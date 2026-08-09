@@ -60,17 +60,22 @@ export class GmailClient {
       const token = await this.ensureAccessToken()
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       if (res.ok) return (await res.json()) as T
+      const text = await res.text()
       if (res.status === 401 && attempt === 0) {
         attempt++
         await this.refresh()
         continue
       }
-      if ((res.status === 429 || res.status >= 500) && attempt < 4) {
+      // Gmail reports per-user rate/quota limits as 403, not 429. Per-MINUTE
+      // quota windows need long backoff — wait into the next window.
+      // TODO(M1): replace with a token-bucket limiter in the sync process.
+      const quotaHit = res.status === 403 && /quota|rate ?limit/i.test(text)
+      if ((res.status === 429 || res.status >= 500 || quotaHit) && attempt < 7) {
         attempt++
-        await sleep(400 * 2 ** attempt)
+        await sleep(Math.min(65_000, 1000 * 2 ** attempt) + Math.random() * 1000)
         continue
       }
-      throw new Error(`gmail ${path} failed (${res.status}): ${(await res.text()).slice(0, 300)}`)
+      throw new Error(`gmail ${path} failed (${res.status}): ${text.slice(0, 300)}`)
     }
   }
 }

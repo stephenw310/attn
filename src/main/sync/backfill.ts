@@ -57,7 +57,7 @@ export async function runInboxBackfill(db: Db, client: GmailClient, cb: Backfill
       if (pageToken) params.pageToken = pageToken
       const page = await client.get<ThreadList>('/threads', params)
 
-      await mapConcurrent(page.threads ?? [], 5, async (t) => {
+      await mapConcurrent(page.threads ?? [], 3, async (t) => {
         const full = await client.get<GmailThread>(`/threads/${t.id}`, { format: 'full' })
         persistThread(db, accountId, full)
         done++
