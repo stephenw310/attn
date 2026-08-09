@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import { openDatabase, schemaVersion, type Db } from './db'
 import { firstAccountId, getConversation, listInboxThreads } from './db/queries'
-import { loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
+import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { loadTokens, saveTokens } from './auth/tokenStore'
 import { GmailClient } from './gmail/client'
 import { runInboxBackfill } from './sync/backfill'
@@ -74,7 +74,9 @@ function registerIpc(): void {
   ipcMain.handle('auth:getStatus', () => authStatus())
   ipcMain.handle('auth:signIn', async () => {
     const config = loadOAuthConfig(oauthSearchDirs())
-    if (!config || signInInFlight) return authStatus()
+    if (!config) return authStatus()
+    // A retry click aborts the previous pending flow instead of being ignored.
+    if (signInInFlight) cancelActiveSignIn()
     signInInFlight = true
     try {
       const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))

@@ -97,7 +97,11 @@ function AccountChip({
     window.shc?.auth
       .signIn()
       .then(onStatus)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'sign-in failed'))
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : 'sign-in failed'
+        // A canceled flow means the user retried — the new attempt owns the UI.
+        if (!msg.includes('sign-in canceled')) setError(msg)
+      })
       .finally(() => setBusy(false))
   }, [onStatus])
 

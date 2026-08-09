@@ -26,6 +26,14 @@ export interface TokenSet {
   // TODO(M0-final): refresh flow — untestable until a real client exists.
 }
 
+let activeCancel: (() => void) | null = null
+
+/** Abort a pending sign-in (stale browser tab, user retrying). */
+export function cancelActiveSignIn(): void {
+  activeCancel?.()
+  activeCancel = null
+}
+
 export function loadOAuthConfig(searchDirs: string[]): OAuthConfig | null {
   for (const dir of searchDirs) {
     try {
@@ -93,6 +101,11 @@ function waitForAuthCode(
       server.close()
       reject(new Error('sign-in timed out — no response from the browser within 5 minutes'))
     }, FLOW_TIMEOUT_MS)
+    activeCancel = () => {
+      clearTimeout(timeout)
+      server.close()
+      reject(new Error('sign-in canceled'))
+    }
 
     server.on('request', (req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -115,6 +128,7 @@ function waitForAuthCode(
 
       clearTimeout(timeout)
       server.close()
+      activeCancel = null
       if (err) return reject(new Error(`Google returned error: ${err}`))
       if (gotState !== state) return reject(new Error('state mismatch in OAuth callback'))
       if (!code) return reject(new Error('no authorization code in OAuth callback'))
