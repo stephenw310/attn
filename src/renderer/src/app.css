@@ -8,10 +8,13 @@
   color-scheme: dark;
   --bg: #16181d;
   --bg-raised: #1d2026;
+  --bg-selected: #242936;
   --border: #2a2e36;
   --text: #e8eaed;
   --text-dim: #9aa0a8;
+  --text-faint: #6b717a;
   --accent: #7aa2f7;
+  --unread-dot: #7aa2f7;
 }
 
 html,
@@ -27,20 +30,253 @@ body {
   color: var(--text);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
 
-.boot {
+.app {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* ── Top bar ─────────────────────────────────────────── */
+
+.topbar {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+}
+
+.splits {
+  display: flex;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.split {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.split.active {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
+.split:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.split .count {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.account-chip {
+  font-size: 12px;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 999px;
+  -webkit-app-region: no-drag;
+}
+
+/* ── Panes ───────────────────────────────────────────── */
+
+.panes {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.thread-list {
+  width: 42%;
+  min-width: 360px;
+  max-width: 560px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 6px 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px 9px 10px;
+  cursor: default;
+  border-left: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.row.selected {
+  background: var(--bg-selected);
+  border-left-color: var(--accent);
+}
+
+.row-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: transparent;
+}
+
+.row.unread .row-dot {
+  background: var(--unread-dot);
+}
+
+.row-from {
+  flex: none;
+  width: 128px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-dim);
 }
 
-.boot h1 {
+.row.unread .row-from {
   color: var(--text);
-  font-size: 22px;
   font-weight: 600;
+}
+
+.row-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+}
+
+.row-subject {
+  color: var(--text-dim);
+}
+
+.row.unread .row-subject {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.row-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.row-meta [title='Starred'] {
+  color: #e5c07b;
+}
+
+.row-time {
+  min-width: 58px;
+  text-align: right;
+}
+
+/* ── Reading pane ────────────────────────────────────── */
+
+.reading-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  outline: none;
+  border-top: 2px solid transparent;
+}
+
+.reading-pane.focused {
+  border-top-color: var(--accent);
+}
+
+.conv-header {
+  padding: 18px 24px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.conv-header h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.conv-messages {
+  padding: 12px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.message-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.message-from {
+  font-weight: 600;
+}
+
+.message-email {
+  color: var(--text-faint);
+  font-size: 12px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-at {
+  color: var(--text-faint);
+  font-size: 12px;
+  flex: none;
+}
+
+.message-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+/* ── Hint bar ────────────────────────────────────────── */
+
+.hintbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 7px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.hintbar kbd {
+  font-family: inherit;
+  background: var(--bg-selected);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
+}
+
+.hint-right {
+  margin-left: auto;
 }
