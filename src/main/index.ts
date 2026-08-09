@@ -83,6 +83,9 @@ function registerIpc(): void {
       saveTokens(app.getPath('userData'), tokens)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
       startSync()
+    } catch (e) {
+      console.error('[auth] sign-in failed:', e instanceof Error ? e.message : e)
+      throw e
     } finally {
       signInInFlight = false
     }

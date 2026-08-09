@@ -97,6 +97,8 @@ function waitForAuthCode(
 ): Promise<{ code: string; redirectUri: string }> {
   return new Promise((resolve, reject) => {
     const server = createServer()
+    // Captured at listen time — server.address() returns null after close().
+    let redirectUri = ''
     const timeout = setTimeout(() => {
       server.close()
       reject(new Error('sign-in timed out — no response from the browser within 5 minutes'))
@@ -132,15 +134,13 @@ function waitForAuthCode(
       if (err) return reject(new Error(`Google returned error: ${err}`))
       if (gotState !== state) return reject(new Error('state mismatch in OAuth callback'))
       if (!code) return reject(new Error('no authorization code in OAuth callback'))
-      const addr = server.address()
-      const port = typeof addr === 'object' && addr ? addr.port : 0
-      resolve({ code, redirectUri: `http://127.0.0.1:${port}/callback` })
+      resolve({ code, redirectUri })
     })
 
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address()
       const port = typeof addr === 'object' && addr ? addr.port : 0
-      const redirectUri = `http://127.0.0.1:${port}/callback`
+      redirectUri = `http://127.0.0.1:${port}/callback`
       const params = new URLSearchParams({
         client_id: config.client_id,
         redirect_uri: redirectUri,
