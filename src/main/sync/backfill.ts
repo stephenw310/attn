@@ -26,6 +26,11 @@ export interface BackfillCallbacks {
   onError: (message: string) => void
 }
 
+// M0 bounds: newest N threads only, and don't repeat a fresh successful run.
+// M1 replaces both with the spec'd windowed backfill + incremental history sync.
+const MAX_THREADS_PER_RUN = 1000
+const FRESH_SYNC_WINDOW_MS = 15 * 60 * 1000
+
 export async function runInboxBackfill(db: Db, client: GmailClient, cb: BackfillCallbacks): Promise<void> {
   try {
     const profile = await client.get<Profile>('/profile')
@@ -36,12 +41,25 @@ export async function runInboxBackfill(db: Db, client: GmailClient, cb: Backfill
       profile.emailAddress,
       Date.now()
     )
+
+    // backfill_cursor === 'done' marks a COMPLETED run; updated_at is its
+    // finish time. Skip if we completed one recently (dev restarts are common).
+    const prev = db
+      .prepare('SELECT backfill_cursor, updated_at FROM sync_state WHERE account_id = ?')
+      .get(accountId) as { backfill_cursor: string | null; updated_at: number | null } | undefined
+    if (prev?.backfill_cursor === 'done' && Date.now() - (prev.updated_at ?? 0) < FRESH_SYNC_WINDOW_MS) {
+      console.log('[sync] recent completed backfill exists — skipping (M0)')
+      cb.onDone(accountId, 0)
+      return
+    }
+
     // Checkpoint BEFORE backfill: anything that changes while we backfill is
     // replayed by incremental history sync from this id (gapless, M1).
+    // updated_at is only stamped on successful completion.
     db.prepare(
-      `INSERT INTO sync_state (account_id, last_history_id, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(account_id) DO UPDATE SET last_history_id = excluded.last_history_id, updated_at = excluded.updated_at`
-    ).run(accountId, profile.historyId, Date.now())
+      `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor, updated_at) VALUES (?, ?, NULL, 0)
+       ON CONFLICT(account_id) DO UPDATE SET last_history_id = excluded.last_history_id`
+    ).run(accountId, profile.historyId)
 
     const labelList = await client.get<LabelList>('/labels')
     const upsertLabel = db.prepare(
@@ -65,8 +83,17 @@ export async function runInboxBackfill(db: Db, client: GmailClient, cb: Backfill
 
       cb.onProgress(done)
       pageToken = page.nextPageToken
+      if (done >= MAX_THREADS_PER_RUN && pageToken) {
+        console.log(`[sync] M0 cap reached (${MAX_THREADS_PER_RUN} threads) — older mail deferred to M1`)
+        pageToken = undefined
+      }
     } while (pageToken)
 
+    db.prepare('UPDATE sync_state SET backfill_cursor = ?, updated_at = ? WHERE account_id = ?').run(
+      'done',
+      Date.now(),
+      accountId
+    )
     cb.onDone(accountId, done)
   } catch (e) {
     cb.onError(e instanceof Error ? e.message : String(e))
