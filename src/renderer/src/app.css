@@ -266,6 +266,24 @@ body {
   line-height: 1.55;
 }
 
+.message-text {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.list-empty,
+.pane-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-faint);
+}
+
+.hint-error {
+  color: #e06c75;
+}
+
 /* ── Hint bar ────────────────────────────────────────── */
 
 .hintbar {

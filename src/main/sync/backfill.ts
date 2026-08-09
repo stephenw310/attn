@@ -1,0 +1,175 @@
+// M0 backfill: labels + every INBOX thread (full content) into SQLite.
+// Fails soft — any error surfaces through onError, never as an unhandled
+// rejection. Widens to the 12-month metadata window at M1 (SPEC F2).
+
+import type { Db } from '../db'
+import type { GmailClient } from '../gmail/client'
+import { extractBodyText, hasAttachment, header, parseAddress, type GmailThread } from '../gmail/parse'
+
+interface Profile {
+  emailAddress: string
+  historyId: string
+}
+
+interface LabelList {
+  labels?: { id: string; name: string; type: string }[]
+}
+
+interface ThreadList {
+  threads?: { id: string }[]
+  nextPageToken?: string
+}
+
+export interface BackfillCallbacks {
+  onProgress: (threadsDone: number) => void
+  onDone: (accountId: string, threadCount: number) => void
+  onError: (message: string) => void
+}
+
+export async function runInboxBackfill(db: Db, client: GmailClient, cb: BackfillCallbacks): Promise<void> {
+  try {
+    const profile = await client.get<Profile>('/profile')
+    const accountId = profile.emailAddress
+
+    db.prepare('INSERT OR IGNORE INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+      accountId,
+      profile.emailAddress,
+      Date.now()
+    )
+    // Checkpoint BEFORE backfill: anything that changes while we backfill is
+    // replayed by incremental history sync from this id (gapless, M1).
+    db.prepare(
+      `INSERT INTO sync_state (account_id, last_history_id, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(account_id) DO UPDATE SET last_history_id = excluded.last_history_id, updated_at = excluded.updated_at`
+    ).run(accountId, profile.historyId, Date.now())
+
+    const labelList = await client.get<LabelList>('/labels')
+    const upsertLabel = db.prepare(
+      `INSERT INTO labels (account_id, id, name, type) VALUES (?, ?, ?, ?)
+       ON CONFLICT(account_id, id) DO UPDATE SET name = excluded.name, type = excluded.type`
+    )
+    for (const l of labelList.labels ?? []) upsertLabel.run(accountId, l.id, l.name, l.type)
+
+    let done = 0
+    let pageToken: string | undefined
+    do {
+      const params: Record<string, string> = { labelIds: 'INBOX', maxResults: '100' }
+      if (pageToken) params.pageToken = pageToken
+      const page = await client.get<ThreadList>('/threads', params)
+
+      await mapConcurrent(page.threads ?? [], 5, async (t) => {
+        const full = await client.get<GmailThread>(`/threads/${t.id}`, { format: 'full' })
+        persistThread(db, accountId, full)
+        done++
+      })
+
+      cb.onProgress(done)
+      pageToken = page.nextPageToken
+    } while (pageToken)
+
+    cb.onDone(accountId, done)
+  } catch (e) {
+    cb.onError(e instanceof Error ? e.message : String(e))
+  }
+}
+
+function persistThread(db: Db, accountId: string, thread: GmailThread): void {
+  const messages = thread.messages ?? []
+  if (messages.length === 0) return
+
+  const upsertMsg = db.prepare(
+    `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, to_json, subject, snippet,
+                           internal_date, is_unread, body_text)
+     VALUES (@account_id, @id, @thread_id, @from_name, @from_email, @to_json, @subject, @snippet,
+             @internal_date, @is_unread, @body_text)
+     ON CONFLICT(account_id, id) DO UPDATE SET
+       is_unread = excluded.is_unread, snippet = excluded.snippet, body_text = excluded.body_text`
+  )
+  const upsertThread = db.prepare(
+    `INSERT INTO threads (account_id, id, history_id, subject, snippet, last_msg_at,
+                          from_display, is_unread, is_starred, has_attachment)
+     VALUES (@account_id, @id, @history_id, @subject, @snippet, @last_msg_at,
+             @from_display, @is_unread, @is_starred, @has_attachment)
+     ON CONFLICT(account_id, id) DO UPDATE SET
+       history_id = excluded.history_id, subject = excluded.subject, snippet = excluded.snippet,
+       last_msg_at = excluded.last_msg_at, from_display = excluded.from_display,
+       is_unread = excluded.is_unread, is_starred = excluded.is_starred,
+       has_attachment = excluded.has_attachment`
+  )
+  const clearLabels = db.prepare('DELETE FROM thread_labels WHERE account_id = ? AND thread_id = ?')
+  const insertLabel = db.prepare(
+    'INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)'
+  )
+
+  const tx = db.transaction(() => {
+    const labelUnion = new Set<string>()
+    let lastMsgAt = 0
+    let anyUnread = 0
+    let anyStarred = 0
+    let anyAttachment = 0
+    let subject = ''
+    let fromDisplay = ''
+    let snippet = ''
+
+    for (const msg of messages) {
+      const from = parseAddress(header(msg, 'From'))
+      const at = Number(msg.internalDate ?? 0)
+      const unread = msg.labelIds?.includes('UNREAD') ? 1 : 0
+      const attach = hasAttachment(msg.payload) ? 1 : 0
+
+      upsertMsg.run({
+        account_id: accountId,
+        id: msg.id,
+        thread_id: thread.id,
+        from_name: from.name,
+        from_email: from.email,
+        to_json: JSON.stringify([header(msg, 'To')]),
+        subject: header(msg, 'Subject'),
+        snippet: msg.snippet ?? '',
+        internal_date: at,
+        is_unread: unread,
+        body_text: extractBodyText(msg.payload)
+      })
+
+      msg.labelIds?.forEach((l) => labelUnion.add(l))
+      if (!subject) subject = header(msg, 'Subject')
+      if (at >= lastMsgAt) {
+        lastMsgAt = at
+        fromDisplay = from.name
+        snippet = msg.snippet ?? ''
+      }
+      anyUnread ||= unread
+      anyStarred ||= msg.labelIds?.includes('STARRED') ? 1 : 0
+      anyAttachment ||= attach
+    }
+
+    upsertThread.run({
+      account_id: accountId,
+      id: thread.id,
+      history_id: thread.historyId ?? null,
+      subject,
+      snippet,
+      last_msg_at: lastMsgAt,
+      from_display: fromDisplay,
+      is_unread: anyUnread,
+      is_starred: anyStarred,
+      has_attachment: anyAttachment
+    })
+
+    clearLabels.run(accountId, thread.id)
+    for (const l of labelUnion) insertLabel.run(accountId, thread.id, l)
+  })
+  tx()
+}
+
+async function mapConcurrent<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  const queue = [...items]
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    for (;;) {
+      const item = queue.shift()
+      if (item === undefined) return
+      await fn(item)
+    }
+  })
+  await Promise.all(workers)
+}

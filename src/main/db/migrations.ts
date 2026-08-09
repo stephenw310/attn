@@ -59,5 +59,15 @@ export const migrations: string[] = [
     backfill_cursor  TEXT,
     updated_at       INTEGER
   );
+  `,
+
+  // v2 — denormalized list-view columns + plain-text bodies for M0.
+  // (Body storage moves to an FTS5-backed table at M3.)
+  `
+  ALTER TABLE threads ADD COLUMN from_display TEXT;
+  ALTER TABLE threads ADD COLUMN is_unread INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE threads ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE threads ADD COLUMN has_attachment INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE messages ADD COLUMN body_text TEXT;
   `
 ]

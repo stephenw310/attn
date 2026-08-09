@@ -1,11 +1,61 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import { openDatabase, schemaVersion, type Db } from './db'
+import { firstAccountId, getConversation, listInboxThreads } from './db/queries'
 import { loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { loadTokens, saveTokens } from './auth/tokenStore'
+import { GmailClient } from './gmail/client'
+import { runInboxBackfill } from './sync/backfill'
 import type { AuthStatus } from '../shared/auth'
+import type { SyncState } from '../shared/mail'
 
 let db: Db | null = null
+let syncState: SyncState = { phase: 'idle' }
+let syncRunning = false
+
+function broadcast(channel: string, payload?: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send(channel, payload)
+  }
+}
+
+function setSyncState(s: SyncState): void {
+  syncState = s
+  broadcast('sync:state', s)
+}
+
+function makeClient(): GmailClient | null {
+  const config = loadOAuthConfig(oauthSearchDirs())
+  const tokens = loadTokens(app.getPath('userData'))
+  if (!config || !tokens) return null
+  return new GmailClient(config, tokens, (t) => saveTokens(app.getPath('userData'), t))
+}
+
+function startSync(): void {
+  if (!db || syncRunning) return
+  const client = makeClient()
+  if (!client) return
+  syncRunning = true
+  setSyncState({ phase: 'syncing', threadsDone: 0 })
+  console.log('[sync] inbox backfill started')
+  void runInboxBackfill(db, client, {
+    onProgress: (n) => {
+      setSyncState({ phase: 'syncing', threadsDone: n })
+      broadcast('mail:changed')
+    },
+    onDone: (accountId, count) => {
+      syncRunning = false
+      setSyncState({ phase: 'idle' })
+      broadcast('mail:changed')
+      console.log(`[sync] backfill done: ${count} inbox threads for ${accountId}`)
+    },
+    onError: (message) => {
+      syncRunning = false
+      setSyncState({ phase: 'error', message })
+      console.error(`[sync] failed: ${message}`)
+    }
+  })
+}
 
 function oauthSearchDirs(): string[] {
   // Project root in dev; userData for a packaged build.
@@ -30,10 +80,23 @@ function registerIpc(): void {
       const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
       saveTokens(app.getPath('userData'), tokens)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
+      startSync()
     } finally {
       signInInFlight = false
     }
     return authStatus()
+  })
+
+  ipcMain.handle('sync:getState', () => syncState)
+  ipcMain.handle('mail:listThreads', () => {
+    if (!db) return []
+    const account = firstAccountId(db)
+    return account ? listInboxThreads(db, account) : []
+  })
+  ipcMain.handle('mail:getConversation', (_e, threadId: unknown) => {
+    if (!db || typeof threadId !== 'string') return null
+    const account = firstAccountId(db)
+    return account ? getConversation(db, account, threadId) : null
   })
 }
 
@@ -87,6 +150,7 @@ if (!gotLock) {
 
     registerIpc()
     createWindow()
+    if (authStatus().signedIn) startSync()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
