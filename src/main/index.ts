@@ -1,8 +1,41 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import { openDatabase, schemaVersion, type Db } from './db'
+import { loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
+import { loadTokens, saveTokens } from './auth/tokenStore'
+import type { AuthStatus } from '../shared/auth'
 
 let db: Db | null = null
+
+function oauthSearchDirs(): string[] {
+  // Project root in dev; userData for a packaged build.
+  return [app.getAppPath(), app.getPath('userData')]
+}
+
+function authStatus(): AuthStatus {
+  const config = loadOAuthConfig(oauthSearchDirs())
+  const tokens = loadTokens(app.getPath('userData'))
+  return { configured: config !== null, signedIn: tokens !== null, email: tokens?.email }
+}
+
+let signInInFlight = false
+
+function registerIpc(): void {
+  ipcMain.handle('auth:getStatus', () => authStatus())
+  ipcMain.handle('auth:signIn', async () => {
+    const config = loadOAuthConfig(oauthSearchDirs())
+    if (!config || signInInFlight) return authStatus()
+    signInInFlight = true
+    try {
+      const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
+      saveTokens(app.getPath('userData'), tokens)
+      console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
+    } finally {
+      signInInFlight = false
+    }
+    return authStatus()
+  })
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -52,6 +85,7 @@ if (!gotLock) {
     db = openDatabase(dbPath)
     console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
 
+    registerIpc()
     createWindow()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

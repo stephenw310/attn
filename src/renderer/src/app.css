@@ -92,6 +92,16 @@ body {
   -webkit-app-region: no-drag;
 }
 
+.chip-button {
+  background: var(--bg-selected);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.chip-button:hover {
+  border-color: var(--accent);
+}
+
 /* ── Panes ───────────────────────────────────────────── */
 
 .panes {

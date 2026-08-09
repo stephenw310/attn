@@ -1,7 +1,48 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { mockThreads, getConversation } from './mockData'
+import type { AuthStatus } from '../../shared/auth'
 
 type FocusRegion = 'list' | 'conversation'
+
+function AccountChip(): React.JSX.Element {
+  const [status, setStatus] = useState<AuthStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.shc?.auth
+      .getStatus()
+      .then(setStatus)
+      .catch(() => {})
+  }, [])
+
+  const signIn = useCallback(() => {
+    setBusy(true)
+    setError(null)
+    window.shc?.auth
+      .signIn()
+      .then(setStatus)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'sign-in failed'))
+      .finally(() => setBusy(false))
+  }, [])
+
+  if (!window.shc) return <div className="account-chip">mock data · browser preview</div>
+  if (!status) return <div className="account-chip">…</div>
+  if (status.signedIn) return <div className="account-chip">{status.email ?? 'signed in'}</div>
+  if (!status.configured) {
+    return (
+      <div className="account-chip" title="Create your Google OAuth client, then add oauth.config.json — see SETUP.md">
+        OAuth not configured · see SETUP.md
+      </div>
+    )
+  }
+  if (busy) return <div className="account-chip">waiting for Google…</div>
+  return (
+    <button className="account-chip chip-button" onClick={signIn} title={error ?? undefined}>
+      {error ? 'sign-in failed — retry' : 'Sign in with Google'}
+    </button>
+  )
+}
 
 export default function App(): React.JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -20,7 +61,13 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
       const target = e.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'BUTTON' ||
+          target.isContentEditable)
+      ) {
         return
       }
       switch (e.key) {
@@ -63,9 +110,7 @@ export default function App(): React.JSX.Element {
             Other
           </button>
         </div>
-        <div className="account-chip" title="Google sign-in is wired at M0-final — see SETUP.md">
-          mock data · not signed in
-        </div>
+        <AccountChip />
       </header>
 
       <main className="panes">
