@@ -1,5 +1,8 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
+import { openDatabase, schemaVersion, type Db } from './db'
+
+let db: Db | null = null
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -45,6 +48,10 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
+    const dbPath = join(app.getPath('userData'), 'shc.db')
+    db = openDatabase(dbPath)
+    console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
+
     createWindow()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -54,5 +61,10 @@ if (!gotLock) {
   app.on('window-all-closed', () => {
     // F16 (tray/background mode) lands at M1; the M0 skeleton quits normally.
     if (process.platform !== 'darwin') app.quit()
+  })
+
+  app.on('will-quit', () => {
+    db?.close()
+    db = null
   })
 }
