@@ -3,11 +3,6 @@
 import type { Conversation, ConversationMsg, ThreadRow } from '../../shared/mail'
 import type { Db } from './index'
 
-export function firstAccountId(db: Db): string | null {
-  const row = db.prepare('SELECT id FROM accounts LIMIT 1').get() as { id: string } | undefined
-  return row?.id ?? null
-}
-
 export function listInboxThreads(db: Db, accountId: string, limit = 300): ThreadRow[] {
   const rows = db
     .prepare(
@@ -41,6 +36,21 @@ export function listInboxThreads(db: Db, accountId: string, limit = 300): Thread
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1
   }))
+}
+
+export function countInboxUnread(db: Db, accountId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM threads t
+       WHERE t.account_id = ?
+         AND t.is_unread = 1
+         AND EXISTS (SELECT 1 FROM thread_labels tl
+                     WHERE tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX')`
+    )
+    .get(accountId) as { count: number }
+
+  return row.count
 }
 
 export function getConversation(db: Db, accountId: string, threadId: string): Conversation | null {
