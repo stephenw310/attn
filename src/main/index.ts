@@ -3,7 +3,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
 import type { SyncState } from '../shared/mail'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
-import { loadTokens, saveTokens } from './auth/tokenStore'
+import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { type Db, openDatabase, schemaVersion } from './db'
 import { firstAccountId, getConversation, listInboxThreads } from './db/queries'
 import { GmailClient } from './gmail/client'
@@ -89,6 +89,15 @@ function registerIpc(): void {
     } finally {
       signInInFlight = false
     }
+    return authStatus()
+  })
+
+  ipcMain.handle('auth:signOut', () => {
+    cancelActiveSignIn()
+    clearTokens(app.getPath('userData'))
+    // A backfill already in flight keeps its in-memory tokens and finishes;
+    // no new sync can start without stored tokens. Local mail stays cached.
+    console.log('[auth] signed out')
     return authStatus()
   })
 
