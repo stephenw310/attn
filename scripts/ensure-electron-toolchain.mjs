@@ -109,14 +109,41 @@ function rebuild() {
   return run(bin, ['-f', '-w', 'better-sqlite3'])
 }
 
+// Every path handed to sparseClone is a directory in the source repo, so a
+// non-empty listing is the signal that the checkout actually landed.
+function sparsePathsReady(dest, paths) {
+  return paths.every((p) => {
+    try {
+      return readdirSync(join(dest, p.replace(/^\/+/, ''))).length > 0
+    } catch {
+      return false
+    }
+  })
+}
+
 function sparseClone(url, ref, dest, paths) {
-  if (existsSync(join(dest, '.git'))) return true
+  const checkout = () =>
+    run('git', ['sparse-checkout', 'set', '--no-cone', ...paths], { cwd: dest }) &&
+    sparsePathsReady(dest, paths)
+
+  // A cached clone counts only once its sparse paths are materialized: git
+  // creates .git before the checkout that fills them, so a connection lost
+  // mid-checkout — the very failure this fallback exists for — leaves a .git
+  // promising content it doesn't have. Trusting it would wedge every later
+  // run, including the `npm run toolchain` meant to repair things.
+  if (existsSync(join(dest, '.git'))) {
+    if (sparsePathsReady(dest, paths)) return true
+    log(`incomplete cached clone at ${dest} — retrying its sparse checkout`)
+    if (checkout()) return true
+    log('retry failed — re-cloning from scratch')
+  }
+
   rmSync(dest, { recursive: true, force: true })
   mkdirSync(dirname(dest), { recursive: true })
   if (!run('git', ['clone', '--depth', '1', '--branch', ref, '--filter=blob:none', '--sparse', url, dest])) {
     return false
   }
-  return run('git', ['sparse-checkout', 'set', '--no-cone', ...paths], { cwd: dest })
+  return checkout()
 }
 
 // Assembles the node headers Electron addons compile against, equivalent to
