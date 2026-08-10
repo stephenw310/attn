@@ -1,18 +1,21 @@
+@import "@fontsource-variable/inter";
 @import "tailwindcss";
 
-/* Design tokens — the M3 theming pass (F14 light/dark) swaps these per scheme. */
+/* Design tokens — Dispatch direction (SPEC D6). The M3 theming pass (F14)
+   derives the light variant from these same semantic names. */
 @theme {
-  --color-base: #16181d;
-  --color-raised: #1d2026;
-  --color-active: #242936;
-  --color-edge: #2a2e36;
-  --color-ink: #e8eaed;
-  --color-ink-dim: #9aa0a8;
-  --color-ink-faint: #6b717a;
-  --color-accent: #7aa2f7;
-  --color-star: #e5c07b;
+  --color-ground: #101114;
+  --color-raised: #17181c;
+  --color-active: #1f2127;
+  --color-edge: #262931;
+  --color-ink: #e9eaee;
+  --color-ink-dim: #9da2ac;
+  --color-ink-faint: #626875;
+  --color-accent: #ffb224;
+  --color-star: #ffb224;
   --color-danger: #e06c75;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans:
+    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 @layer base {
@@ -27,7 +30,7 @@
   }
 
   body {
-    background: var(--color-base);
+    background: var(--color-ground);
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-size: 14px;

@@ -3,8 +3,6 @@ import type { AuthStatus } from '../../shared/auth'
 import type { Conversation, SyncState, ThreadRow } from '../../shared/mail'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
 
-type FocusRegion = 'list' | 'conversation'
-
 interface DisplayThread {
   id: string
   from: string
@@ -85,13 +83,39 @@ function displayFromMockId(threadId: string): DisplayConversation {
 
 function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
-    <kbd className="rounded border border-edge bg-active px-[5px] py-px font-sans text-[11px]">
+    <kbd className="rounded-[5px] border border-edge bg-active px-1.5 py-px text-[10.5px] font-medium text-ink-dim">
       {children}
     </kbd>
   )
 }
 
-function AccountChip({
+function QueueReadout({ unread }: { unread: number }): React.JSX.Element {
+  const lit = Math.min(unread, 10)
+  return (
+    <div className="flex items-center gap-3 text-xs text-ink-faint">
+      <span className="flex items-center gap-[3px]" aria-hidden>
+        {Array.from({ length: 10 }, (_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size decorative meter — position is the identity
+          <i key={i} className={`size-[5px] rounded-full ${i < lit ? 'bg-accent' : 'bg-edge'}`} />
+        ))}
+      </span>
+      {unread > 0 ? (
+        <span className="font-medium text-ink-dim tabular-nums">
+          <b className="font-semibold text-accent">{unread}</b> to zero
+        </span>
+      ) : (
+        <span className="font-medium">at zero</span>
+      )}
+    </div>
+  )
+}
+
+function blurActive(): void {
+  const el = document.activeElement
+  if (el instanceof HTMLElement) el.blur()
+}
+
+function AccountMenu({
   status,
   onStatus
 }: {
@@ -100,6 +124,8 @@ function AccountChip({
 }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
 
   const signIn = useCallback(() => {
     setBusy(true)
@@ -115,29 +141,108 @@ function AccountChip({
       .finally(() => setBusy(false))
   }, [onStatus])
 
+  const signOut = useCallback(() => {
+    setOpen(false)
+    blurActive()
+    window.attn?.auth
+      .signOut()
+      .then(onStatus)
+      .catch(() => {})
+  }, [onStatus])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        setOpen(false)
+        blurActive()
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey, true)
+    }
+  }, [open])
+
   if (!window.attn) return <div className={CHIP_CLASS}>mock data · browser preview</div>
   if (!status) return <div className={CHIP_CLASS}>…</div>
-  if (status.signedIn) return <div className={CHIP_CLASS}>{status.email ?? 'signed in'}</div>
-  if (!status.configured) {
+  if (!status.signedIn) {
+    if (!status.configured) {
+      return (
+        <div
+          className={CHIP_CLASS}
+          title="Create your Google OAuth client, then add oauth.config.json — see SETUP.md"
+        >
+          OAuth not configured · see SETUP.md
+        </div>
+      )
+    }
+    if (busy) return <div className={CHIP_CLASS}>waiting for Google…</div>
     return (
-      <div
-        className={CHIP_CLASS}
-        title="Create your Google OAuth client, then add oauth.config.json — see SETUP.md"
+      <button
+        type="button"
+        className={`${CHIP_CLASS} cursor-pointer bg-active text-ink hover:border-accent`}
+        onClick={signIn}
+        title={error ?? undefined}
       >
-        OAuth not configured · see SETUP.md
-      </div>
+        {error ? 'sign-in failed — retry' : 'Sign in with Google'}
+      </button>
     )
   }
-  if (busy) return <div className={CHIP_CLASS}>waiting for Google…</div>
+
   return (
-    <button
-      type="button"
-      className={`${CHIP_CLASS} cursor-pointer bg-active text-ink hover:border-accent`}
-      onClick={signIn}
-      title={error ?? undefined}
-    >
-      {error ? 'sign-in failed — retry' : 'Sign in with Google'}
-    </button>
+    <div ref={wrapRef} className="app-no-drag relative">
+      <button
+        type="button"
+        className={`${CHIP_CLASS} flex cursor-pointer items-center gap-1.5 hover:border-accent hover:text-ink-dim`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {status.email ?? 'signed in'} <span className="text-[8px]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute top-full right-0 z-50 mt-2 w-[230px] rounded-lg border border-edge bg-raised p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
+          <button
+            type="button"
+            disabled
+            title="Settings surface lands at M4"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim opacity-45"
+          >
+            Settings <Kbd>⌘ ,</Kbd>
+          </button>
+          <button
+            type="button"
+            disabled
+            title="Cheat sheet lands at M4"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim opacity-45"
+          >
+            Keyboard shortcuts <Kbd>⌘ /</Kbd>
+          </button>
+          <button
+            type="button"
+            disabled
+            title="Split rules land at M3"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim opacity-45"
+          >
+            Split rules…
+          </button>
+          <hr className="my-1.5 border-edge" />
+          <button
+            type="button"
+            onClick={signOut}
+            title="Tokens are removed; sign back in any time — local mail stays cached"
+            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -150,7 +255,7 @@ export default function App(): React.JSX.Element {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const [focusRegion, setFocusRegion] = useState<FocusRegion>('list')
+  const [overlayOpen, setOverlayOpen] = useState(false)
   const [readIds, setReadIds] = useState<ReadonlySet<string>>(new Set())
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
@@ -208,7 +313,11 @@ export default function App(): React.JSX.Element {
   }, [realMode, realThreads])
 
   useEffect(() => {
+    // NOTE(M1 incremental sync): if a refresh removes the open thread, this
+    // clamp shifts selection and an open overlay would jump to a different
+    // conversation. Revisit when mail:changed can fire mid-read.
     setSelectedIndex((i) => Math.min(i, Math.max(threads.length - 1, 0)))
+    if (threads.length === 0) setOverlayOpen(false)
   }, [threads.length])
 
   const selected: DisplayThread | undefined = threads[selectedIndex]
@@ -244,9 +353,23 @@ export default function App(): React.JSX.Element {
     }
   }, [selected, realMode])
 
-  const openConversation = useCallback((threadId: string) => {
-    setFocusRegion('conversation')
-    setReadIds((prev) => (prev.has(threadId) ? prev : new Set(prev).add(threadId)))
+  // Preload neighbors so Enter and in-overlay J/K render instantly (F3).
+  useEffect(() => {
+    if (!realMode || !attn) return
+    for (const idx of [selectedIndex - 1, selectedIndex + 1]) {
+      const t = threads[idx]
+      if (!t || convCache.current.has(t.id)) continue
+      attn.mail
+        .getConversation(t.id)
+        .then((c) => {
+          if (c) convCache.current.set(t.id, displayFromReal(c))
+        })
+        .catch(() => {})
+    }
+  }, [selectedIndex, threads, realMode])
+
+  const markRead = useCallback((id: string) => {
+    setReadIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
   }, [])
 
   useEffect(() => {
@@ -262,30 +385,60 @@ export default function App(): React.JSX.Element {
         return
       }
       if (threads.length === 0) return
+
+      const clamp = (i: number): number => Math.min(Math.max(i, 0), threads.length - 1)
+
+      if (overlayOpen) {
+        switch (e.key) {
+          case 'j':
+          case 'ArrowDown': {
+            e.preventDefault()
+            const next = clamp(selectedIndex + 1)
+            setSelectedIndex(next)
+            markRead(threads[next].id)
+            break
+          }
+          case 'k':
+          case 'ArrowUp': {
+            e.preventDefault()
+            const prev = clamp(selectedIndex - 1)
+            setSelectedIndex(prev)
+            markRead(threads[prev].id)
+            break
+          }
+          case 'Escape':
+            e.preventDefault()
+            setOverlayOpen(false)
+            break
+        }
+        return
+      }
+
       switch (e.key) {
         case 'j':
         case 'ArrowDown':
           e.preventDefault()
-          setSelectedIndex((i) => Math.min(i + 1, threads.length - 1))
+          setSelectedIndex(clamp(selectedIndex + 1))
           break
         case 'k':
         case 'ArrowUp':
           e.preventDefault()
-          setSelectedIndex((i) => Math.max(i - 1, 0))
+          setSelectedIndex(clamp(selectedIndex - 1))
           break
-        case 'Enter':
+        case 'Enter': {
           e.preventDefault()
-          if (threads[selectedIndex]) openConversation(threads[selectedIndex].id)
+          const t = threads[selectedIndex]
+          if (t) {
+            markRead(t.id)
+            setOverlayOpen(true)
+          }
           break
-        case 'Escape':
-          e.preventDefault()
-          setFocusRegion('list')
-          break
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedIndex, threads, openConversation])
+  }, [selectedIndex, threads, overlayOpen, markRead])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
@@ -301,133 +454,170 @@ export default function App(): React.JSX.Element {
         ? `sync failed — ${sync.message.slice(0, 80)}`
         : realMode
           ? 'live Gmail data'
-          : 'M0 walking skeleton · mock data'
+          : 'mock data'
 
   return (
     <div className="flex h-full flex-col">
-      <header className="app-drag flex items-center justify-between border-b border-edge px-4 py-2.5">
-        <div className="app-no-drag flex gap-1">
+      <header className="app-drag flex items-center gap-6 border-b border-edge px-6 py-3">
+        <div className="text-base font-bold tracking-tight">
+          attn<span className="text-accent">:</span>
+        </div>
+        <nav className="app-no-drag flex gap-1">
           <button
             type="button"
-            className="cursor-pointer rounded-md bg-active px-3 py-1.5 text-[13px] font-medium text-ink"
+            className="cursor-pointer rounded-[7px] bg-active px-3 py-1.5 text-[13px] font-medium text-ink"
           >
-            Important <span className="ml-1.5 text-[11px] text-accent">{unreadCount}</span>
+            Important
+            {unreadCount > 0 && (
+              <span className="ml-1.5 text-xs font-semibold text-accent tabular-nums">{unreadCount}</span>
+            )}
           </button>
           <button
             type="button"
-            className="cursor-pointer rounded-md px-3 py-1.5 text-[13px] font-medium text-ink-dim disabled:cursor-default disabled:opacity-50"
             disabled
             title="Split inbox lands at M3 (F11)"
+            className="rounded-[7px] px-3 py-1.5 text-[13px] font-medium text-ink-faint disabled:opacity-60"
           >
             Other
           </button>
+        </nav>
+        <div className="app-no-drag ml-auto flex items-center gap-4">
+          <QueueReadout unread={unreadCount} />
+          <AccountMenu status={status} onStatus={setStatus} />
         </div>
-        <AccountChip status={status} onStatus={setStatus} />
       </header>
 
-      <main className="flex min-h-0 flex-1">
-        <section
-          className="w-[42%] min-w-[360px] max-w-[560px] overflow-y-auto border-r border-edge py-1.5"
-          aria-label="Conversation list"
-        >
-          {threads.length === 0 && (
-            <div className="flex h-full items-center justify-center text-ink-faint">
-              {sync.phase === 'syncing' ? 'Syncing your inbox…' : 'Inbox empty'}
-            </div>
-          )}
-          {threads.map((t, i) => {
-            const isSelected = i === selectedIndex
-            const isUnread = t.unread && !readIds.has(t.id)
-            return (
-              // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
-              // biome-ignore lint/a11y/noStaticElementInteractions: same — row selection is driven by the app-level key handler, not per-row focus
-              <div
-                key={t.id}
-                ref={isSelected ? selectedRowRef : null}
-                className={`flex cursor-default items-center gap-2.5 whitespace-nowrap border-l-2 py-[9px] pr-3.5 pl-2.5 ${
-                  isSelected ? 'border-l-accent bg-active' : 'border-l-transparent'
+      <main className="min-h-0 flex-1 overflow-y-auto py-2" aria-label="Conversation list">
+        {threads.length === 0 && (
+          <div className="flex h-full items-center justify-center text-ink-faint">
+            {sync.phase === 'syncing' ? 'Syncing your inbox…' : 'Inbox empty'}
+          </div>
+        )}
+        {threads.map((t, i) => {
+          const isSelected = i === selectedIndex
+          const isUnread = t.unread && !readIds.has(t.id)
+          return (
+            // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
+            // biome-ignore lint/a11y/noStaticElementInteractions: same — row selection is driven by the app-level key handler, not per-row focus
+            <div
+              key={t.id}
+              ref={isSelected ? selectedRowRef : null}
+              className={`flex cursor-default items-center gap-3.5 whitespace-nowrap border-l-[3px] py-[11px] pr-7 pl-5 ${
+                isSelected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'
+              }`}
+              onClick={() => setSelectedIndex(i)}
+              onDoubleClick={() => {
+                setSelectedIndex(i)
+                markRead(t.id)
+                setOverlayOpen(true)
+              }}
+            >
+              <span
+                className={`size-1.5 flex-none rounded-full ${
+                  isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
                 }`}
-                onClick={() => setSelectedIndex(i)}
-                onDoubleClick={() => openConversation(t.id)}
+                aria-hidden
+              />
+              <span
+                className={`w-52 flex-none overflow-hidden text-ellipsis ${
+                  isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
+                }`}
               >
+                {t.from}
+              </span>
+              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis text-ink-faint">
+                <span className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}>{t.subject}</span>
+                <span> — {t.snippet}</span>
+              </span>
+              <span className="flex flex-none items-center gap-2.5 text-xs">
+                {t.hasAttachment && <span title="Has attachment">📎</span>}
+                {t.starred && (
+                  <span className="text-star" title="Starred">
+                    ★
+                  </span>
+                )}
                 <span
-                  className={`size-[7px] flex-none rounded-full ${isUnread ? 'bg-accent' : 'bg-transparent'}`}
-                  aria-hidden
-                />
-                <span
-                  className={`w-32 flex-none overflow-hidden text-ellipsis ${
-                    isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
+                  className={`min-w-[70px] text-right tabular-nums ${
+                    isUnread ? 'font-medium text-accent' : 'text-ink-faint'
                   }`}
                 >
-                  {t.from}
+                  {t.at}
                 </span>
-                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis text-ink-faint">
-                  <span className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}>{t.subject}</span>
-                  <span> — {t.snippet}</span>
-                </span>
-                <span className="flex flex-none items-center gap-1.5 text-xs text-ink-faint">
-                  {t.hasAttachment && <span title="Has attachment">📎</span>}
-                  {t.starred && (
-                    <span className="text-star" title="Starred">
-                      ★
-                    </span>
-                  )}
-                  <span className="min-w-[58px] text-right">{t.at}</span>
-                </span>
-              </div>
-            )
-          })}
-        </section>
-
-        <section
-          className={`min-w-0 flex-1 overflow-y-auto border-t-2 ${
-            focusRegion === 'conversation' ? 'border-t-accent' : 'border-t-transparent'
-          }`}
-          aria-label="Conversation"
-        >
-          {selected && conversation ? (
-            <>
-              <div className="border-b border-edge px-6 pt-[18px] pb-2.5">
-                <h2 className="text-[17px] font-semibold">{conversation.subject}</h2>
-              </div>
-              <div className="flex flex-col gap-3 px-6 pt-3 pb-8">
-                {conversation.messages.map((m) => (
-                  <article key={m.id} className="rounded-[10px] border border-edge bg-raised px-4 py-3.5">
-                    <div className="mb-2.5 flex items-baseline gap-2">
-                      <span className="font-semibold">{m.fromName}</span>
-                      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
-                        &lt;{m.fromEmail}&gt;
-                      </span>
-                      <span className="flex-none text-xs text-ink-faint">{m.at}</span>
-                    </div>
-                    {/* Mail bodies are untrusted input: render ONLY as a text
-                        node. Sanitized HTML rendering is a later milestone. */}
-                    <div className="whitespace-pre-wrap leading-[1.55] text-ink [overflow-wrap:break-word]">
-                      {m.text}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="flex h-full items-center justify-center text-ink-faint">
-              {selected ? 'Loading…' : 'Nothing selected'}
+              </span>
             </div>
-          )}
-        </section>
+          )
+        })}
       </main>
 
-      <footer className="flex items-center gap-4 border-t border-edge px-4 py-[7px] text-xs text-ink-faint">
-        <span>
-          <Kbd>J</Kbd>/<Kbd>K</Kbd> navigate
-        </span>
-        <span>
-          <Kbd>Enter</Kbd> open
-        </span>
-        <span>
-          <Kbd>Esc</Kbd> back
-        </span>
-        <span className={`ml-auto ${sync.phase === 'error' ? 'text-danger' : ''}`} title={statusNote}>
+      {overlayOpen && selected && (
+        <>
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: Esc is the keyboard path to close (global handler) — backdrop click is the pointer equivalent */}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: same — dismiss-on-backdrop is a convention, not the primary control */}
+          <div className="fixed inset-0 z-20 bg-[rgba(8,9,11,0.62)]" onClick={() => setOverlayOpen(false)} />
+          <div className="fixed top-[7vh] left-1/2 z-30 flex max-h-[80vh] w-[min(780px,92vw)] -translate-x-1/2 flex-col rounded-[13px] border border-edge bg-raised shadow-[0_24px_64px_rgba(0,0,0,0.6)]">
+            <div className="flex items-center gap-3 border-b border-edge px-6 pt-4 pb-3">
+              <h1 className="min-w-0 flex-1 text-lg font-bold tracking-tight">
+                {conversation?.subject ?? selected.subject}
+              </h1>
+              <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
+                <span className="tabular-nums">
+                  {selectedIndex + 1} of {threads.length}
+                </span>
+                · <Kbd>Esc</Kbd>
+              </span>
+            </div>
+            <div className="overflow-y-auto px-6 pt-4 pb-6">
+              {conversation ? (
+                <div className="flex flex-col gap-3.5">
+                  {conversation.messages.map((m) => (
+                    <article key={m.id} className="rounded-[10px] border border-edge bg-ground px-5 py-4">
+                      <div className="mb-2.5 flex items-baseline gap-2.5">
+                        <span className="font-semibold">{m.fromName}</span>
+                        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+                          &lt;{m.fromEmail}&gt;
+                        </span>
+                        <span className="flex-none text-xs text-ink-faint tabular-nums">{m.at}</span>
+                      </div>
+                      {/* Mail bodies are untrusted input: render ONLY as a text
+                          node. Sanitized HTML rendering is a later milestone. */}
+                      <div className="whitespace-pre-wrap leading-[1.6] text-ink [overflow-wrap:break-word]">
+                        {m.text}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-10 text-center text-ink-faint">Loading…</div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      <footer className="relative z-40 flex items-center gap-4 border-t border-edge bg-ground px-6 py-2 text-xs text-ink-faint">
+        {overlayOpen ? (
+          <>
+            <span>
+              <Kbd>J</Kbd>/<Kbd>K</Kbd> next / prev
+            </span>
+            <span>
+              <Kbd>Esc</Kbd> close
+            </span>
+          </>
+        ) : (
+          <>
+            <span>
+              <Kbd>J</Kbd>/<Kbd>K</Kbd> navigate
+            </span>
+            <span>
+              <Kbd>Enter</Kbd> open
+            </span>
+          </>
+        )}
+        <span
+          className={`ml-auto font-medium ${sync.phase === 'error' ? 'text-danger' : ''}`}
+          title={statusNote}
+        >
           {statusNote}
         </span>
       </footer>
