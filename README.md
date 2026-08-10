@@ -5,7 +5,7 @@ Keyboard-first, local-first desktop email client for macOS and Windows, modeled 
 **Current state: M1 triage core in progress.** The Dispatch list ⇄ conversation-overlay flow is implemented with `J`/`K`/`Enter`/`Esc` navigation, SQLite local storage, Google OAuth (PKCE loopback, keychain-encrypted tokens), and quota-aware Gmail backfill.
 
 - **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.7)
-- **[CLAUDE.md](CLAUDE.md)** — working agreement for coding agents (verification contract, test harness, conventions)
+- **[AGENTS.md](AGENTS.md)** — working agreement for coding agents (verification contract, test harness, conventions). `CLAUDE.md` imports it, so Claude Code picks it up automatically; other tools read it directly.
 
 ## Prerequisites
 
@@ -68,7 +68,7 @@ Restart the app and click **Sign in with Google**. The browser will show Google'
 
 ```
 docs/SPEC.md         Product & technical spec — the source of truth
-CLAUDE.md            Working agreement for coding agents
+AGENTS.md            Working agreement for coding agents (CLAUDE.md imports it)
 design/explorations/ Static HTML visual-direction studies
 src/main/            Electron main process: windows, OAuth, SQLite, Gmail sync
 src/preload/         contextBridge API — the renderer's only path to the main process
