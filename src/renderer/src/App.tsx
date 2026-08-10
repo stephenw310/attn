@@ -29,6 +29,8 @@ interface DisplayConversation {
   messages: DisplayMsg[]
 }
 
+const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
+
 function formatTime(ms: number): string {
   if (!ms) return ''
   const d = new Date(ms)
@@ -81,6 +83,14 @@ function displayFromMockId(threadId: string): DisplayConversation {
   }
 }
 
+function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <kbd className="rounded border border-edge bg-active px-[5px] py-px font-sans text-[11px]">
+      {children}
+    </kbd>
+  )
+}
+
 function AccountChip({
   status,
   onStatus
@@ -105,22 +115,27 @@ function AccountChip({
       .finally(() => setBusy(false))
   }, [onStatus])
 
-  if (!window.attn) return <div className="account-chip">mock data · browser preview</div>
-  if (!status) return <div className="account-chip">…</div>
-  if (status.signedIn) return <div className="account-chip">{status.email ?? 'signed in'}</div>
+  if (!window.attn) return <div className={CHIP_CLASS}>mock data · browser preview</div>
+  if (!status) return <div className={CHIP_CLASS}>…</div>
+  if (status.signedIn) return <div className={CHIP_CLASS}>{status.email ?? 'signed in'}</div>
   if (!status.configured) {
     return (
       <div
-        className="account-chip"
+        className={CHIP_CLASS}
         title="Create your Google OAuth client, then add oauth.config.json — see SETUP.md"
       >
         OAuth not configured · see SETUP.md
       </div>
     )
   }
-  if (busy) return <div className="account-chip">waiting for Google…</div>
+  if (busy) return <div className={CHIP_CLASS}>waiting for Google…</div>
   return (
-    <button type="button" className="account-chip chip-button" onClick={signIn} title={error ?? undefined}>
+    <button
+      type="button"
+      className={`${CHIP_CLASS} cursor-pointer bg-active text-ink hover:border-accent`}
+      onClick={signIn}
+      title={error ?? undefined}
+    >
       {error ? 'sign-in failed — retry' : 'Sign in with Google'}
     </button>
   )
@@ -289,26 +304,34 @@ export default function App(): React.JSX.Element {
           : 'M0 walking skeleton · mock data'
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="splits">
-          <button type="button" className="split active">
-            Important <span className="count">{unreadCount}</span>
+    <div className="flex h-full flex-col">
+      <header className="app-drag flex items-center justify-between border-b border-edge px-4 py-2.5">
+        <div className="app-no-drag flex gap-1">
+          <button
+            type="button"
+            className="cursor-pointer rounded-md bg-active px-3 py-1.5 text-[13px] font-medium text-ink"
+          >
+            Important <span className="ml-1.5 text-[11px] text-accent">{unreadCount}</span>
           </button>
-          <button type="button" className="split" disabled title="Split inbox lands at M3 (F11)">
+          <button
+            type="button"
+            className="cursor-pointer rounded-md px-3 py-1.5 text-[13px] font-medium text-ink-dim disabled:cursor-default disabled:opacity-50"
+            disabled
+            title="Split inbox lands at M3 (F11)"
+          >
             Other
           </button>
         </div>
         <AccountChip status={status} onStatus={setStatus} />
       </header>
 
-      <main className="panes">
+      <main className="flex min-h-0 flex-1">
         <section
-          className={`thread-list ${focusRegion === 'list' ? 'focused' : ''}`}
+          className="w-[42%] min-w-[360px] max-w-[560px] overflow-y-auto border-r border-edge py-1.5"
           aria-label="Conversation list"
         >
           {threads.length === 0 && (
-            <div className="list-empty">
+            <div className="flex h-full items-center justify-center text-ink-faint">
               {sync.phase === 'syncing' ? 'Syncing your inbox…' : 'Inbox empty'}
             </div>
           )}
@@ -321,20 +344,35 @@ export default function App(): React.JSX.Element {
               <div
                 key={t.id}
                 ref={isSelected ? selectedRowRef : null}
-                className={`row ${isSelected ? 'selected' : ''} ${isUnread ? 'unread' : ''}`}
+                className={`flex cursor-default items-center gap-2.5 whitespace-nowrap border-l-2 py-[9px] pr-3.5 pl-2.5 ${
+                  isSelected ? 'border-l-accent bg-active' : 'border-l-transparent'
+                }`}
                 onClick={() => setSelectedIndex(i)}
                 onDoubleClick={() => openConversation(t.id)}
               >
-                <span className="row-dot" aria-hidden />
-                <span className="row-from">{t.from}</span>
-                <span className="row-main">
-                  <span className="row-subject">{t.subject}</span>
-                  <span className="row-snippet"> — {t.snippet}</span>
+                <span
+                  className={`size-[7px] flex-none rounded-full ${isUnread ? 'bg-accent' : 'bg-transparent'}`}
+                  aria-hidden
+                />
+                <span
+                  className={`w-32 flex-none overflow-hidden text-ellipsis ${
+                    isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
+                  }`}
+                >
+                  {t.from}
                 </span>
-                <span className="row-meta">
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis text-ink-faint">
+                  <span className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}>{t.subject}</span>
+                  <span> — {t.snippet}</span>
+                </span>
+                <span className="flex flex-none items-center gap-1.5 text-xs text-ink-faint">
                   {t.hasAttachment && <span title="Has attachment">📎</span>}
-                  {t.starred && <span title="Starred">★</span>}
-                  <span className="row-time">{t.at}</span>
+                  {t.starred && (
+                    <span className="text-star" title="Starred">
+                      ★
+                    </span>
+                  )}
+                  <span className="min-w-[58px] text-right">{t.at}</span>
                 </span>
               </div>
             )
@@ -342,46 +380,54 @@ export default function App(): React.JSX.Element {
         </section>
 
         <section
-          className={`reading-pane ${focusRegion === 'conversation' ? 'focused' : ''}`}
+          className={`min-w-0 flex-1 overflow-y-auto border-t-2 ${
+            focusRegion === 'conversation' ? 'border-t-accent' : 'border-t-transparent'
+          }`}
           aria-label="Conversation"
         >
           {selected && conversation ? (
             <>
-              <div className="conv-header">
-                <h2>{conversation.subject}</h2>
+              <div className="border-b border-edge px-6 pt-[18px] pb-2.5">
+                <h2 className="text-[17px] font-semibold">{conversation.subject}</h2>
               </div>
-              <div className="conv-messages">
+              <div className="flex flex-col gap-3 px-6 pt-3 pb-8">
                 {conversation.messages.map((m) => (
-                  <article key={m.id} className="message">
-                    <div className="message-head">
-                      <span className="message-from">{m.fromName}</span>
-                      <span className="message-email">&lt;{m.fromEmail}&gt;</span>
-                      <span className="message-at">{m.at}</span>
+                  <article key={m.id} className="rounded-[10px] border border-edge bg-raised px-4 py-3.5">
+                    <div className="mb-2.5 flex items-baseline gap-2">
+                      <span className="font-semibold">{m.fromName}</span>
+                      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+                        &lt;{m.fromEmail}&gt;
+                      </span>
+                      <span className="flex-none text-xs text-ink-faint">{m.at}</span>
                     </div>
                     {/* Mail bodies are untrusted input: render ONLY as a text
                         node. Sanitized HTML rendering is a later milestone. */}
-                    <div className="message-body message-text">{m.text}</div>
+                    <div className="whitespace-pre-wrap leading-[1.55] text-ink [overflow-wrap:break-word]">
+                      {m.text}
+                    </div>
                   </article>
                 ))}
               </div>
             </>
           ) : (
-            <div className="pane-empty">{selected ? 'Loading…' : 'Nothing selected'}</div>
+            <div className="flex h-full items-center justify-center text-ink-faint">
+              {selected ? 'Loading…' : 'Nothing selected'}
+            </div>
           )}
         </section>
       </main>
 
-      <footer className="hintbar">
+      <footer className="flex items-center gap-4 border-t border-edge px-4 py-[7px] text-xs text-ink-faint">
         <span>
-          <kbd>J</kbd>/<kbd>K</kbd> navigate
+          <Kbd>J</Kbd>/<Kbd>K</Kbd> navigate
         </span>
         <span>
-          <kbd>Enter</kbd> open
+          <Kbd>Enter</Kbd> open
         </span>
         <span>
-          <kbd>Esc</kbd> back
+          <Kbd>Esc</Kbd> back
         </span>
-        <span className={`hint-right ${sync.phase === 'error' ? 'hint-error' : ''}`} title={statusNote}>
+        <span className={`ml-auto ${sync.phase === 'error' ? 'text-danger' : ''}`} title={statusNote}>
           {statusNote}
         </span>
       </footer>
