@@ -123,8 +123,8 @@ function waitForAuthCode(
       res.end(
         '<html><body style="font-family:sans-serif;background:#16181d;color:#e8eaed;display:flex;align-items:center;justify-content:center;height:100vh"><p>' +
           (err || gotState !== state || !code
-            ? 'Sign-in failed — you can close this tab and retry from ATTN.'
-            : 'Signed in — you can close this tab and return to ATTN.') +
+            ? 'Sign-in failed — you can close this tab and retry from Attn.'
+            : 'Signed in — you can close this tab and return to Attn.') +
           '</p></body></html>'
       )
 

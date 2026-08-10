@@ -1,8 +1,8 @@
 {
   "name": "attn",
-  "productName": "ATTN",
+  "productName": "Attn",
   "version": "0.0.1",
-  "description": "ATTN — keyboard-first, local-first desktop email client for macOS and Windows",
+  "description": "Attn — keyboard-first, local-first desktop email client for macOS and Windows",
   "private": true,
   "engines": {
     "node": ">=22.12.0"
