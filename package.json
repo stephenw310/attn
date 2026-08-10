@@ -12,9 +12,14 @@
     "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "postinstall": "electron-rebuild -f -w better-sqlite3"
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.7",
     "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^19.2.18",
@@ -22,6 +27,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.3.0",
     "electron-vite": "^5.0.0",
+    "lefthook": "^2.1.10",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"
   },

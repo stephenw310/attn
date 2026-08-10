@@ -139,5 +139,8 @@ function stripHtml(html: string): string {
 }
 
 function normalize(text: string): string {
-  return text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }

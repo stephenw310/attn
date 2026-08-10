@@ -17,7 +17,8 @@ export const mockThreads: ThreadSummary[] = [
     id: 't2',
     from: 'GitHub',
     subject: '[attn] PR #14: Sync engine backfill pagination',
-    snippet: 'chao-wu requested your review on: Implement threads.list pagination with historyId checkpointing…',
+    snippet:
+      'chao-wu requested your review on: Implement threads.list pagination with historyId checkpointing…',
     at: '9:12 AM',
     unread: true
   },
@@ -50,7 +51,8 @@ export const mockThreads: ThreadSummary[] = [
     id: 't6',
     from: 'Priya Raman',
     subject: 'Design tokens for the reading pane',
-    snippet: "I pushed the first pass of spacing/typography tokens. Two open questions on message card density…",
+    snippet:
+      'I pushed the first pass of spacing/typography tokens. Two open questions on message card density…',
     at: 'Yesterday',
     unread: true
   },
@@ -66,7 +68,8 @@ export const mockThreads: ThreadSummary[] = [
     id: 't8',
     from: 'Ken Watanabe',
     subject: 'Fwd: Conference talk proposal deadline',
-    snippet: 'Forwarding in case you missed it — CFP closes Friday. Your local-first sync talk would be perfect…',
+    snippet:
+      'Forwarding in case you missed it — CFP closes Friday. Your local-first sync talk would be perfect…',
     at: 'Yesterday',
     unread: false
   },
@@ -74,7 +77,8 @@ export const mockThreads: ThreadSummary[] = [
     id: 't9',
     from: 'The Pragmatic Engineer',
     subject: 'The Pulse #147: Desktop apps are back',
-    snippet: 'A look at why high-performance desktop email clients and local-first software are having a moment…',
+    snippet:
+      'A look at why high-performance desktop email clients and local-first software are having a moment…',
     at: 'Wed',
     unread: false
   },
@@ -107,7 +111,8 @@ export const mockThreads: ThreadSummary[] = [
     id: 't13',
     from: 'Notion',
     subject: 'Comments on "M1 triage-loop spec"',
-    snippet: 'Maya Lin mentioned you: "@chao should undo restore selection position too, or just the thread state?"…',
+    snippet:
+      'Maya Lin mentioned you: "@chao should undo restore selection position too, or just the thread state?"…',
     at: 'Tue',
     unread: false
   },
@@ -115,7 +120,8 @@ export const mockThreads: ThreadSummary[] = [
     id: 't14',
     from: 'Aunt Rosa',
     subject: 'Photos from the lake house 🏞️',
-    snippet: 'Finally uploaded everything from last month. The one of you falling off the paddleboard is framed…',
+    snippet:
+      'Finally uploaded everything from last month. The one of you falling off the paddleboard is framed…',
     at: 'Mon',
     unread: false,
     hasAttachment: true
@@ -132,7 +138,8 @@ export const mockThreads: ThreadSummary[] = [
     id: 't16',
     from: 'Jess Nakamura',
     subject: 'Intro: Chao <> Felix (local-first sync)',
-    snippet: "Chao, meet Felix — he's been building CRDT tooling for two years and would love to compare notes…",
+    snippet:
+      "Chao, meet Felix — he's been building CRDT tooling for two years and would love to compare notes…",
     at: 'Mon',
     unread: false
   },
@@ -156,7 +163,8 @@ export const mockThreads: ThreadSummary[] = [
     id: 't19',
     from: 'Marco Bianchi',
     subject: 'Re: Splitting the sync reducer',
-    snippet: 'Agree on the single-reducer approach. Server events and optimistic actions through one code path…',
+    snippet:
+      'Agree on the single-reducer approach. Server events and optimistic actions through one code path…',
     at: 'Aug 1',
     unread: false
   },
@@ -280,7 +288,10 @@ const genericBody = (t: ThreadSummary): ConversationView => ({
       fromEmail: `${t.from.toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`,
       to: 'you',
       at: t.at,
-      body: [t.snippet.replace(/…$/, '.'), 'This is mock content standing in for the real message body until Gmail sync lands (M0-final).']
+      body: [
+        t.snippet.replace(/…$/, '.'),
+        'This is mock content standing in for the real message body until Gmail sync lands (M0-final).'
+      ]
     }
   ]
 })

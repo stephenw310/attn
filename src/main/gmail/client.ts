@@ -60,8 +60,11 @@ export class GmailClient {
     const url = new URL(BASE + path)
     if (params) {
       for (const [k, v] of Object.entries(params)) {
-        if (Array.isArray(v)) v.forEach((x) => url.searchParams.append(k, x))
-        else url.searchParams.set(k, v)
+        if (Array.isArray(v)) {
+          for (const x of v) url.searchParams.append(k, x)
+        } else {
+          url.searchParams.set(k, v)
+        }
       }
     }
     let attempt = 0

@@ -2,9 +2,9 @@
 // loopback redirect (SPEC F1). Plain Node module — the caller supplies
 // openUrl so this file stays free of Electron imports.
 
-import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'

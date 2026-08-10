@@ -8,11 +8,11 @@ import {
   decodeBase64Url,
   extractBodyText,
   findExternalTextParts,
+  type GmailThread,
   hasAttachment,
   header,
   parseAddress,
-  textFromRaw,
-  type GmailThread
+  textFromRaw
 } from '../gmail/parse'
 
 interface Profile {
@@ -179,7 +179,7 @@ function persistThread(db: Db, accountId: string, thread: GmailThread): void {
         body_text: extractBodyText(msg.payload)
       })
 
-      msg.labelIds?.forEach((l) => labelUnion.add(l))
+      for (const l of msg.labelIds ?? []) labelUnion.add(l)
       if (!subject) subject = header(msg, 'Subject')
       if (at >= lastMsgAt) {
         lastMsgAt = at
@@ -215,7 +215,12 @@ function persistThread(db: Db, accountId: string, thread: GmailThread): void {
  * For the rare messages whose extraction came up empty, fetch those parts and
  * fill in body_text. 404s are skipped — the snippet fallback still renders.
  */
-async function fetchExternalBodies(db: Db, client: GmailClient, accountId: string, thread: GmailThread): Promise<void> {
+async function fetchExternalBodies(
+  db: Db,
+  client: GmailClient,
+  accountId: string,
+  thread: GmailThread
+): Promise<void> {
   const readBody = db.prepare('SELECT body_text FROM messages WHERE account_id = ? AND id = ?')
   const writeBody = db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?')
 

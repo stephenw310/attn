@@ -1,9 +1,9 @@
 // Encrypted token persistence via Electron safeStorage
 // (macOS Keychain-backed / Windows DPAPI — SPEC F1, §6 Security).
 
-import { safeStorage } from 'electron'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { safeStorage } from 'electron'
 import type { TokenSet } from './googleAuth'
 
 const FILE = 'tokens.bin'

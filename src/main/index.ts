@@ -1,13 +1,13 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
-import { openDatabase, schemaVersion, type Db } from './db'
-import { firstAccountId, getConversation, listInboxThreads } from './db/queries'
-import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
-import { loadTokens, saveTokens } from './auth/tokenStore'
-import { GmailClient } from './gmail/client'
-import { runInboxBackfill } from './sync/backfill'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
 import type { SyncState } from '../shared/mail'
+import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
+import { loadTokens, saveTokens } from './auth/tokenStore'
+import { type Db, openDatabase, schemaVersion } from './db'
+import { firstAccountId, getConversation, listInboxThreads } from './db/queries'
+import { GmailClient } from './gmail/client'
+import { runInboxBackfill } from './sync/backfill'
 
 let db: Db | null = null
 let syncState: SyncState = { phase: 'idle' }
@@ -129,8 +129,8 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  if (process.env.ELECTRON_RENDERER_URL) {
+    win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }

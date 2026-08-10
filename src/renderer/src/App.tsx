@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { mockThreads, getConversation as getMockConversation } from './mockData'
 import type { AuthStatus } from '../../shared/auth'
 import type { Conversation, SyncState, ThreadRow } from '../../shared/mail'
+import { getConversation as getMockConversation, mockThreads } from './mockData'
 
 type FocusRegion = 'list' | 'conversation'
 
@@ -120,14 +120,17 @@ function AccountChip({
   }
   if (busy) return <div className="account-chip">waiting for Google…</div>
   return (
-    <button className="account-chip chip-button" onClick={signIn} title={error ?? undefined}>
+    <button type="button" className="account-chip chip-button" onClick={signIn} title={error ?? undefined}>
       {error ? 'sign-in failed — retry' : 'Sign in with Google'}
     </button>
   )
 }
 
+// The preload bridge is injected before renderer modules evaluate, so this is
+// safe to read once at module scope (undefined in the plain-browser preview).
+const attn = window.attn
+
 export default function App(): React.JSX.Element {
-  const attn = window.attn
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
@@ -145,25 +148,35 @@ export default function App(): React.JSX.Element {
       .getStatus()
       .then(setStatus)
       .catch(() => {})
-  }, [attn])
+  }, [])
 
   useEffect(() => {
     if (!attn) return
-    attn.sync.getState().then(setSync).catch(() => {})
+    attn.sync
+      .getState()
+      .then(setSync)
+      .catch(() => {})
     const offSync = attn.sync.onState(setSync)
     const offMail = attn.mail.onChanged(() => {
       convCache.current.clear()
-      attn.mail.listThreads().then(setRealThreads).catch(() => {})
+      attn.mail
+        .listThreads()
+        .then(setRealThreads)
+        .catch(() => {})
     })
     return () => {
       offSync()
       offMail()
     }
-  }, [attn])
+  }, [])
 
   useEffect(() => {
-    if (realMode) attn!.mail.listThreads().then(setRealThreads).catch(() => {})
-  }, [realMode, attn])
+    if (realMode && attn)
+      attn.mail
+        .listThreads()
+        .then(setRealThreads)
+        .catch(() => {})
+  }, [realMode])
 
   const threads: DisplayThread[] = useMemo(() => {
     if (realMode) return (realThreads ?? []).map(fromThreadRow)
@@ -199,9 +212,10 @@ export default function App(): React.JSX.Element {
       setConversation(cached)
       return
     }
+    if (!attn) return
     let cancelled = false
     setConversation(null)
-    attn!.mail
+    attn.mail
       .getConversation(selected.id)
       .then((c) => {
         if (cancelled || !c) return
@@ -213,7 +227,7 @@ export default function App(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [selected?.id, realMode, attn])
+  }, [selected, realMode])
 
   const openConversation = useCallback((threadId: string) => {
     setFocusRegion('conversation')
@@ -258,6 +272,7 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedIndex, threads, openConversation])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
     selectedRowRef.current?.scrollIntoView({ block: 'nearest' })
   }, [selectedIndex])
@@ -277,10 +292,10 @@ export default function App(): React.JSX.Element {
     <div className="app">
       <header className="topbar">
         <div className="splits">
-          <button className="split active">
+          <button type="button" className="split active">
             Important <span className="count">{unreadCount}</span>
           </button>
-          <button className="split" disabled title="Split inbox lands at M3 (F11)">
+          <button type="button" className="split" disabled title="Split inbox lands at M3 (F11)">
             Other
           </button>
         </div>
@@ -288,7 +303,10 @@ export default function App(): React.JSX.Element {
       </header>
 
       <main className="panes">
-        <section className={`thread-list ${focusRegion === 'list' ? 'focused' : ''}`} aria-label="Conversation list">
+        <section
+          className={`thread-list ${focusRegion === 'list' ? 'focused' : ''}`}
+          aria-label="Conversation list"
+        >
           {threads.length === 0 && (
             <div className="list-empty">
               {sync.phase === 'syncing' ? 'Syncing your inbox…' : 'Inbox empty'}
@@ -298,6 +316,8 @@ export default function App(): React.JSX.Element {
             const isSelected = i === selectedIndex
             const isUnread = t.unread && !readIds.has(t.id)
             return (
+              // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
+              // biome-ignore lint/a11y/noStaticElementInteractions: same — row selection is driven by the app-level key handler, not per-row focus
               <div
                 key={t.id}
                 ref={isSelected ? selectedRowRef : null}

@@ -5,5 +5,3 @@ declare global {
     attn: AttnApi
   }
 }
-
-export {}

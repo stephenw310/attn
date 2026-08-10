@@ -1,7 +1,7 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
-import type { Db } from './index'
 import type { Conversation, ConversationMsg, ThreadRow } from '../../shared/mail'
+import type { Db } from './index'
 
 export function firstAccountId(db: Db): string | null {
   const row = db.prepare('SELECT id FROM accounts LIMIT 1').get() as { id: string } | undefined
