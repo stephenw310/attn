@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Attn — Dispatch v2 · Conversation view</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #101114;
+    --raised: #17181c;
+    --active: #1f2127;
+    --edge: #262931;
+    --ink: #e9eaee;
+    --ink-dim: #9da2ac;
+    --ink-faint: #626875;
+    --amber: #ffb224;
+    --sans: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    font-size: 14px;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .app { height: 100vh; display: flex; flex-direction: column; }
+
+  /* ── Top bar ── */
+  .topbar {
+    display: flex; align-items: center; gap: 24px;
+    padding: 13px 24px; border-bottom: 1px solid var(--edge);
+  }
+  .wordmark { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
+  .wordmark .colon { color: var(--amber); }
+  .crumb { font-size: 13px; color: var(--ink-faint); display: flex; align-items: center; gap: 8px; }
+  .crumb .where { color: var(--ink-dim); font-weight: 500; }
+  .crumb kbd { margin-right: 2px; }
+  .readout {
+    margin-left: auto; display: flex; align-items: center; gap: 12px;
+    font-size: 12px; color: var(--ink-faint);
+  }
+  .readout .meter { display: inline-flex; gap: 3px; align-items: center; }
+  .readout .meter i {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--edge); font-style: normal;
+  }
+  .readout .meter i.on { background: var(--amber); }
+  .readout .q { color: var(--ink-dim); font-weight: 500; }
+  .readout .q b { color: var(--amber); font-weight: 600; }
+
+  /* ── Conversation, one clear focus ── */
+  .scroll { flex: 1; overflow-y: auto; }
+  .conv { max-width: 780px; margin: 0 auto; padding: 34px 32px 60px; }
+  .conv-subject { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; }
+  .conv-meta { font-size: 12.5px; color: var(--ink-faint); margin: 8px 0 26px; }
+  .conv-meta b { color: var(--ink-dim); font-weight: 500; }
+  .msg {
+    background: var(--raised); border: 1px solid var(--edge); border-radius: 10px;
+    padding: 18px 22px; margin-bottom: 16px;
+  }
+  .msg.collapsed {
+    background: transparent; padding: 12px 22px;
+    color: var(--ink-faint); display: flex; gap: 10px; align-items: baseline;
+  }
+  .msg.collapsed .msg-from { color: var(--ink-dim); font-weight: 500; }
+  .msg.collapsed .preview { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .msg-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .msg-from { font-weight: 600; }
+  .msg-email { color: var(--ink-faint); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg-time { font-size: 12px; color: var(--ink-faint); flex: none; }
+  .msg-body p { line-height: 1.65; color: var(--ink); margin-bottom: 11px; max-width: 68ch; }
+  .msg-body p:last-child { margin-bottom: 0; }
+  .quote-trail {
+    margin-top: 12px; font-size: 12.5px; color: var(--ink-faint); cursor: default;
+  }
+
+  /* ── Hint bar ── */
+  .hintbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 9px 24px; border-top: 1px solid var(--edge);
+    font-size: 12px; color: var(--ink-faint);
+  }
+  kbd {
+    font-family: var(--sans); font-size: 10.5px; font-weight: 500; color: var(--ink-dim);
+    background: var(--active); border: 1px solid var(--edge);
+    border-radius: 5px; padding: 1px 6px;
+  }
+  .tag { margin-left: auto; letter-spacing: 0.04em; font-weight: 500; }
+  .tag b { color: var(--amber); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="wordmark">attn<span class="colon">:</span></div>
+    <div class="crumb"><kbd>Esc</kbd> <span class="where">Important</span> · <span class="num">4 of 12</span></div>
+    <div class="readout">
+      <span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="q num"><b>3</b> to zero</span>
+    </div>
+  </header>
+
+  <div class="scroll">
+    <main class="conv">
+      <h1 class="conv-subject">Design tokens for the reading pane</h1>
+      <div class="conv-meta"><b>Priya Raman</b> ↔ <b>you</b> · 2 messages · yesterday → today</div>
+
+      <article class="msg collapsed">
+        <span class="msg-from">Priya Raman</span>
+        <span class="preview">Kicking off the token audit — full notes in Notion, but the short version is…</span>
+        <span class="msg-time">Mon</span>
+      </article>
+
+      <article class="msg">
+        <div class="msg-head">
+          <span class="msg-from">Priya Raman</span>
+          <span class="msg-email">&lt;priya@acme.dev&gt;</span>
+          <span class="msg-time num">Yesterday, 2:17 PM</span>
+        </div>
+        <div class="msg-body">
+          <p>I pushed the first pass of spacing/typography tokens for the reading pane.</p>
+          <p>Two open questions: (1) message card density — compact vs comfortable as the default? (2) do quoted trails collapse to one line or three?</p>
+          <p>My vote is comfortable + one line, matching the "one clear focus" principle.</p>
+          <div class="quote-trail">··· show quoted trail</div>
+        </div>
+      </article>
+
+      <article class="msg">
+        <div class="msg-head">
+          <span class="msg-from">You</span>
+          <span class="msg-email">&lt;magicchao1989@gmail.com&gt;</span>
+          <span class="msg-time num">Today, 8:47 AM</span>
+        </div>
+        <div class="msg-body">
+          <p>Comfortable density, one-line quoted trails. Matches the spec — ship it.</p>
+        </div>
+      </article>
+    </main>
+  </div>
+
+  <footer class="hintbar">
+    <span><kbd>R</kbd> reply</span>
+    <span><kbd>E</kbd> done</span>
+    <span><kbd>H</kbd> snooze</span>
+    <span><kbd>J</kbd>/<kbd>K</kbd> next / prev</span>
+    <span><kbd>Esc</kbd> back</span>
+    <span class="tag">Dispatch <b>v2</b> · conversation view</span>
+  </footer>
+</div>
+</body>
+</html>
