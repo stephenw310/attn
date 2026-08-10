@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
@@ -8,6 +9,29 @@ import { type Db, openDatabase, schemaVersion } from './db'
 import { countInboxUnread, getConversation, listInboxThreads } from './db/queries'
 import { GmailClient } from './gmail/client'
 import { runInboxBackfill } from './sync/backfill'
+
+// E2E seam: an isolated userData dir gives each test run a fresh DB and empty
+// token store. Must be set before requestSingleInstanceLock() so concurrent
+// test apps (distinct dirs) don't share an instance lock.
+const testUserData = process.env.ATTN_TEST_USER_DATA
+if (testUserData) {
+  app.setPath('userData', testUserData)
+  // Mirror console output to a file the e2e fixture attaches on failure —
+  // Playwright consumes early stdout before test listeners can attach, so
+  // boot-time lines would otherwise be lost to diagnostics.
+  const logFile = join(testUserData, 'main.log')
+  for (const level of ['log', 'warn', 'error'] as const) {
+    const original = console[level].bind(console)
+    console[level] = (...args: unknown[]) => {
+      original(...args)
+      try {
+        appendFileSync(logFile, `[${level}] ${args.map(String).join(' ')}\n`)
+      } catch {
+        // Diagnostics only — never let logging break the app under test.
+      }
+    }
+  }
+}
 
 let db: Db | null = null
 let syncState: SyncState = { phase: 'idle' }
@@ -75,6 +99,9 @@ function startSync(): void {
 }
 
 function oauthSearchDirs(): string[] {
+  // Under e2e, only the isolated dir — a developer's real oauth.config.json in
+  // the project root must never leak into test runs.
+  if (testUserData) return [app.getPath('userData')]
   // Project root in dev; userData for a packaged build.
   return [app.getAppPath(), app.getPath('userData')]
 }

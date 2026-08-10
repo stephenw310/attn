@@ -41,3 +41,40 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  electron-smoke:
+    name: Electron smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Electron smoke tests
+        run: npm run e2e
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-smoke-artifacts
+          path: e2e/.artifacts/
+          if-no-files-found: ignore
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-smoke-traces
+          path: e2e/.results/
+          if-no-files-found: ignore

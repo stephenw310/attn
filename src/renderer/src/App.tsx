@@ -92,7 +92,7 @@ function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
 function QueueReadout({ unread }: { unread: number | null }): React.JSX.Element {
   const lit = Math.min(unread ?? 0, 10)
   return (
-    <div className="flex items-center gap-3 text-xs text-ink-faint">
+    <div data-testid="queue-readout" className="flex items-center gap-3 text-xs text-ink-faint">
       <span className="flex items-center gap-[3px]" aria-hidden>
         {Array.from({ length: 10 }, (_, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size decorative meter — position is the identity
@@ -182,9 +182,9 @@ function AccountMenu({
       return (
         <div
           className={CHIP_CLASS}
-          title="Create your Google OAuth client, then add oauth.config.json — see SETUP.md"
+          title="Create your Google OAuth client, then add oauth.config.json — see the README"
         >
-          OAuth not configured · see SETUP.md
+          OAuth not configured · see README
         </div>
       )
     }
@@ -508,7 +508,9 @@ export default function App(): React.JSX.Element {
         </nav>
         <div className="app-no-drag ml-auto flex items-center gap-4">
           <QueueReadout unread={unreadCount} />
-          <AccountMenu status={status} onStatus={setStatus} />
+          <div data-testid="account-menu">
+            <AccountMenu status={status} onStatus={setStatus} />
+          </div>
         </div>
       </header>
 
@@ -527,6 +529,9 @@ export default function App(): React.JSX.Element {
             <div
               key={t.id}
               ref={isSelected ? selectedRowRef : null}
+              data-testid="thread-row"
+              data-selected={isSelected || undefined}
+              data-unread={isUnread || undefined}
               className={`flex cursor-default items-center gap-3.5 whitespace-nowrap border-l-[3px] py-[11px] pr-7 pl-5 ${
                 isSelected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'
               }`}
@@ -579,13 +584,19 @@ export default function App(): React.JSX.Element {
           {/* biome-ignore lint/a11y/useKeyWithClickEvents: Esc is the keyboard path to close (global handler) — backdrop click is the pointer equivalent */}
           {/* biome-ignore lint/a11y/noStaticElementInteractions: same — dismiss-on-backdrop is a convention, not the primary control */}
           <div className="fixed inset-0 z-20 bg-[rgba(8,9,11,0.62)]" onClick={() => setOverlayOpen(false)} />
-          <div className="fixed top-[7vh] left-1/2 z-30 flex max-h-[80vh] w-[min(780px,92vw)] -translate-x-1/2 flex-col rounded-[13px] border border-edge bg-raised shadow-[0_24px_64px_rgba(0,0,0,0.6)]">
+          <div
+            data-testid="conversation-overlay"
+            className="fixed top-[7vh] left-1/2 z-30 flex max-h-[80vh] w-[min(780px,92vw)] -translate-x-1/2 flex-col rounded-[13px] border border-edge bg-raised shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
+          >
             <div className="flex items-center gap-3 border-b border-edge px-6 pt-4 pb-3">
-              <h1 className="min-w-0 flex-1 text-lg font-bold tracking-tight">
+              <h1
+                data-testid="conversation-subject"
+                className="min-w-0 flex-1 text-lg font-bold tracking-tight"
+              >
                 {conversation?.subject ?? selected.subject}
               </h1>
               <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
-                <span className="tabular-nums">
+                <span data-testid="conversation-position" className="tabular-nums">
                   {selectedIndex + 1} of {threads.length}
                 </span>
                 · <Kbd>Esc</Kbd>
@@ -595,7 +606,11 @@ export default function App(): React.JSX.Element {
               {conversation ? (
                 <div className="flex flex-col gap-3.5">
                   {conversation.messages.map((m) => (
-                    <article key={m.id} className="rounded-[10px] border border-edge bg-ground px-5 py-4">
+                    <article
+                      key={m.id}
+                      data-testid="message-card"
+                      className="rounded-[10px] border border-edge bg-ground px-5 py-4"
+                    >
                       <div className="mb-2.5 flex items-baseline gap-2.5">
                         <span className="font-semibold">{m.fromName}</span>
                         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
@@ -640,6 +655,7 @@ export default function App(): React.JSX.Element {
           </>
         )}
         <span
+          data-testid="status-note"
           className={`ml-auto font-medium ${sync.phase === 'error' ? 'text-danger' : ''}`}
           title={statusNote}
         >
