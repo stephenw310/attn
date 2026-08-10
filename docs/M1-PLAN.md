@@ -30,16 +30,16 @@ Supporting tasks: **T1** (test seam every triage test depends on), **T10** (perf
 
 ```mermaid
 graph LR
-  T1[T1 · e2e seed seam · S]
-  T2[T2 · HTML mail rendering · M]
-  T3[T3 · triage engine core · L]
-  T4[T4 · selection + bulk · S/M]
-  T5[T5 · label picker · M]
-  T6[T6 · snooze + scheduler · L]
-  T7[T7 · incremental sync · L]
-  T8[T8 · tray + background · M]
-  T9[T9 · notifications + badge · S/M]
-  T10[T10 · perf smoke · S · stretch]
+  T1[T1 · e2e seed seam]
+  T2[T2 · HTML mail rendering]
+  T3[T3 · triage engine core]
+  T4[T4 · selection + bulk]
+  T5[T5 · label picker]
+  T6[T6 · snooze + scheduler]
+  T7[T7 · incremental sync]
+  T8[T8 · tray + background]
+  T9[T9 · notifications + badge]
+  T10[T10 · perf smoke · stretch]
 
   T1 --> T2
   T1 --> T3
@@ -62,14 +62,15 @@ graph LR
 **Suggested order, one engineer:** T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10.
 T2 before T3 on purpose: it's self-contained and a gentler ramp into the codebase than the engine.
 
-**Suggested split, two engineers:**
+**Suggested split, two engineers** — tasks are planned at equal length, so each row is one round of parallel work:
 
-| | Eng A (engine track) | Eng B (surface track) |
+| Round | Eng A (engine track) | Eng B (surface track) |
 |---|---|---|
-| Week 1 | T1, then T3 | T8 (no deps), then T2 (after T1) |
-| Week 2 | T7, then T9 | T4, T5, then T6 |
-
-Sizes: S ≈ ½–1 day, M ≈ 1–2 days, L ≈ 3–4 days, for someone new to the codebase, tests included.
+| 1 | T1 | T8 (no deps) |
+| 2 | T3 | T2 |
+| 3 | T7 | T4 |
+| 4 | T6 | T5 |
+| 5 | T9 | T10 (stretch) |
 
 ---
 
@@ -89,7 +90,7 @@ Sizes: S ≈ ½–1 day, M ≈ 1–2 days, L ≈ 3–4 days, for someone new to 
 
 ## T1 — E2E seed seam: real-store tests without credentials
 
-**Size:** S · **Depends on:** nothing · **Unblocks:** T2, T3 (and everything after) · **Parallel with:** T8
+**Depends on:** nothing · **Unblocks:** T2, T3 (and everything after) · **Parallel with:** T8
 
 ### Why
 
@@ -149,7 +150,7 @@ Today the mock inbox lives inside the renderer (`mockData.ts`) and never touches
 
 ## T2 — Sanitized HTML mail rendering
 
-**Size:** M · **Depends on:** T1 · **Parallel with:** T3 · **Spec:** M1 "first item", §6 *HTML mail rendering*, decision log #5
+**Depends on:** T1 · **Parallel with:** T3 · **Spec:** M1 "first item", §6 *HTML mail rendering*, decision log #5
 
 ### Why
 
@@ -193,7 +194,7 @@ Hostile-input assertions green; text-mail path unchanged; renderer console clean
 
 ## T3 — Triage engine core: reducer, durable queue, E/#/S/U/!, auto-advance, undo
 
-**Size:** L — the load-bearing task · **Depends on:** T1 · **Parallel with:** T2 · **Spec:** F4, F2 (action queue), §6 (one reducer)
+**Depends on:** T1 · **Parallel with:** T2 · **Spec:** F4, F2 (action queue), §6 (one reducer)
 
 ### Why
 
@@ -299,7 +300,7 @@ All of the above green; `verify` includes the unit step; AGENTS.md updated; comm
 
 ## T4 — Selection and bulk triage
 
-**Size:** S/M · **Depends on:** T3 · **Parallel with:** T5, T6, T7 · **Spec:** F4 (`X`, `Shift+J/K`, bulk undo)
+**Depends on:** T3 · **Parallel with:** T5, T6, T7 · **Spec:** F4 (`X`, `Shift+J/K`, bulk undo)
 
 ### Implementation guide
 
@@ -321,7 +322,7 @@ Bulk archive + single-undo criterion (F4) demonstrated in e2e; `verify` green.
 
 ## T5 — Label picker (`L`)
 
-**Size:** M · **Depends on:** T3 (uses the generic `label` action) · **Parallel with:** T4, T6, T7 · **Spec:** F4
+**Depends on:** T3 (uses the generic `label` action) · **Parallel with:** T4, T6, T7 · **Spec:** F4
 
 ### Implementation guide
 
@@ -344,7 +345,7 @@ Picker works on single + bulk targets; label ops queue like any triage op; `veri
 
 ## T6 — Snooze (`H`): picker, scheduler, Snoozed view
 
-**Size:** L · **Depends on:** T3 · **Parallel with:** T4, T5, T7 · **Spec:** F4 (snooze), D2 (catch-up), F3 (chips)
+**Depends on:** T3 · **Parallel with:** T4, T5, T7 · **Spec:** F4 (snooze), D2 (catch-up), F3 (chips)
 
 ### Design (decided — includes one explicit spec deviation)
 
@@ -391,7 +392,7 @@ Snooze/return/catch-up/undo all demonstrated; snoozed view navigable by keyboard
 
 ## T7 — Incremental sync: history polling, windowed backfill, reconciliation
 
-**Size:** L · **Depends on:** T3 (reducer, provider, executor) · **Parallel with:** T4, T5, T6 · **Spec:** F2, §6
+**Depends on:** T3 (reducer, provider, executor) · **Parallel with:** T4, T5, T6 · **Spec:** F2, §6
 
 ### Design (decided)
 
@@ -432,7 +433,7 @@ Unit suite covers the planner + reconciliation; manual smoke checklist executed 
 
 ## T8 — Tray, background mode, launch at login
 
-**Size:** M · **Depends on:** nothing (coordinate `src/main/index.ts` edits with T3) · **Parallel with:** everything · **Spec:** F16
+**Depends on:** nothing (coordinate `src/main/index.ts` edits with T3) · **Parallel with:** everything · **Spec:** F16
 
 ### Design (decided)
 
@@ -461,7 +462,7 @@ Lifecycle e2e green on Linux; manual win/mac checklist in the PR; fixture teardo
 
 ## T9 — Notifications and unread badge
 
-**Size:** S/M · **Depends on:** T7 (new-mail events) · soft on T8 (window focus/show helpers) · **Spec:** F12
+**Depends on:** T7 (new-mail events) · soft on T8 (window focus/show helpers) · **Spec:** F12
 
 ### Design (decided)
 
@@ -487,7 +488,7 @@ Unit + e2e green; manual click-through verified on one real OS; `verify` green.
 
 ## T10 (stretch) — Perf smoke in CI
 
-**Size:** S · **Depends on:** T3 · **Spec:** §7 ("Budgets are CI-tracked once M1 lands")
+**Depends on:** T3 · **Spec:** §7 ("Budgets are CI-tracked once M1 lands")
 
 Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and assert generous CI-safe ceilings that still catch order-of-magnitude regressions: triage keypress → row removed from DOM < 100ms; list render after boot < 1.5s; conversation open < 200ms (measure via `performance.now()` in `page.evaluate` around dispatched keys). Mark the spec `@perf` and keep it out of the default suite if flaky; run in CI nightly. Rendering 2,000 unvirtualized rows will itself be informative — if it's already janky, file the virtualization task (F3's 10k/60fps criterion, currently deferred) with data attached.
 
