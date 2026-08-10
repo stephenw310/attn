@@ -2,7 +2,7 @@
 
 Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (list ⇄ conversation overlay). Currently at **M1 (triage core)**.
 
-This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
+This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
 
 ## Verification contract
 
@@ -58,7 +58,7 @@ Violating these is a correctness bug, not a style preference:
 
 ```
 AGENTS.md            This file — the working agreement, shared by every agent tool
-CLAUDE.md            Claude Code's entry point; imports AGENTS.md
+.claude/             Claude Code config: CLAUDE.md (imports this file), settings, hooks
 docs/SPEC.md         Product & technical spec — source of truth for behavior
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies
