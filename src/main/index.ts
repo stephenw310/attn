@@ -5,13 +5,14 @@ import type { SyncState } from '../shared/mail'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { type Db, openDatabase, schemaVersion } from './db'
-import { firstAccountId, getConversation, listInboxThreads } from './db/queries'
+import { countInboxUnread, getConversation, listInboxThreads } from './db/queries'
 import { GmailClient } from './gmail/client'
 import { runInboxBackfill } from './sync/backfill'
 
 let db: Db | null = null
 let syncState: SyncState = { phase: 'idle' }
 let syncRunning = false
+let authSessionGeneration = 0
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -24,33 +25,49 @@ function setSyncState(s: SyncState): void {
   broadcast('sync:state', s)
 }
 
-function makeClient(): GmailClient | null {
+function makeClient(generation: number): GmailClient | null {
   const config = loadOAuthConfig(oauthSearchDirs())
   const tokens = loadTokens(app.getPath('userData'))
   if (!config || !tokens) return null
-  return new GmailClient(config, tokens, (t) => saveTokens(app.getPath('userData'), t))
+  return new GmailClient(config, tokens, (t) => {
+    if (generation === authSessionGeneration) saveTokens(app.getPath('userData'), t)
+  })
+}
+
+function currentAccountId(): string | null {
+  return loadTokens(app.getPath('userData'))?.email ?? null
 }
 
 function startSync(): void {
   if (!db || syncRunning) return
-  const client = makeClient()
+  const generation = authSessionGeneration
+  const client = makeClient(generation)
   if (!client) return
   syncRunning = true
   setSyncState({ phase: 'syncing', threadsDone: 0 })
   console.log('[sync] inbox backfill started')
   void runInboxBackfill(db, client, {
     onProgress: (n) => {
+      if (generation !== authSessionGeneration) return
       setSyncState({ phase: 'syncing', threadsDone: n })
       broadcast('mail:changed')
     },
     onDone: (accountId, count) => {
       syncRunning = false
+      if (generation !== authSessionGeneration) {
+        if (authStatus().signedIn) startSync()
+        return
+      }
       setSyncState({ phase: 'idle' })
       broadcast('mail:changed')
       console.log(`[sync] backfill done: ${count} inbox threads for ${accountId}`)
     },
     onError: (message) => {
       syncRunning = false
+      if (generation !== authSessionGeneration) {
+        if (authStatus().signedIn) startSync()
+        return
+      }
       setSyncState({ phase: 'error', message })
       console.error(`[sync] failed: ${message}`)
     }
@@ -80,6 +97,7 @@ function registerIpc(): void {
     signInInFlight = true
     try {
       const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
+      authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
       startSync()
@@ -94,9 +112,11 @@ function registerIpc(): void {
 
   ipcMain.handle('auth:signOut', () => {
     cancelActiveSignIn()
+    authSessionGeneration++
     clearTokens(app.getPath('userData'))
-    // A backfill already in flight keeps its in-memory tokens and finishes;
-    // no new sync can start without stored tokens. Local mail stays cached.
+    // A stale backfill may finish caching locally, but its generation can no
+    // longer persist refreshed tokens or publish state for the signed-out user.
+    setSyncState({ phase: 'idle' })
     console.log('[auth] signed out')
     return authStatus()
   })
@@ -104,12 +124,17 @@ function registerIpc(): void {
   ipcMain.handle('sync:getState', () => syncState)
   ipcMain.handle('mail:listThreads', () => {
     if (!db) return []
-    const account = firstAccountId(db)
+    const account = currentAccountId()
     return account ? listInboxThreads(db, account) : []
+  })
+  ipcMain.handle('mail:getUnreadCount', () => {
+    if (!db) return 0
+    const account = currentAccountId()
+    return account ? countInboxUnread(db, account) : 0
   })
   ipcMain.handle('mail:getConversation', (_e, threadId: unknown) => {
     if (!db || typeof threadId !== 'string') return null
-    const account = firstAccountId(db)
+    const account = currentAccountId()
     return account ? getConversation(db, account, threadId) : null
   })
 }

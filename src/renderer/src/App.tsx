@@ -89,8 +89,8 @@ function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
   )
 }
 
-function QueueReadout({ unread }: { unread: number }): React.JSX.Element {
-  const lit = Math.min(unread, 10)
+function QueueReadout({ unread }: { unread: number | null }): React.JSX.Element {
+  const lit = Math.min(unread ?? 0, 10)
   return (
     <div className="flex items-center gap-3 text-xs text-ink-faint">
       <span className="flex items-center gap-[3px]" aria-hidden>
@@ -99,7 +99,9 @@ function QueueReadout({ unread }: { unread: number }): React.JSX.Element {
           <i key={i} className={`size-[5px] rounded-full ${i < lit ? 'bg-accent' : 'bg-edge'}`} />
         ))}
       </span>
-      {unread > 0 ? (
+      {unread === null ? (
+        <span className="font-medium">counting…</span>
+      ) : unread > 0 ? (
         <span className="font-medium text-ink-dim tabular-nums">
           <b className="font-semibold text-accent">{unread}</b> to zero
         </span>
@@ -127,6 +129,11 @@ function AccountMenu({
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
 
+  const closeMenu = useCallback(() => {
+    setOpen(false)
+    blurActive()
+  }, [])
+
   const signIn = useCallback(() => {
     setBusy(true)
     setError(null)
@@ -142,24 +149,22 @@ function AccountMenu({
   }, [onStatus])
 
   const signOut = useCallback(() => {
-    setOpen(false)
-    blurActive()
+    closeMenu()
     window.attn?.auth
       .signOut()
       .then(onStatus)
       .catch(() => {})
-  }, [onStatus])
+  }, [closeMenu, onStatus])
 
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent): void => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) closeMenu()
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.stopPropagation()
-        setOpen(false)
-        blurActive()
+        closeMenu()
       }
     }
     document.addEventListener('mousedown', onDown)
@@ -168,7 +173,7 @@ function AccountMenu({
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey, true)
     }
-  }, [open])
+  }, [closeMenu, open])
 
   if (!window.attn) return <div className={CHIP_CLASS}>mock data · browser preview</div>
   if (!status) return <div className={CHIP_CLASS}>…</div>
@@ -201,7 +206,9 @@ function AccountMenu({
       <button
         type="button"
         className={`${CHIP_CLASS} flex cursor-pointer items-center gap-1.5 hover:border-accent hover:text-ink-dim`}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? closeMenu() : setOpen(true))}
+        aria-expanded={open}
+        aria-haspopup="menu"
       >
         {status.email ?? 'signed in'} <span className="text-[8px]">▾</span>
       </button>
@@ -254,6 +261,7 @@ export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
+  const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [overlayOpen, setOverlayOpen] = useState(false)
   const [readIds, setReadIds] = useState<ReadonlySet<string>>(new Set())
@@ -261,6 +269,7 @@ export default function App(): React.JSX.Element {
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const convCache = useRef(new Map<string, DisplayConversation>())
 
+  const activeAccount = status?.signedIn ? (status.email ?? null) : null
   const realMode = Boolean(attn && status?.signedIn)
 
   useEffect(() => {
@@ -277,26 +286,37 @@ export default function App(): React.JSX.Element {
       .then(setSync)
       .catch(() => {})
     const offSync = attn.sync.onState(setSync)
-    const offMail = attn.mail.onChanged(() => {
-      convCache.current.clear()
-      attn.mail
-        .listThreads()
-        .then(setRealThreads)
-        .catch(() => {})
-    })
-    return () => {
-      offSync()
-      offMail()
-    }
+    return offSync
   }, [])
 
   useEffect(() => {
-    if (realMode && attn)
-      attn.mail
-        .listThreads()
-        .then(setRealThreads)
+    setRealThreads(null)
+    setRealUnreadTotal(null)
+    setSelectedIndex(0)
+    setOverlayOpen(false)
+    setReadIds(new Set())
+    setConversation(null)
+    convCache.current.clear()
+
+    if (!attn || !activeAccount) return
+    let cancelled = false
+    const refresh = (): void => {
+      convCache.current.clear()
+      void Promise.all([attn.mail.listThreads(), attn.mail.getUnreadCount()])
+        .then(([nextThreads, nextUnreadTotal]) => {
+          if (cancelled) return
+          setRealThreads(nextThreads)
+          setRealUnreadTotal(nextUnreadTotal)
+        })
         .catch(() => {})
-  }, [realMode])
+    }
+    refresh()
+    const offMail = attn.mail.onChanged(refresh)
+    return () => {
+      cancelled = true
+      offMail()
+    }
+  }, [activeAccount])
 
   const threads: DisplayThread[] = useMemo(() => {
     if (realMode) return (realThreads ?? []).map(fromThreadRow)
@@ -445,7 +465,12 @@ export default function App(): React.JSX.Element {
     selectedRowRef.current?.scrollIntoView({ block: 'nearest' })
   }, [selectedIndex])
 
-  const unreadCount = threads.filter((t) => t.unread && !readIds.has(t.id)).length
+  const visibleUnreadTotal = threads.filter((t) => t.unread).length
+  const locallyReadTotal = threads.filter((t) => t.unread && readIds.has(t.id)).length
+  const unreadCount =
+    realMode && realUnreadTotal === null
+      ? null
+      : Math.max(0, (realMode ? (realUnreadTotal ?? 0) : visibleUnreadTotal) - locallyReadTotal)
 
   const statusNote =
     sync.phase === 'syncing'
@@ -468,7 +493,7 @@ export default function App(): React.JSX.Element {
             className="cursor-pointer rounded-[7px] bg-active px-3 py-1.5 text-[13px] font-medium text-ink"
           >
             Important
-            {unreadCount > 0 && (
+            {unreadCount !== null && unreadCount > 0 && (
               <span className="ml-1.5 text-xs font-semibold text-accent tabular-nums">{unreadCount}</span>
             )}
           </button>

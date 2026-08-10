@@ -11,6 +11,7 @@ const api = {
   },
   mail: {
     listThreads: (): Promise<ThreadRow[]> => ipcRenderer.invoke('mail:listThreads'),
+    getUnreadCount: (): Promise<number> => ipcRenderer.invoke('mail:getUnreadCount'),
     getConversation: (threadId: string): Promise<Conversation | null> =>
       ipcRenderer.invoke('mail:getConversation', threadId),
     onChanged: (cb: () => void): (() => void) => {
