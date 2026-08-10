@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Attn — Dispatch v2 · List view</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #101114;
+    --raised: #17181c;
+    --active: #1f2127;
+    --edge: #262931;
+    --ink: #e9eaee;
+    --ink-dim: #9da2ac;
+    --ink-faint: #626875;
+    --amber: #ffb224;
+    --amber-wash: rgba(255, 178, 36, 0.07);
+    --sans: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    font-size: 14px;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .app { height: 100vh; display: flex; flex-direction: column; }
+
+  /* ── Top bar ── */
+  .topbar {
+    display: flex; align-items: center; gap: 24px;
+    padding: 13px 24px; border-bottom: 1px solid var(--edge);
+  }
+  .wordmark { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
+  .wordmark .colon { color: var(--amber); }
+  .splits { display: flex; gap: 4px; }
+  .split {
+    font-size: 13px; font-weight: 500; color: var(--ink-faint);
+    padding: 5px 12px; border-radius: 7px; cursor: default;
+  }
+  .split.active { background: var(--active); color: var(--ink); }
+  .split .n { color: var(--amber); margin-left: 5px; font-size: 12px; font-weight: 600; }
+  .split .n.cold { color: var(--ink-faint); font-weight: 500; }
+  .split.more { padding: 5px 8px; letter-spacing: 0.1em; }
+  .readout {
+    margin-left: auto; display: flex; align-items: center; gap: 12px;
+    font-size: 12px; color: var(--ink-faint);
+  }
+  .account-wrap { position: relative; }
+  .account-chip {
+    display: flex; align-items: center; gap: 6px; cursor: default;
+    font-size: 12px; color: var(--ink-faint);
+  }
+  .account-chip .chev { font-size: 9px; color: var(--ink-faint); }
+  .menu {
+    position: absolute; top: 26px; right: 0; z-index: 30; width: 230px;
+    background: var(--raised); border: 1px solid var(--edge); border-radius: 9px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); padding: 6px;
+  }
+  .mi {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 10px; border-radius: 6px; font-size: 13px; color: var(--ink-dim);
+  }
+  .mi:hover { background: var(--active); color: var(--ink); }
+  .msep { border: none; border-top: 1px solid var(--edge); margin: 6px 4px; }
+  .readout .meter { display: inline-flex; gap: 3px; align-items: center; }
+  .readout .meter i {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--edge); font-style: normal;
+  }
+  .readout .meter i.on { background: var(--amber); }
+  .readout .q { color: var(--ink-dim); font-weight: 500; }
+  .readout .q b { color: var(--amber); font-weight: 600; }
+  .account { font-size: 12px; color: var(--ink-faint); }
+
+  /* ── Full-width list ── */
+  .list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 11px 28px 11px 20px; white-space: nowrap;
+    border-left: 3px solid transparent; cursor: default;
+  }
+  .row.selected { background: var(--amber-wash); border-left-color: var(--amber); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: transparent; }
+  .row.unread .dot { background: var(--amber); box-shadow: 0 0 6px rgba(255, 178, 36, 0.45); }
+  .from { flex: none; width: 208px; overflow: hidden; text-overflow: ellipsis; color: var(--ink-dim); }
+  .row.unread .from { color: var(--ink); font-weight: 600; }
+  .main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-faint); }
+  .subject { color: var(--ink-dim); }
+  .row.unread .subject { color: var(--ink); font-weight: 600; }
+  .meta { flex: none; display: flex; align-items: center; gap: 10px; }
+  .star { color: var(--amber); font-size: 12px; }
+  .clip { font-size: 12px; color: var(--ink-faint); }
+  .time { font-size: 12px; color: var(--ink-faint); min-width: 70px; text-align: right; }
+  .row.unread .time { color: var(--amber); font-weight: 500; }
+
+  /* ── Hint bar ── */
+  .hintbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 9px 24px; border-top: 1px solid var(--edge);
+    font-size: 12px; color: var(--ink-faint);
+  }
+  kbd {
+    font-family: var(--sans); font-size: 10.5px; font-weight: 500; color: var(--ink-dim);
+    background: var(--active); border: 1px solid var(--edge);
+    border-radius: 5px; padding: 1px 6px;
+  }
+  .tag { margin-left: auto; letter-spacing: 0.04em; font-weight: 500; }
+  .tag b { color: var(--amber); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="wordmark">attn<span class="colon">:</span></div>
+    <nav class="splits">
+      <span class="split active">Important<span class="n num">3</span></span>
+      <span class="split">Other</span>
+      <span class="split">Team<span class="n num cold">1</span></span>
+      <span class="split">VIPs</span>
+      <span class="split">Newsletters<span class="n num cold">12</span></span>
+      <span class="split">Receipts</span>
+      <span class="split more" title="All splits — also in the palette (⌘K)">···</span>
+    </nav>
+    <div class="readout">
+      <span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="q num"><b>3</b> to zero</span>
+      <span class="account-wrap">
+        <span class="account-chip">magicchao1989@gmail.com <span class="chev">▾</span></span>
+        <span class="menu">
+          <span class="mi">Settings <kbd>⌘ ,</kbd></span>
+          <span class="mi">Keyboard shortcuts <kbd>⌘ /</kbd></span>
+          <span class="mi">Split rules…</span>
+          <hr class="msep" />
+          <span class="mi">Sign out</span>
+        </span>
+      </span>
+    </div>
+  </header>
+
+  <main class="list">
+    <div class="row unread">
+      <span class="dot"></span><span class="from">Maya Lin</span>
+      <span class="main"><span class="subject">Q3 roadmap review — moved to Thursday</span> — Heads up: moving our roadmap review to Thursday 2pm so Priya can join from Berlin. Agenda attached…</span>
+      <span class="meta"><span class="clip">📎</span><span class="time num">9:41 AM</span></span>
+    </div>
+    <div class="row unread">
+      <span class="dot"></span><span class="from">GitHub</span>
+      <span class="main"><span class="subject">[attn] PR #14: Sync engine backfill pagination</span> — chao-wu requested your review: cursor persistence in sync_state so a killed backfill resumes…</span>
+      <span class="meta"><span class="time num">9:12 AM</span></span>
+    </div>
+    <div class="row unread">
+      <span class="dot"></span><span class="from">Stripe</span>
+      <span class="main"><span class="subject">Your invoice from Acme Cloud is available</span> — Invoice #A-2041 for $48.00 is now available. Payment scheduled for Aug 12…</span>
+      <span class="meta"><span class="time num">8:55 AM</span></span>
+    </div>
+    <div class="row selected">
+      <span class="dot"></span><span class="from">Priya Raman</span>
+      <span class="main"><span class="subject">Design tokens for the reading pane</span> — I pushed the first pass of spacing/typography tokens. Two open questions on message card density…</span>
+      <span class="meta"><span class="time num">8:47 AM</span></span>
+    </div>
+    <div class="row">
+      <span class="dot"></span><span class="from">Daniel Okafor</span>
+      <span class="main"><span class="subject">Re: Coffee next week?</span> — Tuesday works great. There's a new place on Valencia I've been meaning to try — 10am? And bring the laptop…</span>
+      <span class="meta"><span class="star">★</span><span class="time num">8:20 AM</span></span>
+    </div>
+    <div class="row">
+      <span class="dot"></span><span class="from">Linear</span>
+      <span class="main"><span class="subject">Weekly digest: 12 issues completed</span> — Your team closed 12 issues this week. Top project: Sync Engine (7 issues)…</span>
+      <span class="meta"><span class="time">Yesterday</span></span>
+    </div>
+    <div class="row">
+      <span class="dot"></span><span class="from">Anthropic</span>
+      <span class="main"><span class="subject">Your API usage summary for July</span> — Your organization used 2.1M tokens in July. View the full breakdown in the console…</span>
+      <span class="meta"><span class="time">Yesterday</span></span>
+    </div>
+    <div class="row">
+      <span class="dot"></span><span class="from">Ken Watanabe</span>
+      <span class="main"><span class="subject">Fwd: Conference talk proposal deadline</span> — Forwarding in case you missed it — CFP closes Friday. Your local-first sync talk would be perfect…</span>
+      <span class="meta"><span class="time">Yesterday</span></span>
+    </div>
+    <div class="row">
+      <span class="dot"></span><span class="from">Sam Torres</span>
+      <span class="main"><span class="subject">Benchmark results: FTS5 on 50k messages</span> — Ran the numbers on my machine (M2 Air): p50 11ms, p95 63ms with the trigram tokenizer…</span>
+      <span class="meta"><span class="star">★</span><span class="time">Tue</span></span>
+    </div>
+    <div class="row">
+      <span class="dot"></span><span class="from">The Pragmatic Engineer</span>
+      <span class="main"><span class="subject">The Pulse #147: Desktop apps are back</span> — A look at why high-performance desktop email clients and local-first software are having a moment…</span>
+      <span class="meta"><span class="time">Wed</span></span>
+    </div>
+    <div class="row">
+      <span class="dot"></span><span class="from">Notion</span>
+      <span class="main"><span class="subject">Comments on "M1 triage-loop spec"</span> — Maya Lin mentioned you: "should undo restore selection position too, or just the thread state?"…</span>
+      <span class="meta"><span class="time">Tue</span></span>
+    </div>
+    <div class="row">
+      <span class="dot"></span><span class="from">Aunt Rosa</span>
+      <span class="main"><span class="subject">Photos from the lake house 🏞️</span> — Finally uploaded everything from last month. The one of you falling off the paddleboard is framed…</span>
+      <span class="meta"><span class="clip">📎</span><span class="time">Mon</span></span>
+    </div>
+  </main>
+
+  <footer class="hintbar">
+    <span><kbd>J</kbd>/<kbd>K</kbd> navigate</span>
+    <span><kbd>Enter</kbd> open</span>
+    <span><kbd>E</kbd> done</span>
+    <span><kbd>H</kbd> snooze</span>
+    <span><kbd>Z</kbd> undo</span>
+    <span class="tag">Dispatch <b>v2</b> · list view</span>
+  </footer>
+</div>
+</body>
+</html>

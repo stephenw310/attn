@@ -6,10 +6,12 @@ const api = {
   platform: process.platform,
   auth: {
     getStatus: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:getStatus'),
-    signIn: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:signIn')
+    signIn: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:signIn'),
+    signOut: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:signOut')
   },
   mail: {
     listThreads: (): Promise<ThreadRow[]> => ipcRenderer.invoke('mail:listThreads'),
+    getUnreadCount: (): Promise<number> => ipcRenderer.invoke('mail:getUnreadCount'),
     getConversation: (threadId: string): Promise<Conversation | null> =>
       ipcRenderer.invoke('mail:getConversation', threadId),
     onChanged: (cb: () => void): (() => void) => {
