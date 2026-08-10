@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
@@ -13,7 +14,24 @@ import { runInboxBackfill } from './sync/backfill'
 // token store. Must be set before requestSingleInstanceLock() so concurrent
 // test apps (distinct dirs) don't share an instance lock.
 const testUserData = process.env.ATTN_TEST_USER_DATA
-if (testUserData) app.setPath('userData', testUserData)
+if (testUserData) {
+  app.setPath('userData', testUserData)
+  // Mirror console output to a file the e2e fixture attaches on failure —
+  // Playwright consumes early stdout before test listeners can attach, so
+  // boot-time lines would otherwise be lost to diagnostics.
+  const logFile = join(testUserData, 'main.log')
+  for (const level of ['log', 'warn', 'error'] as const) {
+    const original = console[level].bind(console)
+    console[level] = (...args: unknown[]) => {
+      original(...args)
+      try {
+        appendFileSync(logFile, `[${level}] ${args.map(String).join(' ')}\n`)
+      } catch {
+        // Diagnostics only — never let logging break the app under test.
+      }
+    }
+  }
+}
 
 let db: Db | null = null
 let syncState: SyncState = { phase: 'idle' }

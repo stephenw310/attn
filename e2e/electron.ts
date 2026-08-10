@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -17,7 +17,7 @@ const ROOT = join(__dirname, '..')
 
 interface Boot {
   app: ElectronApplication
-  chunks: string[]
+  mainLog: () => string
   userData: string
 }
 
@@ -27,7 +27,11 @@ interface ElectronFixtures {
   page: Page
   /** The isolated userData dir this test's app instance runs against. */
   userData: string
-  /** Main-process stdout/stderr captured after launch (attached on failure). */
+  /**
+   * The complete main-process log: the app's teed main.log (covers boot lines
+   * Playwright consumes before listeners attach) plus captured stdout/stderr
+   * (covers native/Chromium output). Attached to failed tests.
+   */
   mainLog: () => string
 }
 
@@ -41,18 +45,34 @@ export const test = base.extend<ElectronFixtures>({
       if (process.getuid?.() === 0 || process.env.CI) args.push('--no-sandbox')
       args.push('--disable-dev-shm-usage')
     }
-    const app = await electron.launch({
-      args,
-      env: { ...cleanEnv(), ATTN_TEST_USER_DATA: userData },
-      cwd: ROOT
-    })
+    let app: ElectronApplication
+    try {
+      app = await electron.launch({
+        args,
+        env: { ...cleanEnv(), ATTN_TEST_USER_DATA: userData },
+        cwd: ROOT
+      })
+    } catch (err) {
+      // Never leak the temp dir when the app can't even start.
+      rmSync(userData, { recursive: true, force: true, maxRetries: 3 })
+      throw err
+    }
     const chunks: string[] = []
     app.process().stdout?.on('data', (d: Buffer) => chunks.push(d.toString()))
     app.process().stderr?.on('data', (d: Buffer) => chunks.push(d.toString()))
-    await use({ app, chunks, userData })
+    const mainLog = (): string => {
+      let teed = ''
+      try {
+        teed = readFileSync(join(userData, 'main.log'), 'utf8')
+      } catch {
+        // App may not have written anything yet.
+      }
+      return `${teed}${chunks.join('')}`
+    }
+    await use({ app, mainLog, userData })
     await app.close().catch(() => {})
     if (testInfo.status !== testInfo.expectedStatus) {
-      await testInfo.attach('main-process-log', { body: chunks.join(''), contentType: 'text/plain' })
+      await testInfo.attach('main-process-log', { body: mainLog(), contentType: 'text/plain' })
     }
     rmSync(userData, { recursive: true, force: true, maxRetries: 3 })
   },
@@ -66,7 +86,7 @@ export const test = base.extend<ElectronFixtures>({
   },
 
   mainLog: async ({ boot }, use) => {
-    await use(() => boot.chunks.join(''))
+    await use(boot.mainLog)
   },
 
   page: async ({ app }, use) => {

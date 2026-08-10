@@ -12,13 +12,23 @@ function selectedIndex(page: Page): Promise<number> {
     .evaluateAll((rows) => rows.findIndex((row) => row.hasAttribute('data-selected')))
 }
 
-test('boots the built app with an isolated store and working IPC bridge', async ({ app, page, userData }) => {
+test('boots the built app with an isolated store and working IPC bridge', async ({
+  app,
+  page,
+  userData,
+  mainLog
+}) => {
   await expect(page).toHaveTitle('Attn')
   await expect(page.getByTestId('thread-row').first()).toBeVisible()
 
   const resolvedUserData = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'))
   expect(resolvedUserData).toBe(userData)
   expect(existsSync(join(userData, 'attn.db'))).toBe(true)
+
+  // The teed main.log covers boot-time lines (Playwright consumes early
+  // stdout), so the store's open/migrate line is assertable — inside the
+  // isolated dir, at a migrated schema version.
+  await expect.poll(mainLog).toMatch(/\[log\] \[db\] open at .*attn-e2e-.*attn\.db \(schema v\d+\)/)
 
   expect(await page.evaluate(() => typeof window.attn?.mail.listThreads)).toBe('function')
   expect(await page.evaluate(() => window.attn.auth.getStatus())).toEqual({
@@ -79,6 +89,9 @@ test('Enter opens the overlay; J/K navigate and mark read; Esc restores the list
   await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')
   await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread - 1} to zero`)
 
+  // Precondition for the count math below: advancing must land on an unread
+  // thread, or the -2 expectation silently depends on fixture data.
+  await expect(rows.nth(1)).toHaveAttribute('data-unread', 'true')
   await page.keyboard.press('j')
   await expect(page.getByTestId('conversation-subject')).toHaveText(mockThreads[1].subject)
   await expect(page.getByTestId('conversation-position')).toHaveText(`2 of ${mockThreads.length}`)

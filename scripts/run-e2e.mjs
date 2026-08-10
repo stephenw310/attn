@@ -22,4 +22,5 @@ if (process.platform === 'linux' && !process.env.DISPLAY) {
 }
 
 const res = spawnSync(exec[0], exec.slice(1), { stdio: 'inherit' })
+if (res.error) console.error('[e2e] failed to launch test runner:', res.error)
 process.exit(res.status ?? 1)
