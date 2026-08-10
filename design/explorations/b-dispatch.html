@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Attn — Direction B · Dispatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #1a1917;
+    --raised: #232120;
+    --active: #2b2825;
+    --ink: #ece8e2;
+    --ink-dim: #a8a29a;
+    --ink-faint: #6e6962;
+    --amber: #e8a33d;
+    --amber-wash: rgba(232, 163, 61, 0.09);
+    --edge: #33302c;
+    --sans: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    font-size: 14px;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .app { height: 100vh; display: flex; flex-direction: column; }
+
+  /* ── Top bar ── */
+  .topbar {
+    display: flex; align-items: center; gap: 24px;
+    padding: 12px 20px; border-bottom: 1px solid var(--edge);
+  }
+  .wordmark { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
+  .wordmark .colon { color: var(--amber); }
+  .splits { display: flex; gap: 6px; }
+  .split {
+    font-size: 13px; font-weight: 500; color: var(--ink-faint);
+    padding: 5px 12px; border-radius: 6px; cursor: default;
+  }
+  .split.active { background: var(--active); color: var(--ink); }
+  .split .n { font-family: var(--mono); font-size: 11px; color: var(--amber); margin-left: 4px; }
+  .readout {
+    margin-left: auto; display: flex; align-items: center; gap: 14px;
+    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+  }
+  .readout .q { color: var(--amber); }
+  .readout .meter { display: inline-flex; gap: 2px; }
+  .readout .meter i {
+    width: 4px; height: 10px; background: var(--edge); border-radius: 1px; font-style: normal;
+  }
+  .readout .meter i.on { background: var(--amber); }
+  .account { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+
+  /* ── Panes ── */
+  .panes { flex: 1; display: flex; min-height: 0; }
+  .list {
+    width: 44%; min-width: 380px; max-width: 600px;
+    border-right: 1px solid var(--edge); overflow-y: auto; padding: 6px 0;
+  }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px 10px 13px; white-space: nowrap;
+    border-left: 3px solid transparent; cursor: default;
+  }
+  .row.selected { background: var(--amber-wash); border-left-color: var(--amber); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: transparent; }
+  .row.unread .dot { background: var(--amber); box-shadow: 0 0 7px rgba(232, 163, 61, 0.55); }
+  .from { flex: none; width: 138px; overflow: hidden; text-overflow: ellipsis; color: var(--ink-dim); }
+  .row.unread .from { color: var(--ink); font-weight: 600; }
+  .main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-faint); }
+  .subject { color: var(--ink-dim); }
+  .row.unread .subject { color: var(--ink); font-weight: 600; }
+  .meta { flex: none; display: flex; align-items: center; gap: 8px; }
+  .star { color: var(--amber); font-size: 12px; }
+  .clip { font-size: 12px; color: var(--ink-faint); }
+  .time {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+    min-width: 64px; text-align: right;
+  }
+  .row.unread .time { color: var(--amber); }
+
+  /* ── Reading pane ── */
+  .pane { flex: 1; min-width: 0; overflow-y: auto; padding: 26px 34px; }
+  .conv-subject { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+  .conv-meta {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+    margin: 8px 0 22px;
+  }
+  .conv-meta .k { color: var(--amber); }
+  .msg {
+    background: var(--raised); border: 1px solid var(--edge); border-radius: 8px;
+    padding: 16px 20px; margin-bottom: 14px;
+  }
+  .msg-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .msg-from { font-weight: 600; }
+  .msg-email { color: var(--ink-faint); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg-time { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); flex: none; }
+  .msg-body p { line-height: 1.6; color: var(--ink); margin-bottom: 10px; }
+  .msg-body p:last-child { margin-bottom: 0; }
+
+  /* ── Hint bar ── */
+  .hintbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 8px 20px; border-top: 1px solid var(--edge);
+    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+  }
+  kbd {
+    font-family: var(--mono); font-size: 10px; color: var(--ink-dim);
+    background: var(--active); border: 1px solid var(--edge);
+    border-radius: 4px; padding: 1px 5px;
+  }
+  .tag { margin-left: auto; letter-spacing: 0.08em; text-transform: uppercase; }
+  .tag b { color: var(--amber); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="wordmark">attn<span class="colon">:</span></div>
+    <nav class="splits">
+      <span class="split active">Important<span class="n">3</span></span>
+      <span class="split">Other</span>
+    </nav>
+    <div class="readout">
+      <span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span><span class="q">3 waiting</span> · zero in sight</span>
+      <span class="account">magicchao1989@gmail.com</span>
+    </div>
+  </header>
+
+  <main class="panes">
+    <section class="list">
+      <div class="row unread">
+        <span class="dot"></span><span class="from">Maya Lin</span>
+        <span class="main"><span class="subject">Q3 roadmap review — moved to Thursday</span> — Heads up: moving our roadmap review to Thursday 2pm…</span>
+        <span class="meta"><span class="clip">📎</span><span class="time">9:41 AM</span></span>
+      </div>
+      <div class="row unread">
+        <span class="dot"></span><span class="from">GitHub</span>
+        <span class="main"><span class="subject">[attn] PR #14: Sync engine backfill pagination</span> — chao-wu requested your review…</span>
+        <span class="meta"><span class="time">9:12 AM</span></span>
+      </div>
+      <div class="row unread">
+        <span class="dot"></span><span class="from">Stripe</span>
+        <span class="main"><span class="subject">Your invoice from Acme Cloud is available</span> — Invoice #A-2041 for $48.00…</span>
+        <span class="meta"><span class="time">8:55 AM</span></span>
+      </div>
+      <div class="row selected">
+        <span class="dot"></span><span class="from">Priya Raman</span>
+        <span class="main"><span class="subject">Design tokens for the reading pane</span> — I pushed the first pass of spacing…</span>
+        <span class="meta"><span class="time">8:47 AM</span></span>
+      </div>
+      <div class="row">
+        <span class="dot"></span><span class="from">Daniel Okafor</span>
+        <span class="main"><span class="subject">Re: Coffee next week?</span> — Tuesday works great. There's a new place on Valencia…</span>
+        <span class="meta"><span class="star">★</span><span class="time">8:20 AM</span></span>
+      </div>
+      <div class="row">
+        <span class="dot"></span><span class="from">Linear</span>
+        <span class="main"><span class="subject">Weekly digest: 12 issues completed</span> — Your team closed 12 issues this week…</span>
+        <span class="meta"><span class="time">Yesterday</span></span>
+      </div>
+      <div class="row">
+        <span class="dot"></span><span class="from">Anthropic</span>
+        <span class="main"><span class="subject">Your API usage summary for July</span> — Your organization used 2.1M tokens…</span>
+        <span class="meta"><span class="time">Yesterday</span></span>
+      </div>
+      <div class="row">
+        <span class="dot"></span><span class="from">Ken Watanabe</span>
+        <span class="main"><span class="subject">Fwd: Conference talk proposal deadline</span> — Forwarding in case you missed it…</span>
+        <span class="meta"><span class="time">Yesterday</span></span>
+      </div>
+      <div class="row">
+        <span class="dot"></span><span class="from">Sam Torres</span>
+        <span class="main"><span class="subject">Benchmark results: FTS5 on 50k messages</span> — Ran the numbers on my machine…</span>
+        <span class="meta"><span class="star">★</span><span class="time">Tue</span></span>
+      </div>
+      <div class="row">
+        <span class="dot"></span><span class="from">The Pragmatic Engineer</span>
+        <span class="main"><span class="subject">The Pulse #147: Desktop apps are back</span> — A look at why high-performance desktop clients…</span>
+        <span class="meta"><span class="time">Wed</span></span>
+      </div>
+    </section>
+
+    <section class="pane">
+      <h1 class="conv-subject">Design tokens for the reading pane</h1>
+      <div class="conv-meta"><span class="k">thread</span> · 2 messages · priya@acme.dev ↔ you</div>
+
+      <article class="msg">
+        <div class="msg-head">
+          <span class="msg-from">Priya Raman</span>
+          <span class="msg-email">&lt;priya@acme.dev&gt;</span>
+          <span class="msg-time">Yesterday, 2:17 PM</span>
+        </div>
+        <div class="msg-body">
+          <p>I pushed the first pass of spacing/typography tokens for the reading pane.</p>
+          <p>Two open questions: (1) message card density — compact vs comfortable as the default? (2) do quoted trails collapse to one line or three?</p>
+          <p>My vote is comfortable + one line, matching the "one clear focus" principle.</p>
+        </div>
+      </article>
+
+      <article class="msg">
+        <div class="msg-head">
+          <span class="msg-from">You</span>
+          <span class="msg-email">&lt;magicchao1989@gmail.com&gt;</span>
+          <span class="msg-time">Today, 8:47 AM</span>
+        </div>
+        <div class="msg-body">
+          <p>Comfortable density, one-line quoted trails. Matches the spec — ship it.</p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="hintbar">
+    <span><kbd>J</kbd>/<kbd>K</kbd> navigate</span>
+    <span><kbd>Enter</kbd> open</span>
+    <span><kbd>E</kbd> done</span>
+    <span><kbd>H</kbd> snooze</span>
+    <span><kbd>Z</kbd> undo</span>
+    <span class="tag">Direction <b>B</b> · Dispatch</span>
+  </footer>
+</div>
+</body>
+</html>
