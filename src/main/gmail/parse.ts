@@ -70,6 +70,46 @@ export function extractBodyText(payload: GmailPart | undefined): string {
   return ''
 }
 
+export interface ExternalTextPart {
+  attachmentId: string
+  mimeType: 'text/plain' | 'text/html'
+}
+
+/**
+ * Large text/* parts that Gmail stores out-of-line (body.attachmentId, no
+ * inline data). These are NOT user-visible attachments — no filename — and
+ * must be fetched via messages.attachments.get to render the body.
+ */
+export function findExternalTextParts(payload: GmailPart | undefined): ExternalTextPart[] {
+  const found: ExternalTextPart[] = []
+  const walk = (p: GmailPart): void => {
+    if (
+      !p.filename &&
+      p.body?.attachmentId &&
+      !p.body.data &&
+      (p.mimeType === 'text/plain' || p.mimeType === 'text/html')
+    ) {
+      found.push({ attachmentId: p.body.attachmentId, mimeType: p.mimeType })
+    }
+    p.parts?.forEach(walk)
+  }
+  if (payload) walk(payload)
+  return found
+}
+
+/** Decode a fetched raw part into display text (same pipeline as inline parts). */
+export function textFromRaw(mimeType: string, raw: string): string {
+  return normalize(mimeType === 'text/html' ? stripHtml(raw) : raw)
+}
+
+export function decodeBase64Url(data: string): string {
+  try {
+    return Buffer.from(data, 'base64url').toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
 export function hasAttachment(payload: GmailPart | undefined): boolean {
   if (!payload) return false
   if (payload.filename && payload.filename.length > 0) return true

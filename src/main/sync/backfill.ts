@@ -3,8 +3,17 @@
 // rejection. Widens to the 12-month metadata window at M1 (SPEC F2).
 
 import type { Db } from '../db'
-import type { GmailClient } from '../gmail/client'
-import { extractBodyText, hasAttachment, header, parseAddress, type GmailThread } from '../gmail/parse'
+import { GmailApiError, type GmailClient } from '../gmail/client'
+import {
+  decodeBase64Url,
+  extractBodyText,
+  findExternalTextParts,
+  hasAttachment,
+  header,
+  parseAddress,
+  textFromRaw,
+  type GmailThread
+} from '../gmail/parse'
 
 interface Profile {
   emailAddress: string
@@ -76,8 +85,20 @@ export async function runInboxBackfill(db: Db, client: GmailClient, cb: Backfill
       const page = await client.get<ThreadList>('/threads', params)
 
       await mapConcurrent(page.threads ?? [], 3, async (t) => {
-        const full = await client.get<GmailThread>(`/threads/${t.id}`, { format: 'full' })
+        let full: GmailThread
+        try {
+          full = await client.get<GmailThread>(`/threads/${t.id}`, { format: 'full' })
+        } catch (e) {
+          // Normal race on an active inbox: listed thread archived/deleted
+          // before we fetched it. Skip it, keep the backfill alive.
+          if (e instanceof GmailApiError && e.status === 404) {
+            console.log(`[sync] thread ${t.id} vanished mid-backfill — skipped`)
+            return
+          }
+          throw e
+        }
         persistThread(db, accountId, full)
+        await fetchExternalBodies(db, client, accountId, full)
         done++
       })
 
@@ -187,6 +208,33 @@ function persistThread(db: Db, accountId: string, thread: GmailThread): void {
     for (const l of labelUnion) insertLabel.run(accountId, thread.id, l)
   })
   tx()
+}
+
+/**
+ * Gmail externalizes large text bodies as attachment parts (no inline data).
+ * For the rare messages whose extraction came up empty, fetch those parts and
+ * fill in body_text. 404s are skipped — the snippet fallback still renders.
+ */
+async function fetchExternalBodies(db: Db, client: GmailClient, accountId: string, thread: GmailThread): Promise<void> {
+  const readBody = db.prepare('SELECT body_text FROM messages WHERE account_id = ? AND id = ?')
+  const writeBody = db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?')
+
+  for (const msg of thread.messages ?? []) {
+    const row = readBody.get(accountId, msg.id) as { body_text: string | null } | undefined
+    if (!row || (row.body_text ?? '') !== '') continue
+    const parts = findExternalTextParts(msg.payload)
+    const pick = parts.find((p) => p.mimeType === 'text/plain') ?? parts[0]
+    if (!pick) continue
+    try {
+      const att = await client.get<{ data?: string }>(`/messages/${msg.id}/attachments/${pick.attachmentId}`)
+      if (!att.data) continue
+      const text = textFromRaw(pick.mimeType, decodeBase64Url(att.data))
+      if (text) writeBody.run(text, accountId, msg.id)
+    } catch (e) {
+      if (e instanceof GmailApiError && e.status === 404) continue
+      throw e
+    }
+  }
 }
 
 async function mapConcurrent<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

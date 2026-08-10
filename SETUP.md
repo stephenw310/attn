@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node 20+ (developed on 24) and npm
+- Node 22.12+ (developed on 24) and npm — better-sqlite3 and Electron's build tooling require ≥22.12
 - macOS: Xcode Command Line Tools (for the native SQLite build)
 - Windows: Visual Studio Build Tools with the C++ workload
 

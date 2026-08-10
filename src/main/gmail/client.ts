@@ -6,6 +6,15 @@ import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
 const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
 
+export class GmailApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message)
+  }
+}
+
 export class GmailClient {
   constructor(
     private readonly config: OAuthConfig,
@@ -75,7 +84,7 @@ export class GmailClient {
         await sleep(Math.min(65_000, 1000 * 2 ** attempt) + Math.random() * 1000)
         continue
       }
-      throw new Error(`gmail ${path} failed (${res.status}): ${text.slice(0, 300)}`)
+      throw new GmailApiError(res.status, `gmail ${path} failed (${res.status}): ${text.slice(0, 300)}`)
     }
   }
 }
