@@ -1,4 +1,4 @@
-# Attn — Product & Technical Spec (v0.6)
+# Attn — Product & Technical Spec (v0.7)
 
 A desktop email client for **macOS and Windows** modeled on Superhuman's core idea: email triage so fast and keyboard-driven that reaching inbox zero is the default state, not an aspiration.
 
@@ -54,6 +54,7 @@ This spec covers **v1: the inbox experience only**. Calendar is explicitly out o
 | Team features (shared threads, comments) | Requires backend + multi-tenant model |
 | Unified inbox across accounts | Multi-account itself is v1.1 (see D4) |
 | Full keyboard remapping UI | Post-v1; v1 ships fixed defaults |
+| Custom themes (user-defined palettes / accent colors) | Post-v1 (v1.1 candidate); v1 ships Dispatch dark + the derived light variant (F14). D6's semantic token system is the enabler — a custom theme is just another token set |
 
 ---
 
@@ -243,7 +244,7 @@ When a split reaches zero, the list pane is replaced by a full-pane zero state: 
 
 ### F14 — Themes
 
-Light and dark themes; follows the OS by default with a manual override (palette: "Switch theme"). Dark is the Dispatch base (D6); the light variant is derived from the same tokens at M3. All UI, including rendered HTML mail, must be legible in both (dark mode sanitizes/inverts mail backgrounds where safe, with a per-message "view original" escape hatch).
+Light and dark themes; follows the OS by default with a manual override (palette: "Switch theme"). Dark is the Dispatch base (D6); the light variant is derived from the same tokens at M3, and user-customizable themes (own token sets over the same semantic names) are post-v1 roadmap. All UI, including rendered HTML mail, must be legible in both (dark mode sanitizes/inverts mail backgrounds where safe, with a per-message "view original" escape hatch).
 
 ### F15 — Settings
 
@@ -416,7 +417,7 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 - **M3 — Find & focus.** FTS5 instant search + operators, split inbox + rules, inbox-zero states, themes, command palette hardened (every command registered).
 - **M4 — Power finish.** Snippets, follow-up reminders, AI reply drafting (F17), settings surface, badges, packaging + auto-update + signing.
 
-**Post-v1 sequence:** v1.1 — global-hotkey quick panel (quick compose + quick search) and multi-account (switcher `Mod+1..9`; unified inbox stays out). v1.5 — companion Apps Script: send later + exact-time snooze return (F7). v2 — hosted backend: read statuses, true multi-device state.
+**Post-v1 sequence:** v1.1 — global-hotkey quick panel (quick compose + quick search), multi-account (switcher `Mod+1..9`; unified inbox stays out), and custom themes (user token sets over D6's semantic names). v1.5 — companion Apps Script: send later + exact-time snooze return (F7). v2 — hosted backend: read statuses, true multi-device state.
 
 **Success metrics (post-M2 dogfood):** p95 action latency vs. budget, % of actions invoked via keyboard (target > 80%), time-to-zero on a 50-conversation morning inbox (target < 15 min), crash-free sessions > 99.5%.
 
