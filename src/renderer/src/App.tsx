@@ -94,7 +94,7 @@ function AccountChip({
   const signIn = useCallback(() => {
     setBusy(true)
     setError(null)
-    window.shc?.auth
+    window.attn?.auth
       .signIn()
       .then(onStatus)
       .catch((e: unknown) => {
@@ -105,7 +105,7 @@ function AccountChip({
       .finally(() => setBusy(false))
   }, [onStatus])
 
-  if (!window.shc) return <div className="account-chip">mock data · browser preview</div>
+  if (!window.attn) return <div className="account-chip">mock data · browser preview</div>
   if (!status) return <div className="account-chip">…</div>
   if (status.signedIn) return <div className="account-chip">{status.email ?? 'signed in'}</div>
   if (!status.configured) {
@@ -127,7 +127,7 @@ function AccountChip({
 }
 
 export default function App(): React.JSX.Element {
-  const shc = window.shc
+  const attn = window.attn
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
@@ -138,32 +138,32 @@ export default function App(): React.JSX.Element {
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const convCache = useRef(new Map<string, DisplayConversation>())
 
-  const realMode = Boolean(shc && status?.signedIn)
+  const realMode = Boolean(attn && status?.signedIn)
 
   useEffect(() => {
-    shc?.auth
+    attn?.auth
       .getStatus()
       .then(setStatus)
       .catch(() => {})
-  }, [shc])
+  }, [attn])
 
   useEffect(() => {
-    if (!shc) return
-    shc.sync.getState().then(setSync).catch(() => {})
-    const offSync = shc.sync.onState(setSync)
-    const offMail = shc.mail.onChanged(() => {
+    if (!attn) return
+    attn.sync.getState().then(setSync).catch(() => {})
+    const offSync = attn.sync.onState(setSync)
+    const offMail = attn.mail.onChanged(() => {
       convCache.current.clear()
-      shc.mail.listThreads().then(setRealThreads).catch(() => {})
+      attn.mail.listThreads().then(setRealThreads).catch(() => {})
     })
     return () => {
       offSync()
       offMail()
     }
-  }, [shc])
+  }, [attn])
 
   useEffect(() => {
-    if (realMode) shc!.mail.listThreads().then(setRealThreads).catch(() => {})
-  }, [realMode, shc])
+    if (realMode) attn!.mail.listThreads().then(setRealThreads).catch(() => {})
+  }, [realMode, attn])
 
   const threads: DisplayThread[] = useMemo(() => {
     if (realMode) return (realThreads ?? []).map(fromThreadRow)
@@ -201,7 +201,7 @@ export default function App(): React.JSX.Element {
     }
     let cancelled = false
     setConversation(null)
-    shc!.mail
+    attn!.mail
       .getConversation(selected.id)
       .then((c) => {
         if (cancelled || !c) return
@@ -213,7 +213,7 @@ export default function App(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [selected?.id, realMode, shc])
+  }, [selected?.id, realMode, attn])
 
   const openConversation = useCallback((threadId: string) => {
     setFocusRegion('conversation')

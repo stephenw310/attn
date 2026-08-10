@@ -28,6 +28,6 @@ const api = {
   }
 }
 
-contextBridge.exposeInMainWorld('shc', api)
+contextBridge.exposeInMainWorld('attn', api)
 
-export type ShcApi = typeof api
+export type AttnApi = typeof api

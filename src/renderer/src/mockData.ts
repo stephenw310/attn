@@ -16,7 +16,7 @@ export const mockThreads: ThreadSummary[] = [
   {
     id: 't2',
     from: 'GitHub',
-    subject: '[superhuman-clone] PR #14: Sync engine backfill pagination',
+    subject: '[attn] PR #14: Sync engine backfill pagination',
     snippet: 'chao-wu requested your review on: Implement threads.list pagination with historyId checkpointing…',
     at: '9:12 AM',
     unread: true
@@ -90,7 +90,7 @@ export const mockThreads: ThreadSummary[] = [
     id: 't11',
     from: 'Google Cloud',
     subject: 'Reminder: OAuth consent screen in Testing mode',
-    snippet: 'Your app superhuman-clone-dev is in Testing mode. Refresh tokens for test users expire after 7 days…',
+    snippet: 'Your app attn-dev is in Testing mode. Refresh tokens for test users expire after 7 days…',
     at: 'Wed',
     unread: false
   },
@@ -191,7 +191,7 @@ const conversationBodies: Record<string, ConversationView> = {
   },
   t2: {
     threadId: 't2',
-    subject: '[superhuman-clone] PR #14: Sync engine backfill pagination',
+    subject: '[attn] PR #14: Sync engine backfill pagination',
     messages: [
       {
         id: 't2m1',
@@ -200,7 +200,7 @@ const conversationBodies: Record<string, ConversationView> = {
         to: 'you',
         at: 'Today, 9:12 AM',
         body: [
-          'chao-wu requested your review on: superhuman-clone#14 — Implement threads.list pagination with historyId checkpointing.',
+          'chao-wu requested your review on: attn#14 — Implement threads.list pagination with historyId checkpointing.',
           '“This adds cursor persistence to sync_state so a killed backfill resumes instead of restarting. Also batches metadata fetches 50-per-request to stay inside quota.”',
           '1 approval required · 14 files changed, +612 −88'
         ]

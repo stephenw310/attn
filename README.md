@@ -1,4 +1,4 @@
-# SHC Mail (superhuman-clone)
+# ATTN
 
 Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
 
@@ -10,4 +10,4 @@ npm install
 npm run dev
 ```
 
-**Current state: M0 walking skeleton.** Electron + React + TypeScript shell, two-pane inbox with `J`/`K`/`Enter`/`Esc` navigation on mock data, SQLite local store (versioned schema), and the Google OAuth PKCE flow — waiting on your `oauth.config.json` (see SETUP.md) to sync real Gmail.
+**Current state: M0 walking skeleton.** Electron + React + TypeScript shell, two-pane inbox with `J`/`K`/`Enter`/`Esc` navigation, SQLite local store (versioned schema), Google OAuth (PKCE loopback, keychain-encrypted tokens), and a quota-aware Gmail backfill rendering your real inbox.

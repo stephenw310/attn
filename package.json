@@ -1,8 +1,12 @@
 {
-  "name": "superhuman-clone",
+  "name": "attn",
+  "productName": "ATTN",
   "version": "0.0.1",
-  "description": "Keyboard-first, local-first desktop email client (Superhuman-style) for macOS and Windows",
+  "description": "ATTN — keyboard-first, local-first desktop email client for macOS and Windows",
   "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev --watch",

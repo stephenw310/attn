@@ -1,8 +1,8 @@
-import type { ShcApi } from './index'
+import type { AttnApi } from './index'
 
 declare global {
   interface Window {
-    shc: ShcApi
+    attn: AttnApi
   }
 }
 

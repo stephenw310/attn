@@ -149,7 +149,7 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
-    const dbPath = join(app.getPath('userData'), 'shc.db')
+    const dbPath = join(app.getPath('userData'), 'attn.db')
     db = openDatabase(dbPath)
     console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
 
