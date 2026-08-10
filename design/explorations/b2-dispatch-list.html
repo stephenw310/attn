@@ -47,10 +47,29 @@
   }
   .split.active { background: var(--active); color: var(--ink); }
   .split .n { color: var(--amber); margin-left: 5px; font-size: 12px; font-weight: 600; }
+  .split .n.cold { color: var(--ink-faint); font-weight: 500; }
+  .split.more { padding: 5px 8px; letter-spacing: 0.1em; }
   .readout {
     margin-left: auto; display: flex; align-items: center; gap: 12px;
     font-size: 12px; color: var(--ink-faint);
   }
+  .account-wrap { position: relative; }
+  .account-chip {
+    display: flex; align-items: center; gap: 6px; cursor: default;
+    font-size: 12px; color: var(--ink-faint);
+  }
+  .account-chip .chev { font-size: 9px; color: var(--ink-faint); }
+  .menu {
+    position: absolute; top: 26px; right: 0; z-index: 30; width: 230px;
+    background: var(--raised); border: 1px solid var(--edge); border-radius: 9px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); padding: 6px;
+  }
+  .mi {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 10px; border-radius: 6px; font-size: 13px; color: var(--ink-dim);
+  }
+  .mi:hover { background: var(--active); color: var(--ink); }
+  .msep { border: none; border-top: 1px solid var(--edge); margin: 6px 4px; }
   .readout .meter { display: inline-flex; gap: 3px; align-items: center; }
   .readout .meter i {
     width: 5px; height: 5px; border-radius: 50%; background: var(--edge); font-style: normal;
@@ -103,11 +122,25 @@
     <nav class="splits">
       <span class="split active">Important<span class="n num">3</span></span>
       <span class="split">Other</span>
+      <span class="split">Team<span class="n num cold">1</span></span>
+      <span class="split">VIPs</span>
+      <span class="split">Newsletters<span class="n num cold">12</span></span>
+      <span class="split">Receipts</span>
+      <span class="split more" title="All splits — also in the palette (⌘K)">···</span>
     </nav>
     <div class="readout">
       <span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
       <span class="q num"><b>3</b> to zero</span>
-      <span class="account">magicchao1989@gmail.com</span>
+      <span class="account-wrap">
+        <span class="account-chip">magicchao1989@gmail.com <span class="chev">▾</span></span>
+        <span class="menu">
+          <span class="mi">Settings <kbd>⌘ ,</kbd></span>
+          <span class="mi">Keyboard shortcuts <kbd>⌘ /</kbd></span>
+          <span class="mi">Split rules…</span>
+          <hr class="msep" />
+          <span class="mi">Sign out</span>
+        </span>
+      </span>
     </div>
   </header>
 
