@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Attn — Dispatch v2 · Side panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #101114;
+    --raised: #17181c;
+    --active: #1f2127;
+    --edge: #262931;
+    --ink: #e9eaee;
+    --ink-dim: #9da2ac;
+    --ink-faint: #626875;
+    --amber: #ffb224;
+    --amber-wash: rgba(255, 178, 36, 0.07);
+    --sans: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans); font-size: 14px; background: var(--bg); color: var(--ink);
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .app { height: 100vh; display: flex; flex-direction: column; }
+
+  .topbar {
+    display: flex; align-items: center; gap: 24px;
+    padding: 13px 24px; border-bottom: 1px solid var(--edge);
+  }
+  .wordmark { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
+  .wordmark .colon { color: var(--amber); }
+  .splits { display: flex; gap: 4px; }
+  .split { font-size: 13px; font-weight: 500; color: var(--ink-faint); padding: 5px 12px; border-radius: 7px; }
+  .split.active { background: var(--active); color: var(--ink); }
+  .split .n { color: var(--amber); margin-left: 5px; font-size: 12px; font-weight: 600; }
+  .split .n.cold { color: var(--ink-faint); font-weight: 500; }
+  .split.more { padding: 5px 8px; letter-spacing: 0.1em; }
+  .readout { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--ink-faint); }
+  .readout .meter { display: inline-flex; gap: 3px; }
+  .readout .meter i { width: 5px; height: 5px; border-radius: 50%; background: var(--edge); font-style: normal; }
+  .readout .meter i.on { background: var(--amber); }
+  .readout .q { color: var(--ink-dim); font-weight: 500; }
+  .readout .q b { color: var(--amber); font-weight: 600; }
+  .account-chip { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-faint); }
+  .account-chip .chev { font-size: 9px; }
+
+  /* ── List (compressed while panel open) ── */
+  .panes { flex: 1; display: flex; min-height: 0; }
+  .list { width: 38%; min-width: 340px; max-width: 460px; border-right: 1px solid var(--edge); overflow-y: auto; padding: 6px 0; }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px 10px 13px; white-space: nowrap;
+    border-left: 3px solid transparent;
+  }
+  .row.selected { background: var(--amber-wash); border-left-color: var(--amber); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: transparent; }
+  .row.unread .dot { background: var(--amber); box-shadow: 0 0 6px rgba(255, 178, 36, 0.45); }
+  .from { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-dim); }
+  .row.unread .from { color: var(--ink); font-weight: 600; }
+  .subject { flex: 1.4; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-faint); }
+  .row.unread .subject { color: var(--ink); font-weight: 500; }
+  .time { flex: none; font-size: 12px; color: var(--ink-faint); min-width: 62px; text-align: right; }
+  .row.unread .time { color: var(--amber); font-weight: 500; }
+
+  /* ── Conversation panel ── */
+  .panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .panel-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 15px 24px 12px; border-bottom: 1px solid var(--edge);
+  }
+  .panel-subject { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel-close { font-size: 12px; color: var(--ink-faint); flex: none; display: flex; gap: 6px; align-items: center; }
+  .panel-scroll { flex: 1; overflow-y: auto; padding: 18px 24px 40px; }
+  .conv-meta { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 18px; }
+  .conv-meta b { color: var(--ink-dim); font-weight: 500; }
+  .msg { background: var(--raised); border: 1px solid var(--edge); border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; }
+  .msg-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 11px; }
+  .msg-from { font-weight: 600; }
+  .msg-email { color: var(--ink-faint); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg-time { font-size: 12px; color: var(--ink-faint); flex: none; }
+  .msg-body p { line-height: 1.6; color: var(--ink); margin-bottom: 10px; }
+  .msg-body p:last-child { margin-bottom: 0; }
+
+  .hintbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 9px 24px; border-top: 1px solid var(--edge);
+    font-size: 12px; color: var(--ink-faint);
+  }
+  kbd {
+    font-family: var(--sans); font-size: 10.5px; font-weight: 500; color: var(--ink-dim);
+    background: var(--active); border: 1px solid var(--edge); border-radius: 5px; padding: 1px 6px;
+  }
+  .tag { margin-left: auto; letter-spacing: 0.04em; font-weight: 500; }
+  .tag b { color: var(--amber); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="wordmark">attn<span class="colon">:</span></div>
+    <nav class="splits">
+      <span class="split active">Important<span class="n num">3</span></span>
+      <span class="split">Other</span>
+      <span class="split">Team<span class="n num cold">1</span></span>
+      <span class="split">VIPs</span>
+      <span class="split">Newsletters<span class="n num cold">12</span></span>
+      <span class="split">Receipts</span>
+      <span class="split more">···</span>
+    </nav>
+    <div class="readout">
+      <span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="q num"><b>3</b> to zero</span>
+      <span class="account-chip">magicchao1989@gmail.com <span class="chev">▾</span></span>
+    </div>
+  </header>
+
+  <main class="panes">
+    <section class="list">
+      <div class="row unread"><span class="dot"></span><span class="from">Maya Lin</span><span class="subject">Q3 roadmap review — moved to Thursday</span><span class="time num">9:41 AM</span></div>
+      <div class="row unread"><span class="dot"></span><span class="from">GitHub</span><span class="subject">[attn] PR #14: Sync engine backfill</span><span class="time num">9:12 AM</span></div>
+      <div class="row unread"><span class="dot"></span><span class="from">Stripe</span><span class="subject">Your invoice from Acme Cloud</span><span class="time num">8:55 AM</span></div>
+      <div class="row selected"><span class="dot"></span><span class="from">Priya Raman</span><span class="subject">Design tokens for the reading pane</span><span class="time num">8:47 AM</span></div>
+      <div class="row"><span class="dot"></span><span class="from">Daniel Okafor</span><span class="subject">Re: Coffee next week?</span><span class="time num">8:20 AM</span></div>
+      <div class="row"><span class="dot"></span><span class="from">Linear</span><span class="subject">Weekly digest: 12 issues completed</span><span class="time">Yesterday</span></div>
+      <div class="row"><span class="dot"></span><span class="from">Anthropic</span><span class="subject">Your API usage summary for July</span><span class="time">Yesterday</span></div>
+      <div class="row"><span class="dot"></span><span class="from">Ken Watanabe</span><span class="subject">Fwd: Conference talk proposal</span><span class="time">Yesterday</span></div>
+      <div class="row"><span class="dot"></span><span class="from">Sam Torres</span><span class="subject">Benchmark results: FTS5 on 50k</span><span class="time">Tue</span></div>
+      <div class="row"><span class="dot"></span><span class="from">The Pragmatic Engineer</span><span class="subject">The Pulse #147: Desktop apps</span><span class="time">Wed</span></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h1 class="panel-subject">Design tokens for the reading pane</h1>
+        <span class="panel-close"><kbd>Esc</kbd> close</span>
+      </div>
+      <div class="panel-scroll">
+        <div class="conv-meta"><b>Priya Raman</b> ↔ <b>you</b> · 2 messages</div>
+        <article class="msg">
+          <div class="msg-head">
+            <span class="msg-from">Priya Raman</span>
+            <span class="msg-email">&lt;priya@acme.dev&gt;</span>
+            <span class="msg-time num">Yesterday, 2:17 PM</span>
+          </div>
+          <div class="msg-body">
+            <p>I pushed the first pass of spacing/typography tokens for the reading pane.</p>
+            <p>Two open questions: (1) message card density — compact vs comfortable as the default? (2) do quoted trails collapse to one line or three?</p>
+            <p>My vote is comfortable + one line, matching the "one clear focus" principle.</p>
+          </div>
+        </article>
+        <article class="msg">
+          <div class="msg-head">
+            <span class="msg-from">You</span>
+            <span class="msg-email">&lt;magicchao1989@gmail.com&gt;</span>
+            <span class="msg-time num">Today, 8:47 AM</span>
+          </div>
+          <div class="msg-body">
+            <p>Comfortable density, one-line quoted trails. Matches the spec — ship it.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="hintbar">
+    <span><kbd>R</kbd> reply</span>
+    <span><kbd>E</kbd> done</span>
+    <span><kbd>H</kbd> snooze</span>
+    <span><kbd>J</kbd>/<kbd>K</kbd> next / prev</span>
+    <span><kbd>Esc</kbd> close</span>
+    <span class="tag">Dispatch <b>v2</b> · side panel</span>
+  </footer>
+</div>
+</body>
+</html>
