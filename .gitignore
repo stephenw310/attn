@@ -9,5 +9,5 @@ dist/
 e2e/.results/
 e2e/.artifacts/
 
-# Per-user Google OAuth client (see SETUP.md) — never commit
+# Per-user Google OAuth client (see README.md) — never commit
 oauth.config.json

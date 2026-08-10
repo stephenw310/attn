@@ -182,9 +182,9 @@ function AccountMenu({
       return (
         <div
           className={CHIP_CLASS}
-          title="Create your Google OAuth client, then add oauth.config.json — see SETUP.md"
+          title="Create your Google OAuth client, then add oauth.config.json — see the README"
         >
-          OAuth not configured · see SETUP.md
+          OAuth not configured · see README
         </div>
       )
     }
