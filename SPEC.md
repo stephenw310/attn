@@ -1,4 +1,4 @@
-# Superhuman-Clone — Product & Technical Spec (v0.4)
+# Attn — Product & Technical Spec (v0.4)
 
 A desktop email client for **macOS and Windows** modeled on Superhuman's core idea: email triage so fast and keyboard-driven that reaching inbox zero is the default state, not an aspiration.
 
@@ -134,7 +134,7 @@ Two-pane layout: conversation list (left, ~40%), reading pane (right). The list 
 | Action | Behavior |
 |---|---|
 | **Mark done** (`E`) | Removes from inbox (Gmail archive). The signature triage verb. |
-| **Snooze / Remind later** (`H`) | Leaves the inbox now, returns at a chosen time. Picker offers presets (Later today, Tonight, Tomorrow, This weekend, Next week) + natural-language input ("thu 2pm", "in 3 days"). Implementation: remove `INBOX`, add app label `[SHC]/Snoozed`, store local due-time; at due time (or next launch) restore to inbox with a "returned" chip. **A new reply wakes the thread immediately** (configurable). |
+| **Snooze / Remind later** (`H`) | Leaves the inbox now, returns at a chosen time. Picker offers presets (Later today, Tonight, Tomorrow, This weekend, Next week) + natural-language input ("thu 2pm", "in 3 days"). Implementation: remove `INBOX`, add app label `[Attn]/Snoozed`, store local due-time; at due time (or next launch) restore to inbox with a "returned" chip. **A new reply wakes the thread immediately** (configurable). |
 | **Trash** (`#`) | Moves to Gmail trash. No permanent delete anywhere in v1. |
 | **Star** (`S`) | Toggles star. |
 | **Unread** (`U`) | Toggles read state. |
@@ -185,7 +185,7 @@ Composing opens an **overlay panel** above the inbox (context is never lost). `C
 
 **Cut from v1** by product decision: a scheduled send must go out at the scheduled time, computer on or off — "sends late on next launch" silently fails the promise made to the recipient, and a feature that can't keep its promise is worse than its absence. The Gmail API does not expose Gmail's native Schedule Send, so exact-time delivery requires something running while the desktop is off (D2).
 
-**v1.5 plan — companion Apps Script (no server we operate):** a small script installed once into the user's own Google account, running on Google's infrastructure as the user. The desktop app writes a normal Gmail draft plus a schedule label (e.g. `[SHC]/SendAt/2026-08-12-0900`); the script sweeps upcoming sends on a time-driven trigger, self-schedules a one-shot trigger per send, and calls `drafts.send` when due. Delivery lands within a few minutes of the target time, and OAuth tokens never leave Google's side. The same script also restores snoozed threads at their exact due time, making snooze returns visible from any device (closing the cross-device gap noted in F4/D2). Reserved keybindings: `Mod+Shift+Enter` (composer), `G` then `L` (Scheduled view).
+**v1.5 plan — companion Apps Script (no server we operate):** a small script installed once into the user's own Google account, running on Google's infrastructure as the user. The desktop app writes a normal Gmail draft plus a schedule label (e.g. `[Attn]/SendAt/2026-08-12-0900`); the script sweeps upcoming sends on a time-driven trigger, self-schedules a one-shot trigger per send, and calls `drafts.send` when due. Delivery lands within a few minutes of the target time, and OAuth tokens never leave Google's side. The same script also restores snoozed threads at their exact due time, making snooze returns visible from any device (closing the cross-device gap noted in F4/D2). Reserved keybindings: `Mod+Shift+Enter` (composer), `G` then `L` (Scheduled view).
 
 ### F8 — Snippets
 

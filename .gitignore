@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+*.tsbuildinfo
+*.log
+.DS_Store
+
+# Per-user Google OAuth client (see SETUP.md) — never commit
+oauth.config.json
