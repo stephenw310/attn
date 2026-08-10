@@ -10,4 +10,6 @@ npm install
 npm run dev
 ```
 
+Verification: `npm run verify` — typecheck + lint + build + Playwright e2e against the built app (headless-safe, no OAuth required). See SETUP.md and CLAUDE.md.
+
 **Current state: M0 walking skeleton.** Electron + React + TypeScript shell, two-pane inbox with `J`/`K`/`Enter`/`Esc` navigation, SQLite local store (versioned schema), Google OAuth (PKCE loopback, keychain-encrypted tokens), and a quota-aware Gmail backfill rendering your real inbox.

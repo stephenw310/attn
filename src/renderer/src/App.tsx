@@ -311,7 +311,10 @@ export default function App(): React.JSX.Element {
             type="button"
             className="cursor-pointer rounded-md bg-active px-3 py-1.5 text-[13px] font-medium text-ink"
           >
-            Important <span className="ml-1.5 text-[11px] text-accent">{unreadCount}</span>
+            Important{' '}
+            <span data-testid="unread-count" className="ml-1.5 text-[11px] text-accent">
+              {unreadCount}
+            </span>
           </button>
           <button
             type="button"
@@ -322,7 +325,9 @@ export default function App(): React.JSX.Element {
             Other
           </button>
         </div>
-        <AccountChip status={status} onStatus={setStatus} />
+        <div data-testid="account-chip">
+          <AccountChip status={status} onStatus={setStatus} />
+        </div>
       </header>
 
       <main className="flex min-h-0 flex-1">
@@ -344,6 +349,9 @@ export default function App(): React.JSX.Element {
               <div
                 key={t.id}
                 ref={isSelected ? selectedRowRef : null}
+                data-testid="thread-row"
+                data-selected={isSelected || undefined}
+                data-unread={isUnread || undefined}
                 className={`flex cursor-default items-center gap-2.5 whitespace-nowrap border-l-2 py-[9px] pr-3.5 pl-2.5 ${
                   isSelected ? 'border-l-accent bg-active' : 'border-l-transparent'
                 }`}
@@ -380,6 +388,7 @@ export default function App(): React.JSX.Element {
         </section>
 
         <section
+          data-focus={focusRegion}
           className={`min-w-0 flex-1 overflow-y-auto border-t-2 ${
             focusRegion === 'conversation' ? 'border-t-accent' : 'border-t-transparent'
           }`}
@@ -388,11 +397,17 @@ export default function App(): React.JSX.Element {
           {selected && conversation ? (
             <>
               <div className="border-b border-edge px-6 pt-[18px] pb-2.5">
-                <h2 className="text-[17px] font-semibold">{conversation.subject}</h2>
+                <h2 data-testid="conversation-subject" className="text-[17px] font-semibold">
+                  {conversation.subject}
+                </h2>
               </div>
               <div className="flex flex-col gap-3 px-6 pt-3 pb-8">
                 {conversation.messages.map((m) => (
-                  <article key={m.id} className="rounded-[10px] border border-edge bg-raised px-4 py-3.5">
+                  <article
+                    key={m.id}
+                    data-testid="message-card"
+                    className="rounded-[10px] border border-edge bg-raised px-4 py-3.5"
+                  >
                     <div className="mb-2.5 flex items-baseline gap-2">
                       <span className="font-semibold">{m.fromName}</span>
                       <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
@@ -427,7 +442,11 @@ export default function App(): React.JSX.Element {
         <span>
           <Kbd>Esc</Kbd> back
         </span>
-        <span className={`ml-auto ${sync.phase === 'error' ? 'text-danger' : ''}`} title={statusNote}>
+        <span
+          data-testid="status-note"
+          className={`ml-auto ${sync.phase === 'error' ? 'text-danger' : ''}`}
+          title={statusNote}
+        >
           {statusNote}
         </span>
       </footer>

@@ -13,9 +13,13 @@ npm install
 npm run dev
 ```
 
-`npm install` downloads the Electron binary and rebuilds `better-sqlite3` against Electron's ABI (postinstall hook). If the Electron binary download was blocked (proxy/sandboxed install) the app fails with "Electron uninstall" — run `node node_modules/electron/install.js` once, then retry.
+`npm install` downloads the Electron binary and verifies `better-sqlite3` loads inside Electron (postinstall: `scripts/ensure-electron-toolchain.mjs`). better-sqlite3 v13 ships Node-API prebuilds, so no compile is normally needed; the script only rebuilds when the loaded-in-Electron check fails, and can assemble the Electron headers from github.com + nodejs.org when Electron's headers host is blocked (sandboxed CI/agent networks). If anything is off, `npm run toolchain` re-runs the repair and says what it did.
 
-Useful scripts: `npm run typecheck` (all three tsconfigs), `npm run build` (production bundles to `out/`).
+Useful scripts: `npm run typecheck` (all four tsconfigs), `npm run build` (production bundles to `out/`), `npm run verify` (full gate: typecheck + lint + build + e2e).
+
+## Verification (e2e)
+
+`npm run e2e` builds and drives the real Electron app with Playwright — headless-safe (auto-xvfb on display-less Linux), no OAuth needed (tests run signed-out against mock data in isolated userData dirs). `npm run verify` is the everything gate and what CI runs; CLAUDE.md documents the harness for coding agents.
 
 ## Google OAuth client (required for real Gmail data)
 

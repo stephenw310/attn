@@ -9,6 +9,12 @@ import { firstAccountId, getConversation, listInboxThreads } from './db/queries'
 import { GmailClient } from './gmail/client'
 import { runInboxBackfill } from './sync/backfill'
 
+// E2E seam: an isolated userData dir gives each test run a fresh DB and empty
+// token store. Must be set before requestSingleInstanceLock() so concurrent
+// test apps (distinct dirs) don't share an instance lock.
+const testUserData = process.env.ATTN_TEST_USER_DATA
+if (testUserData) app.setPath('userData', testUserData)
+
 let db: Db | null = null
 let syncState: SyncState = { phase: 'idle' }
 let syncRunning = false
@@ -58,6 +64,9 @@ function startSync(): void {
 }
 
 function oauthSearchDirs(): string[] {
+  // Under e2e, only the isolated dir — a developer's real oauth.config.json in
+  // the project root must never leak into test runs.
+  if (testUserData) return [app.getPath('userData')]
   // Project root in dev; userData for a packaged build.
   return [app.getAppPath(), app.getPath('userData')]
 }
