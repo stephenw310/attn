@@ -18,7 +18,8 @@
     "verify": "npm run typecheck && npx biome ci . && npm run e2e",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "node scripts/ensure-electron-toolchain.mjs",
+    "toolchain": "node scripts/ensure-electron-toolchain.mjs",
     "prepare": "lefthook install"
   },
   "devDependencies": {

@@ -13,7 +13,7 @@ npm install
 npm run dev
 ```
 
-`npm install` downloads Electron and rebuilds `better-sqlite3` for Electron's runtime through the postinstall hook.
+`npm install` downloads Electron and verifies `better-sqlite3` loads inside it (postinstall: `scripts/ensure-electron-toolchain.mjs`). better-sqlite3 ships Node-API prebuilds, so no compile normally happens; the script rebuilds only when the in-Electron check fails, and on restricted networks (where Electron's binary/headers hosts are blocked) it self-heals via github.com + nodejs.org. If an install ever ends up broken, `npm run toolchain` re-runs the repair and reports what it did.
 
 Useful scripts: `npm run typecheck` (all four tsconfigs), `npm run build` (production bundles to `out/`), `npm run verify` (full gate: typecheck + lint + build + e2e).
 
