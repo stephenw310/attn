@@ -1,4 +1,4 @@
-# Attn — Product & Technical Spec (v0.4)
+# Attn — Product & Technical Spec (v0.5)
 
 A desktop email client for **macOS and Windows** modeled on Superhuman's core idea: email triage so fast and keyboard-driven that reaching inbox zero is the default state, not an aspiration.
 
@@ -405,7 +405,7 @@ Budgets are CI-tracked once M1 lands: a perf smoke test fails the build on >20% 
 Each milestone ends in a usable app; the daily-drivable bar is M2.
 
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading pane, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
-- **M1 — Triage core.** Done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
+- **M1 — Triage core.** First item: **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
 - **M2 — Mail out.** Composer (rich text, attachments, autocomplete), reply/all/forward, crash-safe drafts, send + undo send, exactly-once outbox. **← daily-drivable.**
 - **M3 — Find & focus.** FTS5 instant search + operators, split inbox + rules, inbox-zero states, themes, command palette hardened (every command registered).
 - **M4 — Power finish.** Snippets, follow-up reminders, AI reply drafting (F17), settings surface, badges, packaging + auto-update + signing.
