@@ -85,6 +85,13 @@ export function extractBodyHtml(payload: GmailPart | undefined): string {
   return htmls.join('\n')
 }
 
+/** Whether the inline payload contains authored text/plain (rather than an HTML-derived fallback). */
+export function hasInlinePlainText(payload: GmailPart | undefined): boolean {
+  if (!payload) return false
+  if (!payload.filename && payload.mimeType === 'text/plain' && payload.body?.data) return true
+  return payload.parts?.some(hasInlinePlainText) ?? false
+}
+
 export interface ExternalTextPart {
   attachmentId: string
   mimeType: 'text/plain' | 'text/html'

@@ -6,8 +6,7 @@ interface MessageBodyProps {
   bodyHtml: string | null
 }
 
-const MAX_BODY_HEIGHT = 6000
-const FORWARDED_KEYS = new Set(['Escape', 'j', 'k', 'ArrowDown', 'ArrowUp'])
+const MAX_BODY_HEIGHT = 1600
 const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 
 const RESET = `
@@ -22,12 +21,20 @@ const RESET = `
   pre { white-space: pre-wrap; }
 `
 
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.nodeName !== 'A') return
+  const link = node as HTMLAnchorElement
+  link.setAttribute('target', '_blank')
+  link.setAttribute('rel', 'noopener noreferrer')
+})
+
 function makeSrcDoc(html: string): string | null {
   if (!html.trim()) return null
   const clean = DOMPurify.sanitize(html, {
     FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea'],
+    ADD_TAGS: ['style'],
     ADD_ATTR: ['target'],
-    KEEP_CONTENT: false
+    FORCE_BODY: true
   })
 
   const template = document.createElement('template')
@@ -48,48 +55,17 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
-  const measurementRef = useRef<{
-    viewportHeight: number
-    scrollHeight: number
-    appliedHeight: number
-    locked: boolean
-  } | null>(null)
   const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml)), [bodyHtml])
 
   const measure = useCallback((frame: HTMLIFrameElement) => {
     const doc = frame.contentDocument
     if (!doc?.body) return
-    const viewportHeight = frame.clientHeight
     const scrollHeight = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1)
-    const previous = measurementRef.current
-    if (previous?.locked) return
-
-    const viewportGrowth = previous ? viewportHeight - previous.viewportHeight : 0
-    const scrollGrowth = previous ? scrollHeight - previous.scrollHeight : 0
-    const selfResponsiveGrowth =
-      previous !== null &&
-      viewportHeight === previous.appliedHeight &&
-      viewportGrowth > 0 &&
-      scrollGrowth >= viewportGrowth * 0.9
-    if (selfResponsiveGrowth) {
-      measurementRef.current = { ...previous, scrollHeight, locked: true }
-      return
-    }
-
-    const appliedHeight = Math.min(scrollHeight, MAX_BODY_HEIGHT)
-    setHeight(appliedHeight)
-    measurementRef.current = {
-      viewportHeight,
-      scrollHeight,
-      appliedHeight,
-      locked: appliedHeight === MAX_BODY_HEIGHT && scrollHeight > MAX_BODY_HEIGHT
-    }
+    setHeight(Math.min(scrollHeight, MAX_BODY_HEIGHT))
   }, [])
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
-    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !FORWARDED_KEYS.has(event.key)) {
-      return
-    }
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
     const forwarded = new KeyboardEvent('keydown', {
       key: event.key,
       code: event.code,
@@ -97,7 +73,8 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
       bubbles: true,
       cancelable: true
     })
-    window.dispatchEvent(forwarded)
+    const parentTarget = frameRef.current ?? document.body
+    parentTarget.dispatchEvent(forwarded)
     if (forwarded.defaultPrevented) event.preventDefault()
   }, [])
 
@@ -130,7 +107,7 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
   )
 
   useEffect(() => {
-    measurementRef.current = null
+    setHeight(80)
     if (srcDoc === null) return
     let frameId = 0
     const waitForSrcDoc = (): void => {

@@ -9,7 +9,7 @@ This is the only file you need to start work, and the one place these rules live
 **A change is not done until `npm run verify` is green.** Run it before claiming completion, committing, or pushing.
 
 ```
-npm run verify     # typecheck (3 project tsconfigs) → biome ci → build → e2e
+npm run verify     # typecheck (3 project tsconfigs) → biome ci → unit → build → e2e
 ```
 
 The e2e suite (Playwright) drives the **real built Electron app** — main process, SQLite, preload bridge, IPC, and keyboard loop — headless. On display-less Linux it wraps itself in Xvfb automatically; `--no-sandbox` is added automatically when running as root or in CI.
@@ -17,6 +17,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | Command | Use |
 |---|---|
 | `npm run verify` | The full gate — the definition of done |
+| `npm run test:unit` | Pure sync and parsing tests (no Electron-ABI SQLite imports) |
 | `npm run e2e` | Build + e2e only |
 | `npm run e2e:only` | E2e without rebuilding — **only** when `out/` already matches `src/` |
 | `npm run e2e:only -- --grep <pattern>` | One test while iterating |

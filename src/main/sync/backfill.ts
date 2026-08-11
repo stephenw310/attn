@@ -10,8 +10,9 @@ import {
   extractBodyText,
   findExternalTextParts,
   type GmailThread,
-  textFromRaw
+  hasInlinePlainText
 } from '../gmail/parse'
+import { mergeExternalBodies } from './mergeBodies'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 
 interface Profile {
@@ -138,7 +139,6 @@ async function fetchExternalBodies(
 
     const inlineText = extractBodyText(msg.payload)
     const inlineHtml = extractBodyHtml(msg.payload)
-    const hasExternalPlain = parts.some((part) => part.mimeType === 'text/plain')
     const plainComplete = Boolean(row.body_text) && row.body_text !== inlineText
     const htmlComplete = Boolean(row.body_html) && row.body_html !== inlineHtml
     const plains: string[] = []
@@ -163,13 +163,14 @@ async function fetchExternalBodies(
 
     if (plains.length === 0 && htmls.length === 0) continue
 
-    const bodyHtml = htmls.length > 0 ? [row.body_html, ...htmls].filter(Boolean).join('\n') : row.body_html
-    let bodyText = row.body_text
-    if (plains.length > 0) {
-      bodyText = textFromRaw('text/plain', [inlineText, ...plains].filter(Boolean).join('\n\n'))
-    } else if (htmls.length > 0 && (!hasExternalPlain || !plainComplete)) {
-      bodyText = textFromRaw('text/html', bodyHtml ?? htmls.join('\n'))
-    }
+    const { bodyText, bodyHtml } = mergeExternalBodies({
+      storedText: row.body_text,
+      storedHtml: row.body_html,
+      inlineText,
+      hasInlinePlain: hasInlinePlainText(msg.payload),
+      fetchedPlain: plains,
+      fetchedHtml: htmls
+    })
     if (bodyText === row.body_text && bodyHtml === row.body_html) continue
     writeBody.run(bodyText, bodyHtml, accountId, msg.id)
   }

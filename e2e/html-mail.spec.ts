@@ -34,10 +34,16 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   const body = page.frameLocator('[data-testid="html-body-frame"]')
   await expect(body.locator('#styled-table')).toBeVisible()
   await expect(body.locator('#styled-table')).toHaveAttribute('style', /border-collapse/)
+  await expect(body.locator('#mail-styles')).toHaveCount(1)
+  await expect(body.locator('#stylesheet-styled')).toHaveCSS('color', 'rgb(12, 34, 56)')
+  await expect(body.locator('#invite-details')).toContainText('Invite: roadmap review at 10:00')
+  await expect(body.locator('#custom-card-copy')).toHaveText('Important custom-card content')
   await expect(body.locator('script')).toHaveCount(0)
   await expect(body.locator('[onerror]')).toHaveCount(0)
   await expect(body.locator('a[href^="javascript:"]')).toHaveCount(0)
   await expect(body.locator('form, input, button, select, textarea')).toHaveCount(0)
+  await expect(body.locator('#self-link')).toHaveAttribute('target', '_blank')
+  await expect(body.locator('#top-link')).toHaveAttribute('target', '_blank')
   await expect(body.locator('#remote-image')).toHaveAttribute('src', 'https://remote.attn.test/tracker.gif')
   await expect.poll(() => remoteImageRequested).toBe(true)
   await expect.poll(() => handlerImageRequested).toBe(true)
@@ -61,10 +67,21 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await page.waitForTimeout(250)
   expect(await iframe.evaluate((element) => element.clientHeight)).toBe(stableHeight)
 
+  await page.evaluate(() => {
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (event.key === 'q') document.body.dataset.forwardedKey = event.key
+      },
+      { capture: true, once: true }
+    )
+  })
   await body.locator('#styled-table').click()
   expect(
     await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'html-body-frame')
   ).toBe(true)
+  await page.keyboard.press('q')
+  await expect(page.locator('body')).toHaveAttribute('data-forwarded-key', 'q')
   await page.keyboard.press('k')
   await expect(page.getByTestId('conversation-position')).toHaveText('7 of 8')
   await page.keyboard.press('j')
