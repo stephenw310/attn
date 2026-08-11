@@ -118,4 +118,22 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(page.getByTestId('plain-text-body').last()).toHaveText(
     'I added the launch milestones and owner notes.'
   )
+
+  await page.keyboard.press('Escape')
+  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).dblclick()
+  await page.evaluate(() => {
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        document.body.dataset.shiftedKey = `${event.key}:${event.shiftKey}`
+      },
+      { capture: true }
+    )
+  })
+  await body.locator('#styled-table').click()
+  await page.keyboard.press('Shift+#')
+  await expect(page.locator('body')).toHaveAttribute('data-shifted-key', '#:true')
+  await expect(page.getByTestId('thread-row')).toHaveCount(7)
+  await expect(page.getByTestId('thread-row').filter({ hasText: 'This week in focus' })).toHaveCount(0)
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Research summary')
 })

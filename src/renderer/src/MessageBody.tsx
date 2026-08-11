@@ -65,11 +65,12 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
   }, [])
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
-    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+    if (event.metaKey || event.ctrlKey || event.altKey) return
     const forwarded = new KeyboardEvent('keydown', {
       key: event.key,
       code: event.code,
       repeat: event.repeat,
+      shiftKey: event.shiftKey,
       bubbles: true,
       cancelable: true
     })
