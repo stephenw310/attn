@@ -1,7 +1,8 @@
 # M1 Completion Plan — Task Breakdown for Handoff
 
 **Audience:** the engineer(s) implementing the rest of M1 (triage core).
-**Basis:** [SPEC.md](SPEC.md) §8 M1, repo state at `fd4866b` (M0 complete, Dispatch direction applied, e2e harness live).
+**Basis:** [SPEC.md](SPEC.md) v0.8 §8 M1; repo state at `7f1d3eb` (T1, T3, T8 merged; T2 in flight as draft PR #7).
+**Revised 2026-08-11:** SPEC moved to v0.8 (F3 on-demand split view, full message display, decision-log #7–8). **T11 added and made the sole active task** — it absorbs T2 (amending draft PR #7) and everything else queues behind it.
 **Ground rules:** read [AGENTS.md](../AGENTS.md) first. Every task below is one PR, and no PR is done until `npm run verify` is green. When a task says "spec F4", that's a section of SPEC.md — read it before starting the task.
 
 ---
@@ -10,19 +11,20 @@
 
 | M1 item (SPEC §8) | Status |
 |---|---|
-| Apply Dispatch direction (D6) | ✅ shipped |
-| Sanitized HTML mail rendering | **T2** |
-| Triage verbs done/snooze/trash/star/unread/label | **T3** (E/#/S/U/!), **T5** (L), **T6** (H) |
-| Selection + bulk | **T4** |
-| Auto-advance | **T3** |
-| `Z` undo | **T3** |
-| Durable action queue + offline replay | **T3** |
-| Snooze scheduler | **T6** |
-| Tray/background mode + launch at login | **T8** |
-| Basic notifications | **T9** |
-| *(F2, enables "offline correctness" claim)* Incremental sync | **T7** |
+| Apply Dispatch direction (D6) | ✅ shipped (#3) |
+| E2E seed seam (enabler) | ✅ **T1** (#6) |
+| Triage verbs E/#/S/U/! + auto-advance + `Z` undo + durable queue | ✅ **T3** (#8) |
+| Tray/background mode + launch at login | ✅ **T8** (#9) |
+| Sanitized HTML mail rendering | **T11 · Part A** (was T2 — amend draft PR #7) |
+| Reading view: on-demand split layout (F3 v0.8, §9 #7) | **T11 · Part B** — **the active task** |
+| Full message display: recipients, attachments, quote/signature collapse (F3 v0.8) | **T11 · Parts C–E** |
+| Label verb (`L`) | **T5** — queued behind T11 |
+| Selection + bulk | **T4** — queued behind T11 |
+| Snooze (`H`) + scheduler | **T6** — queued behind T11 |
+| Incremental sync (F2 "offline correctness") | **T7** — queued behind T11 |
+| Basic notifications | **T9** — after T7 |
 
-Supporting tasks: **T1** (test seam every triage test depends on), **T10** (perf smoke, stretch).
+Supporting: **T10** (perf smoke, stretch). Push-vs-polling is settled on paper now — SPEC §9 #8; don't reopen it in reviews.
 
 ---
 
@@ -30,47 +32,38 @@ Supporting tasks: **T1** (test seam every triage test depends on), **T10** (perf
 
 ```mermaid
 graph LR
-  T1[T1 · e2e seed seam]
-  T2[T2 · HTML mail rendering]
-  T3[T3 · triage engine core]
+  T1[T1 ✅ e2e seed seam]
+  T3[T3 ✅ triage engine core]
+  T8[T8 ✅ tray + background]
+  T11[T11 · reading overhaul · ACTIVE]
   T4[T4 · selection + bulk]
   T5[T5 · label picker]
   T6[T6 · snooze + scheduler]
   T7[T7 · incremental sync]
-  T8[T8 · tray + background]
   T9[T9 · notifications + badge]
   T10[T10 · perf smoke · stretch]
 
-  T1 --> T2
   T1 --> T3
-  T3 --> T4
-  T3 --> T5
-  T3 --> T6
-  T3 --> T7
+  T3 --> T11
+  T11 --> T4
+  T11 --> T5
+  T11 --> T6
+  T11 --> T7
+  T11 --> T10
   T7 --> T9
   T8 -.soft.-> T9
-  T3 --> T10
 ```
 
-**Parallel lanes (can be worked simultaneously):**
+The `T11 →` edges are a **product-ordering directive**, not technical dependencies: the reading experience gets fixed before any further feature work starts (only `T7 → T9` is a hard technical dependency). T4–T7 remain mutually parallelizable once T11 lands.
 
-- **T2 ∥ T3** — after T1 lands. Different subsystems (message rendering vs. action engine). Both touch `App.tsx` lightly; whoever merges second rebases.
-- **T4 ∥ T5 ∥ T6 ∥ T7** — all only depend on T3. Four independent PRs.
-- **T8 ∥ anything** — no dependencies at all. Good "second track" work at any point.
-- **T9** — needs T7 (new-mail events). T8 first is nicer (background cadence) but not required.
-
-**Suggested order, one engineer:** T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10.
-T2 before T3 on purpose: it's self-contained and a gentler ramp into the codebase than the engine.
-
-**Suggested split, two engineers** — tasks are planned at equal length, so each row is one round of parallel work:
+**Order from here:**
 
 | Round | Eng A (engine track) | Eng B (surface track) |
 |---|---|---|
-| 1 | T1 | T8 (no deps) |
-| 2 | T3 | T2 |
-| 3 | T7 | T4 |
-| 4 | T6 | T5 |
-| 5 | T9 | T10 (stretch) |
+| 1 | — | **T11** (sole active task; amends draft PR #7) |
+| 2 | T7 | T4 |
+| 3 | T6 | T5 |
+| 4 | T9 | T10 (stretch) |
 
 ---
 
@@ -148,9 +141,11 @@ Today the mock inbox lives inside the renderer (`mockData.ts`) and never touches
 
 ---
 
-## T2 — Sanitized HTML mail rendering
+## T2 — Sanitized HTML mail rendering *(absorbed by T11 Part A — do not run standalone)*
 
-**Depends on:** T1 · **Parallel with:** T3 · **Spec:** M1 "first item", §6 *HTML mail rendering*, decision log #5
+> **Status:** the T2 implementation exists as **draft PR #7**, based on a pre-T3 main. It is finished *inside T11* (rebase + amend that PR — see T11 Part A). The design and implementation guide below remains the contract for the sanitizer/iframe/CSP details.
+
+**Depends on:** T1 · **Spec:** M1 "first item", §6 *HTML mail rendering*, decision log #5
 
 ### Why
 
@@ -304,7 +299,7 @@ All of the above green; `verify` includes the unit step; AGENTS.md updated; comm
 
 ### Implementation guide
 
-- Renderer state: `selectedIds: Set<string>` + an anchor index. `x` toggles the focused row; `Shift+J`/`Shift+K` extend from the anchor; `Shift+click` extends; `Esc` clears the selection *before* it means "close overlay" (list context: selection non-empty → clear and stop).
+- Renderer state: `selectedIds: Set<string>` + an anchor index. `x` toggles the focused row; `Shift+J`/`Shift+K` extend from the anchor; `Shift+click` extends; `Esc` clears the selection *before* it means "close pane" (selection non-empty → clear and stop).
 - Visual: selected rows get a distinct left-edge/check state (`data-checked`), header shows an `N selected` chip (`data-testid="selection-count"`).
 - Verbs: when the selection is non-empty, every triage command (T3's and later T5/T6's) targets `[...selectedIds]` instead of the focused row, then clears the selection. `performTriage` already takes `threadIds[]` and already returns per-thread inverses — **one stack entry per bulk action**, so a single `z` reverses the whole bulk (F4 acceptance).
 - No auto-advance after bulk; keep the focused index clamped.
@@ -327,15 +322,15 @@ Bulk archive + single-undo criterion (F4) demonstrated in e2e; `verify` green.
 ### Implementation guide
 
 - New IPC `mail:listLabels()` → `{ id, name, type }[]` from the `labels` table (user labels plus a curated system set: STARRED/IMPORTANT are flags, not picker entries — show user labels only for M1).
-- Overlay panel (same pattern as the conversation overlay, smaller): search input filters as you type; ArrowUp/Down move; Enter toggles the highlighted label on the target threads (focused row or T4 selection). Checkmark states: on-all / on-some / off.
+- Centered modal panel (modals stay right for pickers even after T11's split-view change): search input filters as you type; ArrowUp/Down move; Enter toggles the highlighted label on the target threads (focused row or T4 selection). Checkmark states: on-all / on-some / off.
 - Apply via `mail:triage` with `{ kind: 'label', add: […], remove: […] }` — no engine changes.
-- Keyboard: `l` opens (register as a command, contexts list + overlay). The existing keydown guard already ignores keystrokes when an `INPUT` is focused, so the search field won't trigger verbs. `Esc` closes the picker (before it closes the conversation overlay).
+- Keyboard: `l` opens (register as a command; works with and without the pane open). The existing keydown guard already ignores keystrokes when an `INPUT` is focused, so the search field won't trigger verbs. `Esc` closes the picker (before it closes the conversation pane).
 - Undo: label changes ride T3's stack automatically.
 - Fixture: T1's seed already carries a user label; add a second so on-some states are testable.
 
 ### Testing
 
-e2e: open picker on a thread, add a label → picker state and a row chip (add a small label chip to rows or the overlay header — your call with a testid) reflect it; `z` reverses; picker search narrows; keys inside the search input don't trigger verbs.
+e2e: open picker on a thread, add a label → picker state and a row chip (add a small label chip to rows or the pane header — your call with a testid) reflect it; `z` reverses; picker search narrows; keys inside the search input don't trigger verbs.
 
 ### Done when
 
@@ -372,7 +367,7 @@ CREATE INDEX idx_reminders_due ON reminders (account_id, state, due_at);
 
 - **IPC:** `mail:snooze({ threadIds, dueAt })` (validates `dueAt` is a number; past values are allowed and simply return on the next scheduler pass — that's also the e2e seam), `mail:listSnoozed()` → thread rows joined with `due_at`.
 - Snooze flow: upsert reminders, archive locally (reuse T3's archive delta + queue), push `{ label: 'Snoozed', undo: [{ kind:'unsnooze'… }] }` — add an `unsnooze` action (delete reminder + restore INBOX) to the action union.
-- **Picker UI:** overlay listing presets — Later today (+3h), Tonight (19:00), Tomorrow (09:00), This weekend (Sat 09:00), Next week (Mon 09:00) — plus a free-text row parsed with **chrono-node** (`npm i chrono-node`; renderer-side parse, show the resolved date before confirming). `h` opens it (command registry, list + overlay contexts, works on T4 selections).
+- **Picker UI:** centered modal listing presets — Later today (+3h), Tonight (19:00), Tomorrow (09:00), This weekend (Sat 09:00), Next week (Mon 09:00) — plus a free-text row parsed with **chrono-node** (`npm i chrono-node`; renderer-side parse, show the resolved date before confirming). `h` opens it (command registry; works with and without the pane open, and on T4 selections).
 - **Snoozed view:** minimal view switching — `g` starts a chord (500ms window), then `h` → snoozed view, `g i` → inbox. Renderer keeps `view: 'inbox' | 'snoozed'`; snoozed view lists `mail:listSnoozed` ordered by `due_at` with a due chip; triage verbs still work there (archive/unsnooze). Header shows which view you're in (`data-testid="view-title"`). Full `G`-navigation (Sent/Drafts/Starred) is M3 — only these two.
 - **Chips (F3):** snoozed-return chip on list rows (`data-testid="chip-returned"`); due chip in the snoozed view.
 - **Wake-on-reply (F4):** implement `wakeThread(threadId)` on the scheduler (returns it immediately if pending) and export it — **T7 calls it** when history shows a new message on a snoozed thread. Don't build the detection here.
@@ -467,18 +462,18 @@ Lifecycle e2e green on Linux; manual win/mac checklist in the PR; fixture teardo
 ### Design (decided)
 
 - Subscribe to T7's `newMail` emitter. Per poll cycle: ≤ 3 new threads → one notification each (sender · subject · snippet); > 3 → one summary ("7 new conversations"). **Suppress entirely while a window is focused** (you're already looking at the inbox).
-- Notification click → `showMainWindow()` (T8) + IPC push `mail:focusThread { threadId }` → renderer selects the row and opens the overlay.
+- Notification click → `showMainWindow()` (T8) + IPC push `mail:focusThread { threadId }` → renderer selects the row and opens the conversation pane.
 - **Badge:** after every `mail:changed`, macOS `app.setBadgeCount(unreadInboxCount)`. Windows: static-dot `setOverlayIcon` + tooltip count — the numeric-count overlay bitmap is M4 polish (packaging milestone), noted as an accepted deviation. Guard platforms (Linux `setBadgeCount` returns false; ignore).
 - Splits don't exist until M3, so M1 notifies for **all** INBOX new mail; per-split filtering arrives with F11.
 - Tray menu (T8) gains "Pause notifications — 1h / until tomorrow" backed by a `settings` key the notifier checks.
 
 ### Implementation guide
 
-New `src/main/notify.ts`: pure decision function `planNotifications(newMail, { focused, pausedUntil }): Notification[]` (unit-test this) + a thin shell using Electron's `Notification`. Preload: `mail.onFocusThread(cb)`. Renderer: handler selects thread id → opens overlay (works in both views).
+New `src/main/notify.ts`: pure decision function `planNotifications(newMail, { focused, pausedUntil }): Notification[]` (unit-test this) + a thin shell using Electron's `Notification`. Preload: `mail.onFocusThread(cb)`. Renderer: handler selects thread id → opens the conversation pane (works in both views).
 
 ### Testing
 
-Unit: `planNotifications` (batching threshold, focus suppression, pause window). e2e: `mail:focusThread` push → row selected + overlay opens (drive the IPC directly via `app.evaluate` broadcasting to the window — no OS notification needed headless); no crash on Linux badge calls. Manual smoke: real notification on macOS/Windows, click-through lands on the thread.
+Unit: `planNotifications` (batching threshold, focus suppression, pause window). e2e: `mail:focusThread` push → row selected + pane opens (drive the IPC directly via `app.evaluate` broadcasting to the window — no OS notification needed headless); no crash on Linux badge calls. Manual smoke: real notification on macOS/Windows, click-through lands on the thread.
 
 ### Done when
 
@@ -494,6 +489,84 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 
 ---
 
+## T11 — Reading experience overhaul: split view, HTML mail, full message display
+
+**THE ACTIVE TASK — everything else waits for it.** · **Depends on:** nothing open (T1/T3/T8 are merged) · **Spec:** F3 (v0.8), D6 (revised), §9 #7 · **PR:** amend **draft PR #7** — rebase its branch (`codex/t2-sanitized-html-mail-rendering`) onto `main`, build Parts B–E on top, retitle, un-draft. That PR is this task's PR.
+
+### Why
+
+Product review (2026-08-11) found the reading experience wrong in shape and short on substance: the centered overlay doesn't work for reading real mail (SPEC §9 #7 has the reasoning), and message cards omit what every mail client shows — recipients, attachments, and quote/signature folding. This task fixes all of it in one pass, absorbing the in-flight HTML-rendering work, so every later renderer task (T4, T5, T6, T9) builds against the final reading surface instead of conflicting with it.
+
+One PR, but commit it in reviewable stages (A through E below in order — each stage keeps `verify` green).
+
+### Part A — Rebase & finish HTML mail rendering (the old T2)
+
+The T2 guide above is still the contract for sanitizer/iframe/CSP details. The rebase has three known traps:
+
+1. **Migration renumber.** The branch's `body_html` migration was written as array index v3; `main` has since taken v3 (`action_queue`) and v4 (`settings`). Since nothing on the branch has shipped, **collapse this task's schema work into one new migration v5** (see Part C for the full DDL).
+2. **`App.tsx` conflicts.** T3 rewired the keyboard through the command registry and T8/T3 touched main-process wiring. Re-express the `MessageBody` swap on top mechanically — don't fight the layout during rebase; Part B replaces the layout anyway.
+3. **Seed-fixture collisions.** T3's triage specs assert exact fixture math (8 threads, "4 to zero", row order — e.g. Northstar Books at index 1 — and exact pending counts). Add the hostile-HTML content as an **additional message on an existing read thread** rather than a new thread; if any assertion must move, change it deliberately in the same commit with a comment.
+
+### Part B — Layout: full-width list ⇄ on-demand split (F3 v0.8)
+
+- Remove the centered overlay + backdrop. New structure: when a conversation is open, the root splits — list column left (fixed ~380px), `data-testid="conversation-pane"` right. Put `data-pane-open` on the list container so e2e and CSS key off one attribute.
+- **Compact rows** when the pane is open: two lines — sender + time on the first, subject on the second, no snippet. Same `thread-row` testid, same selection/unread attributes.
+- Conversation pane: thread position ("4 of 12") + `Esc` hint in its header (keep the existing `conversation-position` testid); body column max ~720px; message cards as today plus Parts C–E.
+- **Keyboard:** `Enter`/click opens the pane; `Esc` closes it (full-width restored, selection + scroll intact); `J`/`K` stay the *same* list-selection commands — with the pane open the pane simply follows the selection. In `src/renderer/src/commands.ts`, collapse the `'overlay'` context: contexts become `'list' | 'global'`, and Esc-close-pane is a command guarded on pane-open state. Auto-advance is untouched (pane follows selection; empty list closes the pane).
+- Start visuals from `design/explorations/b2-conversation-side.html` (the side-panel study already in the Dispatch language). Dimming is gone; the tie between panes is the selected-row highlight.
+- **e2e churn (do in the same stage):** update `smoke.spec.ts`, `triage.spec.ts`, `seeded.spec.ts` from `conversation-overlay` to `conversation-pane`; add asserts: `Esc` removes `data-pane-open`; compact rows show sender + subject; J/K with pane open updates both selection and pane subject.
+
+### Part C — Recipients: From/To/Cc/Bcc/Reply-To
+
+- **`src/main/gmail/parse.ts`:** add `parseAddressList(raw): { name, email }[]` — split on top-level commas (respect quoted display names containing commas), reuse `parseAddress` per element, drop empties. Extract `To`, `Cc`, `Bcc`, `Reply-To` headers.
+- **Migration v5 (single migration for the whole task):**
+
+  ```sql
+  ALTER TABLE messages ADD COLUMN body_html TEXT;
+  ALTER TABLE messages ADD COLUMN recipients_json TEXT;
+  ALTER TABLE messages ADD COLUMN attachments_json TEXT;
+  ```
+- **`persist.ts`:** store `recipients_json` = `{ "to": [{name,email}…], "cc": […], "bcc": […], "replyTo": […] }` (include in the upsert's `ON CONFLICT` set, like `body_text`). Expose via `queries.ts` + `shared/mail.ts` (`ConversationMsg.recipients`).
+- **UI:** a summary line under the sender — `to me, Priya · cc Daniel` (first names; "me" when the address is the account) — `data-testid="recipient-summary"`. Click toggles `data-testid="recipient-details"`: full addresses grouped by To/Cc/Bcc/Reply-To plus the full date.
+- Bcc reality (document in a comment + PR body): Gmail only exposes Bcc on the user's *own sent copies* — other senders' Bcc never exists in the payload.
+- Seed fixture: add `cc` to at least one message (extend the loader's fixture shape + conversion).
+
+### Part D — Attachments: display + download
+
+- **`parse.ts`:** `collectAttachments(payload): { attachmentId, filename, mimeType, sizeBytes }[]` — parts with a non-empty `filename` and `body.attachmentId` (same user-visible criterion as `hasAttachment`). Store in `attachments_json` (v5); expose on `ConversationMsg`.
+- **Message card:** chips row — filename + human-readable size, `data-testid="attachment-chip"`.
+- **IPC (all three layers):** `mail:downloadAttachment({ messageId, attachmentId, filename })` → main process: requires a live signed-in client; `GET /messages/{id}/attachments/{attachmentId}`, decode base64url, write to `app.getPath('downloads')` with collision-safe naming (`name (2).ext`), then `shell.showItemInFolder`, return `{ path }` or `{ error }`.
+- **Filename is untrusted input crossing to the filesystem** — sanitize before writing: strip path separators and control characters, refuse empty/dot-only names. This is a security boundary, treat it like the iframe.
+- Seeded/offline behavior: return `{ error }` → toast "Attachments download when signed in". e2e asserts chips render and the offline toast appears; a real download is manual smoke.
+- `cid:` inline images in HTML mail remain broken-image placeholders (existing accepted deviation).
+
+### Part E — Quote & signature auto-collapse
+
+- **New pure module** `src/renderer/src/mailTrim.ts`: `findTrimIndex(text): number | null` — first match wins: `\n-- \n` (RFC sig delimiter); `/^On .{0,200} wrote:\s*$/m`; a trailing run of `> `-prefixed lines; common mobile signatures ("Sent from my iPhone/Android/Galaxy…"). Guard: if the remainder before the trim point is under one line, return null (never collapse a message to nothing).
+- **HTML path:** after sanitize, when collapsed inject srcdoc CSS hiding `.gmail_quote`, `.gmail_signature`, `blockquote[type="cite"]`; expanding re-renders the srcdoc without that CSS (height re-measures via the existing observer). Only show the toggle if the selectors actually matched (probe with a `DOMParser` pass before building srcdoc).
+- **UI:** `•••` button at the card's bottom edge when anything is hidden — `data-testid="mail-trim-toggle"`; per-message state, default collapsed, expansion instant (no network).
+- Unit tests (vitest, pure): sig only, quote trail only, both, neither, all-quote pathological case, `-- ` mid-line non-delimiter.
+
+### Part F — Dev-store note
+
+The v5 columns populate only for newly synced mail. Dev machines: sign out and delete the local DB (or wipe the userData dir) to re-backfill with recipients/attachments/HTML. Seeded e2e is unaffected (fixtures import fresh every run). Say this in the PR body; no migration-backfill machinery at this stage.
+
+### Testing (rollup)
+
+- **e2e:** updated smoke/triage/seeded specs (pane semantics); `html-mail.spec.ts` per the T2 contract; new `reading.spec.ts` — recipient summary + details toggle, attachment chips + offline toast, trim toggle collapsed by default and expanding (seed a message with a signature *and* a quoted trail).
+- **Unit:** `parseAddressList`, `collectAttachments` (payload-walk fixtures), `findTrimIndex`.
+- **Screenshots:** `inbox.png` (full-width list) and a new `reading.png` (pane open on the hostile-HTML thread) — look at both, per global rule 6.
+- **Manual smoke, signed in:** a real HTML newsletter renders; an attachment downloads and reveals; recipients expand on a group thread; a real Gmail reply chain collapses its quote + signature.
+
+### Done when
+
+- All parts land in **one green PR** (staged commits A→E, `npm run verify` green at the end); PR #7 retitled "Reading experience overhaul", un-drafted, description updated.
+- SPEC v0.8 F3 acceptance criteria demonstrably hold (pane semantics, recipients inspectable, attachment download, safe collapse).
+- Migration v5 is the *only* new migration and sits at index 5 on the rebased branch.
+- The status table at the top of this document is updated in the same PR; both screenshots reviewed.
+
+---
+
 ## Accepted deviations & deferred decisions (do not "fix" these ad hoc)
 
 | Deviation | Where | Revisit |
@@ -504,7 +577,8 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 | Hard 401s mark queue rows `failed` permanently — actions queued across a revoked-token window never retry after re-sign-in | T3 | With the failed-action surface above (re-pend on sign-in) |
 | `matchKey` drops all Ctrl/Alt/Meta chords, so AltGr-layout keys can't trigger verbs (AZERTY `#` = AltGr+3 = Ctrl+Alt on Windows) | T3 | M3 — F5 palette / configurable keybindings |
 | Executor broadcasts `mail:changed` once per drained row (no batching) | T3 | T10 perf data, if large-queue drains show up |
-| HTML mail renders on a white card in dark theme | T2 | F14 at M3 (sanitize/invert) |
+| HTML mail renders on a white card in dark theme | T11 | F14 at M3 (sanitize/invert) |
+| Attachment download requires a live signed-in connection (no blob caching); seeded/offline shows an explanatory toast | T11 | M2+ if offline attachment access proves needed |
 | Windows numeric badge overlay is a static dot | T9 | M4 packaging polish |
 | Notifications cover all INBOX mail (no split filtering) | T9 | M3 (F11 splits) |
 | 90-day body window / on-demand older bodies not enforced (full bodies within 12-month window) | T7 | M3 (bodies table + FTS5 split) |
