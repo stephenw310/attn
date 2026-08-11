@@ -4,18 +4,23 @@ import type { Db } from './db'
 
 type CreateWindow = (options?: { show?: boolean }) => BrowserWindow
 
+const APP_SETTINGS_ACCOUNT_ID = '__app__'
+
 let createMainWindow: CreateWindow | null = null
 let quitting = false
+let showOnInitialize = false
 let tray: Tray | null = null
 
 function settingEnabled(db: Db, key: string, defaultValue: boolean): boolean {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
+  const row = db
+    .prepare('SELECT value FROM settings WHERE account_id = ? AND key = ?')
+    .get(APP_SETTINGS_ACCOUNT_ID, key) as { value: string } | undefined
   return row ? row.value === 'true' : defaultValue
 }
 
 function hiddenLoginLaunch(): boolean {
   if (process.argv.includes('--hidden')) return true
-  return process.platform === 'darwin' && app.isPackaged && app.getLoginItemSettings().wasOpenedAsHidden
+  return process.platform === 'darwin' && app.isPackaged && app.getLoginItemSettings().wasOpenedAtLogin
 }
 
 function installLoginItem(db: Db): void {
@@ -23,7 +28,6 @@ function installLoginItem(db: Db): void {
   const openAtLogin = settingEnabled(db, 'launchAtLogin', true)
   app.setLoginItemSettings({
     openAtLogin,
-    openAsHidden: openAtLogin,
     args: process.platform === 'win32' && openAtLogin ? ['--hidden'] : []
   })
 }
@@ -54,8 +58,14 @@ export function attachBackgroundWindow(win: BrowserWindow): void {
 
 export function showMainWindow(): BrowserWindow | null {
   let win = BrowserWindow.getAllWindows()[0]
-  if (!win && createMainWindow) win = createMainWindow({ show: true })
-  if (!win) return null
+  const creator = createMainWindow
+  if (!win) {
+    if (!creator) {
+      showOnInitialize = true
+      return null
+    }
+    win = creator({ show: true })
+  }
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
@@ -66,7 +76,9 @@ export function initializeBackground(db: Db, createWindow: CreateWindow): { star
   createMainWindow = createWindow
   installLoginItem(db)
   installTray()
-  return { startHidden: hiddenLoginLaunch() }
+  const startHidden = hiddenLoginLaunch() && !showOnInitialize
+  showOnInitialize = false
+  return { startHidden }
 }
 
 app.on('before-quit', () => {

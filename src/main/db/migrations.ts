@@ -71,12 +71,14 @@ export const migrations: string[] = [
   ALTER TABLE messages ADD COLUMN body_text TEXT;
   `,
 
-  // v3 — app-global settings, starting with background launch behavior (F16).
-  // Account-scoped settings will use namespaced keys when that surface lands.
+  // v3 — multi-account-ready settings, starting with background launch behavior (F16).
+  // App-global settings use the reserved __app__ account id.
   `
   CREATE TABLE settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+    account_id TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    PRIMARY KEY (account_id, key)
   );
   `
 ]
