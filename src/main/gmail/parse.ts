@@ -47,6 +47,71 @@ export function parseAddress(raw: string): { name: string; email: string } {
   return { name: email.split('@')[0] || email, email }
 }
 
+/** Split an RFC-style address header without breaking quoted display names. */
+export function parseAddressList(raw: string): { name: string; email: string }[] {
+  const parts: string[] = []
+  let start = 0
+  let quoted = false
+  let escaped = false
+  let angleDepth = 0
+
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quoted) {
+      escaped = true
+      continue
+    }
+    if (char === '"') {
+      quoted = !quoted
+      continue
+    }
+    if (!quoted && char === '<') angleDepth++
+    else if (!quoted && char === '>') angleDepth = Math.max(0, angleDepth - 1)
+    else if (!quoted && angleDepth === 0 && char === ',') {
+      parts.push(raw.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(raw.slice(start))
+
+  return parts
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map(parseAddress)
+    .filter((address) => address.email.length > 0)
+}
+
+export interface ParsedAttachment {
+  attachmentId: string
+  filename: string
+  mimeType: string
+  sizeBytes: number
+}
+
+/** User-visible attachments have both a filename and a Gmail attachment id. */
+export function collectAttachments(payload: GmailPart | undefined): ParsedAttachment[] {
+  const attachments: ParsedAttachment[] = []
+  const walk = (part: GmailPart): void => {
+    const filename = part.filename?.trim()
+    const attachmentId = part.body?.attachmentId
+    if (filename && attachmentId) {
+      attachments.push({
+        attachmentId,
+        filename,
+        mimeType: part.mimeType ?? 'application/octet-stream',
+        sizeBytes: Math.max(0, part.body?.size ?? 0)
+      })
+    }
+    part.parts?.forEach(walk)
+  }
+  if (payload) walk(payload)
+  return attachments
+}
+
 /** Recursive walk: text/plain wins, text/html (stripped) is the fallback. */
 export function extractBodyText(payload: GmailPart | undefined): string {
   if (!payload) return ''
@@ -133,9 +198,7 @@ export function decodeBase64Url(data: string): string {
 }
 
 export function hasAttachment(payload: GmailPart | undefined): boolean {
-  if (!payload) return false
-  if (payload.filename && payload.filename.length > 0) return true
-  return payload.parts?.some(hasAttachment) ?? false
+  return collectAttachments(payload).length > 0
 }
 
 function decodeBody(data: string): string {

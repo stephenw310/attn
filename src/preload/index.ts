@@ -1,7 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
-import type { Conversation, SyncState, ThreadRow } from '../shared/mail'
+import type {
+  Conversation,
+  DownloadAttachmentRequest,
+  DownloadAttachmentResult,
+  SyncState,
+  ThreadRow
+} from '../shared/mail'
 
 const api = {
   platform: process.platform,
@@ -15,6 +21,8 @@ const api = {
     getUnreadCount: (): Promise<number> => ipcRenderer.invoke('mail:getUnreadCount'),
     getConversation: (threadId: string): Promise<Conversation | null> =>
       ipcRenderer.invoke('mail:getConversation', threadId),
+    downloadAttachment: (request: DownloadAttachmentRequest): Promise<DownloadAttachmentResult> =>
+      ipcRenderer.invoke('mail:downloadAttachment', request),
     triage: (action: TriageAction): Promise<TriageResult> => ipcRenderer.invoke('mail:triage', action),
     markReadOnOpen: (threadId: string): Promise<void> => ipcRenderer.invoke('mail:markReadOnOpen', threadId),
     undo: (): Promise<TriageResult | null> => ipcRenderer.invoke('mail:undo'),

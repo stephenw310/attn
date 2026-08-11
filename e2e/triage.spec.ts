@@ -19,7 +19,7 @@ test('archives with auto-advance and undoes durably', async ({ page }) => {
 test('toggles star and unread, then trashes', async ({ page }) => {
   const first = page.getByTestId('thread-row').first()
   await expect(first).toHaveAttribute('data-unread', 'true')
-  await first.click()
+  await page.getByTestId('status-note').click()
   await page.keyboard.press('s')
   await expect(first.getByTitle('Starred')).toBeVisible()
   await page.keyboard.press('u')
@@ -32,7 +32,6 @@ test('toggles star and unread, then trashes', async ({ page }) => {
 test('keeps offline actions across relaunch without reseeding', async ({ boot }) => {
   let page = await boot.app.firstWindow()
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  await page.getByTestId('thread-row').first().click()
   for (let i = 0; i < 3; i++) {
     await page.keyboard.press('e')
     await expect(page.getByTestId('thread-row')).toHaveCount(7 - i)
@@ -43,12 +42,12 @@ test('keeps offline actions across relaunch without reseeding', async ({ boot })
   expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
 })
 
-test('triages from the overlay and advances the open conversation', async ({ page }) => {
+test('triages from the pane and advances the open conversation', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
   await page.keyboard.press('e')
-  await expect(page.getByTestId('conversation-overlay')).toBeVisible()
+  await expect(page.getByTestId('conversation-pane')).toBeVisible()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
   await expect(page.getByTestId('thread-row')).toHaveCount(7)
   await page.keyboard.press('z')
@@ -56,7 +55,7 @@ test('triages from the overlay and advances the open conversation', async ({ pag
   await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
 })
 
-test('keeps explicit unread and undo stable while the overlay is open', async ({ page }) => {
+test('keeps explicit unread and undo stable while the pane is open', async ({ page }) => {
   const first = page.getByTestId('thread-row').first()
   await expect(first).toHaveAttribute('data-unread', 'true')
   await first.click()
@@ -71,7 +70,6 @@ test('keeps explicit unread and undo stable while the overlay is open', async ({
 test('does not run destructive shortcuts with command modifiers', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
-  await rows.first().click()
   await page.keyboard.press('Meta+e')
   await page.keyboard.press('Control+u')
   await page.keyboard.press('Alt+e')

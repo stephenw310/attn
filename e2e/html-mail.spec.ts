@@ -26,6 +26,9 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
 
   const iframe = page.getByTestId('html-body-frame')
   await expect(iframe).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid')))
+    .toBe('conversation-scroll')
   await expect(iframe).toHaveAttribute(
     'sandbox',
     'allow-same-origin allow-popups allow-popups-to-escape-sandbox'
@@ -75,6 +78,25 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await page.waitForTimeout(250)
   expect(await iframe.evaluate((element) => element.clientHeight)).toBe(stableHeight)
 
+  await iframe.evaluate((element) => element.setAttribute('data-stability-marker', 'original'))
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      const off = window.attn.mail.onChanged(() => {
+        off()
+        window.setTimeout(resolve, 50)
+      })
+      void window.attn.mail.markReadOnOpen('t-weekly')
+    })
+  })
+  await expect(iframe).toHaveAttribute('data-stability-marker', 'original')
+
+  const selectedPosition = await page.getByTestId('conversation-position').textContent()
+  await page.keyboard.press('ArrowDown')
+  await expect
+    .poll(() => page.getByTestId('conversation-scroll').evaluate((element) => element.scrollTop))
+    .toBeGreaterThanOrEqual(120)
+  await expect(page.getByTestId('conversation-position')).toHaveText(selectedPosition ?? '')
+
   await page.evaluate(() => {
     document.addEventListener(
       'keydown',
@@ -105,14 +127,14 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     .toBe(true)
   await body.locator('#styled-table').click()
   await page.keyboard.press('Escape')
-  await expect(page.getByTestId('conversation-overlay')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
 
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
-  const path = join(dir, 'conversation.png')
+  const path = join(dir, 'reading.png')
   await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).dblclick()
   await page.screenshot({ path })
-  await testInfo.attach('conversation', { path, contentType: 'image/png' })
+  await testInfo.attach('reading', { path, contentType: 'image/png' })
 
   await page.keyboard.press('Escape')
   await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).dblclick()

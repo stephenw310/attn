@@ -1,6 +1,12 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
-import type { Conversation, ConversationMsg, ThreadRow } from '../../shared/mail'
+import type {
+  Conversation,
+  ConversationMsg,
+  MessageAttachment,
+  MessageRecipients,
+  ThreadRow
+} from '../../shared/mail'
 import type { Db } from './index'
 
 export function listInboxThreads(db: Db, accountId: string, limit = 300): ThreadRow[] {
@@ -61,7 +67,8 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
 
   const rows = db
     .prepare(
-      `SELECT id, from_name, from_email, to_json, internal_date, body_text, body_html, snippet
+      `SELECT id, from_name, from_email, internal_date, body_text, body_html, recipients_json,
+              attachments_json, snippet
        FROM messages WHERE account_id = ? AND thread_id = ?
        ORDER BY internal_date ASC`
     )
@@ -69,10 +76,11 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
     id: string
     from_name: string | null
     from_email: string | null
-    to_json: string | null
     internal_date: number | null
     body_text: string | null
     body_html: string | null
+    recipients_json: string | null
+    attachments_json: string | null
     snippet: string | null
   }[]
 
@@ -80,8 +88,9 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
     id: r.id,
     fromName: r.from_name ?? '',
     fromEmail: r.from_email ?? '',
-    to: parseTo(r.to_json),
     at: r.internal_date ?? 0,
+    recipients: parseJson(r.recipients_json, EMPTY_RECIPIENTS),
+    attachments: parseJson<MessageAttachment[]>(r.attachments_json, []),
     bodyText: r.body_text || r.snippet || '',
     bodyHtml: r.body_html
   }))
@@ -89,11 +98,12 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
   return { threadId, subject: thread.subject ?? '(no subject)', messages }
 }
 
-function parseTo(toJson: string | null): string {
+const EMPTY_RECIPIENTS: MessageRecipients = { to: [], cc: [], bcc: [], replyTo: [] }
+
+function parseJson<T>(value: string | null, fallback: T): T {
   try {
-    const arr = JSON.parse(toJson ?? '[]') as string[]
-    return arr[0] ?? ''
+    return JSON.parse(value ?? '') as T
   } catch {
-    return ''
+    return fallback
   }
 }

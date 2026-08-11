@@ -2,9 +2,10 @@ import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
-import type { SyncState } from '../shared/mail'
+import type { DownloadAttachmentRequest, DownloadAttachmentResult, SyncState } from '../shared/mail'
 import { clearUndo, isTriageAction, pendingActionCount, performTriage, undoLast } from './actions'
 import { ActionExecutor } from './actions/executor'
+import { writeAttachment } from './attachments'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
@@ -134,6 +135,19 @@ function authStatus(): AuthStatus {
   return { configured: config !== null, signedIn: tokens !== null, email: tokens?.email }
 }
 
+function isDownloadAttachmentRequest(value: unknown): value is DownloadAttachmentRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<DownloadAttachmentRequest>
+  return (
+    typeof candidate.messageId === 'string' &&
+    candidate.messageId.length > 0 &&
+    typeof candidate.attachmentId === 'string' &&
+    candidate.attachmentId.length > 0 &&
+    typeof candidate.filename === 'string' &&
+    candidate.filename.length > 0
+  )
+}
+
 let signInInFlight = false
 
 function registerIpc(): void {
@@ -189,6 +203,32 @@ function registerIpc(): void {
     const account = currentAccountId()
     return account ? getConversation(db, account, threadId) : null
   })
+  ipcMain.handle(
+    'mail:downloadAttachment',
+    async (_e, request: unknown): Promise<DownloadAttachmentResult> => {
+      if (!isDownloadAttachmentRequest(request)) return { error: 'Invalid attachment' }
+      const client = seedAccountId ? null : makeClient(authSessionGeneration)
+      if (!client) return { error: 'Attachments download when signed in' }
+      try {
+        const attachment = await client.get<{ data?: string }>(
+          `/messages/${request.messageId}/attachments/${request.attachmentId}`
+        )
+        if (typeof attachment.data !== 'string') return { error: 'Attachment data was unavailable' }
+        const path = await writeAttachment(
+          app.getPath('downloads'),
+          request.filename,
+          Buffer.from(attachment.data, 'base64url')
+        )
+        shell.showItemInFolder(path)
+        return { path }
+      } catch (error) {
+        console.error(
+          `[attachment] download failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+        return { error: 'Could not download attachment' }
+      }
+    }
+  )
   ipcMain.handle('mail:triage', (_e, action: unknown) => {
     if (!db) throw new Error('database unavailable')
     if (!isTriageAction(action)) throw new Error('invalid triage action')

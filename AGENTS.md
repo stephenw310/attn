@@ -17,7 +17,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | Command | Use |
 |---|---|
 | `npm run verify` | The full gate — the definition of done |
-| `npm run test:unit` | Pure-module unit tests (no Electron-ABI SQLite imports) |
+| `npm run test:unit` | Pure-module unit tests across main + renderer (no Electron-ABI SQLite imports) |
 | `npm run e2e` | Build + e2e only |
 | `npm run e2e:only` | E2e without rebuilding — **only** when `out/` already matches `src/` |
 | `npm run e2e:only -- --grep <pattern>` | One test while iterating |

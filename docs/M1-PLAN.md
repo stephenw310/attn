@@ -1,8 +1,8 @@
 # M1 Completion Plan — Task Breakdown for Handoff
 
 **Audience:** the engineer(s) implementing the rest of M1 (triage core).
-**Basis:** [SPEC.md](SPEC.md) v0.8 §8 M1; repo state at `7f1d3eb` (T1, T3, T8 merged; T2 in flight as draft PR #7).
-**Revised 2026-08-11:** SPEC moved to v0.8 (F3 on-demand split view, full message display, decision-log #7–8). **T11 added and made the sole active task** — it absorbs T2 (amending draft PR #7) and everything else queues behind it.
+**Basis:** [SPEC.md](SPEC.md) v0.8 §8 M1; T1, T3, T8, and T11 complete.
+**Revised 2026-08-11:** SPEC moved to v0.8 (F3 on-demand split view, full message display, decision-log #7–8). **T11 is complete**, including the HTML-mail work formerly tracked as T2; T4–T7 are unblocked.
 **Ground rules:** read [AGENTS.md](../AGENTS.md) first. Every task below is one PR, and no PR is done until `npm run verify` is green. When a task says "spec F4", that's a section of SPEC.md — read it before starting the task.
 
 ---
@@ -15,13 +15,13 @@
 | E2E seed seam (enabler) | ✅ **T1** (#6) |
 | Triage verbs E/#/S/U/! + auto-advance + `Z` undo + durable queue | ✅ **T3** (#8) |
 | Tray/background mode + launch at login | ✅ **T8** (#9) |
-| Sanitized HTML mail rendering | **T11 · Part A** (was T2 — amend draft PR #7) |
-| Reading view: on-demand split layout (F3 v0.8, §9 #7) | **T11 · Part B** — **the active task** |
-| Full message display: recipients, attachments, quote/signature collapse (F3 v0.8) | **T11 · Parts C–E** |
-| Label verb (`L`) | **T5** — queued behind T11 |
-| Selection + bulk | **T4** — queued behind T11 |
-| Snooze (`H`) + scheduler | **T6** — queued behind T11 |
-| Incremental sync (F2 "offline correctness") | **T7** — queued behind T11 |
+| Sanitized HTML mail rendering | ✅ **T11 · Part A** |
+| Reading view: on-demand split layout (F3 v0.8, §9 #7) | ✅ **T11 · Part B** |
+| Full message display: recipients, attachments, quote/signature collapse (F3 v0.8) | ✅ **T11 · Parts C–E** |
+| Label verb (`L`) | **T5** — ready |
+| Selection + bulk | **T4** — ready |
+| Snooze (`H`) + scheduler | **T6** — ready |
+| Incremental sync (F2 "offline correctness") | **T7** — ready |
 | Basic notifications | **T9** — after T7 |
 
 Supporting: **T10** (perf smoke, stretch). Push-vs-polling is settled on paper now — SPEC §9 #8; don't reopen it in reviews.
@@ -35,7 +35,7 @@ graph LR
   T1[T1 ✅ e2e seed seam]
   T3[T3 ✅ triage engine core]
   T8[T8 ✅ tray + background]
-  T11[T11 · reading overhaul · ACTIVE]
+  T11[T11 ✅ reading overhaul]
   T4[T4 · selection + bulk]
   T5[T5 · label picker]
   T6[T6 · snooze + scheduler]
@@ -60,10 +60,9 @@ The `T11 →` edges are a **product-ordering directive**, not technical dependen
 
 | Round | Eng A (engine track) | Eng B (surface track) |
 |---|---|---|
-| 1 | — | **T11** (sole active task; amends draft PR #7) |
-| 2 | T7 | T4 |
-| 3 | T6 | T5 |
-| 4 | T9 | T10 (stretch) |
+| 1 | T7 | T4 |
+| 2 | T6 | T5 |
+| 3 | T9 | T10 (stretch) |
 
 ---
 
@@ -143,7 +142,7 @@ Today the mock inbox lives inside the renderer (`mockData.ts`) and never touches
 
 ## T2 — Sanitized HTML mail rendering *(absorbed by T11 Part A — do not run standalone)*
 
-> **Status:** the T2 implementation exists as **draft PR #7**, based on a pre-T3 main. It is finished *inside T11* (rebase + amend that PR — see T11 Part A). The design and implementation guide below remains the contract for the sanitizer/iframe/CSP details.
+> **Status:** completed inside T11. The design and implementation guide below remains the contract for the sanitizer/iframe/CSP details.
 
 **Depends on:** T1 · **Spec:** M1 "first item", §6 *HTML mail rendering*, decision log #5
 
@@ -491,7 +490,7 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 
 ## T11 — Reading experience overhaul: split view, HTML mail, full message display
 
-**THE ACTIVE TASK — everything else waits for it.** · **Depends on:** nothing open (T1/T3/T8 are merged) · **Spec:** F3 (v0.8), D6 (revised), §9 #7 · **PR:** amend **draft PR #7** — rebase its branch (`codex/t2-sanitized-html-mail-rendering`) onto `main`, build Parts B–E on top, retitle, un-draft. That PR is this task's PR.
+**Status: complete.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.8), D6 (revised), §9 #7 · **PR:** extends the sanitized HTML-mail work from draft PR #7 with Parts B–E.
 
 ### Why
 
