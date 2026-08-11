@@ -12,6 +12,7 @@ interface SeedMessage {
   subject: string
   snippet?: string
   bodyText?: string
+  bodyHtml?: string
   attachmentFilename?: string
 }
 
@@ -22,9 +23,18 @@ interface SeedFixture {
 }
 
 function payloadFor(message: SeedMessage): GmailPart {
-  const textPart: GmailPart = {
-    mimeType: 'text/plain',
-    body: { data: Buffer.from(message.bodyText ?? '').toString('base64url') }
+  const bodyParts: GmailPart[] = []
+  if (message.bodyText !== undefined) {
+    bodyParts.push({
+      mimeType: 'text/plain',
+      body: { data: Buffer.from(message.bodyText).toString('base64url') }
+    })
+  }
+  if (message.bodyHtml !== undefined) {
+    bodyParts.push({
+      mimeType: 'text/html',
+      body: { data: Buffer.from(message.bodyHtml).toString('base64url') }
+    })
   }
   return {
     mimeType: 'multipart/mixed',
@@ -34,8 +44,11 @@ function payloadFor(message: SeedMessage): GmailPart {
       { name: 'Subject', value: message.subject }
     ],
     parts: message.attachmentFilename
-      ? [textPart, { mimeType: 'application/octet-stream', filename: message.attachmentFilename, body: {} }]
-      : [textPart]
+      ? [
+          ...bodyParts,
+          { mimeType: 'application/octet-stream', filename: message.attachmentFilename, body: {} }
+        ]
+      : bodyParts
   }
 }
 

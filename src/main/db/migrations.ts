@@ -96,5 +96,11 @@ export const migrations: string[] = [
     value      TEXT NOT NULL,
     PRIMARY KEY (account_id, key)
   );
+  `,
+
+  // v5 — raw HTML bodies, sanitized only when rendered so sanitizer upgrades
+  // apply retroactively to already-cached mail.
+  `
+  ALTER TABLE messages ADD COLUMN body_html TEXT;
   `
 ]

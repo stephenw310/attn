@@ -4,7 +4,15 @@
 
 import type { Db } from '../db'
 import { GmailApiError, type GmailClient } from '../gmail/client'
-import { decodeBase64Url, findExternalTextParts, type GmailThread, textFromRaw } from '../gmail/parse'
+import {
+  decodeBase64Url,
+  extractBodyHtml,
+  extractBodyText,
+  findExternalTextParts,
+  type GmailThread,
+  hasInlinePlainText
+} from '../gmail/parse'
+import { mergeExternalBodies } from './mergeBodies'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 
 interface Profile {
@@ -107,8 +115,8 @@ export async function runInboxBackfill(db: Db, client: GmailClient, cb: Backfill
 
 /**
  * Gmail externalizes large text bodies as attachment parts (no inline data).
- * For the rare messages whose extraction came up empty, fetch those parts and
- * fill in body_text. 404s are skipped — the snippet fallback still renders.
+ * Fetch out-of-line text parts and fill both body formats. 404s are skipped —
+ * the snippet fallback still renders.
  */
 async function fetchExternalBodies(
   db: Db,
@@ -116,24 +124,55 @@ async function fetchExternalBodies(
   accountId: string,
   thread: GmailThread
 ): Promise<void> {
-  const readBody = db.prepare('SELECT body_text FROM messages WHERE account_id = ? AND id = ?')
-  const writeBody = db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?')
+  const readBody = db.prepare('SELECT body_text, body_html FROM messages WHERE account_id = ? AND id = ?')
+  const writeBody = db.prepare(
+    'UPDATE messages SET body_text = ?, body_html = ? WHERE account_id = ? AND id = ?'
+  )
 
   for (const msg of thread.messages ?? []) {
-    const row = readBody.get(accountId, msg.id) as { body_text: string | null } | undefined
-    if (!row || (row.body_text ?? '') !== '') continue
+    const row = readBody.get(accountId, msg.id) as
+      | { body_text: string | null; body_html: string | null }
+      | undefined
+    if (!row) continue
     const parts = findExternalTextParts(msg.payload)
-    const pick = parts.find((p) => p.mimeType === 'text/plain') ?? parts[0]
-    if (!pick) continue
-    try {
-      const att = await client.get<{ data?: string }>(`/messages/${msg.id}/attachments/${pick.attachmentId}`)
-      if (!att.data) continue
-      const text = textFromRaw(pick.mimeType, decodeBase64Url(att.data))
-      if (text) writeBody.run(text, accountId, msg.id)
-    } catch (e) {
-      if (e instanceof GmailApiError && e.status === 404) continue
-      throw e
+    if (parts.length === 0) continue
+
+    const inlineText = extractBodyText(msg.payload)
+    const inlineHtml = extractBodyHtml(msg.payload)
+    const plainComplete = Boolean(row.body_text) && row.body_text !== inlineText
+    const htmlComplete = Boolean(row.body_html) && row.body_html !== inlineHtml
+    const plains: string[] = []
+    const htmls: string[] = []
+    for (const part of parts) {
+      if (part.mimeType === 'text/plain' && plainComplete) continue
+      if (part.mimeType === 'text/html' && htmlComplete) continue
+      try {
+        const att = await client.get<{ data?: string }>(
+          `/messages/${msg.id}/attachments/${part.attachmentId}`
+        )
+        if (!att.data) continue
+        const raw = decodeBase64Url(att.data)
+        if (!raw) continue
+        if (part.mimeType === 'text/html') htmls.push(raw)
+        else plains.push(raw)
+      } catch (e) {
+        if (e instanceof GmailApiError && e.status === 404) continue
+        throw e
+      }
     }
+
+    if (plains.length === 0 && htmls.length === 0) continue
+
+    const { bodyText, bodyHtml } = mergeExternalBodies({
+      storedText: row.body_text,
+      storedHtml: row.body_html,
+      inlineText,
+      hasInlinePlain: hasInlinePlainText(msg.payload),
+      fetchedPlain: plains,
+      fetchedHtml: htmls
+    })
+    if (bodyText === row.body_text && bodyHtml === row.body_html) continue
+    writeBody.run(bodyText, bodyHtml, accountId, msg.id)
   }
 }
 

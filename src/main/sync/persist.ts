@@ -1,5 +1,12 @@
 import type { Db } from '../db'
-import { extractBodyText, type GmailThread, hasAttachment, header, parseAddress } from '../gmail/parse'
+import {
+  extractBodyHtml,
+  extractBodyText,
+  type GmailThread,
+  hasAttachment,
+  header,
+  parseAddress
+} from '../gmail/parse'
 import { replayPendingThreadDeltas } from '../store/replay'
 
 export interface LabelRow {
@@ -33,11 +40,15 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
 
   const upsertMsg = db.prepare(
     `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, to_json, subject, snippet,
-                           internal_date, is_unread, body_text)
+                           internal_date, is_unread, body_text, body_html)
      VALUES (@account_id, @id, @thread_id, @from_name, @from_email, @to_json, @subject, @snippet,
-             @internal_date, @is_unread, @body_text)
+             @internal_date, @is_unread, @body_text, @body_html)
      ON CONFLICT(account_id, id) DO UPDATE SET
-       is_unread = excluded.is_unread, snippet = excluded.snippet, body_text = excluded.body_text`
+       is_unread = excluded.is_unread, snippet = excluded.snippet,
+       body_text = CASE WHEN messages.body_text IS NULL OR messages.body_text = ''
+                        THEN excluded.body_text ELSE messages.body_text END,
+       body_html = CASE WHEN messages.body_html IS NULL OR messages.body_html = ''
+                        THEN excluded.body_html ELSE messages.body_html END`
   )
   const upsertThread = db.prepare(
     `INSERT INTO threads (account_id, id, history_id, subject, snippet, last_msg_at,
@@ -82,7 +93,8 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
         snippet: msg.snippet ?? '',
         internal_date: at,
         is_unread: unread,
-        body_text: extractBodyText(msg.payload)
+        body_text: extractBodyText(msg.payload),
+        body_html: extractBodyHtml(msg.payload) || null
       })
 
       for (const label of msg.labelIds ?? []) labelUnion.add(label)

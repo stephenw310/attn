@@ -61,7 +61,7 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
 
   const rows = db
     .prepare(
-      `SELECT id, from_name, from_email, to_json, internal_date, body_text, snippet
+      `SELECT id, from_name, from_email, to_json, internal_date, body_text, body_html, snippet
        FROM messages WHERE account_id = ? AND thread_id = ?
        ORDER BY internal_date ASC`
     )
@@ -72,6 +72,7 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
     to_json: string | null
     internal_date: number | null
     body_text: string | null
+    body_html: string | null
     snippet: string | null
   }[]
 
@@ -81,7 +82,8 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
     fromEmail: r.from_email ?? '',
     to: parseTo(r.to_json),
     at: r.internal_date ?? 0,
-    bodyText: r.body_text || r.snippet || ''
+    bodyText: r.body_text || r.snippet || '',
+    bodyHtml: r.body_html
   }))
 
   return { threadId, subject: thread.subject ?? '(no subject)', messages }
