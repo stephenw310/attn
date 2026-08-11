@@ -33,6 +33,23 @@ function apply(db: Db, accountId: string, action: TriageAction): TriageAction[] 
   )
   db.transaction(() => {
     for (const threadId of action.threadIds) {
+      if (action.kind === 'unsnooze') {
+        db.prepare("DELETE FROM reminders WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'").run(
+          accountId,
+          threadId
+        )
+      } else if (action.kind === 'archive') {
+        db.prepare(
+          `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
+           WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'
+             AND state IN ('pending', 'returned')`
+        ).run(accountId, threadId)
+      } else {
+        db.prepare(
+          `UPDATE reminders SET state = 'done'
+           WHERE account_id = ? AND thread_id = ? AND kind = 'snooze' AND state = 'returned'`
+        ).run(accountId, threadId)
+      }
       applyThreadDelta(db, accountId, { threadId, add: plan.add, remove: plan.remove })
       enqueue.run(
         accountId,
@@ -44,6 +61,38 @@ function apply(db: Db, accountId: string, action: TriageAction): TriageAction[] 
     }
   })()
   return undo
+}
+
+export function snoozeThreads(db: Db, accountId: string, threadIds: string[], dueAt: number): TriageResult {
+  const now = Date.now()
+  const upsertReminder = db.prepare(
+    `INSERT INTO reminders (account_id, thread_id, kind, due_at, created_at, state)
+     VALUES (?, ?, 'snooze', ?, ?, 'pending')
+     ON CONFLICT(account_id, thread_id, kind) DO UPDATE SET
+       due_at = excluded.due_at, created_at = excluded.created_at, state = 'pending'`
+  )
+  const enqueue = db.prepare(
+    `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, created_at)
+     VALUES (?, 'modifyLabels', ?, ?, 'pending', ?)`
+  )
+
+  db.transaction(() => {
+    for (const threadId of threadIds) {
+      upsertReminder.run(accountId, threadId, dueAt, now)
+      applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
+      // TODO(T7+): mirror the local reminder with an [Attn]/Snoozed Gmail label.
+      enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }), now)
+    }
+  })()
+
+  const label = threadIds.length === 1 ? 'Snoozed' : `${threadIds.length} snoozed`
+  const undoStack = undoStackFor(accountId)
+  undoStack.push({
+    label,
+    undo: [{ kind: 'unsnooze', threadIds: [...threadIds] }]
+  })
+  if (undoStack.length > 50) undoStack.shift()
+  return { label }
 }
 
 export function performTriage(
@@ -93,6 +142,7 @@ export function isTriageAction(value: unknown): value is TriageAction {
     case 'spam':
     case 'restoreInbox':
     case 'untrash':
+    case 'unsnooze':
       return true
     case 'star':
     case 'markUnread':
