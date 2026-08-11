@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
@@ -93,7 +93,7 @@ function makeSrcDoc(html: string, collapsed: boolean): string | null {
 }
 
 export function MessageBody({ bodyText, bodyHtml, expanded = false }: MessageBodyProps): React.JSX.Element {
-  const [height, setHeight] = useState<number | null>(null)
+  const [measuredFrame, setMeasuredFrame] = useState<{ srcDoc: string; height: number } | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
@@ -104,6 +104,7 @@ export function MessageBody({ bodyText, bodyHtml, expanded = false }: MessageBod
   )
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
+  const height = measuredFrame?.srcDoc === srcDoc ? measuredFrame.height : null
 
   const measure = useCallback(
     (frame: HTMLIFrameElement) => {
@@ -114,7 +115,7 @@ export function MessageBody({ bodyText, bodyHtml, expanded = false }: MessageBod
         setOversizedSrcDoc(srcDoc)
         return
       }
-      setHeight(Math.ceil(scrollHeight))
+      if (srcDoc !== null) setMeasuredFrame({ srcDoc, height: Math.ceil(scrollHeight) })
     },
     [srcDoc]
   )
@@ -162,8 +163,7 @@ export function MessageBody({ bodyText, bodyHtml, expanded = false }: MessageBod
     [observe]
   )
 
-  useEffect(() => {
-    setHeight(null)
+  useLayoutEffect(() => {
     if (srcDoc === null || oversized) return
     let frameId = 0
     const waitForSrcDoc = (): void => {

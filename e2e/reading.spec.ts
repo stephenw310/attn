@@ -39,7 +39,10 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(trimToggle).toHaveCSS('border-top-width', '0px')
   expect(
     await trimToggle.evaluate((element) => {
-      return element.parentElement?.getAttribute('data-testid') === 'message-content'
+      return (
+        element.parentElement?.getAttribute('data-testid') === 'message-accessories' &&
+        element.closest('[data-testid="message-content"]') !== null
+      )
     })
   ).toBe(true)
   await trimToggle.click()
@@ -53,6 +56,11 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   const attachment = page.getByTestId('attachment-chip')
   await expect(attachment).toContainText('receipt.pdf')
   await expect(attachment).toContainText('24 KB')
+  const content = page.getByTestId('message-content')
+  await expect(content).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  expect(
+    await attachment.evaluate((element) => element.closest('[data-testid="message-content"]') !== null)
+  ).toBe(true)
   await attachment.click()
   await expect(page.getByTestId('toast')).toHaveText('Attachments download when signed in')
 })
@@ -70,7 +78,17 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
   await expect(frameBody.locator('.gmail_quote')).toBeHidden()
   const toggle = page.getByTestId('mail-trim-toggle')
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByTestId('message-accessories')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  const frame = page.getByTestId('html-body-frame')
+  const collapsedHeight = await frame.evaluate((element) => element.clientHeight)
   await toggle.click()
   await expect(frameBody.locator('.gmail_signature')).toBeVisible()
   await expect(frameBody.locator('.gmail_quote')).toBeVisible()
+  const expandedHeight = await frame.evaluate((element) => element.clientHeight)
+  expect(expandedHeight).toBeGreaterThan(collapsedHeight)
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(frameBody.locator('.gmail_signature')).toBeHidden()
+  await expect(frameBody.locator('.gmail_quote')).toBeHidden()
+  await expect.poll(() => frame.evaluate((element) => element.clientHeight)).toBeLessThan(expandedHeight)
 })
