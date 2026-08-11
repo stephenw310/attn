@@ -1,6 +1,30 @@
 import type { Db } from '../db'
 import { extractBodyText, type GmailThread, hasAttachment, header, parseAddress } from '../gmail/parse'
 
+export interface LabelRow {
+  id: string
+  name: string
+  type: string
+}
+
+/** Idempotently register an account row (account id doubles as the email in v1). */
+export function ensureAccount(db: Db, accountId: string, email: string): void {
+  db.prepare('INSERT OR IGNORE INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+    accountId,
+    email,
+    Date.now()
+  )
+}
+
+/** Upsert label rows — the one statement both backfill and seeding go through. */
+export function upsertLabels(db: Db, accountId: string, labels: LabelRow[]): void {
+  const upsert = db.prepare(
+    `INSERT INTO labels (account_id, id, name, type) VALUES (?, ?, ?, ?)
+     ON CONFLICT(account_id, id) DO UPDATE SET name = excluded.name, type = excluded.type`
+  )
+  for (const label of labels) upsert.run(accountId, label.id, label.name, label.type)
+}
+
 /** Persist a fully fetched Gmail thread through the production sync write path. */
 export function persistThread(db: Db, accountId: string, thread: GmailThread): void {
   const messages = thread.messages ?? []

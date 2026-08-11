@@ -66,16 +66,15 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       const launched = await electron.launch({ args, env, cwd: ROOT })
       launched.process().stdout?.on('data', (d: Buffer) => chunks.push(d.toString()))
       launched.process().stderr?.on('data', (d: Buffer) => chunks.push(d.toString()))
-      watchRenderer(await launched.firstWindow())
+      try {
+        watchRenderer(await launched.firstWindow())
+      } catch (err) {
+        // A boot that dies before its first window (e.g. a failed seed) must
+        // not leak the half-launched instance while the failure propagates.
+        await launched.close().catch(() => {})
+        throw err
+      }
       return launched
-    }
-    let app: ElectronApplication
-    try {
-      app = await launch()
-    } catch (err) {
-      // Never leak the temp dir when the app can't even start.
-      rmSync(userData, { recursive: true, force: true, maxRetries: 3 })
-      throw err
     }
     const mainLog = (): string => {
       let teed = ''
@@ -85,6 +84,18 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
         // App may not have written anything yet.
       }
       return `${teed}${chunks.join('')}`
+    }
+    let app: ElectronApplication
+    try {
+      app = await launch()
+    } catch (err) {
+      // A boot failure reports as an opaque firstWindow() rejection — attach
+      // the main log BEFORE deleting the dir so the app's own last words
+      // (e.g. "[seed] failed: …") survive into the test report.
+      await testInfo.attach('main-process-log', { body: mainLog(), contentType: 'text/plain' })
+      // Never leak the temp dir when the app can't even start.
+      rmSync(userData, { recursive: true, force: true, maxRetries: 3 })
+      throw err
     }
     const boot: Boot = {
       app,
@@ -98,7 +109,9 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     }
     await use(boot)
     await boot.app.close().catch(() => {})
-    if (testInfo.status !== testInfo.expectedStatus) {
+    // The attach must cover failures the expect below is about to raise, so
+    // check pending renderer errors too — not just the already-failed status.
+    if (testInfo.status !== testInfo.expectedStatus || rendererErrors.length > 0) {
       await testInfo.attach('main-process-log', { body: mainLog(), contentType: 'text/plain' })
     }
     rmSync(userData, { recursive: true, force: true, maxRetries: 3 })
@@ -118,15 +131,9 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
   },
 
   page: async ({ app }, use) => {
-    const page = await app.firstWindow()
-    const rendererErrors: string[] = []
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') rendererErrors.push(msg.text())
-    })
-    page.on('pageerror', (err) => rendererErrors.push(String(err)))
-    await use(page)
-    // Guardrail for every test: a clean run must leave zero renderer errors.
-    expect(rendererErrors, 'renderer console/page errors').toEqual([])
+    // Renderer console/page errors are collected and asserted once, by the
+    // boot fixture, across every launch of the test's app — no second guard.
+    await use(await app.firstWindow())
   }
 })
 

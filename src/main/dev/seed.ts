@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type { Db } from '../db'
 import type { GmailPart, GmailThread } from '../gmail/parse'
-import { persistThread } from '../sync/persist'
+import { ensureAccount, persistThread, upsertLabels } from '../sync/persist'
 
 interface SeedMessage {
   id: string
@@ -44,18 +44,10 @@ export function loadSeed(db: Db, path: string): string {
   if (!fixture.account || !Array.isArray(fixture.threads)) throw new Error('Invalid ATTN_TEST_SEED fixture')
 
   db.transaction(() => {
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-      fixture.account,
-      fixture.account,
-      Date.now()
-    )
-    const insertLabel = db.prepare(
-      `INSERT INTO labels (account_id, id, name, type) VALUES (?, ?, ?, ?)
-       ON CONFLICT(account_id, id) DO UPDATE SET name = excluded.name, type = excluded.type`
-    )
-    for (const label of fixture.labels ?? []) {
-      insertLabel.run(fixture.account, label.id, label.name, label.type)
-    }
+    // Same write path as real sync (persist.ts) — the seam must never grow
+    // parallel SQL that can drift from what production writes.
+    ensureAccount(db, fixture.account, fixture.account)
+    upsertLabels(db, fixture.account, fixture.labels ?? [])
     for (const thread of fixture.threads) {
       const gmailThread: GmailThread = {
         id: thread.id,

@@ -5,7 +5,7 @@
 import type { Db } from '../db'
 import { GmailApiError, type GmailClient } from '../gmail/client'
 import { decodeBase64Url, findExternalTextParts, type GmailThread, textFromRaw } from '../gmail/parse'
-import { persistThread } from './persist'
+import { ensureAccount, persistThread, upsertLabels } from './persist'
 
 interface Profile {
   emailAddress: string
@@ -37,11 +37,7 @@ export async function runInboxBackfill(db: Db, client: GmailClient, cb: Backfill
     const profile = await client.get<Profile>('/profile')
     const accountId = profile.emailAddress
 
-    db.prepare('INSERT OR IGNORE INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-      accountId,
-      profile.emailAddress,
-      Date.now()
-    )
+    ensureAccount(db, accountId, profile.emailAddress)
 
     // backfill_cursor === 'done' marks a COMPLETED run; updated_at is its
     // finish time. Skip if we completed one recently (dev restarts are common).
@@ -63,11 +59,7 @@ export async function runInboxBackfill(db: Db, client: GmailClient, cb: Backfill
     ).run(accountId, profile.historyId)
 
     const labelList = await client.get<LabelList>('/labels')
-    const upsertLabel = db.prepare(
-      `INSERT INTO labels (account_id, id, name, type) VALUES (?, ?, ?, ?)
-       ON CONFLICT(account_id, id) DO UPDATE SET name = excluded.name, type = excluded.type`
-    )
-    for (const l of labelList.labels ?? []) upsertLabel.run(accountId, l.id, l.name, l.type)
+    upsertLabels(db, accountId, labelList.labels ?? [])
 
     let done = 0
     let pageToken: string | undefined
