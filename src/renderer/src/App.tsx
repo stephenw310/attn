@@ -260,7 +260,22 @@ function MessageCard({
           <RecipientLine message={message} account={account} />
         </div>
       </div>
-      <MessageBody bodyText={message.text} bodyHtml={message.html} expanded={expanded} />
+      <div data-testid="message-content" className="min-w-0">
+        <MessageBody bodyText={message.text} bodyHtml={message.html} expanded={expanded} />
+        {trimmable && (
+          <button
+            type="button"
+            data-testid="mail-trim-toggle"
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Collapse quoted text and signature' : 'Show quoted text and signature'}
+            onClick={() => setExpanded((value) => !value)}
+            className="mt-1 inline-flex cursor-pointer items-center px-0.5 text-xs tracking-[0.16em] text-ink-faint hover:text-ink"
+            title={expanded ? 'Collapse quoted text and signature' : 'Show quoted text and signature'}
+          >
+            •••
+          </button>
+        )}
+      </div>
       {message.attachments.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
           {message.attachments.map((attachment) => (
@@ -280,18 +295,6 @@ function MessageCard({
             </button>
           ))}
         </div>
-      )}
-      {trimmable && (
-        <button
-          type="button"
-          data-testid="mail-trim-toggle"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-          className="mt-3 cursor-pointer rounded-full border border-edge bg-active px-2.5 py-0.5 text-xs tracking-[0.12em] text-ink-faint hover:border-accent hover:text-ink"
-          title={expanded ? 'Collapse quoted text and signature' : 'Show quoted text and signature'}
-        >
-          {expanded ? '••• hide' : '•••'}
-        </button>
       )}
     </article>
   )
@@ -963,7 +966,11 @@ export default function App(): React.JSX.Element {
               className="min-h-0 flex-1 overflow-y-auto px-6 py-5 focus:outline-none"
             >
               {conversation ? (
-                <div className="mx-auto flex max-w-[720px] flex-col gap-3.5">
+                <div
+                  data-testid="conversation-content"
+                  className="mx-auto flex w-full flex-col gap-3.5"
+                  style={{ maxWidth: 'clamp(720px, 72vw, 1120px)' }}
+                >
                   {conversation.messages.map((message) => (
                     <MessageCard
                       key={message.id}

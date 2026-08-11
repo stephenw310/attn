@@ -22,8 +22,9 @@ const RESET = `
     padding: 0;
     background: #fff;
     color: #202124;
-    overflow: hidden;
   }
+  html { overflow-x: auto; overflow-y: hidden; }
+  body { overflow: visible; }
   body {
     font: 14px/1.6 Arial, Helvetica, sans-serif;
     overflow-wrap: break-word;

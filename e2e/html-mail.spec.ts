@@ -66,7 +66,16 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     )
     .toBe(true)
   await expect(body.locator('#viewport-hero')).toHaveCSS('min-height', '800px')
-  await expect(body.locator('html')).toHaveCSS('overflow', 'hidden')
+  await expect(body.locator('html')).toHaveCSS('overflow-x', 'auto')
+  await expect(body.locator('html')).toHaveCSS('overflow-y', 'hidden')
+  await expect
+    .poll(() =>
+      iframe.evaluate((element) => {
+        const doc = (element as HTMLIFrameElement).contentDocument
+        return doc ? doc.documentElement.scrollWidth > doc.documentElement.clientWidth : false
+      })
+    )
+    .toBe(true)
   await expect
     .poll(() =>
       page.getByTestId('conversation-scroll').evaluate((element) => {

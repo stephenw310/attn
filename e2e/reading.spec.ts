@@ -7,6 +7,10 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await page.keyboard.press('Enter')
   const cards = page.getByTestId('message-card')
   await expect(cards).toHaveCount(2)
+  const contentWidth = await page
+    .getByTestId('conversation-content')
+    .evaluate((element) => element.getBoundingClientRect().width)
+  expect(contentWidth).toBeGreaterThan(720)
 
   const firstSummary = cards.first().getByTestId('recipient-summary')
   await expect(firstSummary).toHaveText(/to me, Priya · cc Daniel/)
@@ -32,6 +36,12 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   )
   const trimToggle = lastCard.getByTestId('mail-trim-toggle')
   await expect(trimToggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(trimToggle).toHaveCSS('border-top-width', '0px')
+  expect(
+    await trimToggle.evaluate((element) => {
+      return element.parentElement?.getAttribute('data-testid') === 'message-content'
+    })
+  ).toBe(true)
   await trimToggle.click()
   await expect(lastCard.getByTestId('plain-text-body')).toContainText('Maya Lin')
   await expect(lastCard.getByTestId('plain-text-body')).toContainText('On Friday, Priya wrote:')
