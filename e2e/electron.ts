@@ -41,6 +41,12 @@ interface ElectronFixtures {
   mainLog: () => string
 }
 
+async function quitApp(app: ElectronApplication): Promise<void> {
+  if (app.process().exitCode !== null) return
+  await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => {})
+  await app.close().catch(() => {})
+}
+
 export const test = base.extend<ElectronFixtures & ElectronOptions>({
   seed: [undefined, { option: true }],
 
@@ -102,13 +108,13 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       mainLog,
       userData,
       relaunch: async () => {
-        await boot.app.close()
+        await quitApp(boot.app)
         boot.app = await launch()
         return { app: boot.app, page: await boot.app.firstWindow() }
       }
     }
     await use(boot)
-    await boot.app.close().catch(() => {})
+    await quitApp(boot.app)
     // The attach must cover failures the expect below is about to raise, so
     // check pending renderer errors too — not just the already-failed status.
     if (testInfo.status !== testInfo.expectedStatus || rendererErrors.length > 0) {

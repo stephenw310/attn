@@ -69,5 +69,14 @@ export const migrations: string[] = [
   ALTER TABLE threads ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE threads ADD COLUMN has_attachment INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE messages ADD COLUMN body_text TEXT;
+  `,
+
+  // v3 — app-global settings, starting with background launch behavior (F16).
+  // Account-scoped settings will use namespaced keys when that surface lands.
+  `
+  CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
   `
 ]
