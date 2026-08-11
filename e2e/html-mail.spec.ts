@@ -56,6 +56,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     expect(await page.locator('body').getAttribute(marker)).toBeNull()
   }
 
+  await page.getByTestId('mail-trim-toggle').click()
   await expect
     .poll(() =>
       iframe.evaluate((element) => {
@@ -125,6 +126,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(page.getByTestId('conversation-position')).toHaveText('7 of 8')
   await page.keyboard.press('j')
   await expect(page.getByTestId('conversation-subject')).toHaveText('This week in focus')
+  await page.getByTestId('mail-trim-toggle').click()
   await expect
     .poll(() =>
       iframe.evaluate((element) => {
@@ -154,7 +156,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).dblclick()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
   await expect(page.getByTestId('plain-text-body')).toHaveCount(2)
-  await expect(page.getByTestId('plain-text-body').last()).toHaveText(
+  await expect(page.getByTestId('plain-text-body').last().getByTestId('plain-text-visible')).toHaveText(
     'I added the launch milestones and owner notes.'
   )
 

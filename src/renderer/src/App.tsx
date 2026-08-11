@@ -10,8 +10,7 @@ import type {
   ThreadRow
 } from '../../shared/mail'
 import { matchKey, registerCommands } from './commands'
-import { hasTrimmableHtml, MessageBody } from './MessageBody'
-import { findTrimIndex } from './mailTrim'
+import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
 
 interface DisplayThread {
@@ -217,10 +216,6 @@ function MessageCard({
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const htmlSurface = message.html !== null
-  const trimmable = useMemo(
-    () => (message.html !== null ? hasTrimmableHtml(message.html) : findTrimIndex(message.text) !== null),
-    [message.html, message.text]
-  )
 
   const download = useCallback(
     (attachment: MessageAttachment) => {
@@ -265,54 +260,38 @@ function MessageCard({
         data-testid="message-content"
         className={`min-w-0 ${htmlSurface ? 'overflow-hidden bg-white' : ''}`}
       >
-        <MessageBody bodyText={message.text} bodyHtml={message.html} expanded={expanded} />
-        {(trimmable || message.attachments.length > 0) && (
+        <MessageBody
+          bodyText={message.text}
+          bodyHtml={message.html}
+          expanded={expanded}
+          onToggleTrim={() => setExpanded((value) => !value)}
+        />
+        {message.attachments.length > 0 && (
           <div data-testid="message-accessories" className={htmlSurface ? 'bg-white px-3 pb-3' : ''}>
-            {trimmable && (
-              <button
-                type="button"
-                data-testid="mail-trim-toggle"
-                aria-expanded={expanded}
-                aria-label={
-                  expanded ? 'Collapse quoted text and signature' : 'Show quoted text and signature'
-                }
-                onClick={() => setExpanded((value) => !value)}
-                className={`mt-1 inline-flex cursor-pointer items-center px-0.5 text-xs tracking-[0.16em] ${
-                  htmlSurface ? 'text-[#6b7280] hover:text-[#202124]' : 'text-ink-faint hover:text-ink'
-                }`}
-                title={expanded ? 'Collapse quoted text and signature' : 'Show quoted text and signature'}
-              >
-                •••
-              </button>
-            )}
-            {message.attachments.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {message.attachments.map((attachment) => (
-                  <button
-                    key={attachment.attachmentId}
-                    type="button"
-                    data-testid="attachment-chip"
-                    onClick={() => download(attachment)}
-                    className={`cursor-pointer rounded-lg border px-3 py-2 text-left text-xs ${
-                      htmlSurface
-                        ? 'border-[#d1d5db] bg-[#f3f4f6] text-[#4b5563] hover:border-[#9ca3af] hover:text-[#202124]'
-                        : 'border-edge bg-active text-ink-dim hover:border-accent hover:text-ink'
-                    }`}
-                    title={`Download ${attachment.filename}`}
-                  >
-                    <span className="mr-2" aria-hidden>
-                      📎
-                    </span>
-                    <span className="font-medium">{attachment.filename}</span>
-                    <span
-                      className={`ml-2 tabular-nums ${htmlSurface ? 'text-[#6b7280]' : 'text-ink-faint'}`}
-                    >
-                      {formatBytes(attachment.sizeBytes)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {message.attachments.map((attachment) => (
+                <button
+                  key={attachment.attachmentId}
+                  type="button"
+                  data-testid="attachment-chip"
+                  onClick={() => download(attachment)}
+                  className={`cursor-pointer rounded-lg border px-3 py-2 text-left text-xs ${
+                    htmlSurface
+                      ? 'border-[#d1d5db] bg-[#f3f4f6] text-[#4b5563] hover:border-[#9ca3af] hover:text-[#202124]'
+                      : 'border-edge bg-active text-ink-dim hover:border-accent hover:text-ink'
+                  }`}
+                  title={`Download ${attachment.filename}`}
+                >
+                  <span className="mr-2" aria-hidden>
+                    📎
+                  </span>
+                  <span className="font-medium">{attachment.filename}</span>
+                  <span className={`ml-2 tabular-nums ${htmlSurface ? 'text-[#6b7280]' : 'text-ink-faint'}`}>
+                    {formatBytes(attachment.sizeBytes)}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
