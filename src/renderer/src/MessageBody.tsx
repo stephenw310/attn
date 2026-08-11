@@ -93,12 +93,16 @@ function makeSrcDoc(html: string): string | null {
   const template = sanitizeToTemplate(html)
   if (!template) return null
   const trimStart = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
+  const richLayoutStart = template.content.querySelector('table, style')
+  const plainLayout =
+    richLayoutStart === null ||
+    (trimStart !== null &&
+      Boolean(trimStart.compareDocumentPosition(richLayoutStart) & Node.DOCUMENT_POSITION_FOLLOWING))
   if (trimStart) {
     const marker = document.createElement('div')
     marker.setAttribute(TRIM_MARKER, '')
     trimStart.before(marker)
   }
-  const plainLayout = template.content.querySelector('table, style') === null
   const layout = plainLayout ? 'body { box-sizing: border-box; padding: 12px; }' : ''
 
   return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}${layout}</style></head><body>${template.innerHTML}</body></html>`
