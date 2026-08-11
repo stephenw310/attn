@@ -18,7 +18,13 @@ const ROOT = join(__dirname, '..')
 interface Boot {
   app: ElectronApplication
   mainLog: () => string
+  relaunch: () => Promise<{ app: ElectronApplication; page: Page }>
   userData: string
+}
+
+interface ElectronOptions {
+  /** JSON fixture path, resolved relative to e2e/, used to seed the real SQLite store. */
+  seed?: string
 }
 
 interface ElectronFixtures {
@@ -35,9 +41,10 @@ interface ElectronFixtures {
   mainLog: () => string
 }
 
-export const test = base.extend<ElectronFixtures>({
-  // biome-ignore lint/correctness/noEmptyPattern: Playwright's fixture API requires a destructuring pattern; this fixture has no dependencies
-  boot: async ({}, use, testInfo) => {
+export const test = base.extend<ElectronFixtures & ElectronOptions>({
+  seed: [undefined, { option: true }],
+
+  boot: async ({ seed }, use, testInfo) => {
     const userData = mkdtempSync(join(tmpdir(), 'attn-e2e-'))
     const args = [join(ROOT, 'out/main/index.js')]
     if (process.platform === 'linux') {
@@ -45,21 +52,23 @@ export const test = base.extend<ElectronFixtures>({
       if (process.getuid?.() === 0 || process.env.CI) args.push('--no-sandbox')
       args.push('--disable-dev-shm-usage')
     }
+    const chunks: string[] = []
+    const launch = async (): Promise<ElectronApplication> => {
+      const env: Record<string, string> = { ...cleanEnv(), ATTN_TEST_USER_DATA: userData }
+      if (seed) env.ATTN_TEST_SEED = join(__dirname, seed)
+      const launched = await electron.launch({ args, env, cwd: ROOT })
+      launched.process().stdout?.on('data', (d: Buffer) => chunks.push(d.toString()))
+      launched.process().stderr?.on('data', (d: Buffer) => chunks.push(d.toString()))
+      return launched
+    }
     let app: ElectronApplication
     try {
-      app = await electron.launch({
-        args,
-        env: { ...cleanEnv(), ATTN_TEST_USER_DATA: userData },
-        cwd: ROOT
-      })
+      app = await launch()
     } catch (err) {
       // Never leak the temp dir when the app can't even start.
       rmSync(userData, { recursive: true, force: true, maxRetries: 3 })
       throw err
     }
-    const chunks: string[] = []
-    app.process().stdout?.on('data', (d: Buffer) => chunks.push(d.toString()))
-    app.process().stderr?.on('data', (d: Buffer) => chunks.push(d.toString()))
     const mainLog = (): string => {
       let teed = ''
       try {
@@ -69,8 +78,18 @@ export const test = base.extend<ElectronFixtures>({
       }
       return `${teed}${chunks.join('')}`
     }
-    await use({ app, mainLog, userData })
-    await app.close().catch(() => {})
+    const boot: Boot = {
+      app,
+      mainLog,
+      userData,
+      relaunch: async () => {
+        await boot.app.close()
+        boot.app = await launch()
+        return { app: boot.app, page: await boot.app.firstWindow() }
+      }
+    }
+    await use(boot)
+    await boot.app.close().catch(() => {})
     if (testInfo.status !== testInfo.expectedStatus) {
       await testInfo.attach('main-process-log', { body: mainLog(), contentType: 'text/plain' })
     }

@@ -1,0 +1,145 @@
+{
+  "account": "seed@attn.test",
+  "labels": [{ "id": "Label_1", "name": "receipts", "type": "user" }],
+  "threads": [
+    {
+      "id": "t-roadmap",
+      "historyId": "1000",
+      "messages": [
+        {
+          "id": "m-roadmap-1",
+          "labelIds": ["INBOX", "UNREAD", "IMPORTANT"],
+          "internalDate": "1754800000000",
+          "from": "Maya Lin <maya@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Q3 roadmap review",
+          "snippet": "The roadmap is ready for review.",
+          "bodyText": "Here is the first draft of the Q3 roadmap."
+        },
+        {
+          "id": "m-roadmap-2",
+          "labelIds": ["INBOX", "UNREAD", "IMPORTANT"],
+          "internalDate": "1754803600000",
+          "from": "Maya Lin <maya@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Q3 roadmap review",
+          "snippet": "I added the launch milestones.",
+          "bodyText": "I added the launch milestones and owner notes."
+        }
+      ]
+    },
+    {
+      "id": "t-receipt",
+      "historyId": "1001",
+      "messages": [
+        {
+          "id": "m-receipt",
+          "labelIds": ["INBOX", "Label_1"],
+          "internalDate": "1754700000000",
+          "from": "Northstar Books <orders@northstar.test>",
+          "to": "seed@attn.test",
+          "subject": "Your receipt",
+          "snippet": "Thanks for your order.",
+          "bodyText": "Your order total was $24.00.",
+          "attachmentFilename": "receipt.pdf"
+        }
+      ]
+    },
+    {
+      "id": "t-design",
+      "historyId": "1002",
+      "messages": [
+        {
+          "id": "m-design",
+          "labelIds": ["INBOX", "UNREAD", "STARRED"],
+          "internalDate": "1754600000000",
+          "from": "Theo Park <theo@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Design notes",
+          "snippet": "A few thoughts on the overlay.",
+          "bodyText": "The conversation overlay direction feels focused."
+        }
+      ]
+    },
+    {
+      "id": "t-lunch",
+      "historyId": "1003",
+      "messages": [
+        {
+          "id": "m-lunch",
+          "labelIds": ["INBOX"],
+          "internalDate": "1754500000000",
+          "from": "Amara Singh <amara@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Lunch next week",
+          "snippet": "Tuesday works for me.",
+          "bodyText": "Would noon on Tuesday work?"
+        }
+      ]
+    },
+    {
+      "id": "t-budget",
+      "historyId": "1004",
+      "messages": [
+        {
+          "id": "m-budget",
+          "labelIds": ["INBOX", "UNREAD"],
+          "internalDate": "1754400000000",
+          "from": "Finance Team <finance@example.com>",
+          "to": "seed@attn.test",
+          "subject": "August budget",
+          "snippet": "Please review by Friday.",
+          "bodyText": "The August budget is ready for approval."
+        }
+      ]
+    },
+    {
+      "id": "t-travel",
+      "historyId": "1005",
+      "messages": [
+        {
+          "id": "m-travel",
+          "labelIds": ["INBOX"],
+          "internalDate": "1754300000000",
+          "from": "Travel Desk <travel@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Flight options",
+          "snippet": "Three routes are available.",
+          "bodyText": "I found three routes for the conference."
+        }
+      ]
+    },
+    {
+      "id": "t-research",
+      "historyId": "1006",
+      "messages": [
+        {
+          "id": "m-research",
+          "labelIds": ["INBOX", "UNREAD"],
+          "internalDate": "1754200000000",
+          "from": "Ravi Shah <ravi@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Research summary",
+          "snippet": "The findings are promising.",
+          "bodyText": "The latest usability findings are promising."
+        }
+      ]
+    },
+    {
+      "id": "t-weekly",
+      "historyId": "1007",
+      "messages": [
+        {
+          "id": "m-weekly",
+          "labelIds": ["INBOX"],
+          "internalDate": "1754100000000",
+          "from": "Attn Weekly <weekly@attn.test>",
+          "to": "seed@attn.test",
+          "subject": "This week in focus",
+          "snippet": "Your weekly digest.",
+          "bodyText": "You completed twelve focused conversations."
+        }
+      ]
+    }
+  ]
+}
