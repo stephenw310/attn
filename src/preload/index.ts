@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import type { Conversation, SyncState, ThreadRow } from '../shared/mail'
 
@@ -14,6 +15,10 @@ const api = {
     getUnreadCount: (): Promise<number> => ipcRenderer.invoke('mail:getUnreadCount'),
     getConversation: (threadId: string): Promise<Conversation | null> =>
       ipcRenderer.invoke('mail:getConversation', threadId),
+    triage: (action: TriageAction): Promise<TriageResult> => ipcRenderer.invoke('mail:triage', action),
+    markReadOnOpen: (threadId: string): Promise<void> => ipcRenderer.invoke('mail:markReadOnOpen', threadId),
+    undo: (): Promise<TriageResult | null> => ipcRenderer.invoke('mail:undo'),
+    getPendingActionCount: (): Promise<number> => ipcRenderer.invoke('mail:getPendingActionCount'),
     onChanged: (cb: () => void): (() => void) => {
       const listener = (): void => cb()
       ipcRenderer.on('mail:changed', listener)

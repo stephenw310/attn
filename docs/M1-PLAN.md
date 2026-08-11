@@ -500,6 +500,10 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 |---|---|---|
 | Snooze doesn't mirror an `[Attn]/Snoozed` label to Gmail (local reminders only; Gmail shows a plain archive) | T6 | After T7 (needs `labels.create` + id mapping) |
 | Sync engine runs in the main process, not the spec'd utility process (§6) | all | M2/M3 — move when polling + executor are proven; interfaces are already Electron-free (`db/`, `sync/` are plain Node modules) |
+| Permanently-failed queue rows count toward the pending badge forever; `last_error` has no UI surface and no retry/clear affordance | T3 | M2 — needs a product call: surface failed actions, auto-expire, or re-queue on sign-in |
+| Hard 401s mark queue rows `failed` permanently — actions queued across a revoked-token window never retry after re-sign-in | T3 | With the failed-action surface above (re-pend on sign-in) |
+| `matchKey` drops all Ctrl/Alt/Meta chords, so AltGr-layout keys can't trigger verbs (AZERTY `#` = AltGr+3 = Ctrl+Alt on Windows) | T3 | M3 — F5 palette / configurable keybindings |
+| Executor broadcasts `mail:changed` once per drained row (no batching) | T3 | T10 perf data, if large-queue drains show up |
 | HTML mail renders on a white card in dark theme | T2 | F14 at M3 (sanitize/invert) |
 | Windows numeric badge overlay is a static dot | T9 | M4 packaging polish |
 | Notifications cover all INBOX mail (no split filtering) | T9 | M3 (F11 splits) |

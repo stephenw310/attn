@@ -9,7 +9,8 @@ const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
 export class GmailApiError extends Error {
   constructor(
     readonly status: number,
-    message: string
+    message: string,
+    readonly retryable = false
   ) {
     super(message)
   }
@@ -57,9 +58,21 @@ export class GmailClient {
   }
 
   async get<T>(path: string, params?: Record<string, string | string[]>): Promise<T> {
+    return this.request('GET', path, { params })
+  }
+
+  async post<T>(path: string, body: unknown): Promise<T> {
+    return this.request('POST', path, { body })
+  }
+
+  private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    options: { params?: Record<string, string | string[]>; body?: unknown }
+  ): Promise<T> {
     const url = new URL(BASE + path)
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
+    if (options.params) {
+      for (const [k, v] of Object.entries(options.params)) {
         if (Array.isArray(v)) {
           for (const x of v) url.searchParams.append(k, x)
         } else {
@@ -70,8 +83,18 @@ export class GmailClient {
     let attempt = 0
     for (;;) {
       const token = await this.ensureAccessToken()
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      if (res.ok) return (await res.json()) as T
+      const res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
+        },
+        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      })
+      if (res.ok) {
+        const text = await res.text()
+        return (text ? JSON.parse(text) : undefined) as T
+      }
       const text = await res.text()
       if (res.status === 401 && attempt === 0) {
         attempt++
@@ -87,7 +110,11 @@ export class GmailClient {
         await sleep(Math.min(65_000, 1000 * 2 ** attempt) + Math.random() * 1000)
         continue
       }
-      throw new GmailApiError(res.status, `gmail ${path} failed (${res.status}): ${text.slice(0, 300)}`)
+      throw new GmailApiError(
+        res.status,
+        `gmail ${path} failed (${res.status}): ${text.slice(0, 300)}`,
+        res.status === 429 || res.status >= 500 || quotaHit
+      )
     }
   }
 }

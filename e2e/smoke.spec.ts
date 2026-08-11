@@ -53,6 +53,17 @@ test('renders the signed-out Dispatch inbox', async ({ page }) => {
   await expect(page.getByTestId('conversation-overlay')).toHaveCount(0)
 })
 
+test('keeps triage verbs inert in signed-out mock mode', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(mockThreads.length)
+  await rows.first().click()
+  await page.keyboard.press('e')
+  await page.keyboard.press('#')
+  await page.keyboard.press('s')
+  await expect(rows).toHaveCount(mockThreads.length)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
+})
+
 test('J/K and arrow keys move list selection without opening a conversation', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(mockThreads.length)
   await expect.poll(() => selectedIndex(page)).toBe(0)

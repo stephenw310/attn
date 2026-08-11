@@ -3,12 +3,15 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
 import type { SyncState } from '../shared/mail'
+import { clearUndo, isTriageAction, pendingActionCount, performTriage, undoLast } from './actions'
+import { ActionExecutor } from './actions/executor'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { type Db, openDatabase, schemaVersion } from './db'
 import { countInboxUnread, getConversation, listInboxThreads } from './db/queries'
 import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
+import { GmailMailProvider } from './gmail/provider'
 import { runInboxBackfill } from './sync/backfill'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
@@ -39,6 +42,7 @@ let syncState: SyncState = { phase: 'idle' }
 let syncRunning = false
 let authSessionGeneration = 0
 let seedAccountId: string | null = null
+let actionExecutor: ActionExecutor | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -58,6 +62,12 @@ function makeClient(generation: number): GmailClient | null {
   return new GmailClient(config, tokens, (t) => {
     if (generation === authSessionGeneration) saveTokens(app.getPath('userData'), t)
   })
+}
+
+function makeProvider(): GmailMailProvider | null {
+  if (seedAccountId) return null
+  const client = makeClient(authSessionGeneration)
+  return client ? new GmailMailProvider(client) : null
 }
 
 function currentAccountId(): string | null {
@@ -81,7 +91,7 @@ function startSync(): void {
     onDone: (accountId, count) => {
       syncRunning = false
       if (generation !== authSessionGeneration) {
-        if (authStatus().signedIn) startSync()
+        if (authStatus().signedIn) void resumeOnlineWork()
         return
       }
       setSyncState({ phase: 'idle' })
@@ -91,13 +101,21 @@ function startSync(): void {
     onError: (message) => {
       syncRunning = false
       if (generation !== authSessionGeneration) {
-        if (authStatus().signedIn) startSync()
+        if (authStatus().signedIn) void resumeOnlineWork()
         return
       }
       setSyncState({ phase: 'error', message })
       console.error(`[sync] failed: ${message}`)
     }
   })
+}
+
+async function resumeOnlineWork(): Promise<void> {
+  await actionExecutor?.trigger()
+  // A sign-out/account switch can make an active drain finish early. A second
+  // pass picks up the newly active account before its server snapshot starts.
+  await actionExecutor?.trigger()
+  if (authStatus().signedIn) startSync()
 }
 
 function oauthSearchDirs(): string[] {
@@ -130,7 +148,7 @@ function registerIpc(): void {
       authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
-      startSync()
+      void resumeOnlineWork()
     } catch (e) {
       console.error('[auth] sign-in failed:', e instanceof Error ? e.message : e)
       throw e
@@ -141,10 +159,12 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('auth:signOut', () => {
+    const account = currentAccountId()
     cancelActiveSignIn()
     authSessionGeneration++
     seedAccountId = null
     clearTokens(app.getPath('userData'))
+    clearUndo(account ?? undefined)
     // A stale backfill may finish caching locally, but its generation can no
     // longer persist refreshed tokens or publish state for the signed-out user.
     setSyncState({ phase: 'idle' })
@@ -167,6 +187,42 @@ function registerIpc(): void {
     if (!db || typeof threadId !== 'string') return null
     const account = currentAccountId()
     return account ? getConversation(db, account, threadId) : null
+  })
+  ipcMain.handle('mail:triage', (_e, action: unknown) => {
+    if (!db) throw new Error('database unavailable')
+    if (!isTriageAction(action)) throw new Error('invalid triage action')
+    const account = currentAccountId()
+    if (!account) throw new Error('not signed in')
+    const result = performTriage(db, account, action)
+    broadcast('mail:changed')
+    void actionExecutor?.trigger()
+    return result
+  })
+  ipcMain.handle('mail:markReadOnOpen', (_e, threadId: unknown) => {
+    if (!db || typeof threadId !== 'string' || threadId.length === 0) {
+      throw new Error('invalid thread id')
+    }
+    const account = currentAccountId()
+    if (!account) throw new Error('not signed in')
+    performTriage(db, account, { kind: 'markUnread', threadIds: [threadId], on: false }, false)
+    broadcast('mail:changed')
+    void actionExecutor?.trigger()
+  })
+  ipcMain.handle('mail:undo', () => {
+    if (!db) return null
+    const account = currentAccountId()
+    if (!account) return null
+    const result = undoLast(db, account)
+    if (result) {
+      broadcast('mail:changed')
+      void actionExecutor?.trigger()
+    }
+    return result
+  })
+  ipcMain.handle('mail:getPendingActionCount', () => {
+    if (!db) return 0
+    const account = currentAccountId()
+    return account ? pendingActionCount(db, account) : 0
   })
 }
 
@@ -232,8 +288,9 @@ if (!gotLock) {
     }
 
     registerIpc()
+    actionExecutor = new ActionExecutor(db, currentAccountId, makeProvider, () => broadcast('mail:changed'))
     createWindow()
-    if (authStatus().signedIn) startSync()
+    if (authStatus().signedIn) void resumeOnlineWork()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -245,6 +302,8 @@ if (!gotLock) {
   })
 
   app.on('will-quit', () => {
+    actionExecutor?.stop()
+    actionExecutor = null
     db?.close()
     db = null
   })
