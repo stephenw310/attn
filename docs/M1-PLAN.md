@@ -1,8 +1,8 @@
 # M1 Completion Plan — Task Breakdown for Handoff
 
 **Audience:** the engineer(s) implementing the rest of M1 (triage core).
-**Basis:** [SPEC.md](SPEC.md) v0.9 §8 M1; T1, T3, and T8 shipped; T11 is implemented in draft PR #11.
-**Revised 2026-08-11:** SPEC moved to v0.9 (F3 on-demand split view plus the dogfooded reading interactions in decision-log #9). **T11 implementation is complete and verified in PR #11**, including the HTML-mail work formerly tracked as T2; merge is its remaining gate, and T4–T7 are otherwise unblocked.
+**Basis:** [SPEC.md](SPEC.md) v0.10 §8 M1; T1, T3, and T8 shipped; T11 is implemented in draft PR #11.
+**Revised 2026-08-11:** SPEC v0.10 makes system mailbox navigation explicit future scope (F3/§9 #10) while retaining the on-demand reading behavior from v0.9. **T11 implementation is complete and verified in PR #11**, including the HTML-mail work formerly tracked as T2; merge is its remaining gate, and T4–T7 are otherwise unblocked.
 **Ground rules:** read [AGENTS.md](../AGENTS.md) first. Every task below is one PR, and no PR is done until `npm run verify` is green. When a task says "spec F4", that's a section of SPEC.md — read it before starting the task.
 
 ---
@@ -16,8 +16,8 @@
 | Triage verbs E/#/S/U/! + auto-advance + `Z` undo + durable queue | ✅ **T3** (#8) |
 | Tray/background mode + launch at login | ✅ **T8** (#9) |
 | Sanitized HTML mail rendering | 🟡 **T11 · Part A** — implemented in PR #11 |
-| Reading view: on-demand split layout (F3 v0.9, §9 #7/#9) | 🟡 **T11 · Part B** — implemented in PR #11 |
-| Full message display: recipients, attachments, quote/signature collapse (F3 v0.9) | 🟡 **T11 · Parts C–E** — implemented in PR #11 |
+| Reading view: on-demand split layout (F3 v0.10, §9 #7/#9) | 🟡 **T11 · Part B** — implemented in PR #11 |
+| Full message display: recipients, attachments, quote/signature collapse (F3 v0.10) | 🟡 **T11 · Parts C–E** — implemented in PR #11 |
 | Label verb (`L`) | **T5** — ready |
 | Selection + bulk | **T4** — ready |
 | Snooze (`H`) + scheduler | **T6** — ready |
@@ -367,7 +367,7 @@ CREATE INDEX idx_reminders_due ON reminders (account_id, state, due_at);
 - **IPC:** `mail:snooze({ threadIds, dueAt })` (validates `dueAt` is a number; past values are allowed and simply return on the next scheduler pass — that's also the e2e seam), `mail:listSnoozed()` → thread rows joined with `due_at`.
 - Snooze flow: upsert reminders, archive locally (reuse T3's archive delta + queue), push `{ label: 'Snoozed', undo: [{ kind:'unsnooze'… }] }` — add an `unsnooze` action (delete reminder + restore INBOX) to the action union.
 - **Picker UI:** centered modal listing presets — Later today (+3h), Tonight (19:00), Tomorrow (09:00), This weekend (Sat 09:00), Next week (Mon 09:00) — plus a free-text row parsed with **chrono-node** (`npm i chrono-node`; renderer-side parse, show the resolved date before confirming). `h` opens it (command registry; works with and without the pane open, and on T4 selections).
-- **Snoozed view:** minimal view switching — `g` starts a chord (500ms window), then `h` → snoozed view, `g i` → inbox. Renderer keeps `view: 'inbox' | 'snoozed'`; snoozed view lists `mail:listSnoozed` ordered by `due_at` with a due chip; triage verbs still work there (archive/unsnooze). Header shows which view you're in (`data-testid="view-title"`). Full `G`-navigation (Sent/Drafts/Starred) is M3 — only these two.
+- **Snoozed view:** minimal view switching — `g` starts a chord (500ms window), then `h` → snoozed view, `g i` → inbox. Renderer keeps `view: 'inbox' | 'snoozed'`; snoozed view lists `mail:listSnoozed` ordered by `due_at` with a due chip; triage verbs still work there (archive/unsnooze). Header shows which view you're in (`data-testid="view-title"`). The complete F3 system-mailbox set (All Mail/Sent/Drafts/Starred/Spam/Trash) is the M3 follow-up below — do not expand T6 beyond Inbox/Snoozed.
 - **Chips (F3):** snoozed-return chip on list rows (`data-testid="chip-returned"`); due chip in the snoozed view.
 - **Wake-on-reply (F4):** implement `wakeThread(threadId)` on the scheduler (returns it immediately if pending) and export it — **T7 calls it** when history shows a new message on a snoozed thread. Don't build the detection here.
 
@@ -490,7 +490,7 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 
 ## T11 — Reading experience overhaul: split view, HTML mail, full message display
 
-**Status: implementation complete; awaiting merge.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.9), D6 (revised), §9 #7/#9 · **PR:** [#11](https://github.com/stephenw310/attn/pull/11) (draft, verified at `17d881b`).
+**Status: implementation complete; awaiting merge.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.10), D6 (revised), §9 #7/#9 · **PR:** [#11](https://github.com/stephenw310/attn/pull/11) (draft, verified through `20140c4`).
 
 ### Why
 
@@ -506,7 +506,7 @@ The T2 guide above is still the contract for sanitizer/iframe/CSP details. The r
 2. **`App.tsx` conflicts.** T3 rewired the keyboard through the command registry and T8/T3 touched main-process wiring. Re-express the `MessageBody` swap on top mechanically — don't fight the layout during rebase; Part B replaces the layout anyway.
 3. **Seed-fixture collisions.** T3's triage specs assert exact fixture math (8 threads, "4 to zero", row order — e.g. Northstar Books at index 1 — and exact pending counts). Add the hostile-HTML content as an **additional message on an existing read thread** rather than a new thread; if any assertion must move, change it deliberately in the same commit with a comment.
 
-### Part B — Layout: full-width list ⇄ on-demand split (F3 v0.9)
+### Part B — Layout: full-width list ⇄ on-demand split (F3 v0.10)
 
 - Remove the centered overlay + backdrop. New structure: when a conversation is open, the root splits — list column left (fixed ~380px), `data-testid="conversation-pane"` right. Put `data-pane-open` on the list container so e2e and CSS key off one attribute.
 - **Compact rows** when the pane is open: two lines — sender + time on the first, subject on the second, no snippet. Same `thread-row` testid, same selection/unread attributes.
@@ -559,10 +559,31 @@ The v5 columns populate only for newly synced mail, and this task intentionally 
 
 ### Done when
 
-- Implementation and review fixes are present in **PR #11**; `npm run verify` is green at `17d881b` (25 unit tests, build, and 23 Electron e2e tests). Removing draft status and merging are the remaining project-state gates.
-- SPEC v0.9 F3 acceptance criteria demonstrably hold (pane/focus semantics, recipients inspectable, remote + inline attachment discovery, and safe/stable collapse).
+- Implementation and review fixes are present in **PR #11**; `npm run verify` is green through `20140c4` (25 unit tests, build, and 23 Electron e2e tests). Removing draft status and merging are the remaining project-state gates.
+- SPEC v0.10 F3's T11 acceptance criteria demonstrably hold (pane/focus semantics, recipients inspectable, remote + inline attachment discovery, and safe/stable collapse); the newly explicit system-mailbox criteria remain assigned to M3.
 - Migration v5 is the only T11 schema entry; the required dev-DB wipe is documented instead of compatibility work.
 - The status table is updated, and `inbox.png`, `reading.png`, and `simple-mail.png` were reviewed.
+
+---
+
+## M3 follow-up — System mailbox navigation *(not an M1 task)*
+
+**Status: planned.** · **Depends on:** T7 incremental sync; M2 for editable Draft rows · **Spec:** F3 (v0.10), F5, §9 #10
+
+Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, and Trash without introducing a permanent folder sidebar.
+
+1. **Local data coverage:** expand the metadata window beyond `INBOX` so the last 12 months of message/thread system-label membership are cached. All Mail excludes `SPAM`/`TRASH`; the other views map to their Gmail system label, while Snoozed remains backed by local reminders. Reuse T7's serialized pagination and history reconciliation rather than adding a second sync engine.
+2. **Typed query surface:** replace one-off inbox/snoozed reads with a shared `MailboxView` union and `mail:listThreads({ view })`. Keep filtering/order in SQLite; cached view switching must not call Gmail.
+3. **Navigation UI:** reuse the current full-width list ⇄ reading split. Show `view-title`; keep Important/Other/user splits visible only for Inbox; register `Go to …` palette commands and the complete `G` chords (`I/A/T/D/S/H/P/R`). Returning to a view restores its selection and scroll.
+4. **View behavior:** switching mailboxes closes the open pane; Draft rows open the M2 composer; local triage refreshes the active filter immediately. Spam/Trash are browsable, but v1 does not add permanent-delete or empty-folder actions.
+5. **Coverage:** seed at least one thread/message per system label. E2e every palette/chord route, label-correct row membership, All Mail exclusion rules, per-view selection/scroll restoration, Draft-to-composer behavior, and offline cached switching. Unit-test the view-to-query mapping and history-driven membership updates.
+
+### Done when
+
+- All eight views render from SQLite and switch in < 50ms once cached.
+- Palette commands and documented `G` chords reach every view; the command registry and cheat sheet contain the same set.
+- Important/Other never appear as peer system mailboxes, and system views never masquerade as Inbox splits.
+- `npm run verify` is green, including the new seeded navigation and sync-membership coverage.
 
 ---
 
