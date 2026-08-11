@@ -1,14 +1,18 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import type { TriageAction } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import type { SyncState } from '../shared/mail'
+import { pendingActionCount, performTriage, undoLast } from './actions'
+import { ActionExecutor } from './actions/executor'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { type Db, openDatabase, schemaVersion } from './db'
 import { countInboxUnread, getConversation, listInboxThreads } from './db/queries'
 import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
+import { GmailMailProvider } from './gmail/provider'
 import { runInboxBackfill } from './sync/backfill'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
@@ -39,6 +43,7 @@ let syncState: SyncState = { phase: 'idle' }
 let syncRunning = false
 let authSessionGeneration = 0
 let seedAccountId: string | null = null
+let actionExecutor: ActionExecutor | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -58,6 +63,12 @@ function makeClient(generation: number): GmailClient | null {
   return new GmailClient(config, tokens, (t) => {
     if (generation === authSessionGeneration) saveTokens(app.getPath('userData'), t)
   })
+}
+
+function makeProvider(): GmailMailProvider | null {
+  if (seedAccountId) return null
+  const client = makeClient(authSessionGeneration)
+  return client ? new GmailMailProvider(client) : null
 }
 
 function currentAccountId(): string | null {
@@ -131,6 +142,7 @@ function registerIpc(): void {
       saveTokens(app.getPath('userData'), tokens)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
       startSync()
+      actionExecutor?.trigger()
     } catch (e) {
       console.error('[auth] sign-in failed:', e instanceof Error ? e.message : e)
       throw e
@@ -167,6 +179,31 @@ function registerIpc(): void {
     if (!db || typeof threadId !== 'string') return null
     const account = currentAccountId()
     return account ? getConversation(db, account, threadId) : null
+  })
+  ipcMain.handle('mail:triage', (_e, action: TriageAction) => {
+    if (!db) throw new Error('database unavailable')
+    const account = currentAccountId()
+    if (!account) throw new Error('not signed in')
+    const result = performTriage(db, account, action)
+    broadcast('mail:changed')
+    actionExecutor?.trigger()
+    return result
+  })
+  ipcMain.handle('mail:undo', () => {
+    if (!db) return null
+    const account = currentAccountId()
+    if (!account) return null
+    const result = undoLast(db, account)
+    if (result) {
+      broadcast('mail:changed')
+      actionExecutor?.trigger()
+    }
+    return result
+  })
+  ipcMain.handle('mail:getPendingActionCount', () => {
+    if (!db) return 0
+    const account = currentAccountId()
+    return account ? pendingActionCount(db, account) : 0
   })
 }
 
@@ -232,6 +269,8 @@ if (!gotLock) {
     }
 
     registerIpc()
+    actionExecutor = new ActionExecutor(db, makeProvider)
+    actionExecutor.trigger()
     createWindow()
     if (authStatus().signedIn) startSync()
     app.on('activate', () => {
@@ -245,6 +284,8 @@ if (!gotLock) {
   })
 
   app.on('will-quit', () => {
+    actionExecutor?.stop()
+    actionExecutor = null
     db?.close()
     db = null
   })

@@ -57,9 +57,21 @@ export class GmailClient {
   }
 
   async get<T>(path: string, params?: Record<string, string | string[]>): Promise<T> {
+    return this.request('GET', path, { params })
+  }
+
+  async post<T>(path: string, body: unknown): Promise<T> {
+    return this.request('POST', path, { body })
+  }
+
+  private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    options: { params?: Record<string, string | string[]>; body?: unknown }
+  ): Promise<T> {
     const url = new URL(BASE + path)
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
+    if (options.params) {
+      for (const [k, v] of Object.entries(options.params)) {
         if (Array.isArray(v)) {
           for (const x of v) url.searchParams.append(k, x)
         } else {
@@ -70,8 +82,18 @@ export class GmailClient {
     let attempt = 0
     for (;;) {
       const token = await this.ensureAccessToken()
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      if (res.ok) return (await res.json()) as T
+      const res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
+        },
+        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      })
+      if (res.ok) {
+        const text = await res.text()
+        return (text ? JSON.parse(text) : undefined) as T
+      }
       const text = await res.text()
       if (res.status === 401 && attempt === 0) {
         attempt++

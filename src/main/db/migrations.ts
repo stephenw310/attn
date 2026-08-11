@@ -69,5 +69,21 @@ export const migrations: string[] = [
   ALTER TABLE threads ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE threads ADD COLUMN has_attachment INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE messages ADD COLUMN body_text TEXT;
+  `,
+
+  // v3 — durable, idempotent Gmail action queue (M1 triage core).
+  `
+  CREATE TABLE action_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    thread_id   TEXT NOT NULL,
+    payload     TEXT NOT NULL DEFAULT '{}',
+    state       TEXT NOT NULL DEFAULT 'pending',
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX idx_action_queue_pending ON action_queue (account_id, state, id);
   `
 ]
