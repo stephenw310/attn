@@ -1,8 +1,8 @@
 # M1 Completion Plan — Task Breakdown for Handoff
 
 **Audience:** the engineer(s) implementing the rest of M1 (triage core).
-**Basis:** [SPEC.md](SPEC.md) v0.8 §8 M1; T1, T3, T8, and T11 complete.
-**Revised 2026-08-11:** SPEC moved to v0.8 (F3 on-demand split view, full message display, decision-log #7–8). **T11 is complete**, including the HTML-mail work formerly tracked as T2; T4–T7 are unblocked.
+**Basis:** [SPEC.md](SPEC.md) v0.9 §8 M1; T1, T3, and T8 shipped; T11 is implemented in draft PR #11.
+**Revised 2026-08-11:** SPEC moved to v0.9 (F3 on-demand split view plus the dogfooded reading interactions in decision-log #9). **T11 implementation is complete and verified in PR #11**, including the HTML-mail work formerly tracked as T2; merge is its remaining gate, and T4–T7 are otherwise unblocked.
 **Ground rules:** read [AGENTS.md](../AGENTS.md) first. Every task below is one PR, and no PR is done until `npm run verify` is green. When a task says "spec F4", that's a section of SPEC.md — read it before starting the task.
 
 ---
@@ -15,9 +15,9 @@
 | E2E seed seam (enabler) | ✅ **T1** (#6) |
 | Triage verbs E/#/S/U/! + auto-advance + `Z` undo + durable queue | ✅ **T3** (#8) |
 | Tray/background mode + launch at login | ✅ **T8** (#9) |
-| Sanitized HTML mail rendering | ✅ **T11 · Part A** |
-| Reading view: on-demand split layout (F3 v0.8, §9 #7) | ✅ **T11 · Part B** |
-| Full message display: recipients, attachments, quote/signature collapse (F3 v0.8) | ✅ **T11 · Parts C–E** |
+| Sanitized HTML mail rendering | 🟡 **T11 · Part A** — implemented in PR #11 |
+| Reading view: on-demand split layout (F3 v0.9, §9 #7/#9) | 🟡 **T11 · Part B** — implemented in PR #11 |
+| Full message display: recipients, attachments, quote/signature collapse (F3 v0.9) | 🟡 **T11 · Parts C–E** — implemented in PR #11 |
 | Label verb (`L`) | **T5** — ready |
 | Selection + bulk | **T4** — ready |
 | Snooze (`H`) + scheduler | **T6** — ready |
@@ -35,7 +35,7 @@ graph LR
   T1[T1 ✅ e2e seed seam]
   T3[T3 ✅ triage engine core]
   T8[T8 ✅ tray + background]
-  T11[T11 ✅ reading overhaul]
+  T11[T11 🟡 reading overhaul · PR #11]
   T4[T4 · selection + bulk]
   T5[T5 · label picker]
   T6[T6 · snooze + scheduler]
@@ -68,9 +68,9 @@ The `T11 →` edges are a **product-ordering directive**, not technical dependen
 
 ## Global rules (every task)
 
-1. **Migrations are an append-only array** (`src/main/db/migrations.ts`). Never edit a shipped entry. The migration index = position in the array, so **merge order decides numbering** — if a parallel task merged a migration before yours, rebase and your SQL simply becomes the next array element. Two tasks must never share one migration.
+1. **Migrations are an append-only array** (`src/main/db/migrations.ts`). Never edit a shipped entry. The migration index = position in the array, so **merge order decides numbering** — if a parallel task merged a migration before yours, rebase and your SQL simply becomes the next array element. Two tasks must never share one migration. T11's owner-authorized, dev-only v5 rewrite is the sole pre-release exception: existing local DBs must be wiped and resynced, and later tasks must not copy that pattern.
 2. **IPC has three parts** — a capability is added in `src/main/index.ts` (`ipcMain.handle`), `src/preload/index.ts` (bridge method), and `src/shared/` (types). All three in the same commit. The renderer never imports from `src/main/`.
-3. **Mail content is untrusted.** Outside T2's sanitized iframe, body content goes into text nodes only. Never `dangerouslySetInnerHTML`.
+3. **Mail content is untrusted.** Outside T11's sanitized iframe, body content goes into text nodes only. Never `dangerouslySetInnerHTML`.
 4. **Select on `data-testid`** in e2e; add testids for every new interactive element. Never select on Tailwind classes.
 5. **Mock mode keeps working.** Signed-out without a seed = the browser-preview mock inbox (`mockData.ts`). New features may be inert there (verbs no-op), but it must render and navigate. The existing smoke tests enforce this.
 6. **After UI changes, look at the screenshot** (`e2e/.artifacts/inbox.png`, plus any you add). "Tests pass" is not the same as "looks right".
@@ -156,7 +156,7 @@ Triaging means reading real mail, and most real mail is HTML. Today HTML bodies 
 - Sanitize with **DOMPurify** in the renderer, render into an **`<iframe srcdoc>`** with `sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"`. **Never `allow-scripts`.** `allow-same-origin` is required so the parent can measure content height; it's safe *because* scripts can't run — the mail document is inert.
 - **Remote images load by default** (decision log #5). The block-toggle arrives with the settings surface (M4).
 - HTML mail renders on a **white card** regardless of theme for M1. Dark-mode sanitize/invert is F14 work at M3. Plain-text messages keep the current themed text-node path.
-- `cid:` inline images will render as broken images for M1 — accepted; attachment handling is M2.
+- `cid:` inline images will render as broken images for M1 — attachment metadata/downloads land in T11, but resolving `cid:` references to cached attachment bytes remains deferred.
 
 ### Implementation guide
 
@@ -490,28 +490,28 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 
 ## T11 — Reading experience overhaul: split view, HTML mail, full message display
 
-**Status: complete.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.8), D6 (revised), §9 #7 · **PR:** extends the sanitized HTML-mail work from draft PR #7 with Parts B–E.
+**Status: implementation complete; awaiting merge.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.9), D6 (revised), §9 #7/#9 · **PR:** [#11](https://github.com/stephenw310/attn/pull/11) (draft, verified at `17d881b`).
 
 ### Why
 
 Product review (2026-08-11) found the reading experience wrong in shape and short on substance: the centered overlay doesn't work for reading real mail (SPEC §9 #7 has the reasoning), and message cards omit what every mail client shows — recipients, attachments, and quote/signature folding. This task fixes all of it in one pass, absorbing the in-flight HTML-rendering work, so every later renderer task (T4, T5, T6, T9) builds against the final reading surface instead of conflicting with it.
 
-One PR, but commit it in reviewable stages (A through E below in order — each stage keeps `verify` green).
+The implementation and its dogfood/review iterations live in one PR; the sections below now record the resulting contract rather than an aspirational build order.
 
 ### Part A — Rebase & finish HTML mail rendering (the old T2)
 
 The T2 guide above is still the contract for sanitizer/iframe/CSP details. The rebase has three known traps:
 
-1. **Migration renumber.** The branch's `body_html` migration was written as array index v3; `main` has since taken v3 (`action_queue`) and v4 (`settings`). Since nothing on the branch has shipped, **collapse this task's schema work into one new migration v5** (see Part C for the full DDL).
+1. **Dev-only schema exception.** T11 folds `body_html`, `recipients_json`, and `attachments_json` into v5. This deliberately changes a migration already used by development databases and is acceptable only because the owner authorized wiping/resyncing all local data; no v6 compatibility migration or backfill is part of this task. Any DB already stamped v5 must be deleted before testing the merged schema.
 2. **`App.tsx` conflicts.** T3 rewired the keyboard through the command registry and T8/T3 touched main-process wiring. Re-express the `MessageBody` swap on top mechanically — don't fight the layout during rebase; Part B replaces the layout anyway.
 3. **Seed-fixture collisions.** T3's triage specs assert exact fixture math (8 threads, "4 to zero", row order — e.g. Northstar Books at index 1 — and exact pending counts). Add the hostile-HTML content as an **additional message on an existing read thread** rather than a new thread; if any assertion must move, change it deliberately in the same commit with a comment.
 
-### Part B — Layout: full-width list ⇄ on-demand split (F3 v0.8)
+### Part B — Layout: full-width list ⇄ on-demand split (F3 v0.9)
 
 - Remove the centered overlay + backdrop. New structure: when a conversation is open, the root splits — list column left (fixed ~380px), `data-testid="conversation-pane"` right. Put `data-pane-open` on the list container so e2e and CSS key off one attribute.
 - **Compact rows** when the pane is open: two lines — sender + time on the first, subject on the second, no snippet. Same `thread-row` testid, same selection/unread attributes.
-- Conversation pane: thread position ("4 of 12") + `Esc` hint in its header (keep the existing `conversation-position` testid); body column max ~720px; message cards as today plus Parts C–E.
-- **Keyboard:** `Enter`/click opens the pane; `Esc` closes it (full-width restored, selection + scroll intact); `J`/`K` stay the *same* list-selection commands — with the pane open the pane simply follows the selection. In `src/renderer/src/commands.ts`, collapse the `'overlay'` context: contexts become `'list' | 'global'`, and Esc-close-pane is a command guarded on pane-open state. Auto-advance is untouched (pane follows selection; empty list closes the pane).
+- Conversation pane: thread position ("4 of 12") + `Esc` hint in its header (keep the existing `conversation-position` testid); responsive body measure `clamp(720px, 72vw, 1120px)` so wide windows are used without turning prose into an edge-to-edge line; message cards as today plus Parts C–E. Reserve the vertical scrollbar gutter so expanding a long message cannot shift the centered reading column.
+- **Keyboard:** `Enter`/click opens the pane, focuses its scroll surface, and `Esc` closes it (full-width restored, selection + scroll intact). Unmodified ArrowUp/Down scroll the conversation 120px at a time; modifier+arrow chords are untouched. `J`/`K` stay the *same* list-selection commands — with the pane open the pane simply follows the selection. Keys from the sandboxed iframe are forwarded to the parent, and recipient/attachment/trim buttons blur after click so no control can strand the global keyboard loop. In `src/renderer/src/commands.ts`, collapse the `'overlay'` context: contexts become `'list' | 'global'`, and Esc-close-pane is a command guarded on pane-open state. Auto-advance is untouched (pane follows selection; empty list closes the pane).
 - Start visuals from `design/explorations/b2-conversation-side.html` (the side-panel study already in the Dispatch language). Dimming is gone; the tie between panes is the selected-row highlight.
 - **e2e churn (do in the same stage):** update `smoke.spec.ts`, `triage.spec.ts`, `seeded.spec.ts` from `conversation-overlay` to `conversation-pane`; add asserts: `Esc` removes `data-pane-open`; compact rows show sender + subject; J/K with pane open updates both selection and pane subject.
 
@@ -526,43 +526,43 @@ The T2 guide above is still the contract for sanitizer/iframe/CSP details. The r
   ALTER TABLE messages ADD COLUMN attachments_json TEXT;
   ```
 - **`persist.ts`:** store `recipients_json` = `{ "to": [{name,email}…], "cc": […], "bcc": […], "replyTo": […] }` (include in the upsert's `ON CONFLICT` set, like `body_text`). Expose via `queries.ts` + `shared/mail.ts` (`ConversationMsg.recipients`).
-- **UI:** a summary line under the sender — `to me, Priya · cc Daniel` (first names; "me" when the address is the account) — `data-testid="recipient-summary"`. Click toggles `data-testid="recipient-details"`: full addresses grouped by To/Cc/Bcc/Reply-To plus the full date.
+- **UI:** a full-width summary line under the sender — `to me, Priya · cc Daniel` (first names; "me" when the address is the account) — `data-testid="recipient-summary"`. Click toggles `data-testid="recipient-details"`: full addresses grouped by To/Cc/Bcc/Reply-To plus the full date; the control blurs after click so keyboard navigation continues.
 - Bcc reality (document in a comment + PR body): Gmail only exposes Bcc on the user's *own sent copies* — other senders' Bcc never exists in the payload.
 - Seed fixture: add `cc` to at least one message (extend the loader's fixture shape + conversion).
 
 ### Part D — Attachments: display + download
 
-- **`parse.ts`:** `collectAttachments(payload): { attachmentId, filename, mimeType, sizeBytes }[]` — parts with a non-empty `filename` and `body.attachmentId` (same user-visible criterion as `hasAttachment`). Store in `attachments_json` (v5); expose on `ConversationMsg`.
-- **Message card:** chips row — filename + human-readable size, `data-testid="attachment-chip"`.
-- **IPC (all three layers):** `mail:downloadAttachment({ messageId, attachmentId, filename })` → main process: requires a live signed-in client; `GET /messages/{id}/attachments/{attachmentId}`, decode base64url, write to `app.getPath('downloads')` with collision-safe naming (`name (2).ext`), then `shell.showItemInFolder`, return `{ path }` or `{ error }`.
-- **Filename is untrusted input crossing to the filesystem** — sanitize before writing: strip path separators and control characters, refuse empty/dot-only names. This is a security boundary, treat it like the iframe.
-- Seeded/offline behavior: return `{ error }` → toast "Attachments download when signed in". e2e asserts chips render and the offline toast appears; a real download is manual smoke.
+- **`parse.ts`:** `collectAttachments(payload): { attachmentId, filename, mimeType, sizeBytes, inlineData? }[]` — parts with a non-empty `filename` and either `body.attachmentId` or inline `body.data` (the same user-visible criterion drives `hasAttachment`). Inline parts receive a stable local `inline:<partId/path>` ID and derive their size from decoded bytes when Gmail omits it. Store in `attachments_json` (v5), but strip `inlineData` from `ConversationMsg` so raw bytes never cross into the renderer.
+- **Message card:** filename + human-readable size chips render inside the same body surface (`data-testid="attachment-chip"`) and blur after click.
+- **IPC (all three layers):** `mail:downloadAttachment({ messageId, attachmentId, filename })` → main process first looks for locally stored inline bytes; otherwise it requires a live signed-in client and calls `GET /messages/{id}/attachments/{attachmentId}`. Decode base64url, write to `app.getPath('downloads')` with collision-safe naming (`name (2).ext`), then `shell.showItemInFolder`, return `{ path }` or `{ error }`.
+- **Filename is untrusted input crossing to the filesystem** — normalize it; strip path separators, control characters, and invalid Windows punctuation; reject empty/dot-only names; and prefix Windows device stems (`CON`, `NUL`, `PRN`, `COM1`…`LPT9`). This is a security boundary, treat it like the iframe.
+- Seeded/offline behavior: locally delivered inline attachments remain downloadable; an uncached/out-of-line attachment returns `{ error }` → toast "Attachments download when signed in". e2e asserts chips render and the offline toast appears; a real out-of-line download is manual smoke.
 - `cid:` inline images in HTML mail remain broken-image placeholders (existing accepted deviation).
 
 ### Part E — Quote & signature auto-collapse
 
-- **New pure module** `src/renderer/src/mailTrim.ts`: `findTrimIndex(text): number | null` — first match wins: `\n-- \n` (RFC sig delimiter); `/^On .{0,200} wrote:\s*$/m`; a trailing run of `> `-prefixed lines; common mobile signatures ("Sent from my iPhone/Android/Galaxy…"). Guard: if the remainder before the trim point is under one line, return null (never collapse a message to nothing).
-- **HTML path:** after sanitize, when collapsed inject srcdoc CSS hiding `.gmail_quote`, `.gmail_signature`, `blockquote[type="cite"]`; expanding re-renders the srcdoc without that CSS (height re-measures via the existing observer). Only show the toggle if the selectors actually matched (probe with a `DOMParser` pass before building srcdoc).
-- **UI:** `•••` button at the card's bottom edge when anything is hidden — `data-testid="mail-trim-toggle"`; per-message state, default collapsed, expansion instant (no network).
-- Unit tests (vitest, pure): sig only, quote trail only, both, neither, all-quote pathological case, `-- ` mid-line non-delimiter.
+- **Pure module** `src/renderer/src/mailTrim.ts`: `findTrimIndex(text): number | null` — earliest match wins: `\n-- \n` (the delimiter is part of the hidden signature); `/^On .{0,200} wrote:\s*$/m`; a trailing run of `>`-prefixed lines found by a reverse line scan; common mobile signatures ("Sent from my iPhone/Android/Galaxy…"). Never use a nested-quantifier regex for the quote run: parsing must stay linear for bottom-posted replies with thousands of quoted lines. Guard: if no authored content exists before the boundary, return null (never collapse a message to nothing).
+- **HTML path:** sanitize once and keep one stable `srcDoc`. Probe for `.gmail_quote`, `.gmail_signature_prefix`, `.gmail_signature`, or `blockquote[type="cite"]`; insert a fixed-height marker immediately before the first match only when renderable content exists before it. Collapse by sizing the iframe to the marker boundary and expand by restoring its measured full height — do not rebuild/remount the frame. Horizontal overflow stays inside the frame and contributes scrollbar height to measurement.
+- **UI:** a regular-font `...` button sits inline at the trim boundary inside the white body surface (`data-testid="mail-trim-toggle"`). It stays at exactly the same position expanded or collapsed; clicking again collapses and removes the extra gap. Attachment chips remain below it in the same surface.
+- Unit tests (vitest, pure): signature delimiter, quote trail, both, neither, all-quote pathological case, `-- ` mid-line non-delimiter, and a large mid-message quote run that proves linear behavior.
 
 ### Part F — Dev-store note
 
-The v5 columns populate only for newly synced mail. Dev machines: sign out and delete the local DB (or wipe the userData dir) to re-backfill with recipients/attachments/HTML. Seeded e2e is unaffected (fixtures import fresh every run). Say this in the PR body; no migration-backfill machinery at this stage.
+The v5 columns populate only for newly synced mail, and this task intentionally does not append v6. Dev machines already stamped v5 must sign out, delete the local DB (or wipe the userData dir), and re-sync recipients/attachments/HTML. Seeded e2e is unaffected (fixtures import fresh every run). This is an explicit development-only choice, not a precedent for production migrations.
 
 ### Testing (rollup)
 
-- **e2e:** updated smoke/triage/seeded specs (pane semantics); `html-mail.spec.ts` per the T2 contract; new `reading.spec.ts` — recipient summary + details toggle, attachment chips + offline toast, trim toggle collapsed by default and expanding (seed a message with a signature *and* a quoted trail).
-- **Unit:** `parseAddressList`, `collectAttachments` (payload-walk fixtures), `findTrimIndex`.
+- **e2e:** updated smoke/triage/seeded specs (pane semantics); `html-mail.spec.ts` per the T2 contract; new `reading.spec.ts` covers full-width recipients, attachment chips + offline toast, simple-HTML padding/fallback contrast, an all-quote HTML guard, stable expand/collapse position, stable scrollbar gutter, pane focus, iframe key forwarding, post-click keyboard continuity, modifier-arrow behavior, and the responsive reading width.
+- **Unit:** `parseAddressList`, remote + inline `collectAttachments` (payload-walk fixtures), `findTrimIndex` including the linear-time regression, and cross-platform attachment filename sanitization.
 - **Screenshots:** `inbox.png` (full-width list) and a new `reading.png` (pane open on the hostile-HTML thread) — look at both, per global rule 6.
 - **Manual smoke, signed in:** a real HTML newsletter renders; an attachment downloads and reveals; recipients expand on a group thread; a real Gmail reply chain collapses its quote + signature.
 
 ### Done when
 
-- All parts land in **one green PR** (staged commits A→E, `npm run verify` green at the end); PR #7 retitled "Reading experience overhaul", un-drafted, description updated.
-- SPEC v0.8 F3 acceptance criteria demonstrably hold (pane semantics, recipients inspectable, attachment download, safe collapse).
-- Migration v5 is the *only* new migration and sits at index 5 on the rebased branch.
-- The status table at the top of this document is updated in the same PR; both screenshots reviewed.
+- Implementation and review fixes are present in **PR #11**; `npm run verify` is green at `17d881b` (25 unit tests, build, and 23 Electron e2e tests). Removing draft status and merging are the remaining project-state gates.
+- SPEC v0.9 F3 acceptance criteria demonstrably hold (pane/focus semantics, recipients inspectable, remote + inline attachment discovery, and safe/stable collapse).
+- Migration v5 is the only T11 schema entry; the required dev-DB wipe is documented instead of compatibility work.
+- The status table is updated, and `inbox.png`, `reading.png`, and `simple-mail.png` were reviewed.
 
 ---
 
@@ -577,7 +577,7 @@ The v5 columns populate only for newly synced mail. Dev machines: sign out and d
 | `matchKey` drops all Ctrl/Alt/Meta chords, so AltGr-layout keys can't trigger verbs (AZERTY `#` = AltGr+3 = Ctrl+Alt on Windows) | T3 | M3 — F5 palette / configurable keybindings |
 | Executor broadcasts `mail:changed` once per drained row (no batching) | T3 | T10 perf data, if large-queue drains show up |
 | HTML mail renders on a white card in dark theme | T11 | F14 at M3 (sanitize/invert) |
-| Attachment download requires a live signed-in connection (no blob caching); seeded/offline shows an explanatory toast | T11 | M2+ if offline attachment access proves needed |
+| Out-of-line attachment download requires a live signed-in connection; inline-delivered bytes are cached locally, while uncached seeded/offline downloads show an explanatory toast | T11 | M2+ if general offline attachment caching proves needed |
 | Windows numeric badge overlay is a static dot | T9 | M4 packaging polish |
 | Notifications cover all INBOX mail (no split filtering) | T9 | M3 (F11 splits) |
 | 90-day body window / on-demand older bodies not enforced (full bodies within 12-month window) | T7 | M3 (bodies table + FTS5 split) |
