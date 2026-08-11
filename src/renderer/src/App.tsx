@@ -132,6 +132,37 @@ function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
   )
 }
 
+interface ShortcutHint {
+  id: string
+  keys: string[]
+  label: string
+}
+
+const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
+  { id: 'done', keys: ['E'], label: 'done' },
+  { id: 'trash', keys: ['#'], label: 'trash' },
+  { id: 'star', keys: ['S'], label: 'star' },
+  { id: 'unread', keys: ['U'], label: 'unread' },
+  { id: 'spam', keys: ['!'], label: 'spam' },
+  { id: 'undo', keys: ['Z'], label: 'undo' }
+]
+
+function FooterShortcut({ id, keys, label }: ShortcutHint): React.JSX.Element {
+  return (
+    <span data-testid={`footer-shortcut-${id}`} className="flex items-center gap-1.5 whitespace-nowrap">
+      <span className="flex items-center gap-0.5">
+        {keys.map((key, index) => (
+          <span key={key} className="contents">
+            {index > 0 && <span aria-hidden>/</span>}
+            <Kbd>{key}</Kbd>
+          </span>
+        ))}
+      </span>
+      {label}
+    </span>
+  )
+}
+
 function firstName(address: MailAddress, account: string | null): string {
   if (account && address.email.toLowerCase() === account.toLowerCase()) return 'me'
   if (address.name.toLowerCase() === 'me' || address.email.toLowerCase() === 'you') return 'me'
@@ -798,6 +829,20 @@ export default function App(): React.JSX.Element {
         ? (realUnreadTotal ?? 0)
         : visibleUnreadTotal - mockReadTotal
 
+  const footerShortcuts: ShortcutHint[] = [
+    ...(paneOpen
+      ? [
+          { id: 'scroll', keys: ['↑', '↓'], label: 'scroll' },
+          { id: 'navigate', keys: ['J', 'K'], label: 'next / prev' },
+          { id: 'close', keys: ['Esc'], label: 'close' }
+        ]
+      : [
+          { id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate' },
+          { id: 'open', keys: ['Enter'], label: 'open' }
+        ]),
+    ...TRIAGE_SHORTCUT_HINTS
+  ]
+
   const statusNote =
     sync.phase === 'syncing'
       ? `syncing… ${sync.threadsDone} threads`
@@ -1010,28 +1055,14 @@ export default function App(): React.JSX.Element {
       )}
 
       <footer className="relative z-40 flex items-center gap-4 border-t border-edge bg-ground px-6 py-2 text-xs text-ink-faint">
-        {paneOpen ? (
-          <>
-            <span>
-              <Kbd>J</Kbd>/<Kbd>K</Kbd> next / prev
-            </span>
-            <span>
-              <Kbd>Esc</Kbd> close
-            </span>
-          </>
-        ) : (
-          <>
-            <span>
-              <Kbd>J</Kbd>/<Kbd>K</Kbd> navigate
-            </span>
-            <span>
-              <Kbd>Enter</Kbd> open
-            </span>
-          </>
-        )}
+        <div data-testid="footer-shortcuts" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+          {footerShortcuts.map((shortcut) => (
+            <FooterShortcut key={shortcut.id} {...shortcut} />
+          ))}
+        </div>
         <span
           data-testid="status-note"
-          className={`ml-auto font-medium ${sync.phase === 'error' ? 'text-danger' : ''}`}
+          className={`ml-auto flex-none font-medium ${sync.phase === 'error' ? 'text-danger' : ''}`}
           title={statusNote}
         >
           {statusNote}
