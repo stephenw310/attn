@@ -7,6 +7,7 @@ import {
   header,
   parseAddress
 } from '../gmail/parse'
+import { replayPendingThreadDeltas } from '../store/replay'
 
 export interface LabelRow {
   id: string
@@ -124,4 +125,5 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
     clearLabels.run(accountId, thread.id)
     for (const label of labelUnion) insertLabel.run(accountId, thread.id, label)
   })()
+  replayPendingThreadDeltas(db, accountId, thread.id)
 }

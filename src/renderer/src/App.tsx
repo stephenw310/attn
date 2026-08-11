@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { TriageAction } from '../../shared/actions'
 import type { AuthStatus } from '../../shared/auth'
 import type { Conversation, SyncState, ThreadRow } from '../../shared/mail'
+import { matchKey, registerCommands } from './commands'
 import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
 
@@ -93,7 +95,7 @@ function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
   )
 }
 
-function QueueReadout({ unread }: { unread: number | null }): React.JSX.Element {
+function QueueReadout({ unread, pending }: { unread: number | null; pending: number }): React.JSX.Element {
   const lit = Math.min(unread ?? 0, 10)
   return (
     <div data-testid="queue-readout" className="flex items-center gap-3 text-xs text-ink-faint">
@@ -112,6 +114,7 @@ function QueueReadout({ unread }: { unread: number | null }): React.JSX.Element 
       ) : (
         <span className="font-medium">at zero</span>
       )}
+      {pending > 0 && <span data-testid="pending-count">· {pending} pending</span>}
     </div>
   )
 }
@@ -268,10 +271,14 @@ export default function App(): React.JSX.Element {
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [overlayOpen, setOverlayOpen] = useState(false)
-  const [readIds, setReadIds] = useState<ReadonlySet<string>>(new Set())
+  const [pendingCount, setPendingCount] = useState(0)
+  const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
+  const [toast, setToast] = useState<string | null>(null)
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const convCache = useRef(new Map<string, DisplayConversation>())
+  const autoReadThreadRef = useRef<string | null>(null)
+  const toastTokenRef = useRef(0)
 
   const activeAccount = status?.signedIn ? (status.email ?? null) : null
   const realMode = Boolean(attn && status?.signedIn)
@@ -298,7 +305,8 @@ export default function App(): React.JSX.Element {
     setRealUnreadTotal(null)
     setSelectedIndex(0)
     setOverlayOpen(false)
-    setReadIds(new Set())
+    setPendingCount(0)
+    setMockReadIds(new Set())
     setConversation(null)
     convCache.current.clear()
 
@@ -306,11 +314,16 @@ export default function App(): React.JSX.Element {
     let cancelled = false
     const refresh = (): void => {
       convCache.current.clear()
-      void Promise.all([attn.mail.listThreads(), attn.mail.getUnreadCount()])
-        .then(([nextThreads, nextUnreadTotal]) => {
+      void Promise.all([
+        attn.mail.listThreads(),
+        attn.mail.getUnreadCount(),
+        attn.mail.getPendingActionCount()
+      ])
+        .then(([nextThreads, nextUnreadTotal, nextPendingCount]) => {
           if (cancelled) return
           setRealThreads(nextThreads)
           setRealUnreadTotal(nextUnreadTotal)
+          setPendingCount(nextPendingCount)
         })
         .catch(() => {})
     }
@@ -340,7 +353,7 @@ export default function App(): React.JSX.Element {
     // NOTE(M1 incremental sync): if a refresh removes the open thread, this
     // clamp shifts selection and an open overlay would jump to a different
     // conversation. Revisit when mail:changed can fire mid-read.
-    setSelectedIndex((i) => Math.min(i, Math.max(threads.length - 1, 0)))
+    setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
     if (threads.length === 0) setOverlayOpen(false)
   }, [threads.length])
 
@@ -392,11 +405,133 @@ export default function App(): React.JSX.Element {
     }
   }, [selectedIndex, threads, realMode])
 
-  const markRead = useCallback((id: string) => {
-    setReadIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+  const showToast = useCallback((message: string) => {
+    const token = ++toastTokenRef.current
+    setToast(message)
+    window.setTimeout(() => {
+      if (toastTokenRef.current === token) setToast(null)
+    }, 4000)
   }, [])
 
+  const triage = useCallback(
+    (action: TriageAction) => {
+      if (!realMode || !attn) return
+      void attn.mail
+        .triage(action)
+        .then((result) => showToast(result.label))
+        .catch(() => {})
+    },
+    [realMode, showToast]
+  )
+
+  const openSelected = useCallback(() => {
+    const thread = threads[selectedIndex]
+    if (!thread) return
+    setOverlayOpen(true)
+  }, [selectedIndex, threads])
+
   useEffect(() => {
+    if (!overlayOpen) {
+      autoReadThreadRef.current = null
+      return
+    }
+    if (!selected || autoReadThreadRef.current === selected.id) return
+    autoReadThreadRef.current = selected.id
+    if (!selected.unread) return
+    if (realMode) {
+      void attn?.mail.markReadOnOpen(selected.id).catch(() => {})
+    } else {
+      setMockReadIds((current) => (current.has(selected.id) ? current : new Set(current).add(selected.id)))
+    }
+  }, [overlayOpen, realMode, selected])
+
+  useLayoutEffect(
+    () =>
+      registerCommands([
+        {
+          id: 'navigate.next',
+          title: 'Next conversation',
+          shortcut: 'j',
+          context: overlayOpen ? 'overlay' : 'list',
+          run: () => setSelectedIndex((i) => Math.min(i + 1, Math.max(threads.length - 1, 0)))
+        },
+        {
+          id: 'navigate.previous',
+          title: 'Previous conversation',
+          shortcut: 'k',
+          context: overlayOpen ? 'overlay' : 'list',
+          run: () => setSelectedIndex((i) => Math.max(i - 1, 0))
+        },
+        {
+          id: 'conversation.open',
+          title: 'Open conversation',
+          shortcut: 'Enter',
+          context: 'list',
+          run: openSelected
+        },
+        {
+          id: 'conversation.close',
+          title: 'Close conversation',
+          shortcut: 'Escape',
+          context: 'overlay',
+          run: () => setOverlayOpen(false)
+        },
+        {
+          id: 'triage.archive',
+          title: 'Mark done',
+          shortcut: 'e',
+          context: overlayOpen ? 'overlay' : 'list',
+          run: () => selected && triage({ kind: 'archive', threadIds: [selected.id] })
+        },
+        {
+          id: 'triage.trash',
+          title: 'Move to trash',
+          shortcut: '#',
+          context: overlayOpen ? 'overlay' : 'list',
+          run: () => selected && triage({ kind: 'trash', threadIds: [selected.id] })
+        },
+        {
+          id: 'triage.spam',
+          title: 'Mark as spam',
+          shortcut: '!',
+          context: overlayOpen ? 'overlay' : 'list',
+          run: () => selected && triage({ kind: 'spam', threadIds: [selected.id] })
+        },
+        {
+          id: 'triage.star',
+          title: selected?.starred ? 'Unstar' : 'Star',
+          shortcut: 's',
+          context: overlayOpen ? 'overlay' : 'list',
+          run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: !selected.starred })
+        },
+        {
+          id: 'triage.unread',
+          title: selected?.unread ? 'Mark read' : 'Mark unread',
+          shortcut: 'u',
+          context: overlayOpen ? 'overlay' : 'list',
+          run: () =>
+            selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: !selected.unread })
+        },
+        {
+          id: 'triage.undo',
+          title: 'Undo',
+          shortcut: 'z',
+          context: 'global',
+          run: () => {
+            if (!realMode || !attn) return
+            void attn.mail
+              .undo()
+              .then((result) => {
+                if (result) showToast(result.label)
+              })
+              .catch(() => {})
+          }
+        }
+      ]),
+    [openSelected, overlayOpen, realMode, selected, showToast, threads.length, triage]
+  )
+
+  useLayoutEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
       const target = e.target as HTMLElement | null
       if (
@@ -408,61 +543,14 @@ export default function App(): React.JSX.Element {
       ) {
         return
       }
-      if (threads.length === 0) return
-
-      const clamp = (i: number): number => Math.min(Math.max(i, 0), threads.length - 1)
-
-      if (overlayOpen) {
-        switch (e.key) {
-          case 'j':
-          case 'ArrowDown': {
-            e.preventDefault()
-            const next = clamp(selectedIndex + 1)
-            setSelectedIndex(next)
-            markRead(threads[next].id)
-            break
-          }
-          case 'k':
-          case 'ArrowUp': {
-            e.preventDefault()
-            const prev = clamp(selectedIndex - 1)
-            setSelectedIndex(prev)
-            markRead(threads[prev].id)
-            break
-          }
-          case 'Escape':
-            e.preventDefault()
-            setOverlayOpen(false)
-            break
-        }
-        return
-      }
-
-      switch (e.key) {
-        case 'j':
-        case 'ArrowDown':
-          e.preventDefault()
-          setSelectedIndex(clamp(selectedIndex + 1))
-          break
-        case 'k':
-        case 'ArrowUp':
-          e.preventDefault()
-          setSelectedIndex(clamp(selectedIndex - 1))
-          break
-        case 'Enter': {
-          e.preventDefault()
-          const t = threads[selectedIndex]
-          if (t) {
-            markRead(t.id)
-            setOverlayOpen(true)
-          }
-          break
-        }
-      }
+      const command = matchKey(e, overlayOpen ? 'overlay' : 'list')
+      if (!command) return
+      e.preventDefault()
+      command.run()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedIndex, threads, overlayOpen, markRead])
+  }, [overlayOpen])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
@@ -470,11 +558,13 @@ export default function App(): React.JSX.Element {
   }, [selectedIndex])
 
   const visibleUnreadTotal = threads.filter((t) => t.unread).length
-  const locallyReadTotal = threads.filter((t) => t.unread && readIds.has(t.id)).length
+  const mockReadTotal = threads.filter((t) => t.unread && mockReadIds.has(t.id)).length
   const unreadCount =
     realMode && realUnreadTotal === null
       ? null
-      : Math.max(0, (realMode ? (realUnreadTotal ?? 0) : visibleUnreadTotal) - locallyReadTotal)
+      : realMode
+        ? (realUnreadTotal ?? 0)
+        : visibleUnreadTotal - mockReadTotal
 
   const statusNote =
     sync.phase === 'syncing'
@@ -511,7 +601,7 @@ export default function App(): React.JSX.Element {
           </button>
         </nav>
         <div className="app-no-drag ml-auto flex items-center gap-4">
-          <QueueReadout unread={unreadCount} />
+          <QueueReadout unread={unreadCount} pending={pendingCount} />
           <div data-testid="account-menu">
             <AccountMenu status={status} onStatus={setStatus} />
           </div>
@@ -526,7 +616,7 @@ export default function App(): React.JSX.Element {
         )}
         {threads.map((t, i) => {
           const isSelected = i === selectedIndex
-          const isUnread = t.unread && !readIds.has(t.id)
+          const isUnread = t.unread && !mockReadIds.has(t.id)
           return (
             // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
             // biome-ignore lint/a11y/noStaticElementInteractions: same — row selection is driven by the app-level key handler, not per-row focus
@@ -542,7 +632,6 @@ export default function App(): React.JSX.Element {
               onClick={() => setSelectedIndex(i)}
               onDoubleClick={() => {
                 setSelectedIndex(i)
-                markRead(t.id)
                 setOverlayOpen(true)
               }}
             >
@@ -632,6 +721,15 @@ export default function App(): React.JSX.Element {
             </div>
           </div>
         </>
+      )}
+
+      {toast && (
+        <div
+          data-testid="toast"
+          className="fixed bottom-12 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-edge bg-raised px-4 py-2 text-sm text-ink shadow-lg"
+        >
+          {toast}
+        </div>
       )}
 
       <footer className="relative z-40 flex items-center gap-4 border-t border-edge bg-ground px-6 py-2 text-xs text-ink-faint">
