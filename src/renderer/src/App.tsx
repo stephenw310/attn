@@ -6,9 +6,11 @@ import type {
   MailAddress,
   MessageAttachment,
   MessageRecipients,
+  SnoozedThreadRow,
   SyncState,
   ThreadRow
 } from '../../shared/mail'
+import { formatSnoozeDate, parseSnoozeText, snoozePresets } from '../../shared/snooze'
 import { matchKey, registerCommands } from './commands'
 import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
@@ -22,6 +24,8 @@ interface DisplayThread {
   unread: boolean
   starred: boolean
   hasAttachment: boolean
+  returned: boolean
+  dueAt?: number
 }
 
 interface DisplayMsg {
@@ -78,8 +82,13 @@ function fromThreadRow(r: ThreadRow): DisplayThread {
     at: formatTime(r.lastMsgAt),
     unread: r.unread,
     starred: r.starred,
-    hasAttachment: r.hasAttachment
+    hasAttachment: r.hasAttachment,
+    returned: r.returned
   }
+}
+
+function fromSnoozedThreadRow(r: SnoozedThreadRow): DisplayThread {
+  return { ...fromThreadRow(r), dueAt: r.dueAt }
 }
 
 function displayFromReal(c: Conversation): DisplayConversation {
@@ -132,6 +141,38 @@ function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
   )
 }
 
+function ReminderChips({
+  thread,
+  compact = false
+}: {
+  thread: DisplayThread
+  compact?: boolean
+}): React.JSX.Element {
+  return (
+    <>
+      {thread.returned && (
+        <span
+          data-testid="chip-returned"
+          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
+        >
+          Returned
+        </span>
+      )}
+      {thread.dueAt !== undefined && (
+        <span
+          data-testid="chip-snooze-due"
+          title={formatSnoozeDate(thread.dueAt)}
+          className={`rounded-full border border-edge px-2 py-0.5 text-ink-dim ${
+            compact ? 'max-w-32 overflow-hidden text-ellipsis whitespace-nowrap' : ''
+          }`}
+        >
+          {formatSnoozeDate(thread.dueAt)}
+        </span>
+      )}
+    </>
+  )
+}
+
 interface ShortcutHint {
   id: string
   keys: string[]
@@ -140,6 +181,7 @@ interface ShortcutHint {
 
 const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
   { id: 'done', keys: ['E'], label: 'done' },
+  { id: 'snooze', keys: ['H'], label: 'snooze' },
   { id: 'trash', keys: ['#'], label: 'trash' },
   { id: 'star', keys: ['S'], label: 'star' },
   { id: 'unread', keys: ['U'], label: 'unread' },
@@ -598,6 +640,151 @@ function AccountMenu({
   )
 }
 
+function SnoozePicker({
+  onCancel,
+  onConfirm,
+  onUnsnooze
+}: {
+  onCancel: () => void
+  onConfirm: (dueAt: number) => void
+  onUnsnooze?: () => void
+}): React.JSX.Element {
+  const [custom, setCustom] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const dialogRef = useRef<HTMLElement | null>(null)
+  const presets = useMemo(() => snoozePresets(), [])
+  const parsedCustom = useMemo(() => parseSnoozeText(custom), [custom])
+  const optionCount = presets.length + (onUnsnooze ? 1 : 0)
+
+  useEffect(() => {
+    dialogRef.current?.focus()
+  }, [])
+
+  const runActiveOption = (): void => {
+    const preset = presets[activeIndex]
+    if (preset) onConfirm(preset.dueAt)
+    else if (onUnsnooze) onUnsnooze()
+  }
+
+  return (
+    <>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled by the app-level picker guard */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is the pointer dismissal path */}
+      <div className="fixed inset-0 z-50 bg-[rgba(8,9,11,0.72)]" onClick={onCancel} />
+      <section
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="snooze-title"
+        data-testid="snooze-picker"
+        tabIndex={-1}
+        className="fixed top-1/2 left-1/2 z-[60] w-[min(430px,90vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-edge bg-raised p-3 shadow-[0_24px_64px_rgba(0,0,0,0.65)] focus:outline-none"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+            return
+          }
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            event.currentTarget.focus()
+            const direction = event.key === 'ArrowDown' ? 1 : -1
+            setActiveIndex((index) => (index + direction + optionCount) % optionCount)
+            return
+          }
+          if (event.key === 'Enter' && event.target === event.currentTarget) {
+            event.preventDefault()
+            runActiveOption()
+          }
+        }}
+      >
+        <div className="px-2 pt-1 pb-2">
+          <h2 id="snooze-title" className="text-base font-semibold">
+            Remind me later
+          </h2>
+          <p className="mt-0.5 text-xs text-ink-faint">Choose when this conversation returns.</p>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          {presets.map((preset, index) => (
+            <button
+              key={preset.id}
+              type="button"
+              data-testid={`snooze-preset-${preset.id}`}
+              data-active={activeIndex === index || undefined}
+              tabIndex={-1}
+              className={`flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm hover:bg-active ${
+                activeIndex === index ? 'bg-active text-ink' : ''
+              }`}
+              onClick={() => onConfirm(preset.dueAt)}
+              onMouseEnter={() => setActiveIndex(index)}
+            >
+              <span>{preset.label}</span>
+              <span className="text-xs text-ink-faint">{formatSnoozeDate(preset.dueAt)}</span>
+            </button>
+          ))}
+        </div>
+        {onUnsnooze && (
+          <div className="mt-2 border-t border-edge pt-2">
+            <button
+              type="button"
+              data-testid="snooze-unsnooze"
+              data-active={activeIndex === presets.length || undefined}
+              tabIndex={-1}
+              className={`flex w-full cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm hover:bg-active ${
+                activeIndex === presets.length ? 'bg-active text-ink' : ''
+              }`}
+              onClick={onUnsnooze}
+              onMouseEnter={() => setActiveIndex(presets.length)}
+            >
+              <span>Unsnooze</span>
+              <span className="text-xs text-ink-faint">Return to inbox now</span>
+            </button>
+          </div>
+        )}
+        <div className="mt-2 border-t border-edge px-2 pt-3 pb-1">
+          <label htmlFor="snooze-custom" className="text-xs font-medium text-ink-dim">
+            Custom time
+          </label>
+          <div className="mt-1.5 flex gap-2">
+            <input
+              id="snooze-custom"
+              data-testid="snooze-input"
+              value={custom}
+              placeholder="thu 2pm or in 3 days"
+              className="min-w-0 flex-1 rounded-lg border border-edge bg-ground px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+              onChange={(event) => setCustom(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onCancel()
+                }
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  if (parsedCustom !== null) onConfirm(parsedCustom)
+                }
+              }}
+            />
+            <button
+              type="button"
+              data-testid="snooze-custom-confirm"
+              disabled={parsedCustom === null}
+              className="cursor-pointer rounded-lg bg-accent px-3 text-sm font-semibold text-ground disabled:cursor-default disabled:opacity-35"
+              onClick={() => parsedCustom !== null && onConfirm(parsedCustom)}
+            >
+              Snooze
+            </button>
+          </div>
+          <div data-testid="snooze-resolved" className="mt-1.5 min-h-4 text-xs text-ink-faint">
+            {parsedCustom !== null && formatSnoozeDate(parsedCustom)}
+          </div>
+        </div>
+      </section>
+    </>
+  )
+}
+
 // The preload bridge is injected before renderer modules evaluate, so this is
 // safe to read once at module scope (undefined in the plain-browser preview).
 const attn = window.attn
@@ -606,9 +793,12 @@ export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
+  const [realSnoozedThreads, setRealSnoozedThreads] = useState<SnoozedThreadRow[] | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
+  const [view, setView] = useState<'inbox' | 'snoozed'>('inbox')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [paneOpen, setPaneOpen] = useState(false)
+  const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
@@ -618,6 +808,7 @@ export default function App(): React.JSX.Element {
   const convCache = useRef(new Map<string, DisplayConversation>())
   const autoReadThreadRef = useRef<string | null>(null)
   const toastTokenRef = useRef(0)
+  const goChordUntilRef = useRef(0)
 
   const activeAccount = status?.signedIn ? (status.email ?? null) : null
   const realMode = Boolean(attn && status?.signedIn)
@@ -641,9 +832,11 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     setRealThreads(null)
+    setRealSnoozedThreads(null)
     setRealUnreadTotal(null)
     setSelectedIndex(0)
     setPaneOpen(false)
+    setSnoozeOpen(false)
     setPendingCount(0)
     setMockReadIds(new Set())
     setConversation(null)
@@ -655,12 +848,14 @@ export default function App(): React.JSX.Element {
       convCache.current.clear()
       void Promise.all([
         attn.mail.listThreads(),
+        attn.mail.listSnoozed(),
         attn.mail.getUnreadCount(),
         attn.mail.getPendingActionCount()
       ])
-        .then(([nextThreads, nextUnreadTotal, nextPendingCount]) => {
+        .then(([nextThreads, nextSnoozed, nextUnreadTotal, nextPendingCount]) => {
           if (cancelled) return
           setRealThreads(nextThreads)
+          setRealSnoozedThreads(nextSnoozed)
           setRealUnreadTotal(nextUnreadTotal)
           setPendingCount(nextPendingCount)
         })
@@ -675,7 +870,12 @@ export default function App(): React.JSX.Element {
   }, [activeAccount])
 
   const threads: DisplayThread[] = useMemo(() => {
-    if (realMode) return (realThreads ?? []).map(fromThreadRow)
+    if (realMode) {
+      return view === 'inbox'
+        ? (realThreads ?? []).map(fromThreadRow)
+        : (realSnoozedThreads ?? []).map(fromSnoozedThreadRow)
+    }
+    if (view === 'snoozed') return []
     return mockThreads.map((t) => ({
       id: t.id,
       from: t.from,
@@ -684,9 +884,10 @@ export default function App(): React.JSX.Element {
       at: t.at,
       unread: t.unread,
       starred: t.starred ?? false,
-      hasAttachment: t.hasAttachment ?? false
+      hasAttachment: t.hasAttachment ?? false,
+      returned: false
     }))
-  }, [realMode, realThreads])
+  }, [realMode, realSnoozedThreads, realThreads, view])
 
   useEffect(() => {
     // NOTE(M1 incremental sync): if a refresh removes the open thread, this
@@ -752,6 +953,13 @@ export default function App(): React.JSX.Element {
     }, 4000)
   }, [])
 
+  const switchView = useCallback((next: 'inbox' | 'snoozed') => {
+    setView(next)
+    setSelectedIndex(0)
+    setPaneOpen(false)
+    setSnoozeOpen(false)
+  }, [])
+
   const triage = useCallback(
     (action: TriageAction) => {
       if (!realMode || !attn) return
@@ -769,6 +977,24 @@ export default function App(): React.JSX.Element {
     setPaneOpen(true)
   }, [selectedIndex, threads])
 
+  const snoozeSelected = useCallback(
+    (dueAt: number) => {
+      if (!realMode || !attn || !selected) return
+      setSnoozeOpen(false)
+      void attn.mail
+        .snooze([selected.id], dueAt)
+        .then((result) => showToast(result.label))
+        .catch(() => {})
+    },
+    [realMode, selected, showToast]
+  )
+
+  const unsnoozeSelected = useCallback(() => {
+    if (!selected) return
+    setSnoozeOpen(false)
+    triage({ kind: 'unsnooze', threadIds: [selected.id] })
+  }, [selected, triage])
+
   useEffect(() => {
     if (!paneOpen) {
       autoReadThreadRef.current = null
@@ -776,10 +1002,9 @@ export default function App(): React.JSX.Element {
     }
     if (!selected || autoReadThreadRef.current === selected.id) return
     autoReadThreadRef.current = selected.id
-    if (!selected.unread) return
     if (realMode) {
       void attn?.mail.markReadOnOpen(selected.id).catch(() => {})
-    } else {
+    } else if (selected.unread) {
       setMockReadIds((current) => (current.has(selected.id) ? current : new Set(current).add(selected.id)))
     }
   }, [paneOpen, realMode, selected])
@@ -839,6 +1064,13 @@ export default function App(): React.JSX.Element {
           run: () => selected && triage({ kind: 'archive', threadIds: [selected.id] })
         },
         {
+          id: 'triage.snooze',
+          title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later',
+          shortcut: 'h',
+          context: 'list',
+          run: () => selected && setSnoozeOpen(true)
+        },
+        {
           id: 'triage.trash',
           title: 'Move to trash',
           shortcut: '#',
@@ -883,11 +1115,18 @@ export default function App(): React.JSX.Element {
           }
         }
       ]),
-    [openSelected, paneOpen, realMode, selected, showToast, threads.length, triage]
+    [openSelected, paneOpen, realMode, selected, showToast, threads.length, triage, view]
   )
 
   useLayoutEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
+      if (snoozeOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setSnoozeOpen(false)
+        }
+        return
+      }
       const target = e.target as HTMLElement | null
       const isTextEntry =
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
@@ -909,6 +1148,20 @@ export default function App(): React.JSX.Element {
       if (target && target.tagName === 'BUTTON') {
         return
       }
+      const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey
+      const key = e.key.toLowerCase()
+      if (plainKey && Date.now() <= goChordUntilRef.current && (key === 'h' || key === 'i')) {
+        e.preventDefault()
+        goChordUntilRef.current = 0
+        switchView(key === 'h' ? 'snoozed' : 'inbox')
+        return
+      }
+      if (plainKey && key === 'g') {
+        e.preventDefault()
+        goChordUntilRef.current = Date.now() + 500
+        return
+      }
+      goChordUntilRef.current = 0
       const command = matchKey(e, 'list')
       if (!command) return
       e.preventDefault()
@@ -916,7 +1169,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [paneOpen])
+  }, [paneOpen, snoozeOpen, switchView])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
@@ -961,15 +1214,30 @@ export default function App(): React.JSX.Element {
         <div className="text-base font-bold tracking-tight">
           attn<span className="text-accent">:</span>
         </div>
+        <div data-testid="view-title" className="text-sm font-semibold text-ink-dim">
+          {view === 'inbox' ? 'Inbox' : 'Snoozed'}
+        </div>
         <nav className="app-no-drag flex gap-1">
           <button
             type="button"
-            className="cursor-pointer rounded-[7px] bg-active px-3 py-1.5 text-[13px] font-medium text-ink"
+            onClick={() => switchView('inbox')}
+            className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
+              view === 'inbox' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
+            }`}
           >
             Important
             {unreadCount !== null && unreadCount > 0 && (
               <span className="ml-1.5 text-xs font-semibold text-accent tabular-nums">{unreadCount}</span>
             )}
+          </button>
+          <button
+            type="button"
+            onClick={() => switchView('snoozed')}
+            className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
+              view === 'snoozed' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
+            }`}
+          >
+            Snoozed
           </button>
           <button
             type="button"
@@ -999,7 +1267,11 @@ export default function App(): React.JSX.Element {
         >
           {threads.length === 0 && (
             <div className="flex h-full items-center justify-center text-ink-faint">
-              {sync.phase === 'syncing' ? 'Syncing your inbox…' : 'Inbox empty'}
+              {sync.phase === 'syncing'
+                ? 'Syncing your inbox…'
+                : view === 'snoozed'
+                  ? 'Nothing snoozed'
+                  : 'Inbox empty'}
             </div>
           )}
           {threads.map((t, i) => {
@@ -1045,6 +1317,7 @@ export default function App(): React.JSX.Element {
                         isUnread ? 'font-medium text-accent' : 'text-ink-faint'
                       }`}
                     >
+                      <ReminderChips thread={t} compact />
                       {t.hasAttachment && <span title="Has attachment">📎</span>}
                       {t.starred && (
                         <span className="text-star" title="Starred">
@@ -1082,6 +1355,7 @@ export default function App(): React.JSX.Element {
                       <span data-testid="thread-snippet"> — {t.snippet}</span>
                     </span>
                     <span className="flex flex-none items-center gap-2.5 text-xs">
+                      <ReminderChips thread={t} />
                       {t.hasAttachment && <span title="Has attachment">📎</span>}
                       {t.starred && (
                         <span className="text-star" title="Starred">
@@ -1145,6 +1419,14 @@ export default function App(): React.JSX.Element {
           </aside>
         )}
       </div>
+
+      {snoozeOpen && selected && (
+        <SnoozePicker
+          onCancel={() => setSnoozeOpen(false)}
+          onConfirm={snoozeSelected}
+          onUnsnooze={view === 'snoozed' ? unsnoozeSelected : undefined}
+        />
+      )}
 
       {toast && (
         <div

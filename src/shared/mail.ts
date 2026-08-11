@@ -9,6 +9,11 @@ export interface ThreadRow {
   unread: boolean
   starred: boolean
   hasAttachment: boolean
+  returned: boolean
+}
+
+export interface SnoozedThreadRow extends ThreadRow {
+  dueAt: number
 }
 
 export interface MailAddress {
