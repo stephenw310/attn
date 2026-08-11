@@ -16,6 +16,58 @@ test('archives with auto-advance and undoes durably', async ({ page }) => {
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
 })
 
+test('selects a range and archives it as one undoable bulk action', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+
+  await rows.nth(2).click({ modifiers: ['Shift'] })
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('selection-count')).toHaveCount(0)
+  await page.keyboard.press('k')
+  await page.keyboard.press('k')
+
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+j')
+  await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+  await expect(rows.nth(0)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(1)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(2)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(2)).toHaveAttribute('data-selected', 'true')
+
+  // Open a read conversation so this assertion isolates selection clearing
+  // from the separate open-marks-read behavior.
+  await page.keyboard.press('k')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('selection-count')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(rows.locator('[data-checked="true"]')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+
+  await page.keyboard.press('k')
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+j')
+  await page.keyboard.press('Shift+j')
+  await page.keyboard.press('e')
+  await expect(rows).toHaveCount(5)
+  await expect(page.getByTestId('selection-count')).toHaveCount(0)
+  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
+  await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(0)
+  await expect(rows.filter({ hasText: 'Your receipt' })).toHaveCount(0)
+  await expect(rows.filter({ hasText: 'Design notes' })).toHaveCount(0)
+
+  await page.keyboard.press('z')
+  await expect(rows).toHaveCount(8)
+  await expect(page.getByTestId('pending-count')).toContainText('6 pending')
+  await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
+  await expect(rows.filter({ hasText: 'Your receipt' })).toHaveCount(1)
+  await expect(rows.filter({ hasText: 'Design notes' })).toHaveCount(1)
+})
+
 test('toggles star and unread, then trashes', async ({ page }) => {
   const first = page.getByTestId('thread-row').first()
   await expect(first).toHaveAttribute('data-unread', 'true')

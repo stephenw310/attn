@@ -608,6 +608,8 @@ export default function App(): React.JSX.Element {
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
+  const [selectionAnchorIndex, setSelectionAnchorIndex] = useState<number | null>(null)
   const [paneOpen, setPaneOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
@@ -643,6 +645,8 @@ export default function App(): React.JSX.Element {
     setRealThreads(null)
     setRealUnreadTotal(null)
     setSelectedIndex(0)
+    setSelectedIds(new Set())
+    setSelectionAnchorIndex(null)
     setPaneOpen(false)
     setPendingCount(0)
     setMockReadIds(new Set())
@@ -693,8 +697,18 @@ export default function App(): React.JSX.Element {
     // clamp shifts selection and an open pane would jump to a different
     // conversation. Revisit when mail:changed can fire mid-read.
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
+    setSelectedIds((current) => {
+      const visibleIds = new Set(threads.map((thread) => thread.id))
+      const next = new Set([...current].filter((id) => visibleIds.has(id)))
+      if (next.size === current.size) return current
+      if (next.size === 0) setSelectionAnchorIndex(null)
+      return next
+    })
+    setSelectionAnchorIndex((anchor) =>
+      anchor === null ? null : Math.max(0, Math.min(anchor, Math.max(threads.length - 1, 0)))
+    )
     if (threads.length === 0) setPaneOpen(false)
-  }, [threads.length])
+  }, [threads])
 
   const selected: DisplayThread | undefined = threads[selectedIndex]
 
@@ -752,15 +766,53 @@ export default function App(): React.JSX.Element {
     }, 4000)
   }, [])
 
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    setSelectionAnchorIndex(null)
+  }, [])
+
+  const toggleFocusedSelection = useCallback(() => {
+    const thread = threads[selectedIndex]
+    if (!thread) return
+    setSelectionAnchorIndex(selectedIndex)
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(thread.id)) next.delete(thread.id)
+      else next.add(thread.id)
+      if (next.size === 0) setSelectionAnchorIndex(null)
+      return next
+    })
+  }, [selectedIndex, threads])
+
+  const extendSelectionTo = useCallback(
+    (nextIndex: number) => {
+      if (threads.length === 0) return
+      const clampedIndex = Math.max(0, Math.min(nextIndex, threads.length - 1))
+      const anchor = selectionAnchorIndex ?? selectedIndex
+      const start = Math.min(anchor, clampedIndex)
+      const end = Math.max(anchor, clampedIndex)
+      setSelectionAnchorIndex(anchor)
+      setSelectedIds(new Set(threads.slice(start, end + 1).map((thread) => thread.id)))
+      setSelectedIndex(clampedIndex)
+    },
+    [selectedIndex, selectionAnchorIndex, threads]
+  )
+
   const triage = useCallback(
     (action: TriageAction) => {
       if (!realMode || !attn) return
+      const isBulk = selectedIds.size > 0
+      const targetedAction = {
+        ...action,
+        threadIds: isBulk ? [...selectedIds] : action.threadIds
+      } as TriageAction
+      if (isBulk) clearSelection()
       void attn.mail
-        .triage(action)
+        .triage(targetedAction)
         .then((result) => showToast(result.label))
         .catch(() => {})
     },
-    [realMode, showToast]
+    [clearSelection, realMode, selectedIds, showToast]
   )
 
   const openSelected = useCallback(() => {
@@ -812,6 +864,38 @@ export default function App(): React.JSX.Element {
           context: 'list',
           run: () => setSelectedIndex((i) => Math.max(i - 1, 0))
         },
+        {
+          id: 'selection.toggle',
+          title: 'Toggle selection',
+          shortcut: 'x',
+          context: 'list',
+          run: toggleFocusedSelection
+        },
+        {
+          id: 'selection.extendNext',
+          title: 'Extend selection to next conversation',
+          shortcut: 'Shift+J',
+          context: 'list',
+          run: () => extendSelectionTo(selectedIndex + 1)
+        },
+        {
+          id: 'selection.extendPrevious',
+          title: 'Extend selection to previous conversation',
+          shortcut: 'Shift+K',
+          context: 'list',
+          run: () => extendSelectionTo(selectedIndex - 1)
+        },
+        ...(selectedIds.size > 0
+          ? [
+              {
+                id: 'selection.clear',
+                title: 'Clear selection',
+                shortcut: 'Escape',
+                context: 'global' as const,
+                run: clearSelection
+              }
+            ]
+          : []),
         ...(paneOpen
           ? [
               {
@@ -883,7 +967,20 @@ export default function App(): React.JSX.Element {
           }
         }
       ]),
-    [openSelected, paneOpen, realMode, selected, showToast, threads.length, triage]
+    [
+      clearSelection,
+      extendSelectionTo,
+      openSelected,
+      paneOpen,
+      realMode,
+      selected,
+      selectedIds.size,
+      selectedIndex,
+      showToast,
+      threads.length,
+      toggleFocusedSelection,
+      triage
+    ]
   )
 
   useLayoutEffect(() => {
@@ -943,6 +1040,7 @@ export default function App(): React.JSX.Element {
           { id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate' },
           { id: 'open', keys: ['Enter'], label: 'open' }
         ]),
+    { id: 'select', keys: ['X'], label: 'select' },
     ...TRIAGE_SHORTCUT_HINTS
   ]
 
@@ -981,6 +1079,14 @@ export default function App(): React.JSX.Element {
           </button>
         </nav>
         <div className="app-no-drag ml-auto flex items-center gap-4">
+          {selectedIds.size > 0 && (
+            <span
+              data-testid="selection-count"
+              className="rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent tabular-nums"
+            >
+              {selectedIds.size} selected
+            </span>
+          )}
           <QueueReadout unread={unreadCount} pending={pendingCount} />
           <div data-testid="account-menu">
             <AccountMenu status={status} onStatus={setStatus} />
@@ -1004,6 +1110,7 @@ export default function App(): React.JSX.Element {
           )}
           {threads.map((t, i) => {
             const isSelected = i === selectedIndex
+            const isChecked = selectedIds.has(t.id)
             const isUnread = t.unread && !mockReadIds.has(t.id)
             return (
               // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
@@ -1013,23 +1120,45 @@ export default function App(): React.JSX.Element {
                 ref={isSelected ? selectedRowRef : null}
                 data-testid="thread-row"
                 data-selected={isSelected || undefined}
+                data-checked={isChecked || undefined}
                 data-unread={isUnread || undefined}
                 className={`cursor-default border-l-[3px] ${
                   paneOpen
-                    ? 'grid grid-cols-[10px_1fr_auto] gap-x-2 px-3 py-2.5'
+                    ? 'grid grid-cols-[16px_1fr_auto] gap-x-2 px-3 py-2.5'
                     : 'flex items-center gap-3.5 py-[11px] pr-7 pl-5'
-                } ${isSelected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'}`}
-                onClick={() => {
-                  setSelectedIndex(i)
-                  setPaneOpen(true)
+                } ${
+                  isChecked
+                    ? 'border-l-accent bg-accent/[0.12]'
+                    : isSelected
+                      ? 'border-l-accent bg-accent/[0.07]'
+                      : 'border-l-transparent'
+                }`}
+                onClick={(event) => {
+                  if (event.shiftKey) extendSelectionTo(i)
+                  else {
+                    setSelectedIndex(i)
+                    setPaneOpen(true)
+                  }
                 }}
               >
                 <span
-                  className={`size-1.5 flex-none self-center rounded-full ${
-                    isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
-                  } ${paneOpen ? 'row-span-2' : ''}`}
+                  className={`flex size-4 flex-none items-center justify-center self-center ${
+                    paneOpen ? 'row-span-2' : ''
+                  }`}
                   aria-hidden
-                />
+                >
+                  {isChecked ? (
+                    <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
+                      ✓
+                    </span>
+                  ) : (
+                    <span
+                      className={`size-1.5 rounded-full ${
+                        isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
+                      }`}
+                    />
+                  )}
+                </span>
                 {paneOpen ? (
                   <>
                     <span
