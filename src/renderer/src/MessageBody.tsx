@@ -6,12 +6,20 @@ interface MessageBodyProps {
   bodyHtml: string | null
 }
 
-const MAX_BODY_HEIGHT = 1600
+const MAIL_VIEWPORT_HEIGHT = 800
+const MAX_SAFE_BODY_HEIGHT = 100_000
 const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
+const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
 
 const RESET = `
   :root { color-scheme: light; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #202124; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #202124;
+    overflow: hidden;
+  }
   body {
     font: 14px/1.6 Arial, Helvetica, sans-serif;
     overflow-wrap: break-word;
@@ -20,6 +28,12 @@ const RESET = `
   table { max-width: 100%; }
   pre { white-space: pre-wrap; }
 `
+
+function freezeViewportHeightUnits(css: string): string {
+  return css.replace(VIEWPORT_HEIGHT_UNIT, (_, rawValue: string) => {
+    return `${(Number(rawValue) * MAIL_VIEWPORT_HEIGHT) / 100}px`
+  })
+}
 
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.nodeName !== 'A') return
@@ -39,6 +53,12 @@ function makeSrcDoc(html: string): string | null {
 
   const template = document.createElement('template')
   template.innerHTML = clean
+  template.content.querySelectorAll('style').forEach((style) => {
+    style.textContent = freezeViewportHeightUnits(style.textContent ?? '')
+  })
+  template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
+    element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
+  })
   const visibleProbe = template.content.cloneNode(true) as DocumentFragment
   visibleProbe.querySelectorAll('style').forEach((style) => {
     style.remove()
@@ -47,22 +67,32 @@ function makeSrcDoc(html: string): string | null {
   const hasRenderableElement = Boolean(template.content.querySelector(MEANINGFUL_ELEMENTS))
   if (!hasText && !hasRenderableElement) return null
 
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}</style></head><body>${clean}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}</style></head><body>${template.innerHTML}</body></html>`
 }
 
 export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX.Element {
-  const [height, setHeight] = useState(80)
+  const [height, setHeight] = useState<number | null>(null)
+  const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
   const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml)), [bodyHtml])
 
-  const measure = useCallback((frame: HTMLIFrameElement) => {
-    const doc = frame.contentDocument
-    if (!doc?.body) return
-    const scrollHeight = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1)
-    setHeight(Math.min(scrollHeight, MAX_BODY_HEIGHT))
-  }, [])
+  const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
+
+  const measure = useCallback(
+    (frame: HTMLIFrameElement) => {
+      const doc = frame.contentDocument
+      if (!doc?.body) return
+      const scrollHeight = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1)
+      if (scrollHeight > MAX_SAFE_BODY_HEIGHT) {
+        setOversizedSrcDoc(srcDoc)
+        return
+      }
+      setHeight(Math.ceil(scrollHeight))
+    },
+    [srcDoc]
+  )
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return
@@ -108,8 +138,8 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
   )
 
   useEffect(() => {
-    setHeight(80)
-    if (srcDoc === null) return
+    setHeight(null)
+    if (srcDoc === null || oversized) return
     let frameId = 0
     const waitForSrcDoc = (): void => {
       const frame = frameRef.current
@@ -124,9 +154,9 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
       cancelAnimationFrame(frameId)
       disconnect()
     }
-  }, [disconnect, observe, srcDoc])
+  }, [disconnect, observe, oversized, srcDoc])
 
-  if (srcDoc === null) {
+  if (srcDoc === null || oversized) {
     return (
       <div
         data-testid="plain-text-body"
@@ -146,7 +176,7 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
       srcDoc={srcDoc}
       onLoad={onLoad}
       className="block w-full border-0 bg-white"
-      style={{ height, maxHeight: MAX_BODY_HEIGHT }}
+      style={{ height: height ?? 1, visibility: height === null ? 'hidden' : 'visible' }}
     />
   )
 }

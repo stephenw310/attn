@@ -58,12 +58,20 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
       iframe.evaluate((element) => {
         const frame = element as HTMLIFrameElement
         const scrollHeight = frame.contentDocument?.documentElement.scrollHeight ?? 0
-        return frame.clientHeight > 80 && scrollHeight > frame.clientHeight
+        return frame.clientHeight > 2500 && scrollHeight <= frame.clientHeight + 1
+      })
+    )
+    .toBe(true)
+  await expect(body.locator('#viewport-hero')).toHaveCSS('min-height', '800px')
+  await expect(body.locator('html')).toHaveCSS('overflow', 'hidden')
+  await expect
+    .poll(() =>
+      page.getByTestId('conversation-scroll').evaluate((element) => {
+        return element.scrollHeight > element.clientHeight
       })
     )
     .toBe(true)
   const stableHeight = await iframe.evaluate((element) => element.clientHeight)
-  expect(stableHeight).toBeLessThan(2000)
   await page.waitForTimeout(250)
   expect(await iframe.evaluate((element) => element.clientHeight)).toBe(stableHeight)
 
@@ -91,7 +99,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
       iframe.evaluate((element) => {
         const frame = element as HTMLIFrameElement
         const scrollHeight = frame.contentDocument?.documentElement.scrollHeight ?? 0
-        return frame.clientHeight > 80 && scrollHeight > frame.clientHeight
+        return frame.clientHeight > 2500 && scrollHeight <= frame.clientHeight + 1
       })
     )
     .toBe(true)

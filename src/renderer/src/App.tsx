@@ -695,7 +695,7 @@ export default function App(): React.JSX.Element {
                 · <Kbd>Esc</Kbd>
               </span>
             </div>
-            <div className="overflow-y-auto px-6 pt-4 pb-6">
+            <div data-testid="conversation-scroll" className="overflow-y-auto px-6 pt-4 pb-6">
               {conversation ? (
                 <div className="flex flex-col gap-3.5">
                   {conversation.messages.map((m) => (
