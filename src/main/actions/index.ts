@@ -108,6 +108,9 @@ function stringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
+// Deliberately counts 'failed' rows: an action that never reached Gmail must not
+// silently vanish from the badge. Surfacing/clearing failed rows is a deferred
+// decision — see "Accepted deviations" in docs/M1-PLAN.md.
 export function pendingActionCount(db: Db, accountId: string): number {
   const row = db
     .prepare('SELECT COUNT(*) AS count FROM action_queue WHERE account_id = ?')
