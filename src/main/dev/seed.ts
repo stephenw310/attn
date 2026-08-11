@@ -9,11 +9,19 @@ interface SeedMessage {
   internalDate: string
   from: string
   to: string
+  cc?: string
+  bcc?: string
+  replyTo?: string
   subject: string
   snippet?: string
   bodyText?: string
   bodyHtml?: string
-  attachmentFilename?: string
+  attachments?: {
+    attachmentId: string
+    filename: string
+    mimeType?: string
+    sizeBytes?: number
+  }[]
 }
 
 interface SeedFixture {
@@ -41,14 +49,19 @@ function payloadFor(message: SeedMessage): GmailPart {
     headers: [
       { name: 'From', value: message.from },
       { name: 'To', value: message.to },
-      { name: 'Subject', value: message.subject }
+      { name: 'Subject', value: message.subject },
+      ...(message.cc ? [{ name: 'Cc', value: message.cc }] : []),
+      ...(message.bcc ? [{ name: 'Bcc', value: message.bcc }] : []),
+      ...(message.replyTo ? [{ name: 'Reply-To', value: message.replyTo }] : [])
     ],
-    parts: message.attachmentFilename
-      ? [
-          ...bodyParts,
-          { mimeType: 'application/octet-stream', filename: message.attachmentFilename, body: {} }
-        ]
-      : bodyParts
+    parts: [
+      ...bodyParts,
+      ...(message.attachments ?? []).map((attachment) => ({
+        mimeType: attachment.mimeType ?? 'application/octet-stream',
+        filename: attachment.filename,
+        body: { attachmentId: attachment.attachmentId, size: attachment.sizeBytes ?? 0 }
+      }))
+    ]
   }
 }
 

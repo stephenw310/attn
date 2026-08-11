@@ -1,4 +1,4 @@
-# Attn — Product & Technical Spec (v0.8)
+# Attn — Product & Technical Spec (v0.10)
 
 A desktop email client for **macOS and Windows** modeled on Superhuman's core idea: email triage so fast and keyboard-driven that reaching inbox zero is the default state, not an aspiration.
 
@@ -24,6 +24,7 @@ This spec covers **v1: the inbox experience only**. Calendar is explicitly out o
 
 - Gmail accounts (Google OAuth, Gmail API)
 - Full-width conversation list + on-demand split conversation view, threaded conversations
+- System mailbox views: Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash
 - Keyboard triage: mark done, snooze ("remind me later"), trash, star, unread, spam, label
 - Auto-advance after triage; universal undo (`Z`)
 - Command palette (`Mod+K`) exposing every command
@@ -122,11 +123,18 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 
 **Full-width list ⇄ on-demand split** (D6 as revised 2026-08-11, §9 #7): the list owns the full window while deciding — nothing renders in the periphery during triage. Opening a conversation splits the window: the list compacts into a left column and the conversation fills the right, so reading gets a real surface while the queue stays visible. Closing restores the full-width list.
 
+**System mailbox navigation (M3, §9 #10):** the list/reading shell is shared by Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, and Trash. These are mailbox filters, not split-inbox lanes: Important/Other and user-defined splits appear only inside Inbox. To preserve D6's minimal chrome, v1 does not add a permanent folder sidebar; every mailbox is reachable from the command palette (`Go to …`) and a `G` chord, and the active mailbox name appears in the list header.
+
+- Inbox = `INBOX`; Sent = `SENT`; Drafts = `DRAFT`; Starred = `STARRED`; Spam = `SPAM`; Trash = `TRASH`; Snoozed is the local reminders view from F4. All Mail contains locally cached mail without `SPAM` or `TRASH`, including archived conversations.
+- Mailbox queries run entirely against the local store. M3 expands metadata sync beyond the current Inbox window so the last 12 months of system-label membership are cached; switching a cached mailbox never waits on Gmail. Older content follows F2's on-demand policy.
+- Switching mailboxes closes any open conversation and restores that mailbox's prior selection and scroll when revisited. Opening a conversation otherwise uses the same split-pane behavior in every message mailbox. A Draft row opens its crash-safe M2 composer draft rather than a read-only conversation.
+- Triage actions immediately remove a row when it no longer matches the active mailbox. Spam and Trash are browsable but v1 still provides no permanent-delete or empty-folder action.
+
 - The full-width virtualized list shows sender(s), subject, a 1–2 line snippet, timestamp, and chips (attachment, starred, snoozed-return, follow-up). Unread rows are visually distinct.
 - `J`/`K` (and arrow keys) move the selection.
-- `Enter` (or click) opens the **conversation pane**: the list compacts to a ~380px column with two-line rows (sender + time / subject, no snippet); the conversation takes the remaining width at a readable measure (~720px max), with thread position ("4 of 12") and the `Esc` affordance in its header. Older messages are collapsed.
-- With the pane open, `J`/`K` keep moving the list selection and the pane follows; the selected-row highlight ties the two panes. `Esc` closes the pane and restores the full-width list with selection and scroll intact.
-- **Message display:** each message card shows the sender, a recipient summary ("to me, Priya · cc Daniel") that expands on click to the full From/To/Cc/Bcc/Reply-To set with the full date, the body, an attachment row (filename + size chips — click downloads to the OS Downloads folder and reveals the file), and auto-collapsed quoted trails **and signatures** behind a `•••` toggle. Bcc appears only on the user's own sent copies — Gmail never exposes other senders' Bcc.
+- `Enter` (or click) opens the **conversation pane**: the list compacts to a ~380px column with two-line rows (sender + time / subject, no snippet); the conversation takes the remaining width at a responsive readable measure (720–1120px), with thread position ("4 of 12") and the `Esc` affordance in its header. The newest message is expanded; older messages start as one-line summaries and their bodies (including HTML frames) are not mounted until expanded.
+- Opening moves focus to the conversation scroll surface. With the pane open, unmodified `ArrowUp`/`ArrowDown` scroll the message body by a reading step while `J`/`K` keep moving the list selection, reset the new conversation to its top, and the pane follows; modifier+arrow chords retain their platform/browser meaning. Keyboard handling continues after clicking recipient, attachment, or trim controls and while focus is inside an HTML-mail frame; `Enter` on a focused mail link retains its native link action. The selected-row highlight ties the two panes. `Esc` closes the pane and restores the full-width list with selection and scroll intact.
+- **Message display:** each message card shows the sender, a recipient summary ("to me, Priya · cc Daniel") that expands on click to the full From/To/Cc/Bcc/Reply-To set with the full date, the body, and attachment chips (filename + size — click downloads to the OS Downloads folder and reveals the file). Quoted trails and signatures auto-collapse behind a plain-text `...` control rendered inline at the trim boundary; the control stays in place while expanding/collapsing and a second click collapses again. HTML bodies, their trim control, and their attachment row share one white surface; simple/fallback HTML receives consistent inner padding, wide mail gets an in-frame horizontal scrollbar, and the conversation reserves its vertical scrollbar gutter so expanding content does not shift the pane. Bcc appears only on the user's own sent copies — Gmail never exposes other senders' Bcc.
 - Bodies for the selected and adjacent conversations are preloaded so opening never shows a spinner.
 - **Auto-advance:** after done/snooze/trash, selection (and the open pane) moves to the next conversation automatically (setting: next / previous / back to list).
 
@@ -135,7 +143,9 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 - Opening a cached conversation renders in < 50ms; `Esc` returns instantly with scroll + selection intact.
 - Auto-advance never lands on a stale (just-triaged) row.
 - Every message's full recipient set is inspectable in two interactions or fewer; attachments download to the OS Downloads folder and are revealed on completion.
-- Quote/signature collapsing never hides content without a visible expander, and expanding is instant (no network).
+- Quote/signature collapsing never reduces an all-quote/all-signature message to a blank card, never hides content without a visible expander, and expanding/collapsing is instant (no network) without moving the control or remounting the HTML document.
+- Opening a message transfers reading keys to the conversation; inline controls and HTML-frame focus never strand the keyboard loop, and expanding long content does not horizontally shift the reading surface.
+- Every system mailbox is reachable by palette and keyboard; a cached switch renders in < 50ms, returning restores selection/scroll, and the displayed rows match the system-label rules above without a network round trip.
 
 ### F4 — Triage actions & undo
 
@@ -319,10 +329,13 @@ Guardrails:
 | `←` / `→` | Previous / next split |
 | `X` | Select conversation (`Shift+J/K` extends) |
 | `G` then `I` | Go to Inbox |
+| `G` then `A` | Go to All Mail |
 | `G` then `T` | Go to Sent |
 | `G` then `D` | Go to Drafts |
 | `G` then `S` | Go to Starred |
 | `G` then `H` | Go to Snoozed / Reminders |
+| `G` then `P` | Go to Spam |
+| `G` then `R` | Go to Trash |
 
 **Triage** (list or conversation)
 
@@ -385,7 +398,7 @@ Guardrails:
 
 **Security & privacy:** OAuth tokens and LLM API keys via `safeStorage` (Keychain/DPAPI); DB under the OS user profile; TLS to Google only — plus the opt-in LLM provider (F17), which receives content solely on explicit invocation; **no telemetry, no other third-party services** in v1. Remote images in HTML mail load directly (no proxy without a server, D2), with a global "block remote images" toggle and per-sender overrides — default is load (decision log, §9).
 
-**HTML mail rendering:** sanitized (DOMPurify-class allowlist), rendered in a sandboxed `<iframe>`/webview with no script execution, links open in the system browser.
+**HTML mail rendering:** sanitized (DOMPurify-class allowlist), rendered in a sandboxed `<iframe>`/webview with no script execution, links open in the system browser. The frame is measured after load and on resize, preserves horizontal overflow inside the frame, and remains mounted when quote/signature visibility changes. If sanitized HTML has no visible content or exceeds the defensive height ceiling, the plain-text fallback uses the same readable white surface. Filename-bearing MIME parts count as attachments whether Gmail supplies an attachment ID or inline base64url data; inline-delivered bytes stay main-process-only in the local store and can download without a network request.
 
 **Packaging:** `electron-builder`; auto-update via GitHub Releases. macOS notarization + Windows code signing required for public distribution (skippable for personal builds).
 
@@ -418,7 +431,7 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading pane, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
 - **M1 — Triage core.** First items: **apply the Dispatch direction** (D6 — graphite/amber tokens, `attn:` wordmark, layout per D6, split strip, account menu) and **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). The 2026-08-11 F3 revision (on-demand split, recipients, attachments, quote/signature collapse) also lands within M1. Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
 - **M2 — Mail out.** Composer (rich text, attachments, autocomplete), reply/all/forward, crash-safe drafts, send + undo send, exactly-once outbox. **← daily-drivable.**
-- **M3 — Find & focus.** FTS5 instant search + operators, split inbox + rules, inbox-zero states, themes, command palette hardened (every command registered).
+- **M3 — Find & focus.** FTS5 instant search + operators, system mailbox navigation (Inbox/All Mail/Sent/Drafts/Starred/Snoozed/Spam/Trash), split inbox + rules, inbox-zero states, themes, command palette hardened (every command registered).
 - **M4 — Power finish.** Snippets, follow-up reminders, AI reply drafting (F17), settings surface, badges, packaging + auto-update + signing.
 
 **Post-v1 sequence:** v1.1 — global-hotkey quick panel (quick compose + quick search), multi-account (switcher `Mod+1..9`; unified inbox stays out), and custom themes (user token sets over D6's semantic names). v1.5 — companion Apps Script: send later + exact-time snooze return (F7). v2 — hosted backend: read statuses, true multi-device state.
@@ -437,3 +450,5 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 6. **Snooze reinstall durability:** accepted — a reinstall loses local due-times; snoozed threads remain findable in the Snoozed view and are restored to the inbox with a notice. A reinstall isn't expected to preserve local state.
 7. **Conversation layout revised (2026-08-11):** v0.7's centered overlay didn't hold up for reading — a fixed ~780px modal over a dimmed list gives neither immersion nor context, and long mail scrolls inside a viewport-capped box. F3 now specifies the on-demand split: full-width list for triage (preserving "one clear focus" while deciding), compact-list + conversation pane only while a conversation is open. The always-on preview pane remains rejected.
 8. **Push vs polling (2026-08-11):** polling stands for v1. Gmail push means `users.watch` → Cloud Pub/Sub → a public HTTPS webhook — a server, which D2 rules out. The serverless workarounds were weighed and rejected: desktop Pub/Sub *pull* needs each user's own GCP project (topic, publish grant to Gmail's push service account, daily `watch` renewal) — past the dev-mode onboarding ceiling; IMAP IDLE needs the full `https://mail.google.com/` scope (broader than `gmail.modify`) plus a second protocol stack maintained as a wake signal. Polling at 15s/60s meets F12's ≤30s latency bound at negligible quota (`history.list` = 2 units/call). Revisit with the v2 hosted backend.
+9. **Reading interaction refined (2026-08-11):** real-mail dogfood replaces F3's fixed ~720px reading column and detached quote controls with a responsive 720–1120px measure and an inline, position-stable `...` boundary control. The conversation owns unmodified arrow scrolling after open; `J`/`K` remain thread navigation. HTML-mail overflow stays inside the message frame, while a stable outer scrollbar gutter prevents pane-width jumps.
+10. **System mailbox navigation is explicit v1 scope (2026-08-11):** Important/Other are Inbox splits, not substitutes for Gmail's system mailboxes. M3 adds local-first Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, and Trash filters in the existing list/reading shell. Palette commands and `G` chords replace a permanent sidebar; supporting them requires expanding cached metadata/system-label coverage beyond the M1 Inbox-only query.

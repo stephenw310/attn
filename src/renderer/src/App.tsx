@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { TriageAction } from '../../shared/actions'
 import type { AuthStatus } from '../../shared/auth'
-import type { Conversation, SyncState, ThreadRow } from '../../shared/mail'
+import type {
+  Conversation,
+  MailAddress,
+  MessageAttachment,
+  MessageRecipients,
+  SyncState,
+  ThreadRow
+} from '../../shared/mail'
 import { matchKey, registerCommands } from './commands'
 import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
@@ -22,16 +29,21 @@ interface DisplayMsg {
   fromName: string
   fromEmail: string
   at: string
+  fullDate: string
+  recipients: MessageRecipients
+  attachments: MessageAttachment[]
   text: string
   html: string | null
 }
 
 interface DisplayConversation {
+  threadId: string
   subject: string
   messages: DisplayMsg[]
 }
 
 const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
+const READING_SCROLL_STEP = 120
 
 function formatTime(ms: number): string {
   if (!ms) return ''
@@ -43,6 +55,18 @@ function formatTime(ms: number): string {
   if (dayDiff === 1) return 'Yesterday'
   if (dayDiff < 7) return d.toLocaleDateString(undefined, { weekday: 'short' })
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function formatFullDate(ms: number): string {
+  if (!ms) return ''
+  return new Date(ms).toLocaleString(undefined, {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
 }
 
 function fromThreadRow(r: ThreadRow): DisplayThread {
@@ -60,12 +84,16 @@ function fromThreadRow(r: ThreadRow): DisplayThread {
 
 function displayFromReal(c: Conversation): DisplayConversation {
   return {
+    threadId: c.threadId,
     subject: c.subject,
     messages: c.messages.map((m) => ({
       id: m.id,
       fromName: m.fromName,
       fromEmail: m.fromEmail,
       at: formatTime(m.at),
+      fullDate: formatFullDate(m.at),
+      recipients: m.recipients,
+      attachments: m.attachments,
       text: m.bodyText,
       html: m.bodyHtml
     }))
@@ -75,12 +103,21 @@ function displayFromReal(c: Conversation): DisplayConversation {
 function displayFromMockId(threadId: string): DisplayConversation {
   const c = getMockConversation(threadId)
   return {
+    threadId,
     subject: c.subject,
     messages: c.messages.map((m) => ({
       id: m.id,
       fromName: m.fromName,
       fromEmail: m.fromEmail,
       at: m.at,
+      fullDate: m.at,
+      recipients: {
+        to: [{ name: m.to === 'you' ? 'me' : m.to, email: m.to }],
+        cc: [],
+        bcc: [],
+        replyTo: []
+      },
+      attachments: [],
       text: m.body.join('\n\n'),
       html: null
     }))
@@ -92,6 +129,307 @@ function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
     <kbd className="rounded-[5px] border border-edge bg-active px-1.5 py-px text-[10.5px] font-medium text-ink-dim">
       {children}
     </kbd>
+  )
+}
+
+interface ShortcutHint {
+  id: string
+  keys: string[]
+  label: string
+}
+
+const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
+  { id: 'done', keys: ['E'], label: 'done' },
+  { id: 'trash', keys: ['#'], label: 'trash' },
+  { id: 'star', keys: ['S'], label: 'star' },
+  { id: 'unread', keys: ['U'], label: 'unread' },
+  { id: 'spam', keys: ['!'], label: 'spam' },
+  { id: 'undo', keys: ['Z'], label: 'undo' }
+]
+
+function FooterShortcut({ id, keys, label }: ShortcutHint): React.JSX.Element {
+  return (
+    <span data-testid={`footer-shortcut-${id}`} className="flex items-center gap-1.5 whitespace-nowrap">
+      <span className="flex items-center gap-0.5">
+        {keys.map((key, index) => (
+          <span key={key} className="contents">
+            {index > 0 && <span aria-hidden>/</span>}
+            <Kbd>{key}</Kbd>
+          </span>
+        ))}
+      </span>
+      {label}
+    </span>
+  )
+}
+
+function firstName(address: MailAddress, account: string | null): string {
+  if (account && address.email.toLowerCase() === account.toLowerCase()) return 'me'
+  if (address.name.toLowerCase() === 'me' || address.email.toLowerCase() === 'you') return 'me'
+  return address.name.trim().split(/\s+/)[0] || address.email
+}
+
+function fullAddress(address: MailAddress): string {
+  if (!address.name || address.name === address.email) return address.email
+  return `${address.name} <${address.email}>`
+}
+
+function recipientSummary(recipients: MessageRecipients, account: string | null): string {
+  const to = recipients.to.map((address) => firstName(address, account))
+  const cc = recipients.cc.map((address) => firstName(address, account))
+  const parts = [`to ${to.length > 0 ? to.join(', ') : 'undisclosed recipients'}`]
+  if (cc.length > 0) parts.push(`cc ${cc.join(', ')}`)
+  return parts.join(' · ')
+}
+
+function RecipientLine({
+  message,
+  account
+}: {
+  message: DisplayMsg
+  account: string | null
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const groups: { label: string; addresses: MailAddress[] }[] = [
+    { label: 'From', addresses: [{ name: message.fromName, email: message.fromEmail }] },
+    { label: 'To', addresses: message.recipients.to },
+    { label: 'Cc', addresses: message.recipients.cc },
+    { label: 'Bcc', addresses: message.recipients.bcc },
+    { label: 'Reply-To', addresses: message.recipients.replyTo }
+  ]
+
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        data-testid="recipient-summary"
+        aria-expanded={open}
+        onClick={(event) => {
+          setOpen((value) => !value)
+          event.currentTarget.blur()
+        }}
+        className="block max-w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-xs text-ink-faint hover:text-ink-dim"
+      >
+        {recipientSummary(message.recipients, account)} <span aria-hidden>▾</span>
+      </button>
+      {open && (
+        <div
+          data-testid="recipient-details"
+          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-edge bg-active/60 p-3 text-xs text-ink-faint"
+        >
+          {groups
+            .filter((group) => group.addresses.length > 0)
+            .map((group) => (
+              <div key={group.label} className="contents">
+                <span className="font-medium text-ink-dim">{group.label}</span>
+                <span className="min-w-0 break-words">{group.addresses.map(fullAddress).join(', ')}</span>
+              </div>
+            ))}
+          <span className="font-medium text-ink-dim">Date</span>
+          <span>{message.fullDate}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
+}
+
+function MessageCard({
+  message,
+  account,
+  onToast,
+  collapsed = false,
+  onToggleCollapsed
+}: {
+  message: DisplayMsg
+  account: string | null
+  onToast: (message: string) => void
+  collapsed?: boolean
+  onToggleCollapsed?: () => void
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const htmlSurface = message.html !== null
+
+  const download = useCallback(
+    (attachment: MessageAttachment) => {
+      if (!attn) {
+        onToast('Attachments download when signed in')
+        return
+      }
+      void attn.mail
+        .downloadAttachment({
+          messageId: message.id,
+          attachmentId: attachment.attachmentId,
+          filename: attachment.filename
+        })
+        .then((result) => {
+          if ('error' in result) onToast(result.error)
+        })
+        .catch(() => onToast('Could not download attachment'))
+    },
+    [message.id, onToast]
+  )
+
+  if (collapsed) {
+    return (
+      <article
+        data-testid="message-card"
+        data-collapsed="true"
+        className="rounded-[10px] border border-edge bg-ground"
+      >
+        <button
+          type="button"
+          data-testid="older-message-toggle"
+          aria-expanded="false"
+          aria-label={`Expand older message from ${message.fromName}`}
+          onClick={(event) => {
+            onToggleCollapsed?.()
+            event.currentTarget.blur()
+          }}
+          className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-5 py-3 text-left hover:bg-active/50"
+        >
+          <span className="min-w-0 font-semibold">{message.fromName}</span>
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+            {message.text || 'HTML message'}
+          </span>
+          <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
+            {message.attachments.length > 0 && <span title="Has attachment">📎</span>}
+            {message.at}
+            <span aria-hidden>▾</span>
+          </span>
+        </button>
+      </article>
+    )
+  }
+
+  return (
+    <article
+      data-testid="message-card"
+      data-collapsed="false"
+      className="rounded-[10px] border border-edge bg-ground px-5 py-4"
+    >
+      <div
+        data-testid="message-header"
+        className="mb-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2.5"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2.5">
+            <span className="font-semibold">{message.fromName}</span>
+            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+              &lt;{message.fromEmail}&gt;
+            </span>
+          </div>
+        </div>
+        <span className="flex flex-none items-center gap-2 text-xs text-ink-faint tabular-nums">
+          {message.at}
+          {onToggleCollapsed && (
+            <button
+              type="button"
+              data-testid="older-message-toggle"
+              aria-expanded="true"
+              aria-label={`Collapse older message from ${message.fromName}`}
+              onClick={(event) => {
+                onToggleCollapsed()
+                event.currentTarget.blur()
+              }}
+              className="cursor-pointer rounded px-1 text-ink-faint hover:bg-active hover:text-ink-dim"
+            >
+              <span aria-hidden>▴</span>
+            </button>
+          )}
+        </span>
+        <div className="col-span-2 min-w-0">
+          <RecipientLine message={message} account={account} />
+        </div>
+      </div>
+      <div
+        data-testid="message-content"
+        className={`min-w-0 ${htmlSurface ? 'overflow-hidden bg-white' : ''}`}
+      >
+        <MessageBody
+          bodyText={message.text}
+          bodyHtml={message.html}
+          expanded={expanded}
+          onToggleTrim={() => setExpanded((value) => !value)}
+        />
+        {message.attachments.length > 0 && (
+          <div data-testid="message-accessories" className={htmlSurface ? 'bg-white px-3 pb-3' : ''}>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {message.attachments.map((attachment) => (
+                <button
+                  key={attachment.attachmentId}
+                  type="button"
+                  data-testid="attachment-chip"
+                  onClick={(event) => {
+                    download(attachment)
+                    event.currentTarget.blur()
+                  }}
+                  className={`cursor-pointer rounded-lg border px-3 py-2 text-left text-xs ${
+                    htmlSurface
+                      ? 'border-[#d1d5db] bg-[#f3f4f6] text-[#4b5563] hover:border-[#9ca3af] hover:text-[#202124]'
+                      : 'border-edge bg-active text-ink-dim hover:border-accent hover:text-ink'
+                  }`}
+                  title={`Download ${attachment.filename}`}
+                >
+                  <span className="mr-2" aria-hidden>
+                    📎
+                  </span>
+                  <span className="font-medium">{attachment.filename}</span>
+                  <span className={`ml-2 tabular-nums ${htmlSurface ? 'text-[#6b7280]' : 'text-ink-faint'}`}>
+                    {formatBytes(attachment.sizeBytes)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function ConversationMessages({
+  conversation,
+  account,
+  onToast
+}: {
+  conversation: DisplayConversation
+  account: string | null
+  onToast: (message: string) => void
+}): React.JSX.Element {
+  const [expandedOlderIds, setExpandedOlderIds] = useState<Set<string>>(() => new Set())
+  const newestIndex = conversation.messages.length - 1
+
+  const toggleOlder = useCallback((messageId: string) => {
+    setExpandedOlderIds((current) => {
+      const next = new Set(current)
+      if (next.has(messageId)) next.delete(messageId)
+      else next.add(messageId)
+      return next
+    })
+  }, [])
+
+  return (
+    <>
+      {conversation.messages.map((message, index) => {
+        const isOlder = index < newestIndex
+        return (
+          <MessageCard
+            key={message.id}
+            message={message}
+            account={account}
+            onToast={onToast}
+            collapsed={isOlder && !expandedOlderIds.has(message.id)}
+            onToggleCollapsed={isOlder ? () => toggleOlder(message.id) : undefined}
+          />
+        )
+      })}
+    </>
   )
 }
 
@@ -270,12 +608,13 @@ export default function App(): React.JSX.Element {
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const [overlayOpen, setOverlayOpen] = useState(false)
+  const [paneOpen, setPaneOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
+  const conversationScrollRef = useRef<HTMLDivElement | null>(null)
   const convCache = useRef(new Map<string, DisplayConversation>())
   const autoReadThreadRef = useRef<string | null>(null)
   const toastTokenRef = useRef(0)
@@ -304,7 +643,7 @@ export default function App(): React.JSX.Element {
     setRealThreads(null)
     setRealUnreadTotal(null)
     setSelectedIndex(0)
-    setOverlayOpen(false)
+    setPaneOpen(false)
     setPendingCount(0)
     setMockReadIds(new Set())
     setConversation(null)
@@ -351,10 +690,10 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     // NOTE(M1 incremental sync): if a refresh removes the open thread, this
-    // clamp shifts selection and an open overlay would jump to a different
+    // clamp shifts selection and an open pane would jump to a different
     // conversation. Revisit when mail:changed can fire mid-read.
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
-    if (threads.length === 0) setOverlayOpen(false)
+    if (threads.length === 0) setPaneOpen(false)
   }, [threads.length])
 
   const selected: DisplayThread | undefined = threads[selectedIndex]
@@ -375,7 +714,7 @@ export default function App(): React.JSX.Element {
     }
     if (!attn) return
     let cancelled = false
-    setConversation(null)
+    setConversation((current) => (current?.threadId === selected.id ? current : null))
     attn.mail
       .getConversation(selected.id)
       .then((c) => {
@@ -390,7 +729,7 @@ export default function App(): React.JSX.Element {
     }
   }, [selected, realMode])
 
-  // Preload neighbors so Enter and in-overlay J/K render instantly (F3).
+  // Preload neighbors so Enter and in-pane J/K render instantly (F3).
   useEffect(() => {
     if (!realMode || !attn) return
     for (const idx of [selectedIndex - 1, selectedIndex + 1]) {
@@ -427,11 +766,11 @@ export default function App(): React.JSX.Element {
   const openSelected = useCallback(() => {
     const thread = threads[selectedIndex]
     if (!thread) return
-    setOverlayOpen(true)
+    setPaneOpen(true)
   }, [selectedIndex, threads])
 
   useEffect(() => {
-    if (!overlayOpen) {
+    if (!paneOpen) {
       autoReadThreadRef.current = null
       return
     }
@@ -443,7 +782,18 @@ export default function App(): React.JSX.Element {
     } else {
       setMockReadIds((current) => (current.has(selected.id) ? current : new Set(current).add(selected.id)))
     }
-  }, [overlayOpen, realMode, selected])
+  }, [paneOpen, realMode, selected])
+
+  // Reset the reused reading container before paint, then refocus after in-pane J/K navigation.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selected id deliberately resets scroll and focus
+  useLayoutEffect(() => {
+    if (!paneOpen) return
+    const scroll = conversationScrollRef.current
+    if (!scroll) return
+    scroll.scrollTop = 0
+    scroll.scrollLeft = 0
+    scroll.focus({ preventScroll: true })
+  }, [paneOpen, selected?.id])
 
   useLayoutEffect(
     () =>
@@ -452,63 +802,68 @@ export default function App(): React.JSX.Element {
           id: 'navigate.next',
           title: 'Next conversation',
           shortcut: 'j',
-          context: overlayOpen ? 'overlay' : 'list',
+          context: 'list',
           run: () => setSelectedIndex((i) => Math.min(i + 1, Math.max(threads.length - 1, 0)))
         },
         {
           id: 'navigate.previous',
           title: 'Previous conversation',
           shortcut: 'k',
-          context: overlayOpen ? 'overlay' : 'list',
+          context: 'list',
           run: () => setSelectedIndex((i) => Math.max(i - 1, 0))
         },
-        {
-          id: 'conversation.open',
-          title: 'Open conversation',
-          shortcut: 'Enter',
-          context: 'list',
-          run: openSelected
-        },
-        {
-          id: 'conversation.close',
-          title: 'Close conversation',
-          shortcut: 'Escape',
-          context: 'overlay',
-          run: () => setOverlayOpen(false)
-        },
+        ...(paneOpen
+          ? [
+              {
+                id: 'conversation.close',
+                title: 'Close conversation',
+                shortcut: 'Escape',
+                context: 'list' as const,
+                run: () => setPaneOpen(false)
+              }
+            ]
+          : [
+              {
+                id: 'conversation.open',
+                title: 'Open conversation',
+                shortcut: 'Enter',
+                context: 'list' as const,
+                run: openSelected
+              }
+            ]),
         {
           id: 'triage.archive',
           title: 'Mark done',
           shortcut: 'e',
-          context: overlayOpen ? 'overlay' : 'list',
+          context: 'list',
           run: () => selected && triage({ kind: 'archive', threadIds: [selected.id] })
         },
         {
           id: 'triage.trash',
           title: 'Move to trash',
           shortcut: '#',
-          context: overlayOpen ? 'overlay' : 'list',
+          context: 'list',
           run: () => selected && triage({ kind: 'trash', threadIds: [selected.id] })
         },
         {
           id: 'triage.spam',
           title: 'Mark as spam',
           shortcut: '!',
-          context: overlayOpen ? 'overlay' : 'list',
+          context: 'list',
           run: () => selected && triage({ kind: 'spam', threadIds: [selected.id] })
         },
         {
           id: 'triage.star',
           title: selected?.starred ? 'Unstar' : 'Star',
           shortcut: 's',
-          context: overlayOpen ? 'overlay' : 'list',
+          context: 'list',
           run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: !selected.starred })
         },
         {
           id: 'triage.unread',
           title: selected?.unread ? 'Mark read' : 'Mark unread',
           shortcut: 'u',
-          context: overlayOpen ? 'overlay' : 'list',
+          context: 'list',
           run: () =>
             selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: !selected.unread })
         },
@@ -528,29 +883,40 @@ export default function App(): React.JSX.Element {
           }
         }
       ]),
-    [openSelected, overlayOpen, realMode, selected, showToast, threads.length, triage]
+    [openSelected, paneOpen, realMode, selected, showToast, threads.length, triage]
   )
 
   useLayoutEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
       const target = e.target as HTMLElement | null
+      const isTextEntry =
+        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      if (isTextEntry) return
       if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'BUTTON' ||
-          target.isContentEditable)
+        paneOpen &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === 'ArrowDown' || e.key === 'ArrowUp')
       ) {
+        e.preventDefault()
+        conversationScrollRef.current?.scrollBy({
+          top: e.key === 'ArrowDown' ? READING_SCROLL_STEP : -READING_SCROLL_STEP
+        })
         return
       }
-      const command = matchKey(e, overlayOpen ? 'overlay' : 'list')
+      if (target && target.tagName === 'BUTTON') {
+        return
+      }
+      const command = matchKey(e, 'list')
       if (!command) return
       e.preventDefault()
       command.run()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [overlayOpen])
+  }, [paneOpen])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
@@ -565,6 +931,20 @@ export default function App(): React.JSX.Element {
       : realMode
         ? (realUnreadTotal ?? 0)
         : visibleUnreadTotal - mockReadTotal
+
+  const footerShortcuts: ShortcutHint[] = [
+    ...(paneOpen
+      ? [
+          { id: 'scroll', keys: ['↑', '↓'], label: 'scroll' },
+          { id: 'navigate', keys: ['J', 'K'], label: 'next / prev' },
+          { id: 'close', keys: ['Esc'], label: 'close' }
+        ]
+      : [
+          { id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate' },
+          { id: 'open', keys: ['Enter'], label: 'open' }
+        ]),
+    ...TRIAGE_SHORTCUT_HINTS
+  ]
 
   const statusNote =
     sync.phase === 'syncing'
@@ -608,83 +988,127 @@ export default function App(): React.JSX.Element {
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto py-2" aria-label="Conversation list">
-        {threads.length === 0 && (
-          <div className="flex h-full items-center justify-center text-ink-faint">
-            {sync.phase === 'syncing' ? 'Syncing your inbox…' : 'Inbox empty'}
-          </div>
-        )}
-        {threads.map((t, i) => {
-          const isSelected = i === selectedIndex
-          const isUnread = t.unread && !mockReadIds.has(t.id)
-          return (
-            // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
-            // biome-ignore lint/a11y/noStaticElementInteractions: same — row selection is driven by the app-level key handler, not per-row focus
-            <div
-              key={t.id}
-              ref={isSelected ? selectedRowRef : null}
-              data-testid="thread-row"
-              data-selected={isSelected || undefined}
-              data-unread={isUnread || undefined}
-              className={`flex cursor-default items-center gap-3.5 whitespace-nowrap border-l-[3px] py-[11px] pr-7 pl-5 ${
-                isSelected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'
-              }`}
-              onClick={() => setSelectedIndex(i)}
-              onDoubleClick={() => {
-                setSelectedIndex(i)
-                setOverlayOpen(true)
-              }}
-            >
-              <span
-                className={`size-1.5 flex-none rounded-full ${
-                  isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
-                }`}
-                aria-hidden
-              />
-              <span
-                className={`w-52 flex-none overflow-hidden text-ellipsis ${
-                  isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
-                }`}
-              >
-                {t.from}
-              </span>
-              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis text-ink-faint">
-                <span className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}>{t.subject}</span>
-                <span> — {t.snippet}</span>
-              </span>
-              <span className="flex flex-none items-center gap-2.5 text-xs">
-                {t.hasAttachment && <span title="Has attachment">📎</span>}
-                {t.starred && (
-                  <span className="text-star" title="Starred">
-                    ★
-                  </span>
-                )}
-                <span
-                  className={`min-w-[70px] text-right tabular-nums ${
-                    isUnread ? 'font-medium text-accent' : 'text-ink-faint'
-                  }`}
-                >
-                  {t.at}
-                </span>
-              </span>
+      <div className="flex min-h-0 flex-1">
+        <main
+          data-testid="thread-list"
+          data-pane-open={paneOpen || undefined}
+          className={`min-h-0 overflow-y-auto py-2 ${
+            paneOpen ? 'w-[380px] flex-none border-r border-edge' : 'flex-1'
+          }`}
+          aria-label="Conversation list"
+        >
+          {threads.length === 0 && (
+            <div className="flex h-full items-center justify-center text-ink-faint">
+              {sync.phase === 'syncing' ? 'Syncing your inbox…' : 'Inbox empty'}
             </div>
-          )
-        })}
-      </main>
+          )}
+          {threads.map((t, i) => {
+            const isSelected = i === selectedIndex
+            const isUnread = t.unread && !mockReadIds.has(t.id)
+            return (
+              // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
+              // biome-ignore lint/a11y/noStaticElementInteractions: same — row selection is driven by the app-level key handler, not per-row focus
+              <div
+                key={t.id}
+                ref={isSelected ? selectedRowRef : null}
+                data-testid="thread-row"
+                data-selected={isSelected || undefined}
+                data-unread={isUnread || undefined}
+                className={`cursor-default border-l-[3px] ${
+                  paneOpen
+                    ? 'grid grid-cols-[10px_1fr_auto] gap-x-2 px-3 py-2.5'
+                    : 'flex items-center gap-3.5 py-[11px] pr-7 pl-5'
+                } ${isSelected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'}`}
+                onClick={() => {
+                  setSelectedIndex(i)
+                  setPaneOpen(true)
+                }}
+              >
+                <span
+                  className={`size-1.5 flex-none self-center rounded-full ${
+                    isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
+                  } ${paneOpen ? 'row-span-2' : ''}`}
+                  aria-hidden
+                />
+                {paneOpen ? (
+                  <>
+                    <span
+                      data-testid="thread-sender"
+                      className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap ${
+                        isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
+                      }`}
+                    >
+                      {t.from}
+                    </span>
+                    <span
+                      className={`flex items-center gap-1.5 text-xs tabular-nums ${
+                        isUnread ? 'font-medium text-accent' : 'text-ink-faint'
+                      }`}
+                    >
+                      {t.hasAttachment && <span title="Has attachment">📎</span>}
+                      {t.starred && (
+                        <span className="text-star" title="Starred">
+                          ★
+                        </span>
+                      )}
+                      {t.at}
+                    </span>
+                    <span
+                      data-testid="thread-subject"
+                      className={`col-span-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${
+                        isUnread ? 'font-medium text-ink' : 'text-ink-faint'
+                      }`}
+                    >
+                      {t.subject}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      data-testid="thread-sender"
+                      className={`w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap ${
+                        isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
+                      }`}
+                    >
+                      {t.from}
+                    </span>
+                    <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink-faint">
+                      <span
+                        data-testid="thread-subject"
+                        className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
+                      >
+                        {t.subject}
+                      </span>
+                      <span data-testid="thread-snippet"> — {t.snippet}</span>
+                    </span>
+                    <span className="flex flex-none items-center gap-2.5 text-xs">
+                      {t.hasAttachment && <span title="Has attachment">📎</span>}
+                      {t.starred && (
+                        <span className="text-star" title="Starred">
+                          ★
+                        </span>
+                      )}
+                      <span
+                        className={`min-w-[70px] text-right tabular-nums ${
+                          isUnread ? 'font-medium text-accent' : 'text-ink-faint'
+                        }`}
+                      >
+                        {t.at}
+                      </span>
+                    </span>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </main>
 
-      {overlayOpen && selected && (
-        <>
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: Esc is the keyboard path to close (global handler) — backdrop click is the pointer equivalent */}
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: same — dismiss-on-backdrop is a convention, not the primary control */}
-          <div className="fixed inset-0 z-20 bg-[rgba(8,9,11,0.62)]" onClick={() => setOverlayOpen(false)} />
-          <div
-            data-testid="conversation-overlay"
-            className="fixed top-[7vh] left-1/2 z-30 flex max-h-[80vh] w-[min(780px,92vw)] -translate-x-1/2 flex-col rounded-[13px] border border-edge bg-raised shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
-          >
+        {paneOpen && selected && (
+          <aside data-testid="conversation-pane" className="flex min-w-0 flex-1 flex-col bg-raised/35">
             <div className="flex items-center gap-3 border-b border-edge px-6 pt-4 pb-3">
               <h1
                 data-testid="conversation-subject"
-                className="min-w-0 flex-1 text-lg font-bold tracking-tight"
+                className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-lg font-bold tracking-tight"
               >
                 {conversation?.subject ?? selected.subject}
               </h1>
@@ -695,33 +1119,32 @@ export default function App(): React.JSX.Element {
                 · <Kbd>Esc</Kbd>
               </span>
             </div>
-            <div data-testid="conversation-scroll" className="overflow-y-auto px-6 pt-4 pb-6">
+            <div
+              ref={conversationScrollRef}
+              data-testid="conversation-scroll"
+              tabIndex={-1}
+              className="min-h-0 flex-1 overflow-y-auto px-6 py-5 focus:outline-none [scrollbar-gutter:stable]"
+            >
               {conversation ? (
-                <div className="flex flex-col gap-3.5">
-                  {conversation.messages.map((m) => (
-                    <article
-                      key={m.id}
-                      data-testid="message-card"
-                      className="rounded-[10px] border border-edge bg-ground px-5 py-4"
-                    >
-                      <div className="mb-2.5 flex items-baseline gap-2.5">
-                        <span className="font-semibold">{m.fromName}</span>
-                        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
-                          &lt;{m.fromEmail}&gt;
-                        </span>
-                        <span className="flex-none text-xs text-ink-faint tabular-nums">{m.at}</span>
-                      </div>
-                      <MessageBody bodyText={m.text} bodyHtml={m.html} />
-                    </article>
-                  ))}
+                <div
+                  data-testid="conversation-content"
+                  className="mx-auto flex w-full flex-col gap-3.5"
+                  style={{ maxWidth: 'clamp(720px, 72vw, 1120px)' }}
+                >
+                  <ConversationMessages
+                    key={conversation.threadId}
+                    conversation={conversation}
+                    account={activeAccount}
+                    onToast={showToast}
+                  />
                 </div>
               ) : (
                 <div className="py-10 text-center text-ink-faint">Loading…</div>
               )}
             </div>
-          </div>
-        </>
-      )}
+          </aside>
+        )}
+      </div>
 
       {toast && (
         <div
@@ -733,28 +1156,14 @@ export default function App(): React.JSX.Element {
       )}
 
       <footer className="relative z-40 flex items-center gap-4 border-t border-edge bg-ground px-6 py-2 text-xs text-ink-faint">
-        {overlayOpen ? (
-          <>
-            <span>
-              <Kbd>J</Kbd>/<Kbd>K</Kbd> next / prev
-            </span>
-            <span>
-              <Kbd>Esc</Kbd> close
-            </span>
-          </>
-        ) : (
-          <>
-            <span>
-              <Kbd>J</Kbd>/<Kbd>K</Kbd> navigate
-            </span>
-            <span>
-              <Kbd>Enter</Kbd> open
-            </span>
-          </>
-        )}
+        <div data-testid="footer-shortcuts" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+          {footerShortcuts.map((shortcut) => (
+            <FooterShortcut key={shortcut.id} {...shortcut} />
+          ))}
+        </div>
         <span
           data-testid="status-note"
-          className={`ml-auto font-medium ${sync.phase === 'error' ? 'text-danger' : ''}`}
+          className={`ml-auto flex-none font-medium ${sync.phase === 'error' ? 'text-danger' : ''}`}
           title={statusNote}
         >
           {statusNote}

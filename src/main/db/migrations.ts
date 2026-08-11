@@ -98,9 +98,11 @@ export const migrations: string[] = [
   );
   `,
 
-  // v5 — raw HTML bodies, sanitized only when rendered so sanitizer upgrades
-  // apply retroactively to already-cached mail.
+  // v5 — full reading-view metadata. Raw HTML is sanitized only when rendered
+  // so sanitizer upgrades apply retroactively to already-cached mail.
   `
   ALTER TABLE messages ADD COLUMN body_html TEXT;
+  ALTER TABLE messages ADD COLUMN recipients_json TEXT;
+  ALTER TABLE messages ADD COLUMN attachments_json TEXT;
   `
 ]

@@ -47,6 +47,82 @@ export function parseAddress(raw: string): { name: string; email: string } {
   return { name: email.split('@')[0] || email, email }
 }
 
+/** Split an RFC-style address header without breaking quoted display names. */
+export function parseAddressList(raw: string): { name: string; email: string }[] {
+  const parts: string[] = []
+  let start = 0
+  let quoted = false
+  let escaped = false
+  let angleDepth = 0
+
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quoted) {
+      escaped = true
+      continue
+    }
+    if (char === '"') {
+      quoted = !quoted
+      continue
+    }
+    if (!quoted && char === '<') angleDepth++
+    else if (!quoted && char === '>') angleDepth = Math.max(0, angleDepth - 1)
+    else if (!quoted && angleDepth === 0 && char === ',') {
+      parts.push(raw.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(raw.slice(start))
+
+  return parts
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map(parseAddress)
+    .filter((address) => address.email.length > 0)
+}
+
+export interface ParsedAttachment {
+  attachmentId: string
+  filename: string
+  mimeType: string
+  sizeBytes: number
+  /** Present only when Gmail delivered a small attachment inline with the message payload. */
+  inlineData?: string
+}
+
+/** User-visible attachments have a filename and either remote or inline body data. */
+export function collectAttachments(payload: GmailPart | undefined): ParsedAttachment[] {
+  const attachments: ParsedAttachment[] = []
+  const walk = (part: GmailPart, path: string): void => {
+    const filename = part.filename?.trim()
+    const inlineData = typeof part.body?.data === 'string' ? part.body.data : undefined
+    const attachmentId =
+      part.body?.attachmentId ??
+      (inlineData !== undefined ? `inline:${part.partId?.trim() || path}` : undefined)
+    if (filename && attachmentId) {
+      attachments.push({
+        attachmentId,
+        filename,
+        mimeType: part.mimeType ?? 'application/octet-stream',
+        sizeBytes: Math.max(
+          0,
+          part.body?.size ?? (inlineData === undefined ? 0 : Buffer.from(inlineData, 'base64url').byteLength)
+        ),
+        ...(part.body?.attachmentId ? {} : { inlineData })
+      })
+    }
+    part.parts?.forEach((child, index) => {
+      walk(child, `${path}.${index}`)
+    })
+  }
+  if (payload) walk(payload, '0')
+  return attachments
+}
+
 /** Recursive walk: text/plain wins, text/html (stripped) is the fallback. */
 export function extractBodyText(payload: GmailPart | undefined): string {
   if (!payload) return ''
@@ -133,9 +209,7 @@ export function decodeBase64Url(data: string): string {
 }
 
 export function hasAttachment(payload: GmailPart | undefined): boolean {
-  if (!payload) return false
-  if (payload.filename && payload.filename.length > 0) return true
-  return payload.parts?.some(hasAttachment) ?? false
+  return collectAttachments(payload).length > 0
 }
 
 function decodeBody(data: string): string {

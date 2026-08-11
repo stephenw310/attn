@@ -11,12 +11,32 @@ export interface ThreadRow {
   hasAttachment: boolean
 }
 
+export interface MailAddress {
+  name: string
+  email: string
+}
+
+export interface MessageRecipients {
+  to: MailAddress[]
+  cc: MailAddress[]
+  bcc: MailAddress[]
+  replyTo: MailAddress[]
+}
+
+export interface MessageAttachment {
+  attachmentId: string
+  filename: string
+  mimeType: string
+  sizeBytes: number
+}
+
 export interface ConversationMsg {
   id: string
   fromName: string
   fromEmail: string
-  to: string
   at: number
+  recipients: MessageRecipients
+  attachments: MessageAttachment[]
   /** Plain-text fallback, rendered strictly as a text node. */
   bodyText: string
   /** Raw cached mail HTML. Untrusted until sanitized by the renderer. */
@@ -28,6 +48,14 @@ export interface Conversation {
   subject: string
   messages: ConversationMsg[]
 }
+
+export interface DownloadAttachmentRequest {
+  messageId: string
+  attachmentId: string
+  filename: string
+}
+
+export type DownloadAttachmentResult = { path: string } | { error: string }
 
 export type SyncState =
   | { phase: 'idle' }

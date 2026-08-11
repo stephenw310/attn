@@ -1,4 +1,4 @@
-export type CommandContext = 'list' | 'overlay' | 'global'
+export type CommandContext = 'list' | 'global'
 
 export interface Command {
   id: string

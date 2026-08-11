@@ -1,11 +1,12 @@
 import type { Db } from '../db'
 import {
+  collectAttachments,
   extractBodyHtml,
   extractBodyText,
   type GmailThread,
-  hasAttachment,
   header,
-  parseAddress
+  parseAddress,
+  parseAddressList
 } from '../gmail/parse'
 import { replayPendingThreadDeltas } from '../store/replay'
 
@@ -40,15 +41,19 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
 
   const upsertMsg = db.prepare(
     `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, to_json, subject, snippet,
-                           internal_date, is_unread, body_text, body_html)
+                           internal_date, is_unread, body_text, body_html, recipients_json,
+                           attachments_json)
      VALUES (@account_id, @id, @thread_id, @from_name, @from_email, @to_json, @subject, @snippet,
-             @internal_date, @is_unread, @body_text, @body_html)
+             @internal_date, @is_unread, @body_text, @body_html, @recipients_json,
+             @attachments_json)
      ON CONFLICT(account_id, id) DO UPDATE SET
        is_unread = excluded.is_unread, snippet = excluded.snippet,
        body_text = CASE WHEN messages.body_text IS NULL OR messages.body_text = ''
                         THEN excluded.body_text ELSE messages.body_text END,
        body_html = CASE WHEN messages.body_html IS NULL OR messages.body_html = ''
-                        THEN excluded.body_html ELSE messages.body_html END`
+                        THEN excluded.body_html ELSE messages.body_html END,
+       recipients_json = excluded.recipients_json,
+       attachments_json = excluded.attachments_json`
   )
   const upsertThread = db.prepare(
     `INSERT INTO threads (account_id, id, history_id, subject, snippet, last_msg_at,
@@ -80,7 +85,8 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
       const from = parseAddress(header(msg, 'From'))
       const at = Number(msg.internalDate ?? 0)
       const unread = msg.labelIds?.includes('UNREAD') ? 1 : 0
-      const attach = hasAttachment(msg.payload) ? 1 : 0
+      const attachments = collectAttachments(msg.payload)
+      const attach = attachments.length > 0 ? 1 : 0
 
       upsertMsg.run({
         account_id: accountId,
@@ -94,7 +100,15 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
         internal_date: at,
         is_unread: unread,
         body_text: extractBodyText(msg.payload),
-        body_html: extractBodyHtml(msg.payload) || null
+        body_html: extractBodyHtml(msg.payload) || null,
+        recipients_json: JSON.stringify({
+          to: parseAddressList(header(msg, 'To')),
+          cc: parseAddressList(header(msg, 'Cc')),
+          // Gmail exposes Bcc only on the signed-in user's own sent copy.
+          bcc: parseAddressList(header(msg, 'Bcc')),
+          replyTo: parseAddressList(header(msg, 'Reply-To'))
+        }),
+        attachments_json: JSON.stringify(attachments)
       })
 
       for (const label of msg.labelIds ?? []) labelUnion.add(label)

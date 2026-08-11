@@ -50,7 +50,19 @@ test('renders the signed-out Dispatch inbox', async ({ page }) => {
   await expect(page.getByTestId('account-menu')).toHaveText(/OAuth not configured/)
   await expect(page.getByTestId('status-note')).toHaveText('mock data')
   await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
-  await expect(page.getByTestId('conversation-overlay')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/K/↑/↓navigate')
+  await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
+  for (const [id, text] of [
+    ['done', 'Edone'],
+    ['trash', '#trash'],
+    ['star', 'Sstar'],
+    ['unread', 'Uunread'],
+    ['spam', '!spam'],
+    ['undo', 'Zundo']
+  ]) {
+    await expect(page.getByTestId(`footer-shortcut-${id}`)).toContainText(text)
+  }
 })
 
 test('keeps triage verbs inert in signed-out mock mode', async ({ page }) => {
@@ -82,19 +94,28 @@ test('J/K and arrow keys move list selection without opening a conversation', as
   await page.keyboard.press('k')
   await page.keyboard.press('k')
   await expect.poll(() => selectedIndex(page)).toBe(0)
-  await expect(page.getByTestId('conversation-overlay')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
 })
 
-test('Enter opens the overlay; J/K navigate and mark read; Esc restores the list', async ({ page }) => {
+test('Enter opens the pane; J/K navigate and mark read; Esc restores the list', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(mockThreads.length)
   await expect(rows.first()).toHaveAttribute('data-unread', 'true')
   await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
 
   await page.keyboard.press('Enter')
-  await expect(page.getByTestId('conversation-overlay')).toBeVisible()
+  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-pane-open', 'true')
+  await expect(rows.first().getByTestId('thread-sender')).toHaveText(mockThreads[0].from)
+  await expect(rows.first().getByTestId('thread-subject')).toHaveText(mockThreads[0].subject)
+  await expect(rows.first().getByTestId('thread-snippet')).toHaveCount(0)
   await expect(page.getByTestId('conversation-subject')).toHaveText(mockThreads[0].subject)
   await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${mockThreads.length}`)
+  await expect(page.getByTestId('footer-shortcut-open')).toHaveCount(0)
+  await expect(page.getByTestId('footer-shortcut-scroll')).toContainText('↑/↓scroll')
+  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knext / prev')
+  await expect(page.getByTestId('footer-shortcut-close')).toContainText('Escclose')
+  await expect(page.getByTestId('footer-shortcut-done')).toContainText('Edone')
   await expect(page.getByTestId('message-card')).toHaveCount(1)
   await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
   await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')
@@ -113,7 +134,8 @@ test('Enter opens the overlay; J/K navigate and mark read; Esc restores the list
   await page.keyboard.press('k')
   await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${mockThreads.length}`)
   await page.keyboard.press('Escape')
-  await expect(page.getByTestId('conversation-overlay')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).not.toHaveAttribute('data-pane-open')
   await expect.poll(() => selectedIndex(page)).toBe(0)
 })
 

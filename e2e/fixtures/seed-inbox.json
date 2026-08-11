@@ -11,7 +11,9 @@
           "labelIds": ["INBOX", "UNREAD", "IMPORTANT"],
           "internalDate": "1754800000000",
           "from": "Maya Lin <maya@example.com>",
-          "to": "seed@attn.test",
+          "to": "seed@attn.test, Priya Raman <priya@example.com>",
+          "cc": "Daniel Okafor <daniel@example.com>",
+          "replyTo": "Maya Lin <maya+roadmap@example.com>",
           "subject": "Q3 roadmap review",
           "snippet": "The roadmap is ready for review.",
           "bodyText": "Here is the first draft of the Q3 roadmap."
@@ -24,7 +26,7 @@
           "to": "seed@attn.test",
           "subject": "Q3 roadmap review",
           "snippet": "I added the launch milestones.",
-          "bodyText": "I added the launch milestones and owner notes."
+          "bodyText": "I added the launch milestones and owner notes.\n\n-- \nMaya Lin\n\nOn Friday, Priya wrote:\n> Please include owners for each milestone."
         }
       ]
     },
@@ -41,8 +43,15 @@
           "subject": "Your receipt",
           "snippet": "Thanks for your order.",
           "bodyText": "Your order total was $24.00.",
-          "bodyHtml": "<script>ignored()</script>",
-          "attachmentFilename": "receipt.pdf"
+          "bodyHtml": "<div id=plain-html-copy>Thanks for your order. Your order total was $24.00.</div><div><br></div><div>Northstar Books</div><div><br></div><span class=gmail_signature_prefix>-- </span><br><div class=gmail_signature>Customer care<br>Northstar Books<table><tr><td>Signature details</td></tr></table></div>",
+          "attachments": [
+            {
+              "attachmentId": "att-receipt-pdf",
+              "filename": "receipt.pdf",
+              "mimeType": "application/pdf",
+              "sizeBytes": 24576
+            }
+          ]
         }
       ]
     },
@@ -74,7 +83,8 @@
           "to": "seed@attn.test",
           "subject": "Lunch next week",
           "snippet": "Tuesday works for me.",
-          "bodyText": "Would noon on Tuesday work?"
+          "bodyText": "Would noon on Tuesday work?",
+          "bodyHtml": "<div id=all-quote class=gmail_quote>Would noon on Tuesday work?</div>"
         }
       ]
     },
@@ -106,7 +116,8 @@
           "to": "seed@attn.test",
           "subject": "Flight options",
           "snippet": "Three routes are available.",
-          "bodyText": "I found three routes for the conference."
+          "bodyText": "I found three routes for the conference.",
+          "bodyHtml": "<script>document.body.dataset.scriptRan='true'</script>"
         }
       ]
     },
@@ -138,7 +149,7 @@
           "to": "seed@attn.test",
           "subject": "This week in focus",
           "snippet": "Your weekly digest.",
-          "bodyHtml": "<script>document.body.dataset.scriptRan='true';parent.document.body.dataset.scriptRan='true'</script><style id=mail-styles>#stylesheet-styled{color:rgb(12,34,56);font-weight:700}</style><div id=viewport-hero style=\"min-height:100vh\"></div><div id=viewport-tail style=\"height:2000px\"></div><div style=\"position:absolute;top:0;right:0;left:0\"><h2>Weekly focus</h2><img id=handler-image src=\"https://handler.attn.test/broken.gif\" onerror=\"document.body.dataset.handlerRan='true';parent.document.body.dataset.handlerRan='true'\"><a id=unsafe-link href=\"javascript:document.body.dataset.linkRan='true';parent.document.body.dataset.linkRan='true'\">unsafe link</a><a id=self-link href=\"https://links.attn.test/self\" target=\"_self\">self link</a><a id=top-link href=\"https://links.attn.test/top\" target=\"_top\">top link</a><form id=unsafe-form><table id=invite-details><tr><td>Invite: roadmap review at 10:00</td></tr></table><input name=email><button>Submit</button></form><custom-card><p id=custom-card-copy>Important custom-card content</p></custom-card><p id=stylesheet-styled>Stylesheet-styled copy</p><img id=remote-image src=\"https://remote.attn.test/tracker.gif\" alt=\"Remote tracker\"><table id=styled-table style=\"border-collapse:collapse;background:#fff3d6\"><tr><td style=\"padding:12px;border:1px solid #d49a21\">You completed twelve focused conversations.</td></tr></table></div>"
+          "bodyHtml": "<script>document.body.dataset.scriptRan='true';parent.document.body.dataset.scriptRan='true'</script><style id=mail-styles>#stylesheet-styled{color:rgb(12,34,56);font-weight:700}</style><div id=viewport-hero style=\"min-height:100vh\"></div><div id=viewport-tail style=\"height:2000px\"></div><div style=\"position:absolute;top:0;right:0;left:0\"><h2>Weekly focus</h2><img id=handler-image src=\"https://handler.attn.test/broken.gif\" onerror=\"document.body.dataset.handlerRan='true';parent.document.body.dataset.handlerRan='true'\"><a id=unsafe-link href=\"javascript:document.body.dataset.linkRan='true';parent.document.body.dataset.linkRan='true'\">unsafe link</a><a id=self-link href=\"https://links.attn.test/self\" target=\"_self\">self link</a><a id=top-link href=\"https://links.attn.test/top\" target=\"_top\">top link</a><form id=unsafe-form><table id=invite-details><tr><td>Invite: roadmap review at 10:00</td></tr></table><input name=email><button>Submit</button></form><custom-card><p id=custom-card-copy>Important custom-card content</p></custom-card><p id=stylesheet-styled>Stylesheet-styled copy</p><img id=remote-image src=\"https://remote.attn.test/tracker.gif\" alt=\"Remote tracker\"><table id=styled-table style=\"border-collapse:collapse;background:#fff3d6\"><tr><td style=\"padding:12px;border:1px solid #d49a21\">You completed twelve focused conversations.</td></tr></table><div id=wide-mail style=\"width:1200px;white-space:nowrap\">Wide mail remains reachable with horizontal scrolling.</div><div class=\"gmail_signature\">Attn Weekly team</div><div class=\"gmail_quote\" style=\"height:4000px\">Earlier weekly digest content</div></div>"
         }
       ]
     }
