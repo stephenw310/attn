@@ -4,7 +4,6 @@ import {
   extractBodyHtml,
   extractBodyText,
   type GmailThread,
-  hasAttachment,
   header,
   parseAddress,
   parseAddressList
@@ -86,7 +85,8 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
       const from = parseAddress(header(msg, 'From'))
       const at = Number(msg.internalDate ?? 0)
       const unread = msg.labelIds?.includes('UNREAD') ? 1 : 0
-      const attach = hasAttachment(msg.payload) ? 1 : 0
+      const attachments = collectAttachments(msg.payload)
+      const attach = attachments.length > 0 ? 1 : 0
 
       upsertMsg.run({
         account_id: accountId,
@@ -108,7 +108,7 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
           bcc: parseAddressList(header(msg, 'Bcc')),
           replyTo: parseAddressList(header(msg, 'Reply-To'))
         }),
-        attachments_json: JSON.stringify(collectAttachments(msg.payload))
+        attachments_json: JSON.stringify(attachments)
       })
 
       for (const label of msg.labelIds ?? []) labelUnion.add(label)

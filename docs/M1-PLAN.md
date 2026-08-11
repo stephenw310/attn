@@ -490,7 +490,7 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 
 ## T11 — Reading experience overhaul: split view, HTML mail, full message display
 
-**Status: implementation complete; awaiting merge.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.10), D6 (revised), §9 #7/#9 · **PR:** [#11](https://github.com/stephenw310/attn/pull/11) (draft, verified through `20140c4`).
+**Status: implementation complete; awaiting merge.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.10), D6 (revised), §9 #7/#9 · **PR:** [#11](https://github.com/stephenw310/attn/pull/11) (draft; current head verified).
 
 ### Why
 
@@ -510,8 +510,8 @@ The T2 guide above is still the contract for sanitizer/iframe/CSP details. The r
 
 - Remove the centered overlay + backdrop. New structure: when a conversation is open, the root splits — list column left (fixed ~380px), `data-testid="conversation-pane"` right. Put `data-pane-open` on the list container so e2e and CSS key off one attribute.
 - **Compact rows** when the pane is open: two lines — sender + time on the first, subject on the second, no snippet. Same `thread-row` testid, same selection/unread attributes.
-- Conversation pane: thread position ("4 of 12") + `Esc` hint in its header (keep the existing `conversation-position` testid); responsive body measure `clamp(720px, 72vw, 1120px)` so wide windows are used without turning prose into an edge-to-edge line; message cards as today plus Parts C–E. Reserve the vertical scrollbar gutter so expanding a long message cannot shift the centered reading column.
-- **Keyboard:** `Enter`/click opens the pane, focuses its scroll surface, and `Esc` closes it (full-width restored, selection + scroll intact). Unmodified ArrowUp/Down scroll the conversation 120px at a time; modifier+arrow chords are untouched. `J`/`K` stay the *same* list-selection commands — with the pane open the pane simply follows the selection. Keys from the sandboxed iframe are forwarded to the parent, and recipient/attachment/trim buttons blur after click so no control can strand the global keyboard loop. In `src/renderer/src/commands.ts`, collapse the `'overlay'` context: contexts become `'list' | 'global'`, and Esc-close-pane is a command guarded on pane-open state. Auto-advance is untouched (pane follows selection; empty list closes the pane).
+- Conversation pane: thread position ("4 of 12") + `Esc` hint in its header (keep the existing `conversation-position` testid); responsive body measure `clamp(720px, 72vw, 1120px)` so wide windows are used without turning prose into an edge-to-edge line; message cards as today plus Parts C–E. The newest message is expanded, while every older message starts as a one-line summary and does not mount its body/HTML frame until expanded. Reserve the vertical scrollbar gutter so expanding a long message cannot shift the centered reading column.
+- **Keyboard:** `Enter`/click opens the pane, focuses its scroll surface, and `Esc` closes it (full-width restored, selection + scroll intact). Unmodified ArrowUp/Down scroll the conversation 120px at a time; modifier+arrow chords are untouched. `J`/`K` stay the *same* list-selection commands — with the pane open the pane follows the selection and resets the reused reading scroller to the new thread's top. Keys from the sandboxed iframe are forwarded to the parent, but `Enter` remains unclaimed while the pane is open so a focused mail link keeps its native activation; recipient/attachment/trim buttons blur after click so no control can strand the global keyboard loop. In `src/renderer/src/commands.ts`, collapse the `'overlay'` context: contexts become `'list' | 'global'`, and register Enter-open only while the pane is closed and Esc-close only while it is open. Auto-advance is untouched (pane follows selection; empty list closes the pane).
 - Start visuals from `design/explorations/b2-conversation-side.html` (the side-panel study already in the Dispatch language). Dimming is gone; the tie between panes is the selected-row highlight.
 - **e2e churn (do in the same stage):** update `smoke.spec.ts`, `triage.spec.ts`, `seeded.spec.ts` from `conversation-overlay` to `conversation-pane`; add asserts: `Esc` removes `data-pane-open`; compact rows show sender + subject; J/K with pane open updates both selection and pane subject.
 
@@ -552,14 +552,14 @@ The v5 columns populate only for newly synced mail, and this task intentionally 
 
 ### Testing (rollup)
 
-- **e2e:** updated smoke/triage/seeded specs (pane semantics); `html-mail.spec.ts` per the T2 contract; new `reading.spec.ts` covers full-width recipients, attachment chips + offline toast, simple-HTML padding/fallback contrast, an all-quote HTML guard, stable expand/collapse position, stable scrollbar gutter, pane focus, iframe key forwarding, post-click keyboard continuity, modifier-arrow behavior, and the responsive reading width.
+- **e2e:** updated smoke/triage/seeded specs (pane semantics); `html-mail.spec.ts` per the T2 contract; new `reading.spec.ts` covers full-width recipients, attachment chips + offline toast, simple-HTML padding/fallback contrast, an all-quote HTML guard, stable expand/collapse position, stable scrollbar gutter, older-message body deferral, pane focus, iframe key forwarding without stealing link Enter, per-thread scroll reset, post-click keyboard continuity, modifier-arrow behavior, and the responsive reading width.
 - **Unit:** `parseAddressList`, remote + inline `collectAttachments` (payload-walk fixtures), `findTrimIndex` including the linear-time regression, and cross-platform attachment filename sanitization.
 - **Screenshots:** `inbox.png` (full-width list) and a new `reading.png` (pane open on the hostile-HTML thread) — look at both, per global rule 6.
 - **Manual smoke, signed in:** a real HTML newsletter renders; an attachment downloads and reveals; recipients expand on a group thread; a real Gmail reply chain collapses its quote + signature.
 
 ### Done when
 
-- Implementation and review fixes are present in **PR #11**; `npm run verify` is green through `20140c4` (25 unit tests, build, and 23 Electron e2e tests). Removing draft status and merging are the remaining project-state gates.
+- Implementation and review fixes are present in **PR #11**; `npm run verify` is green at the current PR head (25 unit tests, build, and 23 Electron e2e tests). Removing draft status and merging are the remaining project-state gates.
 - SPEC v0.10 F3's T11 acceptance criteria demonstrably hold (pane/focus semantics, recipients inspectable, remote + inline attachment discovery, and safe/stable collapse); the newly explicit system-mailbox criteria remain assigned to M3.
 - Migration v5 is the only T11 schema entry; the required dev-DB wipe is documented instead of compatibility work.
 - The status table is updated, and `inbox.png`, `reading.png`, and `simple-mail.png` were reviewed.

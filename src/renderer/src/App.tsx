@@ -242,11 +242,15 @@ function formatBytes(bytes: number): string {
 function MessageCard({
   message,
   account,
-  onToast
+  onToast,
+  collapsed = false,
+  onToggleCollapsed
 }: {
   message: DisplayMsg
   account: string | null
   onToast: (message: string) => void
+  collapsed?: boolean
+  onToggleCollapsed?: () => void
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const htmlSurface = message.html !== null
@@ -271,8 +275,44 @@ function MessageCard({
     [message.id, onToast]
   )
 
+  if (collapsed) {
+    return (
+      <article
+        data-testid="message-card"
+        data-collapsed="true"
+        className="rounded-[10px] border border-edge bg-ground"
+      >
+        <button
+          type="button"
+          data-testid="older-message-toggle"
+          aria-expanded="false"
+          aria-label={`Expand older message from ${message.fromName}`}
+          onClick={(event) => {
+            onToggleCollapsed?.()
+            event.currentTarget.blur()
+          }}
+          className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-5 py-3 text-left hover:bg-active/50"
+        >
+          <span className="min-w-0 font-semibold">{message.fromName}</span>
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+            {message.text || 'HTML message'}
+          </span>
+          <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
+            {message.attachments.length > 0 && <span title="Has attachment">📎</span>}
+            {message.at}
+            <span aria-hidden>▾</span>
+          </span>
+        </button>
+      </article>
+    )
+  }
+
   return (
-    <article data-testid="message-card" className="rounded-[10px] border border-edge bg-ground px-5 py-4">
+    <article
+      data-testid="message-card"
+      data-collapsed="false"
+      className="rounded-[10px] border border-edge bg-ground px-5 py-4"
+    >
       <div
         data-testid="message-header"
         className="mb-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2.5"
@@ -285,7 +325,24 @@ function MessageCard({
             </span>
           </div>
         </div>
-        <span className="flex-none text-xs text-ink-faint tabular-nums">{message.at}</span>
+        <span className="flex flex-none items-center gap-2 text-xs text-ink-faint tabular-nums">
+          {message.at}
+          {onToggleCollapsed && (
+            <button
+              type="button"
+              data-testid="older-message-toggle"
+              aria-expanded="true"
+              aria-label={`Collapse older message from ${message.fromName}`}
+              onClick={(event) => {
+                onToggleCollapsed()
+                event.currentTarget.blur()
+              }}
+              className="cursor-pointer rounded px-1 text-ink-faint hover:bg-active hover:text-ink-dim"
+            >
+              <span aria-hidden>▴</span>
+            </button>
+          )}
+        </span>
         <div className="col-span-2 min-w-0">
           <RecipientLine message={message} account={account} />
         </div>
@@ -333,6 +390,46 @@ function MessageCard({
         )}
       </div>
     </article>
+  )
+}
+
+function ConversationMessages({
+  conversation,
+  account,
+  onToast
+}: {
+  conversation: DisplayConversation
+  account: string | null
+  onToast: (message: string) => void
+}): React.JSX.Element {
+  const [expandedOlderIds, setExpandedOlderIds] = useState<Set<string>>(() => new Set())
+  const newestIndex = conversation.messages.length - 1
+
+  const toggleOlder = useCallback((messageId: string) => {
+    setExpandedOlderIds((current) => {
+      const next = new Set(current)
+      if (next.has(messageId)) next.delete(messageId)
+      else next.add(messageId)
+      return next
+    })
+  }, [])
+
+  return (
+    <>
+      {conversation.messages.map((message, index) => {
+        const isOlder = index < newestIndex
+        return (
+          <MessageCard
+            key={message.id}
+            message={message}
+            account={account}
+            onToast={onToast}
+            collapsed={isOlder && !expandedOlderIds.has(message.id)}
+            onToggleCollapsed={isOlder ? () => toggleOlder(message.id) : undefined}
+          />
+        )
+      })}
+    </>
   )
 }
 
@@ -687,10 +784,15 @@ export default function App(): React.JSX.Element {
     }
   }, [paneOpen, realMode, selected])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refocus after in-pane J/K changes the selected conversation
-  useEffect(() => {
+  // Reset the reused reading container before paint, then refocus after in-pane J/K navigation.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selected id deliberately resets scroll and focus
+  useLayoutEffect(() => {
     if (!paneOpen) return
-    conversationScrollRef.current?.focus({ preventScroll: true })
+    const scroll = conversationScrollRef.current
+    if (!scroll) return
+    scroll.scrollTop = 0
+    scroll.scrollLeft = 0
+    scroll.focus({ preventScroll: true })
   }, [paneOpen, selected?.id])
 
   useLayoutEffect(
@@ -710,24 +812,25 @@ export default function App(): React.JSX.Element {
           context: 'list',
           run: () => setSelectedIndex((i) => Math.max(i - 1, 0))
         },
-        {
-          id: 'conversation.open',
-          title: 'Open conversation',
-          shortcut: 'Enter',
-          context: 'list',
-          run: () => {
-            if (!paneOpen) openSelected()
-          }
-        },
-        {
-          id: 'conversation.close',
-          title: 'Close conversation',
-          shortcut: 'Escape',
-          context: 'list',
-          run: () => {
-            if (paneOpen) setPaneOpen(false)
-          }
-        },
+        ...(paneOpen
+          ? [
+              {
+                id: 'conversation.close',
+                title: 'Close conversation',
+                shortcut: 'Escape',
+                context: 'list' as const,
+                run: () => setPaneOpen(false)
+              }
+            ]
+          : [
+              {
+                id: 'conversation.open',
+                title: 'Open conversation',
+                shortcut: 'Enter',
+                context: 'list' as const,
+                run: openSelected
+              }
+            ]),
         {
           id: 'triage.archive',
           title: 'Mark done',
@@ -1028,14 +1131,12 @@ export default function App(): React.JSX.Element {
                   className="mx-auto flex w-full flex-col gap-3.5"
                   style={{ maxWidth: 'clamp(720px, 72vw, 1120px)' }}
                 >
-                  {conversation.messages.map((message) => (
-                    <MessageCard
-                      key={message.id}
-                      message={message}
-                      account={activeAccount}
-                      onToast={showToast}
-                    />
-                  ))}
+                  <ConversationMessages
+                    key={conversation.threadId}
+                    conversation={conversation}
+                    account={activeAccount}
+                    onToast={showToast}
+                  />
                 </div>
               ) : (
                 <div className="py-10 text-center text-ink-faint">Loading…</div>
