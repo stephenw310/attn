@@ -1,7 +1,7 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
-import { executeIntent, type QueueIntent } from './execute'
+import { executeIntent, isPermanentActionError, type QueueIntent, retryDelayMs } from './execute'
 
 interface QueueRow {
   id: number
@@ -12,38 +12,48 @@ interface QueueRow {
 }
 
 export class ActionExecutor {
-  private running = false
+  private drainPromise: Promise<void> | null = null
+  private stopping = false
   private timer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private readonly db: Db,
-    private readonly provider: () => MailProvider | null
+    private readonly accountId: () => string | null,
+    private readonly provider: () => MailProvider | null,
+    private readonly notify: () => void = () => {}
   ) {
     db.prepare("UPDATE action_queue SET state = 'pending' WHERE state = 'inflight'").run()
   }
 
-  trigger(): void {
-    if (this.running) return
-    void this.drain()
+  trigger(): Promise<void> {
+    if (this.stopping) return Promise.resolve()
+    if (this.drainPromise) return this.drainPromise
+    this.drainPromise = this.drain().finally(() => {
+      this.drainPromise = null
+    })
+    return this.drainPromise
   }
 
   stop(): void {
+    this.stopping = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
   }
 
   private async drain(): Promise<void> {
+    const accountId = this.accountId()
     const provider = this.provider()
-    if (!provider) return
-    this.running = true
+    if (!accountId || !provider) return
     let retryMs: number | null = null
     try {
       for (;;) {
+        if (this.stopping || this.accountId() !== accountId) break
         const row = this.db
           .prepare(
-            "SELECT id, kind, thread_id, payload, attempts FROM action_queue WHERE state = 'pending' ORDER BY id LIMIT 1"
+            `SELECT id, kind, thread_id, payload, attempts FROM action_queue
+             WHERE account_id = ? AND state = 'pending' ORDER BY id LIMIT 1`
           )
-          .get() as QueueRow | undefined
+          .get(accountId) as QueueRow | undefined
         if (!row) break
         this.db.prepare("UPDATE action_queue SET state = 'inflight' WHERE id = ?").run(row.id)
         try {
@@ -58,17 +68,17 @@ export class ActionExecutor {
                 }
               : { kind: row.kind, threadId: row.thread_id }
           await executeIntent(provider, intent)
+          if (this.stopping) break
           this.db.prepare('DELETE FROM action_queue WHERE id = ?').run(row.id)
+          this.notify()
         } catch (error) {
+          if (this.stopping) break
           if (error instanceof GmailApiError && error.status === 404) {
             this.db.prepare('DELETE FROM action_queue WHERE id = ?').run(row.id)
+            this.notify()
             continue
           }
-          const permanent =
-            error instanceof GmailApiError &&
-            error.status >= 400 &&
-            error.status < 500 &&
-            error.status !== 429
+          const permanent = isPermanentActionError(error)
           this.db
             .prepare(
               'UPDATE action_queue SET state = ?, attempts = attempts + 1, last_error = ? WHERE id = ?'
@@ -78,13 +88,18 @@ export class ActionExecutor {
               error instanceof Error ? error.message : String(error),
               row.id
             )
-          if (!permanent) retryMs = Math.min(60_000, row.attempts === 0 ? 5_000 : 30_000)
+          this.notify()
+          if (permanent) continue
+          retryMs = retryDelayMs(row.attempts)
           break
         }
       }
     } finally {
-      this.running = false
-      if (retryMs !== null) this.timer = setTimeout(() => this.trigger(), retryMs)
+      if (!this.stopping && retryMs !== null) {
+        this.timer = setTimeout(() => {
+          void this.trigger()
+        }, retryMs)
+      }
     }
   }
 }

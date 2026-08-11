@@ -273,6 +273,8 @@ export default function App(): React.JSX.Element {
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const convCache = useRef(new Map<string, DisplayConversation>())
+  const autoReadThreadRef = useRef<string | null>(null)
+  const toastTokenRef = useRef(0)
 
   const activeAccount = status?.signedIn ? (status.email ?? null) : null
   const realMode = Boolean(attn && status?.signedIn)
@@ -347,7 +349,7 @@ export default function App(): React.JSX.Element {
     // NOTE(M1 incremental sync): if a refresh removes the open thread, this
     // clamp shifts selection and an open overlay would jump to a different
     // conversation. Revisit when mail:changed can fire mid-read.
-    setSelectedIndex((i) => Math.min(i, Math.max(threads.length - 1, 0)))
+    setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
     if (threads.length === 0) setOverlayOpen(false)
   }, [threads.length])
 
@@ -400,8 +402,11 @@ export default function App(): React.JSX.Element {
   }, [selectedIndex, threads, realMode])
 
   const showToast = useCallback((message: string) => {
+    const token = ++toastTokenRef.current
     setToast(message)
-    window.setTimeout(() => setToast((current) => (current === message ? null : current)), 4000)
+    window.setTimeout(() => {
+      if (toastTokenRef.current === token) setToast(null)
+    }, 4000)
   }, [])
 
   const triage = useCallback(
@@ -422,13 +427,19 @@ export default function App(): React.JSX.Element {
   }, [selectedIndex, threads])
 
   useEffect(() => {
-    if (!overlayOpen || !selected?.unread) return
+    if (!overlayOpen) {
+      autoReadThreadRef.current = null
+      return
+    }
+    if (!selected || autoReadThreadRef.current === selected.id) return
+    autoReadThreadRef.current = selected.id
+    if (!selected.unread) return
     if (realMode) {
-      triage({ kind: 'markUnread', threadIds: [selected.id], on: false })
+      void attn?.mail.markReadOnOpen(selected.id).catch(() => {})
     } else {
       setMockReadIds((current) => (current.has(selected.id) ? current : new Set(current).add(selected.id)))
     }
-  }, [overlayOpen, realMode, selected, triage])
+  }, [overlayOpen, realMode, selected])
 
   useLayoutEffect(
     () =>
@@ -438,7 +449,7 @@ export default function App(): React.JSX.Element {
           title: 'Next conversation',
           shortcut: 'j',
           context: overlayOpen ? 'overlay' : 'list',
-          run: () => setSelectedIndex((i) => Math.min(i + 1, threads.length - 1))
+          run: () => setSelectedIndex((i) => Math.min(i + 1, Math.max(threads.length - 1, 0)))
         },
         {
           id: 'navigate.previous',

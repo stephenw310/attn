@@ -9,7 +9,8 @@ const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
 export class GmailApiError extends Error {
   constructor(
     readonly status: number,
-    message: string
+    message: string,
+    readonly retryable = false
   ) {
     super(message)
   }
@@ -109,7 +110,11 @@ export class GmailClient {
         await sleep(Math.min(65_000, 1000 * 2 ** attempt) + Math.random() * 1000)
         continue
       }
-      throw new GmailApiError(res.status, `gmail ${path} failed (${res.status}): ${text.slice(0, 300)}`)
+      throw new GmailApiError(
+        res.status,
+        `gmail ${path} failed (${res.status}): ${text.slice(0, 300)}`,
+        res.status === 429 || res.status >= 500 || quotaHit
+      )
     }
   }
 }

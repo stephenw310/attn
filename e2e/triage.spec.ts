@@ -51,4 +51,46 @@ test('triages from the overlay and advances the open conversation', async ({ pag
   await expect(page.getByTestId('conversation-overlay')).toBeVisible()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
   await expect(page.getByTestId('thread-row')).toHaveCount(7)
+  await page.keyboard.press('z')
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
+})
+
+test('keeps explicit unread and undo stable while the overlay is open', async ({ page }) => {
+  const first = page.getByTestId('thread-row').first()
+  await expect(first).toHaveAttribute('data-unread', 'true')
+  await first.click()
+  await page.keyboard.press('Enter')
+  await expect(first).not.toHaveAttribute('data-unread')
+  await page.keyboard.press('u')
+  await expect(first).toHaveAttribute('data-unread', 'true')
+  await page.keyboard.press('z')
+  await expect(first).not.toHaveAttribute('data-unread')
+})
+
+test('does not run destructive shortcuts with command modifiers', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await rows.first().click()
+  await page.keyboard.press('Meta+e')
+  await page.keyboard.press('Control+u')
+  await page.keyboard.press('Alt+e')
+  await expect(rows).toHaveCount(8)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
+})
+
+test('keeps a valid selection after navigating an empty inbox', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await rows.first().click()
+  for (let remaining = 7; remaining >= 0; remaining--) {
+    await page.keyboard.press('e')
+    await expect(rows).toHaveCount(remaining)
+  }
+  await page.keyboard.press('j')
+  await page.keyboard.press('z')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toHaveAttribute('data-selected', 'true')
+  await page.keyboard.press('e')
+  await expect(rows).toHaveCount(0)
 })

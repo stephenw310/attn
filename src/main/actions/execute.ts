@@ -1,3 +1,4 @@
+import { GmailApiError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
 
 export type QueueIntent =
@@ -11,5 +12,20 @@ export async function executeIntent(provider: MailProvider, intent: QueueIntent)
     await provider.trashThread(intent.threadId)
   } else {
     await provider.untrashThread(intent.threadId)
+    await provider.modifyThread(intent.threadId, ['INBOX'], [])
   }
+}
+
+export function isPermanentActionError(error: unknown): boolean {
+  return (
+    error instanceof GmailApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    !error.retryable &&
+    error.status !== 404
+  )
+}
+
+export function retryDelayMs(previousAttempts: number): number {
+  return previousAttempts === 0 ? 5_000 : previousAttempts === 1 ? 30_000 : 60_000
 }

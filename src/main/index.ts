@@ -1,10 +1,9 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import type { TriageAction } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import type { SyncState } from '../shared/mail'
-import { pendingActionCount, performTriage, undoLast } from './actions'
+import { clearUndo, isTriageAction, pendingActionCount, performTriage, undoLast } from './actions'
 import { ActionExecutor } from './actions/executor'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
@@ -92,7 +91,7 @@ function startSync(): void {
     onDone: (accountId, count) => {
       syncRunning = false
       if (generation !== authSessionGeneration) {
-        if (authStatus().signedIn) startSync()
+        if (authStatus().signedIn) void resumeOnlineWork()
         return
       }
       setSyncState({ phase: 'idle' })
@@ -102,13 +101,21 @@ function startSync(): void {
     onError: (message) => {
       syncRunning = false
       if (generation !== authSessionGeneration) {
-        if (authStatus().signedIn) startSync()
+        if (authStatus().signedIn) void resumeOnlineWork()
         return
       }
       setSyncState({ phase: 'error', message })
       console.error(`[sync] failed: ${message}`)
     }
   })
+}
+
+async function resumeOnlineWork(): Promise<void> {
+  await actionExecutor?.trigger()
+  // A sign-out/account switch can make an active drain finish early. A second
+  // pass picks up the newly active account before its server snapshot starts.
+  await actionExecutor?.trigger()
+  if (authStatus().signedIn) startSync()
 }
 
 function oauthSearchDirs(): string[] {
@@ -141,8 +148,7 @@ function registerIpc(): void {
       authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
-      startSync()
-      actionExecutor?.trigger()
+      void resumeOnlineWork()
     } catch (e) {
       console.error('[auth] sign-in failed:', e instanceof Error ? e.message : e)
       throw e
@@ -153,10 +159,12 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('auth:signOut', () => {
+    const account = currentAccountId()
     cancelActiveSignIn()
     authSessionGeneration++
     seedAccountId = null
     clearTokens(app.getPath('userData'))
+    clearUndo(account ?? undefined)
     // A stale backfill may finish caching locally, but its generation can no
     // longer persist refreshed tokens or publish state for the signed-out user.
     setSyncState({ phase: 'idle' })
@@ -180,14 +188,25 @@ function registerIpc(): void {
     const account = currentAccountId()
     return account ? getConversation(db, account, threadId) : null
   })
-  ipcMain.handle('mail:triage', (_e, action: TriageAction) => {
+  ipcMain.handle('mail:triage', (_e, action: unknown) => {
     if (!db) throw new Error('database unavailable')
+    if (!isTriageAction(action)) throw new Error('invalid triage action')
     const account = currentAccountId()
     if (!account) throw new Error('not signed in')
     const result = performTriage(db, account, action)
     broadcast('mail:changed')
-    actionExecutor?.trigger()
+    void actionExecutor?.trigger()
     return result
+  })
+  ipcMain.handle('mail:markReadOnOpen', (_e, threadId: unknown) => {
+    if (!db || typeof threadId !== 'string' || threadId.length === 0) {
+      throw new Error('invalid thread id')
+    }
+    const account = currentAccountId()
+    if (!account) throw new Error('not signed in')
+    performTriage(db, account, { kind: 'markUnread', threadIds: [threadId], on: false }, false)
+    broadcast('mail:changed')
+    void actionExecutor?.trigger()
   })
   ipcMain.handle('mail:undo', () => {
     if (!db) return null
@@ -196,7 +215,7 @@ function registerIpc(): void {
     const result = undoLast(db, account)
     if (result) {
       broadcast('mail:changed')
-      actionExecutor?.trigger()
+      void actionExecutor?.trigger()
     }
     return result
   })
@@ -269,10 +288,9 @@ if (!gotLock) {
     }
 
     registerIpc()
-    actionExecutor = new ActionExecutor(db, makeProvider)
-    actionExecutor.trigger()
+    actionExecutor = new ActionExecutor(db, currentAccountId, makeProvider, () => broadcast('mail:changed'))
     createWindow()
-    if (authStatus().signedIn) startSync()
+    if (authStatus().signedIn) void resumeOnlineWork()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

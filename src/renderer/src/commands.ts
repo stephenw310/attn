@@ -31,6 +31,7 @@ function normalizedKey(event: KeyboardEvent): string {
 }
 
 export function matchKey(event: KeyboardEvent, context: Exclude<CommandContext, 'global'>): Command | null {
+  if (event.ctrlKey || event.metaKey || event.altKey) return null
   const key = normalizedKey(event)
   return (
     commands.find(

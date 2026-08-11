@@ -16,6 +16,7 @@ const api = {
     getConversation: (threadId: string): Promise<Conversation | null> =>
       ipcRenderer.invoke('mail:getConversation', threadId),
     triage: (action: TriageAction): Promise<TriageResult> => ipcRenderer.invoke('mail:triage', action),
+    markReadOnOpen: (threadId: string): Promise<void> => ipcRenderer.invoke('mail:markReadOnOpen', threadId),
     undo: (): Promise<TriageResult | null> => ipcRenderer.invoke('mail:undo'),
     getPendingActionCount: (): Promise<number> => ipcRenderer.invoke('mail:getPendingActionCount'),
     onChanged: (cb: () => void): (() => void) => {

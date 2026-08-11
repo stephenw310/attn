@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isTriageAction } from '.'
 import { inverseForThread, planAction } from './plan'
 
 describe('triage action planning', () => {
@@ -29,5 +30,12 @@ describe('triage action planning', () => {
         't1'
       )
     ).toEqual({ kind: 'label', threadIds: ['t1'], add: ['keep'], remove: ['new'] })
+  })
+
+  it('rejects malformed actions at the IPC boundary', () => {
+    expect(isTriageAction({ kind: 'archive', threadIds: ['t1'] })).toBe(true)
+    expect(isTriageAction({ kind: 'archive' })).toBe(false)
+    expect(isTriageAction({ kind: 'star', threadIds: ['t1'], on: 'yes' })).toBe(false)
+    expect(isTriageAction({ kind: 'unknown', threadIds: ['t1'] })).toBe(false)
   })
 })
