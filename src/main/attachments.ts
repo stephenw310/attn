@@ -1,6 +1,8 @@
 import { writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 
+const WINDOWS_RESERVED_STEM = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i
+
 export function safeAttachmentFilename(untrusted: string): string | null {
   const printable = Array.from(untrusted.normalize('NFKC'))
     .filter((character) => {
@@ -15,7 +17,8 @@ export function safeAttachmentFilename(untrusted: string): string | null {
     .trim()
     .replace(/[. ]+$/g, '')
   if (!cleaned || /^\.+$/.test(cleaned)) return null
-  return cleaned
+  const windowsStem = cleaned.split('.', 1)[0].replace(/[. ]+$/g, '')
+  return WINDOWS_RESERVED_STEM.test(windowsStem) ? `_${cleaned}` : cleaned
 }
 
 export async function writeAttachment(

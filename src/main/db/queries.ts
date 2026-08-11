@@ -9,6 +9,10 @@ import type {
 } from '../../shared/mail'
 import type { Db } from './index'
 
+interface StoredAttachment extends MessageAttachment {
+  inlineData?: string
+}
+
 export function listInboxThreads(db: Db, accountId: string, limit = 300): ThreadRow[] {
   const rows = db
     .prepare(
@@ -90,12 +94,29 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
     fromEmail: r.from_email ?? '',
     at: r.internal_date ?? 0,
     recipients: parseJson(r.recipients_json, EMPTY_RECIPIENTS),
-    attachments: parseJson<MessageAttachment[]>(r.attachments_json, []),
+    attachments: parseJson<StoredAttachment[]>(r.attachments_json, []).map(
+      ({ inlineData: _inlineData, ...attachment }) => attachment
+    ),
     bodyText: r.body_text || r.snippet || '',
     bodyHtml: r.body_html
   }))
 
   return { threadId, subject: thread.subject ?? '(no subject)', messages }
+}
+
+export function getInlineAttachmentData(
+  db: Db,
+  accountId: string,
+  messageId: string,
+  attachmentId: string
+): string | null {
+  const row = db
+    .prepare('SELECT attachments_json FROM messages WHERE account_id = ? AND id = ?')
+    .get(accountId, messageId) as { attachments_json: string | null } | undefined
+  const attachment = parseJson<StoredAttachment[]>(row?.attachments_json ?? null, []).find(
+    (candidate) => candidate.attachmentId === attachmentId
+  )
+  return typeof attachment?.inlineData === 'string' ? attachment.inlineData : null
 }
 
 const EMPTY_RECIPIENTS: MessageRecipients = { to: [], cc: [], bcc: [], replyTo: [] }

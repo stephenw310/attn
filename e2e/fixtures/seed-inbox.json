@@ -83,7 +83,8 @@
           "to": "seed@attn.test",
           "subject": "Lunch next week",
           "snippet": "Tuesday works for me.",
-          "bodyText": "Would noon on Tuesday work?"
+          "bodyText": "Would noon on Tuesday work?",
+          "bodyHtml": "<div id=all-quote class=gmail_quote>Would noon on Tuesday work?</div>"
         }
       ]
     },
@@ -115,7 +116,8 @@
           "to": "seed@attn.test",
           "subject": "Flight options",
           "snippet": "Three routes are available.",
-          "bodyText": "I found three routes for the conference."
+          "bodyText": "I found three routes for the conference.",
+          "bodyHtml": "<script>document.body.dataset.scriptRan='true'</script>"
         }
       ]
     },

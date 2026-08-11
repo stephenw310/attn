@@ -29,6 +29,10 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
     })
   const detailsWidth = await details.evaluate((element) => element.getBoundingClientRect().width)
   expect(Math.abs(headerWidth - detailsWidth)).toBeLessThan(1)
+  await page.keyboard.press('j')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
+  await page.keyboard.press('k')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
 
   const lastCard = cards.last()
   await expect(lastCard.getByTestId('plain-text-visible')).toHaveText(
@@ -55,6 +59,8 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(lastCard.getByTestId('plain-text-visible')).toHaveText(
     'I added the launch milestones and owner notes.'
   )
+  await page.keyboard.press('j')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
 })
 
 test('shows attachment metadata and explains offline downloads', async ({ page }) => {
@@ -91,6 +97,26 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   ).toBe(true)
   await attachment.click()
   await expect(page.getByTestId('toast')).toHaveText('Attachments download when signed in')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+})
+
+test('keeps HTML fallbacks readable and never collapses an all-quote message', async ({ page }) => {
+  await page.getByTestId('thread-row').filter({ hasText: 'Lunch next week' }).click()
+  const quoteFrame = page.getByTestId('html-body-frame')
+  await expect(quoteFrame).toBeVisible()
+  await expect(page.frameLocator('[data-testid="html-body-frame"]').locator('#all-quote')).toHaveText(
+    'Would noon on Tuesday work?'
+  )
+  await expect(page.getByTestId('mail-trim-toggle')).toHaveCount(0)
+
+  await page.keyboard.press('Escape')
+  await page.getByTestId('thread-row').filter({ hasText: 'Flight options' }).click()
+  await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
+  const fallback = page.getByTestId('plain-text-body')
+  await expect(fallback).toHaveText('I found three routes for the conference.')
+  await expect(fallback).toHaveCSS('color', 'rgb(32, 33, 36)')
+  await expect(fallback).toHaveCSS('padding-left', '12px')
 })
 
 test('collapses sanitized HTML quote and signature blocks behind an expander', async ({ page }) => {

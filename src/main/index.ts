@@ -10,7 +10,7 @@ import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/go
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { type Db, openDatabase, schemaVersion } from './db'
-import { countInboxUnread, getConversation, listInboxThreads } from './db/queries'
+import { countInboxUnread, getConversation, getInlineAttachmentData, listInboxThreads } from './db/queries'
 import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
@@ -207,17 +207,24 @@ function registerIpc(): void {
     'mail:downloadAttachment',
     async (_e, request: unknown): Promise<DownloadAttachmentResult> => {
       if (!isDownloadAttachmentRequest(request)) return { error: 'Invalid attachment' }
-      const client = seedAccountId ? null : makeClient(authSessionGeneration)
-      if (!client) return { error: 'Attachments download when signed in' }
+      const account = currentAccountId()
+      const inlineData =
+        db && account ? getInlineAttachmentData(db, account, request.messageId, request.attachmentId) : null
+      const client = inlineData === null && !seedAccountId ? makeClient(authSessionGeneration) : null
+      if (inlineData === null && !client) return { error: 'Attachments download when signed in' }
       try {
-        const attachment = await client.get<{ data?: string }>(
-          `/messages/${request.messageId}/attachments/${request.attachmentId}`
-        )
-        if (typeof attachment.data !== 'string') return { error: 'Attachment data was unavailable' }
+        const data =
+          inlineData ??
+          (
+            await client?.get<{ data?: string }>(
+              `/messages/${request.messageId}/attachments/${request.attachmentId}`
+            )
+          )?.data
+        if (typeof data !== 'string') return { error: 'Attachment data was unavailable' }
         const path = await writeAttachment(
           app.getPath('downloads'),
           request.filename,
-          Buffer.from(attachment.data, 'base64url')
+          Buffer.from(data, 'base64url')
         )
         shell.showItemInFolder(path)
         return { path }

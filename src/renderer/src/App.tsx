@@ -173,7 +173,10 @@ function RecipientLine({
         type="button"
         data-testid="recipient-summary"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={(event) => {
+          setOpen((value) => !value)
+          event.currentTarget.blur()
+        }}
         className="block max-w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-xs text-ink-faint hover:text-ink-dim"
       >
         {recipientSummary(message.recipients, account)} <span aria-hidden>▾</span>
@@ -274,7 +277,10 @@ function MessageCard({
                   key={attachment.attachmentId}
                   type="button"
                   data-testid="attachment-chip"
-                  onClick={() => download(attachment)}
+                  onClick={(event) => {
+                    download(attachment)
+                    event.currentTarget.blur()
+                  }}
                   className={`cursor-pointer rounded-lg border px-3 py-2 text-left text-xs ${
                     htmlSurface
                       ? 'border-[#d1d5db] bg-[#f3f4f6] text-[#4b5563] hover:border-[#9ca3af] hover:text-[#202124]'
@@ -752,7 +758,14 @@ export default function App(): React.JSX.Element {
       const isTextEntry =
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       if (isTextEntry) return
-      if (paneOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      if (
+        paneOpen &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === 'ArrowDown' || e.key === 'ArrowUp')
+      ) {
         e.preventDefault()
         conversationScrollRef.current?.scrollBy({
           top: e.key === 'ArrowDown' ? READING_SCROLL_STEP : -READING_SCROLL_STEP

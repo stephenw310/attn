@@ -16,6 +16,7 @@ describe('Gmail message parsing', () => {
   })
 
   it('parses addresses and finds nested attachments', () => {
+    const inlineData = Buffer.from('small attachment').toString('base64url')
     expect(parseAddress('Maya Lin <maya@example.com>')).toEqual({
       name: 'Maya Lin',
       email: 'maya@example.com'
@@ -27,6 +28,12 @@ describe('Gmail message parsing', () => {
           filename: 'receipt.pdf',
           body: { attachmentId: 'att-1', size: 24_576 }
         },
+        {
+          partId: '2',
+          mimeType: 'text/plain',
+          filename: 'notes.txt',
+          body: { data: inlineData }
+        },
         { mimeType: 'text/plain', filename: '', body: { attachmentId: 'external-body' } }
       ]
     }
@@ -37,6 +44,13 @@ describe('Gmail message parsing', () => {
         filename: 'receipt.pdf',
         mimeType: 'application/pdf',
         sizeBytes: 24_576
+      },
+      {
+        attachmentId: 'inline:2',
+        filename: 'notes.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 16,
+        inlineData
       }
     ])
   })

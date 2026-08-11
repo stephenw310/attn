@@ -28,6 +28,11 @@ describe('findTrimIndex', () => {
     expect(findTrimIndex('> Quoted example\nAuthored text after it.')).toBeNull()
   })
 
+  it('scans large mid-message quote runs in linear time', () => {
+    const quoted = Array.from({ length: 2_000 }, (_, index) => `> Quoted line ${index}`).join('\n')
+    expect(findTrimIndex(`Authored intro.\n${quoted}\nAuthored bottom reply.`)).toBeNull()
+  })
+
   it('never collapses an all-quote message to nothing', () => {
     expect(findTrimIndex('> Entire message\n> Still quoted')).toBeNull()
     expect(findTrimIndex('On Monday, Maya wrote:\n> Entire message')).toBeNull()

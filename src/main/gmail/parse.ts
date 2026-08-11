@@ -90,25 +90,36 @@ export interface ParsedAttachment {
   filename: string
   mimeType: string
   sizeBytes: number
+  /** Present only when Gmail delivered a small attachment inline with the message payload. */
+  inlineData?: string
 }
 
-/** User-visible attachments have both a filename and a Gmail attachment id. */
+/** User-visible attachments have a filename and either remote or inline body data. */
 export function collectAttachments(payload: GmailPart | undefined): ParsedAttachment[] {
   const attachments: ParsedAttachment[] = []
-  const walk = (part: GmailPart): void => {
+  const walk = (part: GmailPart, path: string): void => {
     const filename = part.filename?.trim()
-    const attachmentId = part.body?.attachmentId
+    const inlineData = typeof part.body?.data === 'string' ? part.body.data : undefined
+    const attachmentId =
+      part.body?.attachmentId ??
+      (inlineData !== undefined ? `inline:${part.partId?.trim() || path}` : undefined)
     if (filename && attachmentId) {
       attachments.push({
         attachmentId,
         filename,
         mimeType: part.mimeType ?? 'application/octet-stream',
-        sizeBytes: Math.max(0, part.body?.size ?? 0)
+        sizeBytes: Math.max(
+          0,
+          part.body?.size ?? (inlineData === undefined ? 0 : Buffer.from(inlineData, 'base64url').byteLength)
+        ),
+        ...(part.body?.attachmentId ? {} : { inlineData })
       })
     }
-    part.parts?.forEach(walk)
+    part.parts?.forEach((child, index) => {
+      walk(child, `${path}.${index}`)
+    })
   }
-  if (payload) walk(payload)
+  if (payload) walk(payload, '0')
   return attachments
 }
 

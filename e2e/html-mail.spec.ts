@@ -107,6 +107,19 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     .toBeGreaterThanOrEqual(120)
   await expect(page.getByTestId('conversation-position')).toHaveText(selectedPosition ?? '')
 
+  expect(
+    await page.evaluate(() => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        altKey: true,
+        bubbles: true,
+        cancelable: true
+      })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    })
+  ).toBe(false)
+
   await page.evaluate(() => {
     document.addEventListener(
       'keydown',

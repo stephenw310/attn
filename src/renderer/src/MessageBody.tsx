@@ -61,6 +61,21 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   link.setAttribute('rel', 'noopener noreferrer')
 })
 
+function hasRenderableContent(content: DocumentFragment): boolean {
+  const visibleProbe = content.cloneNode(true) as DocumentFragment
+  visibleProbe.querySelectorAll('style').forEach((style) => {
+    style.remove()
+  })
+  return Boolean(visibleProbe.textContent?.trim()) || Boolean(visibleProbe.querySelector(MEANINGFUL_ELEMENTS))
+}
+
+function hasRenderableContentBefore(content: DocumentFragment, boundary: Element): boolean {
+  const range = document.createRange()
+  range.setStart(content, 0)
+  range.setEndBefore(boundary)
+  return hasRenderableContent(range.cloneContents())
+}
+
 function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   if (!html.trim()) return null
   const clean = DOMPurify.sanitize(html, {
@@ -78,13 +93,7 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
   })
-  const visibleProbe = template.content.cloneNode(true) as DocumentFragment
-  visibleProbe.querySelectorAll('style').forEach((style) => {
-    style.remove()
-  })
-  const hasText = Boolean(visibleProbe.textContent?.trim())
-  const hasRenderableElement = Boolean(template.content.querySelector(MEANINGFUL_ELEMENTS))
-  if (!hasText && !hasRenderableElement) return null
+  if (!hasRenderableContent(template.content)) return null
 
   return template
 }
@@ -92,7 +101,8 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
 function makeSrcDoc(html: string): string | null {
   const template = sanitizeToTemplate(html)
   if (!template) return null
-  const trimStart = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
+  const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
+  const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
   const richLayoutStart = template.content.querySelector('table, style')
   const plainLayout =
     richLayoutStart === null ||
@@ -128,7 +138,10 @@ function TrimToggle({
       data-testid="mail-trim-toggle"
       aria-expanded={expanded}
       aria-label={label}
-      onClick={onToggle}
+      onClick={(event) => {
+        onToggle()
+        event.currentTarget.blur()
+      }}
       className={`cursor-pointer border-0 bg-transparent px-0.5 text-sm font-normal tracking-normal ${
         lightSurface ? 'text-[#6b7280] hover:text-[#202124]' : 'text-ink-faint hover:text-ink'
       } ${className}`}
@@ -254,12 +267,14 @@ export function MessageBody({
   }, [disconnect, observe, oversized, srcDoc])
 
   if (srcDoc === null || oversized) {
+    const lightSurface = bodyHtml !== null
+    const surfaceClass = lightSurface ? 'p-3 text-[#202124]' : 'text-ink'
     const trimIndex = findTrimIndex(bodyText)
     if (trimIndex === null) {
       return (
         <div
           data-testid="plain-text-body"
-          className="whitespace-pre-wrap leading-[1.6] text-ink [overflow-wrap:break-word]"
+          className={`whitespace-pre-wrap leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
         >
           {bodyText}
         </div>
@@ -268,11 +283,19 @@ export function MessageBody({
     const visibleText = bodyText.slice(0, trimIndex).trimEnd()
     const trimmedText = bodyText.slice(trimIndex).trimStart()
     return (
-      <div data-testid="plain-text-body" className="leading-[1.6] text-ink [overflow-wrap:break-word]">
+      <div
+        data-testid="plain-text-body"
+        className={`leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
+      >
         <div data-testid="plain-text-visible" className="whitespace-pre-wrap">
           {visibleText}
         </div>
-        <TrimToggle expanded={expanded} lightSurface={false} onToggle={onToggleTrim} className="mt-1 block" />
+        <TrimToggle
+          expanded={expanded}
+          lightSurface={lightSurface}
+          onToggle={onToggleTrim}
+          className="mt-1 block"
+        />
         {expanded && (
           <div data-testid="plain-text-trimmed" className="whitespace-pre-wrap">
             {trimmedText}

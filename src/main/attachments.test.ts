@@ -10,6 +10,14 @@ describe('attachment filenames', () => {
     expect(safeAttachmentFilename('invoice:<draft>?.pdf')).toBe('invoice__draft__.pdf')
   })
 
+  it('prefixes Windows device names', () => {
+    expect(safeAttachmentFilename('CON.pdf')).toBe('_CON.pdf')
+    expect(safeAttachmentFilename('nul')).toBe('_nul')
+    expect(safeAttachmentFilename('COM1.txt')).toBe('_COM1.txt')
+    expect(safeAttachmentFilename('LPT9')).toBe('_LPT9')
+    expect(safeAttachmentFilename('company.txt')).toBe('company.txt')
+  })
+
   it('rejects empty and dot-only names', () => {
     expect(safeAttachmentFilename(' /\\ ')).toBeNull()
     expect(safeAttachmentFilename('...')).toBeNull()
