@@ -85,5 +85,16 @@ export const migrations: string[] = [
     created_at  INTEGER NOT NULL
   );
   CREATE INDEX idx_action_queue_pending ON action_queue (account_id, state, id);
+  `,
+
+  // v4 — multi-account-ready settings, starting with background launch behavior (F16).
+  // App-global settings use the reserved __app__ account id.
+  `
+  CREATE TABLE settings (
+    account_id TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    PRIMARY KEY (account_id, key)
+  );
   `
 ]

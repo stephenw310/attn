@@ -7,6 +7,7 @@ import { clearUndo, isTriageAction, pendingActionCount, performTriage, undoLast 
 import { ActionExecutor } from './actions/executor'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
+import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { type Db, openDatabase, schemaVersion } from './db'
 import { countInboxUnread, getConversation, listInboxThreads } from './db/queries'
 import { loadSeed } from './dev/seed'
@@ -226,7 +227,8 @@ function registerIpc(): void {
   })
 }
 
-function createWindow(): void {
+function createWindow(options: { show?: boolean } = {}): BrowserWindow {
+  const shouldShow = options.show ?? true
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -242,7 +244,10 @@ function createWindow(): void {
     }
   })
 
-  win.on('ready-to-show', () => win.show())
+  win.on('ready-to-show', () => {
+    if (shouldShow) win.show()
+  })
+  attachBackgroundWindow(win)
 
   // All external links open in the system browser, never in-app (SPEC §6).
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -255,6 +260,7 @@ function createWindow(): void {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  return win
 }
 
 const gotLock = app.requestSingleInstanceLock()
@@ -262,11 +268,7 @@ if (!gotLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    const win = BrowserWindow.getAllWindows()[0]
-    if (win) {
-      if (win.isMinimized()) win.restore()
-      win.focus()
-    }
+    showMainWindow()
   })
 
   app.whenReady().then(() => {
@@ -289,17 +291,15 @@ if (!gotLock) {
 
     registerIpc()
     actionExecutor = new ActionExecutor(db, currentAccountId, makeProvider, () => broadcast('mail:changed'))
-    createWindow()
+    const { startHidden } = initializeBackground(db, createWindow)
+    createWindow({ show: !startHidden })
     if (authStatus().signedIn) void resumeOnlineWork()
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    })
+    app.on('activate', () => showMainWindow())
   })
 
-  app.on('window-all-closed', () => {
-    // F16 (tray/background mode) lands at M1; the M0 skeleton quits normally.
-    if (process.platform !== 'darwin') app.quit()
-  })
+  // Deliberately keep the process alive with no windows so sync, snooze timers,
+  // and notifications continue running in the background on every platform.
+  app.on('window-all-closed', () => {})
 
   app.on('will-quit', () => {
     actionExecutor?.stop()

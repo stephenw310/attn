@@ -25,6 +25,8 @@ interface Boot {
 interface ElectronOptions {
   /** JSON fixture path, resolved relative to e2e/, used to seed the real SQLite store. */
   seed?: string
+  /** Extra argv for the app under test, e.g. ['--hidden'] to drive an F16 login launch. */
+  appArgs?: string[]
 }
 
 interface ElectronFixtures {
@@ -43,10 +45,11 @@ interface ElectronFixtures {
 
 export const test = base.extend<ElectronFixtures & ElectronOptions>({
   seed: [undefined, { option: true }],
+  appArgs: [undefined, { option: true }],
 
-  boot: async ({ seed }, use, testInfo) => {
+  boot: async ({ seed, appArgs }, use, testInfo) => {
     const userData = mkdtempSync(join(tmpdir(), 'attn-e2e-'))
-    const args = [join(ROOT, 'out/main/index.js')]
+    const args = [join(ROOT, 'out/main/index.js'), ...(appArgs ?? [])]
     if (process.platform === 'linux') {
       // Container/CI realities: no SUID sandbox as root, tiny /dev/shm.
       if (process.getuid?.() === 0 || process.env.CI) args.push('--no-sandbox')
