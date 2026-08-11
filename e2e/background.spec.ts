@@ -24,3 +24,24 @@ test('development and test runs do not register a login item', async ({ app }) =
   const settings = await app.evaluate(({ app: electronApp }) => electronApp.getLoginItemSettings())
   expect(settings.openAtLogin).toBe(false)
 })
+
+test.describe('login launch', () => {
+  test.use({ appArgs: ['--hidden'] })
+
+  test('a --hidden launch is windowless until asked to show (F16)', async ({ app, page }) => {
+    // Wait for the renderer to fully render first — before that, an invisible
+    // window proves nothing about the startHidden path.
+    await expect(page.getByTestId('thread-row').first()).toBeVisible()
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible())).toBe(
+      false
+    )
+
+    // activate routes through showMainWindow — the same path Dock clicks take.
+    await app.evaluate(({ app: electronApp }) => electronApp.emit('activate'))
+    await expect
+      .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible()))
+      .toBe(true)
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
+  })
+})
