@@ -4,7 +4,14 @@
 
 import type { Db } from '../db'
 import { GmailApiError, type GmailClient } from '../gmail/client'
-import { decodeBase64Url, findExternalTextParts, type GmailThread, textFromRaw } from '../gmail/parse'
+import {
+  decodeBase64Url,
+  extractBodyHtml,
+  extractBodyText,
+  findExternalTextParts,
+  type GmailThread,
+  textFromRaw
+} from '../gmail/parse'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 
 interface Profile {
@@ -129,17 +136,23 @@ async function fetchExternalBodies(
     const parts = findExternalTextParts(msg.payload)
     if (parts.length === 0) continue
 
+    const inlineText = extractBodyText(msg.payload)
+    const inlineHtml = extractBodyHtml(msg.payload)
+    const hasExternalPlain = parts.some((part) => part.mimeType === 'text/plain')
+    const plainComplete = Boolean(row.body_text) && row.body_text !== inlineText
+    const htmlComplete = Boolean(row.body_html) && row.body_html !== inlineHtml
     const plains: string[] = []
     const htmls: string[] = []
     for (const part of parts) {
-      if (part.mimeType === 'text/plain' && row.body_text) continue
-      if (part.mimeType === 'text/html' && row.body_html) continue
+      if (part.mimeType === 'text/plain' && plainComplete) continue
+      if (part.mimeType === 'text/html' && htmlComplete) continue
       try {
         const att = await client.get<{ data?: string }>(
           `/messages/${msg.id}/attachments/${part.attachmentId}`
         )
         if (!att.data) continue
         const raw = decodeBase64Url(att.data)
+        if (!raw) continue
         if (part.mimeType === 'text/html') htmls.push(raw)
         else plains.push(raw)
       } catch (e) {
@@ -148,11 +161,16 @@ async function fetchExternalBodies(
       }
     }
 
-    const bodyHtml = htmls.length > 0 ? htmls.join('\n') : row.body_html
-    const fetchedText = plains.length > 0 ? plains.join('\n\n') : htmls.join('\n')
-    const bodyText =
-      row.body_text ||
-      (fetchedText ? textFromRaw(plains.length > 0 ? 'text/plain' : 'text/html', fetchedText) : null)
+    if (plains.length === 0 && htmls.length === 0) continue
+
+    const bodyHtml = htmls.length > 0 ? [row.body_html, ...htmls].filter(Boolean).join('\n') : row.body_html
+    let bodyText = row.body_text
+    if (plains.length > 0) {
+      bodyText = textFromRaw('text/plain', [inlineText, ...plains].filter(Boolean).join('\n\n'))
+    } else if (htmls.length > 0 && (!hasExternalPlain || !plainComplete)) {
+      bodyText = textFromRaw('text/html', bodyHtml ?? htmls.join('\n'))
+    }
+    if (bodyText === row.body_text && bodyHtml === row.body_html) continue
     writeBody.run(bodyText, bodyHtml, accountId, msg.id)
   }
 }

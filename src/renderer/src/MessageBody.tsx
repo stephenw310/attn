@@ -6,6 +6,10 @@ interface MessageBodyProps {
   bodyHtml: string | null
 }
 
+const MAX_BODY_HEIGHT = 6000
+const FORWARDED_KEYS = new Set(['Escape', 'j', 'k', 'ArrowDown', 'ArrowUp'])
+const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
+
 const RESET = `
   :root { color-scheme: light; }
   html, body { margin: 0; padding: 0; background: #fff; color: #202124; }
@@ -18,11 +22,24 @@ const RESET = `
   pre { white-space: pre-wrap; }
 `
 
-function makeSrcDoc(html: string): string {
+function makeSrcDoc(html: string): string | null {
+  if (!html.trim()) return null
   const clean = DOMPurify.sanitize(html, {
     FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea'],
-    ADD_ATTR: ['target']
+    ADD_ATTR: ['target'],
+    KEEP_CONTENT: false
   })
+
+  const template = document.createElement('template')
+  template.innerHTML = clean
+  const visibleProbe = template.content.cloneNode(true) as DocumentFragment
+  visibleProbe.querySelectorAll('style').forEach((style) => {
+    style.remove()
+  })
+  const hasText = Boolean(visibleProbe.textContent?.trim())
+  const hasRenderableElement = Boolean(template.content.querySelector(MEANINGFUL_ELEMENTS))
+  if (!hasText && !hasRenderableElement) return null
+
   return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}</style></head><body>${clean}</body></html>`
 }
 
@@ -30,26 +47,81 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
   const [height, setHeight] = useState(80)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
+  const keyDocumentRef = useRef<Document | null>(null)
+  const measurementRef = useRef<{
+    viewportHeight: number
+    scrollHeight: number
+    appliedHeight: number
+    locked: boolean
+  } | null>(null)
   const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml)), [bodyHtml])
 
   const measure = useCallback((frame: HTMLIFrameElement) => {
     const doc = frame.contentDocument
     if (!doc?.body) return
-    setHeight(Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1))
+    const viewportHeight = frame.clientHeight
+    const scrollHeight = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1)
+    const previous = measurementRef.current
+    if (previous?.locked) return
+
+    const viewportGrowth = previous ? viewportHeight - previous.viewportHeight : 0
+    const scrollGrowth = previous ? scrollHeight - previous.scrollHeight : 0
+    const selfResponsiveGrowth =
+      previous !== null &&
+      viewportHeight === previous.appliedHeight &&
+      viewportGrowth > 0 &&
+      scrollGrowth >= viewportGrowth * 0.9
+    if (selfResponsiveGrowth) {
+      measurementRef.current = { ...previous, scrollHeight, locked: true }
+      return
+    }
+
+    const appliedHeight = Math.min(scrollHeight, MAX_BODY_HEIGHT)
+    setHeight(appliedHeight)
+    measurementRef.current = {
+      viewportHeight,
+      scrollHeight,
+      appliedHeight,
+      locked: appliedHeight === MAX_BODY_HEIGHT && scrollHeight > MAX_BODY_HEIGHT
+    }
   }, [])
+
+  const forwardKey = useCallback((event: KeyboardEvent) => {
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !FORWARDED_KEYS.has(event.key)) {
+      return
+    }
+    const forwarded = new KeyboardEvent('keydown', {
+      key: event.key,
+      code: event.code,
+      repeat: event.repeat,
+      bubbles: true,
+      cancelable: true
+    })
+    window.dispatchEvent(forwarded)
+    if (forwarded.defaultPrevented) event.preventDefault()
+  }, [])
+
+  const disconnect = useCallback(() => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    keyDocumentRef.current?.removeEventListener('keydown', forwardKey)
+    keyDocumentRef.current = null
+  }, [forwardKey])
 
   const observe = useCallback(
     (frame: HTMLIFrameElement) => {
       const doc = frame.contentDocument
       if (!doc?.body) return
 
-      observerRef.current?.disconnect()
+      disconnect()
       measure(frame)
       const observer = new ResizeObserver(() => measure(frame))
       observer.observe(doc.body)
       observerRef.current = observer
+      doc.addEventListener('keydown', forwardKey)
+      keyDocumentRef.current = doc
     },
-    [measure]
+    [disconnect, forwardKey, measure]
   )
 
   const onLoad = useCallback(
@@ -58,6 +130,7 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
   )
 
   useEffect(() => {
+    measurementRef.current = null
     if (srcDoc === null) return
     let frameId = 0
     const waitForSrcDoc = (): void => {
@@ -71,9 +144,9 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
     frameId = requestAnimationFrame(waitForSrcDoc)
     return () => {
       cancelAnimationFrame(frameId)
-      observerRef.current?.disconnect()
+      disconnect()
     }
-  }, [observe, srcDoc])
+  }, [disconnect, observe, srcDoc])
 
   if (srcDoc === null) {
     return (
@@ -95,7 +168,7 @@ export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX
       srcDoc={srcDoc}
       onLoad={onLoad}
       className="block w-full border-0 bg-white"
-      style={{ height }}
+      style={{ height, maxHeight: MAX_BODY_HEIGHT }}
     />
   )
 }
