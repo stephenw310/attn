@@ -15,7 +15,7 @@ const TRIM_CONTROL_HEIGHT = 28
 const HORIZONTAL_SCROLLBAR_HEIGHT = 16
 const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
-const TRIM_SELECTOR = '.gmail_quote, .gmail_signature, blockquote[type="cite"]'
+const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
 const TRIM_MARKER = 'data-attn-trim-start'
 
 const RESET = `
@@ -35,8 +35,7 @@ const RESET = `
   img { max-width: 100%; height: auto; }
   table { max-width: 100%; }
   pre { white-space: pre-wrap; }
-  [${TRIM_MARKER}]::before {
-    content: '' !important;
+  [${TRIM_MARKER}] {
     display: block !important;
     height: ${TRIM_CONTROL_HEIGHT}px !important;
   }
@@ -93,9 +92,16 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
 function makeSrcDoc(html: string): string | null {
   const template = sanitizeToTemplate(html)
   if (!template) return null
-  template.content.querySelector<HTMLElement>(TRIM_SELECTOR)?.setAttribute(TRIM_MARKER, '')
+  const trimStart = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
+  if (trimStart) {
+    const marker = document.createElement('div')
+    marker.setAttribute(TRIM_MARKER, '')
+    trimStart.before(marker)
+  }
+  const plainLayout = template.content.querySelector('table, style') === null
+  const layout = plainLayout ? 'body { box-sizing: border-box; padding: 12px; }' : ''
 
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}</style></head><body>${template.innerHTML}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}${layout}</style></head><body>${template.innerHTML}</body></html>`
 }
 
 function TrimToggle({

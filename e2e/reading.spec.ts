@@ -65,6 +65,27 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   await expect(attachment).toContainText('24 KB')
   const content = page.getByTestId('message-content')
   await expect(content).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  const frame = page.getByTestId('html-body-frame')
+  const frameBody = page.frameLocator('[data-testid="html-body-frame"]')
+  await expect(frameBody.locator('body')).toHaveCSS('padding-left', '12px')
+  await expect(frameBody.locator('#plain-html-copy')).toContainText('Your order total was $24.00.')
+  expect(
+    await frame.evaluate((element) => {
+      const iframe = element as HTMLIFrameElement
+      const marker = iframe.contentDocument?.querySelector<HTMLElement>('[data-attn-trim-start]')
+      const prefix = iframe.contentDocument?.querySelector<HTMLElement>('.gmail_signature_prefix')
+      return marker && prefix
+        ? Math.abs(marker.getBoundingClientRect().bottom - iframe.clientHeight) < 1 &&
+            prefix.getBoundingClientRect().top >= iframe.clientHeight
+        : false
+    })
+  ).toBe(true)
+  const toggle = page.getByTestId('mail-trim-toggle')
+  const frameLeft = await frame.evaluate((element) => element.getBoundingClientRect().left)
+  const toggleLeft = await toggle.evaluate((element) => element.getBoundingClientRect().left)
+  const attachmentLeft = await attachment.evaluate((element) => element.getBoundingClientRect().left)
+  expect(Math.abs(toggleLeft - frameLeft - 12)).toBeLessThan(1)
+  expect(Math.abs(attachmentLeft - frameLeft - 12)).toBeLessThan(1)
   expect(
     await attachment.evaluate((element) => element.closest('[data-testid="message-content"]') !== null)
   ).toBe(true)
@@ -93,9 +114,12 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
   expect(
     await frame.evaluate((element) => {
       const iframe = element as HTMLIFrameElement
+      const marker = iframe.contentDocument?.querySelector<HTMLElement>('[data-attn-trim-start]')
       const signature = iframe.contentDocument?.querySelector<HTMLElement>('.gmail_signature')
-      return signature
-        ? Math.abs(iframe.clientHeight - signature.getBoundingClientRect().top - 28 - 16) < 1
+      return marker && signature
+        ? Math.abs(marker.getBoundingClientRect().height - 28) < 1 &&
+            signature.getBoundingClientRect().top >= marker.getBoundingClientRect().bottom &&
+            Math.abs(iframe.clientHeight - marker.getBoundingClientRect().bottom - 16) < 1
         : false
     })
   ).toBe(true)

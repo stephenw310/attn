@@ -149,8 +149,13 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
 
   await page.keyboard.press('Escape')
   await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).dblclick()
-  await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
-  await expect(page.getByTestId('plain-text-body')).toHaveText('Your order total was $24.00.')
+  await expect(page.getByTestId('html-body-frame')).toBeVisible()
+  await expect(
+    page.frameLocator('[data-testid="html-body-frame"]').locator('#plain-html-copy')
+  ).toContainText('Your order total was $24.00.')
+  const simpleMailPath = join(dir, 'simple-mail.png')
+  await page.screenshot({ path: simpleMailPath })
+  await testInfo.attach('simple mail', { path: simpleMailPath, contentType: 'image/png' })
 
   await page.keyboard.press('Escape')
   await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).dblclick()

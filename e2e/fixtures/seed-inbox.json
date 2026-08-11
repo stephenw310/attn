@@ -43,7 +43,7 @@
           "subject": "Your receipt",
           "snippet": "Thanks for your order.",
           "bodyText": "Your order total was $24.00.",
-          "bodyHtml": "<script>ignored()</script>",
+          "bodyHtml": "<div id=plain-html-copy>Thanks for your order. Your order total was $24.00.</div><div><br></div><div>Northstar Books</div><div><br></div><span class=gmail_signature_prefix>-- </span><br><div class=gmail_signature>Customer care<br>Northstar Books</div>",
           "attachments": [
             {
               "attachmentId": "att-receipt-pdf",
