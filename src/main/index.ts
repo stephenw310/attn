@@ -7,6 +7,7 @@ import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/go
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { type Db, openDatabase, schemaVersion } from './db'
 import { countInboxUnread, getConversation, listInboxThreads } from './db/queries'
+import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
 import { runInboxBackfill } from './sync/backfill'
 
@@ -37,6 +38,7 @@ let db: Db | null = null
 let syncState: SyncState = { phase: 'idle' }
 let syncRunning = false
 let authSessionGeneration = 0
+let seedAccountId: string | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -59,11 +61,11 @@ function makeClient(generation: number): GmailClient | null {
 }
 
 function currentAccountId(): string | null {
-  return loadTokens(app.getPath('userData'))?.email ?? null
+  return seedAccountId ?? loadTokens(app.getPath('userData'))?.email ?? null
 }
 
 function startSync(): void {
-  if (!db || syncRunning) return
+  if (!db || syncRunning || seedAccountId) return
   const generation = authSessionGeneration
   const client = makeClient(generation)
   if (!client) return
@@ -107,6 +109,7 @@ function oauthSearchDirs(): string[] {
 }
 
 function authStatus(): AuthStatus {
+  if (seedAccountId) return { configured: false, signedIn: true, email: seedAccountId }
   const config = loadOAuthConfig(oauthSearchDirs())
   const tokens = loadTokens(app.getPath('userData'))
   return { configured: config !== null, signedIn: tokens !== null, email: tokens?.email }
@@ -140,6 +143,7 @@ function registerIpc(): void {
   ipcMain.handle('auth:signOut', () => {
     cancelActiveSignIn()
     authSessionGeneration++
+    seedAccountId = null
     clearTokens(app.getPath('userData'))
     // A stale backfill may finish caching locally, but its generation can no
     // longer persist refreshed tokens or publish state for the signed-out user.
@@ -213,6 +217,19 @@ if (!gotLock) {
     const dbPath = join(app.getPath('userData'), 'attn.db')
     db = openDatabase(dbPath)
     console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
+    const seedPath = testUserData ? process.env.ATTN_TEST_SEED : undefined
+    if (seedPath) {
+      try {
+        const existing = db.prepare('SELECT id FROM accounts ORDER BY created_at LIMIT 1').get() as
+          | { id: string }
+          | undefined
+        seedAccountId = existing?.id ?? loadSeed(db, seedPath)
+      } catch (error) {
+        console.error(`[seed] failed: ${error instanceof Error ? error.message : String(error)}`)
+        app.exit(1)
+        return
+      }
+    }
 
     registerIpc()
     createWindow()
