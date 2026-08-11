@@ -1,0 +1,101 @@
+import DOMPurify from 'dompurify'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+interface MessageBodyProps {
+  bodyText: string
+  bodyHtml: string | null
+}
+
+const RESET = `
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #202124; }
+  body {
+    font: 14px/1.6 Arial, Helvetica, sans-serif;
+    overflow-wrap: break-word;
+  }
+  img { max-width: 100%; height: auto; }
+  table { max-width: 100%; }
+  pre { white-space: pre-wrap; }
+`
+
+function makeSrcDoc(html: string): string {
+  const clean = DOMPurify.sanitize(html, {
+    FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea'],
+    ADD_ATTR: ['target']
+  })
+  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}</style></head><body>${clean}</body></html>`
+}
+
+export function MessageBody({ bodyText, bodyHtml }: MessageBodyProps): React.JSX.Element {
+  const [height, setHeight] = useState(80)
+  const frameRef = useRef<HTMLIFrameElement | null>(null)
+  const observerRef = useRef<ResizeObserver | null>(null)
+  const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml)), [bodyHtml])
+
+  const measure = useCallback((frame: HTMLIFrameElement) => {
+    const doc = frame.contentDocument
+    if (!doc?.body) return
+    setHeight(Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1))
+  }, [])
+
+  const observe = useCallback(
+    (frame: HTMLIFrameElement) => {
+      const doc = frame.contentDocument
+      if (!doc?.body) return
+
+      observerRef.current?.disconnect()
+      measure(frame)
+      const observer = new ResizeObserver(() => measure(frame))
+      observer.observe(doc.body)
+      observerRef.current = observer
+    },
+    [measure]
+  )
+
+  const onLoad = useCallback(
+    (event: React.SyntheticEvent<HTMLIFrameElement>) => observe(event.currentTarget),
+    [observe]
+  )
+
+  useEffect(() => {
+    if (srcDoc === null) return
+    let frameId = 0
+    const waitForSrcDoc = (): void => {
+      const frame = frameRef.current
+      if (frame?.contentWindow?.location.href === 'about:srcdoc' && frame.contentDocument?.body) {
+        observe(frame)
+        return
+      }
+      frameId = requestAnimationFrame(waitForSrcDoc)
+    }
+    frameId = requestAnimationFrame(waitForSrcDoc)
+    return () => {
+      cancelAnimationFrame(frameId)
+      observerRef.current?.disconnect()
+    }
+  }, [observe, srcDoc])
+
+  if (srcDoc === null) {
+    return (
+      <div
+        data-testid="plain-text-body"
+        className="whitespace-pre-wrap leading-[1.6] text-ink [overflow-wrap:break-word]"
+      >
+        {bodyText}
+      </div>
+    )
+  }
+
+  return (
+    <iframe
+      ref={frameRef}
+      data-testid="html-body-frame"
+      title="HTML message body"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      srcDoc={srcDoc}
+      onLoad={onLoad}
+      className="block w-full border-0 bg-white"
+      style={{ height }}
+    />
+  )
+}

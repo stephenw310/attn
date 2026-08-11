@@ -17,8 +17,10 @@ export interface ConversationMsg {
   fromEmail: string
   to: string
   at: number
-  /** Plain text only in M0 — rendered strictly as text nodes, never as HTML. */
+  /** Plain-text fallback, rendered strictly as a text node. */
   bodyText: string
+  /** Raw cached mail HTML. Untrusted until sanitized by the renderer. */
+  bodyHtml: string | null
 }
 
 export interface Conversation {

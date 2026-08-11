@@ -1,6 +1,6 @@
 // Gmail message payload parsing: headers, addresses, and body extraction.
-// Bodies are reduced to plain text in M0. That text is UNTRUSTED input —
-// the renderer must only ever place it in text nodes (no innerHTML).
+// Both body formats are UNTRUSTED input. Plain text must stay in text nodes;
+// raw HTML is sanitized and isolated by the renderer at display time.
 
 export interface GmailHeader {
   name: string
@@ -68,6 +68,21 @@ export function extractBodyText(payload: GmailPart | undefined): string {
   if (plains.length > 0) return normalize(plains.join('\n\n'))
   if (htmls.length > 0) return normalize(stripHtml(htmls.join('\n')))
   return ''
+}
+
+/** Recursive walk collecting raw inline text/html parts for render-time sanitization. */
+export function extractBodyHtml(payload: GmailPart | undefined): string {
+  if (!payload) return ''
+  const htmls: string[] = []
+
+  const walk = (part: GmailPart): void => {
+    const data = part.body?.data
+    if (data && !part.filename && part.mimeType === 'text/html') htmls.push(decodeBody(data))
+    part.parts?.forEach(walk)
+  }
+  walk(payload)
+
+  return htmls.join('\n')
 }
 
 export interface ExternalTextPart {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthStatus } from '../../shared/auth'
 import type { Conversation, SyncState, ThreadRow } from '../../shared/mail'
+import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
 
 interface DisplayThread {
@@ -20,6 +21,7 @@ interface DisplayMsg {
   fromEmail: string
   at: string
   text: string
+  html: string | null
 }
 
 interface DisplayConversation {
@@ -62,7 +64,8 @@ function displayFromReal(c: Conversation): DisplayConversation {
       fromName: m.fromName,
       fromEmail: m.fromEmail,
       at: formatTime(m.at),
-      text: m.bodyText
+      text: m.bodyText,
+      html: m.bodyHtml
     }))
   }
 }
@@ -76,7 +79,8 @@ function displayFromMockId(threadId: string): DisplayConversation {
       fromName: m.fromName,
       fromEmail: m.fromEmail,
       at: m.at,
-      text: m.body.join('\n\n')
+      text: m.body.join('\n\n'),
+      html: null
     }))
   }
 }
@@ -618,11 +622,7 @@ export default function App(): React.JSX.Element {
                         </span>
                         <span className="flex-none text-xs text-ink-faint tabular-nums">{m.at}</span>
                       </div>
-                      {/* Mail bodies are untrusted input: render ONLY as a text
-                          node. Sanitized HTML rendering is a later milestone. */}
-                      <div className="whitespace-pre-wrap leading-[1.6] text-ink [overflow-wrap:break-word]">
-                        {m.text}
-                      </div>
+                      <MessageBody bodyText={m.text} bodyHtml={m.html} />
                     </article>
                   ))}
                 </div>

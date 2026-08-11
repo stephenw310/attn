@@ -69,5 +69,11 @@ export const migrations: string[] = [
   ALTER TABLE threads ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE threads ADD COLUMN has_attachment INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE messages ADD COLUMN body_text TEXT;
+  `,
+
+  // v3 — raw HTML bodies, sanitized only when rendered so sanitizer upgrades
+  // apply retroactively to already-cached mail.
+  `
+  ALTER TABLE messages ADD COLUMN body_html TEXT;
   `
 ]

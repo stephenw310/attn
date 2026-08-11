@@ -137,7 +137,7 @@
           "to": "seed@attn.test",
           "subject": "This week in focus",
           "snippet": "Your weekly digest.",
-          "bodyText": "You completed twelve focused conversations."
+          "bodyHtml": "<script>document.body.dataset.scriptRan='true'</script><h2>Weekly focus</h2><img id=handler-image src=\"data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=\" onerror=\"document.body.dataset.handlerRan='true'\"><a id=unsafe-link href=\"javascript:document.body.dataset.linkRan='true'\">unsafe link</a><form id=unsafe-form><input name=email><button>Submit</button></form><img id=remote-image src=\"https://remote.attn.test/tracker.gif\" alt=\"Remote tracker\"><table id=styled-table style=\"border-collapse:collapse;background:#fff3d6\"><tr><td style=\"padding:12px;border:1px solid #d49a21\">You completed twelve focused conversations.</td></tr></table>"
         }
       ]
     }
