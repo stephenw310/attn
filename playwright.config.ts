@@ -10,6 +10,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
+  grepInvert: process.env.ATTN_E2E_PERF === '1' ? undefined : /@perf/,
   retries: process.env.CI ? 1 : 0,
   reporter: [['list']],
   outputDir: './e2e/.results',

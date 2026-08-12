@@ -16,6 +16,8 @@
     "test:unit": "vitest run",
     "e2e": "npm run build && node scripts/run-e2e.mjs",
     "e2e:only": "node scripts/run-e2e.mjs",
+    "e2e:perf": "npm run build && node scripts/generate-perf-seed.mjs && node scripts/run-e2e.mjs --perf --grep @perf",
+    "e2e:perf:only": "node scripts/generate-perf-seed.mjs && node scripts/run-e2e.mjs --perf --grep @perf",
     "verify": "npm run typecheck && npx biome ci . && npm run test:unit && npm run e2e",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

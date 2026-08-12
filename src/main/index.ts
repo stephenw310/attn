@@ -309,7 +309,10 @@ function registerIpc(): void {
   ipcMain.handle('mail:listThreads', () => {
     if (!db) return []
     const account = currentAccountId()
-    return account ? listInboxThreads(db, account) : []
+    // Production deliberately keeps its M1 query cap. The perf-only seam lifts
+    // it so the renderer benchmark actually mounts the generated 2,000 rows.
+    const limit = testUserData && process.env.ATTN_E2E_PERF === '1' ? 2_000 : undefined
+    return account ? listInboxThreads(db, account, limit) : []
   })
   ipcMain.handle('mail:listSnoozed', () => {
     if (!db) return []

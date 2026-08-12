@@ -8,9 +8,14 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const cli = require.resolve('@playwright/test/cli')
 const visible = process.argv.includes('--visible')
-const playwrightArgs = process.argv.slice(2).filter((arg) => arg !== '--visible')
+const perf = process.argv.includes('--perf')
+const playwrightArgs = process.argv.slice(2).filter((arg) => arg !== '--visible' && arg !== '--perf')
 const cmd = [process.execPath, cli, 'test', ...playwrightArgs]
-const env = visible ? { ...process.env, ATTN_E2E_VISIBLE: '1' } : process.env
+const env = {
+  ...process.env,
+  ...(visible ? { ATTN_E2E_VISIBLE: '1' } : {}),
+  ...(perf ? { ATTN_E2E_PERF: '1' } : {})
+}
 
 let exec = cmd
 if (process.platform === 'linux' && !process.env.DISPLAY) {
