@@ -18,7 +18,7 @@ const ROOT = join(__dirname, '..')
 interface Boot {
   app: ElectronApplication
   mainLog: () => string
-  relaunch: (options?: { waitBeforeLaunch?: number }) => Promise<{ app: ElectronApplication; page: Page }>
+  relaunch: () => Promise<{ app: ElectronApplication; page: Page }>
   userData: string
 }
 
@@ -104,11 +104,8 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       app,
       mainLog,
       userData,
-      relaunch: async (options) => {
+      relaunch: async () => {
         await boot.app.close()
-        if (options?.waitBeforeLaunch) {
-          await new Promise((resolve) => setTimeout(resolve, options.waitBeforeLaunch))
-        }
         boot.app = await launch()
         return { app: boot.app, page: await boot.app.firstWindow() }
       }

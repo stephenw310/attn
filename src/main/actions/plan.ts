@@ -11,7 +11,6 @@ export function planAction(action: TriageAction): ThreadActionPlan {
     case 'archive':
       return { add: [], remove: ['INBOX'], queueKind: 'modifyLabels' }
     case 'restoreInbox':
-    case 'unsnooze':
       return { add: ['INBOX'], remove: [], queueKind: 'modifyLabels' }
     case 'trash':
       return { add: [], remove: ['INBOX'], queueKind: 'trash' }
@@ -44,8 +43,6 @@ export function actionLabel(action: TriageAction): string {
       return plural('Archived', 'archived')
     case 'restoreInbox':
       return plural('Restored', 'restored')
-    case 'unsnooze':
-      return plural('Unsnoozed', 'unsnoozed')
     case 'trash':
       return plural('Trashed', 'trashed')
     case 'untrash':
@@ -70,8 +67,6 @@ export function inverseForThread(
     case 'archive':
       return { kind: 'restoreInbox', threadIds: [threadId] }
     case 'restoreInbox':
-      return { kind: 'archive', threadIds: [threadId] }
-    case 'unsnooze':
       return { kind: 'archive', threadIds: [threadId] }
     case 'trash':
       return { kind: 'untrash', threadIds: [threadId] }
