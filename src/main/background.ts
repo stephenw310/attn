@@ -1,35 +1,15 @@
 import { app, BrowserWindow, Menu, Tray } from 'electron'
 import trayIcon from '../../resources/tray.png?asset'
 import type { Db } from './db'
+import { oneHourFrom, setNotificationPausedUntil, tomorrowStart } from './notify'
+import { readSetting, settingEnabled, writeSetting } from './settings'
 
 type CreateWindow = (options?: { show?: boolean }) => BrowserWindow
-
-const APP_SETTINGS_ACCOUNT_ID = '__app__'
 
 let createMainWindow: CreateWindow | null = null
 let quitting = false
 let showOnInitialize = false
 let tray: Tray | null = null
-
-function readSetting(db: Db, key: string): string | undefined {
-  const row = db
-    .prepare('SELECT value FROM settings WHERE account_id = ? AND key = ?')
-    .get(APP_SETTINGS_ACCOUNT_ID, key) as { value: string } | undefined
-  return row?.value
-}
-
-function writeSetting(db: Db, key: string, value: string): void {
-  db.prepare('INSERT OR REPLACE INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(
-    APP_SETTINGS_ACCOUNT_ID,
-    key,
-    value
-  )
-}
-
-function settingEnabled(db: Db, key: string, defaultValue: boolean): boolean {
-  const value = readSetting(db, key)
-  return value === undefined ? defaultValue : value === 'true'
-}
 
 function hiddenLoginLaunch(): boolean {
   if (process.argv.includes('--hidden')) return true
@@ -50,7 +30,7 @@ function installLoginItem(db: Db): void {
   writeSetting(db, 'loginItemRegistered', 'true')
 }
 
-function installTray(): void {
+function installTray(db: Db): void {
   if (process.platform !== 'win32' || tray) return
   tray = new Tray(trayIcon)
   tray.setToolTip('Attn')
@@ -58,6 +38,22 @@ function installTray(): void {
     Menu.buildFromTemplate([
       { label: 'Open Inbox', click: () => showMainWindow() },
       { label: 'Compose (M2)', enabled: false },
+      { type: 'separator' },
+      {
+        label: 'Pause notifications',
+        submenu: [
+          {
+            label: 'For 1 hour',
+            click: () => setNotificationPausedUntil(db, oneHourFrom())
+          },
+          {
+            label: 'Until tomorrow',
+            click: () => setNotificationPausedUntil(db, tomorrowStart())
+          },
+          { type: 'separator' },
+          { label: 'Resume notifications', click: () => setNotificationPausedUntil(db, null) }
+        ]
+      },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() }
     ])
@@ -95,7 +91,7 @@ export function showMainWindow(): BrowserWindow | null {
 export function initializeBackground(db: Db, createWindow: CreateWindow): { startHidden: boolean } {
   createMainWindow = createWindow
   installLoginItem(db)
-  installTray()
+  installTray(db)
   const startHidden = hiddenLoginLaunch() && !showOnInitialize
   showOnInitialize = false
   return { startHidden }

@@ -29,6 +29,7 @@ import {
 import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
+import { MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import { SnoozeScheduler } from './scheduler'
 import { runInboxBackfill } from './sync/backfill'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
@@ -65,11 +66,24 @@ let seedAccountId: string | null = null
 let actionExecutor: ActionExecutor | null = null
 let historyPoller: HistoryPoller | null = null
 let snoozeScheduler: SnoozeScheduler | null = null
+let mailNotifier: MailNotifier | null = null
+let pendingFocus: PendingFocus | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, payload)
   }
+}
+
+function broadcastMailChanged(): void {
+  broadcast('mail:changed')
+  mailNotifier?.updateBadge()
+}
+
+function focusInboxThread(threadId: string): void {
+  pendingFocus = { threadId, at: Date.now() }
+  const win = showMainWindow()
+  win?.webContents.send('mail:focusThreadAvailable')
 }
 
 function setSyncState(s: SyncState): void {
@@ -124,7 +138,7 @@ function startSync(): void {
     onProgress: (threadsDone) => {
       if (generation !== authSessionGeneration) return
       setSyncState({ phase: 'syncing', threadsDone })
-      broadcast('mail:changed')
+      broadcastMailChanged()
     },
     onError: (message) => {
       syncRunning = false
@@ -145,7 +159,7 @@ function startSync(): void {
       }
       reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
       setSyncState({ phase: 'idle' })
-      broadcast('mail:changed')
+      broadcastMailChanged()
       console.log(`[sync] backfill done: ${result.threadCount} inbox threads for ${accountId}`)
       startHistoryPoller(accountId, provider, generation)
     })
@@ -203,7 +217,7 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
     onCycleComplete: (changed) => {
       if (generation !== authSessionGeneration) return
       setSyncState({ phase: 'idle' })
-      if (changed) broadcast('mail:changed')
+      if (changed) broadcastMailChanged()
     },
     onError: (message) => {
       if (generation !== authSessionGeneration) return
@@ -277,6 +291,9 @@ function registerIpc(): void {
       stopHistoryPoller()
       authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
+      // A target queued for the previous account must not survive the switch.
+      pendingFocus = null
+      mailNotifier?.setAccountId(tokens.email ?? null)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
       snoozeScheduler?.refresh()
       void resumeOnlineWork()
@@ -296,6 +313,8 @@ function registerIpc(): void {
     authSessionGeneration++
     seedAccountId = null
     clearTokens(app.getPath('userData'))
+    pendingFocus = null
+    mailNotifier?.setAccountId(null)
     clearUndo(account ?? undefined)
     snoozeScheduler?.refresh()
     // A stale backfill may finish caching locally, but its generation can no
@@ -306,6 +325,11 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('sync:getState', () => syncState)
+  ipcMain.handle('mail:takePendingFocus', () => {
+    const threadId = takePendingFocus(pendingFocus)
+    pendingFocus = null
+    return threadId
+  })
   ipcMain.handle('mail:listThreads', () => {
     if (!db) return []
     const account = currentAccountId()
@@ -374,7 +398,7 @@ function registerIpc(): void {
     if (!account) throw new Error('not signed in')
     const result = performTriage(db, account, action)
     snoozeScheduler?.refresh()
-    broadcast('mail:changed')
+    broadcastMailChanged()
     void actionExecutor?.trigger()
     return result
   })
@@ -395,7 +419,7 @@ function registerIpc(): void {
     if (!account) throw new Error('not signed in')
     const result = snoozeThreads(db, account, threadIds, dueAt)
     snoozeScheduler?.refresh()
-    broadcast('mail:changed')
+    broadcastMailChanged()
     void actionExecutor?.trigger()
     return result
   })
@@ -419,7 +443,7 @@ function registerIpc(): void {
       performTriage(db, account, { kind: 'markUnread', threadIds: [threadId], on: false }, false)
       void actionExecutor?.trigger()
     }
-    if (settled || markedRead) broadcast('mail:changed')
+    if (settled || markedRead) broadcastMailChanged()
   })
   ipcMain.handle('mail:undo', () => {
     if (!db) return null
@@ -428,7 +452,7 @@ function registerIpc(): void {
     const result = undoLast(db, account)
     if (result) {
       snoozeScheduler?.refresh()
-      broadcast('mail:changed')
+      broadcastMailChanged()
       void actionExecutor?.trigger()
     }
     return result
@@ -503,17 +527,24 @@ if (!gotLock) {
     }
 
     registerIpc()
-    actionExecutor = new ActionExecutor(db, currentAccountId, makeProvider, () => broadcast('mail:changed'))
+    actionExecutor = new ActionExecutor(db, currentAccountId, makeProvider, broadcastMailChanged)
     snoozeScheduler = new SnoozeScheduler(
       db,
       currentAccountId,
-      () => broadcast('mail:changed'),
+      broadcastMailChanged,
       () => void actionExecutor?.trigger()
     )
     snoozeScheduler.start()
     powerMonitor.on('resume', refreshSnoozesAfterResume)
     const { startHidden } = initializeBackground(db, createWindow)
     createWindow({ show: !startHidden })
+    mailNotifier = new MailNotifier(db, currentAccountId(), showMainWindow, focusInboxThread)
+    mailNotifier.start()
+    if (testUserData) {
+      ipcMain.on('attn:test:focusThread', (_event, threadId: unknown) => {
+        if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
+      })
+    }
     if (authStatus().signedIn) void resumeOnlineWork()
     app.on('activate', () => showMainWindow())
   })
@@ -529,6 +560,9 @@ if (!gotLock) {
     actionExecutor = null
     snoozeScheduler?.stop()
     snoozeScheduler = null
+    mailNotifier?.stop()
+    mailNotifier = null
+    ipcMain.removeAllListeners('attn:test:focusThread')
     db?.close()
     db = null
   })
