@@ -32,6 +32,7 @@ import { GmailMailProvider } from './gmail/provider'
 import { SnoozeScheduler } from './scheduler'
 import { runInboxBackfill } from './sync/backfill'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
+import { sameSyncState } from './sync/state'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
 // token store. Must be set before requestSingleInstanceLock() so concurrent
@@ -72,6 +73,7 @@ function broadcast(channel: string, payload?: unknown): void {
 }
 
 function setSyncState(s: SyncState): void {
+  if (sameSyncState(syncState, s)) return
   syncState = s
   broadcast('sync:state', s)
 }

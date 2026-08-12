@@ -105,6 +105,8 @@ Tokens are stored via Electron `safeStorage` (macOS Keychain / Windows DPAPI). N
 
 **Backfill:** on first sync, fetch all labels, thread/message metadata for the last 12 months (headers, snippets, label sets), then message bodies for the last 90 days, newest first. Older content is fetched on demand and cached permanently. UI renders as soon as the first page of metadata lands.
 
+> **Known implementation gap (T7):** the staged backfill is implemented, but opening a 90-day-to-12-month-old metadata-only thread does not yet fetch and cache its bodies. Add body hydration on conversation open before this path is considered daily-drivable.
+
 **Incremental:** poll `history.list` from the last stored `historyId` (15s foreground / 60s background). On `historyId` expiry (HTTP 404), fall back to a delta re-list. All writes funnel through a single reducer so server-originated and locally-originated changes apply identically.
 
 **Action queue:** every user action (archive, label, star, send…) is:
