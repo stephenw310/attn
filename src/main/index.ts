@@ -167,7 +167,7 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
     accountId,
     provider,
     isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
-    recoverExpiredHistory: async (restart) => {
+    recoverExpiredHistory: async () => {
       if (generation !== authSessionGeneration) throw new Error('authentication session changed')
       syncRunning = true
       setSyncState({ phase: 'syncing', threadsDone: 0 })
@@ -186,7 +186,7 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
               failureMessage = message
             }
           },
-          { restart }
+          { recovery: true }
         )
         if (!result) throw new Error(failureMessage)
         if (generation !== authSessionGeneration) throw new Error('authentication session changed')

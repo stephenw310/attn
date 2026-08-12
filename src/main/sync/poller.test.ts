@@ -168,8 +168,7 @@ describe('history poller lifecycle', () => {
     await poller.runNow()
     await poller.runNow()
 
-    expect(recover).toHaveBeenNthCalledWith(1, true)
-    expect(recover).toHaveBeenNthCalledWith(2, false)
+    expect(recover).toHaveBeenCalledTimes(2)
     expect(options.onError).toHaveBeenCalledOnce()
     expect(options.onCycleComplete).toHaveBeenCalledWith(true)
     poller.stop()

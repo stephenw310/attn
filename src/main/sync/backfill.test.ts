@@ -105,4 +105,20 @@ describe('windowed backfill checkpoints', () => {
     expect(result).not.toBeNull()
     expect(callbacks.onError).not.toHaveBeenCalled()
   })
+
+  it('restarts a completed cursor when recovery retries after failing before checkpointing', async () => {
+    const provider = emptyProvider()
+    vi.mocked(provider.getProfile).mockRejectedValueOnce(new Error('offline'))
+    const db = fakeDb({ backfill_cursor: 'done', updated_at: 1, last_history_id: '88' })
+
+    const failed = await runInboxBackfill(db, provider, callbacks, { recovery: true })
+    const recovered = await runInboxBackfill(db, provider, callbacks, { recovery: true })
+
+    expect(failed).toBeNull()
+    expect(recovered).toEqual({ threadCount: 0, inboxThreadIds: [] })
+    expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, 'newer_than:12m', undefined)
+    expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, 'newer_than:90d', undefined)
+    expect(provider.listThreadIds).toHaveBeenNthCalledWith(3, '', undefined)
+    expect(callbacks.onError).toHaveBeenCalledWith('offline')
+  })
 })

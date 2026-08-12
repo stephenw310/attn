@@ -146,7 +146,7 @@ export interface HistoryPollerOptions {
   accountId: string
   provider: MailProvider
   isForeground: () => boolean
-  recoverExpiredHistory: (restart: boolean) => Promise<void>
+  recoverExpiredHistory: () => Promise<void>
   onCycleComplete: (changed: boolean) => void
   onError: (message: string) => void
   wakeThread?: (threadId: string) => void
@@ -160,7 +160,6 @@ export class HistoryPoller {
   private stopped = true
   private lastAttemptAt = 0
   private recoveryPending = false
-  private recoveryNeedsRestart = false
 
   constructor(private readonly options: HistoryPollerOptions) {}
 
@@ -187,9 +186,7 @@ export class HistoryPoller {
     try {
       let plan: FetchedHistoryPlan | null = null
       if (this.recoveryPending) {
-        const restart = this.recoveryNeedsRestart
-        this.recoveryNeedsRestart = false
-        await this.options.recoverExpiredHistory(restart)
+        await this.options.recoverExpiredHistory()
         this.recoveryPending = false
       } else {
         try {
@@ -203,10 +200,7 @@ export class HistoryPoller {
           if (!(error instanceof GmailApiError) || error.status !== 404) throw error
           console.warn('[sync] history checkpoint expired — running delta re-list')
           this.recoveryPending = true
-          this.recoveryNeedsRestart = true
-          const restart = this.recoveryNeedsRestart
-          this.recoveryNeedsRestart = false
-          await this.options.recoverExpiredHistory(restart)
+          await this.options.recoverExpiredHistory()
           this.recoveryPending = false
         }
       }

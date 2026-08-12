@@ -18,8 +18,8 @@ export interface BackfillResult {
 }
 
 export interface BackfillOptions {
-  /** Start a fresh delta re-list even if an earlier backfill completed. */
-  restart?: boolean
+  /** Restart a completed backfill, but resume one already in progress. */
+  recovery?: boolean
 }
 
 type BackfillPhase = 'metadata' | 'bodies' | 'reconcile'
@@ -43,13 +43,11 @@ export async function runInboxBackfill(
     const previous = db
       .prepare('SELECT backfill_cursor, updated_at FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null; updated_at: number | null } | undefined
-    if (previous?.backfill_cursor === 'done' && !options.restart) {
+    if (previous?.backfill_cursor === 'done' && !options.recovery) {
       return { threadCount: 0, inboxThreadIds: [] }
     }
 
-    const resuming = Boolean(
-      !options.restart && previous?.backfill_cursor && previous.backfill_cursor !== 'done'
-    )
+    const resuming = Boolean(previous?.backfill_cursor && previous.backfill_cursor !== 'done')
     let cursor = resuming ? parseCursor(previous?.backfill_cursor) : { phase: 'metadata' as const }
     if (!resuming) {
       // Record the gapless history checkpoint before the first metadata page.
