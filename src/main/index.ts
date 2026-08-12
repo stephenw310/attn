@@ -29,7 +29,7 @@ import {
 import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
-import { MailNotifier } from './notify'
+import { MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import { SnoozeScheduler } from './scheduler'
 import { runInboxBackfill } from './sync/backfill'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
@@ -67,7 +67,7 @@ let actionExecutor: ActionExecutor | null = null
 let historyPoller: HistoryPoller | null = null
 let snoozeScheduler: SnoozeScheduler | null = null
 let mailNotifier: MailNotifier | null = null
-let pendingFocusThreadId: string | null = null
+let pendingFocus: PendingFocus | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -81,7 +81,7 @@ function broadcastMailChanged(): void {
 }
 
 function focusInboxThread(threadId: string): void {
-  pendingFocusThreadId = threadId
+  pendingFocus = { threadId, at: Date.now() }
   const win = showMainWindow()
   win?.webContents.send('mail:focusThreadAvailable')
 }
@@ -291,6 +291,8 @@ function registerIpc(): void {
       stopHistoryPoller()
       authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
+      // A target queued for the previous account must not survive the switch.
+      pendingFocus = null
       mailNotifier?.setAccountId(tokens.email ?? null)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
       snoozeScheduler?.refresh()
@@ -311,6 +313,7 @@ function registerIpc(): void {
     authSessionGeneration++
     seedAccountId = null
     clearTokens(app.getPath('userData'))
+    pendingFocus = null
     mailNotifier?.setAccountId(null)
     clearUndo(account ?? undefined)
     snoozeScheduler?.refresh()
@@ -323,8 +326,8 @@ function registerIpc(): void {
 
   ipcMain.handle('sync:getState', () => syncState)
   ipcMain.handle('mail:takePendingFocus', () => {
-    const threadId = pendingFocusThreadId
-    pendingFocusThreadId = null
+    const threadId = takePendingFocus(pendingFocus)
+    pendingFocus = null
     return threadId
   })
   ipcMain.handle('mail:listThreads', () => {

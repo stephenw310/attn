@@ -3,11 +3,14 @@ import type { Db } from './db'
 import type { NotificationCandidate } from './notify'
 import {
   applyUnreadBadge,
+  candidatesFor,
   isolateNotificationFailure,
   notificationPausedUntil,
   oneHourFrom,
+  PENDING_FOCUS_TTL_MS,
   planNotifications,
   setNotificationPausedUntil,
+  takePendingFocus,
   tomorrowStart
 } from './notify'
 
@@ -54,6 +57,12 @@ describe('planNotifications', () => {
         focused: false
       })
     ).toEqual([{ title: 'Attn', body: '4 new conversations' }])
+  })
+
+  it('falls back to placeholders when a message has no sender or subject', () => {
+    expect(planNotifications([mail('one', { sender: '', subject: '' })], { focused: false })).toEqual([
+      { threadId: 'one', title: 'New message · (no subject)', body: 'Snippet one' }
+    ])
   })
 
   it('suppresses notifications while focused or paused', () => {
@@ -124,6 +133,75 @@ describe('notification failure isolation', () => {
     expect(messages).toEqual(['database is locked'])
   })
 })
+
+describe('takePendingFocus', () => {
+  it('honours a fresh target and drops one nothing picked up in time', () => {
+    expect(takePendingFocus(null)).toBeNull()
+    expect(takePendingFocus({ threadId: 't-budget', at: 1_000 }, 1_000 + PENDING_FOCUS_TTL_MS)).toBe(
+      't-budget'
+    )
+    expect(takePendingFocus({ threadId: 't-budget', at: 1_000 }, 1_001 + PENDING_FOCUS_TTL_MS)).toBeNull()
+  })
+})
+
+describe('candidatesFor', () => {
+  it('excludes mail with no stored message from both the detail list and the count', () => {
+    const db = fakeMailDb([
+      { messageId: 'message-one', threadId: 'one' },
+      { messageId: 'message-two', threadId: 'two' },
+      { messageId: 'message-three', threadId: 'three' }
+    ])
+    // Four new threads arrive, but 'four' has no persisted message row. Counting
+    // it would tip the batch over the threshold and summarize instead of listing.
+    const candidates = candidatesFor(db, 'user@attn.test', [
+      { threadId: 'one', messageId: 'message-one' },
+      { threadId: 'two', messageId: 'message-two' },
+      { threadId: 'three', messageId: 'message-three' },
+      { threadId: 'four', messageId: 'message-four' }
+    ])
+
+    expect(candidates.map((candidate) => candidate.threadId)).toEqual(['one', 'two', 'three'])
+    expect(planNotifications(candidates, { focused: false })).toHaveLength(3)
+  })
+
+  it('skips hydration above the threshold and still summarizes by that same count', () => {
+    const stored = ['one', 'two', 'three', 'four'].map((threadId) => ({
+      messageId: `message-${threadId}`,
+      threadId
+    }))
+    const db = fakeMailDb(stored)
+
+    // Guards the coupling between the two SUMMARY_THRESHOLD uses: hydration is
+    // skipped here, so a threshold raised only in planNotifications would plan
+    // detail notifications from blank rows.
+    expect(planNotifications(candidatesFor(db, 'user@attn.test', stored), { focused: false })).toEqual([
+      { title: 'Attn', body: '4 new conversations' }
+    ])
+  })
+})
+
+function fakeMailDb(inboxMessages: readonly { messageId: string; threadId: string }[]): Db {
+  const byMessageId = new Map(inboxMessages.map((message) => [message.messageId, message]))
+  return {
+    prepare: () => ({
+      all: (_accountId: string, ...messageIds: string[]) =>
+        messageIds.flatMap((messageId) => {
+          const message = byMessageId.get(messageId)
+          return message ? [{ message_id: messageId, thread_id: message.threadId }] : []
+        }),
+      get: (_accountId: string, messageId: string) => {
+        const message = byMessageId.get(messageId)
+        if (!message) return undefined
+        return {
+          from_name: `Sender ${message.threadId}`,
+          from_email: null,
+          snippet: `Snippet ${message.threadId}`,
+          subject: `Subject ${message.threadId}`
+        }
+      }
+    })
+  } as unknown as Db
+}
 
 function fakeSettingsDb(): { db: Db; values: Map<string, string> } {
   const values = new Map<string, string>()

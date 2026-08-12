@@ -9,6 +9,22 @@ import { historyEvents } from './sync/poller'
 const PAUSED_UNTIL_KEY = 'notificationsPausedUntil'
 let windowsBadgeIcon: NativeImage | null = null
 
+/**
+ * Above this many new conversations a poll cycle collapses to one summary.
+ * `candidatesFor` skips hydration past this point, so both sides must agree:
+ * a threshold raised here alone would plan detail notifications from rows that
+ * were never hydrated, titling them "New message · (no subject)".
+ */
+export const SUMMARY_THRESHOLD = 3
+
+/** A focus target is only worth honouring briefly — see `takePendingFocus`. */
+export const PENDING_FOCUS_TTL_MS = 60_000
+
+export interface PendingFocus {
+  threadId: string
+  at: number
+}
+
 export interface NotificationCandidate extends NewMail {
   sender: string
   subject: string
@@ -61,7 +77,7 @@ export function planNotifications(
   const byThread = new Map<string, NotificationCandidate>()
   for (const mail of newMail) byThread.set(mail.threadId, mail)
   const conversations = [...byThread.values()]
-  if (conversations.length > 3) {
+  if (conversations.length > SUMMARY_THRESHOLD) {
     return [{ title: 'Attn', body: `${conversations.length} new conversations` }]
   }
   return conversations.map((mail) => ({
@@ -94,22 +110,46 @@ export function oneHourFrom(now = Date.now()): number {
   return now + 60 * 60 * 1000
 }
 
-function candidatesFor(db: Db, accountId: string, newMail: readonly NewMail[]): NotificationCandidate[] {
+/**
+ * Consume a focus target requested by a notification click. A renderer that
+ * never picks one up (its window was closed again before it mounted, or the
+ * account signed out) must not redirect an unrelated window opened much later,
+ * so a stale target is dropped rather than honoured.
+ */
+export function takePendingFocus(pending: PendingFocus | null, now = Date.now()): string | null {
+  if (!pending) return null
+  return now - pending.at > PENDING_FOCUS_TTL_MS ? null : pending.threadId
+}
+
+export function candidatesFor(
+  db: Db,
+  accountId: string,
+  newMail: readonly NewMail[]
+): NotificationCandidate[] {
   const distinct = new Map<string, NewMail>()
   for (const mail of newMail) distinct.set(mail.threadId, mail)
   if (distinct.size === 0) return []
+  // Match on message id, not just thread id: the detail path below drops mail
+  // whose message row is missing, and the summary count has to agree with it.
   const placeholders = [...distinct].map(() => '?').join(', ')
   const inboxRows = db
     .prepare(
-      `SELECT thread_id FROM thread_labels
-       WHERE account_id = ? AND label_id = 'INBOX' AND thread_id IN (${placeholders})`
+      `SELECT m.id AS message_id, m.thread_id AS thread_id
+         FROM messages m
+         WHERE m.account_id = ? AND m.id IN (${placeholders})
+           AND EXISTS (SELECT 1 FROM thread_labels tl
+                       WHERE tl.account_id = m.account_id AND tl.thread_id = m.thread_id
+                         AND tl.label_id = 'INBOX')`
     )
-    .all(accountId, ...distinct.keys()) as { thread_id: string }[]
+    .all(accountId, ...[...distinct.values()].map((mail) => mail.messageId)) as {
+    message_id: string
+    thread_id: string
+  }[]
   const inboxMail = inboxRows.flatMap((row) => {
     const mail = distinct.get(row.thread_id)
-    return mail ? [mail] : []
+    return mail && mail.messageId === row.message_id ? [mail] : []
   })
-  if (inboxMail.length > 3) {
+  if (inboxMail.length > SUMMARY_THRESHOLD) {
     return inboxMail.map((mail) => ({ ...mail, sender: '', subject: '', snippet: '' }))
   }
 
