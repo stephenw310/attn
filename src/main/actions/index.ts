@@ -26,18 +26,26 @@ function labelsFor(db: Db, accountId: string, threadId: string): Set<string> {
   return new Set(rows.map((row) => row.label_id))
 }
 
+function pendingSnoozeFor(db: Db, accountId: string, threadId: string): { dueAt: number } | undefined {
+  return db
+    .prepare(
+      `SELECT due_at AS dueAt FROM reminders
+       WHERE account_id = ? AND thread_id = ? AND kind = 'snooze' AND state = 'pending'`
+    )
+    .get(accountId, threadId) as { dueAt: number } | undefined
+}
+
 function apply(db: Db, accountId: string, action: TriageAction): UndoAction[] {
   const plan = planAction(action)
+  const labelsBefore = new Map(
+    action.threadIds.map((threadId) => [threadId, labelsFor(db, accountId, threadId)] as const)
+  )
   const undo = action.threadIds.map((id): UndoAction => {
-    if (action.kind === 'unsnooze') {
-      const reminder = db
-        .prepare(
-          "SELECT due_at AS dueAt FROM reminders WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'"
-        )
-        .get(accountId, id) as { dueAt: number } | undefined
+    if (action.kind === 'unsnooze' || action.kind === 'archive') {
+      const reminder = pendingSnoozeFor(db, accountId, id)
       if (reminder) return { kind: 'snoozeAt', threadIds: [id], dueAt: reminder.dueAt }
     }
-    return inverseForThread(action, labelsFor(db, accountId, id), id)
+    return inverseForThread(action, labelsBefore.get(id) ?? new Set(), id)
   })
   const enqueue = db.prepare(
     `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, created_at)
@@ -63,13 +71,16 @@ function apply(db: Db, accountId: string, action: TriageAction): UndoAction[] {
         ).run(accountId, threadId)
       }
       applyThreadDelta(db, accountId, { threadId, add: plan.add, remove: plan.remove })
-      enqueue.run(
-        accountId,
-        plan.queueKind,
-        threadId,
-        JSON.stringify({ add: plan.add, remove: plan.remove }),
-        Date.now()
-      )
+      const archiveWasAlreadyApplied = action.kind === 'archive' && !labelsBefore.get(threadId)?.has('INBOX')
+      if (!archiveWasAlreadyApplied) {
+        enqueue.run(
+          accountId,
+          plan.queueKind,
+          threadId,
+          JSON.stringify({ add: plan.add, remove: plan.remove }),
+          Date.now()
+        )
+      }
     }
   })()
   return undo
@@ -89,21 +100,30 @@ function applySnooze(db: Db, accountId: string, threadIds: string[], dueAt: numb
   )
 
   for (const threadId of threadIds) {
+    const wasInInbox = labelsFor(db, accountId, threadId).has('INBOX')
     upsertReminder.run(accountId, threadId, dueAt, now)
     applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
     // TODO(T7+): mirror the local reminder with an [Attn]/Snoozed Gmail label.
-    enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }), now)
+    if (wasInInbox) {
+      enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }), now)
+    }
   }
 }
 
 export function snoozeThreads(db: Db, accountId: string, threadIds: string[], dueAt: number): TriageResult {
+  const undo = threadIds.map((threadId): UndoAction => {
+    const previous = pendingSnoozeFor(db, accountId, threadId)
+    return previous
+      ? { kind: 'snoozeAt', threadIds: [threadId], dueAt: previous.dueAt }
+      : { kind: 'unsnooze', threadIds: [threadId] }
+  })
   db.transaction(() => applySnooze(db, accountId, threadIds, dueAt))()
 
   const label = threadIds.length === 1 ? 'Snoozed' : `${threadIds.length} snoozed`
   const undoStack = undoStackFor(accountId)
   undoStack.push({
     label,
-    undo: [{ kind: 'unsnooze', threadIds: [...threadIds] }]
+    undo
   })
   if (undoStack.length > 50) undoStack.shift()
   return { label }

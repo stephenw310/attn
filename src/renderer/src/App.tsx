@@ -654,6 +654,7 @@ function SnoozePicker({
   const dialogRef = useRef<HTMLElement | null>(null)
   const presets = useMemo(() => snoozePresets(), [])
   const parsedCustom = useMemo(() => parseSnoozeText(custom), [custom])
+  const customDueAt = parsedCustom !== null && parsedCustom > Date.now() ? parsedCustom : null
   const optionCount = presets.length + (onUnsnooze ? 1 : 0)
 
   useEffect(() => {
@@ -716,7 +717,7 @@ function SnoozePicker({
                 activeIndex === index ? 'bg-active text-ink' : ''
               }`}
               onClick={() => onConfirm(preset.dueAt)}
-              onMouseEnter={() => setActiveIndex(index)}
+              onMouseMove={() => setActiveIndex(index)}
             >
               <span>{preset.label}</span>
               <span className="text-xs text-ink-faint">{formatSnoozeDate(preset.dueAt)}</span>
@@ -734,7 +735,7 @@ function SnoozePicker({
                 activeIndex === presets.length ? 'bg-active text-ink' : ''
               }`}
               onClick={onUnsnooze}
-              onMouseEnter={() => setActiveIndex(presets.length)}
+              onMouseMove={() => setActiveIndex(presets.length)}
             >
               <span>Unsnooze</span>
               <span className="text-xs text-ink-faint">Return to inbox now</span>
@@ -762,22 +763,23 @@ function SnoozePicker({
                 if (event.key === 'Enter') {
                   event.preventDefault()
                   event.stopPropagation()
-                  if (parsedCustom !== null) onConfirm(parsedCustom)
+                  if (customDueAt !== null) onConfirm(customDueAt)
                 }
               }}
             />
             <button
               type="button"
               data-testid="snooze-custom-confirm"
-              disabled={parsedCustom === null}
+              disabled={customDueAt === null}
               className="cursor-pointer rounded-lg bg-accent px-3 text-sm font-semibold text-ground disabled:cursor-default disabled:opacity-35"
-              onClick={() => parsedCustom !== null && onConfirm(parsedCustom)}
+              onClick={() => customDueAt !== null && onConfirm(customDueAt)}
             >
               Snooze
             </button>
           </div>
           <div data-testid="snooze-resolved" className="mt-1.5 min-h-4 text-xs text-ink-faint">
-            {parsedCustom !== null && formatSnoozeDate(parsedCustom)}
+            {parsedCustom !== null &&
+              (customDueAt !== null ? formatSnoozeDate(customDueAt) : 'Choose a future time')}
           </div>
         </div>
       </section>
@@ -1057,6 +1059,20 @@ export default function App(): React.JSX.Element {
               }
             ]),
         {
+          id: 'view.inbox',
+          title: 'Go to Inbox',
+          shortcut: 'g i',
+          context: 'global',
+          run: () => switchView('inbox')
+        },
+        {
+          id: 'view.snoozed',
+          title: 'Go to Snoozed',
+          shortcut: 'g h',
+          context: 'global',
+          run: () => switchView('snoozed')
+        },
+        {
           id: 'triage.archive',
           title: 'Mark done',
           shortcut: 'e',
@@ -1115,11 +1131,15 @@ export default function App(): React.JSX.Element {
           }
         }
       ]),
-    [openSelected, paneOpen, realMode, selected, showToast, threads.length, triage, view]
+    [openSelected, paneOpen, realMode, selected, showToast, switchView, threads.length, triage, view]
   )
 
   useLayoutEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
+      const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey
+      const key = e.key.toLowerCase()
+      const pendingGoUntil = goChordUntilRef.current
+      goChordUntilRef.current = 0
       if (snoozeOpen) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -1148,11 +1168,8 @@ export default function App(): React.JSX.Element {
       if (target && target.tagName === 'BUTTON') {
         return
       }
-      const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey
-      const key = e.key.toLowerCase()
-      if (plainKey && Date.now() <= goChordUntilRef.current && (key === 'h' || key === 'i')) {
+      if (plainKey && Date.now() <= pendingGoUntil && (key === 'h' || key === 'i')) {
         e.preventDefault()
-        goChordUntilRef.current = 0
         switchView(key === 'h' ? 'snoozed' : 'inbox')
         return
       }
@@ -1161,7 +1178,6 @@ export default function App(): React.JSX.Element {
         goChordUntilRef.current = Date.now() + 500
         return
       }
-      goChordUntilRef.current = 0
       const command = matchKey(e, 'list')
       if (!command) return
       e.preventDefault()

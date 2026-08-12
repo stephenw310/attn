@@ -36,13 +36,18 @@ test('parses custom times without leaking list shortcuts from the input', async 
   await expect(page.getByTestId('snooze-resolved')).not.toBeEmpty()
   await input.press('e')
   await expect(rows).toHaveCount(8)
+  await input.fill('yesterday 9am')
+  await expect(page.getByTestId('snooze-resolved')).toHaveText('Choose a future time')
+  await expect(page.getByTestId('snooze-custom-confirm')).toBeDisabled()
 })
 
 test('navigates picker options with arrows and unsnoozes back to the inbox', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
 
+  await page.mouse.move(640, 410)
   await page.keyboard.press('h')
+  await expect(page.getByTestId('snooze-preset-later-today')).toHaveAttribute('data-active', 'true')
   await page.keyboard.press('ArrowDown')
   await expect(page.getByTestId('snooze-preset-tonight')).toHaveAttribute('data-active', 'true')
   await page.keyboard.press('Enter')
@@ -69,6 +74,41 @@ test('navigates picker options with arrows and unsnoozes back to the inbox', asy
   await page.keyboard.press('g')
   await page.keyboard.press('h')
   await expect(rows).toHaveCount(1)
+})
+
+test('undoes reminder changes and archive without losing the original due time', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('h')
+  await page.getByTestId('snooze-preset-tomorrow').click()
+  await page.keyboard.press('g')
+  await page.keyboard.press('h')
+  await expect(rows).toHaveCount(1)
+  const originalDue = await rows.first().getByTestId('chip-snooze-due').textContent()
+
+  await page.keyboard.press('h')
+  await page.getByTestId('snooze-preset-next-week').click()
+  await expect(rows.first().getByTestId('chip-snooze-due')).not.toHaveText(originalDue ?? '')
+  await page.keyboard.press('z')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first().getByTestId('chip-snooze-due')).toHaveText(originalDue ?? '')
+
+  await page.keyboard.press('e')
+  await expect(rows).toHaveCount(0)
+  await page.keyboard.press('z')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first().getByTestId('chip-snooze-due')).toHaveText(originalDue ?? '')
+})
+
+test('unrelated pane keys disarm a pending go chord', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-content')).toBeVisible()
+  await page.keyboard.press('g')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('h')
+  await expect(page.getByTestId('view-title')).toHaveText('Inbox')
+  await expect(page.getByTestId('snooze-picker')).toBeVisible()
 })
 
 test('returns a due snooze to the inbox with a returned chip', async ({ page }) => {

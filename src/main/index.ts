@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
 import type { DownloadAttachmentRequest, DownloadAttachmentResult, SyncState } from '../shared/mail'
 import {
@@ -299,17 +299,18 @@ function registerIpc(): void {
     const thread = db
       .prepare('SELECT is_unread FROM threads WHERE account_id = ? AND id = ?')
       .get(account, threadId) as { is_unread: number } | undefined
-    db.prepare(
-      `UPDATE reminders SET state = 'done'
+    const settled = db
+      .prepare(
+        `UPDATE reminders SET state = 'done'
        WHERE account_id = ? AND thread_id = ? AND kind = 'snooze' AND state = 'returned'`
-    ).run(account, threadId)
-    if (thread?.is_unread === 1) {
+      )
+      .run(account, threadId).changes
+    const markedRead = thread?.is_unread === 1
+    if (markedRead) {
       performTriage(db, account, { kind: 'markUnread', threadIds: [threadId], on: false }, false)
       void actionExecutor?.trigger()
     }
-    // Preserve the renderer refresh contract even when the thread was already
-    // read; the reading pane keeps the existing message body stable across it.
-    broadcast('mail:changed')
+    if (settled || markedRead) broadcast('mail:changed')
   })
   ipcMain.handle('mail:undo', () => {
     if (!db) return null
@@ -401,6 +402,7 @@ if (!gotLock) {
       () => void actionExecutor?.trigger()
     )
     snoozeScheduler.start()
+    powerMonitor.on('resume', refreshSnoozesAfterResume)
     const { startHidden } = initializeBackground(db, createWindow)
     createWindow({ show: !startHidden })
     if (authStatus().signedIn) void resumeOnlineWork()
@@ -412,6 +414,7 @@ if (!gotLock) {
   app.on('window-all-closed', () => {})
 
   app.on('will-quit', () => {
+    powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
     actionExecutor?.stop()
     actionExecutor = null
     snoozeScheduler?.stop()
@@ -419,4 +422,8 @@ if (!gotLock) {
     db?.close()
     db = null
   })
+}
+
+function refreshSnoozesAfterResume(): void {
+  snoozeScheduler?.refresh()
 }

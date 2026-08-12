@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { snoozePresets } from '../shared/snooze'
+import { snoozePresets } from './snooze'
 
 describe('snoozePresets', () => {
   it('computes every preset from the supplied local time', () => {
