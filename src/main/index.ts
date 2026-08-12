@@ -501,6 +501,28 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     }
   })
 
+  // HTML mail lives in our scriptless srcdoc frame. Some legitimate senders
+  // serve images with CORP: same-origin, which Chromium otherwise blocks in
+  // that frame. Remove only that embedding response header for image requests
+  // from the mail frame; the renderer still loads the original URL directly.
+  win.webContents.session.webRequest.onHeadersReceived(
+    { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
+    (details, callback) => {
+      if (details.frame?.url !== 'about:srcdoc' || !details.responseHeaders) {
+        callback({})
+        return
+      }
+      const responseHeaders = { ...details.responseHeaders }
+      let changed = false
+      for (const name of Object.keys(responseHeaders)) {
+        if (name.toLowerCase() !== 'cross-origin-resource-policy') continue
+        delete responseHeaders[name]
+        changed = true
+      }
+      callback(changed ? { responseHeaders } : {})
+    }
+  )
+
   win.on('ready-to-show', () => {
     if (shouldShow) win.show()
   })

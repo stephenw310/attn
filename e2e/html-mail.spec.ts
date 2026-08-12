@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { expect, test } from './electron'
 
@@ -236,4 +237,39 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(page.getByTestId('thread-row')).toHaveCount(7)
   await expect(page.getByTestId('thread-row').filter({ hasText: 'This week in focus' })).toHaveCount(0)
   await expect(page.getByTestId('conversation-subject')).toHaveText('Research summary')
+})
+
+test('loads direct mail images when the sender restricts cross-origin embedding', async ({ page }) => {
+  const pixel = Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64')
+  const server = createServer((_request, response) => {
+    response.writeHead(200, {
+      'Content-Type': 'image/gif',
+      'Content-Length': pixel.length,
+      'Cross-Origin-Resource-Policy': 'same-origin'
+    })
+    response.end(pixel)
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+
+  try {
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('Image test server did not start')
+    await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).dblclick()
+    await expect(page.getByTestId('html-body-frame')).toBeVisible()
+    const body = page.frameLocator('[data-testid="html-body-frame"]')
+    await body.locator('body').evaluate((mailBody, imageUrl) => {
+      const image = document.createElement('img')
+      image.id = 'corp-image'
+      image.src = imageUrl
+      mailBody.append(image)
+    }, `http://127.0.0.1:${address.port}/sender-image.gif`)
+    await expect
+      .poll(() => body.locator('#corp-image').evaluate((image) => (image as HTMLImageElement).naturalWidth))
+      .toBe(1)
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 })
