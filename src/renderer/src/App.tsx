@@ -608,6 +608,9 @@ export default function App(): React.JSX.Element {
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null)
+  const [selectionBaseIds, setSelectionBaseIds] = useState<ReadonlySet<string>>(new Set())
   const [paneOpen, setPaneOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
@@ -643,6 +646,9 @@ export default function App(): React.JSX.Element {
     setRealThreads(null)
     setRealUnreadTotal(null)
     setSelectedIndex(0)
+    setSelectedIds(new Set())
+    setSelectionAnchorId(null)
+    setSelectionBaseIds(new Set())
     setPaneOpen(false)
     setPendingCount(0)
     setMockReadIds(new Set())
@@ -693,10 +699,32 @@ export default function App(): React.JSX.Element {
     // clamp shifts selection and an open pane would jump to a different
     // conversation. Revisit when mail:changed can fire mid-read.
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
+    setSelectedIds((current) => {
+      if (current.size === 0) return current
+      const visibleIds = new Set(threads.map((thread) => thread.id))
+      const next = new Set([...current].filter((id) => visibleIds.has(id)))
+      if (next.size === current.size) return current
+      return next
+    })
     if (threads.length === 0) setPaneOpen(false)
-  }, [threads.length])
+  }, [threads])
+
+  useEffect(() => {
+    setSelectionAnchorId((anchor) => {
+      if (anchor !== null && selectedIds.has(anchor) && threads.some((thread) => thread.id === anchor)) {
+        return anchor
+      }
+      // Drop a stale anchor rather than retargeting it: extendSelectionTo falls back
+      // to the cursor, which is where the user is actually looking.
+      return null
+    })
+  }, [selectedIds, threads])
 
   const selected: DisplayThread | undefined = threads[selectedIndex]
+  const targetedThreads =
+    selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
+  const starOn = targetedThreads.some((thread) => !thread.starred)
+  const markUnreadOn = targetedThreads.some((thread) => !thread.unread)
 
   useEffect(() => {
     if (!selected) {
@@ -752,15 +780,64 @@ export default function App(): React.JSX.Element {
     }, 4000)
   }, [])
 
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    setSelectionAnchorId(null)
+    setSelectionBaseIds(new Set())
+  }, [])
+
+  const toggleFocusedSelection = useCallback(() => {
+    const thread = threads[selectedIndex]
+    if (!thread) return
+    const next = new Set(selectedIds)
+    const isAdding = !next.has(thread.id)
+    if (isAdding) next.add(thread.id)
+    else next.delete(thread.id)
+    setSelectedIds(next)
+    setSelectionBaseIds(next)
+    if (isAdding) setSelectionAnchorId(thread.id)
+    else if (next.size === 0 || selectionAnchorId === thread.id) setSelectionAnchorId(null)
+  }, [selectedIds, selectedIndex, selectionAnchorId, threads])
+
+  const extendSelectionTo = useCallback(
+    (nextIndex: number) => {
+      if (threads.length === 0) return
+      const clampedIndex = Math.max(0, Math.min(nextIndex, threads.length - 1))
+      const storedAnchorIndex = selectionAnchorId
+        ? threads.findIndex((thread) => thread.id === selectionAnchorId)
+        : -1
+      const hasAnchor = storedAnchorIndex >= 0
+      const anchorIndex = hasAnchor ? storedAnchorIndex : selectedIndex
+      const start = Math.min(anchorIndex, clampedIndex)
+      const end = Math.max(anchorIndex, clampedIndex)
+      // Rebuild from the selection captured when the anchor was set, so walking the
+      // range back with Shift+K shrinks it instead of accumulating every row crossed.
+      const base = hasAnchor ? selectionBaseIds : selectedIds
+      const next = new Set(base)
+      for (const thread of threads.slice(start, end + 1)) next.add(thread.id)
+      setSelectedIds(next)
+      if (!hasAnchor) setSelectionBaseIds(selectedIds)
+      setSelectionAnchorId(threads[anchorIndex]?.id ?? null)
+      setSelectedIndex(clampedIndex)
+    },
+    [selectedIds, selectedIndex, selectionAnchorId, selectionBaseIds, threads]
+  )
+
   const triage = useCallback(
     (action: TriageAction) => {
       if (!realMode || !attn) return
+      const isBulk = selectedIds.size > 0
+      const targetedAction = {
+        ...action,
+        threadIds: isBulk ? [...selectedIds] : action.threadIds
+      }
+      if (isBulk) clearSelection()
       void attn.mail
-        .triage(action)
+        .triage(targetedAction)
         .then((result) => showToast(result.label))
         .catch(() => {})
     },
-    [realMode, showToast]
+    [clearSelection, realMode, selectedIds, showToast]
   )
 
   const openSelected = useCallback(() => {
@@ -812,6 +889,38 @@ export default function App(): React.JSX.Element {
           context: 'list',
           run: () => setSelectedIndex((i) => Math.max(i - 1, 0))
         },
+        {
+          id: 'selection.toggle',
+          title: 'Toggle selection',
+          shortcut: 'x',
+          context: 'list',
+          run: toggleFocusedSelection
+        },
+        {
+          id: 'selection.extendNext',
+          title: 'Extend selection to next conversation',
+          shortcut: 'Shift+J',
+          context: 'list',
+          run: () => extendSelectionTo(selectedIndex + 1)
+        },
+        {
+          id: 'selection.extendPrevious',
+          title: 'Extend selection to previous conversation',
+          shortcut: 'Shift+K',
+          context: 'list',
+          run: () => extendSelectionTo(selectedIndex - 1)
+        },
+        ...(selectedIds.size > 0
+          ? [
+              {
+                id: 'selection.clear',
+                title: 'Clear selection',
+                shortcut: 'Escape',
+                context: 'global' as const,
+                run: clearSelection
+              }
+            ]
+          : []),
         ...(paneOpen
           ? [
               {
@@ -854,18 +963,17 @@ export default function App(): React.JSX.Element {
         },
         {
           id: 'triage.star',
-          title: selected?.starred ? 'Unstar' : 'Star',
+          title: starOn ? 'Star' : 'Unstar',
           shortcut: 's',
           context: 'list',
-          run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: !selected.starred })
+          run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: starOn })
         },
         {
           id: 'triage.unread',
-          title: selected?.unread ? 'Mark read' : 'Mark unread',
+          title: markUnreadOn ? 'Mark unread' : 'Mark read',
           shortcut: 'u',
           context: 'list',
-          run: () =>
-            selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: !selected.unread })
+          run: () => selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: markUnreadOn })
         },
         {
           id: 'triage.undo',
@@ -883,7 +991,22 @@ export default function App(): React.JSX.Element {
           }
         }
       ]),
-    [openSelected, paneOpen, realMode, selected, showToast, threads.length, triage]
+    [
+      clearSelection,
+      extendSelectionTo,
+      openSelected,
+      paneOpen,
+      realMode,
+      markUnreadOn,
+      selected,
+      selectedIds.size,
+      selectedIndex,
+      showToast,
+      starOn,
+      threads.length,
+      toggleFocusedSelection,
+      triage
+    ]
   )
 
   useLayoutEffect(() => {
@@ -943,6 +1066,7 @@ export default function App(): React.JSX.Element {
           { id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate' },
           { id: 'open', keys: ['Enter'], label: 'open' }
         ]),
+    { id: 'select', keys: ['X'], label: 'select' },
     ...TRIAGE_SHORTCUT_HINTS
   ]
 
@@ -981,6 +1105,14 @@ export default function App(): React.JSX.Element {
           </button>
         </nav>
         <div className="app-no-drag ml-auto flex items-center gap-4">
+          {selectedIds.size > 0 && (
+            <span
+              data-testid="selection-count"
+              className="rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent tabular-nums"
+            >
+              {selectedIds.size} selected
+            </span>
+          )}
           <QueueReadout unread={unreadCount} pending={pendingCount} />
           <div data-testid="account-menu">
             <AccountMenu status={status} onStatus={setStatus} />
@@ -1004,6 +1136,7 @@ export default function App(): React.JSX.Element {
           )}
           {threads.map((t, i) => {
             const isSelected = i === selectedIndex
+            const isChecked = selectedIds.has(t.id)
             const isUnread = t.unread && !mockReadIds.has(t.id)
             return (
               // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
@@ -1013,23 +1146,45 @@ export default function App(): React.JSX.Element {
                 ref={isSelected ? selectedRowRef : null}
                 data-testid="thread-row"
                 data-selected={isSelected || undefined}
+                data-checked={isChecked || undefined}
                 data-unread={isUnread || undefined}
-                className={`cursor-default border-l-[3px] ${
+                className={`cursor-default select-none border-l-[3px] ${
                   paneOpen
-                    ? 'grid grid-cols-[10px_1fr_auto] gap-x-2 px-3 py-2.5'
+                    ? 'grid grid-cols-[16px_1fr_auto] gap-x-2 px-3 py-2.5'
                     : 'flex items-center gap-3.5 py-[11px] pr-7 pl-5'
-                } ${isSelected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'}`}
-                onClick={() => {
-                  setSelectedIndex(i)
-                  setPaneOpen(true)
+                } ${
+                  isChecked
+                    ? 'border-l-accent bg-accent/[0.12]'
+                    : isSelected
+                      ? 'border-l-accent bg-accent/[0.07]'
+                      : 'border-l-transparent'
+                }`}
+                onClick={(event) => {
+                  if (event.shiftKey) extendSelectionTo(i)
+                  else {
+                    setSelectedIndex(i)
+                    setPaneOpen(true)
+                  }
                 }}
               >
                 <span
-                  className={`size-1.5 flex-none self-center rounded-full ${
-                    isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
-                  } ${paneOpen ? 'row-span-2' : ''}`}
+                  className={`flex size-4 flex-none items-center justify-center self-center ${
+                    paneOpen ? 'row-span-2' : ''
+                  }`}
                   aria-hidden
-                />
+                >
+                  {isChecked ? (
+                    <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
+                      ✓
+                    </span>
+                  ) : (
+                    <span
+                      className={`size-1.5 rounded-full ${
+                        isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
+                      }`}
+                    />
+                  )}
+                </span>
                 {paneOpen ? (
                   <>
                     <span

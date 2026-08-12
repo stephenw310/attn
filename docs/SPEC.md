@@ -161,6 +161,9 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 | **Select** (`X`) | Toggles selection; `Shift+click`/`Shift+J/K` extends. All triage verbs operate on the selection when one exists. |
 | **Undo** (`Z`) | Reverses the last action — including bulk actions — from a session-scoped stack (last 50 actions). Every destructive-feeling verb is instantly reversible; this is what makes fearless triage possible. |
 
+Bare-letter shortcuts do not also accept their shifted variants: `Shift+letter` is reserved for explicit
+combinations such as `Shift+J/K`. Printable symbols that require Shift, including `#` and `!`, are unaffected.
+
 **Acceptance criteria**
 - Any triage action gives visual feedback in < 16ms (optimistic), including on selections of 100+ conversations.
 - `Z` fully reverses a bulk archive of 100 conversations, locally and (after sync) server-side.
