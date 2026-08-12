@@ -1,8 +1,8 @@
 # M1 Completion Plan — Task Breakdown for Handoff
 
 **Audience:** the engineer(s) implementing the rest of M1 (triage core).
-**Basis:** [SPEC.md](SPEC.md) v0.10 §8 M1; T1, T3, and T8 shipped; T11 is implemented in draft PR #11.
-**Revised 2026-08-11:** SPEC v0.10 makes system mailbox navigation explicit future scope (F3/§9 #10) while retaining the on-demand reading behavior from v0.9. **T11 implementation is complete and verified in PR #11**, including the HTML-mail work formerly tracked as T2; merge is its remaining gate, and T4–T7 are otherwise unblocked.
+**Basis:** [SPEC.md](SPEC.md) v0.10 §8 M1 and the implementation merged through PR #18.
+**Revised 2026-08-11:** T1, T3–T8, T10, and T11 are shipped. The sanitized HTML work formerly tracked as T2 shipped across PRs #7 and #11. **T9 (notifications and unread badge) is the next and final unimplemented M1 feature.** M1 is therefore not complete yet; after T9, run the exit audit below, including the real-Gmail and real-OS manual checks that cannot be established by the headless suite.
 **Ground rules:** read [AGENTS.md](../AGENTS.md) first. Every task below is one PR, and no PR is done until `npm run verify` is green. When a task says "spec F4", that's a section of SPEC.md — read it before starting the task.
 
 ---
@@ -15,16 +15,16 @@
 | E2E seed seam (enabler) | ✅ **T1** (#6) |
 | Triage verbs E/#/S/U/! + auto-advance + `Z` undo + durable queue | ✅ **T3** (#8) |
 | Tray/background mode + launch at login | ✅ **T8** (#9) |
-| Sanitized HTML mail rendering | 🟡 **T11 · Part A** — implemented in PR #11 |
-| Reading view: on-demand split layout (F3 v0.10, §9 #7/#9) | 🟡 **T11 · Part B** — implemented in PR #11 |
-| Full message display: recipients, attachments, quote/signature collapse (F3 v0.10) | 🟡 **T11 · Parts C–E** — implemented in PR #11 |
-| Label verb (`L`) | **T5** — ready |
-| Selection + bulk | **T4** — ready |
-| Snooze (`H`) + scheduler | **T6** — ready |
-| Incremental sync (F2 "offline correctness") | **T7** — ready |
-| Basic notifications | **T9** — after T7 |
+| Sanitized HTML mail rendering | ✅ shipped (#7, completed by **T11** in #11) |
+| Reading view: on-demand split layout (F3 v0.10, §9 #7/#9) | ✅ **T11** (#11) |
+| Full message display: recipients, attachments, quote/signature collapse (F3 v0.10) | ✅ **T11** (#11) |
+| Label verb (`L`) | ✅ **T5** (#13) |
+| Selection + bulk | ✅ **T4** (#12) |
+| Snooze (`H`) + scheduler | ✅ **T6** (#14; bulk-selection fix #16) |
+| Incremental sync (F2 "offline correctness") | ✅ **T7** (#15) |
+| Basic notifications + unread badge | ⏭️ **T9** — next; not implemented |
 
-Supporting: **T10** (perf smoke, stretch). Push-vs-polling is settled on paper now — SPEC §9 #8; don't reopen it in reviews.
+Supporting: ✅ **T10** perf smoke shipped (#18). Push-vs-polling is settled on paper now — SPEC §9 #8; don't reopen it in reviews.
 
 ---
 
@@ -35,13 +35,13 @@ graph LR
   T1[T1 ✅ e2e seed seam]
   T3[T3 ✅ triage engine core]
   T8[T8 ✅ tray + background]
-  T11[T11 🟡 reading overhaul · PR #11]
-  T4[T4 · selection + bulk]
-  T5[T5 · label picker]
-  T6[T6 · snooze + scheduler]
-  T7[T7 · incremental sync]
+  T11[T11 ✅ reading overhaul]
+  T4[T4 ✅ selection + bulk]
+  T5[T5 ✅ label picker]
+  T6[T6 ✅ snooze + scheduler]
+  T7[T7 ✅ incremental sync]
   T9[T9 · notifications + badge]
-  T10[T10 · perf smoke · stretch]
+  T10[T10 ✅ perf smoke]
 
   T1 --> T3
   T3 --> T11
@@ -54,15 +54,14 @@ graph LR
   T8 -.soft.-> T9
 ```
 
-The `T11 →` edges are a **product-ordering directive**, not technical dependencies: the reading experience gets fixed before any further feature work starts (only `T7 → T9` is a hard technical dependency). T4–T7 remain mutually parallelizable once T11 lands.
+The `T11 →` edges record the product ordering used during implementation (only `T7 → T9` is a hard technical dependency).
 
 **Order from here:**
 
-| Round | Eng A (engine track) | Eng B (surface track) |
-|---|---|---|
-| 1 | T7 | T4 |
-| 2 | T6 | T5 |
-| 3 | T9 | T10 (stretch) |
+1. Implement **T9** using T7's existing `historyEvents` `newMail` emitter and T8's window/background helpers.
+2. Run `npm run verify` and review the final e2e screenshots.
+3. Complete the real-OS notification click-through smoke and confirm the T7 real-Gmail offline/polling smoke is recorded.
+4. Close the M1 exit checklist; then begin M2.
 
 ---
 
@@ -294,7 +293,7 @@ All of the above green; `verify` includes the unit step; AGENTS.md updated; comm
 
 ## T4 — Selection and bulk triage
 
-**Depends on:** T3 · **Parallel with:** T5, T6, T7 · **Spec:** F4 (`X`, `Shift+J/K`, bulk undo)
+**Status:** shipped in PR #12. · **Depends on:** T3 · **Spec:** F4 (`X`, `Shift+J/K`, bulk undo)
 
 ### Implementation guide
 
@@ -316,7 +315,7 @@ Bulk archive + single-undo criterion (F4) demonstrated in e2e; `verify` green.
 
 ## T5 — Label picker (`L`)
 
-**Depends on:** T3 (uses the generic `label` action) · **Parallel with:** T4, T6, T7 · **Spec:** F4
+**Status:** shipped in PR #13. · **Depends on:** T3 (uses the generic `label` action) · **Spec:** F4
 
 ### Implementation guide
 
@@ -339,7 +338,7 @@ Picker works on single + bulk targets; label ops queue like any triage op; `veri
 
 ## T6 — Snooze (`H`): picker, scheduler, Snoozed view
 
-**Depends on:** T3 · **Parallel with:** T4, T5, T7 · **Spec:** F4 (snooze), D2 (catch-up), F3 (chips)
+**Status:** shipped in PR #14; bulk-selection correction shipped in PR #16. · **Depends on:** T3 · **Spec:** F4 (snooze), D2 (catch-up), F3 (chips)
 
 ### Design (decided — includes one explicit spec deviation)
 
@@ -386,7 +385,7 @@ Snooze/return/catch-up/undo all demonstrated; snoozed view navigable by keyboard
 
 ## T7 — Incremental sync: history polling, windowed backfill, reconciliation
 
-**Depends on:** T3 (reducer, provider, executor) · **Parallel with:** T4, T5, T6 · **Spec:** F2, §6
+**Status:** shipped in PR #15. · **Depends on:** T3 (reducer, provider, executor) · **Spec:** F2, §6
 
 ### Design (decided)
 
@@ -456,7 +455,7 @@ Lifecycle e2e green on Linux; manual win/mac checklist in the PR; fixture teardo
 
 ## T9 — Notifications and unread badge
 
-**Depends on:** T7 (new-mail events) · soft on T8 (window focus/show helpers) · **Spec:** F12
+**Status:** next; not implemented as of PR #18. · **Depends on:** T7 (new-mail events) · soft on T8 (window focus/show helpers) · **Spec:** F12
 
 ### Design (decided)
 
@@ -482,7 +481,7 @@ Unit + e2e green; manual click-through verified on one real OS; `verify` green.
 
 ## T10 (stretch) — Perf smoke in CI
 
-**Depends on:** T3 · **Spec:** §7 ("Budgets are CI-tracked once M1 lands")
+**Status:** shipped in PR #18. · **Depends on:** T3 · **Spec:** §7 ("Budgets are CI-tracked once M1 lands")
 
 Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and assert generous CI-safe ceilings that still catch order-of-magnitude regressions: triage keypress → row removed from DOM < 100ms; list render after boot < 1.5s; conversation open < 200ms (measure via `performance.now()` in `page.evaluate` around dispatched keys). Mark the spec `@perf` and keep it out of the default suite if flaky; run in CI nightly. Rendering 2,000 unvirtualized rows will itself be informative — if it's already janky, file the virtualization task (F3's 10k/60fps criterion, currently deferred) with data attached.
 
@@ -490,7 +489,7 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 
 ## T11 — Reading experience overhaul: split view, HTML mail, full message display
 
-**Status: implementation complete; awaiting merge.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.10), D6 (revised), §9 #7/#9 · **PR:** [#11](https://github.com/stephenw310/attn/pull/11) (draft; current head verified).
+**Status: shipped in PR #11.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.10), D6 (revised), §9 #7/#9 · **PR:** [#11](https://github.com/stephenw310/attn/pull/11).
 
 ### Why
 
@@ -559,7 +558,7 @@ The v5 columns populate only for newly synced mail, and this task intentionally 
 
 ### Done when
 
-- Implementation and review fixes are present in **PR #11**; `npm run verify` is green at the current PR head (25 unit tests, build, and 23 Electron e2e tests). Removing draft status and merging are the remaining project-state gates.
+- Implementation and review fixes shipped in **PR #11**; its merge gate is complete.
 - SPEC v0.10 F3's T11 acceptance criteria demonstrably hold (pane/focus semantics, recipients inspectable, remote + inline attachment discovery, and safe/stable collapse); the newly explicit system-mailbox criteria remain assigned to M3.
 - Migration v5 is the only T11 schema entry; the required dev-DB wipe is documented instead of compatibility work.
 - The status table is updated, and `inbox.png`, `reading.png`, and `simple-mail.png` were reviewed.
@@ -610,12 +609,14 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 
 M1 is done when every SPEC §8 M1 bullet maps to a shipped task above, and:
 
-- [ ] `npm run verify` green, including the unit-test step (T3+)
-- [ ] F4 criteria demonstrated in e2e: bulk archive + single `z` undo; snooze return while running *and* via relaunch catch-up
+- [ ] T9 notifications + unread badge shipped
+- [ ] Final `npm run verify` green, including the unit-test step
+- [x] F4 core paths demonstrated in e2e: bulk archive + single `z` undo; snooze return while running *and* via relaunch catch-up
 - [ ] F2 airplane-mode criterion executed as T7's manual smoke (documented in PR)
-- [ ] F16 criteria: close-window keeps timers/polling alive; quit leaves nothing behind
-- [ ] Every command reachable via keyboard is in the command registry (spot-check `listCommands()`)
-- [ ] AGENTS.md reflects any pipeline/harness changes
+- [x] F16 automated lifecycle criteria: close-window keeps the process alive; explicit quit leaves nothing behind
+- [ ] T9 real-OS smoke: notification appears and click-through opens the intended thread
+- [ ] Every command reachable via keyboard is in the command registry (final spot-check `listCommands()`)
+- [x] AGENTS.md reflects the current pipeline/harness behavior
 - [ ] `e2e/.artifacts/*.png` reviewed after the final task
 
 Then M2 (composer, drafts, send + undo send, exactly-once outbox) starts from a genuinely daily-drivable triage loop.
