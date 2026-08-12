@@ -1615,7 +1615,7 @@ export default function App(): React.JSX.Element {
             const showGroup = view === 'inbox' && (i === 0 || dateGroup(threads[i - 1]) !== group)
             const isExiting = exitingThreadIds.has(t.id)
             return (
-              <div key={t.id} className="contents">
+              <div key={t.id} className="overflow-x-clip">
                 {showGroup && (
                   <div
                     data-testid="thread-date-group"

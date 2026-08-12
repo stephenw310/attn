@@ -34,12 +34,34 @@ test('animates a marked-done row before removing it', async ({ page }) => {
 
 test('does not drop rapid archives or an undo during the exit animation', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
-  const list = page.getByTestId('thread-list')
   await expect(rows).toHaveCount(8)
+  const stableRow = rows.nth(2)
+  const stableX = await stableRow.evaluate((element) => element.getBoundingClientRect().x)
 
   await page.keyboard.press('e')
   await page.keyboard.press('e')
-  await expect.poll(() => list.evaluate((element) => element.scrollLeft)).toBe(0)
+  const framePositions = await stableRow.evaluate(
+    (element) =>
+      new Promise<Array<{ rowX: number; listScrollLeft: number; windowScrollX: number }>>((resolve) => {
+        const positions: Array<{ rowX: number; listScrollLeft: number; windowScrollX: number }> = []
+        const list = element.closest('[data-testid="thread-list"]')
+        const startedAt = performance.now()
+        const sample = (): void => {
+          positions.push({
+            rowX: element.getBoundingClientRect().x,
+            listScrollLeft: list?.scrollLeft ?? -1,
+            windowScrollX: window.scrollX
+          })
+          if (performance.now() - startedAt < 650) requestAnimationFrame(sample)
+          else resolve(positions)
+        }
+        requestAnimationFrame(sample)
+      })
+  )
+  expect(framePositions.every(({ rowX }) => Math.abs(rowX - stableX) < 1)).toBe(true)
+  expect(
+    framePositions.every(({ listScrollLeft, windowScrollX }) => listScrollLeft === 0 && windowScrollX === 0)
+  ).toBe(true)
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
   await expect(rows).toHaveCount(6)
 
