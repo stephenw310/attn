@@ -40,6 +40,7 @@ export interface MessageAttachment {
   filename: string
   mimeType: string
   sizeBytes: number
+  contentId?: string
 }
 
 export interface ConversationMsg {
@@ -68,6 +69,14 @@ export interface DownloadAttachmentRequest {
 }
 
 export type DownloadAttachmentResult = { path: string } | { error: string }
+
+export interface InlineImageRequest {
+  messageId: string
+  attachmentId: string
+  mimeType: string
+}
+
+export type InlineImageResult = { dataUrl: string } | { error: string }
 
 export type SyncState =
   | { phase: 'idle' }

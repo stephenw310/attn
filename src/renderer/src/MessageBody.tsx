@@ -1,10 +1,14 @@
 import DOMPurify from 'dompurify'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { MessageAttachment } from '../../shared/mail'
+import { forceLightMailCss } from './mailCss'
 import { findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
   bodyText: string
   bodyHtml: string | null
+  messageId: string
+  attachments: MessageAttachment[]
   expanded?: boolean
   onToggleTrim: () => void
 }
@@ -17,9 +21,12 @@ const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
 const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
 const TRIM_MARKER = 'data-attn-trim-start'
+const CID_SOURCE_MARKER = 'data-attn-cid-source'
+const EMPTY_IMAGES = new Map<string, string>()
+const attn = window.attn
 
 const RESET = `
-  :root { color-scheme: light; }
+  :root { color-scheme: only light; }
   html, body {
     margin: 0;
     padding: 0;
@@ -31,6 +38,10 @@ const RESET = `
   body {
     font: 14px/1.6 Arial, Helvetica, sans-serif;
     overflow-wrap: break-word;
+  }
+  #attn-mail-body {
+    box-sizing: border-box;
+    padding: 12px !important;
   }
   img { max-width: 100%; height: auto; }
   table { max-width: 100%; }
@@ -52,6 +63,18 @@ function freezeViewportHeightUnits(css: string): string {
   return css.replace(VIEWPORT_HEIGHT_UNIT, (_, rawValue: string) => {
     return `${(Number(rawValue) * MAIL_VIEWPORT_HEIGHT) / 100}px`
   })
+}
+
+function normalizeMailLink(href: string): string | null {
+  const value = href.trim()
+  if (!value) return null
+  if (value.startsWith('#')) return value
+  if (value.startsWith('//')) return `https:${value}`
+  if (/^[a-z][a-z\d+.-]*:/i.test(value)) return value
+  if (/^(?:www\.)?[a-z\d](?:[a-z\d-]*[a-z\d])?(?:\.[a-z\d](?:[a-z\d-]*[a-z\d])?)+(?:[/?#]|$)/i.test(value)) {
+    return `https://${value}`
+  }
+  return null
 }
 
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
@@ -79,7 +102,12 @@ function hasRenderableContentBefore(content: DocumentFragment, boundary: Element
 function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   if (!html.trim()) return null
   const clean = DOMPurify.sanitize(html, {
-    FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea'],
+    FORBID_TAGS: ['script', 'form', 'input', 'button', 'select', 'textarea'],
+    // DOMPurify passes data-* through by default, so a sender could otherwise ship
+    // our own markers: an early data-attn-trim-start moves the trim fold wherever
+    // they like, and data-attn-cid-source aims the inline-image patch at their
+    // element. FORBID_ATTR is checked before the data-* allowance, so both lose.
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', TRIM_MARKER, CID_SOURCE_MARKER],
     ADD_TAGS: ['style'],
     ADD_ATTR: ['target'],
     FORCE_BODY: true
@@ -88,34 +116,63 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   const template = document.createElement('template')
   template.innerHTML = clean
   template.content.querySelectorAll('style').forEach((style) => {
-    style.textContent = freezeViewportHeightUnits(style.textContent ?? '')
+    style.textContent = forceLightMailCss(freezeViewportHeightUnits(style.textContent ?? ''))
   })
   template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
+  })
+  template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
+    const normalizedHref = normalizeMailLink(link.getAttribute('href') ?? '')
+    if (normalizedHref === null) link.removeAttribute('href')
+    else link.setAttribute('href', normalizedHref)
   })
   if (!hasRenderableContent(template.content)) return null
 
   return template
 }
 
-function makeSrcDoc(html: string): string | null {
+function replaceCidSources(content: DocumentFragment, inlineImages: ReadonlyMap<string, string>): void {
+  content.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => {
+    const source = image.getAttribute('src')?.trim() ?? ''
+    if (!source.toLowerCase().startsWith('cid:')) return
+    const dataUrl = inlineImages.get(normalizedContentId(source.slice(4)))
+    if (dataUrl) image.setAttribute('src', dataUrl)
+    else {
+      image.setAttribute(CID_SOURCE_MARKER, source)
+      image.removeAttribute('src')
+    }
+  })
+}
+
+function normalizedContentId(value: string): string {
+  try {
+    return decodeURIComponent(value).replace(/^<|>$/g, '').toLowerCase()
+  } catch {
+    return value.replace(/^<|>$/g, '').toLowerCase()
+  }
+}
+
+function cidReferences(html: string): string[] {
+  if (!/cid:/i.test(html)) return []
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  return [...parsed.querySelectorAll<HTMLImageElement>('img[src]')]
+    .map((image) => image.getAttribute('src')?.trim() ?? '')
+    .filter((source) => source.toLowerCase().startsWith('cid:'))
+    .map((source) => normalizedContentId(source.slice(4)))
+}
+
+function makeSrcDoc(html: string, inlineImages: ReadonlyMap<string, string>): string | null {
   const template = sanitizeToTemplate(html)
   if (!template) return null
+  replaceCidSources(template.content, inlineImages)
   const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
-  const richLayoutStart = template.content.querySelector('table, style')
-  const plainLayout =
-    richLayoutStart === null ||
-    (trimStart !== null &&
-      Boolean(trimStart.compareDocumentPosition(richLayoutStart) & Node.DOCUMENT_POSITION_FOLLOWING))
   if (trimStart) {
     const marker = document.createElement('div')
     marker.setAttribute(TRIM_MARKER, '')
     trimStart.before(marker)
   }
-  const layout = plainLayout ? 'body { box-sizing: border-box; padding: 12px; }' : ''
-
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}${layout}</style></head><body>${template.innerHTML}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light"><base target="_blank"><style>${RESET}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
 }
 
 function TrimToggle({
@@ -156,6 +213,8 @@ function TrimToggle({
 export function MessageBody({
   bodyText,
   bodyHtml,
+  messageId,
+  attachments,
   expanded = false,
   onToggleTrim
 }: MessageBodyProps): React.JSX.Element {
@@ -164,7 +223,59 @@ export function MessageBody({
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
-  const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml)), [bodyHtml])
+  const attachmentsRef = useRef(attachments)
+  const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
+  attachmentsRef.current = attachments
+  const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES)), [bodyHtml])
+
+  const applyInlineImages = useCallback(() => {
+    const doc = frameRef.current?.contentDocument
+    if (!doc) return
+    doc.querySelectorAll<HTMLImageElement>(`img[${CID_SOURCE_MARKER}]`).forEach((image) => {
+      const source = image.getAttribute(CID_SOURCE_MARKER)?.trim() ?? ''
+      const dataUrl = inlineImagesRef.current.get(normalizedContentId(source.slice(4)))
+      if (!dataUrl) return
+      image.setAttribute('src', dataUrl)
+      image.removeAttribute(CID_SOURCE_MARKER)
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    inlineImagesRef.current = EMPTY_IMAGES
+    if (bodyHtml === null || !attn) return
+    const references = cidReferences(bodyHtml)
+    const cidAttachments = attachmentsRef.current
+      .filter((attachment) => attachment.mimeType.startsWith('image/'))
+      .map((attachment) => {
+        const filename = attachment.filename.toLowerCase()
+        const contentIds = attachment.contentId
+          ? [attachment.contentId.toLowerCase()]
+          : references.filter((reference) => reference === filename || reference.startsWith(`${filename}@`))
+        return { attachment, contentIds }
+      })
+      .filter(({ contentIds }) => contentIds.length > 0)
+    let cancelled = false
+    const addInlineImages = (entries: ReadonlyArray<readonly [string, string]>): void => {
+      if (cancelled || entries.length === 0) return
+      inlineImagesRef.current = new Map([...inlineImagesRef.current, ...entries])
+      applyInlineImages()
+    }
+
+    void Promise.all(
+      cidAttachments.map(async ({ attachment, contentIds }) => {
+        const result = await attn.mail.getInlineImage({
+          messageId,
+          attachmentId: attachment.attachmentId,
+          mimeType: attachment.mimeType
+        })
+        return 'dataUrl' in result ? contentIds.map((contentId) => [contentId, result.dataUrl] as const) : []
+      })
+    ).then((inlineResults) => addInlineImages(inlineResults.flat()))
+
+    return () => {
+      cancelled = true
+    }
+  }, [applyInlineImages, bodyHtml, messageId])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
   const measurement = measuredFrame?.srcDoc === srcDoc ? measuredFrame : null
@@ -233,6 +344,7 @@ export function MessageBody({
       if (!doc?.body) return
 
       disconnect()
+      applyInlineImages()
       measure(frame)
       const observer = new ResizeObserver(() => measure(frame))
       observer.observe(doc.body)
@@ -240,11 +352,15 @@ export function MessageBody({
       doc.addEventListener('keydown', forwardKey)
       keyDocumentRef.current = doc
     },
-    [disconnect, forwardKey, measure]
+    [applyInlineImages, disconnect, forwardKey, measure]
   )
 
   const onLoad = useCallback(
-    (event: React.SyntheticEvent<HTMLIFrameElement>) => observe(event.currentTarget),
+    (event: React.SyntheticEvent<HTMLIFrameElement>) => {
+      const frame = event.currentTarget
+      frame.dataset.loadCount = String(Number(frame.dataset.loadCount ?? 0) + 1)
+      observe(frame)
+    },
     [observe]
   )
 
@@ -315,7 +431,11 @@ export function MessageBody({
         srcDoc={srcDoc}
         onLoad={onLoad}
         className="block w-full border-0 bg-white"
-        style={{ height: height ?? 1, visibility: height === null ? 'hidden' : 'visible' }}
+        style={{
+          colorScheme: 'light',
+          height: height ?? 1,
+          visibility: height === null ? 'hidden' : 'visible'
+        }}
       />
       {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
         <TrimToggle

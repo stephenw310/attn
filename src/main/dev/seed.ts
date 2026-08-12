@@ -21,6 +21,8 @@ interface SeedMessage {
     filename: string
     mimeType?: string
     sizeBytes?: number
+    contentId?: string
+    dataBase64Url?: string
   }[]
 }
 
@@ -57,9 +59,15 @@ function payloadFor(message: SeedMessage): GmailPart {
     parts: [
       ...bodyParts,
       ...(message.attachments ?? []).map((attachment) => ({
+        ...(attachment.dataBase64Url ? { partId: attachment.attachmentId.replace(/^inline:/, '') } : {}),
         mimeType: attachment.mimeType ?? 'application/octet-stream',
         filename: attachment.filename,
-        body: { attachmentId: attachment.attachmentId, size: attachment.sizeBytes ?? 0 }
+        ...(attachment.contentId
+          ? { headers: [{ name: 'Content-ID', value: `<${attachment.contentId}>` }] }
+          : {}),
+        body: attachment.dataBase64Url
+          ? { data: attachment.dataBase64Url, size: attachment.sizeBytes ?? 0 }
+          : { attachmentId: attachment.attachmentId, size: attachment.sizeBytes ?? 0 }
       }))
     ]
   }

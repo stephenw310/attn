@@ -26,6 +26,7 @@ describe('Gmail message parsing', () => {
         {
           mimeType: 'application/pdf',
           filename: 'receipt.pdf',
+          headers: [{ name: 'Content-ID', value: '<invoice-image@example.test>' }],
           body: { attachmentId: 'att-1', size: 24_576 }
         },
         {
@@ -43,7 +44,8 @@ describe('Gmail message parsing', () => {
         attachmentId: 'att-1',
         filename: 'receipt.pdf',
         mimeType: 'application/pdf',
-        sizeBytes: 24_576
+        sizeBytes: 24_576,
+        contentId: 'invoice-image@example.test'
       },
       {
         attachmentId: 'inline:2',

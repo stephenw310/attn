@@ -2,7 +2,13 @@ import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
-import type { DownloadAttachmentRequest, DownloadAttachmentResult, SyncState } from '../shared/mail'
+import type {
+  DownloadAttachmentRequest,
+  DownloadAttachmentResult,
+  InlineImageRequest,
+  InlineImageResult,
+  SyncState
+} from '../shared/mail'
 import {
   clearUndo,
   isTriageAction,
@@ -263,17 +269,50 @@ function authStatus(): AuthStatus {
   return { configured: config !== null, signedIn: tokens !== null, email: tokens?.email }
 }
 
-function isDownloadAttachmentRequest(value: unknown): value is DownloadAttachmentRequest {
+type AttachmentDataRequest = Pick<DownloadAttachmentRequest, 'messageId' | 'attachmentId'>
+
+function isAttachmentDataRequest(value: unknown): value is AttachmentDataRequest {
   if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<DownloadAttachmentRequest>
+  const candidate = value as Partial<AttachmentDataRequest>
   return (
     typeof candidate.messageId === 'string' &&
     candidate.messageId.length > 0 &&
     typeof candidate.attachmentId === 'string' &&
-    candidate.attachmentId.length > 0 &&
-    typeof candidate.filename === 'string' &&
-    candidate.filename.length > 0
+    candidate.attachmentId.length > 0
   )
+}
+
+function isDownloadAttachmentRequest(value: unknown): value is DownloadAttachmentRequest {
+  if (!isAttachmentDataRequest(value)) return false
+  const { filename } = value as Partial<DownloadAttachmentRequest>
+  return typeof filename === 'string' && filename.length > 0
+}
+
+function isInlineImageRequest(value: unknown): value is InlineImageRequest {
+  if (!isAttachmentDataRequest(value)) return false
+  const candidate = value as Partial<InlineImageRequest>
+  return (
+    typeof candidate.mimeType === 'string' && /^(?:image\/(?:png|jpeg|gif|webp))$/i.test(candidate.mimeType)
+  )
+}
+
+type AttachmentDataResult =
+  | { kind: 'available'; data: string }
+  | { kind: 'signed-out' }
+  | { kind: 'unavailable' }
+
+async function resolveAttachmentData(request: AttachmentDataRequest): Promise<AttachmentDataResult> {
+  const account = currentAccountId()
+  const inlineData =
+    db && account ? getInlineAttachmentData(db, account, request.messageId, request.attachmentId) : null
+  if (inlineData !== null) return { kind: 'available', data: inlineData }
+  if (seedAccountId) return { kind: 'signed-out' }
+  const client = makeClient(authSessionGeneration)
+  if (!client) return { kind: 'signed-out' }
+  const data = (
+    await client.get<{ data?: string }>(`/messages/${request.messageId}/attachments/${request.attachmentId}`)
+  ).data
+  return typeof data === 'string' ? { kind: 'available', data } : { kind: 'unavailable' }
 }
 
 let signInInFlight = false
@@ -362,24 +401,14 @@ function registerIpc(): void {
     'mail:downloadAttachment',
     async (_e, request: unknown): Promise<DownloadAttachmentResult> => {
       if (!isDownloadAttachmentRequest(request)) return { error: 'Invalid attachment' }
-      const account = currentAccountId()
-      const inlineData =
-        db && account ? getInlineAttachmentData(db, account, request.messageId, request.attachmentId) : null
-      const client = inlineData === null && !seedAccountId ? makeClient(authSessionGeneration) : null
-      if (inlineData === null && !client) return { error: 'Attachments download when signed in' }
       try {
-        const data =
-          inlineData ??
-          (
-            await client?.get<{ data?: string }>(
-              `/messages/${request.messageId}/attachments/${request.attachmentId}`
-            )
-          )?.data
-        if (typeof data !== 'string') return { error: 'Attachment data was unavailable' }
+        const resolved = await resolveAttachmentData(request)
+        if (resolved.kind === 'signed-out') return { error: 'Attachments download when signed in' }
+        if (resolved.kind === 'unavailable') return { error: 'Attachment data was unavailable' }
         const path = await writeAttachment(
           app.getPath('downloads'),
           request.filename,
-          Buffer.from(data, 'base64url')
+          Buffer.from(resolved.data, 'base64url')
         )
         shell.showItemInFolder(path)
         return { path }
@@ -391,6 +420,21 @@ function registerIpc(): void {
       }
     }
   )
+  ipcMain.handle('mail:getInlineImage', async (_e, request: unknown): Promise<InlineImageResult> => {
+    if (!isInlineImageRequest(request)) return { error: 'Invalid inline image' }
+    try {
+      const resolved = await resolveAttachmentData(request)
+      if (resolved.kind !== 'available') return { error: 'Inline image data was unavailable' }
+      const bytes = Buffer.from(resolved.data, 'base64url')
+      if (bytes.byteLength > 10 * 1024 * 1024) return { error: 'Inline image was too large' }
+      return { dataUrl: `data:${request.mimeType.toLowerCase()};base64,${bytes.toString('base64')}` }
+    } catch (error) {
+      console.error(
+        `[attachment] inline image failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+      return { error: 'Could not load inline image' }
+    }
+  })
   ipcMain.handle('mail:triage', (_e, action: unknown) => {
     if (!db) throw new Error('database unavailable')
     if (!isTriageAction(action)) throw new Error('invalid triage action')
@@ -480,6 +524,28 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       nodeIntegration: false
     }
   })
+
+  // HTML mail lives in our scriptless srcdoc frame. Some legitimate senders
+  // serve images with CORP: same-origin, which Chromium otherwise blocks in
+  // that frame. Remove only that embedding response header for image requests
+  // from the mail frame; the renderer still loads the original URL directly.
+  win.webContents.session.webRequest.onHeadersReceived(
+    { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
+    (details, callback) => {
+      if (details.frame?.url !== 'about:srcdoc' || !details.responseHeaders) {
+        callback({})
+        return
+      }
+      const responseHeaders = { ...details.responseHeaders }
+      let changed = false
+      for (const name of Object.keys(responseHeaders)) {
+        if (name.toLowerCase() !== 'cross-origin-resource-policy') continue
+        delete responseHeaders[name]
+        changed = true
+      }
+      callback(changed ? { responseHeaders } : {})
+    }
+  )
 
   win.on('ready-to-show', () => {
     if (shouldShow) win.show()

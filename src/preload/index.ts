@@ -5,6 +5,8 @@ import type {
   Conversation,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
+  InlineImageRequest,
+  InlineImageResult,
   MailLabel,
   SnoozedThreadRow,
   SyncState,
@@ -27,6 +29,8 @@ const api = {
       ipcRenderer.invoke('mail:getConversation', threadId),
     downloadAttachment: (request: DownloadAttachmentRequest): Promise<DownloadAttachmentResult> =>
       ipcRenderer.invoke('mail:downloadAttachment', request),
+    getInlineImage: (request: InlineImageRequest): Promise<InlineImageResult> =>
+      ipcRenderer.invoke('mail:getInlineImage', request),
     triage: (action: TriageAction): Promise<TriageResult> => ipcRenderer.invoke('mail:triage', action),
     snooze: (threadIds: string[], dueAt: number): Promise<TriageResult> =>
       ipcRenderer.invoke('mail:snooze', { threadIds, dueAt }),

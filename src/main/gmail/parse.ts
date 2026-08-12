@@ -90,6 +90,7 @@ export interface ParsedAttachment {
   filename: string
   mimeType: string
   sizeBytes: number
+  contentId?: string
   /** Present only when Gmail delivered a small attachment inline with the message payload. */
   inlineData?: string
 }
@@ -104,6 +105,10 @@ export function collectAttachments(payload: GmailPart | undefined): ParsedAttach
       part.body?.attachmentId ??
       (inlineData !== undefined ? `inline:${part.partId?.trim() || path}` : undefined)
     if (filename && attachmentId) {
+      const contentId = part.headers
+        ?.find((candidate) => candidate.name.toLowerCase() === 'content-id')
+        ?.value.trim()
+        .replace(/^<|>$/g, '')
       attachments.push({
         attachmentId,
         filename,
@@ -112,6 +117,7 @@ export function collectAttachments(payload: GmailPart | undefined): ParsedAttach
           0,
           part.body?.size ?? (inlineData === undefined ? 0 : Buffer.from(inlineData, 'base64url').byteLength)
         ),
+        ...(contentId ? { contentId } : {}),
         ...(part.body?.attachmentId ? {} : { inlineData })
       })
     }

@@ -20,6 +20,12 @@ test('boots the built app with an isolated store and working IPC bridge', async 
 }) => {
   await expect(page).toHaveTitle('Attn')
   await expect(page.getByTestId('thread-row').first()).toBeVisible()
+  await expect(page.getByTestId('thread-date-group')).toHaveText([
+    'Today',
+    'Yesterday',
+    'Last 7 days',
+    'Earlier this month'
+  ])
 
   const resolvedUserData = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'))
   expect(resolvedUserData).toBe(userData)
@@ -101,29 +107,64 @@ test('J/K and arrow keys move list selection without opening a conversation', as
   await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
 })
 
-test('Enter opens the pane; J/K navigate and mark read; Esc restores the list', async ({ page }) => {
+test('Enter opens the pane; arrows switch pane focus; Esc restores the list', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(mockThreads.length)
   await expect(rows.first()).toHaveAttribute('data-unread', 'true')
   await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
+  const listSubjectFontSize = await rows
+    .first()
+    .getByTestId('thread-subject')
+    .evaluate((element) => getComputedStyle(element).fontSize)
 
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-pane')).toBeVisible()
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-pane-open', 'true')
   await expect(rows.first().getByTestId('thread-sender')).toHaveText(mockThreads[0].from)
   await expect(rows.first().getByTestId('thread-subject')).toHaveText(mockThreads[0].subject)
+  await expect(rows.first().getByTestId('thread-subject')).toHaveCSS('font-size', listSubjectFontSize)
   await expect(rows.first().getByTestId('thread-snippet')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-pane')).toHaveAttribute('data-split-focus', 'true')
+  await expect(page.getByTestId('conversation-pane')).not.toHaveCSS('box-shadow', 'none')
+  await expect
+    .poll(() =>
+      page.getByTestId('conversation-pane').evaluate((element) => getComputedStyle(element).boxShadow)
+    )
+    .toMatch(/0px 1px 0px.*inset/)
+  await expect(page.getByTestId('thread-list')).toHaveCSS('box-shadow', 'none')
+  await expect
+    .poll(() =>
+      rows.first().evaluate((row) => {
+        const sender = row.querySelector('[data-testid="thread-sender"]')?.getBoundingClientRect()
+        const subject = row.querySelector('[data-testid="thread-subject"]')?.getBoundingClientRect()
+        return sender && subject
+          ? Math.abs(sender.top + sender.height / 2 - (subject.top + subject.height / 2)) < 2
+          : false
+      })
+    )
+    .toBe(true)
   await expect(page.getByTestId('conversation-subject')).toHaveText(mockThreads[0].subject)
   await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${mockThreads.length}`)
   await expect(page.getByTestId('footer-shortcut-open')).toHaveCount(0)
-  await expect(page.getByTestId('footer-shortcut-scroll')).toContainText('↑/↓scroll')
-  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knext / prev')
+  await expect(page.getByTestId('footer-shortcut-scroll')).toContainText('J/K/↑/↓scroll message')
+  await expect(page.getByTestId('footer-shortcut-focus')).toContainText('←/→switch pane')
   await expect(page.getByTestId('footer-shortcut-close')).toContainText('Escclose')
   await expect(page.getByTestId('footer-shortcut-done')).toContainText('Edone')
   await expect(page.getByTestId('message-card')).toHaveCount(1)
   await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
   await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')
   await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread - 1} to zero`)
+
+  // Reading-pane navigation keys scroll rather than changing the conversation.
+  await page.keyboard.press('j')
+  await expect(page.getByTestId('conversation-subject')).toHaveText(mockThreads[0].subject)
+
+  // Move focus left, then navigate the thread list with either key family.
+  await page.keyboard.press('ArrowLeft')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-split-focus', 'true')
+  await expect(page.getByTestId('thread-list')).not.toHaveCSS('box-shadow', 'none')
+  await expect(page.getByTestId('conversation-pane')).toHaveCSS('box-shadow', 'none')
+  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/K/↑/↓navigate threads')
 
   // Precondition for the count math below: advancing must land on an unread
   // thread, or the -2 expectation silently depends on fixture data.
@@ -135,7 +176,7 @@ test('Enter opens the pane; J/K navigate and mark read; Esc restores the list', 
   await expect(rows.nth(1)).not.toHaveAttribute('data-unread', 'true')
   await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread - 2} to zero`)
 
-  await page.keyboard.press('k')
+  await page.keyboard.press('ArrowUp')
   await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${mockThreads.length}`)
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
