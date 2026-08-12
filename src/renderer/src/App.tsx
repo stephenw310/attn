@@ -1674,6 +1674,11 @@ export default function App(): React.JSX.Element {
                       </span>
                       <span className="flex min-w-0 items-center gap-1.5">
                         <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                        {t.starred && (
+                          <span className="flex-none text-star" title="Starred">
+                            ★
+                          </span>
+                        )}
                         <span
                           data-testid="thread-subject"
                           className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap ${
@@ -1690,11 +1695,6 @@ export default function App(): React.JSX.Element {
                       >
                         <ReminderChips thread={t} compact />
                         {t.hasAttachment && <span title="Has attachment">📎</span>}
-                        {t.starred && (
-                          <span className="text-star" title="Starred">
-                            ★
-                          </span>
-                        )}
                         {t.at}
                       </span>
                     </>
@@ -1710,6 +1710,11 @@ export default function App(): React.JSX.Element {
                       </span>
                       <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
                         <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                        {t.starred && (
+                          <span className="flex-none text-star" title="Starred">
+                            ★
+                          </span>
+                        )}
                         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                           <span
                             data-testid="thread-subject"
@@ -1723,11 +1728,6 @@ export default function App(): React.JSX.Element {
                       <span className="flex flex-none items-center gap-2.5 text-xs">
                         <ReminderChips thread={t} />
                         {t.hasAttachment && <span title="Has attachment">📎</span>}
-                        {t.starred && (
-                          <span className="text-star" title="Starred">
-                            ★
-                          </span>
-                        )}
                         <span
                           className={`min-w-[70px] text-right tabular-nums ${
                             isUnread ? 'font-medium text-accent' : 'text-ink-faint'

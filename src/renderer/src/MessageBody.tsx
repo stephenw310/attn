@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify'
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MessageAttachment } from '../../shared/mail'
 import { findTrimIndex } from './mailTrim'
 
@@ -239,25 +239,33 @@ export function MessageBody({
 }: MessageBodyProps): React.JSX.Element {
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
-  const [preparedHtml, setPreparedHtml] = useState<{ messageId: string; srcDoc: string | null } | null>(null)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
   const attachmentsRef = useRef(attachments)
+  const resolvedImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
   attachmentsRef.current = attachments
-  const srcDoc = preparedHtml?.messageId === messageId ? preparedHtml.srcDoc : null
-  const preparingHtml = bodyHtml !== null && preparedHtml?.messageId !== messageId
+  const srcDoc = useMemo(
+    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, EMPTY_IMAGES)),
+    [bodyHtml]
+  )
+
+  const applyResolvedImages = useCallback(() => {
+    const doc = frameRef.current?.contentDocument
+    if (!doc) return
+    doc.querySelectorAll<HTMLImageElement>(`img[${IMAGE_SOURCE_MARKER}]`).forEach((image) => {
+      const source = image.getAttribute(IMAGE_SOURCE_MARKER)?.trim() ?? ''
+      const key = source.toLowerCase().startsWith('cid:') ? normalizedContentId(source.slice(4)) : source
+      const dataUrl = resolvedImagesRef.current.get(key)
+      if (!dataUrl) return
+      image.setAttribute('src', dataUrl)
+      image.removeAttribute(IMAGE_SOURCE_MARKER)
+    })
+  }, [])
 
   useLayoutEffect(() => {
-    if (bodyHtml === null) {
-      setPreparedHtml({ messageId, srcDoc: null })
-      return
-    }
-    if (!attn) {
-      setPreparedHtml({ messageId, srcDoc: makeSrcDoc(bodyHtml, EMPTY_IMAGES, EMPTY_IMAGES) })
-      return
-    }
-    setPreparedHtml(null)
+    resolvedImagesRef.current = EMPTY_IMAGES
+    if (bodyHtml === null || !attn) return
     const references = cidReferences(bodyHtml)
     const cidAttachments = attachmentsRef.current
       .filter((attachment) => attachment.mimeType.startsWith('image/'))
@@ -292,19 +300,16 @@ export function MessageBody({
       )
     ]).then(([inlineResults, remoteResults]) => {
       if (cancelled) return
-      setPreparedHtml({
-        messageId,
-        srcDoc: makeSrcDoc(
-          bodyHtml,
-          new Map(inlineResults.flat()),
-          new Map(remoteResults.filter((result) => result !== null))
-        )
-      })
+      resolvedImagesRef.current = new Map([
+        ...inlineResults.flat(),
+        ...remoteResults.filter((result) => result !== null)
+      ])
+      applyResolvedImages()
     })
     return () => {
       cancelled = true
     }
-  }, [bodyHtml, messageId])
+  }, [applyResolvedImages, bodyHtml, messageId])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
   const measurement = measuredFrame?.srcDoc === srcDoc ? measuredFrame : null
@@ -373,6 +378,7 @@ export function MessageBody({
       if (!doc?.body) return
 
       disconnect()
+      applyResolvedImages()
       measure(frame)
       const observer = new ResizeObserver(() => measure(frame))
       observer.observe(doc.body)
@@ -380,11 +386,15 @@ export function MessageBody({
       doc.addEventListener('keydown', forwardKey)
       keyDocumentRef.current = doc
     },
-    [disconnect, forwardKey, measure]
+    [applyResolvedImages, disconnect, forwardKey, measure]
   )
 
   const onLoad = useCallback(
-    (event: React.SyntheticEvent<HTMLIFrameElement>) => observe(event.currentTarget),
+    (event: React.SyntheticEvent<HTMLIFrameElement>) => {
+      const frame = event.currentTarget
+      frame.dataset.loadCount = String(Number(frame.dataset.loadCount ?? 0) + 1)
+      observe(frame)
+    },
     [observe]
   )
 
@@ -405,10 +415,6 @@ export function MessageBody({
       disconnect()
     }
   }, [disconnect, observe, oversized, srcDoc])
-
-  if (preparingHtml) {
-    return <div data-testid="html-body-loading" className="min-h-24 bg-white" />
-  }
 
   if (srcDoc === null || oversized) {
     const lightSurface = bodyHtml !== null

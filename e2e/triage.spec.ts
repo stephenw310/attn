@@ -260,7 +260,17 @@ test('toggles star and unread, then trashes', async ({ page }) => {
   await expect(first).toHaveAttribute('data-unread', 'true')
   await page.getByTestId('status-note').click()
   await page.keyboard.press('s')
-  await expect(first.getByTitle('Starred')).toBeVisible()
+  const star = first.getByTitle('Starred')
+  await expect(star).toBeVisible()
+  expect(
+    await first.evaluate((row) => {
+      const star = row.querySelector('[title="Starred"]')
+      const subject = row.querySelector('[data-testid="thread-subject"]')
+      return Boolean(
+        star && subject && star.compareDocumentPosition(subject) & Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    })
+  ).toBe(true)
   await page.keyboard.press('u')
   await expect(first).not.toHaveAttribute('data-unread')
   await page.keyboard.press('#')
