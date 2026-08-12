@@ -896,6 +896,30 @@ export default function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (!attn) return
+    return attn.mail.onFocusThread((threadId) => {
+      activeViewRef.current = 'inbox'
+      setView('inbox')
+      setSelectedIds(new Set())
+      setSelectionAnchorId(null)
+      setSelectionBaseIds(new Set())
+      setSnoozeOpen(false)
+      setLabelTargetId(null)
+      void attn.mail
+        .listThreads()
+        .then((nextThreads) => {
+          const nextIndex = nextThreads.findIndex((thread) => thread.id === threadId)
+          if (nextIndex < 0) return
+          selectedThreadIdRef.current = threadId
+          setRealThreads(nextThreads)
+          setSelectedIndex(nextIndex)
+          setPaneOpen(true)
+        })
+        .catch(() => {})
+    })
+  }, [])
+
+  useEffect(() => {
     setRealThreads(null)
     setRealSnoozedThreads(null)
     setRealUnreadTotal(null)

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, Tray } from 'electron'
 import trayIcon from '../../resources/tray.png?asset'
 import type { Db } from './db'
+import { setNotificationPausedUntil, tomorrowStart } from './notify'
 
 type CreateWindow = (options?: { show?: boolean }) => BrowserWindow
 
@@ -50,7 +51,7 @@ function installLoginItem(db: Db): void {
   writeSetting(db, 'loginItemRegistered', 'true')
 }
 
-function installTray(): void {
+function installTray(db: Db): void {
   if (process.platform !== 'win32' || tray) return
   tray = new Tray(trayIcon)
   tray.setToolTip('Attn')
@@ -58,6 +59,22 @@ function installTray(): void {
     Menu.buildFromTemplate([
       { label: 'Open Inbox', click: () => showMainWindow() },
       { label: 'Compose (M2)', enabled: false },
+      { type: 'separator' },
+      {
+        label: 'Pause notifications',
+        submenu: [
+          {
+            label: 'For 1 hour',
+            click: () => setNotificationPausedUntil(db, Date.now() + 60 * 60 * 1000)
+          },
+          {
+            label: 'Until tomorrow',
+            click: () => setNotificationPausedUntil(db, tomorrowStart())
+          },
+          { type: 'separator' },
+          { label: 'Resume notifications', click: () => setNotificationPausedUntil(db, null) }
+        ]
+      },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() }
     ])
@@ -95,7 +112,7 @@ export function showMainWindow(): BrowserWindow | null {
 export function initializeBackground(db: Db, createWindow: CreateWindow): { startHidden: boolean } {
   createMainWindow = createWindow
   installLoginItem(db)
-  installTray()
+  installTray(db)
   const startHidden = hiddenLoginLaunch() && !showOnInitialize
   showOnInitialize = false
   return { startHidden }

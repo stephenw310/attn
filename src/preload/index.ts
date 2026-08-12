@@ -37,6 +37,15 @@ const api = {
       const listener = (): void => cb()
       ipcRenderer.on('mail:changed', listener)
       return () => ipcRenderer.removeListener('mail:changed', listener)
+    },
+    onFocusThread: (cb: (threadId: string) => void): (() => void) => {
+      const listener = (_e: unknown, payload: unknown): void => {
+        if (!payload || typeof payload !== 'object') return
+        const threadId = (payload as { threadId?: unknown }).threadId
+        if (typeof threadId === 'string' && threadId.length > 0) cb(threadId)
+      }
+      ipcRenderer.on('mail:focusThread', listener)
+      return () => ipcRenderer.removeListener('mail:focusThread', listener)
     }
   },
   sync: {
