@@ -3,6 +3,7 @@ import {
   COMMAND_SPECS,
   createCommand,
   findCommandByShortcut,
+  isChordPrefix,
   listCommands,
   matchKey,
   readingScrollDelta,
@@ -105,6 +106,20 @@ describe('keyboard dispatch', () => {
     expect(readingScrollDelta(key('ArrowUp'), 800)).toBe(-120)
   })
 
+  test('extends the selection with Shift+Arrow in both contexts', () => {
+    useCommands([
+      createCommand('selection.extendNext', () => {}),
+      createCommand('selection.extendPrevious', () => {})
+    ])
+    for (const context of ['list', 'reader'] as const) {
+      expect(matchKey(key('ArrowDown', { shiftKey: true }), context)?.id).toBe('selection.extendNext')
+      expect(matchKey(key('ArrowUp', { shiftKey: true }), context)?.id).toBe('selection.extendPrevious')
+    }
+    // A shifted arrow is selection, never scrolling — the reader must not do both.
+    expect(readingScrollDelta(key('ArrowDown', { shiftKey: true }), 800)).toBeNull()
+    expect(readingScrollDelta(key('ArrowUp', { shiftKey: true }), 800)).toBeNull()
+  })
+
   test('separates bare J/K from shifted range extension and rejects command modifiers', () => {
     useCommands([createCommand('navigate.next', () => {}), createCommand('selection.extendNext', () => {})])
     expect(matchKey(key('j'), 'reader')?.id).toBe('navigate.next')
@@ -135,6 +150,20 @@ describe('keyboard dispatch', () => {
     expect(findCommandByShortcut('g i', 'list')?.id).toBe('view.inbox')
     expect(findCommandByShortcut('G H', 'reader')?.id).toBe('view.snoozed')
     expect(matchKey(key('g'), 'list')).toBeNull()
+  })
+
+  test('derives chord prefixes from the registry rather than a hardcoded list', () => {
+    expect(isChordPrefix('g', 'list')).toBe(false)
+    useCommands([createCommand('view.inbox', () => {})])
+    expect(isChordPrefix('g', 'list')).toBe(true)
+    expect(isChordPrefix('G', 'reader')).toBe(true)
+    // Registering a new chord must make its prefix live without a dispatch change.
+    expect(isChordPrefix('m', 'list')).toBe(false)
+    useCommands([createCommand('view.snoozed', () => {}, { shortcut: 'm t' })])
+    expect(isChordPrefix('m', 'list')).toBe(true)
+    expect(findCommandByShortcut('m t', 'list')?.id).toBe('view.snoozed')
+    // A chord prefix is not itself a single-key shortcut.
+    expect(matchKey(key('m'), 'list')).toBeNull()
   })
 
   test('keeps scrolling as an explicit non-command reader primitive', () => {

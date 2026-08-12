@@ -75,8 +75,13 @@ export function listCommands(): readonly Command[] {
 }
 
 function normalizedKey(event: KeyboardEvent, context: 'list' | 'reader'): string {
-  if (context === 'list' && event.key === 'ArrowDown') return 'j'
-  if (context === 'list' && event.key === 'ArrowUp') return 'k'
+  // Arrows alias to J/K so navigation and range selection accept either. A bare
+  // arrow in the reader scrolls instead — readingScrollDelta claims it before
+  // dispatch reaches here — but Shift+Arrow keeps extending the selection in
+  // both contexts rather than becoming a dead key while reading.
+  const aliasesArrows = context === 'list' || event.shiftKey
+  if (aliasesArrows && event.key === 'ArrowDown') return 'j'
+  if (aliasesArrows && event.key === 'ArrowUp') return 'k'
   return event.key.toLowerCase()
 }
 
@@ -98,6 +103,17 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string, context: 'list'
 
 function matchesContext(command: Command, context: 'list' | 'reader'): boolean {
   return command.context === 'global' || command.context === 'mail' || command.context === context
+}
+
+// Chord shortcuts are written with a space ("g i"): the prefix key opens a short
+// window in which the next key completes the command. Prefixes are derived from
+// the registry so registering a new chord needs no change to keyboard dispatch.
+export function isChordPrefix(key: string, context: 'list' | 'reader'): boolean {
+  const prefix = `${key.toLowerCase()} `
+  return commands.some(
+    (command) =>
+      matchesContext(command, context) && (command.shortcut?.toLowerCase().startsWith(prefix) ?? false)
+  )
 }
 
 export function findCommandByShortcut(shortcut: string, context: 'list' | 'reader'): Command | null {
@@ -123,16 +139,20 @@ export function matchKey(event: KeyboardEvent, context: 'list' | 'reader'): Comm
   )
 }
 
+const ARROW_STEP = 120
+
 // Reader scrolling is deliberately a local interaction primitive rather than a
 // palette command. It changes viewport position, not application state.
 export function readingScrollDelta(event: KeyboardEvent, viewportHeight: number): number | null {
   if (event.ctrlKey || event.metaKey || event.altKey) return null
-  if (event.key === 'ArrowDown' && !event.shiftKey) return 120
-  if (event.key === 'ArrowUp' && !event.shiftKey) return -120
-  if (event.key === 'PageDown' && !event.shiftKey) return Math.max(120, viewportHeight * 0.85)
-  if (event.key === 'PageUp' && !event.shiftKey) return -Math.max(120, viewportHeight * 0.85)
+  // A page keeps one line of overlap on short viewports, never less than one arrow step.
+  const page = Math.max(ARROW_STEP, viewportHeight * 0.85)
+  if (event.key === 'ArrowDown' && !event.shiftKey) return ARROW_STEP
+  if (event.key === 'ArrowUp' && !event.shiftKey) return -ARROW_STEP
+  if (event.key === 'PageDown' && !event.shiftKey) return page
+  if (event.key === 'PageUp' && !event.shiftKey) return -page
   if (event.key === ' ' || event.code === 'Space') {
-    return (event.shiftKey ? -1 : 1) * Math.max(120, viewportHeight * 0.85)
+    return (event.shiftKey ? -1 : 1) * page
   }
   return null
 }

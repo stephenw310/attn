@@ -15,6 +15,7 @@ import { formatSnoozeDate, parseSnoozeText, snoozePresets } from '../../shared/s
 import {
   createCommand,
   findCommandByShortcut,
+  isChordPrefix,
   matchKey,
   readingScrollDelta,
   registerCommands
@@ -908,7 +909,7 @@ export default function App(): React.JSX.Element {
   const activeViewRef = useRef<'inbox' | 'snoozed'>('inbox')
   const autoReadThreadRef = useRef<string | null>(null)
   const toastTokenRef = useRef(0)
-  const goChordUntilRef = useRef(0)
+  const pendingChordRef = useRef<{ key: string; until: number } | null>(null)
   const deferRefreshUntilRef = useRef(0)
   const earliestExitIndexRef = useRef<number | null>(null)
 
@@ -1384,8 +1385,8 @@ export default function App(): React.JSX.Element {
     function onKeyDown(e: KeyboardEvent): void {
       const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey
       const key = e.key.toLowerCase()
-      const pendingGoUntil = goChordUntilRef.current
-      goChordUntilRef.current = 0
+      const pendingChord = pendingChordRef.current
+      pendingChordRef.current = null
       if (labelTarget) return
       if (snoozeOpen) {
         if (e.key === 'Escape') {
@@ -1403,22 +1404,24 @@ export default function App(): React.JSX.Element {
       if (target && target.tagName === 'BUTTON' && e.key !== 'Escape') return
       const context = readerOpen ? 'reader' : 'list'
       const scroll = conversationScrollRef.current
-      const scrollDelta = readerOpen && scroll ? readingScrollDelta(e, scroll.clientHeight) : null
-      if (scrollDelta !== null) {
-        e.preventDefault()
-        scroll?.scrollBy({ top: scrollDelta })
-        return
+      if (readerOpen && scroll) {
+        const scrollDelta = readingScrollDelta(e, scroll.clientHeight)
+        if (scrollDelta !== null) {
+          e.preventDefault()
+          scroll.scrollBy({ top: scrollDelta })
+          return
+        }
       }
-      if (plainKey && Date.now() <= pendingGoUntil && (key === 'h' || key === 'i')) {
-        const command = findCommandByShortcut(`g ${key}`, context)
+      if (plainKey && pendingChord && Date.now() <= pendingChord.until) {
+        const command = findCommandByShortcut(`${pendingChord.key} ${key}`, context)
         if (!command) return
         e.preventDefault()
         command.run()
         return
       }
-      if (plainKey && key === 'g') {
+      if (plainKey && isChordPrefix(key, context)) {
         e.preventDefault()
-        goChordUntilRef.current = Date.now() + 500
+        pendingChordRef.current = { key, until: Date.now() + 500 }
         return
       }
       const command = matchKey(e, context)
@@ -1430,10 +1433,14 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [labelTarget, readerOpen, snoozeOpen])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
-  useEffect(() => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex and readerOpen are deliberate triggers — scroll after every selection change, ref itself never changes
+  useLayoutEffect(() => {
+    // While the reader is open the list is display:none, so scrollIntoView is a
+    // no-op and J/K moves leave it at a stale offset. Re-running as the reader
+    // closes brings the cursor back into view; `nearest` scrolls the minimum, so
+    // a conversation opened and closed without navigating keeps its position.
     selectedRowRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [selectedIndex])
+  }, [selectedIndex, readerOpen])
 
   const visibleUnreadTotal = threads.filter((t) => t.unread).length
   const mockReadTotal = threads.filter((t) => t.unread && mockReadIds.has(t.id)).length
@@ -1527,7 +1534,8 @@ export default function App(): React.JSX.Element {
       <div className="flex min-h-0 flex-1">
         <main
           data-testid="thread-list"
-          aria-hidden={readerOpen || undefined}
+          // `hidden` is display:none, which already removes the list from the
+          // accessibility tree and tab order while reading — no aria-hidden needed.
           className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
           aria-label="Conversation list"
         >

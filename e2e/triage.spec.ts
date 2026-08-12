@@ -339,3 +339,26 @@ test('keeps a valid selection after navigating an empty inbox', async ({ page })
   await page.keyboard.press('e')
   await expect(rows).toHaveCount(0)
 })
+
+test('extends the selection with Shift+Arrow in the list and in the reader', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  const count = page.getByTestId('selection-count')
+
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+ArrowDown')
+  await expect(count).toHaveText('2 selected')
+
+  // Shift+Arrow keeps extending inside the reader, where a bare arrow scrolls.
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Shift+ArrowDown')
+  await expect(count).toHaveText('3 selected')
+  await page.keyboard.press('Shift+ArrowUp')
+  await expect(count).toHaveText('2 selected')
+
+  // A bare arrow in the reader scrolls the conversation instead of navigating.
+  const position = page.getByTestId('conversation-position')
+  const before = await position.textContent()
+  await page.keyboard.press('ArrowDown')
+  await expect(position).toHaveText(before ?? '')
+})

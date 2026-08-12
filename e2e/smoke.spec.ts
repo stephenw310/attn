@@ -196,6 +196,37 @@ test('returning from the reader preserves the list scroll position', async ({ ap
   await expect.poll(() => selectedIndex(page)).toBe(selectedBefore)
 })
 
+test('returning from the reader brings a cursor moved by J/K back into view', async ({ page }) => {
+  const list = page.getByTestId('thread-list')
+  await expect(page.getByTestId('thread-row')).toHaveCount(mockThreads.length)
+  // Precondition: the list must overflow, or "scrolled back into view" proves nothing.
+  expect(await list.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  // The list is display:none while reading, so these moves cannot scroll it.
+  for (let index = 1; index < mockThreads.length; index++) await page.keyboard.press('j')
+  await expect(page.getByTestId('conversation-position')).toHaveText(
+    `${mockThreads.length} of ${mockThreads.length}`
+  )
+  await page.keyboard.press('Escape')
+
+  await expect(list).toBeVisible()
+  await expect.poll(() => selectedIndex(page)).toBe(mockThreads.length - 1)
+  // The cursor the reader left behind must be inside the restored list viewport.
+  await expect
+    .poll(async () => {
+      const viewport = await list.boundingBox()
+      const row = await page
+        .getByTestId('thread-row')
+        .nth(mockThreads.length - 1)
+        .boundingBox()
+      if (!viewport || !row) return false
+      return row.y >= viewport.y - 1 && row.y + row.height <= viewport.y + viewport.height + 1
+    })
+    .toBe(true)
+})
+
 test('captures the Dispatch inbox for visual review', async ({ page }, testInfo) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(mockThreads.length)
   const dir = join(__dirname, '.artifacts')

@@ -240,5 +240,5 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
     .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid')))
     .toBe('mail-trim-toggle')
   await page.keyboard.press('Escape')
-  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
 })
