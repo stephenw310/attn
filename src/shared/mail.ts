@@ -9,6 +9,13 @@ export interface ThreadRow {
   unread: boolean
   starred: boolean
   hasAttachment: boolean
+  labelIds: string[]
+}
+
+export interface MailLabel {
+  id: string
+  name: string
+  type: string
 }
 
 export interface MailAddress {

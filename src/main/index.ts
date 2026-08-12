@@ -6,11 +6,18 @@ import type { DownloadAttachmentRequest, DownloadAttachmentResult, SyncState } f
 import { clearUndo, isTriageAction, pendingActionCount, performTriage, undoLast } from './actions'
 import { ActionExecutor } from './actions/executor'
 import { writeAttachment } from './attachments'
+import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { type Db, openDatabase, schemaVersion } from './db'
-import { countInboxUnread, getConversation, getInlineAttachmentData, listInboxThreads } from './db/queries'
+import {
+  countInboxUnread,
+  getConversation,
+  getInlineAttachmentData,
+  listInboxThreads,
+  listUserLabels
+} from './db/queries'
 import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
@@ -122,10 +129,8 @@ async function resumeOnlineWork(): Promise<void> {
 
 function oauthSearchDirs(): string[] {
   // Under e2e, only the isolated dir — a developer's real oauth.config.json in
-  // the project root must never leak into test runs.
-  if (testUserData) return [app.getPath('userData')]
-  // Project root in dev; userData for a packaged build.
-  return [app.getAppPath(), app.getPath('userData')]
+  // either checkout must never leak into test runs.
+  return oauthConfigSearchDirs(app.getAppPath(), app.getPath('userData'), Boolean(testUserData))
 }
 
 function authStatus(): AuthStatus {
@@ -192,6 +197,11 @@ function registerIpc(): void {
     if (!db) return []
     const account = currentAccountId()
     return account ? listInboxThreads(db, account) : []
+  })
+  ipcMain.handle('mail:listLabels', () => {
+    if (!db) return []
+    const account = currentAccountId()
+    return account ? listUserLabels(db, account) : []
   })
   ipcMain.handle('mail:getUnreadCount', () => {
     if (!db) return 0
@@ -344,8 +354,8 @@ if (!gotLock) {
     app.on('activate', () => showMainWindow())
   })
 
-  // Deliberately keep the process alive with no windows so sync, snooze timers,
-  // and notifications continue running in the background on every platform.
+  // Deliberately keep the process alive with no windows so sync and
+  // notifications continue running in the background on every platform.
   app.on('window-all-closed', () => {})
 
   app.on('will-quit', () => {

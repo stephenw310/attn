@@ -4,12 +4,14 @@ import type { AuthStatus } from '../../shared/auth'
 import type {
   Conversation,
   MailAddress,
+  MailLabel,
   MessageAttachment,
   MessageRecipients,
   SyncState,
   ThreadRow
 } from '../../shared/mail'
 import { matchKey, registerCommands } from './commands'
+import { type LabelCheckState, LabelPicker } from './LabelPicker'
 import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
 
@@ -22,6 +24,7 @@ interface DisplayThread {
   unread: boolean
   starred: boolean
   hasAttachment: boolean
+  labelIds: string[]
 }
 
 interface DisplayMsg {
@@ -44,6 +47,48 @@ interface DisplayConversation {
 
 const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
 const READING_SCROLL_STEP = 120
+
+const LABEL_PALETTE = [
+  { backgroundColor: '#44351b', borderColor: '#765b26', color: '#ffd789' },
+  { backgroundColor: '#193b4a', borderColor: '#28647d', color: '#8cdbff' },
+  { backgroundColor: '#263d2a', borderColor: '#3f6a48', color: '#a9e8b3' },
+  { backgroundColor: '#402b43', borderColor: '#704a76', color: '#e6abe9' },
+  { backgroundColor: '#452a2d', borderColor: '#75464b', color: '#ffadb3' },
+  { backgroundColor: '#28334c', borderColor: '#465985', color: '#b8c9ff' }
+] as const
+
+function labelColor(labelId: string): (typeof LABEL_PALETTE)[number] {
+  let hash = 0
+  for (const character of labelId) hash = (hash * 31 + character.charCodeAt(0)) | 0
+  return LABEL_PALETTE[Math.abs(hash) % LABEL_PALETTE.length]
+}
+
+function ThreadLabels({
+  labelIds,
+  labelsById
+}: {
+  labelIds: readonly string[]
+  labelsById: ReadonlyMap<string, MailLabel>
+}): React.JSX.Element {
+  return (
+    <>
+      {labelIds.map((labelId) => {
+        const label = labelsById.get(labelId)
+        return label ? (
+          <span
+            key={labelId}
+            data-testid="label-chip"
+            title={label.name}
+            className="max-w-24 flex-none truncate rounded-[4px] border px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+            style={labelColor(labelId)}
+          >
+            {label.name}
+          </span>
+        ) : null
+      })}
+    </>
+  )
+}
 
 function formatTime(ms: number): string {
   if (!ms) return ''
@@ -78,7 +123,8 @@ function fromThreadRow(r: ThreadRow): DisplayThread {
     at: formatTime(r.lastMsgAt),
     unread: r.unread,
     starred: r.starred,
-    hasAttachment: r.hasAttachment
+    hasAttachment: r.hasAttachment,
+    labelIds: r.labelIds
   }
 }
 
@@ -140,6 +186,7 @@ interface ShortcutHint {
 
 const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
   { id: 'done', keys: ['E'], label: 'done' },
+  { id: 'label', keys: ['L'], label: 'label' },
   { id: 'trash', keys: ['#'], label: 'trash' },
   { id: 'star', keys: ['S'], label: 'star' },
   { id: 'unread', keys: ['U'], label: 'unread' },
@@ -607,11 +654,13 @@ export default function App(): React.JSX.Element {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
+  const [labels, setLabels] = useState<MailLabel[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null)
   const [selectionBaseIds, setSelectionBaseIds] = useState<ReadonlySet<string>>(new Set())
   const [paneOpen, setPaneOpen] = useState(false)
+  const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
@@ -624,6 +673,7 @@ export default function App(): React.JSX.Element {
 
   const activeAccount = status?.signedIn ? (status.email ?? null) : null
   const realMode = Boolean(attn && status?.signedIn)
+  const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
 
   useEffect(() => {
     attn?.auth
@@ -645,11 +695,13 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     setRealThreads(null)
     setRealUnreadTotal(null)
+    setLabels([])
     setSelectedIndex(0)
     setSelectedIds(new Set())
     setSelectionAnchorId(null)
     setSelectionBaseIds(new Set())
     setPaneOpen(false)
+    setLabelTargetId(null)
     setPendingCount(0)
     setMockReadIds(new Set())
     setConversation(null)
@@ -661,12 +713,14 @@ export default function App(): React.JSX.Element {
       convCache.current.clear()
       void Promise.all([
         attn.mail.listThreads(),
+        attn.mail.listLabels(),
         attn.mail.getUnreadCount(),
         attn.mail.getPendingActionCount()
       ])
-        .then(([nextThreads, nextUnreadTotal, nextPendingCount]) => {
+        .then(([nextThreads, nextLabels, nextUnreadTotal, nextPendingCount]) => {
           if (cancelled) return
           setRealThreads(nextThreads)
+          setLabels(nextLabels)
           setRealUnreadTotal(nextUnreadTotal)
           setPendingCount(nextPendingCount)
         })
@@ -690,7 +744,8 @@ export default function App(): React.JSX.Element {
       at: t.at,
       unread: t.unread,
       starred: t.starred ?? false,
-      hasAttachment: t.hasAttachment ?? false
+      hasAttachment: t.hasAttachment ?? false,
+      labelIds: []
     }))
   }, [realMode, realThreads])
 
@@ -725,6 +780,18 @@ export default function App(): React.JSX.Element {
     selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
   const starOn = targetedThreads.some((thread) => !thread.starred)
   const markUnreadOn = targetedThreads.some((thread) => !thread.unread)
+
+  // The label picker targets a thread by id, not by list position: a refresh can
+  // reorder or drop rows underneath an open picker, and applying the label to
+  // whatever now sits at the old index would silently label the wrong thread.
+  const labelTarget = useMemo(
+    () => (labelTargetId === null ? undefined : threads.find((t) => t.id === labelTargetId)),
+    [labelTargetId, threads]
+  )
+
+  useEffect(() => {
+    if (labelTargetId !== null && !labelTarget) setLabelTargetId(null)
+  }, [labelTarget, labelTargetId])
 
   useEffect(() => {
     if (!selected) {
@@ -838,6 +905,19 @@ export default function App(): React.JSX.Element {
         .catch(() => {})
     },
     [clearSelection, realMode, selectedIds, showToast]
+  )
+
+  const toggleLabel = useCallback(
+    (label: MailLabel, state: LabelCheckState) => {
+      if (!labelTarget) return
+      triage({
+        kind: 'label',
+        threadIds: [labelTarget.id],
+        add: state === 'all' ? [] : [label.id],
+        remove: state === 'all' ? [label.id] : []
+      })
+    },
+    [labelTarget, triage]
   )
 
   const openSelected = useCallback(() => {
@@ -976,6 +1056,15 @@ export default function App(): React.JSX.Element {
           run: () => selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: markUnreadOn })
         },
         {
+          id: 'triage.label',
+          title: 'Label',
+          shortcut: 'l',
+          context: 'list',
+          run: () => {
+            if (selected && realMode) setLabelTargetId(selected.id)
+          }
+        },
+        {
           id: 'triage.undo',
           title: 'Undo',
           shortcut: 'z',
@@ -1011,6 +1100,7 @@ export default function App(): React.JSX.Element {
 
   useLayoutEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
+      if (labelTarget) return
       const target = e.target as HTMLElement | null
       const isTextEntry =
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
@@ -1029,9 +1119,7 @@ export default function App(): React.JSX.Element {
         })
         return
       }
-      if (target && target.tagName === 'BUTTON') {
-        return
-      }
+      if (target && target.tagName === 'BUTTON') return
       const command = matchKey(e, 'list')
       if (!command) return
       e.preventDefault()
@@ -1039,7 +1127,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [paneOpen])
+  }, [labelTarget, paneOpen])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
@@ -1208,13 +1296,16 @@ export default function App(): React.JSX.Element {
                       )}
                       {t.at}
                     </span>
-                    <span
-                      data-testid="thread-subject"
-                      className={`col-span-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${
-                        isUnread ? 'font-medium text-ink' : 'text-ink-faint'
-                      }`}
-                    >
-                      {t.subject}
+                    <span className="col-span-2 flex min-w-0 items-center gap-1.5">
+                      <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                      <span
+                        data-testid="thread-subject"
+                        className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${
+                          isUnread ? 'font-medium text-ink' : 'text-ink-faint'
+                        }`}
+                      >
+                        {t.subject}
+                      </span>
                     </span>
                   </>
                 ) : (
@@ -1227,14 +1318,17 @@ export default function App(): React.JSX.Element {
                     >
                       {t.from}
                     </span>
-                    <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink-faint">
-                      <span
-                        data-testid="thread-subject"
-                        className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
-                      >
-                        {t.subject}
+                    <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
+                      <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                        <span
+                          data-testid="thread-subject"
+                          className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
+                        >
+                          {t.subject}
+                        </span>
+                        <span data-testid="thread-snippet"> — {t.snippet}</span>
                       </span>
-                      <span data-testid="thread-snippet"> — {t.snippet}</span>
                     </span>
                     <span className="flex flex-none items-center gap-2.5 text-xs">
                       {t.hasAttachment && <span title="Has attachment">📎</span>}
@@ -1300,6 +1394,15 @@ export default function App(): React.JSX.Element {
           </aside>
         )}
       </div>
+
+      {labelTarget && (
+        <LabelPicker
+          labels={labels}
+          targets={[{ id: labelTarget.id, labelIds: labelTarget.labelIds }]}
+          onClose={() => setLabelTargetId(null)}
+          onToggle={toggleLabel}
+        />
+      )}
 
       {toast && (
         <div

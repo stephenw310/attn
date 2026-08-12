@@ -5,6 +5,7 @@ import type {
   Conversation,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
+  MailLabel,
   SyncState,
   ThreadRow
 } from '../shared/mail'
@@ -18,6 +19,7 @@ const api = {
   },
   mail: {
     listThreads: (): Promise<ThreadRow[]> => ipcRenderer.invoke('mail:listThreads'),
+    listLabels: (): Promise<MailLabel[]> => ipcRenderer.invoke('mail:listLabels'),
     getUnreadCount: (): Promise<number> => ipcRenderer.invoke('mail:getUnreadCount'),
     getConversation: (threadId: string): Promise<Conversation | null> =>
       ipcRenderer.invoke('mail:getConversation', threadId),
