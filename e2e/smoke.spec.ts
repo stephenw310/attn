@@ -24,6 +24,9 @@ test('boots the built app with an isolated store and working IPC bridge', async 
   const resolvedUserData = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'))
   expect(resolvedUserData).toBe(userData)
   expect(existsSync(join(userData, 'attn.db'))).toBe(true)
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(
+    process.env.ATTN_E2E_VISIBLE === '1'
+  )
 
   // The teed main.log covers boot-time lines (Playwright consumes early
   // stdout), so the store's open/migrate line is assertable — inside the

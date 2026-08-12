@@ -7,7 +7,10 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const cli = require.resolve('@playwright/test/cli')
-const cmd = [process.execPath, cli, 'test', ...process.argv.slice(2)]
+const visible = process.argv.includes('--visible')
+const playwrightArgs = process.argv.slice(2).filter((arg) => arg !== '--visible')
+const cmd = [process.execPath, cli, 'test', ...playwrightArgs]
+const env = visible ? { ...process.env, ATTN_E2E_VISIBLE: '1' } : process.env
 
 let exec = cmd
 if (process.platform === 'linux' && !process.env.DISPLAY) {
@@ -21,6 +24,6 @@ if (process.platform === 'linux' && !process.env.DISPLAY) {
   exec = ['xvfb-run', '-a', '--server-args=-screen 0 1440x900x24', ...cmd]
 }
 
-const res = spawnSync(exec[0], exec.slice(1), { stdio: 'inherit' })
+const res = spawnSync(exec[0], exec.slice(1), { stdio: 'inherit', env })
 if (res.error) console.error('[e2e] failed to launch test runner:', res.error)
 process.exit(res.status ?? 1)
