@@ -2,9 +2,10 @@
 
 Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
 
-**Current state: M1 triage core in progress.** The Dispatch list ⇄ conversation-overlay flow is implemented with `J`/`K`/`Enter`/`Esc` navigation, SQLite local storage, Google OAuth (PKCE loopback, keychain-encrypted tokens), and quota-aware Gmail backfill.
+**Current state: M1 feature implementation complete; exit audit in progress.** The Dispatch full-width list ⇄ on-demand conversation split now includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling, sanitized HTML/attachment rendering, background lifecycle, notifications, and unread badges. M2 starts after the remaining manual and engineering closeout checks in the M1 plan.
 
-- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.7)
+- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.11)
+- **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist
 - **[AGENTS.md](AGENTS.md)** — working agreement for coding agents (verification contract, test harness, conventions). `.claude/CLAUDE.md` imports it, so Claude Code picks it up automatically; other tools read it directly.
 
 ## Prerequisites
@@ -32,18 +33,19 @@ The app starts on mock data. Wiring it to a real inbox is the [Google OAuth clie
 npm run verify
 ```
 
-Typecheck → lint/format → production build → Playwright end-to-end tests that drive the **real built Electron app** (main process, SQLite, preload bridge, IPC, keyboard loop). The suite needs no Google credentials: it runs signed out against mock data in throwaway user-data directories, and uses Xvfb automatically on display-less Linux. GitHub Actions runs the same command on every pull request.
+Typecheck → lint/format → unit tests → production build → Playwright end-to-end tests that drive the **real built Electron app** (main process, SQLite, preload bridge, IPC, keyboard loop). The suite needs no Google credentials: it runs signed out against mock data in throwaway user-data directories, and uses Xvfb automatically on display-less Linux. GitHub Actions currently runs static/build, Electron smoke, and performance jobs separately; adding the unit step to CI is an explicit M1 exit item.
 
 | Script | What it does |
 |---|---|
 | `npm run verify` | The full gate — run this before calling a change done |
+| `npm run test:unit` | Pure main/renderer module tests |
 | `npm run e2e` | Build + end-to-end tests |
 | `npm run e2e:only` | End-to-end tests without rebuilding (only when `out/` is current) |
 | `npm run typecheck` · `npm run lint` | Fast static passes |
 | `npm run build` | Production bundles into `out/` |
 | `npm run toolchain` | Repair the Electron binary / native-module setup |
 
-Each run writes a full-window screenshot to `e2e/.artifacts/inbox.png`; failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
+The e2e suite writes `inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png` under `e2e/.artifacts/`; failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
 
 ## Google OAuth client (for real Gmail data)
 

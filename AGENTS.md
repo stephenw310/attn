@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (list ⇄ conversation overlay). Currently at **M1 (triage core)**.
+Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ on-demand conversation split). **M1 feature implementation is complete; the exit audit in `docs/M1-PLAN.md` is still open before M2 begins.**
 
 This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
 
@@ -24,7 +24,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run typecheck` / `npm run lint` | Fast static passes |
 | `npm run toolchain` | Repair Electron binary / native-module ABI (also runs as postinstall) |
 
-**Visual self-check:** every e2e run rewrites `e2e/.artifacts/inbox.png` (full app window). After UI changes, read that file and confirm the rendering matches intent. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
+**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png`. After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
 
 ## How the e2e harness works
 
@@ -43,7 +43,10 @@ Violating these is a correctness bug, not a style preference:
 - **The renderer is sandboxed** (`contextIsolation`, no `nodeIntegration`) and never talks to Google or the filesystem. Everything crosses through the typed `contextBridge` API in `src/preload/index.ts` plus an `ipcMain.handle` in `src/main/index.ts` — add both halves, and the type in `src/shared/`, when you add a capability.
 - **Mail bodies are untrusted input.** Plain text stays in text nodes. HTML must pass through
   DOMPurify and render only in the scriptless sandbox used by `MessageBody`; never add `allow-scripts`
-  or use `dangerouslySetInnerHTML` (SPEC §6).
+  or use `dangerouslySetInnerHTML` (SPEC §6). Stored attachment `inlineData` is omitted from
+  `ConversationMsg`, but CID rendering deliberately returns an allowlisted image as a base64 `dataUrl`
+  through the typed `mail:getInlineImage` bridge (maximum 10 MB) and assigns it inside that iframe.
+  Treat the bridged value as untrusted attachment content; it is not confined to the main process.
 - **Local-first:** reads and writes hit the local SQLite store and apply optimistically. Never block the UI on the network.
 - **Every row is keyed by `account_id`** — the schema is multi-account-ready even though v1 ships single-account (SPEC D4).
 - Secrets live in the OS keychain via `safeStorage`; `oauth.config.json` is gitignored and must never be committed or read into a test.
