@@ -32,6 +32,7 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
     .find((part) => part.type === 'timeZoneName')?.value
   expect(timezone).toBeTruthy()
   await expect(details).toContainText(timezone ?? '')
+  await expect(cards.first()).toHaveAttribute('data-collapsed', 'false')
   const headerWidth = await cards
     .first()
     .getByTestId('message-header')
@@ -53,6 +54,11 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(lastCard.getByTestId('plain-text-visible')).toHaveText(
     'I added the launch milestones and owner notes.'
   )
+  await lastCard.getByTestId('message-header').click({ position: { x: 300, y: 8 } })
+  await expect(lastCard).toHaveAttribute('data-collapsed', 'true')
+  await expect(lastCard.getByTestId('plain-text-body')).toHaveCount(0)
+  await lastCard.getByTestId('older-message-toggle').click()
+  await expect(lastCard).toHaveAttribute('data-collapsed', 'false')
   const trimToggle = lastCard.getByTestId('mail-trim-toggle')
   await expect(trimToggle).toHaveAttribute('aria-expanded', 'false')
   await expect(trimToggle).toHaveText('...')
@@ -153,6 +159,8 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
   const conversationScroll = page.getByTestId('conversation-scroll')
   const conversationContent = page.getByTestId('conversation-content')
   await expect(conversationScroll).toHaveCSS('scrollbar-gutter', 'stable')
+  const collapsedViewportBox = await conversationScroll.boundingBox()
+  expect(collapsedViewportBox).not.toBeNull()
   const collapsedContentBox = await conversationContent.boundingBox()
   expect(collapsedContentBox).not.toBeNull()
   const collapsedHeight = await frame.evaluate((element) => element.clientHeight)
@@ -171,15 +179,50 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
     })
   ).toBe(true)
   await frame.evaluate((element) => element.setAttribute('data-trim-stability', 'original'))
-  await toggle.click()
+
+  // Tab remains native app focus navigation: it moves from the reading
+  // surface through header controls and into links inside the mail frame
+  // without requiring a click in the message body.
+  await conversationScroll.focus()
+  await page.keyboard.press('Tab')
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid')))
+    .toBe('older-message-toggle')
+  await page.keyboard.press('Tab')
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid')))
+    .toBe('recipient-summary')
+  // The visually earlier ellipsis also comes before iframe links in keyboard
+  // order, so a collapsed body cannot jump straight into an oddly clipped link.
+  await page.keyboard.press('Tab')
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid')))
+    .toBe('mail-trim-toggle')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await page.keyboard.press('Tab')
+  await expect
+    .poll(() =>
+      frame.evaluate((element) => {
+        const iframe = element as HTMLIFrameElement
+        return iframe.contentDocument?.activeElement?.id
+      })
+    )
+    .toBe('schemeless-link')
   await expect(frameBody.locator('.gmail_signature')).toBeVisible()
   await expect(frameBody.locator('.gmail_quote')).toBeVisible()
   await expect(frame).toHaveAttribute('data-trim-stability', 'original')
   await expect.poll(() => frame.evaluate((element) => element.clientHeight)).toBeGreaterThan(collapsedHeight)
   const expandedHeight = await frame.evaluate((element) => element.clientHeight)
+  const expandedViewportBox = await conversationScroll.boundingBox()
+  expect(expandedViewportBox).not.toBeNull()
   const expandedContentBox = await conversationContent.boundingBox()
   expect(expandedContentBox).not.toBeNull()
   expect(expandedHeight).toBeGreaterThan(collapsedHeight)
+  expect(Math.abs((expandedViewportBox?.width ?? 0) - (collapsedViewportBox?.width ?? 0))).toBeLessThan(1)
+  expect(Math.abs((expandedViewportBox?.height ?? 0) - (collapsedViewportBox?.height ?? 0))).toBeLessThan(1)
+  expect(await conversationScroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    true
+  )
   expect(Math.abs((expandedContentBox?.x ?? 0) - (collapsedContentBox?.x ?? 0))).toBeLessThan(1)
   expect(Math.abs((expandedContentBox?.width ?? 0) - (collapsedContentBox?.width ?? 0))).toBeLessThan(1)
   expect(
@@ -191,4 +234,13 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
   expect(
     Math.abs((await toggle.evaluate((element) => element.getBoundingClientRect().y)) - collapsedToggleY)
   ).toBeLessThan(1)
+
+  // Shift+Tab returns from the first mail link to the ellipsis control. Escape
+  // remains Back/Close from that focused button instead of becoming inert.
+  await page.keyboard.press('Shift+Tab')
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid')))
+    .toBe('mail-trim-toggle')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
 })

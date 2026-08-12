@@ -195,6 +195,16 @@ function TrimToggle({
       data-testid="mail-trim-toggle"
       aria-expanded={expanded}
       aria-label={label}
+      onFocus={() => {
+        // Reaching the ellipsis through normal Tab navigation reveals the
+        // hidden trail without turning Tab into an app-wide shortcut.
+        if (!expanded) onToggle()
+      }}
+      onMouseDown={(event) => {
+        // Pointer activation has its own toggle path below; avoid firing the
+        // keyboard-focus reveal immediately before the click.
+        event.preventDefault()
+      }}
       onClick={(event) => {
         onToggle()
         event.currentTarget.blur()
@@ -318,6 +328,9 @@ export function MessageBody({
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return
+    // Tab owns focus traversal inside the mail document. Forwarding it to the
+    // app would prevent the browser from moving through links in the message.
+    if (event.key === 'Tab') return
     const forwarded = new KeyboardEvent('keydown', {
       key: event.key,
       code: event.code,
@@ -423,6 +436,15 @@ export function MessageBody({
 
   return (
     <div data-testid="html-body-container" className="relative min-w-0 bg-white">
+      {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
+        <TrimToggle
+          expanded={expanded}
+          lightSurface
+          onToggle={onToggleTrim}
+          className="absolute left-3 z-10 h-7"
+          style={{ top: measurement.trimTop }}
+        />
+      )}
       <iframe
         ref={frameRef}
         data-testid="html-body-frame"
@@ -437,15 +459,6 @@ export function MessageBody({
           visibility: height === null ? 'hidden' : 'visible'
         }}
       />
-      {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
-        <TrimToggle
-          expanded={expanded}
-          lightSurface
-          onToggle={onToggleTrim}
-          className="absolute left-3 z-10 h-7"
-          style={{ top: measurement.trimTop }}
-        />
-      )}
     </div>
   )
 }
