@@ -49,7 +49,11 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
 
   boot: async ({ seed, appArgs }, use, testInfo) => {
     const userData = mkdtempSync(join(tmpdir(), 'attn-e2e-'))
-    const args = [join(ROOT, 'out/main/index.js'), ...(appArgs ?? [])]
+    // Keep real Electron windows off the desktop during normal local runs. A
+    // hidden BrowserWindow still renders, receives Playwright input, and can be
+    // screenshotted; --visible is only an opt-in debugging aid in run-e2e.mjs.
+    const hiddenArgs = process.env.ATTN_E2E_VISIBLE === '1' ? [] : ['--hidden']
+    const args = [join(ROOT, 'out/main/index.js'), ...hiddenArgs, ...(appArgs ?? [])]
     if (process.platform === 'linux') {
       // Container/CI realities: no SUID sandbox as root, tiny /dev/shm.
       if (process.getuid?.() === 0 || process.env.CI) args.push('--no-sandbox')
