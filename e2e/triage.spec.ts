@@ -101,6 +101,43 @@ test('keeps the range anchor selected when toggling a row off', async ({ page })
   await expect(rows.nth(2)).not.toHaveAttribute('data-checked')
 })
 
+test('shrinks the range when Shift+K walks back over an overshoot', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+j')
+  await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+
+  await page.keyboard.press('Shift+k')
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+  await expect(rows.nth(2)).not.toHaveAttribute('data-checked')
+  await page.keyboard.press('Shift+k')
+  await expect(page.getByTestId('selection-count')).toHaveText('1 selected')
+  await expect(rows.nth(0)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(1)).not.toHaveAttribute('data-checked')
+})
+
+test('extends from the cursor after the anchor row is deselected', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('x')
+  for (let i = 0; i < 5; i++) await page.keyboard.press('j')
+  await page.keyboard.press('x')
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+  await page.keyboard.press('x')
+  await expect(page.getByTestId('selection-count')).toHaveText('1 selected')
+
+  // The anchor died with row 5, so the range starts from the cursor — not from
+  // the surviving row 0, which would swallow everything in between.
+  await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+  await expect(rows.nth(0)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(3)).not.toHaveAttribute('data-checked')
+  await expect(rows.nth(5)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(6)).toHaveAttribute('data-checked', 'true')
+})
+
 test('keeps the range anchor on its thread when undo reorders the list', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)

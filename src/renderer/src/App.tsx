@@ -610,6 +610,7 @@ export default function App(): React.JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null)
+  const [selectionBaseIds, setSelectionBaseIds] = useState<ReadonlySet<string>>(new Set())
   const [paneOpen, setPaneOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
@@ -647,6 +648,7 @@ export default function App(): React.JSX.Element {
     setSelectedIndex(0)
     setSelectedIds(new Set())
     setSelectionAnchorId(null)
+    setSelectionBaseIds(new Set())
     setPaneOpen(false)
     setPendingCount(0)
     setMockReadIds(new Set())
@@ -712,7 +714,9 @@ export default function App(): React.JSX.Element {
       if (anchor !== null && selectedIds.has(anchor) && threads.some((thread) => thread.id === anchor)) {
         return anchor
       }
-      return threads.find((thread) => selectedIds.has(thread.id))?.id ?? null
+      // Drop a stale anchor rather than retargeting it: extendSelectionTo falls back
+      // to the cursor, which is where the user is actually looking.
+      return null
     })
   }, [selectedIds, threads])
 
@@ -779,6 +783,7 @@ export default function App(): React.JSX.Element {
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set())
     setSelectionAnchorId(null)
+    setSelectionBaseIds(new Set())
   }, [])
 
   const toggleFocusedSelection = useCallback(() => {
@@ -789,11 +794,9 @@ export default function App(): React.JSX.Element {
     if (isAdding) next.add(thread.id)
     else next.delete(thread.id)
     setSelectedIds(next)
+    setSelectionBaseIds(next)
     if (isAdding) setSelectionAnchorId(thread.id)
-    else if (next.size === 0) setSelectionAnchorId(null)
-    else if (selectionAnchorId === thread.id) {
-      setSelectionAnchorId(threads.find((candidate) => next.has(candidate.id))?.id ?? null)
-    }
+    else if (next.size === 0 || selectionAnchorId === thread.id) setSelectionAnchorId(null)
   }, [selectedIds, selectedIndex, selectionAnchorId, threads])
 
   const extendSelectionTo = useCallback(
@@ -803,16 +806,21 @@ export default function App(): React.JSX.Element {
       const storedAnchorIndex = selectionAnchorId
         ? threads.findIndex((thread) => thread.id === selectionAnchorId)
         : -1
-      const anchorIndex = storedAnchorIndex >= 0 ? storedAnchorIndex : selectedIndex
+      const hasAnchor = storedAnchorIndex >= 0
+      const anchorIndex = hasAnchor ? storedAnchorIndex : selectedIndex
       const start = Math.min(anchorIndex, clampedIndex)
       const end = Math.max(anchorIndex, clampedIndex)
-      const next = new Set(selectedIds)
+      // Rebuild from the selection captured when the anchor was set, so walking the
+      // range back with Shift+K shrinks it instead of accumulating every row crossed.
+      const base = hasAnchor ? selectionBaseIds : selectedIds
+      const next = new Set(base)
       for (const thread of threads.slice(start, end + 1)) next.add(thread.id)
       setSelectedIds(next)
+      if (!hasAnchor) setSelectionBaseIds(selectedIds)
       setSelectionAnchorId(threads[anchorIndex]?.id ?? null)
       setSelectedIndex(clampedIndex)
     },
-    [selectedIds, selectedIndex, selectionAnchorId, threads]
+    [selectedIds, selectedIndex, selectionAnchorId, selectionBaseIds, threads]
   )
 
   const triage = useCallback(
