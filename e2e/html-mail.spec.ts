@@ -57,6 +57,14 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(iframe).toHaveAttribute('data-load-count', '1')
   await expect(body.locator('#malformed-cid-image')).not.toHaveAttribute('src')
   await expect(body.locator('#cid-image')).toBeVisible()
+  // The sender ships its own copies of our marker attributes. Both must be stripped:
+  // a surviving trim marker would move the fold to wherever the sender wants, and a
+  // surviving cid marker would aim the inline-image patch at the sender's element.
+  await expect(body.locator('#forged-trim-anchor')).toHaveCount(1)
+  await expect(body.locator('#forged-trim-anchor')).not.toHaveAttribute('data-attn-trim-start')
+  await expect(body.locator('#forged-cid')).not.toHaveAttribute('data-attn-cid-source')
+  await expect(body.locator('#forged-cid')).not.toHaveAttribute('src')
+  await expect(body.locator('[data-attn-trim-start]')).toHaveCount(1)
   await expect(body.locator('form, input, button, select, textarea')).toHaveCount(0)
   await expect(body.locator('#self-link')).toHaveAttribute('target', '_blank')
   await expect(body.locator('#top-link')).toHaveAttribute('target', '_blank')

@@ -103,7 +103,11 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   if (!html.trim()) return null
   const clean = DOMPurify.sanitize(html, {
     FORBID_TAGS: ['script', 'form', 'input', 'button', 'select', 'textarea'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
+    // DOMPurify passes data-* through by default, so a sender could otherwise ship
+    // our own markers: an early data-attn-trim-start moves the trim fold wherever
+    // they like, and data-attn-cid-source aims the inline-image patch at their
+    // element. FORBID_ATTR is checked before the data-* allowance, so both lose.
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', TRIM_MARKER, CID_SOURCE_MARKER],
     ADD_TAGS: ['style'],
     ADD_ATTR: ['target'],
     FORCE_BODY: true
