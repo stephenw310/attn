@@ -4,6 +4,7 @@ import type { AuthStatus } from '../../shared/auth'
 import type {
   Conversation,
   MailAddress,
+  MailLabel,
   MessageAttachment,
   MessageRecipients,
   SnoozedThreadRow,
@@ -12,6 +13,7 @@ import type {
 } from '../../shared/mail'
 import { formatSnoozeDate, parseSnoozeText, snoozePresets } from '../../shared/snooze'
 import { matchKey, registerCommands } from './commands'
+import { type LabelCheckState, LabelPicker } from './LabelPicker'
 import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
 
@@ -26,6 +28,7 @@ interface DisplayThread {
   hasAttachment: boolean
   returned: boolean
   dueAt?: number
+  labelIds: string[]
 }
 
 interface DisplayMsg {
@@ -48,6 +51,48 @@ interface DisplayConversation {
 
 const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
 const READING_SCROLL_STEP = 120
+
+const LABEL_PALETTE = [
+  { backgroundColor: '#44351b', borderColor: '#765b26', color: '#ffd789' },
+  { backgroundColor: '#193b4a', borderColor: '#28647d', color: '#8cdbff' },
+  { backgroundColor: '#263d2a', borderColor: '#3f6a48', color: '#a9e8b3' },
+  { backgroundColor: '#402b43', borderColor: '#704a76', color: '#e6abe9' },
+  { backgroundColor: '#452a2d', borderColor: '#75464b', color: '#ffadb3' },
+  { backgroundColor: '#28334c', borderColor: '#465985', color: '#b8c9ff' }
+] as const
+
+function labelColor(labelId: string): (typeof LABEL_PALETTE)[number] {
+  let hash = 0
+  for (const character of labelId) hash = (hash * 31 + character.charCodeAt(0)) | 0
+  return LABEL_PALETTE[Math.abs(hash) % LABEL_PALETTE.length]
+}
+
+function ThreadLabels({
+  labelIds,
+  labelsById
+}: {
+  labelIds: readonly string[]
+  labelsById: ReadonlyMap<string, MailLabel>
+}): React.JSX.Element {
+  return (
+    <>
+      {labelIds.map((labelId) => {
+        const label = labelsById.get(labelId)
+        return label ? (
+          <span
+            key={labelId}
+            data-testid="label-chip"
+            title={label.name}
+            className="max-w-24 flex-none truncate rounded-[4px] border px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+            style={labelColor(labelId)}
+          >
+            {label.name}
+          </span>
+        ) : null
+      })}
+    </>
+  )
+}
 
 function formatTime(ms: number): string {
   if (!ms) return ''
@@ -83,7 +128,8 @@ function fromThreadRow(r: ThreadRow): DisplayThread {
     unread: r.unread,
     starred: r.starred,
     hasAttachment: r.hasAttachment,
-    returned: r.returned
+    returned: r.returned,
+    labelIds: r.labelIds
   }
 }
 
@@ -182,6 +228,7 @@ interface ShortcutHint {
 const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
   { id: 'done', keys: ['E'], label: 'done' },
   { id: 'snooze', keys: ['H'], label: 'snooze' },
+  { id: 'label', keys: ['L'], label: 'label' },
   { id: 'trash', keys: ['#'], label: 'trash' },
   { id: 'star', keys: ['S'], label: 'star' },
   { id: 'unread', keys: ['U'], label: 'unread' },
@@ -798,9 +845,14 @@ export default function App(): React.JSX.Element {
   const [realSnoozedThreads, setRealSnoozedThreads] = useState<SnoozedThreadRow[] | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [view, setView] = useState<'inbox' | 'snoozed'>('inbox')
+  const [labels, setLabels] = useState<MailLabel[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null)
+  const [selectionBaseIds, setSelectionBaseIds] = useState<ReadonlySet<string>>(new Set())
   const [paneOpen, setPaneOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
+  const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
@@ -814,6 +866,7 @@ export default function App(): React.JSX.Element {
 
   const activeAccount = status?.signedIn ? (status.email ?? null) : null
   const realMode = Boolean(attn && status?.signedIn)
+  const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
 
   useEffect(() => {
     attn?.auth
@@ -836,9 +889,14 @@ export default function App(): React.JSX.Element {
     setRealThreads(null)
     setRealSnoozedThreads(null)
     setRealUnreadTotal(null)
+    setLabels([])
     setSelectedIndex(0)
+    setSelectedIds(new Set())
+    setSelectionAnchorId(null)
+    setSelectionBaseIds(new Set())
     setPaneOpen(false)
     setSnoozeOpen(false)
+    setLabelTargetId(null)
     setPendingCount(0)
     setMockReadIds(new Set())
     setConversation(null)
@@ -851,13 +909,15 @@ export default function App(): React.JSX.Element {
       void Promise.all([
         attn.mail.listThreads(),
         attn.mail.listSnoozed(),
+        attn.mail.listLabels(),
         attn.mail.getUnreadCount(),
         attn.mail.getPendingActionCount()
       ])
-        .then(([nextThreads, nextSnoozed, nextUnreadTotal, nextPendingCount]) => {
+        .then(([nextThreads, nextSnoozed, nextLabels, nextUnreadTotal, nextPendingCount]) => {
           if (cancelled) return
           setRealThreads(nextThreads)
           setRealSnoozedThreads(nextSnoozed)
+          setLabels(nextLabels)
           setRealUnreadTotal(nextUnreadTotal)
           setPendingCount(nextPendingCount)
         })
@@ -887,7 +947,8 @@ export default function App(): React.JSX.Element {
       unread: t.unread,
       starred: t.starred ?? false,
       hasAttachment: t.hasAttachment ?? false,
-      returned: false
+      returned: false,
+      labelIds: []
     }))
   }, [realMode, realSnoozedThreads, realThreads, view])
 
@@ -896,10 +957,44 @@ export default function App(): React.JSX.Element {
     // clamp shifts selection and an open pane would jump to a different
     // conversation. Revisit when mail:changed can fire mid-read.
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
+    setSelectedIds((current) => {
+      if (current.size === 0) return current
+      const visibleIds = new Set(threads.map((thread) => thread.id))
+      const next = new Set([...current].filter((id) => visibleIds.has(id)))
+      if (next.size === current.size) return current
+      return next
+    })
     if (threads.length === 0) setPaneOpen(false)
-  }, [threads.length])
+  }, [threads])
+
+  useEffect(() => {
+    setSelectionAnchorId((anchor) => {
+      if (anchor !== null && selectedIds.has(anchor) && threads.some((thread) => thread.id === anchor)) {
+        return anchor
+      }
+      // Drop a stale anchor rather than retargeting it: extendSelectionTo falls back
+      // to the cursor, which is where the user is actually looking.
+      return null
+    })
+  }, [selectedIds, threads])
 
   const selected: DisplayThread | undefined = threads[selectedIndex]
+  const targetedThreads =
+    selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
+  const starOn = targetedThreads.some((thread) => !thread.starred)
+  const markUnreadOn = targetedThreads.some((thread) => !thread.unread)
+
+  // The label picker targets a thread by id, not by list position: a refresh can
+  // reorder or drop rows underneath an open picker, and applying the label to
+  // whatever now sits at the old index would silently label the wrong thread.
+  const labelTarget = useMemo(
+    () => (labelTargetId === null ? undefined : threads.find((t) => t.id === labelTargetId)),
+    [labelTargetId, threads]
+  )
+
+  useEffect(() => {
+    if (labelTargetId !== null && !labelTarget) setLabelTargetId(null)
+  }, [labelTarget, labelTargetId])
 
   useEffect(() => {
     if (!selected) {
@@ -960,17 +1055,80 @@ export default function App(): React.JSX.Element {
     setSelectedIndex(0)
     setPaneOpen(false)
     setSnoozeOpen(false)
+    setLabelTargetId(null)
   }, [])
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    setSelectionAnchorId(null)
+    setSelectionBaseIds(new Set())
+  }, [])
+
+  const toggleFocusedSelection = useCallback(() => {
+    const thread = threads[selectedIndex]
+    if (!thread) return
+    const next = new Set(selectedIds)
+    const isAdding = !next.has(thread.id)
+    if (isAdding) next.add(thread.id)
+    else next.delete(thread.id)
+    setSelectedIds(next)
+    setSelectionBaseIds(next)
+    if (isAdding) setSelectionAnchorId(thread.id)
+    else if (next.size === 0 || selectionAnchorId === thread.id) setSelectionAnchorId(null)
+  }, [selectedIds, selectedIndex, selectionAnchorId, threads])
+
+  const extendSelectionTo = useCallback(
+    (nextIndex: number) => {
+      if (threads.length === 0) return
+      const clampedIndex = Math.max(0, Math.min(nextIndex, threads.length - 1))
+      const storedAnchorIndex = selectionAnchorId
+        ? threads.findIndex((thread) => thread.id === selectionAnchorId)
+        : -1
+      const hasAnchor = storedAnchorIndex >= 0
+      const anchorIndex = hasAnchor ? storedAnchorIndex : selectedIndex
+      const start = Math.min(anchorIndex, clampedIndex)
+      const end = Math.max(anchorIndex, clampedIndex)
+      // Rebuild from the selection captured when the anchor was set, so walking the
+      // range back with Shift+K shrinks it instead of accumulating every row crossed.
+      const base = hasAnchor ? selectionBaseIds : selectedIds
+      const next = new Set(base)
+      for (const thread of threads.slice(start, end + 1)) next.add(thread.id)
+      setSelectedIds(next)
+      if (!hasAnchor) setSelectionBaseIds(selectedIds)
+      setSelectionAnchorId(threads[anchorIndex]?.id ?? null)
+      setSelectedIndex(clampedIndex)
+    },
+    [selectedIds, selectedIndex, selectionAnchorId, selectionBaseIds, threads]
+  )
 
   const triage = useCallback(
     (action: TriageAction) => {
       if (!realMode || !attn) return
+      const isBulk = selectedIds.size > 0
+      const targetedAction = {
+        ...action,
+        threadIds: isBulk ? [...selectedIds] : action.threadIds
+      }
+      if (isBulk) clearSelection()
       void attn.mail
-        .triage(action)
+        .triage(targetedAction)
         .then((result) => showToast(result.label))
         .catch(() => {})
     },
-    [realMode, showToast]
+    [clearSelection, realMode, selectedIds, showToast]
+  )
+
+  const toggleLabel = useCallback(
+    (label: MailLabel, state: LabelCheckState) => {
+      if (!labelTarget) return
+      triage({
+        kind: 'label',
+        threadIds: [labelTarget.id],
+        add: state === 'all' ? [] : [label.id],
+        remove: state === 'all' ? [label.id] : []
+      })
+    },
+    [labelTarget, triage]
   )
 
   const openSelected = useCallback(() => {
@@ -1039,6 +1197,38 @@ export default function App(): React.JSX.Element {
           context: 'list',
           run: () => setSelectedIndex((i) => Math.max(i - 1, 0))
         },
+        {
+          id: 'selection.toggle',
+          title: 'Toggle selection',
+          shortcut: 'x',
+          context: 'list',
+          run: toggleFocusedSelection
+        },
+        {
+          id: 'selection.extendNext',
+          title: 'Extend selection to next conversation',
+          shortcut: 'Shift+J',
+          context: 'list',
+          run: () => extendSelectionTo(selectedIndex + 1)
+        },
+        {
+          id: 'selection.extendPrevious',
+          title: 'Extend selection to previous conversation',
+          shortcut: 'Shift+K',
+          context: 'list',
+          run: () => extendSelectionTo(selectedIndex - 1)
+        },
+        ...(selectedIds.size > 0
+          ? [
+              {
+                id: 'selection.clear',
+                title: 'Clear selection',
+                shortcut: 'Escape',
+                context: 'global' as const,
+                run: clearSelection
+              }
+            ]
+          : []),
         ...(paneOpen
           ? [
               {
@@ -1102,18 +1292,26 @@ export default function App(): React.JSX.Element {
         },
         {
           id: 'triage.star',
-          title: selected?.starred ? 'Unstar' : 'Star',
+          title: starOn ? 'Star' : 'Unstar',
           shortcut: 's',
           context: 'list',
-          run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: !selected.starred })
+          run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: starOn })
         },
         {
           id: 'triage.unread',
-          title: selected?.unread ? 'Mark read' : 'Mark unread',
+          title: markUnreadOn ? 'Mark unread' : 'Mark read',
           shortcut: 'u',
           context: 'list',
-          run: () =>
-            selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: !selected.unread })
+          run: () => selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: markUnreadOn })
+        },
+        {
+          id: 'triage.label',
+          title: 'Label',
+          shortcut: 'l',
+          context: 'list',
+          run: () => {
+            if (selected && realMode) setLabelTargetId(selected.id)
+          }
         },
         {
           id: 'triage.undo',
@@ -1131,7 +1329,24 @@ export default function App(): React.JSX.Element {
           }
         }
       ]),
-    [openSelected, paneOpen, realMode, selected, showToast, switchView, threads.length, triage, view]
+    [
+      clearSelection,
+      extendSelectionTo,
+      openSelected,
+      paneOpen,
+      realMode,
+      markUnreadOn,
+      selected,
+      selectedIds.size,
+      selectedIndex,
+      showToast,
+      starOn,
+      switchView,
+      threads.length,
+      toggleFocusedSelection,
+      triage,
+      view
+    ]
   )
 
   useLayoutEffect(() => {
@@ -1140,6 +1355,7 @@ export default function App(): React.JSX.Element {
       const key = e.key.toLowerCase()
       const pendingGoUntil = goChordUntilRef.current
       goChordUntilRef.current = 0
+      if (labelTarget) return
       if (snoozeOpen) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -1165,9 +1381,7 @@ export default function App(): React.JSX.Element {
         })
         return
       }
-      if (target && target.tagName === 'BUTTON') {
-        return
-      }
+      if (target && target.tagName === 'BUTTON') return
       if (plainKey && Date.now() <= pendingGoUntil && (key === 'h' || key === 'i')) {
         e.preventDefault()
         switchView(key === 'h' ? 'snoozed' : 'inbox')
@@ -1185,7 +1399,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [paneOpen, snoozeOpen, switchView])
+  }, [labelTarget, paneOpen, snoozeOpen, switchView])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
@@ -1212,6 +1426,7 @@ export default function App(): React.JSX.Element {
           { id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate' },
           { id: 'open', keys: ['Enter'], label: 'open' }
         ]),
+    { id: 'select', keys: ['X'], label: 'select' },
     ...TRIAGE_SHORTCUT_HINTS
   ]
 
@@ -1265,6 +1480,14 @@ export default function App(): React.JSX.Element {
           </button>
         </nav>
         <div className="app-no-drag ml-auto flex items-center gap-4">
+          {selectedIds.size > 0 && (
+            <span
+              data-testid="selection-count"
+              className="rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent tabular-nums"
+            >
+              {selectedIds.size} selected
+            </span>
+          )}
           <QueueReadout unread={unreadCount} pending={pendingCount} />
           <div data-testid="account-menu">
             <AccountMenu status={status} onStatus={setStatus} />
@@ -1292,6 +1515,7 @@ export default function App(): React.JSX.Element {
           )}
           {threads.map((t, i) => {
             const isSelected = i === selectedIndex
+            const isChecked = selectedIds.has(t.id)
             const isUnread = t.unread && !mockReadIds.has(t.id)
             return (
               // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
@@ -1301,23 +1525,45 @@ export default function App(): React.JSX.Element {
                 ref={isSelected ? selectedRowRef : null}
                 data-testid="thread-row"
                 data-selected={isSelected || undefined}
+                data-checked={isChecked || undefined}
                 data-unread={isUnread || undefined}
-                className={`cursor-default border-l-[3px] ${
+                className={`cursor-default select-none border-l-[3px] ${
                   paneOpen
-                    ? 'grid grid-cols-[10px_1fr_auto] gap-x-2 px-3 py-2.5'
+                    ? 'grid grid-cols-[16px_1fr_auto] gap-x-2 px-3 py-2.5'
                     : 'flex items-center gap-3.5 py-[11px] pr-7 pl-5'
-                } ${isSelected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'}`}
-                onClick={() => {
-                  setSelectedIndex(i)
-                  setPaneOpen(true)
+                } ${
+                  isChecked
+                    ? 'border-l-accent bg-accent/[0.12]'
+                    : isSelected
+                      ? 'border-l-accent bg-accent/[0.07]'
+                      : 'border-l-transparent'
+                }`}
+                onClick={(event) => {
+                  if (event.shiftKey) extendSelectionTo(i)
+                  else {
+                    setSelectedIndex(i)
+                    setPaneOpen(true)
+                  }
                 }}
               >
                 <span
-                  className={`size-1.5 flex-none self-center rounded-full ${
-                    isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
-                  } ${paneOpen ? 'row-span-2' : ''}`}
+                  className={`flex size-4 flex-none items-center justify-center self-center ${
+                    paneOpen ? 'row-span-2' : ''
+                  }`}
                   aria-hidden
-                />
+                >
+                  {isChecked ? (
+                    <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
+                      ✓
+                    </span>
+                  ) : (
+                    <span
+                      className={`size-1.5 rounded-full ${
+                        isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
+                      }`}
+                    />
+                  )}
+                </span>
                 {paneOpen ? (
                   <>
                     <span
@@ -1342,13 +1588,16 @@ export default function App(): React.JSX.Element {
                       )}
                       {t.at}
                     </span>
-                    <span
-                      data-testid="thread-subject"
-                      className={`col-span-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${
-                        isUnread ? 'font-medium text-ink' : 'text-ink-faint'
-                      }`}
-                    >
-                      {t.subject}
+                    <span className="col-span-2 flex min-w-0 items-center gap-1.5">
+                      <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                      <span
+                        data-testid="thread-subject"
+                        className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${
+                          isUnread ? 'font-medium text-ink' : 'text-ink-faint'
+                        }`}
+                      >
+                        {t.subject}
+                      </span>
                     </span>
                   </>
                 ) : (
@@ -1361,14 +1610,17 @@ export default function App(): React.JSX.Element {
                     >
                       {t.from}
                     </span>
-                    <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink-faint">
-                      <span
-                        data-testid="thread-subject"
-                        className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
-                      >
-                        {t.subject}
+                    <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
+                      <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                        <span
+                          data-testid="thread-subject"
+                          className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
+                        >
+                          {t.subject}
+                        </span>
+                        <span data-testid="thread-snippet"> — {t.snippet}</span>
                       </span>
-                      <span data-testid="thread-snippet"> — {t.snippet}</span>
                     </span>
                     <span className="flex flex-none items-center gap-2.5 text-xs">
                       <ReminderChips thread={t} />
@@ -1441,6 +1693,15 @@ export default function App(): React.JSX.Element {
           onCancel={() => setSnoozeOpen(false)}
           onConfirm={snoozeSelected}
           onUnsnooze={view === 'snoozed' ? unsnoozeSelected : undefined}
+        />
+      )}
+
+      {labelTarget && (
+        <LabelPicker
+          labels={labels}
+          targets={[{ id: labelTarget.id, labelIds: labelTarget.labelIds }]}
+          onClose={() => setLabelTargetId(null)}
+          onToggle={toggleLabel}
         />
       )}
 

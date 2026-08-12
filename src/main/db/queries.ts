@@ -3,6 +3,7 @@
 import type {
   Conversation,
   ConversationMsg,
+  MailLabel,
   MessageAttachment,
   MessageRecipients,
   SnoozedThreadRow,
@@ -12,6 +13,24 @@ import type { Db } from './index'
 
 interface StoredAttachment extends MessageAttachment {
   inlineData?: string
+}
+
+function labelIdsForThreads(db: Db, accountId: string, threadIds: readonly string[]): Map<string, string[]> {
+  const result = new Map<string, string[]>()
+  if (threadIds.length === 0) return result
+  const placeholders = threadIds.map(() => '?').join(', ')
+  const memberships = db
+    .prepare(
+      `SELECT thread_id, label_id FROM thread_labels
+       WHERE account_id = ? AND thread_id IN (${placeholders})`
+    )
+    .all(accountId, ...threadIds) as { thread_id: string; label_id: string }[]
+  for (const membership of memberships) {
+    const ids = result.get(membership.thread_id) ?? []
+    ids.push(membership.label_id)
+    result.set(membership.thread_id, ids)
+  }
+  return result
 }
 
 export function listInboxThreads(db: Db, accountId: string, limit = 300): ThreadRow[] {
@@ -41,6 +60,11 @@ export function listInboxThreads(db: Db, accountId: string, limit = 300): Thread
     returned: number
   }[]
 
+  const labelIds = labelIdsForThreads(
+    db,
+    accountId,
+    rows.map((row) => row.id)
+  )
   return rows.map((r) => ({
     id: r.id,
     fromDisplay: r.from_display ?? '',
@@ -50,7 +74,8 @@ export function listInboxThreads(db: Db, accountId: string, limit = 300): Thread
     unread: r.is_unread === 1,
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
-    returned: r.returned === 1
+    returned: r.returned === 1,
+    labelIds: labelIds.get(r.id) ?? []
   }))
 }
 
@@ -77,6 +102,11 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = 300): Snoo
     due_at: number
   }[]
 
+  const labelIds = labelIdsForThreads(
+    db,
+    accountId,
+    rows.map((row) => row.id)
+  )
   return rows.map((r) => ({
     id: r.id,
     fromDisplay: r.from_display ?? '',
@@ -87,8 +117,19 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = 300): Snoo
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
     returned: false,
+    labelIds: labelIds.get(r.id) ?? [],
     dueAt: r.due_at
   }))
+}
+
+export function listUserLabels(db: Db, accountId: string): MailLabel[] {
+  return db
+    .prepare(
+      `SELECT id, name, type FROM labels
+       WHERE account_id = ? AND lower(type) = 'user'
+       ORDER BY name COLLATE NOCASE, id`
+    )
+    .all(accountId) as MailLabel[]
 }
 
 export function countInboxUnread(db: Db, accountId: string): number {

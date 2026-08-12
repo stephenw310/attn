@@ -5,6 +5,7 @@ import type {
   Conversation,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
+  MailLabel,
   SnoozedThreadRow,
   SyncState,
   ThreadRow
@@ -20,6 +21,7 @@ const api = {
   mail: {
     listThreads: (): Promise<ThreadRow[]> => ipcRenderer.invoke('mail:listThreads'),
     listSnoozed: (): Promise<SnoozedThreadRow[]> => ipcRenderer.invoke('mail:listSnoozed'),
+    listLabels: (): Promise<MailLabel[]> => ipcRenderer.invoke('mail:listLabels'),
     getUnreadCount: (): Promise<number> => ipcRenderer.invoke('mail:getUnreadCount'),
     getConversation: (threadId: string): Promise<Conversation | null> =>
       ipcRenderer.invoke('mail:getConversation', threadId),

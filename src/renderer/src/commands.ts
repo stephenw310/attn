@@ -30,14 +30,28 @@ function normalizedKey(event: KeyboardEvent): string {
   return event.key.toLowerCase()
 }
 
+function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
+  const normalizedShortcut = shortcut.toLowerCase()
+  const expectsShift = normalizedShortcut.startsWith('shift+')
+  const expectedKey = expectsShift ? normalizedShortcut.slice('shift+'.length) : normalizedShortcut
+  if (expectedKey !== normalizedKey(event)) return false
+  if (expectsShift) return event.shiftKey
+
+  // Shift is part of the keystroke for printable symbols such as # and !, but it
+  // distinguishes J/K navigation from Shift+J/K range selection. Bare-letter
+  // shortcuts deliberately decline Shift so that namespace stays reserved for
+  // future combinations without changing muscle memory later.
+  const isLetter = /^[a-z]$/.test(expectedKey)
+  return !isLetter || !event.shiftKey
+}
+
 export function matchKey(event: KeyboardEvent, context: Exclude<CommandContext, 'global'>): Command | null {
   if (event.ctrlKey || event.metaKey || event.altKey) return null
-  const key = normalizedKey(event)
   return (
     commands.find(
       (command) =>
         (command.context === context || command.context === 'global') &&
-        command.shortcut.toLowerCase() === key
+        matchesShortcut(event, command.shortcut)
     ) ?? null
   )
 }
