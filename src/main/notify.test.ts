@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
+import type { Db } from './db'
 import type { NotificationCandidate } from './notify'
-import { planNotifications, tomorrowStart } from './notify'
+import {
+  applyUnreadBadge,
+  isolateNotificationFailure,
+  notificationPausedUntil,
+  oneHourFrom,
+  planNotifications,
+  setNotificationPausedUntil,
+  tomorrowStart
+} from './notify'
 
 function mail(threadId: string, overrides: Partial<NotificationCandidate> = {}): NotificationCandidate {
   return {
@@ -62,3 +71,74 @@ describe('tomorrowStart', () => {
     expect(tomorrowStart(now)).toBe(new Date(2026, 7, 12).getTime())
   })
 })
+
+describe('notification pause settings', () => {
+  it('persists one-hour and tomorrow pauses and resumes notifications', () => {
+    const { db, values } = fakeSettingsDb()
+    const now = new Date(2026, 7, 11, 17, 42, 30)
+
+    setNotificationPausedUntil(db, oneHourFrom(now.getTime()))
+    expect(notificationPausedUntil(db)).toBe(now.getTime() + 60 * 60 * 1000)
+    expect(values.get('notificationsPausedUntil')).toBe(String(now.getTime() + 60 * 60 * 1000))
+
+    setNotificationPausedUntil(db, tomorrowStart(now))
+    expect(notificationPausedUntil(db)).toBe(new Date(2026, 7, 12).getTime())
+
+    setNotificationPausedUntil(db, null)
+    expect(notificationPausedUntil(db)).toBeNull()
+  })
+})
+
+describe('badge effects', () => {
+  it('is a no-op on Linux and maps unread counts on macOS and Windows', () => {
+    const calls: string[] = []
+    const effects = {
+      setMacBadge: (count: number): void => {
+        calls.push(`mac:${count}`)
+      },
+      setWindowsOverlay: (show: boolean, description: string): void => {
+        calls.push(`windows:${show}:${description}`)
+      }
+    }
+
+    applyUnreadBadge('linux', 4, effects)
+    expect(calls).toEqual([])
+    applyUnreadBadge('darwin', 4, effects)
+    applyUnreadBadge('win32', 4, effects)
+    applyUnreadBadge('win32', 0, effects)
+    expect(calls).toEqual(['mac:4', 'windows:true:4 unread conversations', 'windows:false:'])
+  })
+})
+
+describe('notification failure isolation', () => {
+  it('reports notification errors without rethrowing into the sync poller', () => {
+    const messages: string[] = []
+    expect(() =>
+      isolateNotificationFailure(
+        () => {
+          throw new Error('database is locked')
+        },
+        (message) => messages.push(message)
+      )
+    ).not.toThrow()
+    expect(messages).toEqual(['database is locked'])
+  })
+})
+
+function fakeSettingsDb(): { db: Db; values: Map<string, string> } {
+  const values = new Map<string, string>()
+  const db = {
+    prepare: (sql: string) => ({
+      get: (_accountId: string, key: string) => {
+        const value = values.get(key)
+        return value === undefined ? undefined : { value }
+      },
+      run: (_accountId: string, key: string, value?: string) => {
+        if (sql.startsWith('DELETE')) values.delete(key)
+        else if (value !== undefined) values.set(key, value)
+        return { changes: 1 }
+      }
+    })
+  } as unknown as Db
+  return { db, values }
+}

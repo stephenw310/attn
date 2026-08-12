@@ -1,12 +1,13 @@
-import { app, BrowserWindow, Notification, nativeImage } from 'electron'
+import { app, BrowserWindow, type NativeImage, Notification, nativeImage } from 'electron'
 import badgeIcon from '../../resources/tray.png?asset'
 import type { Db } from './db'
 import { countInboxUnread } from './db/queries'
+import { deleteSetting, readSetting, writeSetting } from './settings'
 import type { NewMail } from './sync/poller'
 import { historyEvents } from './sync/poller'
 
-const APP_SETTINGS_ACCOUNT_ID = '__app__'
 const PAUSED_UNTIL_KEY = 'notificationsPausedUntil'
+let windowsBadgeIcon: NativeImage | null = null
 
 export interface NotificationCandidate extends NewMail {
   sender: string
@@ -24,6 +25,30 @@ export interface NotificationContext {
   focused: boolean
   pausedUntil?: number | null
   now?: number
+}
+
+export interface BadgeEffects {
+  setMacBadge: (count: number) => void
+  setWindowsOverlay: (show: boolean, description: string) => void
+}
+
+export function isolateNotificationFailure(operation: () => void, report: (message: string) => void): void {
+  try {
+    operation()
+  } catch (error) {
+    report(error instanceof Error ? error.message : String(error))
+  }
+}
+
+export function applyUnreadBadge(
+  platform: NodeJS.Platform,
+  unreadCount: number,
+  effects: BadgeEffects
+): void {
+  if (platform === 'darwin') effects.setMacBadge(unreadCount)
+  else if (platform === 'win32') {
+    effects.setWindowsOverlay(unreadCount > 0, unreadCount > 0 ? `${unreadCount} unread conversations` : '')
+  }
 }
 
 /** Keep batching policy independent from Electron so it can be exhaustively unit tested. */
@@ -47,47 +72,56 @@ export function planNotifications(
 }
 
 export function notificationPausedUntil(db: Db): number | null {
-  const row = db
-    .prepare('SELECT value FROM settings WHERE account_id = ? AND key = ?')
-    .get(APP_SETTINGS_ACCOUNT_ID, PAUSED_UNTIL_KEY) as { value: string } | undefined
-  if (!row) return null
-  const value = Number(row.value)
+  const stored = readSetting(db, PAUSED_UNTIL_KEY)
+  if (stored === undefined) return null
+  const value = Number(stored)
   return Number.isFinite(value) ? value : null
 }
 
 export function setNotificationPausedUntil(db: Db, pausedUntil: number | null): void {
   if (pausedUntil === null) {
-    db.prepare('DELETE FROM settings WHERE account_id = ? AND key = ?').run(
-      APP_SETTINGS_ACCOUNT_ID,
-      PAUSED_UNTIL_KEY
-    )
+    deleteSetting(db, PAUSED_UNTIL_KEY)
     return
   }
-  db.prepare('INSERT OR REPLACE INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(
-    APP_SETTINGS_ACCOUNT_ID,
-    PAUSED_UNTIL_KEY,
-    String(pausedUntil)
-  )
+  writeSetting(db, PAUSED_UNTIL_KEY, String(pausedUntil))
 }
 
 export function tomorrowStart(now = new Date()): number {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime()
 }
 
+export function oneHourFrom(now = Date.now()): number {
+  return now + 60 * 60 * 1000
+}
+
 function candidatesFor(db: Db, accountId: string, newMail: readonly NewMail[]): NotificationCandidate[] {
+  const distinct = new Map<string, NewMail>()
+  for (const mail of newMail) distinct.set(mail.threadId, mail)
+  if (distinct.size === 0) return []
+  const placeholders = [...distinct].map(() => '?').join(', ')
+  const inboxRows = db
+    .prepare(
+      `SELECT thread_id FROM thread_labels
+       WHERE account_id = ? AND label_id = 'INBOX' AND thread_id IN (${placeholders})`
+    )
+    .all(accountId, ...distinct.keys()) as { thread_id: string }[]
+  const inboxMail = inboxRows.flatMap((row) => {
+    const mail = distinct.get(row.thread_id)
+    return mail ? [mail] : []
+  })
+  if (inboxMail.length > 3) {
+    return inboxMail.map((mail) => ({ ...mail, sender: '', subject: '', snippet: '' }))
+  }
+
   const candidates: NotificationCandidate[] = []
-  for (const mail of newMail) {
-    const row = db
-      .prepare(
-        `SELECT m.from_name, m.from_email, m.snippet, t.subject
+  const statement = db.prepare(
+    `SELECT m.from_name, m.from_email, m.snippet, t.subject
          FROM messages m
          JOIN threads t ON t.account_id = m.account_id AND t.id = m.thread_id
-         WHERE m.account_id = ? AND m.id = ? AND m.thread_id = ?
-           AND EXISTS (SELECT 1 FROM thread_labels tl
-                       WHERE tl.account_id = t.account_id AND tl.thread_id = t.id
-                         AND tl.label_id = 'INBOX')`
-      )
-      .get(accountId, mail.messageId, mail.threadId) as
+         WHERE m.account_id = ? AND m.id = ? AND m.thread_id = ?`
+  )
+  for (const mail of inboxMail) {
+    const row = statement.get(accountId, mail.messageId, mail.threadId) as
       | {
           from_name: string | null
           from_email: string | null
@@ -106,22 +140,28 @@ function candidatesFor(db: Db, accountId: string, newMail: readonly NewMail[]): 
   return candidates
 }
 
-function focusThread(threadId: string, showMainWindow: () => BrowserWindow | null): void {
-  const win = showMainWindow()
-  if (!win) return
-  const send = (): void => win.webContents.send('mail:focusThread', { threadId })
-  if (win.webContents.isLoadingMainFrame()) win.webContents.once('did-finish-load', send)
-  else send()
+function getWindowsBadgeIcon(): NativeImage {
+  windowsBadgeIcon ??= nativeImage.createFromPath(badgeIcon)
+  return windowsBadgeIcon
 }
 
 export class MailNotifier {
-  private readonly onNewMail = (newMail: NewMail[]): void => this.notify(newMail)
+  private readonly onNewMail = (newMail: NewMail[]): void => {
+    isolateNotificationFailure(
+      () => this.notify(newMail),
+      (message) => console.error(`[notify] failed: ${message}`)
+    )
+  }
+  private accountId: string | null
 
   constructor(
     private readonly db: Db,
-    private readonly currentAccountId: () => string | null,
-    private readonly showMainWindow: () => BrowserWindow | null
-  ) {}
+    accountId: string | null,
+    private readonly showMainWindow: () => BrowserWindow | null,
+    private readonly focusThread: (threadId: string) => void
+  ) {
+    this.accountId = accountId
+  }
 
   start(): void {
     historyEvents.on('newMail', this.onNewMail)
@@ -137,19 +177,27 @@ export class MailNotifier {
   }
 
   updateBadge(): void {
-    const accountId = this.currentAccountId()
-    const unreadCount = accountId ? countInboxUnread(this.db, accountId) : 0
-    if (process.platform === 'darwin') {
-      app.setBadgeCount(unreadCount)
-    } else if (process.platform === 'win32') {
-      const icon = unreadCount > 0 ? nativeImage.createFromPath(badgeIcon) : null
-      const description = unreadCount > 0 ? `${unreadCount} unread conversations` : ''
-      for (const win of BrowserWindow.getAllWindows()) win.setOverlayIcon(icon, description)
+    try {
+      const unreadCount = this.accountId ? countInboxUnread(this.db, this.accountId) : 0
+      applyUnreadBadge(process.platform, unreadCount, {
+        setMacBadge: (count) => app.setBadgeCount(count),
+        setWindowsOverlay: (show, description) => {
+          const icon = show ? getWindowsBadgeIcon() : null
+          for (const win of BrowserWindow.getAllWindows()) win.setOverlayIcon(icon, description)
+        }
+      })
+    } catch (error) {
+      console.error(`[badge] failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
+  setAccountId(accountId: string | null): void {
+    this.accountId = accountId
+    this.updateBadge()
+  }
+
   private notify(newMail: readonly NewMail[]): void {
-    const accountId = this.currentAccountId()
+    const accountId = this.accountId
     if (!accountId || !Notification.isSupported()) return
     const planned = planNotifications(candidatesFor(this.db, accountId, newMail), {
       focused: BrowserWindow.getAllWindows().some((win) => win.isFocused()),
@@ -159,7 +207,7 @@ export class MailNotifier {
       const notification = new Notification({ title: item.title, body: item.body })
       const threadId = item.threadId
       notification.on('click', () => {
-        if (threadId) focusThread(threadId, this.showMainWindow)
+        if (threadId) this.focusThread(threadId)
         else this.showMainWindow()
       })
       notification.show()

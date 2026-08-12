@@ -1,36 +1,15 @@
 import { app, BrowserWindow, Menu, Tray } from 'electron'
 import trayIcon from '../../resources/tray.png?asset'
 import type { Db } from './db'
-import { setNotificationPausedUntil, tomorrowStart } from './notify'
+import { oneHourFrom, setNotificationPausedUntil, tomorrowStart } from './notify'
+import { readSetting, settingEnabled, writeSetting } from './settings'
 
 type CreateWindow = (options?: { show?: boolean }) => BrowserWindow
-
-const APP_SETTINGS_ACCOUNT_ID = '__app__'
 
 let createMainWindow: CreateWindow | null = null
 let quitting = false
 let showOnInitialize = false
 let tray: Tray | null = null
-
-function readSetting(db: Db, key: string): string | undefined {
-  const row = db
-    .prepare('SELECT value FROM settings WHERE account_id = ? AND key = ?')
-    .get(APP_SETTINGS_ACCOUNT_ID, key) as { value: string } | undefined
-  return row?.value
-}
-
-function writeSetting(db: Db, key: string, value: string): void {
-  db.prepare('INSERT OR REPLACE INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(
-    APP_SETTINGS_ACCOUNT_ID,
-    key,
-    value
-  )
-}
-
-function settingEnabled(db: Db, key: string, defaultValue: boolean): boolean {
-  const value = readSetting(db, key)
-  return value === undefined ? defaultValue : value === 'true'
-}
 
 function hiddenLoginLaunch(): boolean {
   if (process.argv.includes('--hidden')) return true
@@ -65,7 +44,7 @@ function installTray(db: Db): void {
         submenu: [
           {
             label: 'For 1 hour',
-            click: () => setNotificationPausedUntil(db, Date.now() + 60 * 60 * 1000)
+            click: () => setNotificationPausedUntil(db, oneHourFrom())
           },
           {
             label: 'Until tomorrow',

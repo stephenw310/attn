@@ -896,30 +896,6 @@ export default function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (!attn) return
-    return attn.mail.onFocusThread((threadId) => {
-      activeViewRef.current = 'inbox'
-      setView('inbox')
-      setSelectedIds(new Set())
-      setSelectionAnchorId(null)
-      setSelectionBaseIds(new Set())
-      setSnoozeOpen(false)
-      setLabelTargetId(null)
-      void attn.mail
-        .listThreads()
-        .then((nextThreads) => {
-          const nextIndex = nextThreads.findIndex((thread) => thread.id === threadId)
-          if (nextIndex < 0) return
-          selectedThreadIdRef.current = threadId
-          setRealThreads(nextThreads)
-          setSelectedIndex(nextIndex)
-          setPaneOpen(true)
-        })
-        .catch(() => {})
-    })
-  }, [])
-
-  useEffect(() => {
     setRealThreads(null)
     setRealSnoozedThreads(null)
     setRealUnreadTotal(null)
@@ -1112,6 +1088,27 @@ export default function App(): React.JSX.Element {
     setSelectionAnchorId(null)
     setSelectionBaseIds(new Set())
   }, [])
+
+  useEffect(() => {
+    if (!attn || !activeAccount) return
+    return attn.mail.onFocusThread((threadId) => {
+      // Close the old pane before changing lists. Otherwise the auto-read
+      // effect can observe the old cursor against Inbox and mutate the wrong thread.
+      switchView('inbox')
+      clearSelection()
+      void attn.mail
+        .listThreads()
+        .then((nextThreads) => {
+          const nextIndex = nextThreads.findIndex((thread) => thread.id === threadId)
+          setRealThreads(nextThreads)
+          if (nextIndex < 0) return
+          selectedThreadIdRef.current = threadId
+          setSelectedIndex(nextIndex)
+          setPaneOpen(true)
+        })
+        .catch(() => {})
+    })
+  }, [activeAccount, clearSelection, switchView])
 
   const toggleFocusedSelection = useCallback(() => {
     const thread = threads[selectedIndex]

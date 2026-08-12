@@ -67,6 +67,7 @@ let actionExecutor: ActionExecutor | null = null
 let historyPoller: HistoryPoller | null = null
 let snoozeScheduler: SnoozeScheduler | null = null
 let mailNotifier: MailNotifier | null = null
+let pendingFocusThreadId: string | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -77,6 +78,12 @@ function broadcast(channel: string, payload?: unknown): void {
 function broadcastMailChanged(): void {
   broadcast('mail:changed')
   mailNotifier?.updateBadge()
+}
+
+function focusInboxThread(threadId: string): void {
+  pendingFocusThreadId = threadId
+  const win = showMainWindow()
+  win?.webContents.send('mail:focusThreadAvailable')
 }
 
 function setSyncState(s: SyncState): void {
@@ -284,7 +291,7 @@ function registerIpc(): void {
       stopHistoryPoller()
       authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
-      mailNotifier?.updateBadge()
+      mailNotifier?.setAccountId(tokens.email ?? null)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
       snoozeScheduler?.refresh()
       void resumeOnlineWork()
@@ -304,7 +311,7 @@ function registerIpc(): void {
     authSessionGeneration++
     seedAccountId = null
     clearTokens(app.getPath('userData'))
-    mailNotifier?.updateBadge()
+    mailNotifier?.setAccountId(null)
     clearUndo(account ?? undefined)
     snoozeScheduler?.refresh()
     // A stale backfill may finish caching locally, but its generation can no
@@ -315,6 +322,11 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('sync:getState', () => syncState)
+  ipcMain.handle('mail:takePendingFocus', () => {
+    const threadId = pendingFocusThreadId
+    pendingFocusThreadId = null
+    return threadId
+  })
   ipcMain.handle('mail:listThreads', () => {
     if (!db) return []
     const account = currentAccountId()
@@ -523,8 +535,13 @@ if (!gotLock) {
     powerMonitor.on('resume', refreshSnoozesAfterResume)
     const { startHidden } = initializeBackground(db, createWindow)
     createWindow({ show: !startHidden })
-    mailNotifier = new MailNotifier(db, currentAccountId, showMainWindow)
+    mailNotifier = new MailNotifier(db, currentAccountId(), showMainWindow, focusInboxThread)
     mailNotifier.start()
+    if (testUserData) {
+      ipcMain.on('attn:test:focusThread', (_event, threadId: unknown) => {
+        if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
+      })
+    }
     if (authStatus().signedIn) void resumeOnlineWork()
     app.on('activate', () => showMainWindow())
   })
@@ -542,6 +559,7 @@ if (!gotLock) {
     snoozeScheduler = null
     mailNotifier?.stop()
     mailNotifier = null
+    ipcMain.removeAllListeners('attn:test:focusThread')
     db?.close()
     db = null
   })

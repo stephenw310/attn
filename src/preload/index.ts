@@ -39,13 +39,20 @@ const api = {
       return () => ipcRenderer.removeListener('mail:changed', listener)
     },
     onFocusThread: (cb: (threadId: string) => void): (() => void) => {
-      const listener = (_e: unknown, payload: unknown): void => {
-        if (!payload || typeof payload !== 'object') return
-        const threadId = (payload as { threadId?: unknown }).threadId
-        if (typeof threadId === 'string' && threadId.length > 0) cb(threadId)
+      let active = true
+      const takePendingFocus = async (): Promise<void> => {
+        const threadId: unknown = await ipcRenderer.invoke('mail:takePendingFocus')
+        if (active && typeof threadId === 'string' && threadId.length > 0) cb(threadId)
       }
-      ipcRenderer.on('mail:focusThread', listener)
-      return () => ipcRenderer.removeListener('mail:focusThread', listener)
+      const listener = (): void => void takePendingFocus()
+      ipcRenderer.on('mail:focusThreadAvailable', listener)
+      // A newly-created renderer may miss the availability signal while it is
+      // mounting, so it always pulls the pending target after subscribing.
+      void takePendingFocus()
+      return () => {
+        active = false
+        ipcRenderer.removeListener('mail:focusThreadAvailable', listener)
+      }
     }
   },
   sync: {
