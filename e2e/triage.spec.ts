@@ -32,6 +32,21 @@ test('animates a marked-done row before removing it', async ({ page }) => {
   await expect(page.getByTestId('toast')).not.toHaveAttribute('data-toast-id', firstToastId ?? '')
 })
 
+test('does not drop rapid archives or an undo during the exit animation', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+
+  await page.keyboard.press('e')
+  await page.keyboard.press('e')
+  await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+  await expect(rows).toHaveCount(6)
+
+  await page.keyboard.press('e')
+  await page.keyboard.press('z')
+  await expect(page.getByTestId('pending-count')).toContainText('4 pending')
+  await expect(rows).toHaveCount(6)
+})
+
 test('selects a range and archives it as one undoable bulk action', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
@@ -107,6 +122,20 @@ test('extends disjoint selections without dropping earlier rows', async ({ page 
   await expect(rows.nth(1)).not.toHaveAttribute('data-checked')
   await expect(rows.nth(2)).toHaveAttribute('data-checked', 'true')
   await expect(rows.nth(3)).toHaveAttribute('data-checked', 'true')
+})
+
+test('extends a range while the reading pane has message focus', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-pane')).toHaveAttribute('data-split-focus', 'true')
+
+  await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+  await expect(rows.nth(2)).toHaveAttribute('data-checked', 'true')
 })
 
 test('keeps the range anchor selected when toggling a row off', async ({ page }) => {

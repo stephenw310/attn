@@ -16,6 +16,7 @@ test('snoozes from the picker, navigates to Snoozed, and undoes', async ({ page 
   await page.keyboard.press('h')
   await expect(page.getByTestId('view-title')).toHaveText('Snoozed')
   await expect(rows).toHaveCount(1)
+  await expect(page.getByTestId('thread-date-group')).toHaveCount(0)
   await expect(rows.first()).toContainText('Maya Lin')
   await expect(rows.first().getByTestId('chip-snooze-due')).toBeVisible()
 

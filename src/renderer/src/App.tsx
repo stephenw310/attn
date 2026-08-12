@@ -13,6 +13,7 @@ import type {
 } from '../../shared/mail'
 import { formatSnoozeDate, parseSnoozeText, snoozePresets } from '../../shared/snooze'
 import { matchKey, registerCommands } from './commands'
+import { dateGroup } from './dateGroup'
 import { type LabelCheckState, LabelPicker } from './LabelPicker'
 import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
@@ -135,30 +136,6 @@ function fromThreadRow(r: ThreadRow): DisplayThread {
     labelIds: r.labelIds,
     lastMsgAt: r.lastMsgAt
   }
-}
-
-type DateGroup = 'Today' | 'Yesterday' | 'Last 7 days' | 'Earlier this month' | 'Older'
-
-function dateGroup(thread: DisplayThread): DateGroup {
-  if (thread.lastMsgAt) {
-    const messageDate = new Date(thread.lastMsgAt)
-    const now = new Date()
-    const startOfDay = (date: Date): number =>
-      new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-    const dayDiff = Math.floor((startOfDay(now) - startOfDay(messageDate)) / 86_400_000)
-    if (dayDiff <= 0) return 'Today'
-    if (dayDiff === 1) return 'Yesterday'
-    if (dayDiff < 7) return 'Last 7 days'
-    if (messageDate.getFullYear() === now.getFullYear() && messageDate.getMonth() === now.getMonth()) {
-      return 'Earlier this month'
-    }
-    return 'Older'
-  }
-
-  if (/\d{1,2}:\d{2}/.test(thread.at)) return 'Today'
-  if (thread.at === 'Yesterday') return 'Yesterday'
-  if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/.test(thread.at)) return 'Last 7 days'
-  return 'Earlier this month'
 }
 
 function fromSnoozedThreadRow(r: SnoozedThreadRow): DisplayThread {
@@ -907,6 +884,8 @@ export default function App(): React.JSX.Element {
   const autoReadThreadRef = useRef<string | null>(null)
   const toastTokenRef = useRef(0)
   const goChordUntilRef = useRef(0)
+  const deferRefreshUntilRef = useRef(0)
+  const earliestExitIndexRef = useRef<number | null>(null)
 
   const activeAccount = status?.signedIn ? (status.email ?? null) : null
   const realMode = Boolean(attn && status?.signedIn)
@@ -951,7 +930,14 @@ export default function App(): React.JSX.Element {
 
     if (!attn || !activeAccount) return
     let cancelled = false
+    let deferredRefreshTimer: number | null = null
     const refresh = (): void => {
+      const delay = deferRefreshUntilRef.current - Date.now()
+      if (delay > 0) {
+        if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
+        deferredRefreshTimer = window.setTimeout(refresh, delay)
+        return
+      }
       const preserveSelection = preserveSelectionOnRefreshRef.current
       preserveSelectionOnRefreshRef.current = true
       convCache.current.clear()
@@ -984,6 +970,7 @@ export default function App(): React.JSX.Element {
     const offMail = attn.mail.onChanged(refresh)
     return () => {
       cancelled = true
+      if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
     }
   }, [activeAccount])
@@ -1177,28 +1164,31 @@ export default function App(): React.JSX.Element {
         threadIds: isBulk ? [...selectedIds] : action.threadIds
       }
       if (isBulk) clearSelection()
-      const run = (): void => {
-        void attn.mail
-          .triage(targetedAction)
-          .then((result) => showToast(result.label))
-          .catch(() => {
-            preserveSelectionOnRefreshRef.current = true
-            setExitingThreadIds((current) => {
-              const next = new Set(current)
-              for (const id of targetedAction.threadIds) next.delete(id)
-              return next
-            })
-          })
-      }
       if (action.kind === 'archive' && view === 'inbox' && !paneOpen) {
         setExitingThreadIds((current) => new Set([...current, ...targetedAction.threadIds]))
         const exitDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 550
-        window.setTimeout(run, exitDuration)
-      } else {
-        run()
+        deferRefreshUntilRef.current = Math.max(deferRefreshUntilRef.current, Date.now() + exitDuration)
+        earliestExitIndexRef.current = Math.min(earliestExitIndexRef.current ?? selectedIndex, selectedIndex)
+        setSelectedIndex((index) => Math.min(index + targetedAction.threadIds.length, threads.length - 1))
+        window.setTimeout(() => {
+          const earliest = earliestExitIndexRef.current
+          earliestExitIndexRef.current = null
+          if (earliest !== null) setSelectedIndex(earliest)
+        }, exitDuration)
       }
+      void attn.mail
+        .triage(targetedAction)
+        .then((result) => showToast(result.label))
+        .catch(() => {
+          preserveSelectionOnRefreshRef.current = true
+          setExitingThreadIds((current) => {
+            const next = new Set(current)
+            for (const id of targetedAction.threadIds) next.delete(id)
+            return next
+          })
+        })
     },
-    [clearSelection, paneOpen, realMode, selectedIds, showToast, view]
+    [clearSelection, paneOpen, realMode, selectedIds, selectedIndex, showToast, threads.length, view]
   )
 
   const toggleLabel = useCallback(
@@ -1458,6 +1448,7 @@ export default function App(): React.JSX.Element {
       const isTextEntry =
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       if (isTextEntry) return
+      if (target && target.tagName === 'BUTTON') return
       if (paneOpen && plainKey && !e.shiftKey && e.key === 'ArrowLeft') {
         e.preventDefault()
         setSplitFocus('list')
@@ -1482,22 +1473,6 @@ export default function App(): React.JSX.Element {
         })
         return
       }
-      if (
-        plainKey &&
-        !e.shiftKey &&
-        (e.key === 'ArrowDown' || e.key === 'ArrowUp') &&
-        (!paneOpen || splitFocus === 'list')
-      ) {
-        e.preventDefault()
-        setSelectedIndex((index) =>
-          e.key === 'ArrowDown'
-            ? Math.min(index + 1, Math.max(threads.length - 1, 0))
-            : Math.max(index - 1, 0)
-        )
-        return
-      }
-      if (paneOpen && splitFocus === 'message' && (key === 'j' || key === 'k')) return
-      if (target && target.tagName === 'BUTTON') return
       if (plainKey && Date.now() <= pendingGoUntil && (key === 'h' || key === 'i')) {
         e.preventDefault()
         switchView(key === 'h' ? 'snoozed' : 'inbox')
@@ -1515,7 +1490,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [labelTarget, paneOpen, snoozeOpen, splitFocus, switchView, threads.length])
+  }, [labelTarget, paneOpen, snoozeOpen, splitFocus, switchView])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
@@ -1637,7 +1612,7 @@ export default function App(): React.JSX.Element {
             const isChecked = selectedIds.has(t.id)
             const isUnread = t.unread && !mockReadIds.has(t.id)
             const group = dateGroup(t)
-            const showGroup = i === 0 || dateGroup(threads[i - 1]) !== group
+            const showGroup = view === 'inbox' && (i === 0 || dateGroup(threads[i - 1]) !== group)
             const isExiting = exitingThreadIds.has(t.id)
             return (
               <div key={t.id} className="contents">
@@ -1674,12 +1649,7 @@ export default function App(): React.JSX.Element {
                     }
                   }}
                 >
-                  <span
-                    className={`flex size-4 flex-none items-center justify-center self-center ${
-                      paneOpen ? 'row-span-2' : ''
-                    }`}
-                    aria-hidden
-                  >
+                  <span className="flex size-4 flex-none items-center justify-center self-center" aria-hidden>
                     {isChecked ? (
                       <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
                         ✓

@@ -119,18 +119,30 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   return template
 }
 
-function replaceCidSources(html: string, inlineImages: ReadonlyMap<string, string>): string {
-  if (!/cid:/i.test(html)) return html
+function replaceImageSources(
+  html: string,
+  inlineImages: ReadonlyMap<string, string>,
+  remoteImages: ReadonlyMap<string, string>
+): string {
+  if (!/<img/i.test(html)) return html
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   parsed.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => {
     const source = image.getAttribute('src')?.trim() ?? ''
-    if (!source.toLowerCase().startsWith('cid:')) return
-    const contentId = decodeURIComponent(source.slice(4)).replace(/^<|>$/g, '').toLowerCase()
-    const dataUrl = inlineImages.get(contentId)
+    const isCid = source.toLowerCase().startsWith('cid:')
+    const key = isCid ? normalizedContentId(source.slice(4)) : source
+    const dataUrl = isCid ? inlineImages.get(key) : remoteImages.get(key)
     if (dataUrl) image.setAttribute('src', dataUrl)
-    else image.removeAttribute('src')
+    else if (isCid) image.removeAttribute('src')
   })
   return `${parsed.head.innerHTML}${parsed.body.innerHTML}`
+}
+
+function normalizedContentId(value: string): string {
+  try {
+    return decodeURIComponent(value).replace(/^<|>$/g, '').toLowerCase()
+  } catch {
+    return value.replace(/^<|>$/g, '').toLowerCase()
+  }
 }
 
 function cidReferences(html: string): string[] {
@@ -139,11 +151,27 @@ function cidReferences(html: string): string[] {
   return [...parsed.querySelectorAll<HTMLImageElement>('img[src]')]
     .map((image) => image.getAttribute('src')?.trim() ?? '')
     .filter((source) => source.toLowerCase().startsWith('cid:'))
-    .map((source) => decodeURIComponent(source.slice(4)).replace(/^<|>$/g, '').toLowerCase())
+    .map((source) => normalizedContentId(source.slice(4)))
 }
 
-function makeSrcDoc(html: string, inlineImages: ReadonlyMap<string, string>): string | null {
-  const template = sanitizeToTemplate(replaceCidSources(html, inlineImages))
+function remoteImageReferences(html: string): string[] {
+  if (!/<img/i.test(html)) return []
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  return [
+    ...new Set(
+      [...parsed.querySelectorAll<HTMLImageElement>('img[src]')]
+        .map((image) => image.getAttribute('src')?.trim() ?? '')
+        .filter((source) => /^https?:\/\//i.test(source))
+    )
+  ]
+}
+
+function makeSrcDoc(
+  html: string,
+  inlineImages: ReadonlyMap<string, string>,
+  remoteImages: ReadonlyMap<string, string>
+): string | null {
+  const template = sanitizeToTemplate(replaceImageSources(html, inlineImages, remoteImages))
   if (!template) return null
   const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
@@ -208,17 +236,18 @@ export function MessageBody({
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
   const [inlineImages, setInlineImages] = useState<ReadonlyMap<string, string>>(new Map())
+  const [remoteImages, setRemoteImages] = useState<ReadonlyMap<string, string>>(new Map())
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
   const srcDoc = useMemo(
-    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, inlineImages)),
-    [bodyHtml, inlineImages]
+    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, inlineImages, remoteImages)),
+    [bodyHtml, inlineImages, remoteImages]
   )
 
   useLayoutEffect(() => {
-    setInlineImages(new Map())
     if (bodyHtml === null || !attn || !/cid:/i.test(bodyHtml)) return
+    setInlineImages(new Map())
     const references = cidReferences(bodyHtml)
     const cidAttachments = attachments
       .filter((attachment) => attachment.mimeType.startsWith('image/'))
@@ -248,6 +277,25 @@ export function MessageBody({
       cancelled = true
     }
   }, [attachments, bodyHtml, messageId])
+
+  useLayoutEffect(() => {
+    setRemoteImages(new Map())
+    if (bodyHtml === null || !attn) return
+    const references = remoteImageReferences(bodyHtml)
+    if (references.length === 0) return
+    let cancelled = false
+    void Promise.all(
+      references.map(async (url) => {
+        const result = await attn.mail.getRemoteImage({ url })
+        return 'dataUrl' in result ? ([url, result.dataUrl] as const) : null
+      })
+    ).then((results) => {
+      if (!cancelled) setRemoteImages(new Map(results.filter((result) => result !== null)))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [bodyHtml])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
   const measurement = measuredFrame?.srcDoc === srcDoc ? measuredFrame : null
