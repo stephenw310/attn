@@ -36,6 +36,8 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
 
   const body = page.frameLocator('[data-testid="html-body-frame"]')
   await expect(body.locator('#styled-table')).toBeVisible()
+  await expect(body.locator('body')).toHaveCSS('padding-left', '12px')
+  await expect(body.locator('body')).toHaveCSS('padding-right', '12px')
   await expect(body.locator('#styled-table')).toHaveAttribute('style', /border-collapse/)
   await expect(body.locator('#mail-styles')).toHaveCount(1)
   await expect(body.locator('#stylesheet-styled')).toHaveCSS('color', 'rgb(12, 34, 56)')
@@ -67,9 +69,9 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
       return event.defaultPrevented
     })
   ).toBe(false)
-  await expect(body.locator('#remote-image')).not.toHaveAttribute('src')
-  expect(remoteImageRequested).toBe(false)
-  expect(handlerImageRequested).toBe(false)
+  await expect(body.locator('#remote-image')).toHaveAttribute('src', 'https://remote.attn.test/tracker.gif')
+  await expect.poll(() => remoteImageRequested).toBe(true)
+  await expect.poll(() => handlerImageRequested).toBe(true)
 
   for (const marker of ['data-script-ran', 'data-handler-ran', 'data-link-ran']) {
     expect(await body.locator('body').getAttribute(marker)).toBeNull()

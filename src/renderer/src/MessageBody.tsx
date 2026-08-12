@@ -21,6 +21,7 @@ const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
 const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
 const TRIM_MARKER = 'data-attn-trim-start'
 const IMAGE_SOURCE_MARKER = 'data-attn-image-source'
+const REMOTE_IMAGE_CONCURRENCY = 6
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
@@ -37,6 +38,10 @@ const RESET = `
   body {
     font: 14px/1.6 Arial, Helvetica, sans-serif;
     overflow-wrap: break-word;
+  }
+  #attn-mail-body {
+    box-sizing: border-box;
+    padding: 12px !important;
   }
   img { max-width: 100%; height: auto; }
   table { max-width: 100%; }
@@ -135,7 +140,7 @@ function replaceImageSources(
     if (dataUrl) image.setAttribute('src', dataUrl)
     else if (isCid || /^https?:\/\//i.test(source)) {
       image.setAttribute(IMAGE_SOURCE_MARKER, source)
-      image.removeAttribute('src')
+      if (isCid) image.removeAttribute('src')
     }
   })
 }
@@ -179,19 +184,12 @@ function makeSrcDoc(
   replaceImageSources(template.content, inlineImages, remoteImages)
   const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
-  const richLayoutStart = template.content.querySelector('table, style')
-  const plainLayout =
-    richLayoutStart === null ||
-    (trimStart !== null &&
-      Boolean(trimStart.compareDocumentPosition(richLayoutStart) & Node.DOCUMENT_POSITION_FOLLOWING))
   if (trimStart) {
     const marker = document.createElement('div')
     marker.setAttribute(TRIM_MARKER, '')
     trimStart.before(marker)
   }
-  const layout = plainLayout ? 'body { box-sizing: border-box; padding: 12px; }' : ''
-
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}${layout}</style></head><body>${template.innerHTML}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
 }
 
 function TrimToggle({
@@ -279,33 +277,35 @@ export function MessageBody({
       .filter(({ contentIds }) => contentIds.length > 0)
     const remoteReferences = remoteImageReferences(bodyHtml)
     let cancelled = false
-    void Promise.all([
-      Promise.all(
-        cidAttachments.map(async ({ attachment, contentIds }) => {
-          const result = await attn.mail.getInlineImage({
-            messageId,
-            attachmentId: attachment.attachmentId,
-            mimeType: attachment.mimeType
-          })
-          return 'dataUrl' in result
-            ? contentIds.map((contentId) => [contentId, result.dataUrl] as const)
-            : []
-        })
-      ),
-      Promise.all(
-        remoteReferences.map(async (url) => {
-          const result = await attn.mail.getRemoteImage({ url })
-          return 'dataUrl' in result ? ([url, result.dataUrl] as const) : null
-        })
-      )
-    ]).then(([inlineResults, remoteResults]) => {
-      if (cancelled) return
-      resolvedImagesRef.current = new Map([
-        ...inlineResults.flat(),
-        ...remoteResults.filter((result) => result !== null)
-      ])
+    const addResolvedImages = (entries: ReadonlyArray<readonly [string, string]>): void => {
+      if (cancelled || entries.length === 0) return
+      resolvedImagesRef.current = new Map([...resolvedImagesRef.current, ...entries])
       applyResolvedImages()
-    })
+    }
+
+    void Promise.all(
+      cidAttachments.map(async ({ attachment, contentIds }) => {
+        const result = await attn.mail.getInlineImage({
+          messageId,
+          attachmentId: attachment.attachmentId,
+          mimeType: attachment.mimeType
+        })
+        return 'dataUrl' in result ? contentIds.map((contentId) => [contentId, result.dataUrl] as const) : []
+      })
+    ).then((inlineResults) => addResolvedImages(inlineResults.flat()))
+
+    let nextRemoteIndex = 0
+    const resolveRemoteImages = async (): Promise<void> => {
+      while (!cancelled && nextRemoteIndex < remoteReferences.length) {
+        const url = remoteReferences[nextRemoteIndex]
+        nextRemoteIndex += 1
+        const result = await attn.mail.getRemoteImage({ url })
+        if ('dataUrl' in result) addResolvedImages([[url, result.dataUrl]])
+      }
+    }
+    for (let index = 0; index < Math.min(REMOTE_IMAGE_CONCURRENCY, remoteReferences.length); index += 1) {
+      void resolveRemoteImages()
+    }
     return () => {
       cancelled = true
     }
