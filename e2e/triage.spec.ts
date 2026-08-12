@@ -34,10 +34,12 @@ test('animates a marked-done row before removing it', async ({ page }) => {
 
 test('does not drop rapid archives or an undo during the exit animation', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
+  const list = page.getByTestId('thread-list')
   await expect(rows).toHaveCount(8)
 
   await page.keyboard.press('e')
   await page.keyboard.press('e')
+  await expect.poll(() => list.evaluate((element) => element.scrollLeft)).toBe(0)
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
   await expect(rows).toHaveCount(6)
 

@@ -1494,7 +1494,7 @@ export default function App(): React.JSX.Element {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
-    selectedRowRef.current?.scrollIntoView({ block: 'nearest' })
+    selectedRowRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [selectedIndex])
 
   const visibleUnreadTotal = threads.filter((t) => t.unread).length
@@ -1593,7 +1593,7 @@ export default function App(): React.JSX.Element {
           data-testid="thread-list"
           data-pane-open={paneOpen || undefined}
           data-split-focus={paneOpen && splitFocus === 'list' ? 'true' : undefined}
-          className={`min-h-0 overflow-y-auto py-2 ${
+          className={`min-h-0 overflow-x-hidden overflow-y-auto py-2 ${
             paneOpen ? 'w-[380px] flex-none border-r border-edge' : 'flex-1'
           } ${paneOpen && splitFocus === 'list' ? 'shadow-[inset_0_1px_0_rgba(255,178,36,0.8)]' : ''}`}
           aria-label="Conversation list"
