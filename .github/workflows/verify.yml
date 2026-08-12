@@ -63,6 +63,9 @@ jobs:
       - name: Run Electron smoke tests
         run: npm run e2e
 
+      - name: Run Electron performance smoke
+        run: npm run e2e:perf
+
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
