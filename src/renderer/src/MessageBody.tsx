@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { MessageAttachment } from '../../shared/mail'
 import { findTrimIndex } from './mailTrim'
 
@@ -20,6 +20,8 @@ const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
 const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
 const TRIM_MARKER = 'data-attn-trim-start'
+const IMAGE_SOURCE_MARKER = 'data-attn-image-source'
+const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
 const RESET = `
@@ -95,7 +97,8 @@ function hasRenderableContentBefore(content: DocumentFragment, boundary: Element
 function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   if (!html.trim()) return null
   const clean = DOMPurify.sanitize(html, {
-    FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea'],
+    FORBID_TAGS: ['script', 'form', 'input', 'button', 'select', 'textarea'],
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
     ADD_TAGS: ['style'],
     ADD_ATTR: ['target'],
     FORCE_BODY: true
@@ -120,21 +123,21 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
 }
 
 function replaceImageSources(
-  html: string,
+  content: DocumentFragment,
   inlineImages: ReadonlyMap<string, string>,
   remoteImages: ReadonlyMap<string, string>
-): string {
-  if (!/<img/i.test(html)) return html
-  const parsed = new DOMParser().parseFromString(html, 'text/html')
-  parsed.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => {
+): void {
+  content.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => {
     const source = image.getAttribute('src')?.trim() ?? ''
     const isCid = source.toLowerCase().startsWith('cid:')
     const key = isCid ? normalizedContentId(source.slice(4)) : source
     const dataUrl = isCid ? inlineImages.get(key) : remoteImages.get(key)
     if (dataUrl) image.setAttribute('src', dataUrl)
-    else if (isCid) image.removeAttribute('src')
+    else if (isCid || /^https?:\/\//i.test(source)) {
+      image.setAttribute(IMAGE_SOURCE_MARKER, source)
+      image.removeAttribute('src')
+    }
   })
-  return `${parsed.head.innerHTML}${parsed.body.innerHTML}`
 }
 
 function normalizedContentId(value: string): string {
@@ -171,8 +174,9 @@ function makeSrcDoc(
   inlineImages: ReadonlyMap<string, string>,
   remoteImages: ReadonlyMap<string, string>
 ): string | null {
-  const template = sanitizeToTemplate(replaceImageSources(html, inlineImages, remoteImages))
+  const template = sanitizeToTemplate(html)
   if (!template) return null
+  replaceImageSources(template.content, inlineImages, remoteImages)
   const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
   const richLayoutStart = template.content.querySelector('table, style')
@@ -235,21 +239,27 @@ export function MessageBody({
 }: MessageBodyProps): React.JSX.Element {
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
-  const [inlineImages, setInlineImages] = useState<ReadonlyMap<string, string>>(new Map())
-  const [remoteImages, setRemoteImages] = useState<ReadonlyMap<string, string>>(new Map())
+  const [preparedHtml, setPreparedHtml] = useState<{ messageId: string; srcDoc: string | null } | null>(null)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
-  const srcDoc = useMemo(
-    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, inlineImages, remoteImages)),
-    [bodyHtml, inlineImages, remoteImages]
-  )
+  const attachmentsRef = useRef(attachments)
+  attachmentsRef.current = attachments
+  const srcDoc = preparedHtml?.messageId === messageId ? preparedHtml.srcDoc : null
+  const preparingHtml = bodyHtml !== null && preparedHtml?.messageId !== messageId
 
   useLayoutEffect(() => {
-    if (bodyHtml === null || !attn || !/cid:/i.test(bodyHtml)) return
-    setInlineImages(new Map())
+    if (bodyHtml === null) {
+      setPreparedHtml({ messageId, srcDoc: null })
+      return
+    }
+    if (!attn) {
+      setPreparedHtml({ messageId, srcDoc: makeSrcDoc(bodyHtml, EMPTY_IMAGES, EMPTY_IMAGES) })
+      return
+    }
+    setPreparedHtml(null)
     const references = cidReferences(bodyHtml)
-    const cidAttachments = attachments
+    const cidAttachments = attachmentsRef.current
       .filter((attachment) => attachment.mimeType.startsWith('image/'))
       .map((attachment) => {
         const filename = attachment.filename.toLowerCase()
@@ -259,43 +269,42 @@ export function MessageBody({
         return { attachment, contentIds }
       })
       .filter(({ contentIds }) => contentIds.length > 0)
-    if (cidAttachments.length === 0) return
+    const remoteReferences = remoteImageReferences(bodyHtml)
     let cancelled = false
-    void Promise.all(
-      cidAttachments.map(async ({ attachment, contentIds }) => {
-        const result = await attn.mail.getInlineImage({
-          messageId,
-          attachmentId: attachment.attachmentId,
-          mimeType: attachment.mimeType
+    void Promise.all([
+      Promise.all(
+        cidAttachments.map(async ({ attachment, contentIds }) => {
+          const result = await attn.mail.getInlineImage({
+            messageId,
+            attachmentId: attachment.attachmentId,
+            mimeType: attachment.mimeType
+          })
+          return 'dataUrl' in result
+            ? contentIds.map((contentId) => [contentId, result.dataUrl] as const)
+            : []
         })
-        return 'dataUrl' in result ? contentIds.map((contentId) => [contentId, result.dataUrl] as const) : []
+      ),
+      Promise.all(
+        remoteReferences.map(async (url) => {
+          const result = await attn.mail.getRemoteImage({ url })
+          return 'dataUrl' in result ? ([url, result.dataUrl] as const) : null
+        })
+      )
+    ]).then(([inlineResults, remoteResults]) => {
+      if (cancelled) return
+      setPreparedHtml({
+        messageId,
+        srcDoc: makeSrcDoc(
+          bodyHtml,
+          new Map(inlineResults.flat()),
+          new Map(remoteResults.filter((result) => result !== null))
+        )
       })
-    ).then((results) => {
-      if (!cancelled) setInlineImages(new Map(results.flat()))
     })
     return () => {
       cancelled = true
     }
-  }, [attachments, bodyHtml, messageId])
-
-  useLayoutEffect(() => {
-    setRemoteImages(new Map())
-    if (bodyHtml === null || !attn) return
-    const references = remoteImageReferences(bodyHtml)
-    if (references.length === 0) return
-    let cancelled = false
-    void Promise.all(
-      references.map(async (url) => {
-        const result = await attn.mail.getRemoteImage({ url })
-        return 'dataUrl' in result ? ([url, result.dataUrl] as const) : null
-      })
-    ).then((results) => {
-      if (!cancelled) setRemoteImages(new Map(results.filter((result) => result !== null)))
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [bodyHtml])
+  }, [bodyHtml, messageId])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
   const measurement = measuredFrame?.srcDoc === srcDoc ? measuredFrame : null
@@ -396,6 +405,10 @@ export function MessageBody({
       disconnect()
     }
   }, [disconnect, observe, oversized, srcDoc])
+
+  if (preparingHtml) {
+    return <div data-testid="html-body-loading" className="min-h-24 bg-white" />
+  }
 
   if (srcDoc === null || oversized) {
     const lightSurface = bodyHtml !== null

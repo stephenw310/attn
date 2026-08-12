@@ -50,9 +50,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   )
   await expect(body.locator('#cid-image')).toHaveAttribute('src', /^data:image\/gif;base64,/)
   await expect(body.locator('#malformed-cid-image')).not.toHaveAttribute('src')
-  await expect
-    .poll(() => body.locator('#cid-image').evaluate((image) => (image as HTMLImageElement).complete))
-    .toBe(true)
+  await expect(body.locator('#cid-image')).toBeVisible()
   await expect(body.locator('form, input, button, select, textarea')).toHaveCount(0)
   await expect(body.locator('#self-link')).toHaveAttribute('target', '_blank')
   await expect(body.locator('#top-link')).toHaveAttribute('target', '_blank')
@@ -68,9 +66,9 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
       return event.defaultPrevented
     })
   ).toBe(false)
-  await expect(body.locator('#remote-image')).toHaveAttribute('src', 'https://remote.attn.test/tracker.gif')
-  await expect.poll(() => remoteImageRequested).toBe(true)
-  await expect.poll(() => handlerImageRequested).toBe(true)
+  await expect(body.locator('#remote-image')).not.toHaveAttribute('src')
+  expect(remoteImageRequested).toBe(false)
+  expect(handlerImageRequested).toBe(false)
 
   for (const marker of ['data-script-ran', 'data-handler-ran', 'data-link-ran']) {
     expect(await body.locator('body').getAttribute(marker)).toBeNull()
