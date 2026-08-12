@@ -22,6 +22,7 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
 
   await rows.nth(2).click({ modifiers: ['Shift'] })
   await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('')
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('selection-count')).toHaveCount(0)
   await page.keyboard.press('k')
@@ -66,6 +67,78 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
   await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
   await expect(rows.filter({ hasText: 'Your receipt' })).toHaveCount(1)
   await expect(rows.filter({ hasText: 'Design notes' })).toHaveCount(1)
+})
+
+test('extends disjoint selections without dropping earlier rows', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('x')
+  await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+j')
+
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+  await expect(rows.nth(0)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(1)).not.toHaveAttribute('data-checked')
+  await expect(rows.nth(2)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(3)).toHaveAttribute('data-checked', 'true')
+})
+
+test('keeps the range anchor selected when toggling a row off', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+j')
+  await page.keyboard.press('Shift+j')
+  await page.keyboard.press('x')
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+
+  await page.keyboard.press('Shift+k')
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+  await expect(rows.nth(0)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(1)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(2)).not.toHaveAttribute('data-checked')
+})
+
+test('keeps the range anchor on its thread when undo reorders the list', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('e')
+  await expect(rows).toHaveCount(7)
+  await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+
+  await page.keyboard.press('z')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+  await expect(rows.nth(2)).not.toHaveAttribute('data-checked')
+  await expect(rows.nth(3)).toHaveAttribute('data-checked', 'true')
+  await expect(rows.nth(4)).toHaveAttribute('data-checked', 'true')
+})
+
+test('derives bulk star and unread direction from the selected rows', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  await expect(rows.nth(2).getByTitle('Starred')).toBeVisible()
+  await page.keyboard.press('x')
+  await page.keyboard.press('k')
+  await page.keyboard.press('k')
+  await page.keyboard.press('s')
+  await expect(rows.nth(2).getByTitle('Starred')).toHaveCount(0)
+
+  await page.keyboard.press('j')
+  await expect(rows.nth(1)).not.toHaveAttribute('data-unread')
+  await page.keyboard.press('x')
+  await page.keyboard.press('k')
+  await page.keyboard.press('u')
+  await expect(rows.nth(1)).toHaveAttribute('data-unread', 'true')
 })
 
 test('toggles star and unread, then trashes', async ({ page }) => {

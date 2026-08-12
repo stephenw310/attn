@@ -609,7 +609,7 @@ export default function App(): React.JSX.Element {
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
-  const [selectionAnchorIndex, setSelectionAnchorIndex] = useState<number | null>(null)
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null)
   const [paneOpen, setPaneOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
@@ -646,7 +646,7 @@ export default function App(): React.JSX.Element {
     setRealUnreadTotal(null)
     setSelectedIndex(0)
     setSelectedIds(new Set())
-    setSelectionAnchorIndex(null)
+    setSelectionAnchorId(null)
     setPaneOpen(false)
     setPendingCount(0)
     setMockReadIds(new Set())
@@ -698,19 +698,29 @@ export default function App(): React.JSX.Element {
     // conversation. Revisit when mail:changed can fire mid-read.
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
     setSelectedIds((current) => {
+      if (current.size === 0) return current
       const visibleIds = new Set(threads.map((thread) => thread.id))
       const next = new Set([...current].filter((id) => visibleIds.has(id)))
       if (next.size === current.size) return current
-      if (next.size === 0) setSelectionAnchorIndex(null)
       return next
     })
-    setSelectionAnchorIndex((anchor) =>
-      anchor === null ? null : Math.max(0, Math.min(anchor, Math.max(threads.length - 1, 0)))
-    )
     if (threads.length === 0) setPaneOpen(false)
   }, [threads])
 
+  useEffect(() => {
+    setSelectionAnchorId((anchor) => {
+      if (anchor !== null && selectedIds.has(anchor) && threads.some((thread) => thread.id === anchor)) {
+        return anchor
+      }
+      return threads.find((thread) => selectedIds.has(thread.id))?.id ?? null
+    })
+  }, [selectedIds, threads])
+
   const selected: DisplayThread | undefined = threads[selectedIndex]
+  const targetedThreads =
+    selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
+  const starOn = targetedThreads.some((thread) => !thread.starred)
+  const markUnreadOn = targetedThreads.some((thread) => !thread.unread)
 
   useEffect(() => {
     if (!selected) {
@@ -768,34 +778,41 @@ export default function App(): React.JSX.Element {
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set())
-    setSelectionAnchorIndex(null)
+    setSelectionAnchorId(null)
   }, [])
 
   const toggleFocusedSelection = useCallback(() => {
     const thread = threads[selectedIndex]
     if (!thread) return
-    setSelectionAnchorIndex(selectedIndex)
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (next.has(thread.id)) next.delete(thread.id)
-      else next.add(thread.id)
-      if (next.size === 0) setSelectionAnchorIndex(null)
-      return next
-    })
-  }, [selectedIndex, threads])
+    const next = new Set(selectedIds)
+    const isAdding = !next.has(thread.id)
+    if (isAdding) next.add(thread.id)
+    else next.delete(thread.id)
+    setSelectedIds(next)
+    if (isAdding) setSelectionAnchorId(thread.id)
+    else if (next.size === 0) setSelectionAnchorId(null)
+    else if (selectionAnchorId === thread.id) {
+      setSelectionAnchorId(threads.find((candidate) => next.has(candidate.id))?.id ?? null)
+    }
+  }, [selectedIds, selectedIndex, selectionAnchorId, threads])
 
   const extendSelectionTo = useCallback(
     (nextIndex: number) => {
       if (threads.length === 0) return
       const clampedIndex = Math.max(0, Math.min(nextIndex, threads.length - 1))
-      const anchor = selectionAnchorIndex ?? selectedIndex
-      const start = Math.min(anchor, clampedIndex)
-      const end = Math.max(anchor, clampedIndex)
-      setSelectionAnchorIndex(anchor)
-      setSelectedIds(new Set(threads.slice(start, end + 1).map((thread) => thread.id)))
+      const storedAnchorIndex = selectionAnchorId
+        ? threads.findIndex((thread) => thread.id === selectionAnchorId)
+        : -1
+      const anchorIndex = storedAnchorIndex >= 0 ? storedAnchorIndex : selectedIndex
+      const start = Math.min(anchorIndex, clampedIndex)
+      const end = Math.max(anchorIndex, clampedIndex)
+      const next = new Set(selectedIds)
+      for (const thread of threads.slice(start, end + 1)) next.add(thread.id)
+      setSelectedIds(next)
+      setSelectionAnchorId(threads[anchorIndex]?.id ?? null)
       setSelectedIndex(clampedIndex)
     },
-    [selectedIndex, selectionAnchorIndex, threads]
+    [selectedIds, selectedIndex, selectionAnchorId, threads]
   )
 
   const triage = useCallback(
@@ -805,7 +822,7 @@ export default function App(): React.JSX.Element {
       const targetedAction = {
         ...action,
         threadIds: isBulk ? [...selectedIds] : action.threadIds
-      } as TriageAction
+      }
       if (isBulk) clearSelection()
       void attn.mail
         .triage(targetedAction)
@@ -938,18 +955,17 @@ export default function App(): React.JSX.Element {
         },
         {
           id: 'triage.star',
-          title: selected?.starred ? 'Unstar' : 'Star',
+          title: starOn ? 'Star' : 'Unstar',
           shortcut: 's',
           context: 'list',
-          run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: !selected.starred })
+          run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: starOn })
         },
         {
           id: 'triage.unread',
-          title: selected?.unread ? 'Mark read' : 'Mark unread',
+          title: markUnreadOn ? 'Mark unread' : 'Mark read',
           shortcut: 'u',
           context: 'list',
-          run: () =>
-            selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: !selected.unread })
+          run: () => selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: markUnreadOn })
         },
         {
           id: 'triage.undo',
@@ -973,10 +989,12 @@ export default function App(): React.JSX.Element {
       openSelected,
       paneOpen,
       realMode,
+      markUnreadOn,
       selected,
       selectedIds.size,
       selectedIndex,
       showToast,
+      starOn,
       threads.length,
       toggleFocusedSelection,
       triage
@@ -1122,7 +1140,7 @@ export default function App(): React.JSX.Element {
                 data-selected={isSelected || undefined}
                 data-checked={isChecked || undefined}
                 data-unread={isUnread || undefined}
-                className={`cursor-default border-l-[3px] ${
+                className={`cursor-default select-none border-l-[3px] ${
                   paneOpen
                     ? 'grid grid-cols-[16px_1fr_auto] gap-x-2 px-3 py-2.5'
                     : 'flex items-center gap-3.5 py-[11px] pr-7 pl-5'

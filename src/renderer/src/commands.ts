@@ -37,8 +37,10 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
   if (expectedKey !== normalizedKey(event)) return false
   if (expectsShift) return event.shiftKey
 
-  // Shift is part of the keystroke for printable symbols such as # and !, but
-  // it must distinguish J/K navigation from Shift+J/K range selection.
+  // Shift is part of the keystroke for printable symbols such as # and !, but it
+  // distinguishes J/K navigation from Shift+J/K range selection. Bare-letter
+  // shortcuts deliberately decline Shift so that namespace stays reserved for
+  // future combinations without changing muscle memory later.
   const isLetter = /^[a-z]$/.test(expectedKey)
   return !isLetter || !event.shiftKey
 }
