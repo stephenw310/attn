@@ -440,7 +440,7 @@ Unit suite covers the planner + reconciliation; manual smoke checklist executed 
 
 - New `src/main/background.ts` owning: quit flag, window close→hide (win32), tray construction (win32), login-item registration, and a `showMainWindow()` used by tray/activate/second-instance/notification-click (T9).
 - `createWindow` gains a `show` option; keep the `ready-to-show` handler but respect hidden launches.
-- Tray icon asset: `resources/tray.png` (16 + 32px, simple amber-dot-on-graphite glyph consistent with D6); load via electron-vite `?asset` import.
+- Tray icon asset: `resources/tray.png` (32px rendition of the Attn app icon); load via electron-vite `?asset` import. Platform packaging masters live beside it as `icon.png`, `icon.icns`, and `icon.ico`.
 - **e2e pitfall (important):** with quit-on-close gone, Playwright's `app.close()` can hang waiting for exit. Update the `boot` fixture teardown to `await app.evaluate(({ app }) => app.quit())` before `close()`. Do this in *this* PR — it's this PR's behavior change. Verify the whole suite still tears down cleanly.
 
 ### Testing

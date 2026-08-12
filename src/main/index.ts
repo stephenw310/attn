@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
+import appIcon from '../../resources/icon.png?asset'
 import type { AuthStatus } from '../shared/auth'
 import type {
   DownloadAttachmentRequest,
@@ -515,6 +516,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     height: 820,
     minWidth: 900,
     minHeight: 600,
+    icon: appIcon,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -575,6 +577,7 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
+    if (process.platform === 'darwin') app.dock?.setIcon(appIcon)
     const dbPath = join(app.getPath('userData'), 'attn.db')
     db = openDatabase(dbPath)
     console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
