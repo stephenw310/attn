@@ -39,6 +39,7 @@ test('boots the built app with an isolated store and working IPC bridge', async 
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(0)
   expect(await page.evaluate(() => window.attn.mail.getConversation('no-such-thread'))).toBeNull()
   expect(await page.evaluate(() => window.attn.sync.getState())).toEqual({ phase: 'idle' })
+  expect(mainLog()).not.toContain('[sync] history poller started')
 })
 
 test('renders the signed-out Dispatch inbox', async ({ page }) => {

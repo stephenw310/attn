@@ -1,0 +1,50 @@
+[
+  {
+    "id": "9007199254740993",
+    "labelsAdded": [
+      {
+        "message": { "id": "m-label-add", "threadId": "t-label", "labelIds": ["STARRED"] },
+        "labelIds": ["STARRED"]
+      }
+    ]
+  },
+  {
+    "id": "9007199254740994",
+    "labelsRemoved": [
+      {
+        "message": { "id": "m-label-remove", "threadId": "t-label", "labelIds": [] },
+        "labelIds": ["INBOX"]
+      }
+    ],
+    "messagesDeleted": [{ "message": { "id": "m-deleted", "threadId": "t-deleted" } }]
+  },
+  {
+    "id": "9007199254740995",
+    "messagesAdded": [
+      {
+        "message": {
+          "id": "m-inbound",
+          "threadId": "t-inbound",
+          "labelIds": ["INBOX", "UNREAD"]
+        }
+      },
+      {
+        "message": {
+          "id": "m-self",
+          "threadId": "t-self",
+          "labelIds": ["INBOX", "UNREAD", "SENT"]
+        }
+      },
+      {
+        "message": { "id": "m-read", "threadId": "t-read", "labelIds": ["INBOX"] }
+      },
+      {
+        "message": {
+          "id": "m-inbound",
+          "threadId": "t-inbound",
+          "labelIds": ["INBOX", "UNREAD"]
+        }
+      }
+    ]
+  }
+]

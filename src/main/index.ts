@@ -15,6 +15,7 @@ import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
 import { runInboxBackfill } from './sync/backfill'
+import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
 // token store. Must be set before requestSingleInstanceLock() so concurrent
@@ -45,6 +46,7 @@ let syncRunning = false
 let authSessionGeneration = 0
 let seedAccountId: string | null = null
 let actionExecutor: ActionExecutor | null = null
+let historyPoller: HistoryPoller | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -77,29 +79,35 @@ function currentAccountId(): string | null {
 }
 
 function startSync(): void {
-  if (!db || syncRunning || seedAccountId) return
+  if (!db || syncRunning || seedAccountId || historyPoller) return
   const generation = authSessionGeneration
-  const client = makeClient(generation)
-  if (!client) return
+  const accountId = currentAccountId()
+  const provider = makeProvider()
+  if (!accountId) return
+  if (!provider) {
+    const message = 'OAuth configuration unavailable — add oauth.config.json'
+    setSyncState({ phase: 'error', message })
+    console.error(`[sync] failed: ${message}`)
+    return
+  }
+  const state = db.prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
+    | { backfill_cursor: string | null }
+    | undefined
+  if (state?.backfill_cursor === 'done') {
+    startHistoryPoller(accountId, provider, generation)
+    return
+  }
   syncRunning = true
   setSyncState({ phase: 'syncing', threadsDone: 0 })
   console.log('[sync] inbox backfill started')
-  void runInboxBackfill(db, client, {
-    onProgress: (n) => {
+  const activeDb = db
+  void runInboxBackfill(activeDb, provider, {
+    onProgress: (threadsDone) => {
       if (generation !== authSessionGeneration) return
-      setSyncState({ phase: 'syncing', threadsDone: n })
+      setSyncState({ phase: 'syncing', threadsDone })
       broadcast('mail:changed')
     },
-    onDone: (accountId, count) => {
-      syncRunning = false
-      if (generation !== authSessionGeneration) {
-        if (authStatus().signedIn) void resumeOnlineWork()
-        return
-      }
-      setSyncState({ phase: 'idle' })
-      broadcast('mail:changed')
-      console.log(`[sync] backfill done: ${count} inbox threads for ${accountId}`)
-    },
+    onDone: () => {},
     onError: (message) => {
       syncRunning = false
       if (generation !== authSessionGeneration) {
@@ -109,15 +117,83 @@ function startSync(): void {
       setSyncState({ phase: 'error', message })
       console.error(`[sync] failed: ${message}`)
     }
+  }).then((result) => {
+    syncRunning = false
+    if (!result) return
+    if (generation !== authSessionGeneration) {
+      if (authStatus().signedIn) void resumeOnlineWork()
+      return
+    }
+    reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+    setSyncState({ phase: 'idle' })
+    broadcast('mail:changed')
+    console.log(`[sync] backfill done: ${result.threadCount} inbox threads for ${accountId}`)
+    startHistoryPoller(accountId, provider, generation)
   })
 }
 
+function startHistoryPoller(accountId: string, provider: GmailMailProvider, generation: number): void {
+  if (!db || generation !== authSessionGeneration || historyPoller) return
+  const activeDb = db
+  historyPoller = new HistoryPoller({
+    db: activeDb,
+    accountId,
+    provider,
+    isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
+    recoverExpiredHistory: async () => {
+      if (generation !== authSessionGeneration) throw new Error('authentication session changed')
+      syncRunning = true
+      setSyncState({ phase: 'syncing', threadsDone: 0 })
+      const result = await runInboxBackfill(
+        activeDb,
+        provider,
+        {
+          onProgress: (threadsDone) => {
+            if (generation === authSessionGeneration) {
+              setSyncState({ phase: 'syncing', threadsDone })
+            }
+          },
+          onDone: () => {},
+          onError: () => {}
+        },
+        { restart: true }
+      )
+      syncRunning = false
+      if (!result) throw new Error('history recovery backfill failed')
+      reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+    },
+    onChanged: () => {
+      if (generation !== authSessionGeneration) return
+      setSyncState({ phase: 'idle' })
+      broadcast('mail:changed')
+    },
+    onError: (message) => {
+      if (generation !== authSessionGeneration) return
+      syncRunning = false
+      setSyncState({ phase: 'error', message })
+      console.error(`[sync] history poll failed: ${message}`)
+    },
+    // T6 supplies wakeThread when its snooze scheduler lands.
+    kickExecutor: () => {
+      if (pendingActionCount(activeDb, accountId) > 0) void actionExecutor?.trigger()
+    }
+  })
+  historyPoller.start()
+}
+
+function stopHistoryPoller(): void {
+  historyPoller?.stop()
+  historyPoller = null
+}
+
 async function resumeOnlineWork(): Promise<void> {
+  // Remote changes must keep flowing even when a queued local action is in
+  // Gmail's retry/backoff loop. The executor and history poller are independent.
+  if (authStatus().signedIn) startSync()
   await actionExecutor?.trigger()
   // A sign-out/account switch can make an active drain finish early. A second
-  // pass picks up the newly active account before its server snapshot starts.
+  // pass picks up the newly active account.
   await actionExecutor?.trigger()
-  if (authStatus().signedIn) startSync()
 }
 
 function oauthSearchDirs(): string[] {
@@ -160,6 +236,7 @@ function registerIpc(): void {
     signInInFlight = true
     try {
       const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
+      stopHistoryPoller()
       authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
@@ -176,6 +253,7 @@ function registerIpc(): void {
   ipcMain.handle('auth:signOut', () => {
     const account = currentAccountId()
     cancelActiveSignIn()
+    stopHistoryPoller()
     authSessionGeneration++
     seedAccountId = null
     clearTokens(app.getPath('userData'))
@@ -349,6 +427,7 @@ if (!gotLock) {
   app.on('window-all-closed', () => {})
 
   app.on('will-quit', () => {
+    stopHistoryPoller()
     actionExecutor?.stop()
     actionExecutor = null
     db?.close()

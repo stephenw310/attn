@@ -141,3 +141,12 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
   })()
   replayPendingThreadDeltas(db, accountId, thread.id)
 }
+
+/** Remove a thread snapshot that Gmail reports as no longer existing. */
+export function deleteThread(db: Db, accountId: string, threadId: string): void {
+  db.transaction(() => {
+    db.prepare('DELETE FROM thread_labels WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
+    db.prepare('DELETE FROM messages WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
+    db.prepare('DELETE FROM threads WHERE account_id = ? AND id = ?').run(accountId, threadId)
+  })()
+}

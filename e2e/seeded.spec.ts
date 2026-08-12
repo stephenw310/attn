@@ -20,6 +20,7 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
     'I added the launch milestones and owner notes.'
   )
   await expect.poll(mainLog).toContain('[seed] loaded 8 threads for seed@attn.test')
+  expect(mainLog()).not.toContain('[sync] history poller started')
 })
 
 test('relaunches against persisted seeded data without importing again', async ({ boot }) => {

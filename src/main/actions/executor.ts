@@ -1,6 +1,6 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
-import type { MailProvider } from '../sync/provider'
+import type { MailActionProvider } from '../sync/provider'
 import { executeIntent, isPermanentActionError, type QueueIntent, retryDelayMs } from './execute'
 
 interface QueueRow {
@@ -19,7 +19,7 @@ export class ActionExecutor {
   constructor(
     private readonly db: Db,
     private readonly accountId: () => string | null,
-    private readonly provider: () => MailProvider | null,
+    private readonly provider: () => MailActionProvider | null,
     private readonly notify: () => void = () => {}
   ) {
     db.prepare("UPDATE action_queue SET state = 'pending' WHERE state = 'inflight'").run()

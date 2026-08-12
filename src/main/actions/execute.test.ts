@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { GmailApiError } from '../gmail/client'
-import type { MailProvider } from '../sync/provider'
+import type { MailActionProvider } from '../sync/provider'
 import { executeIntent, isPermanentActionError, retryDelayMs } from './execute'
 
 describe('queue intent execution', () => {
   it('routes each intent to the provider endpoint abstraction', async () => {
-    const provider: MailProvider = {
+    const provider = {
       modifyThread: vi.fn(async () => {}),
       trashThread: vi.fn(async () => {}),
       untrashThread: vi.fn(async () => {})
-    }
+    } satisfies MailActionProvider
     await executeIntent(provider, { kind: 'modifyLabels', threadId: 't1', add: ['STARRED'], remove: [] })
     await executeIntent(provider, { kind: 'trash', threadId: 't2' })
     await executeIntent(provider, { kind: 'untrash', threadId: 't3' })
