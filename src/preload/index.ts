@@ -5,6 +5,8 @@ import type {
   Conversation,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
+  MailLabel,
+  SnoozedThreadRow,
   SyncState,
   ThreadRow
 } from '../shared/mail'
@@ -18,12 +20,16 @@ const api = {
   },
   mail: {
     listThreads: (): Promise<ThreadRow[]> => ipcRenderer.invoke('mail:listThreads'),
+    listSnoozed: (): Promise<SnoozedThreadRow[]> => ipcRenderer.invoke('mail:listSnoozed'),
+    listLabels: (): Promise<MailLabel[]> => ipcRenderer.invoke('mail:listLabels'),
     getUnreadCount: (): Promise<number> => ipcRenderer.invoke('mail:getUnreadCount'),
     getConversation: (threadId: string): Promise<Conversation | null> =>
       ipcRenderer.invoke('mail:getConversation', threadId),
     downloadAttachment: (request: DownloadAttachmentRequest): Promise<DownloadAttachmentResult> =>
       ipcRenderer.invoke('mail:downloadAttachment', request),
     triage: (action: TriageAction): Promise<TriageResult> => ipcRenderer.invoke('mail:triage', action),
+    snooze: (threadIds: string[], dueAt: number): Promise<TriageResult> =>
+      ipcRenderer.invoke('mail:snooze', { threadIds, dueAt }),
     markReadOnOpen: (threadId: string): Promise<void> => ipcRenderer.invoke('mail:markReadOnOpen', threadId),
     undo: (): Promise<TriageResult | null> => ipcRenderer.invoke('mail:undo'),
     getPendingActionCount: (): Promise<number> => ipcRenderer.invoke('mail:getPendingActionCount'),

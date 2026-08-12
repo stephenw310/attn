@@ -104,5 +104,19 @@ export const migrations: string[] = [
   ALTER TABLE messages ADD COLUMN body_html TEXT;
   ALTER TABLE messages ADD COLUMN recipients_json TEXT;
   ALTER TABLE messages ADD COLUMN attachments_json TEXT;
+  `,
+
+  // v6 — local snooze reminders and catch-up scheduling (M1 T6).
+  `
+  CREATE TABLE reminders (
+    account_id TEXT NOT NULL,
+    thread_id  TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'snooze',
+    due_at     INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    state      TEXT NOT NULL DEFAULT 'pending',
+    PRIMARY KEY (account_id, thread_id, kind)
+  );
+  CREATE INDEX idx_reminders_due ON reminders (account_id, state, due_at);
   `
 ]

@@ -1,19 +1,35 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
 import type { DownloadAttachmentRequest, DownloadAttachmentResult, SyncState } from '../shared/mail'
-import { clearUndo, isTriageAction, pendingActionCount, performTriage, undoLast } from './actions'
+import {
+  clearUndo,
+  isTriageAction,
+  pendingActionCount,
+  performTriage,
+  snoozeThreads,
+  undoLast
+} from './actions'
 import { ActionExecutor } from './actions/executor'
 import { writeAttachment } from './attachments'
+import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { type Db, openDatabase, schemaVersion } from './db'
-import { countInboxUnread, getConversation, getInlineAttachmentData, listInboxThreads } from './db/queries'
+import {
+  countInboxUnread,
+  getConversation,
+  getInlineAttachmentData,
+  listInboxThreads,
+  listSnoozedThreads,
+  listUserLabels
+} from './db/queries'
 import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
+import { SnoozeScheduler } from './scheduler'
 import { runInboxBackfill } from './sync/backfill'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
 
@@ -47,6 +63,7 @@ let authSessionGeneration = 0
 let seedAccountId: string | null = null
 let actionExecutor: ActionExecutor | null = null
 let historyPoller: HistoryPoller | null = null
+let snoozeScheduler: SnoozeScheduler | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -192,7 +209,9 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
       setSyncState({ phase: 'error', message })
       console.error(`[sync] history poll failed: ${message}`)
     },
-    // T6 supplies wakeThread when its snooze scheduler lands.
+    wakeThread: (threadId) => {
+      snoozeScheduler?.wakeThread(threadId)
+    },
     kickExecutor: () => {
       if (pendingActionCount(activeDb, accountId) > 0) void actionExecutor?.trigger()
     }
@@ -217,10 +236,8 @@ async function resumeOnlineWork(): Promise<void> {
 
 function oauthSearchDirs(): string[] {
   // Under e2e, only the isolated dir — a developer's real oauth.config.json in
-  // the project root must never leak into test runs.
-  if (testUserData) return [app.getPath('userData')]
-  // Project root in dev; userData for a packaged build.
-  return [app.getAppPath(), app.getPath('userData')]
+  // either checkout must never leak into test runs.
+  return oauthConfigSearchDirs(app.getAppPath(), app.getPath('userData'), Boolean(testUserData))
 }
 
 function authStatus(): AuthStatus {
@@ -259,6 +276,7 @@ function registerIpc(): void {
       authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
       console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
+      snoozeScheduler?.refresh()
       void resumeOnlineWork()
     } catch (e) {
       console.error('[auth] sign-in failed:', e instanceof Error ? e.message : e)
@@ -277,6 +295,7 @@ function registerIpc(): void {
     seedAccountId = null
     clearTokens(app.getPath('userData'))
     clearUndo(account ?? undefined)
+    snoozeScheduler?.refresh()
     // A stale backfill may finish caching locally, but its generation can no
     // longer persist refreshed tokens or publish state for the signed-out user.
     setSyncState({ phase: 'idle' })
@@ -289,6 +308,16 @@ function registerIpc(): void {
     if (!db) return []
     const account = currentAccountId()
     return account ? listInboxThreads(db, account) : []
+  })
+  ipcMain.handle('mail:listSnoozed', () => {
+    if (!db) return []
+    const account = currentAccountId()
+    return account ? listSnoozedThreads(db, account) : []
+  })
+  ipcMain.handle('mail:listLabels', () => {
+    if (!db) return []
+    const account = currentAccountId()
+    return account ? listUserLabels(db, account) : []
   })
   ipcMain.handle('mail:getUnreadCount', () => {
     if (!db) return 0
@@ -339,6 +368,28 @@ function registerIpc(): void {
     const account = currentAccountId()
     if (!account) throw new Error('not signed in')
     const result = performTriage(db, account, action)
+    snoozeScheduler?.refresh()
+    broadcast('mail:changed')
+    void actionExecutor?.trigger()
+    return result
+  })
+  ipcMain.handle('mail:snooze', (_e, input: unknown) => {
+    if (!db) throw new Error('database unavailable')
+    if (!input || typeof input !== 'object') throw new Error('invalid snooze request')
+    const { threadIds, dueAt } = input as Record<string, unknown>
+    if (
+      !Array.isArray(threadIds) ||
+      threadIds.length === 0 ||
+      !threadIds.every((id) => typeof id === 'string' && id.length > 0) ||
+      typeof dueAt !== 'number' ||
+      !Number.isFinite(dueAt)
+    ) {
+      throw new Error('invalid snooze request')
+    }
+    const account = currentAccountId()
+    if (!account) throw new Error('not signed in')
+    const result = snoozeThreads(db, account, threadIds, dueAt)
+    snoozeScheduler?.refresh()
     broadcast('mail:changed')
     void actionExecutor?.trigger()
     return result
@@ -349,9 +400,21 @@ function registerIpc(): void {
     }
     const account = currentAccountId()
     if (!account) throw new Error('not signed in')
-    performTriage(db, account, { kind: 'markUnread', threadIds: [threadId], on: false }, false)
-    broadcast('mail:changed')
-    void actionExecutor?.trigger()
+    const thread = db
+      .prepare('SELECT is_unread FROM threads WHERE account_id = ? AND id = ?')
+      .get(account, threadId) as { is_unread: number } | undefined
+    const settled = db
+      .prepare(
+        `UPDATE reminders SET state = 'done'
+       WHERE account_id = ? AND thread_id = ? AND kind = 'snooze' AND state = 'returned'`
+      )
+      .run(account, threadId).changes
+    const markedRead = thread?.is_unread === 1
+    if (markedRead) {
+      performTriage(db, account, { kind: 'markUnread', threadIds: [threadId], on: false }, false)
+      void actionExecutor?.trigger()
+    }
+    if (settled || markedRead) broadcast('mail:changed')
   })
   ipcMain.handle('mail:undo', () => {
     if (!db) return null
@@ -359,6 +422,7 @@ function registerIpc(): void {
     if (!account) return null
     const result = undoLast(db, account)
     if (result) {
+      snoozeScheduler?.refresh()
       broadcast('mail:changed')
       void actionExecutor?.trigger()
     }
@@ -435,21 +499,36 @@ if (!gotLock) {
 
     registerIpc()
     actionExecutor = new ActionExecutor(db, currentAccountId, makeProvider, () => broadcast('mail:changed'))
+    snoozeScheduler = new SnoozeScheduler(
+      db,
+      currentAccountId,
+      () => broadcast('mail:changed'),
+      () => void actionExecutor?.trigger()
+    )
+    snoozeScheduler.start()
+    powerMonitor.on('resume', refreshSnoozesAfterResume)
     const { startHidden } = initializeBackground(db, createWindow)
     createWindow({ show: !startHidden })
     if (authStatus().signedIn) void resumeOnlineWork()
     app.on('activate', () => showMainWindow())
   })
 
-  // Deliberately keep the process alive with no windows so sync, snooze timers,
-  // and notifications continue running in the background on every platform.
+  // Deliberately keep the process alive with no windows so sync and
+  // notifications continue running in the background on every platform.
   app.on('window-all-closed', () => {})
 
   app.on('will-quit', () => {
     stopHistoryPoller()
+    powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
     actionExecutor?.stop()
     actionExecutor = null
+    snoozeScheduler?.stop()
+    snoozeScheduler = null
     db?.close()
     db = null
   })
+}
+
+function refreshSnoozesAfterResume(): void {
+  snoozeScheduler?.refresh()
 }

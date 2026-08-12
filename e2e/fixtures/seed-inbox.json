@@ -1,6 +1,20 @@
 {
   "account": "seed@attn.test",
-  "labels": [{ "id": "Label_1", "name": "receipts", "type": "user" }],
+  "labels": [
+    { "id": "Label_1", "name": "receipts", "type": "user" },
+    { "id": "Label_2", "name": "projects", "type": "user" },
+    { "id": "Label_3", "name": "clients", "type": "user" },
+    { "id": "Label_4", "name": "design", "type": "user" },
+    { "id": "Label_5", "name": "engineering", "type": "user" },
+    { "id": "Label_6", "name": "finance", "type": "user" },
+    { "id": "Label_7", "name": "follow-up", "type": "user" },
+    { "id": "Label_8", "name": "hiring", "type": "user" },
+    { "id": "Label_9", "name": "legal", "type": "user" },
+    { "id": "Label_10", "name": "marketing", "type": "user" },
+    { "id": "Label_11", "name": "personal", "type": "user" },
+    { "id": "Label_12", "name": "travel", "type": "user" },
+    { "id": "STARRED", "name": "Starred", "type": "system" }
+  ],
   "threads": [
     {
       "id": "t-roadmap",
@@ -61,7 +75,7 @@
       "messages": [
         {
           "id": "m-design",
-          "labelIds": ["INBOX", "UNREAD", "STARRED"],
+          "labelIds": ["INBOX", "UNREAD", "STARRED", "Label_2"],
           "internalDate": "1754600000000",
           "from": "Theo Park <theo@example.com>",
           "to": "seed@attn.test",
