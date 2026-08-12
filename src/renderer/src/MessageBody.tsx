@@ -20,8 +20,7 @@ const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
 const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
 const TRIM_MARKER = 'data-attn-trim-start'
-const IMAGE_SOURCE_MARKER = 'data-attn-image-source'
-const REMOTE_IMAGE_CONCURRENCY = 6
+const CID_SOURCE_MARKER = 'data-attn-cid-source'
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
@@ -127,20 +126,15 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   return template
 }
 
-function replaceImageSources(
-  content: DocumentFragment,
-  inlineImages: ReadonlyMap<string, string>,
-  remoteImages: ReadonlyMap<string, string>
-): void {
+function replaceCidSources(content: DocumentFragment, inlineImages: ReadonlyMap<string, string>): void {
   content.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => {
     const source = image.getAttribute('src')?.trim() ?? ''
-    const isCid = source.toLowerCase().startsWith('cid:')
-    const key = isCid ? normalizedContentId(source.slice(4)) : source
-    const dataUrl = isCid ? inlineImages.get(key) : remoteImages.get(key)
+    if (!source.toLowerCase().startsWith('cid:')) return
+    const dataUrl = inlineImages.get(normalizedContentId(source.slice(4)))
     if (dataUrl) image.setAttribute('src', dataUrl)
-    else if (isCid || /^https?:\/\//i.test(source)) {
-      image.setAttribute(IMAGE_SOURCE_MARKER, source)
-      if (isCid) image.removeAttribute('src')
+    else {
+      image.setAttribute(CID_SOURCE_MARKER, source)
+      image.removeAttribute('src')
     }
   })
 }
@@ -162,26 +156,10 @@ function cidReferences(html: string): string[] {
     .map((source) => normalizedContentId(source.slice(4)))
 }
 
-function remoteImageReferences(html: string): string[] {
-  if (!/<img/i.test(html)) return []
-  const parsed = new DOMParser().parseFromString(html, 'text/html')
-  return [
-    ...new Set(
-      [...parsed.querySelectorAll<HTMLImageElement>('img[src]')]
-        .map((image) => image.getAttribute('src')?.trim() ?? '')
-        .filter((source) => /^https?:\/\//i.test(source))
-    )
-  ]
-}
-
-function makeSrcDoc(
-  html: string,
-  inlineImages: ReadonlyMap<string, string>,
-  remoteImages: ReadonlyMap<string, string>
-): string | null {
+function makeSrcDoc(html: string, inlineImages: ReadonlyMap<string, string>): string | null {
   const template = sanitizeToTemplate(html)
   if (!template) return null
-  replaceImageSources(template.content, inlineImages, remoteImages)
+  replaceCidSources(template.content, inlineImages)
   const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
   if (trimStart) {
@@ -241,28 +219,24 @@ export function MessageBody({
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
   const attachmentsRef = useRef(attachments)
-  const resolvedImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
+  const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
   attachmentsRef.current = attachments
-  const srcDoc = useMemo(
-    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, EMPTY_IMAGES)),
-    [bodyHtml]
-  )
+  const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES)), [bodyHtml])
 
-  const applyResolvedImages = useCallback(() => {
+  const applyInlineImages = useCallback(() => {
     const doc = frameRef.current?.contentDocument
     if (!doc) return
-    doc.querySelectorAll<HTMLImageElement>(`img[${IMAGE_SOURCE_MARKER}]`).forEach((image) => {
-      const source = image.getAttribute(IMAGE_SOURCE_MARKER)?.trim() ?? ''
-      const key = source.toLowerCase().startsWith('cid:') ? normalizedContentId(source.slice(4)) : source
-      const dataUrl = resolvedImagesRef.current.get(key)
+    doc.querySelectorAll<HTMLImageElement>(`img[${CID_SOURCE_MARKER}]`).forEach((image) => {
+      const source = image.getAttribute(CID_SOURCE_MARKER)?.trim() ?? ''
+      const dataUrl = inlineImagesRef.current.get(normalizedContentId(source.slice(4)))
       if (!dataUrl) return
       image.setAttribute('src', dataUrl)
-      image.removeAttribute(IMAGE_SOURCE_MARKER)
+      image.removeAttribute(CID_SOURCE_MARKER)
     })
   }, [])
 
   useLayoutEffect(() => {
-    resolvedImagesRef.current = EMPTY_IMAGES
+    inlineImagesRef.current = EMPTY_IMAGES
     if (bodyHtml === null || !attn) return
     const references = cidReferences(bodyHtml)
     const cidAttachments = attachmentsRef.current
@@ -275,12 +249,11 @@ export function MessageBody({
         return { attachment, contentIds }
       })
       .filter(({ contentIds }) => contentIds.length > 0)
-    const remoteReferences = remoteImageReferences(bodyHtml)
     let cancelled = false
-    const addResolvedImages = (entries: ReadonlyArray<readonly [string, string]>): void => {
+    const addInlineImages = (entries: ReadonlyArray<readonly [string, string]>): void => {
       if (cancelled || entries.length === 0) return
-      resolvedImagesRef.current = new Map([...resolvedImagesRef.current, ...entries])
-      applyResolvedImages()
+      inlineImagesRef.current = new Map([...inlineImagesRef.current, ...entries])
+      applyInlineImages()
     }
 
     void Promise.all(
@@ -292,24 +265,12 @@ export function MessageBody({
         })
         return 'dataUrl' in result ? contentIds.map((contentId) => [contentId, result.dataUrl] as const) : []
       })
-    ).then((inlineResults) => addResolvedImages(inlineResults.flat()))
+    ).then((inlineResults) => addInlineImages(inlineResults.flat()))
 
-    let nextRemoteIndex = 0
-    const resolveRemoteImages = async (): Promise<void> => {
-      while (!cancelled && nextRemoteIndex < remoteReferences.length) {
-        const url = remoteReferences[nextRemoteIndex]
-        nextRemoteIndex += 1
-        const result = await attn.mail.getRemoteImage({ url })
-        if ('dataUrl' in result) addResolvedImages([[url, result.dataUrl]])
-      }
-    }
-    for (let index = 0; index < Math.min(REMOTE_IMAGE_CONCURRENCY, remoteReferences.length); index += 1) {
-      void resolveRemoteImages()
-    }
     return () => {
       cancelled = true
     }
-  }, [applyResolvedImages, bodyHtml, messageId])
+  }, [applyInlineImages, bodyHtml, messageId])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
   const measurement = measuredFrame?.srcDoc === srcDoc ? measuredFrame : null
@@ -378,7 +339,7 @@ export function MessageBody({
       if (!doc?.body) return
 
       disconnect()
-      applyResolvedImages()
+      applyInlineImages()
       measure(frame)
       const observer = new ResizeObserver(() => measure(frame))
       observer.observe(doc.body)
@@ -386,7 +347,7 @@ export function MessageBody({
       doc.addEventListener('keydown', forwardKey)
       keyDocumentRef.current = doc
     },
-    [applyResolvedImages, disconnect, forwardKey, measure]
+    [applyInlineImages, disconnect, forwardKey, measure]
   )
 
   const onLoad = useCallback(

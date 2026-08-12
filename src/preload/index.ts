@@ -8,8 +8,6 @@ import type {
   InlineImageRequest,
   InlineImageResult,
   MailLabel,
-  RemoteImageRequest,
-  RemoteImageResult,
   SnoozedThreadRow,
   SyncState,
   ThreadRow
@@ -33,8 +31,6 @@ const api = {
       ipcRenderer.invoke('mail:downloadAttachment', request),
     getInlineImage: (request: InlineImageRequest): Promise<InlineImageResult> =>
       ipcRenderer.invoke('mail:getInlineImage', request),
-    getRemoteImage: (request: RemoteImageRequest): Promise<RemoteImageResult> =>
-      ipcRenderer.invoke('mail:getRemoteImage', request),
     triage: (action: TriageAction): Promise<TriageResult> => ipcRenderer.invoke('mail:triage', action),
     snooze: (threadIds: string[], dueAt: number): Promise<TriageResult> =>
       ipcRenderer.invoke('mail:snooze', { threadIds, dueAt }),

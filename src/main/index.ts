@@ -1,6 +1,4 @@
-import { lookup } from 'node:dns/promises'
 import { appendFileSync } from 'node:fs'
-import { isIP } from 'node:net'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
@@ -9,8 +7,6 @@ import type {
   DownloadAttachmentResult,
   InlineImageRequest,
   InlineImageResult,
-  RemoteImageRequest,
-  RemoteImageResult,
   SyncState
 } from '../shared/mail'
 import {
@@ -259,68 +255,50 @@ function authStatus(): AuthStatus {
   return { configured: config !== null, signedIn: tokens !== null, email: tokens?.email }
 }
 
-function isDownloadAttachmentRequest(value: unknown): value is DownloadAttachmentRequest {
+type AttachmentDataRequest = Pick<DownloadAttachmentRequest, 'messageId' | 'attachmentId'>
+
+function isAttachmentDataRequest(value: unknown): value is AttachmentDataRequest {
   if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<DownloadAttachmentRequest>
+  const candidate = value as Partial<AttachmentDataRequest>
   return (
     typeof candidate.messageId === 'string' &&
     candidate.messageId.length > 0 &&
     typeof candidate.attachmentId === 'string' &&
-    candidate.attachmentId.length > 0 &&
-    typeof candidate.filename === 'string' &&
-    candidate.filename.length > 0
+    candidate.attachmentId.length > 0
   )
+}
+
+function isDownloadAttachmentRequest(value: unknown): value is DownloadAttachmentRequest {
+  if (!isAttachmentDataRequest(value)) return false
+  const { filename } = value as Partial<DownloadAttachmentRequest>
+  return typeof filename === 'string' && filename.length > 0
 }
 
 function isInlineImageRequest(value: unknown): value is InlineImageRequest {
-  if (!value || typeof value !== 'object') return false
+  if (!isAttachmentDataRequest(value)) return false
   const candidate = value as Partial<InlineImageRequest>
   return (
-    typeof candidate.messageId === 'string' &&
-    candidate.messageId.length > 0 &&
-    typeof candidate.attachmentId === 'string' &&
-    candidate.attachmentId.length > 0 &&
-    typeof candidate.mimeType === 'string' &&
-    /^(?:image\/(?:png|jpeg|gif|webp))$/i.test(candidate.mimeType)
+    typeof candidate.mimeType === 'string' && /^(?:image\/(?:png|jpeg|gif|webp))$/i.test(candidate.mimeType)
   )
 }
 
-function isRemoteImageRequest(value: unknown): value is RemoteImageRequest {
-  return Boolean(value && typeof value === 'object' && typeof (value as RemoteImageRequest).url === 'string')
-}
+type AttachmentDataResult =
+  | { kind: 'available'; data: string }
+  | { kind: 'signed-out' }
+  | { kind: 'unavailable' }
 
-function isPrivateAddress(address: string): boolean {
-  if (
-    address === '::1' ||
-    address.startsWith('fc') ||
-    address.startsWith('fd') ||
-    address.startsWith('fe80:')
-  ) {
-    return true
-  }
-  if (isIP(address) !== 4) return false
-  const [a, b] = address.split('.').map(Number)
-  return (
-    a === 10 ||
-    a === 127 ||
-    a === 0 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168)
-  )
-}
-
-async function safeRemoteImageUrl(value: string): Promise<URL | null> {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    return null
-  }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null
-  if (url.hostname === 'localhost' || url.hostname.endsWith('.local')) return null
-  const addresses = await lookup(url.hostname, { all: true })
-  return addresses.some(({ address }) => isPrivateAddress(address)) ? null : url
+async function resolveAttachmentData(request: AttachmentDataRequest): Promise<AttachmentDataResult> {
+  const account = currentAccountId()
+  const inlineData =
+    db && account ? getInlineAttachmentData(db, account, request.messageId, request.attachmentId) : null
+  if (inlineData !== null) return { kind: 'available', data: inlineData }
+  if (seedAccountId) return { kind: 'signed-out' }
+  const client = makeClient(authSessionGeneration)
+  if (!client) return { kind: 'signed-out' }
+  const data = (
+    await client.get<{ data?: string }>(`/messages/${request.messageId}/attachments/${request.attachmentId}`)
+  ).data
+  return typeof data === 'string' ? { kind: 'available', data } : { kind: 'unavailable' }
 }
 
 let signInInFlight = false
@@ -399,24 +377,14 @@ function registerIpc(): void {
     'mail:downloadAttachment',
     async (_e, request: unknown): Promise<DownloadAttachmentResult> => {
       if (!isDownloadAttachmentRequest(request)) return { error: 'Invalid attachment' }
-      const account = currentAccountId()
-      const inlineData =
-        db && account ? getInlineAttachmentData(db, account, request.messageId, request.attachmentId) : null
-      const client = inlineData === null && !seedAccountId ? makeClient(authSessionGeneration) : null
-      if (inlineData === null && !client) return { error: 'Attachments download when signed in' }
       try {
-        const data =
-          inlineData ??
-          (
-            await client?.get<{ data?: string }>(
-              `/messages/${request.messageId}/attachments/${request.attachmentId}`
-            )
-          )?.data
-        if (typeof data !== 'string') return { error: 'Attachment data was unavailable' }
+        const resolved = await resolveAttachmentData(request)
+        if (resolved.kind === 'signed-out') return { error: 'Attachments download when signed in' }
+        if (resolved.kind === 'unavailable') return { error: 'Attachment data was unavailable' }
         const path = await writeAttachment(
           app.getPath('downloads'),
           request.filename,
-          Buffer.from(data, 'base64url')
+          Buffer.from(resolved.data, 'base64url')
         )
         shell.showItemInFolder(path)
         return { path }
@@ -430,21 +398,10 @@ function registerIpc(): void {
   )
   ipcMain.handle('mail:getInlineImage', async (_e, request: unknown): Promise<InlineImageResult> => {
     if (!isInlineImageRequest(request)) return { error: 'Invalid inline image' }
-    const account = currentAccountId()
-    const inlineData =
-      db && account ? getInlineAttachmentData(db, account, request.messageId, request.attachmentId) : null
-    const client = inlineData === null && !seedAccountId ? makeClient(authSessionGeneration) : null
-    if (inlineData === null && !client) return { error: 'Inline image data was unavailable' }
     try {
-      const data =
-        inlineData ??
-        (
-          await client?.get<{ data?: string }>(
-            `/messages/${request.messageId}/attachments/${request.attachmentId}`
-          )
-        )?.data
-      if (typeof data !== 'string') return { error: 'Inline image data was unavailable' }
-      const bytes = Buffer.from(data, 'base64url')
+      const resolved = await resolveAttachmentData(request)
+      if (resolved.kind !== 'available') return { error: 'Inline image data was unavailable' }
+      const bytes = Buffer.from(resolved.data, 'base64url')
       if (bytes.byteLength > 10 * 1024 * 1024) return { error: 'Inline image was too large' }
       return { dataUrl: `data:${request.mimeType.toLowerCase()};base64,${bytes.toString('base64')}` }
     } catch (error) {
@@ -452,39 +409,6 @@ function registerIpc(): void {
         `[attachment] inline image failed: ${error instanceof Error ? error.message : String(error)}`
       )
       return { error: 'Could not load inline image' }
-    }
-  })
-  ipcMain.handle('mail:getRemoteImage', async (_e, request: unknown): Promise<RemoteImageResult> => {
-    if (!isRemoteImageRequest(request)) return { error: 'Invalid remote image' }
-    try {
-      let url = await safeRemoteImageUrl(request.url)
-      if (!url) return { error: 'Remote image URL was blocked' }
-      for (let redirects = 0; redirects <= 5; redirects += 1) {
-        const response = await fetch(url, {
-          redirect: 'manual',
-          signal: AbortSignal.timeout(15_000),
-          headers: { Accept: 'image/*' }
-        })
-        if (response.status >= 300 && response.status < 400) {
-          const location = response.headers.get('location')
-          if (!location || redirects === 5) return { error: 'Remote image redirect was invalid' }
-          url = await safeRemoteImageUrl(new URL(location, url).href)
-          if (!url) return { error: 'Remote image redirect was blocked' }
-          continue
-        }
-        if (!response.ok) return { error: 'Remote image was unavailable' }
-        const mimeType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()
-        if (!mimeType?.startsWith('image/')) return { error: 'Remote resource was not an image' }
-        const declaredSize = Number(response.headers.get('content-length') ?? 0)
-        if (declaredSize > 10 * 1024 * 1024) return { error: 'Remote image was too large' }
-        const bytes = Buffer.from(await response.arrayBuffer())
-        if (bytes.byteLength > 10 * 1024 * 1024) return { error: 'Remote image was too large' }
-        return { dataUrl: `data:${mimeType};base64,${bytes.toString('base64')}` }
-      }
-      return { error: 'Remote image had too many redirects' }
-    } catch (error) {
-      console.error(`[mail] remote image failed: ${error instanceof Error ? error.message : String(error)}`)
-      return { error: 'Could not load remote image' }
     }
   })
   ipcMain.handle('mail:triage', (_e, action: unknown) => {

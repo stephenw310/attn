@@ -7,17 +7,17 @@ test.use({ seed: 'fixtures/seed-inbox.json' })
 test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mail', async ({
   page
 }, testInfo) => {
-  let remoteImageRequested = false
-  let handlerImageRequested = false
+  let remoteImageRequests = 0
+  let handlerImageRequests = 0
   await page.route('https://remote.attn.test/**', async (route) => {
-    remoteImageRequested = true
+    remoteImageRequests += 1
     await route.fulfill({
       contentType: 'image/gif',
       body: Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64')
     })
   })
   await page.route('https://handler.attn.test/**', async (route) => {
-    handlerImageRequested = true
+    handlerImageRequests += 1
     await route.fulfill({ contentType: 'image/gif', body: 'not an image' })
   })
 
@@ -70,8 +70,8 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     })
   ).toBe(false)
   await expect(body.locator('#remote-image')).toHaveAttribute('src', 'https://remote.attn.test/tracker.gif')
-  await expect.poll(() => remoteImageRequested).toBe(true)
-  await expect.poll(() => handlerImageRequested).toBe(true)
+  await expect.poll(() => remoteImageRequests).toBe(1)
+  await expect.poll(() => handlerImageRequests).toBe(1)
 
   for (const marker of ['data-script-ran', 'data-handler-ran', 'data-link-ran']) {
     expect(await body.locator('body').getAttribute(marker)).toBeNull()

@@ -78,12 +78,6 @@ export interface InlineImageRequest {
 
 export type InlineImageResult = { dataUrl: string } | { error: string }
 
-export interface RemoteImageRequest {
-  url: string
-}
-
-export type RemoteImageResult = { dataUrl: string } | { error: string }
-
 export type SyncState =
   | { phase: 'idle' }
   | { phase: 'syncing'; threadsDone: number }
