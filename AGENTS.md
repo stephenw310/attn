@@ -43,7 +43,10 @@ Violating these is a correctness bug, not a style preference:
 - **The renderer is sandboxed** (`contextIsolation`, no `nodeIntegration`) and never talks to Google or the filesystem. Everything crosses through the typed `contextBridge` API in `src/preload/index.ts` plus an `ipcMain.handle` in `src/main/index.ts` — add both halves, and the type in `src/shared/`, when you add a capability.
 - **Mail bodies are untrusted input.** Plain text stays in text nodes. HTML must pass through
   DOMPurify and render only in the scriptless sandbox used by `MessageBody`; never add `allow-scripts`
-  or use `dangerouslySetInnerHTML` (SPEC §6).
+  or use `dangerouslySetInnerHTML` (SPEC §6). Stored attachment `inlineData` is omitted from
+  `ConversationMsg`, but CID rendering deliberately returns an allowlisted image as a base64 `dataUrl`
+  through the typed `mail:getInlineImage` bridge (maximum 10 MB) and assigns it inside that iframe.
+  Treat the bridged value as untrusted attachment content; it is not confined to the main process.
 - **Local-first:** reads and writes hit the local SQLite store and apply optimistically. Never block the UI on the network.
 - **Every row is keyed by `account_id`** — the schema is multi-account-ready even though v1 ships single-account (SPEC D4).
 - Secrets live in the OS keychain via `safeStorage`; `oauth.config.json` is gitignored and must never be committed or read into a test.
