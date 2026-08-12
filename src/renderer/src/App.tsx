@@ -688,10 +688,12 @@ function AccountMenu({
 }
 
 function SnoozePicker({
+  targetCount,
   onCancel,
   onConfirm,
   onUnsnooze
 }: {
+  targetCount: number
   onCancel: () => void
   onConfirm: (dueAt: number) => void
   onUnsnooze?: () => void
@@ -750,7 +752,11 @@ function SnoozePicker({
           <h2 id="snooze-title" className="text-base font-semibold">
             Remind me later
           </h2>
-          <p className="mt-0.5 text-xs text-ink-faint">Choose when this conversation returns.</p>
+          <p data-testid="snooze-subtitle" className="mt-0.5 text-xs text-ink-faint">
+            {targetCount > 1
+              ? `Choose when these ${targetCount} conversations return.`
+              : 'Choose when this conversation returns.'}
+          </p>
         </div>
         <div className="flex flex-col gap-0.5">
           {presets.map((preset, index) => (
@@ -760,7 +766,7 @@ function SnoozePicker({
               data-testid={`snooze-preset-${preset.id}`}
               data-active={activeIndex === index || undefined}
               tabIndex={-1}
-              className={`flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm hover:bg-active ${
+              className={`flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
                 activeIndex === index ? 'bg-active text-ink' : ''
               }`}
               onClick={() => onConfirm(preset.dueAt)}
@@ -778,7 +784,7 @@ function SnoozePicker({
               data-testid="snooze-unsnooze"
               data-active={activeIndex === presets.length || undefined}
               tabIndex={-1}
-              className={`flex w-full cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm hover:bg-active ${
+              className={`flex w-full cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
                 activeIndex === presets.length ? 'bg-active text-ink' : ''
               }`}
               onClick={onUnsnooze}
@@ -1140,13 +1146,16 @@ export default function App(): React.JSX.Element {
   const snoozeSelected = useCallback(
     (dueAt: number) => {
       if (!realMode || !attn || !selected) return
+      const isBulk = selectedIds.size > 0
+      const threadIds = isBulk ? [...selectedIds] : [selected.id]
       setSnoozeOpen(false)
+      if (isBulk) clearSelection()
       void attn.mail
-        .snooze([selected.id], dueAt)
+        .snooze(threadIds, dueAt)
         .then((result) => showToast(result.label))
         .catch(() => {})
     },
-    [realMode, selected, showToast]
+    [clearSelection, realMode, selected, selectedIds, showToast]
   )
 
   const unsnoozeSelected = useCallback(() => {
@@ -1690,6 +1699,7 @@ export default function App(): React.JSX.Element {
 
       {snoozeOpen && selected && (
         <SnoozePicker
+          targetCount={targetedThreads.length}
           onCancel={() => setSnoozeOpen(false)}
           onConfirm={snoozeSelected}
           onUnsnooze={view === 'snoozed' ? unsnoozeSelected : undefined}

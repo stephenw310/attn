@@ -100,6 +100,34 @@ test('undoes reminder changes and archive without losing the original due time',
   await expect(rows.first().getByTestId('chip-snooze-due')).toHaveText(originalDue ?? '')
 })
 
+test('snoozes every selected conversation, not just the focused one', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+J')
+  await page.keyboard.press('Shift+J')
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+
+  await page.keyboard.press('h')
+  await expect(page.getByTestId('snooze-subtitle')).toHaveText('Choose when these 3 conversations return.')
+  await page.getByTestId('snooze-preset-tomorrow').click()
+
+  await expect(rows).toHaveCount(5)
+  await expect(page.getByTestId('toast')).toHaveText('3 snoozed')
+  await expect(page.getByTestId('selection-count')).toHaveCount(0)
+
+  await page.keyboard.press('g')
+  await page.keyboard.press('h')
+  await expect(rows).toHaveCount(3)
+
+  // One undo reverses the whole bulk snooze (F4).
+  await page.keyboard.press('z')
+  await expect(rows).toHaveCount(0)
+  await page.keyboard.press('g')
+  await page.keyboard.press('i')
+  await expect(rows).toHaveCount(8)
+})
+
 test('unrelated pane keys disarm a pending go chord', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.keyboard.press('Enter')
