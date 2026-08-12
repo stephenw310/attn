@@ -100,17 +100,16 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
     )
     .toEqual([true, true, 'rgb(255, 178, 36)'])
 
-  // Open a read conversation so this assertion isolates selection clearing
-  // from the separate open-marks-read behavior.
+  // Reader Escape always returns to the list; a second list Escape clears selection.
   await page.keyboard.press('k')
   await page.keyboard.press('Enter')
-  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('selection-count')).toHaveCount(0)
-  await expect(page.getByTestId('conversation-pane')).toBeVisible()
   await expect(rows.locator('[data-checked="true"]')).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
 
   await page.keyboard.press('k')
   await page.keyboard.press('x')
@@ -148,14 +147,14 @@ test('extends disjoint selections without dropping earlier rows', async ({ page 
   await expect(rows.nth(3)).toHaveAttribute('data-checked', 'true')
 })
 
-test('extends a range while the reading pane has message focus', async ({ page }) => {
+test('extends a range while the full-window reader is open', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await page.keyboard.press('x')
   await page.keyboard.press('Shift+j')
   await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
   await page.keyboard.press('Enter')
-  await expect(page.getByTestId('conversation-pane')).toHaveAttribute('data-split-focus', 'true')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
 
   await page.keyboard.press('Shift+j')
   await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
@@ -291,12 +290,12 @@ test('keeps offline actions across relaunch without reseeding', async ({ boot })
   expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
 })
 
-test('triages from the pane and advances the open conversation', async ({ page }) => {
+test('triages from the reader and advances the open conversation', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
   await page.keyboard.press('e')
-  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
   await expect(page.getByTestId('thread-row')).toHaveCount(7)
   await page.keyboard.press('z')
@@ -304,11 +303,10 @@ test('triages from the pane and advances the open conversation', async ({ page }
   await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
 })
 
-test('keeps explicit unread and undo stable while the pane is open', async ({ page }) => {
+test('keeps explicit unread and undo stable while the reader is open', async ({ page }) => {
   const first = page.getByTestId('thread-row').first()
   await expect(first).toHaveAttribute('data-unread', 'true')
   await first.click()
-  await page.keyboard.press('Enter')
   await expect(first).not.toHaveAttribute('data-unread')
   await page.keyboard.press('u')
   await expect(first).toHaveAttribute('data-unread', 'true')

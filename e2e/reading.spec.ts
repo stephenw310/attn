@@ -44,7 +44,6 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await cards.first().getByTestId('older-message-toggle').click()
   await expect(cards.first()).toHaveAttribute('data-collapsed', 'true')
   await expect(cards.first().getByTestId('plain-text-body')).toHaveCount(0)
-  await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('j')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
   await page.keyboard.press('k')
@@ -80,14 +79,13 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(lastCard.getByTestId('plain-text-visible')).toHaveText(
     'I added the launch milestones and owner notes.'
   )
-  await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('j')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
 })
 
 test('shows attachment metadata and explains offline downloads', async ({ page }) => {
   await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).click()
-  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   const attachment = page.getByTestId('attachment-chip')
   await expect(attachment).toContainText('receipt.pdf')
   await expect(attachment).toContainText('24 KB')
@@ -120,7 +118,7 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   await attachment.click()
   await expect(page.getByTestId('toast')).toHaveText('Attachments download when signed in')
   await page.keyboard.press('Escape')
-  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
 })
 
 test('keeps HTML fallbacks readable and never collapses an all-quote message', async ({ page }) => {

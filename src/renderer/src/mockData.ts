@@ -1,6 +1,6 @@
 import type { ConversationView, ThreadSummary } from './types'
 
-// Static mock inbox so the M0 list/reading-pane/keyboard loop is testable
+// Static mock inbox so the M0 list/reader/keyboard loop is testable
 // before Gmail sync exists. Replaced wholesale by the local store at M0-final.
 
 export const mockThreads: ThreadSummary[] = [

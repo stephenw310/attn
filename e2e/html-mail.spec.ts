@@ -24,7 +24,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   })
 
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).dblclick()
+  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
 
   const iframe = page.getByTestId('html-body-frame')
   await expect(iframe).toBeVisible()
@@ -177,7 +177,6 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect
     .poll(() => page.getByTestId('conversation-scroll').evaluate((element) => element.scrollTop))
     .toBe(600)
-  await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('k')
   await expect(page.getByTestId('conversation-position')).toHaveText('7 of 8')
   await expect
@@ -200,17 +199,17 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     .toBe(true)
   await body.locator('#styled-table').click()
   await page.keyboard.press('Escape')
-  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
 
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
   const path = join(dir, 'reading.png')
-  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).dblclick()
+  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
   await page.screenshot({ path })
   await testInfo.attach('reading', { path, contentType: 'image/png' })
 
   await page.keyboard.press('Escape')
-  await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).dblclick()
+  await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).click()
   await expect(page.getByTestId('html-body-frame')).toBeVisible()
   await expect(
     page.frameLocator('[data-testid="html-body-frame"]').locator('#plain-html-copy')
@@ -220,7 +219,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await testInfo.attach('simple mail', { path: simpleMailPath, contentType: 'image/png' })
 
   await page.keyboard.press('Escape')
-  await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).dblclick()
+  await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
   await expect(page.getByTestId('plain-text-body')).toHaveCount(1)
   await expect(page.getByTestId('message-card').first()).toHaveAttribute('data-collapsed', 'true')
@@ -229,7 +228,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   )
 
   await page.keyboard.press('Escape')
-  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).dblclick()
+  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
   await page.evaluate(() => {
     document.addEventListener(
       'keydown',
@@ -265,7 +264,7 @@ test('loads direct mail images when the sender restricts cross-origin embedding'
   try {
     const address = server.address()
     if (address === null || typeof address === 'string') throw new Error('Image test server did not start')
-    await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).dblclick()
+    await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).click()
     await expect(page.getByTestId('html-body-frame')).toBeVisible()
     const body = page.frameLocator('[data-testid="html-body-frame"]')
     await body.locator('body').evaluate((mailBody, imageUrl) => {

@@ -129,7 +129,7 @@ test('snoozes every selected conversation, not just the focused one', async ({ p
   await expect(rows).toHaveCount(8)
 })
 
-test('unrelated pane keys disarm a pending go chord', async ({ page }) => {
+test('unrelated reader keys disarm a pending go chord', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-content')).toBeVisible()

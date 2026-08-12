@@ -53,7 +53,7 @@ test('keeps picker typing isolated and opens it over a conversation', async ({ p
   const first = page.getByTestId('thread-row').first()
   await expect(first).toContainText('Maya Lin')
   await first.click()
-  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('l')
   await expect(page.getByTestId('label-picker')).toBeVisible()
   await expect(page.getByTestId('pending-count')).toContainText('1 pending')
@@ -71,9 +71,9 @@ test('keeps picker typing isolated and opens it over a conversation', async ({ p
 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('label-picker')).toHaveCount(0)
-  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
 })
 
 test('shows existing user-label membership without system labels', async ({ page }) => {
