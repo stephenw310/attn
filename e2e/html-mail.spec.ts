@@ -7,6 +7,7 @@ test.use({ seed: 'fixtures/seed-inbox.json' })
 test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mail', async ({
   page
 }, testInfo) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
   let remoteImageRequests = 0
   let handlerImageRequests = 0
   await page.route('https://remote.attn.test/**', async (route) => {
@@ -41,6 +42,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(body.locator('#styled-table')).toHaveAttribute('style', /border-collapse/)
   await expect(body.locator('#mail-styles')).toHaveCount(1)
   await expect(body.locator('#stylesheet-styled')).toHaveCSS('color', 'rgb(12, 34, 56)')
+  await expect(body.locator('#dark-mode-copy')).toHaveCSS('color', 'rgb(17, 34, 51)')
   await expect(body.locator('#invite-details')).toContainText('Invite: roadmap review at 10:00')
   await expect(body.locator('#custom-card-copy')).toHaveText('Important custom-card content')
   await expect(body.locator('script')).toHaveCount(0)

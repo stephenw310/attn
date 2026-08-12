@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MessageAttachment } from '../../shared/mail'
+import { forceLightMailCss } from './mailCss'
 import { findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
@@ -25,7 +26,7 @@ const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
 const RESET = `
-  :root { color-scheme: light; }
+  :root { color-scheme: only light; }
   html, body {
     margin: 0;
     padding: 0;
@@ -111,7 +112,7 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   const template = document.createElement('template')
   template.innerHTML = clean
   template.content.querySelectorAll('style').forEach((style) => {
-    style.textContent = freezeViewportHeightUnits(style.textContent ?? '')
+    style.textContent = forceLightMailCss(freezeViewportHeightUnits(style.textContent ?? ''))
   })
   template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
@@ -167,7 +168,7 @@ function makeSrcDoc(html: string, inlineImages: ReadonlyMap<string, string>): st
     marker.setAttribute(TRIM_MARKER, '')
     trimStart.before(marker)
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${RESET}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light"><base target="_blank"><style>${RESET}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
 }
 
 function TrimToggle({
@@ -426,7 +427,11 @@ export function MessageBody({
         srcDoc={srcDoc}
         onLoad={onLoad}
         className="block w-full border-0 bg-white"
-        style={{ height: height ?? 1, visibility: height === null ? 'hidden' : 'visible' }}
+        style={{
+          colorScheme: 'light',
+          height: height ?? 1,
+          visibility: height === null ? 'hidden' : 'visible'
+        }}
       />
       {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
         <TrimToggle
