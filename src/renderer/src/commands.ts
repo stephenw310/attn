@@ -3,7 +3,7 @@ export type CommandContext = 'list' | 'global'
 export interface Command {
   id: string
   title: string
-  shortcut: string
+  shortcut?: string
   context: CommandContext
   run: () => void
 }
@@ -46,11 +46,14 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
 }
 
 export function matchKey(event: KeyboardEvent, context: Exclude<CommandContext, 'global'>): Command | null {
-  if (event.ctrlKey || event.metaKey || event.altKey) return null
+  // Tab always belongs to the browser's native focus traversal. Commands may
+  // still be registered without a shortcut for the future command palette.
+  if (event.ctrlKey || event.metaKey || event.altKey || event.key === 'Tab') return null
   return (
     commands.find(
       (command) =>
         (command.context === context || command.context === 'global') &&
+        command.shortcut !== undefined &&
         matchesShortcut(event, command.shortcut)
     ) ?? null
   )

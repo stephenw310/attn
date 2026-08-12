@@ -147,6 +147,7 @@ test('Enter opens the pane; arrows switch pane focus; Esc restores the list', as
   await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${mockThreads.length}`)
   await expect(page.getByTestId('footer-shortcut-open')).toHaveCount(0)
   await expect(page.getByTestId('footer-shortcut-scroll')).toContainText('J/K/↑/↓scroll message')
+  await expect(page.getByTestId('footer-shortcut-trim')).toHaveCount(0)
   await expect(page.getByTestId('footer-shortcut-focus')).toContainText('←/→switch pane')
   await expect(page.getByTestId('footer-shortcut-close')).toContainText('Escclose')
   await expect(page.getByTestId('footer-shortcut-done')).toContainText('Edone')

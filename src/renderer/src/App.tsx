@@ -341,15 +341,18 @@ function MessageCard({
   account,
   onToast,
   collapsed = false,
-  onToggleCollapsed
+  onToggleCollapsed,
+  trimExpanded = false,
+  onToggleTrim
 }: {
   message: DisplayMsg
   account: string | null
   onToast: (message: string) => void
   collapsed?: boolean
   onToggleCollapsed?: () => void
+  trimExpanded?: boolean
+  onToggleTrim: () => void
 }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false)
   const htmlSurface = message.html !== null
 
   const download = useCallback(
@@ -410,9 +413,16 @@ function MessageCard({
       data-collapsed="false"
       className="rounded-[10px] border border-edge bg-ground px-5 py-4"
     >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level; this mirrors the summary row's pointer target */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: nested recipient controls must remain independently interactive */}
       <div
         data-testid="message-header"
-        className="mb-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2.5"
+        className="mb-3 grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2.5"
+        onClick={(event) => {
+          const target = event.target
+          if (target instanceof Element && target.closest('button, a')) return
+          onToggleCollapsed?.()
+        }}
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2.5">
@@ -453,8 +463,8 @@ function MessageCard({
           bodyHtml={message.html}
           messageId={message.id}
           attachments={message.attachments}
-          expanded={expanded}
-          onToggleTrim={() => setExpanded((value) => !value)}
+          expanded={trimExpanded}
+          onToggleTrim={onToggleTrim}
         />
         {message.attachments.length > 0 && (
           <div data-testid="message-accessories" className={htmlSurface ? 'bg-white px-3 pb-3' : ''}>
@@ -501,11 +511,15 @@ function ConversationMessages({
   account: string | null
   onToast: (message: string) => void
 }): React.JSX.Element {
-  const [expandedOlderIds, setExpandedOlderIds] = useState<Set<string>>(() => new Set())
   const newestIndex = conversation.messages.length - 1
+  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
+    const newestMessage = conversation.messages[newestIndex]
+    return new Set(newestMessage ? [newestMessage.id] : [])
+  })
+  const [expandedTrimIds, setExpandedTrimIds] = useState<Set<string>>(() => new Set())
 
-  const toggleOlder = useCallback((messageId: string) => {
-    setExpandedOlderIds((current) => {
+  const toggleMessage = useCallback((messageId: string) => {
+    setExpandedMessageIds((current) => {
       const next = new Set(current)
       if (next.has(messageId)) next.delete(messageId)
       else next.add(messageId)
@@ -513,18 +527,41 @@ function ConversationMessages({
     })
   }, [])
 
+  const toggleTrim = useCallback((messageId: string) => {
+    setExpandedTrimIds((current) => {
+      const next = new Set(current)
+      if (next.has(messageId)) next.delete(messageId)
+      else next.add(messageId)
+      return next
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    const newestMessage = conversation.messages[newestIndex]
+    if (!newestMessage) return
+    return registerCommands([
+      {
+        id: 'message.trim.toggle',
+        title: 'Show or hide trimmed message content',
+        context: 'list',
+        run: () => toggleTrim(newestMessage.id)
+      }
+    ])
+  }, [conversation.messages, newestIndex, toggleTrim])
+
   return (
     <>
-      {conversation.messages.map((message, index) => {
-        const isOlder = index < newestIndex
+      {conversation.messages.map((message) => {
         return (
           <MessageCard
             key={message.id}
             message={message}
             account={account}
             onToast={onToast}
-            collapsed={isOlder && !expandedOlderIds.has(message.id)}
-            onToggleCollapsed={isOlder ? () => toggleOlder(message.id) : undefined}
+            collapsed={!expandedMessageIds.has(message.id)}
+            onToggleCollapsed={() => toggleMessage(message.id)}
+            trimExpanded={expandedTrimIds.has(message.id)}
+            onToggleTrim={() => toggleTrim(message.id)}
           />
         )
       })}
@@ -1469,7 +1506,9 @@ export default function App(): React.JSX.Element {
       const isTextEntry =
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       if (isTextEntry) return
-      if (target && target.tagName === 'BUTTON') return
+      // Focused controls keep their native activation keys, but Escape remains
+      // the app-level Back action from every Tab stop in the reading pane.
+      if (target && target.tagName === 'BUTTON' && e.key !== 'Escape') return
       if (paneOpen && plainKey && !e.shiftKey && e.key === 'ArrowLeft') {
         e.preventDefault()
         setSplitFocus('list')
