@@ -1,10 +1,13 @@
 import DOMPurify from 'dompurify'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { MessageAttachment } from '../../shared/mail'
 import { findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
   bodyText: string
   bodyHtml: string | null
+  messageId: string
+  attachments: MessageAttachment[]
   expanded?: boolean
   onToggleTrim: () => void
 }
@@ -17,6 +20,7 @@ const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
 const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
 const TRIM_MARKER = 'data-attn-trim-start'
+const attn = window.attn
 
 const RESET = `
   :root { color-scheme: light; }
@@ -52,6 +56,18 @@ function freezeViewportHeightUnits(css: string): string {
   return css.replace(VIEWPORT_HEIGHT_UNIT, (_, rawValue: string) => {
     return `${(Number(rawValue) * MAIL_VIEWPORT_HEIGHT) / 100}px`
   })
+}
+
+function normalizeMailLink(href: string): string | null {
+  const value = href.trim()
+  if (!value) return null
+  if (value.startsWith('#')) return value
+  if (value.startsWith('//')) return `https:${value}`
+  if (/^[a-z][a-z\d+.-]*:/i.test(value)) return value
+  if (/^(?:www\.)?[a-z\d](?:[a-z\d-]*[a-z\d])?(?:\.[a-z\d](?:[a-z\d-]*[a-z\d])?)+(?:[/?#]|$)/i.test(value)) {
+    return `https://${value}`
+  }
+  return null
 }
 
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
@@ -93,13 +109,41 @@ function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
   })
+  template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
+    const normalizedHref = normalizeMailLink(link.getAttribute('href') ?? '')
+    if (normalizedHref === null) link.removeAttribute('href')
+    else link.setAttribute('href', normalizedHref)
+  })
   if (!hasRenderableContent(template.content)) return null
 
   return template
 }
 
-function makeSrcDoc(html: string): string | null {
-  const template = sanitizeToTemplate(html)
+function replaceCidSources(html: string, inlineImages: ReadonlyMap<string, string>): string {
+  if (!/cid:/i.test(html)) return html
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  parsed.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => {
+    const source = image.getAttribute('src')?.trim() ?? ''
+    if (!source.toLowerCase().startsWith('cid:')) return
+    const contentId = decodeURIComponent(source.slice(4)).replace(/^<|>$/g, '').toLowerCase()
+    const dataUrl = inlineImages.get(contentId)
+    if (dataUrl) image.setAttribute('src', dataUrl)
+    else image.removeAttribute('src')
+  })
+  return `${parsed.head.innerHTML}${parsed.body.innerHTML}`
+}
+
+function cidReferences(html: string): string[] {
+  if (!/cid:/i.test(html)) return []
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  return [...parsed.querySelectorAll<HTMLImageElement>('img[src]')]
+    .map((image) => image.getAttribute('src')?.trim() ?? '')
+    .filter((source) => source.toLowerCase().startsWith('cid:'))
+    .map((source) => decodeURIComponent(source.slice(4)).replace(/^<|>$/g, '').toLowerCase())
+}
+
+function makeSrcDoc(html: string, inlineImages: ReadonlyMap<string, string>): string | null {
+  const template = sanitizeToTemplate(replaceCidSources(html, inlineImages))
   if (!template) return null
   const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
@@ -156,15 +200,54 @@ function TrimToggle({
 export function MessageBody({
   bodyText,
   bodyHtml,
+  messageId,
+  attachments,
   expanded = false,
   onToggleTrim
 }: MessageBodyProps): React.JSX.Element {
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
+  const [inlineImages, setInlineImages] = useState<ReadonlyMap<string, string>>(new Map())
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
-  const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml)), [bodyHtml])
+  const srcDoc = useMemo(
+    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, inlineImages)),
+    [bodyHtml, inlineImages]
+  )
+
+  useLayoutEffect(() => {
+    setInlineImages(new Map())
+    if (bodyHtml === null || !attn || !/cid:/i.test(bodyHtml)) return
+    const references = cidReferences(bodyHtml)
+    const cidAttachments = attachments
+      .filter((attachment) => attachment.mimeType.startsWith('image/'))
+      .map((attachment) => {
+        const filename = attachment.filename.toLowerCase()
+        const contentIds = attachment.contentId
+          ? [attachment.contentId.toLowerCase()]
+          : references.filter((reference) => reference === filename || reference.startsWith(`${filename}@`))
+        return { attachment, contentIds }
+      })
+      .filter(({ contentIds }) => contentIds.length > 0)
+    if (cidAttachments.length === 0) return
+    let cancelled = false
+    void Promise.all(
+      cidAttachments.map(async ({ attachment, contentIds }) => {
+        const result = await attn.mail.getInlineImage({
+          messageId,
+          attachmentId: attachment.attachmentId,
+          mimeType: attachment.mimeType
+        })
+        return 'dataUrl' in result ? contentIds.map((contentId) => [contentId, result.dataUrl] as const) : []
+      })
+    ).then((results) => {
+      if (!cancelled) setInlineImages(new Map(results.flat()))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [attachments, bodyHtml, messageId])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
   const measurement = measuredFrame?.srcDoc === srcDoc ? measuredFrame : null

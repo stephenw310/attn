@@ -16,6 +16,22 @@ test('archives with auto-advance and undoes durably', async ({ page }) => {
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
 })
 
+test('animates a marked-done row before removing it', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+
+  await page.keyboard.press('e')
+  await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
+  await expect(rows.first()).toHaveClass(/app-thread-exit/)
+  await expect(rows).toHaveCount(7)
+  const firstToastId = await page.getByTestId('toast').getAttribute('data-toast-id')
+
+  await page.keyboard.press('e')
+  await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
+  await expect(rows).toHaveCount(6)
+  await expect(page.getByTestId('toast')).not.toHaveAttribute('data-toast-id', firstToastId ?? '')
+})
+
 test('selects a range and archives it as one undoable bulk action', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
@@ -36,6 +52,14 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
   await expect(rows.nth(1)).toHaveAttribute('data-checked', 'true')
   await expect(rows.nth(2)).toHaveAttribute('data-checked', 'true')
   await expect(rows.nth(2)).toHaveAttribute('data-selected', 'true')
+  await expect
+    .poll(() =>
+      rows.evaluateAll((items) => {
+        const borders = items.slice(0, 3).map((item) => getComputedStyle(item).borderLeftColor)
+        return [borders[0] === 'rgba(0, 0, 0, 0)', borders[1] === 'rgba(0, 0, 0, 0)', borders[2]]
+      })
+    )
+    .toEqual([true, true, 'rgb(255, 178, 36)'])
 
   // Open a read conversation so this assertion isolates selection clearing
   // from the separate open-marks-read behavior.

@@ -30,6 +30,7 @@ interface DisplayThread {
   returned: boolean
   dueAt?: number
   labelIds: string[]
+  lastMsgAt?: number
 }
 
 interface DisplayMsg {
@@ -115,7 +116,8 @@ function formatFullDate(ms: number): string {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
-    minute: '2-digit'
+    minute: '2-digit',
+    timeZoneName: 'short'
   })
 }
 
@@ -130,8 +132,33 @@ function fromThreadRow(r: ThreadRow): DisplayThread {
     starred: r.starred,
     hasAttachment: r.hasAttachment,
     returned: r.returned,
-    labelIds: r.labelIds
+    labelIds: r.labelIds,
+    lastMsgAt: r.lastMsgAt
   }
+}
+
+type DateGroup = 'Today' | 'Yesterday' | 'Last 7 days' | 'Earlier this month' | 'Older'
+
+function dateGroup(thread: DisplayThread): DateGroup {
+  if (thread.lastMsgAt) {
+    const messageDate = new Date(thread.lastMsgAt)
+    const now = new Date()
+    const startOfDay = (date: Date): number =>
+      new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+    const dayDiff = Math.floor((startOfDay(now) - startOfDay(messageDate)) / 86_400_000)
+    if (dayDiff <= 0) return 'Today'
+    if (dayDiff === 1) return 'Yesterday'
+    if (dayDiff < 7) return 'Last 7 days'
+    if (messageDate.getFullYear() === now.getFullYear() && messageDate.getMonth() === now.getMonth()) {
+      return 'Earlier this month'
+    }
+    return 'Older'
+  }
+
+  if (/\d{1,2}:\d{2}/.test(thread.at)) return 'Today'
+  if (thread.at === 'Yesterday') return 'Yesterday'
+  if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/.test(thread.at)) return 'Last 7 days'
+  return 'Earlier this month'
 }
 
 function fromSnoozedThreadRow(r: SnoozedThreadRow): DisplayThread {
@@ -239,7 +266,10 @@ const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
 
 function FooterShortcut({ id, keys, label }: ShortcutHint): React.JSX.Element {
   return (
-    <span data-testid={`footer-shortcut-${id}`} className="flex items-center gap-1.5 whitespace-nowrap">
+    <span
+      data-testid={`footer-shortcut-${id}`}
+      className="flex items-center gap-1.5 whitespace-nowrap text-ink-dim"
+    >
       <span className="flex items-center gap-0.5">
         {keys.map((key, index) => (
           <span key={key} className="contents">
@@ -444,6 +474,8 @@ function MessageCard({
         <MessageBody
           bodyText={message.text}
           bodyHtml={message.html}
+          messageId={message.id}
+          attachments={message.attachments}
           expanded={expanded}
           onToggleTrim={() => setExpanded((value) => !value)}
         />
@@ -858,12 +890,14 @@ export default function App(): React.JSX.Element {
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null)
   const [selectionBaseIds, setSelectionBaseIds] = useState<ReadonlySet<string>>(new Set())
   const [paneOpen, setPaneOpen] = useState(false)
+  const [splitFocus, setSplitFocus] = useState<'list' | 'message'>('list')
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
   const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ id: number; message: string } | null>(null)
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
+  const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const conversationScrollRef = useRef<HTMLDivElement | null>(null)
   const convCache = useRef(new Map<string, DisplayConversation>())
@@ -910,6 +944,7 @@ export default function App(): React.JSX.Element {
     setPendingCount(0)
     setMockReadIds(new Set())
     setConversation(null)
+    setExitingThreadIds(new Set())
     selectedThreadIdRef.current = null
     preserveSelectionOnRefreshRef.current = true
     convCache.current.clear()
@@ -976,6 +1011,12 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
+    setExitingThreadIds((current) => {
+      if (current.size === 0) return current
+      const visibleIds = new Set(threads.map((thread) => thread.id))
+      const next = new Set([...current].filter((id) => visibleIds.has(id)))
+      return next.size === current.size ? current : next
+    })
     setSelectedIds((current) => {
       if (current.size === 0) return current
       const visibleIds = new Set(threads.map((thread) => thread.id))
@@ -1067,7 +1108,7 @@ export default function App(): React.JSX.Element {
 
   const showToast = useCallback((message: string) => {
     const token = ++toastTokenRef.current
-    setToast(message)
+    setToast({ id: token, message })
     window.setTimeout(() => {
       if (toastTokenRef.current === token) setToast(null)
     }, 4000)
@@ -1136,14 +1177,28 @@ export default function App(): React.JSX.Element {
         threadIds: isBulk ? [...selectedIds] : action.threadIds
       }
       if (isBulk) clearSelection()
-      void attn.mail
-        .triage(targetedAction)
-        .then((result) => showToast(result.label))
-        .catch(() => {
-          preserveSelectionOnRefreshRef.current = true
-        })
+      const run = (): void => {
+        void attn.mail
+          .triage(targetedAction)
+          .then((result) => showToast(result.label))
+          .catch(() => {
+            preserveSelectionOnRefreshRef.current = true
+            setExitingThreadIds((current) => {
+              const next = new Set(current)
+              for (const id of targetedAction.threadIds) next.delete(id)
+              return next
+            })
+          })
+      }
+      if (action.kind === 'archive' && view === 'inbox' && !paneOpen) {
+        setExitingThreadIds((current) => new Set([...current, ...targetedAction.threadIds]))
+        const exitDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 550
+        window.setTimeout(run, exitDuration)
+      } else {
+        run()
+      }
     },
-    [clearSelection, realMode, selectedIds, showToast]
+    [clearSelection, paneOpen, realMode, selectedIds, showToast, view]
   )
 
   const toggleLabel = useCallback(
@@ -1163,6 +1218,7 @@ export default function App(): React.JSX.Element {
     const thread = threads[selectedIndex]
     if (!thread) return
     setPaneOpen(true)
+    setSplitFocus('message')
   }, [selectedIndex, threads])
 
   const snoozeSelected = useCallback(
@@ -1402,20 +1458,45 @@ export default function App(): React.JSX.Element {
       const isTextEntry =
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       if (isTextEntry) return
+      if (paneOpen && plainKey && !e.shiftKey && e.key === 'ArrowLeft') {
+        e.preventDefault()
+        setSplitFocus('list')
+        return
+      }
+      if (paneOpen && plainKey && !e.shiftKey && e.key === 'ArrowRight') {
+        e.preventDefault()
+        setSplitFocus('message')
+        conversationScrollRef.current?.focus({ preventScroll: true })
+        return
+      }
       if (
         paneOpen &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.altKey &&
+        splitFocus === 'message' &&
+        plainKey &&
         !e.shiftKey &&
-        (e.key === 'ArrowDown' || e.key === 'ArrowUp')
+        (e.key === 'ArrowDown' || e.key === 'ArrowUp' || key === 'j' || key === 'k')
       ) {
         e.preventDefault()
         conversationScrollRef.current?.scrollBy({
-          top: e.key === 'ArrowDown' ? READING_SCROLL_STEP : -READING_SCROLL_STEP
+          top: e.key === 'ArrowDown' || key === 'j' ? READING_SCROLL_STEP : -READING_SCROLL_STEP
         })
         return
       }
+      if (
+        plainKey &&
+        !e.shiftKey &&
+        (e.key === 'ArrowDown' || e.key === 'ArrowUp') &&
+        (!paneOpen || splitFocus === 'list')
+      ) {
+        e.preventDefault()
+        setSelectedIndex((index) =>
+          e.key === 'ArrowDown'
+            ? Math.min(index + 1, Math.max(threads.length - 1, 0))
+            : Math.max(index - 1, 0)
+        )
+        return
+      }
+      if (paneOpen && splitFocus === 'message' && (key === 'j' || key === 'k')) return
       if (target && target.tagName === 'BUTTON') return
       if (plainKey && Date.now() <= pendingGoUntil && (key === 'h' || key === 'i')) {
         e.preventDefault()
@@ -1434,7 +1515,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [labelTarget, paneOpen, snoozeOpen, switchView])
+  }, [labelTarget, paneOpen, snoozeOpen, splitFocus, switchView, threads.length])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
   useEffect(() => {
@@ -1453,8 +1534,10 @@ export default function App(): React.JSX.Element {
   const footerShortcuts: ShortcutHint[] = [
     ...(paneOpen
       ? [
-          { id: 'scroll', keys: ['↑', '↓'], label: 'scroll' },
-          { id: 'navigate', keys: ['J', 'K'], label: 'next / prev' },
+          ...(splitFocus === 'list'
+            ? [{ id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate threads' }]
+            : [{ id: 'scroll', keys: ['J', 'K', '↑', '↓'], label: 'scroll message' }]),
+          { id: 'focus', keys: ['←', '→'], label: 'switch pane' },
           { id: 'close', keys: ['Esc'], label: 'close' }
         ]
       : [
@@ -1534,9 +1617,10 @@ export default function App(): React.JSX.Element {
         <main
           data-testid="thread-list"
           data-pane-open={paneOpen || undefined}
+          data-split-focus={paneOpen && splitFocus === 'list' ? 'true' : undefined}
           className={`min-h-0 overflow-y-auto py-2 ${
             paneOpen ? 'w-[380px] flex-none border-r border-edge' : 'flex-1'
-          }`}
+          } ${paneOpen && splitFocus === 'list' ? 'shadow-[inset_0_1px_0_rgba(255,178,36,0.8)]' : ''}`}
           aria-label="Conversation list"
         >
           {threads.length === 0 && (
@@ -1552,136 +1636,154 @@ export default function App(): React.JSX.Element {
             const isSelected = i === selectedIndex
             const isChecked = selectedIds.has(t.id)
             const isUnread = t.unread && !mockReadIds.has(t.id)
+            const group = dateGroup(t)
+            const showGroup = i === 0 || dateGroup(threads[i - 1]) !== group
+            const isExiting = exitingThreadIds.has(t.id)
             return (
-              // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target
-              // biome-ignore lint/a11y/noStaticElementInteractions: same — row selection is driven by the app-level key handler, not per-row focus
-              <div
-                key={t.id}
-                ref={isSelected ? selectedRowRef : null}
-                data-testid="thread-row"
-                data-selected={isSelected || undefined}
-                data-checked={isChecked || undefined}
-                data-unread={isUnread || undefined}
-                className={`cursor-default select-none border-l-[3px] ${
-                  paneOpen
-                    ? 'grid grid-cols-[16px_1fr_auto] gap-x-2 px-3 py-2.5'
-                    : 'flex items-center gap-3.5 py-[11px] pr-7 pl-5'
-                } ${
-                  isChecked
-                    ? 'border-l-accent bg-accent/[0.12]'
-                    : isSelected
-                      ? 'border-l-accent bg-accent/[0.07]'
-                      : 'border-l-transparent'
-                }`}
-                onClick={(event) => {
-                  if (event.shiftKey) extendSelectionTo(i)
-                  else {
-                    setSelectedIndex(i)
-                    setPaneOpen(true)
-                  }
-                }}
-              >
-                <span
-                  className={`flex size-4 flex-none items-center justify-center self-center ${
-                    paneOpen ? 'row-span-2' : ''
-                  }`}
-                  aria-hidden
+              <div key={t.id} className="contents">
+                {showGroup && (
+                  <div
+                    data-testid="thread-date-group"
+                    className={`select-none font-semibold text-ink-faint ${paneOpen ? 'px-4 pt-4 pb-1 text-[11px]' : 'px-8 pt-5 pb-2 text-xs'}`}
+                  >
+                    {group}
+                  </div>
+                )}
+                {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global (J/K/Enter, F3) — clicks are a supplementary pointer target */}
+                {/* biome-ignore lint/a11y/noStaticElementInteractions: same — row selection is driven by the app-level key handler, not per-row focus */}
+                <div
+                  ref={isSelected ? selectedRowRef : null}
+                  data-testid="thread-row"
+                  data-selected={isSelected || undefined}
+                  data-checked={isChecked || undefined}
+                  data-unread={isUnread || undefined}
+                  data-exiting={isExiting || undefined}
+                  className={`cursor-default select-none border-l-[3px] ${
+                    paneOpen
+                      ? 'grid grid-cols-[16px_minmax(72px,0.8fr)_minmax(0,1.5fr)_auto] items-center gap-x-2 px-3 py-2.5'
+                      : 'flex items-center gap-3.5 py-[11px] pr-7 pl-5'
+                  } ${isSelected ? 'border-l-accent' : 'border-l-transparent'} ${
+                    isChecked ? 'bg-accent/[0.12]' : isSelected ? 'bg-accent/[0.07]' : ''
+                  } ${isExiting ? 'app-thread-exit' : ''}`}
+                  onClick={(event) => {
+                    if (event.shiftKey) extendSelectionTo(i)
+                    else {
+                      setSelectedIndex(i)
+                      setPaneOpen(true)
+                      setSplitFocus('list')
+                    }
+                  }}
                 >
-                  {isChecked ? (
-                    <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
-                      ✓
-                    </span>
-                  ) : (
-                    <span
-                      className={`size-1.5 rounded-full ${
-                        isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
-                      }`}
-                    />
-                  )}
-                </span>
-                {paneOpen ? (
-                  <>
-                    <span
-                      data-testid="thread-sender"
-                      className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap ${
-                        isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
-                      }`}
-                    >
-                      {t.from}
-                    </span>
-                    <span
-                      className={`flex items-center gap-1.5 text-xs tabular-nums ${
-                        isUnread ? 'font-medium text-accent' : 'text-ink-faint'
-                      }`}
-                    >
-                      <ReminderChips thread={t} compact />
-                      {t.hasAttachment && <span title="Has attachment">📎</span>}
-                      {t.starred && (
-                        <span className="text-star" title="Starred">
-                          ★
-                        </span>
-                      )}
-                      {t.at}
-                    </span>
-                    <span className="col-span-2 flex min-w-0 items-center gap-1.5">
-                      <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                  <span
+                    className={`flex size-4 flex-none items-center justify-center self-center ${
+                      paneOpen ? 'row-span-2' : ''
+                    }`}
+                    aria-hidden
+                  >
+                    {isChecked ? (
+                      <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
+                        ✓
+                      </span>
+                    ) : (
                       <span
-                        data-testid="thread-subject"
-                        className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${
-                          isUnread ? 'font-medium text-ink' : 'text-ink-faint'
+                        className={`size-1.5 rounded-full ${
+                          isUnread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
+                        }`}
+                      />
+                    )}
+                  </span>
+                  {paneOpen ? (
+                    <>
+                      <span
+                        data-testid="thread-sender"
+                        className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap ${
+                          isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
                         }`}
                       >
-                        {t.subject}
+                        {t.from}
                       </span>
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span
-                      data-testid="thread-sender"
-                      className={`w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap ${
-                        isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
-                      }`}
-                    >
-                      {t.from}
-                    </span>
-                    <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
-                      <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
-                      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
                         <span
                           data-testid="thread-subject"
-                          className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
+                          className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap ${
+                            isUnread ? 'font-medium text-ink' : 'text-ink-faint'
+                          }`}
                         >
                           {t.subject}
                         </span>
-                        <span data-testid="thread-snippet"> — {t.snippet}</span>
                       </span>
-                    </span>
-                    <span className="flex flex-none items-center gap-2.5 text-xs">
-                      <ReminderChips thread={t} />
-                      {t.hasAttachment && <span title="Has attachment">📎</span>}
-                      {t.starred && (
-                        <span className="text-star" title="Starred">
-                          ★
-                        </span>
-                      )}
                       <span
-                        className={`min-w-[70px] text-right tabular-nums ${
+                        className={`flex items-center gap-1.5 text-xs tabular-nums ${
                           isUnread ? 'font-medium text-accent' : 'text-ink-faint'
                         }`}
                       >
+                        <ReminderChips thread={t} compact />
+                        {t.hasAttachment && <span title="Has attachment">📎</span>}
+                        {t.starred && (
+                          <span className="text-star" title="Starred">
+                            ★
+                          </span>
+                        )}
                         {t.at}
                       </span>
-                    </span>
-                  </>
-                )}
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        data-testid="thread-sender"
+                        className={`w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap ${
+                          isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
+                        }`}
+                      >
+                        {t.from}
+                      </span>
+                      <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
+                        <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                          <span
+                            data-testid="thread-subject"
+                            className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
+                          >
+                            {t.subject}
+                          </span>
+                          <span data-testid="thread-snippet"> — {t.snippet}</span>
+                        </span>
+                      </span>
+                      <span className="flex flex-none items-center gap-2.5 text-xs">
+                        <ReminderChips thread={t} />
+                        {t.hasAttachment && <span title="Has attachment">📎</span>}
+                        {t.starred && (
+                          <span className="text-star" title="Starred">
+                            ★
+                          </span>
+                        )}
+                        <span
+                          className={`min-w-[70px] text-right tabular-nums ${
+                            isUnread ? 'font-medium text-accent' : 'text-ink-faint'
+                          }`}
+                        >
+                          {t.at}
+                        </span>
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
             )
           })}
         </main>
 
         {paneOpen && selected && (
-          <aside data-testid="conversation-pane" className="flex min-w-0 flex-1 flex-col bg-raised/35">
+          // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard focus moves with ArrowLeft/ArrowRight; click only mirrors pointer intent
+          <aside
+            data-testid="conversation-pane"
+            data-split-focus={splitFocus === 'message' ? 'true' : undefined}
+            className={`flex min-w-0 flex-1 flex-col bg-raised/35 ${
+              splitFocus === 'message' ? 'shadow-[inset_0_1px_0_rgba(255,178,36,0.8)]' : ''
+            }`}
+            onClick={() => setSplitFocus('message')}
+          >
             <div className="flex items-center gap-3 border-b border-edge px-6 pt-4 pb-3">
               <h1
                 data-testid="conversation-subject"
@@ -1743,14 +1845,18 @@ export default function App(): React.JSX.Element {
 
       {toast && (
         <div
+          key={toast.id}
           data-testid="toast"
-          className="fixed bottom-12 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-edge bg-raised px-4 py-2 text-sm text-ink shadow-lg"
+          data-toast-id={toast.id}
+          className="pointer-events-none fixed bottom-14 left-1/2 z-50 -translate-x-1/2"
         >
-          {toast}
+          <div className="app-confirmation-toast rounded-xl border border-white/70 bg-ink px-5 py-3 text-base font-semibold text-ground shadow-[0_12px_40px_rgba(0,0,0,0.65)]">
+            {toast.message}
+          </div>
         </div>
       )}
 
-      <footer className="relative z-40 flex items-center gap-4 border-t border-edge bg-ground px-6 py-2 text-xs text-ink-faint">
+      <footer className="relative z-40 flex items-center gap-4 border-t border-white/10 bg-raised px-6 py-2 text-xs text-ink-faint shadow-[0_-8px_24px_rgba(0,0,0,0.32)]">
         <div data-testid="footer-shortcuts" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
           {footerShortcuts.map((shortcut) => (
             <FooterShortcut key={shortcut.id} {...shortcut} />

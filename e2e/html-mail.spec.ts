@@ -44,6 +44,14 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(body.locator('script')).toHaveCount(0)
   await expect(body.locator('[onerror]')).toHaveCount(0)
   await expect(body.locator('a[href^="javascript:"]')).toHaveCount(0)
+  await expect(body.locator('#schemeless-link')).toHaveAttribute(
+    'href',
+    'https://www.kimi.com?referer=upcoming_invoice'
+  )
+  await expect(body.locator('#cid-image')).toHaveAttribute('src', /^data:image\/gif;base64,/)
+  await expect
+    .poll(() => body.locator('#cid-image').evaluate((image) => (image as HTMLImageElement).complete))
+    .toBe(true)
   await expect(body.locator('form, input, button, select, textarea')).toHaveCount(0)
   await expect(body.locator('#self-link')).toHaveAttribute('target', '_blank')
   await expect(body.locator('#top-link')).toHaveAttribute('target', '_blank')
@@ -156,6 +164,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect
     .poll(() => page.getByTestId('conversation-scroll').evaluate((element) => element.scrollTop))
     .toBe(600)
+  await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('k')
   await expect(page.getByTestId('conversation-position')).toHaveText('7 of 8')
   await expect

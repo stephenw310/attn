@@ -2,7 +2,13 @@ import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import type { AuthStatus } from '../shared/auth'
-import type { DownloadAttachmentRequest, DownloadAttachmentResult, SyncState } from '../shared/mail'
+import type {
+  DownloadAttachmentRequest,
+  DownloadAttachmentResult,
+  InlineImageRequest,
+  InlineImageResult,
+  SyncState
+} from '../shared/mail'
 import {
   clearUndo,
   isTriageAction,
@@ -262,6 +268,19 @@ function isDownloadAttachmentRequest(value: unknown): value is DownloadAttachmen
   )
 }
 
+function isInlineImageRequest(value: unknown): value is InlineImageRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<InlineImageRequest>
+  return (
+    typeof candidate.messageId === 'string' &&
+    candidate.messageId.length > 0 &&
+    typeof candidate.attachmentId === 'string' &&
+    candidate.attachmentId.length > 0 &&
+    typeof candidate.mimeType === 'string' &&
+    candidate.mimeType.startsWith('image/')
+  )
+}
+
 let signInInFlight = false
 
 function registerIpc(): void {
@@ -367,6 +386,32 @@ function registerIpc(): void {
       }
     }
   )
+  ipcMain.handle('mail:getInlineImage', async (_e, request: unknown): Promise<InlineImageResult> => {
+    if (!isInlineImageRequest(request)) return { error: 'Invalid inline image' }
+    const account = currentAccountId()
+    const inlineData =
+      db && account ? getInlineAttachmentData(db, account, request.messageId, request.attachmentId) : null
+    const client = inlineData === null && !seedAccountId ? makeClient(authSessionGeneration) : null
+    if (inlineData === null && !client) return { error: 'Inline image data was unavailable' }
+    try {
+      const data =
+        inlineData ??
+        (
+          await client?.get<{ data?: string }>(
+            `/messages/${request.messageId}/attachments/${request.attachmentId}`
+          )
+        )?.data
+      if (typeof data !== 'string') return { error: 'Inline image data was unavailable' }
+      const bytes = Buffer.from(data, 'base64url')
+      if (bytes.byteLength > 10 * 1024 * 1024) return { error: 'Inline image was too large' }
+      return { dataUrl: `data:${request.mimeType};base64,${bytes.toString('base64')}` }
+    } catch (error) {
+      console.error(
+        `[attachment] inline image failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+      return { error: 'Could not load inline image' }
+    }
+  })
   ipcMain.handle('mail:triage', (_e, action: unknown) => {
     if (!db) throw new Error('database unavailable')
     if (!isTriageAction(action)) throw new Error('invalid triage action')

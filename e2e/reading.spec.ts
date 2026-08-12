@@ -27,6 +27,11 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(details).toContainText('daniel@example.com')
   await expect(details).toContainText('maya+roadmap@example.com')
   await expect(details).toContainText('Date')
+  const timezone = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+    .formatToParts(new Date(1_754_800_000_000))
+    .find((part) => part.type === 'timeZoneName')?.value
+  expect(timezone).toBeTruthy()
+  await expect(details).toContainText(timezone ?? '')
   const headerWidth = await cards
     .first()
     .getByTestId('message-header')
@@ -38,6 +43,7 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await cards.first().getByTestId('older-message-toggle').click()
   await expect(cards.first()).toHaveAttribute('data-collapsed', 'true')
   await expect(cards.first().getByTestId('plain-text-body')).toHaveCount(0)
+  await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('j')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
   await page.keyboard.press('k')
@@ -68,6 +74,7 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(lastCard.getByTestId('plain-text-visible')).toHaveText(
     'I added the launch milestones and owner notes.'
   )
+  await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('j')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
 })
