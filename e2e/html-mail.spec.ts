@@ -107,7 +107,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
         off()
         window.setTimeout(resolve, 50)
       })
-      void window.attn.mail.markReadOnOpen('t-weekly')
+      void window.attn.mail.triage({ kind: 'star', threadIds: ['t-weekly'], on: true })
     })
   })
   await expect(iframe).toHaveAttribute('data-stability-marker', 'original')
