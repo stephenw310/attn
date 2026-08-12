@@ -16,6 +16,7 @@ import { matchKey, registerCommands } from './commands'
 import { type LabelCheckState, LabelPicker } from './LabelPicker'
 import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
+import { refreshedSelectionIndex } from './selection'
 
 interface DisplayThread {
   id: string
@@ -866,6 +867,9 @@ export default function App(): React.JSX.Element {
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const conversationScrollRef = useRef<HTMLDivElement | null>(null)
   const convCache = useRef(new Map<string, DisplayConversation>())
+  const selectedThreadIdRef = useRef<string | null>(null)
+  const preserveSelectionOnRefreshRef = useRef(true)
+  const activeViewRef = useRef<'inbox' | 'snoozed'>('inbox')
   const autoReadThreadRef = useRef<string | null>(null)
   const toastTokenRef = useRef(0)
   const goChordUntilRef = useRef(0)
@@ -906,11 +910,15 @@ export default function App(): React.JSX.Element {
     setPendingCount(0)
     setMockReadIds(new Set())
     setConversation(null)
+    selectedThreadIdRef.current = null
+    preserveSelectionOnRefreshRef.current = true
     convCache.current.clear()
 
     if (!attn || !activeAccount) return
     let cancelled = false
     const refresh = (): void => {
+      const preserveSelection = preserveSelectionOnRefreshRef.current
+      preserveSelectionOnRefreshRef.current = true
       convCache.current.clear()
       void Promise.all([
         attn.mail.listThreads(),
@@ -921,6 +929,14 @@ export default function App(): React.JSX.Element {
       ])
         .then(([nextThreads, nextSnoozed, nextLabels, nextUnreadTotal, nextPendingCount]) => {
           if (cancelled) return
+          const nextVisibleThreads = activeViewRef.current === 'inbox' ? nextThreads : nextSnoozed
+          setSelectedIndex((current) =>
+            refreshedSelectionIndex(
+              nextVisibleThreads,
+              preserveSelection ? selectedThreadIdRef.current : null,
+              current
+            )
+          )
           setRealThreads(nextThreads)
           setRealSnoozedThreads(nextSnoozed)
           setLabels(nextLabels)
@@ -959,9 +975,6 @@ export default function App(): React.JSX.Element {
   }, [realMode, realSnoozedThreads, realThreads, view])
 
   useEffect(() => {
-    // NOTE(M1 incremental sync): if a refresh removes the open thread, this
-    // clamp shifts selection and an open pane would jump to a different
-    // conversation. Revisit when mail:changed can fire mid-read.
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
     setSelectedIds((current) => {
       if (current.size === 0) return current
@@ -1001,6 +1014,10 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (labelTargetId !== null && !labelTarget) setLabelTargetId(null)
   }, [labelTarget, labelTargetId])
+
+  useEffect(() => {
+    selectedThreadIdRef.current = selected?.id ?? null
+  }, [selected?.id])
 
   useEffect(() => {
     if (!selected) {
@@ -1057,6 +1074,8 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const switchView = useCallback((next: 'inbox' | 'snoozed') => {
+    activeViewRef.current = next
+    selectedThreadIdRef.current = null
     setView(next)
     setSelectedIndex(0)
     setPaneOpen(false)
@@ -1110,6 +1129,7 @@ export default function App(): React.JSX.Element {
   const triage = useCallback(
     (action: TriageAction) => {
       if (!realMode || !attn) return
+      preserveSelectionOnRefreshRef.current = false
       const isBulk = selectedIds.size > 0
       const targetedAction = {
         ...action,
@@ -1119,7 +1139,9 @@ export default function App(): React.JSX.Element {
       void attn.mail
         .triage(targetedAction)
         .then((result) => showToast(result.label))
-        .catch(() => {})
+        .catch(() => {
+          preserveSelectionOnRefreshRef.current = true
+        })
     },
     [clearSelection, realMode, selectedIds, showToast]
   )
@@ -1329,12 +1351,16 @@ export default function App(): React.JSX.Element {
           context: 'global',
           run: () => {
             if (!realMode || !attn) return
+            preserveSelectionOnRefreshRef.current = false
             void attn.mail
               .undo()
               .then((result) => {
                 if (result) showToast(result.label)
+                else preserveSelectionOnRefreshRef.current = true
               })
-              .catch(() => {})
+              .catch(() => {
+                preserveSelectionOnRefreshRef.current = true
+              })
           }
         }
       ]),

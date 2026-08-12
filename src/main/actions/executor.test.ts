@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
-import type { MailProvider } from '../sync/provider'
+import type { MailActionProvider } from '../sync/provider'
 import { ActionExecutor } from './executor'
 
 interface FakeRow {
@@ -55,11 +55,11 @@ function row(id: number, accountId: string, threadId: string): FakeRow {
 describe('action executor', () => {
   it('drains only the active account and notifies after success', async () => {
     const rows = [row(1, 'a@example.com', 'a-thread'), row(2, 'b@example.com', 'b-thread')]
-    const provider: MailProvider = {
+    const provider = {
       modifyThread: vi.fn(async () => {}),
       trashThread: vi.fn(async () => {}),
       untrashThread: vi.fn(async () => {})
-    }
+    } satisfies MailActionProvider
     const notify = vi.fn()
     const executor = new ActionExecutor(
       fakeDb(rows),
@@ -76,14 +76,14 @@ describe('action executor', () => {
 
   it('continues past a permanent failure to later rows', async () => {
     const rows = [row(1, 'a@example.com', 'bad'), row(2, 'a@example.com', 'good')]
-    const provider: MailProvider = {
+    const provider = {
       modifyThread: vi
         .fn()
         .mockRejectedValueOnce(new GmailApiError(400, 'bad request'))
         .mockResolvedValue(undefined),
       trashThread: vi.fn(async () => {}),
       untrashThread: vi.fn(async () => {})
-    }
+    } satisfies MailActionProvider
     const executor = new ActionExecutor(
       fakeDb(rows),
       () => 'a@example.com',
@@ -93,5 +93,39 @@ describe('action executor', () => {
     expect(provider.modifyThread).toHaveBeenCalledTimes(2)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ thread_id: 'bad', state: 'failed', attempts: 1 })
+  })
+
+  it('does not let external nudges bypass transient retry backoff', async () => {
+    vi.useFakeTimers()
+    try {
+      const rows = [row(1, 'a@example.com', 'retry')]
+      const provider = {
+        modifyThread: vi
+          .fn()
+          .mockRejectedValueOnce(new GmailApiError(503, 'unavailable', true))
+          .mockResolvedValue(undefined),
+        trashThread: vi.fn(async () => {}),
+        untrashThread: vi.fn(async () => {})
+      } satisfies MailActionProvider
+      const executor = new ActionExecutor(
+        fakeDb(rows),
+        () => 'a@example.com',
+        () => provider
+      )
+
+      await executor.trigger()
+      await executor.trigger()
+      expect(provider.modifyThread).toHaveBeenCalledOnce()
+
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.runAllTimersAsync()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(provider.modifyThread).toHaveBeenCalledTimes(2)
+      expect(rows).toHaveLength(0)
+      executor.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

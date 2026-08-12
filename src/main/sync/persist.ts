@@ -34,8 +34,17 @@ export function upsertLabels(db: Db, accountId: string, labels: LabelRow[]): voi
   for (const label of labels) upsert.run(accountId, label.id, label.name, label.type)
 }
 
-/** Persist a fully fetched Gmail thread through the production sync write path. */
-export function persistThread(db: Db, accountId: string, thread: GmailThread): void {
+export interface PersistThreadOptions {
+  metadataOnly?: boolean
+}
+
+/** Persist an authoritative Gmail thread snapshot through the production write path. */
+export function persistThread(
+  db: Db,
+  accountId: string,
+  thread: GmailThread,
+  options: PersistThreadOptions = {}
+): void {
   const messages = thread.messages ?? []
   if (messages.length === 0) return
 
@@ -53,7 +62,8 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
        body_html = CASE WHEN messages.body_html IS NULL OR messages.body_html = ''
                         THEN excluded.body_html ELSE messages.body_html END,
        recipients_json = excluded.recipients_json,
-       attachments_json = excluded.attachments_json`
+       attachments_json = CASE WHEN @metadata_only = 1
+                               THEN messages.attachments_json ELSE excluded.attachments_json END`
   )
   const upsertThread = db.prepare(
     `INSERT INTO threads (account_id, id, history_id, subject, snippet, last_msg_at,
@@ -64,12 +74,14 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
        history_id = excluded.history_id, subject = excluded.subject, snippet = excluded.snippet,
        last_msg_at = excluded.last_msg_at, from_display = excluded.from_display,
        is_unread = excluded.is_unread, is_starred = excluded.is_starred,
-       has_attachment = excluded.has_attachment`
+       has_attachment = CASE WHEN @metadata_only = 1
+                             THEN threads.has_attachment ELSE excluded.has_attachment END`
   )
   const clearLabels = db.prepare('DELETE FROM thread_labels WHERE account_id = ? AND thread_id = ?')
   const insertLabel = db.prepare(
     'INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)'
   )
+  const incomingMessageIds = messages.map((message) => message.id)
 
   db.transaction(() => {
     const labelUnion = new Set<string>()
@@ -108,7 +120,8 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
           bcc: parseAddressList(header(msg, 'Bcc')),
           replyTo: parseAddressList(header(msg, 'Reply-To'))
         }),
-        attachments_json: JSON.stringify(attachments)
+        attachments_json: JSON.stringify(attachments),
+        metadata_only: options.metadataOnly ? 1 : 0
       })
 
       for (const label of msg.labelIds ?? []) labelUnion.add(label)
@@ -123,6 +136,8 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
       anyAttachment ||= attach
     }
 
+    pruneMissingMessages(db, accountId, thread.id, incomingMessageIds)
+
     upsertThread.run({
       account_id: accountId,
       id: thread.id,
@@ -133,11 +148,35 @@ export function persistThread(db: Db, accountId: string, thread: GmailThread): v
       from_display: fromDisplay,
       is_unread: anyUnread,
       is_starred: anyStarred,
-      has_attachment: anyAttachment
+      has_attachment: anyAttachment,
+      metadata_only: options.metadataOnly ? 1 : 0
     })
 
     clearLabels.run(accountId, thread.id)
     for (const label of labelUnion) insertLabel.run(accountId, thread.id, label)
   })()
   replayPendingThreadDeltas(db, accountId, thread.id)
+}
+
+/** A thread snapshot is authoritative for which messages still exist in it. */
+export function pruneMissingMessages(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  incomingMessageIds: string[]
+): void {
+  if (incomingMessageIds.length === 0) return
+  const placeholders = incomingMessageIds.map(() => '?').join(', ')
+  db.prepare(
+    `DELETE FROM messages WHERE account_id = ? AND thread_id = ? AND id NOT IN (${placeholders})`
+  ).run(accountId, threadId, ...incomingMessageIds)
+}
+
+/** Remove a thread snapshot that Gmail reports as no longer existing. */
+export function deleteThread(db: Db, accountId: string, threadId: string): void {
+  db.transaction(() => {
+    db.prepare('DELETE FROM thread_labels WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
+    db.prepare('DELETE FROM messages WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
+    db.prepare('DELETE FROM threads WHERE account_id = ? AND id = ?').run(accountId, threadId)
+  })()
 }

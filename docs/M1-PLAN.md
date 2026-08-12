@@ -409,7 +409,7 @@ Snooze/return/catch-up/undo all demonstrated; snoozed view navigable by keyboard
    ```
 
    The shell pages `listHistory` to exhaustion, runs the plan, refetches, replays pending deltas, calls `scheduler.wakeThread` for snoozed threads with new mail (T6's hook), stores the max `historyId`, broadcasts `mail:changed` once per cycle, and emits `newMail` on an internal `EventEmitter` (T9 subscribes; nobody listens yet — that's fine).
-2. **Windowed backfill (F2):** replace the M0 caps in `backfill.ts` — list INBOX threads with `q: 'newer_than:12m'`, page to completion, and persist the `pageToken` into `sync_state.backfill_cursor` as you go so a killed app **resumes** instead of restarting. (The 90-day body window and on-demand older bodies move to M3 with the bodies/FTS split — full bodies within the 12-month window are fine for M1.) Remove the 15-minute skip; after a completed backfill, freshness is the poller's job.
+2. **Windowed backfill (F2):** replace the M0 caps in `backfill.ts` — list INBOX threads with `q: 'newer_than:12m'`, page to completion, and persist the `pageToken` into `sync_state.backfill_cursor` as you go so a killed app **resumes** instead of restarting. T7 implements the 90-day body window, but on-demand hydration for older metadata-only threads remains deferred to M3's bodies/FTS work. Remove the 15-minute skip; after a completed backfill, freshness is the poller's job.
 3. **Wiring (`src/main/index.ts`):** start the poller after a successful backfill and whenever a signed-in app boots with `backfill_cursor='done'`; stop it on sign-out (tie into `authSessionGeneration`). Poller absence (mock/seeded/signed-out) must be a silent no-op.
 4. Executor nudge: a completed cycle with pending queue rows kicks the executor (cheap way to retry quickly after coming back online).
 
@@ -601,7 +601,7 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 | Out-of-line attachment download requires a live signed-in connection; inline-delivered bytes are cached locally, while uncached seeded/offline downloads show an explanatory toast | T11 | M2+ if general offline attachment caching proves needed |
 | Windows numeric badge overlay is a static dot | T9 | M4 packaging polish |
 | Notifications cover all INBOX mail (no split filtering) | T9 | M3 (F11 splits) |
-| 90-day body window / on-demand older bodies not enforced (full bodies within 12-month window) | T7 | M3 (bodies table + FTS5 split) |
+| Opening a 90-day-to-12-month-old metadata-only thread does not fetch and cache its bodies; the 90-day body staging itself is implemented | T7 | M3 (bodies table + FTS5 split); not an M1 exit blocker, but required before M2 daily-driving |
 | List virtualization deferred | — | When T10 data says so, before M2 daily-driving |
 
 ---
