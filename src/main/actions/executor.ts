@@ -27,6 +27,8 @@ export class ActionExecutor {
 
   trigger(): Promise<void> {
     if (this.stopping) return Promise.resolve()
+    // Preserve the retry ladder when another subsystem nudges the executor.
+    if (this.timer) return Promise.resolve()
     if (this.drainPromise) return this.drainPromise
     this.drainPromise = this.drain().finally(() => {
       this.drainPromise = null
@@ -97,6 +99,7 @@ export class ActionExecutor {
     } finally {
       if (!this.stopping && retryMs !== null) {
         this.timer = setTimeout(() => {
+          this.timer = null
           void this.trigger()
         }, retryMs)
       }

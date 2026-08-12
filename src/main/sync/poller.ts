@@ -1,8 +1,10 @@
 import { EventEmitter } from 'node:events'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
+import type { GmailThread } from '../gmail/parse'
 import { applyThreadDelta } from '../store/mutate'
 import { replayPendingThreadDeltas } from '../store/replay'
+import { hydrateMissingThreadBodies } from './bodies'
 import { deleteThread, persistThread } from './persist'
 import type { HistoryRecord, MailProvider } from './provider'
 
@@ -90,11 +92,17 @@ export function reconcileInboxMembership(
   return missing
 }
 
+export interface HistoryCycleEffects {
+  wakeThread?: (threadId: string) => void
+  persist?: (thread: GmailThread) => Promise<void>
+  remove?: (threadId: string) => void
+}
+
 export async function runHistoryCycle(
   db: Db,
   accountId: string,
   provider: MailProvider,
-  wakeThread: (threadId: string) => void = () => {}
+  effects: HistoryCycleEffects = {}
 ): Promise<FetchedHistoryPlan> {
   const state = db.prepare('SELECT last_history_id FROM sync_state WHERE account_id = ?').get(accountId) as
     | { last_history_id: string | null }
@@ -104,16 +112,24 @@ export async function runHistoryCycle(
   const plan = await fetchHistoryPlan(provider, state.last_history_id)
   for (const threadId of plan.refetchThreadIds) {
     try {
-      persistThread(db, accountId, await provider.getThread(threadId))
+      const thread = await provider.getThread(threadId, { format: 'full' })
+      if (effects.persist) await effects.persist(thread)
+      else {
+        persistThread(db, accountId, thread)
+        await hydrateMissingThreadBodies(db, provider, accountId, thread)
+      }
     } catch (error) {
       if (error instanceof GmailApiError && error.status === 404) {
-        deleteThread(db, accountId, threadId)
+        if (effects.remove) effects.remove(threadId)
+        else deleteThread(db, accountId, threadId)
         continue
       }
       throw error
     }
   }
-  for (const threadId of new Set(plan.newMail.map((mail) => mail.threadId))) wakeThread(threadId)
+  for (const threadId of new Set(plan.newMail.map((mail) => mail.threadId))) {
+    effects.wakeThread?.(threadId)
+  }
   db.prepare('UPDATE sync_state SET last_history_id = ?, updated_at = ? WHERE account_id = ?').run(
     plan.historyId,
     Date.now(),
@@ -125,16 +141,17 @@ export async function runHistoryCycle(
 export const FOREGROUND_POLL_MS = 15_000
 export const BACKGROUND_POLL_MS = 60_000
 
-interface HistoryPollerOptions {
+export interface HistoryPollerOptions {
   db: Db
   accountId: string
   provider: MailProvider
   isForeground: () => boolean
-  recoverExpiredHistory: () => Promise<void>
-  onChanged: () => void
+  recoverExpiredHistory: (restart: boolean) => Promise<void>
+  onCycleComplete: (changed: boolean) => void
   onError: (message: string) => void
   wakeThread?: (threadId: string) => void
   kickExecutor?: () => void
+  runCycle?: typeof runHistoryCycle
 }
 
 export class HistoryPoller {
@@ -142,6 +159,8 @@ export class HistoryPoller {
   private executing = false
   private stopped = true
   private lastAttemptAt = 0
+  private recoveryPending = false
+  private recoveryNeedsRestart = false
 
   constructor(private readonly options: HistoryPollerOptions) {}
 
@@ -167,20 +186,32 @@ export class HistoryPoller {
     this.lastAttemptAt = Date.now()
     try {
       let plan: FetchedHistoryPlan | null = null
-      try {
-        plan = await runHistoryCycle(
-          this.options.db,
-          this.options.accountId,
-          this.options.provider,
-          this.options.wakeThread
-        )
-      } catch (error) {
-        if (!(error instanceof GmailApiError) || error.status !== 404) throw error
-        console.warn('[sync] history checkpoint expired — running delta re-list')
-        await this.options.recoverExpiredHistory()
+      if (this.recoveryPending) {
+        const restart = this.recoveryNeedsRestart
+        this.recoveryNeedsRestart = false
+        await this.options.recoverExpiredHistory(restart)
+        this.recoveryPending = false
+      } else {
+        try {
+          plan = await (this.options.runCycle ?? runHistoryCycle)(
+            this.options.db,
+            this.options.accountId,
+            this.options.provider,
+            { wakeThread: this.options.wakeThread }
+          )
+        } catch (error) {
+          if (!(error instanceof GmailApiError) || error.status !== 404) throw error
+          console.warn('[sync] history checkpoint expired — running delta re-list')
+          this.recoveryPending = true
+          this.recoveryNeedsRestart = true
+          const restart = this.recoveryNeedsRestart
+          this.recoveryNeedsRestart = false
+          await this.options.recoverExpiredHistory(restart)
+          this.recoveryPending = false
+        }
       }
       if (this.stopped) return
-      this.options.onChanged()
+      this.options.onCycleComplete(plan === null || plan.refetchThreadIds.length > 0)
       this.options.kickExecutor?.()
       if (plan && plan.newMail.length > 0) historyEvents.emit('newMail', plan.newMail)
     } catch (error) {

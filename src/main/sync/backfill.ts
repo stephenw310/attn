@@ -1,19 +1,18 @@
-// Resumable 12-month INBOX backfill. Each completed page checkpoints its next
-// token, so a killed app safely repeats at most the page that was in flight.
+// Resumable staged INBOX backfill: 12 months of metadata first, then full
+// bodies for 90 days. Each completed page checkpoints the next phase/token.
 
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
+import { hydrateMissingThreadBodies } from './bodies'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
-import type { MailProvider } from './provider'
+import type { MailProvider, ThreadIdPage } from './provider'
 
 export interface BackfillCallbacks {
   onProgress: (threadsDone: number) => void
-  onDone: (accountId: string, threadCount: number) => void
   onError: (message: string) => void
 }
 
 export interface BackfillResult {
-  accountId: string
   threadCount: number
   inboxThreadIds: string[]
 }
@@ -23,39 +22,40 @@ export interface BackfillOptions {
   restart?: boolean
 }
 
+type BackfillPhase = 'metadata' | 'bodies' | 'reconcile'
+
+interface ParsedCursor {
+  phase: BackfillPhase
+  pageToken?: string
+}
+
 export async function runInboxBackfill(
   db: Db,
   provider: MailProvider,
-  cb: BackfillCallbacks,
+  callbacks: BackfillCallbacks,
   options: BackfillOptions = {}
 ): Promise<BackfillResult | null> {
   try {
     const profile = await provider.getProfile()
     const accountId = profile.emailAddress
-
     ensureAccount(db, accountId, profile.emailAddress)
 
-    const prev = db
+    const previous = db
       .prepare('SELECT backfill_cursor, updated_at FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null; updated_at: number | null } | undefined
-    if (prev?.backfill_cursor === 'done' && !options.restart) {
-      cb.onDone(accountId, 0)
-      return { accountId, threadCount: 0, inboxThreadIds: [] }
+    if (previous?.backfill_cursor === 'done' && !options.restart) {
+      return { threadCount: 0, inboxThreadIds: [] }
     }
 
-    const resumeCursor = prev?.backfill_cursor
-    const resuming = Boolean(!options.restart && resumeCursor && resumeCursor !== 'done')
-    let pageToken: string | undefined =
-      resuming && resumeCursor !== 'start' && resumeCursor !== 'reconcile'
-        ? (resumeCursor ?? undefined)
-        : undefined
+    const resuming = Boolean(
+      !options.restart && previous?.backfill_cursor && previous.backfill_cursor !== 'done'
+    )
+    let cursor = resuming ? parseCursor(previous?.backfill_cursor) : { phase: 'metadata' as const }
     if (!resuming) {
-      // Checkpoint before listing. The 'start' sentinel distinguishes an
-      // interrupted first page from a legacy NULL cursor and preserves the
-      // original history id across relaunches.
+      // Record the gapless history checkpoint before the first metadata page.
       db.prepare(
         `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor, updated_at)
-         VALUES (?, ?, 'start', 0)
+         VALUES (?, ?, 'metadata', 0)
          ON CONFLICT(account_id) DO UPDATE SET
            last_history_id = excluded.last_history_id,
            backfill_cursor = excluded.backfill_cursor,
@@ -64,42 +64,57 @@ export async function runInboxBackfill(
     }
 
     upsertLabels(db, accountId, await provider.listLabels())
+    let threadsDone = 0
 
-    let done = 0
-    const inboxThreadIds = new Set<string>()
-    if (resumeCursor !== 'reconcile') {
-      do {
-        const page = await provider.listThreadIds('newer_than:12m', pageToken)
-
-        await mapConcurrent(page.threadIds, 3, async (threadId) => {
-          try {
-            persistThread(db, accountId, await provider.getThread(threadId))
-          } catch (e) {
-            // Normal race on an active inbox: listed thread archived/deleted
-            // before we fetched it. Skip it, keep the backfill alive.
-            if (e instanceof GmailApiError && e.status === 404) {
-              console.log(`[sync] thread ${threadId} vanished mid-backfill — skipped`)
-              return
-            }
-            throw e
-          }
-          done++
-        })
-
-        cb.onProgress(done)
-        pageToken = page.nextPageToken
-        db.prepare('UPDATE sync_state SET backfill_cursor = ?, updated_at = 0 WHERE account_id = ?').run(
-          pageToken ?? 'reconcile',
-          accountId
-        )
-      } while (pageToken)
+    if (cursor.phase === 'metadata') {
+      await runThreadPhase({
+        db,
+        provider,
+        accountId,
+        query: 'newer_than:12m',
+        phase: 'metadata',
+        initialPageToken: cursor.pageToken,
+        nextPhase: 'bodies',
+        onThread: async (threadId) => {
+          persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
+            metadataOnly: true
+          })
+        },
+        onPage: (count) => {
+          threadsDone += count
+          callbacks.onProgress(threadsDone)
+        }
+      })
+      cursor = { phase: 'bodies' }
     }
 
-    // Re-list ids only after the body backfill. This is both the complete set
-    // used for INBOX reconciliation and a resumable final phase after a kill.
-    pageToken = undefined
+    if (cursor.phase === 'bodies') {
+      await runThreadPhase({
+        db,
+        provider,
+        accountId,
+        query: 'newer_than:90d',
+        phase: 'bodies',
+        initialPageToken: cursor.pageToken,
+        nextPhase: 'reconcile',
+        onThread: async (threadId) => {
+          const thread = await provider.getThread(threadId, { format: 'full' })
+          persistThread(db, accountId, thread)
+          await hydrateMissingThreadBodies(db, provider, accountId, thread)
+        },
+        onPage: (count) => {
+          threadsDone += count
+          callbacks.onProgress(threadsDone)
+        }
+      })
+    }
+
+    // Re-list all INBOX ids for authoritative membership reconciliation. This
+    // remains metadata-free and prevents older local threads being stripped.
+    const inboxThreadIds = new Set<string>()
+    let pageToken: string | undefined
     do {
-      const page = await provider.listThreadIds('newer_than:12m', pageToken)
+      const page = await provider.listThreadIds('', pageToken)
       for (const threadId of page.threadIds) inboxThreadIds.add(threadId)
       pageToken = page.nextPageToken
     } while (pageToken)
@@ -109,13 +124,81 @@ export async function runInboxBackfill(
       Date.now(),
       accountId
     )
-
-    cb.onDone(accountId, done)
-    return { accountId, threadCount: done, inboxThreadIds: [...inboxThreadIds] }
-  } catch (e) {
-    cb.onError(e instanceof Error ? e.message : String(e))
+    return { threadCount: threadsDone, inboxThreadIds: [...inboxThreadIds] }
+  } catch (error) {
+    callbacks.onError(error instanceof Error ? error.message : String(error))
     return null
   }
+}
+
+interface ThreadPhaseOptions {
+  db: Db
+  provider: MailProvider
+  accountId: string
+  query: string
+  phase: Exclude<BackfillPhase, 'reconcile'>
+  initialPageToken?: string
+  nextPhase: BackfillPhase
+  onThread: (threadId: string) => Promise<void>
+  onPage: (count: number) => void
+}
+
+async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
+  let pageToken = options.initialPageToken
+  let resetExpiredCursor = false
+  for (;;) {
+    let page: ThreadIdPage
+    try {
+      page = await options.provider.listThreadIds(options.query, pageToken)
+    } catch (error) {
+      if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
+      // Preserve the original history checkpoint while restarting this phase.
+      pageToken = undefined
+      resetExpiredCursor = true
+      checkpoint(options.db, options.accountId, options.phase)
+      continue
+    }
+
+    let completed = 0
+    await mapConcurrent(page.threadIds, 3, async (threadId) => {
+      try {
+        await options.onThread(threadId)
+      } catch (error) {
+        // Normal race on an active inbox: listed thread disappeared before get.
+        if (error instanceof GmailApiError && error.status === 404) {
+          console.log(`[sync] thread ${threadId} vanished mid-backfill — skipped`)
+          return
+        }
+        throw error
+      }
+      completed++
+    })
+    options.onPage(completed)
+    pageToken = page.nextPageToken
+    checkpoint(options.db, options.accountId, pageToken ? `${options.phase}:${pageToken}` : options.nextPhase)
+    if (!pageToken) return
+  }
+}
+
+function parseCursor(raw: string | null | undefined): ParsedCursor {
+  if (!raw || raw === 'start' || raw === 'metadata') return { phase: 'metadata' }
+  if (raw === 'bodies') return { phase: 'bodies' }
+  if (raw === 'reconcile') return { phase: 'reconcile' }
+  if (raw.startsWith('metadata:')) return { phase: 'metadata', pageToken: raw.slice('metadata:'.length) }
+  if (raw.startsWith('bodies:')) return { phase: 'bodies', pageToken: raw.slice('bodies:'.length) }
+  // Compatibility with the first T7 cursor format, which stored a bare token.
+  return { phase: 'metadata', pageToken: raw }
+}
+
+function checkpoint(db: Db, accountId: string, cursor: string): void {
+  db.prepare('UPDATE sync_state SET backfill_cursor = ?, updated_at = 0 WHERE account_id = ?').run(
+    cursor,
+    accountId
+  )
+}
+
+function isExpiredPageToken(error: unknown): boolean {
+  return error instanceof GmailApiError && (error.status === 400 || error.status === 404)
 }
 
 async function mapConcurrent<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

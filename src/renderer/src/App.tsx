@@ -12,6 +12,7 @@ import type {
 import { matchKey, registerCommands } from './commands'
 import { MessageBody } from './MessageBody'
 import { getConversation as getMockConversation, mockThreads } from './mockData'
+import { refreshedSelectionIndex } from './selection'
 
 interface DisplayThread {
   id: string
@@ -616,6 +617,8 @@ export default function App(): React.JSX.Element {
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const conversationScrollRef = useRef<HTMLDivElement | null>(null)
   const convCache = useRef(new Map<string, DisplayConversation>())
+  const selectedThreadIdRef = useRef<string | null>(null)
+  const preserveSelectionOnRefreshRef = useRef(true)
   const autoReadThreadRef = useRef<string | null>(null)
   const toastTokenRef = useRef(0)
 
@@ -647,11 +650,14 @@ export default function App(): React.JSX.Element {
     setPendingCount(0)
     setMockReadIds(new Set())
     setConversation(null)
+    selectedThreadIdRef.current = null
     convCache.current.clear()
 
     if (!attn || !activeAccount) return
     let cancelled = false
     const refresh = (): void => {
+      const preserveSelection = preserveSelectionOnRefreshRef.current
+      preserveSelectionOnRefreshRef.current = true
       convCache.current.clear()
       void Promise.all([
         attn.mail.listThreads(),
@@ -660,6 +666,13 @@ export default function App(): React.JSX.Element {
       ])
         .then(([nextThreads, nextUnreadTotal, nextPendingCount]) => {
           if (cancelled) return
+          setSelectedIndex((current) =>
+            refreshedSelectionIndex(
+              nextThreads,
+              preserveSelection ? selectedThreadIdRef.current : null,
+              current
+            )
+          )
           setRealThreads(nextThreads)
           setRealUnreadTotal(nextUnreadTotal)
           setPendingCount(nextPendingCount)
@@ -689,14 +702,14 @@ export default function App(): React.JSX.Element {
   }, [realMode, realThreads])
 
   useEffect(() => {
-    // NOTE(M1 incremental sync): if a refresh removes the open thread, this
-    // clamp shifts selection and an open pane would jump to a different
-    // conversation. Revisit when mail:changed can fire mid-read.
-    setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
     if (threads.length === 0) setPaneOpen(false)
   }, [threads.length])
 
   const selected: DisplayThread | undefined = threads[selectedIndex]
+
+  useEffect(() => {
+    selectedThreadIdRef.current = selected?.id ?? null
+  }, [selected?.id])
 
   useEffect(() => {
     if (!selected) {
@@ -755,10 +768,13 @@ export default function App(): React.JSX.Element {
   const triage = useCallback(
     (action: TriageAction) => {
       if (!realMode || !attn) return
+      preserveSelectionOnRefreshRef.current = false
       void attn.mail
         .triage(action)
         .then((result) => showToast(result.label))
-        .catch(() => {})
+        .catch(() => {
+          preserveSelectionOnRefreshRef.current = true
+        })
     },
     [realMode, showToast]
   )
@@ -874,12 +890,16 @@ export default function App(): React.JSX.Element {
           context: 'global',
           run: () => {
             if (!realMode || !attn) return
+            preserveSelectionOnRefreshRef.current = false
             void attn.mail
               .undo()
               .then((result) => {
                 if (result) showToast(result.label)
+                else preserveSelectionOnRefreshRef.current = true
               })
-              .catch(() => {})
+              .catch(() => {
+                preserveSelectionOnRefreshRef.current = true
+              })
           }
         }
       ]),

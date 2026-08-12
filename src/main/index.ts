@@ -107,7 +107,6 @@ function startSync(): void {
       setSyncState({ phase: 'syncing', threadsDone })
       broadcast('mail:changed')
     },
-    onDone: () => {},
     onError: (message) => {
       syncRunning = false
       if (generation !== authSessionGeneration) {
@@ -117,19 +116,30 @@ function startSync(): void {
       setSyncState({ phase: 'error', message })
       console.error(`[sync] failed: ${message}`)
     }
-  }).then((result) => {
-    syncRunning = false
-    if (!result) return
-    if (generation !== authSessionGeneration) {
-      if (authStatus().signedIn) void resumeOnlineWork()
-      return
-    }
-    reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
-    setSyncState({ phase: 'idle' })
-    broadcast('mail:changed')
-    console.log(`[sync] backfill done: ${result.threadCount} inbox threads for ${accountId}`)
-    startHistoryPoller(accountId, provider, generation)
   })
+    .then((result) => {
+      syncRunning = false
+      if (!result) return
+      if (generation !== authSessionGeneration) {
+        if (authStatus().signedIn) void resumeOnlineWork()
+        return
+      }
+      reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+      setSyncState({ phase: 'idle' })
+      broadcast('mail:changed')
+      console.log(`[sync] backfill done: ${result.threadCount} inbox threads for ${accountId}`)
+      startHistoryPoller(accountId, provider, generation)
+    })
+    .catch((error) => {
+      syncRunning = false
+      if (generation !== authSessionGeneration) {
+        if (authStatus().signedIn) void resumeOnlineWork()
+        return
+      }
+      const message = error instanceof Error ? error.message : String(error)
+      setSyncState({ phase: 'error', message })
+      console.error(`[sync] failed after backfill: ${message}`)
+    })
 }
 
 function startHistoryPoller(accountId: string, provider: GmailMailProvider, generation: number): void {
@@ -140,32 +150,41 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
     accountId,
     provider,
     isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
-    recoverExpiredHistory: async () => {
+    recoverExpiredHistory: async (restart) => {
       if (generation !== authSessionGeneration) throw new Error('authentication session changed')
       syncRunning = true
       setSyncState({ phase: 'syncing', threadsDone: 0 })
-      const result = await runInboxBackfill(
-        activeDb,
-        provider,
-        {
-          onProgress: (threadsDone) => {
-            if (generation === authSessionGeneration) {
-              setSyncState({ phase: 'syncing', threadsDone })
+      let failureMessage = 'history recovery backfill failed'
+      try {
+        const result = await runInboxBackfill(
+          activeDb,
+          provider,
+          {
+            onProgress: (threadsDone) => {
+              if (generation === authSessionGeneration) {
+                setSyncState({ phase: 'syncing', threadsDone })
+              }
+            },
+            onError: (message) => {
+              failureMessage = message
             }
           },
-          onDone: () => {},
-          onError: () => {}
-        },
-        { restart: true }
-      )
-      syncRunning = false
-      if (!result) throw new Error('history recovery backfill failed')
-      reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+          { restart }
+        )
+        if (!result) throw new Error(failureMessage)
+        if (generation !== authSessionGeneration) throw new Error('authentication session changed')
+        reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+      } finally {
+        syncRunning = false
+        if (generation !== authSessionGeneration && authStatus().signedIn) {
+          void resumeOnlineWork()
+        }
+      }
     },
-    onChanged: () => {
+    onCycleComplete: (changed) => {
       if (generation !== authSessionGeneration) return
       setSyncState({ phase: 'idle' })
-      broadcast('mail:changed')
+      if (changed) broadcast('mail:changed')
     },
     onError: (message) => {
       if (generation !== authSessionGeneration) return

@@ -1,4 +1,5 @@
 import type {
+  GetThreadOptions,
   HistoryPage,
   MailProvider,
   ProviderLabel,
@@ -6,7 +7,9 @@ import type {
   ThreadIdPage
 } from '../sync/provider'
 import { GmailApiError, type GmailClient } from './client'
-import type { GmailPart, GmailThread } from './parse'
+import type { GmailThread } from './parse'
+
+const METADATA_HEADERS = ['From', 'To', 'Cc', 'Bcc', 'Reply-To', 'Subject']
 
 export class GmailMailProvider implements MailProvider {
   constructor(private readonly client: GmailClient) {}
@@ -36,7 +39,8 @@ export class GmailMailProvider implements MailProvider {
   }
 
   async listThreadIds(q: string, pageToken?: string): Promise<ThreadIdPage> {
-    const params: Record<string, string> = { labelIds: 'INBOX', maxResults: '100', q }
+    const params: Record<string, string> = { labelIds: 'INBOX', maxResults: '100' }
+    if (q) params.q = q
     if (pageToken) params.pageToken = pageToken
     const result = await this.client.get<{
       threads?: { id: string }[]
@@ -48,12 +52,26 @@ export class GmailMailProvider implements MailProvider {
     }
   }
 
-  async getThread(id: string): Promise<GmailThread> {
-    const thread = await this.client.get<GmailThread>(`/threads/${encodeURIComponent(id)}`, {
-      format: 'full'
+  getThread(id: string, options: GetThreadOptions = {}): Promise<GmailThread> {
+    const format = options.format ?? 'full'
+    return this.client.get<GmailThread>(`/threads/${encodeURIComponent(id)}`, {
+      format,
+      ...(format === 'metadata' ? { metadataHeaders: METADATA_HEADERS } : {})
     })
-    await this.hydrateExternalTextParts(thread)
-    return thread
+  }
+
+  async getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined> {
+    try {
+      return (
+        await this.client.get<{ data?: string }>(
+          `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
+        )
+      ).data
+    } catch (error) {
+      // The message or attachment can disappear between thread and part fetches.
+      if (error instanceof GmailApiError && error.status === 404) return undefined
+      throw error
+    }
   }
 
   async listHistory(startHistoryId: string, pageToken?: string): Promise<HistoryPage> {
@@ -74,41 +92,4 @@ export class GmailMailProvider implements MailProvider {
       nextPageToken: result.nextPageToken
     }
   }
-
-  private async hydrateExternalTextParts(thread: GmailThread): Promise<void> {
-    for (const message of thread.messages ?? []) {
-      const parts = externalTextParts(message.payload)
-      for (const part of parts) {
-        const attachmentId = part.body?.attachmentId
-        if (!attachmentId) continue
-        try {
-          const attachment = await this.client.get<{ data?: string }>(
-            `/messages/${encodeURIComponent(message.id)}/attachments/${encodeURIComponent(attachmentId)}`
-          )
-          if (attachment.data && part.body) part.body.data = attachment.data
-        } catch (error) {
-          // The message or attachment can disappear between thread and part fetches.
-          if (error instanceof GmailApiError && error.status === 404) continue
-          throw error
-        }
-      }
-    }
-  }
-}
-
-function externalTextParts(payload: GmailPart | undefined): GmailPart[] {
-  const result: GmailPart[] = []
-  const visit = (part: GmailPart): void => {
-    if (
-      !part.filename &&
-      !part.body?.data &&
-      part.body?.attachmentId &&
-      (part.mimeType === 'text/plain' || part.mimeType === 'text/html')
-    ) {
-      result.push(part)
-    }
-    part.parts?.forEach(visit)
-  }
-  if (payload) visit(payload)
-  return result
 }

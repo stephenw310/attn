@@ -94,4 +94,38 @@ describe('action executor', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ thread_id: 'bad', state: 'failed', attempts: 1 })
   })
+
+  it('does not let external nudges bypass transient retry backoff', async () => {
+    vi.useFakeTimers()
+    try {
+      const rows = [row(1, 'a@example.com', 'retry')]
+      const provider = {
+        modifyThread: vi
+          .fn()
+          .mockRejectedValueOnce(new GmailApiError(503, 'unavailable', true))
+          .mockResolvedValue(undefined),
+        trashThread: vi.fn(async () => {}),
+        untrashThread: vi.fn(async () => {})
+      } satisfies MailActionProvider
+      const executor = new ActionExecutor(
+        fakeDb(rows),
+        () => 'a@example.com',
+        () => provider
+      )
+
+      await executor.trigger()
+      await executor.trigger()
+      expect(provider.modifyThread).toHaveBeenCalledOnce()
+
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.runAllTimersAsync()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(provider.modifyThread).toHaveBeenCalledTimes(2)
+      expect(rows).toHaveLength(0)
+      executor.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
