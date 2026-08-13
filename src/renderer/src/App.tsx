@@ -13,7 +13,15 @@ import type {
   ThreadRow
 } from '../../shared/mail'
 import { formatSnoozeDate, parseSnoozeText, snoozePresets } from '../../shared/snooze'
-import { matchKey, registerCommands } from './commands'
+import {
+  chordKey,
+  createCommand,
+  findCommandByShortcut,
+  isChordPrefix,
+  matchKey,
+  readingScrollDelta,
+  registerCommands
+} from './commands'
 import { dateGroup } from './dateGroup'
 import { type LabelCheckState, LabelPicker } from './LabelPicker'
 import { MessageBody } from './MessageBody'
@@ -54,8 +62,6 @@ interface DisplayConversation {
 }
 
 const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
-const READING_SCROLL_STEP = 120
-
 const LABEL_PALETTE = [
   { backgroundColor: '#44351b', borderColor: '#765b26', color: '#ffd789' },
   { backgroundColor: '#193b4a', borderColor: '#28647d', color: '#8cdbff' },
@@ -193,13 +199,7 @@ function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
   )
 }
 
-function ReminderChips({
-  thread,
-  compact = false
-}: {
-  thread: DisplayThread
-  compact?: boolean
-}): React.JSX.Element {
+function ReminderChips({ thread }: { thread: DisplayThread }): React.JSX.Element {
   return (
     <>
       {thread.returned && (
@@ -214,9 +214,7 @@ function ReminderChips({
         <span
           data-testid="chip-snooze-due"
           title={formatSnoozeDate(thread.dueAt)}
-          className={`rounded-full border border-edge px-2 py-0.5 text-ink-dim ${
-            compact ? 'max-w-32 overflow-hidden text-ellipsis whitespace-nowrap' : ''
-          }`}
+          className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
         >
           {formatSnoozeDate(thread.dueAt)}
         </span>
@@ -540,14 +538,7 @@ function ConversationMessages({
   useLayoutEffect(() => {
     const newestMessage = conversation.messages[newestIndex]
     if (!newestMessage) return
-    return registerCommands([
-      {
-        id: 'message.trim.toggle',
-        title: 'Show or hide trimmed message content',
-        context: 'list',
-        run: () => toggleTrim(newestMessage.id)
-      }
-    ])
+    return registerCommands([createCommand('message.trim.toggle', () => toggleTrim(newestMessage.id))])
   }, [conversation.messages, newestIndex, toggleTrim])
 
   return (
@@ -1114,8 +1105,7 @@ export default function App(): React.JSX.Element {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set())
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null)
   const [selectionBaseIds, setSelectionBaseIds] = useState<ReadonlySet<string>>(new Set())
-  const [paneOpen, setPaneOpen] = useState(false)
-  const [splitFocus, setSplitFocus] = useState<'list' | 'message'>('list')
+  const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
@@ -1131,7 +1121,7 @@ export default function App(): React.JSX.Element {
   const activeViewRef = useRef<'inbox' | 'snoozed'>('inbox')
   const autoReadThreadRef = useRef<string | null>(null)
   const toastTokenRef = useRef(0)
-  const goChordUntilRef = useRef(0)
+  const pendingChordRef = useRef<{ key: string; until: number } | null>(null)
   const deferRefreshUntilRef = useRef(0)
   const earliestExitIndexRef = useRef<number | null>(null)
 
@@ -1179,7 +1169,7 @@ export default function App(): React.JSX.Element {
     setSelectedIds(new Set())
     setSelectionAnchorId(null)
     setSelectionBaseIds(new Set())
-    setPaneOpen(false)
+    setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetId(null)
     setPendingCount(0)
@@ -1273,7 +1263,7 @@ export default function App(): React.JSX.Element {
       if (next.size === current.size) return current
       return next
     })
-    if (threads.length === 0) setPaneOpen(false)
+    if (threads.length === 0) setReaderOpen(false)
   }, [threads])
 
   useEffect(() => {
@@ -1340,7 +1330,7 @@ export default function App(): React.JSX.Element {
     }
   }, [selected, realMode])
 
-  // Preload neighbors so Enter and in-pane J/K render instantly (F3).
+  // Preload neighbors so opening and reader J/K navigation normally have no loading state (F3).
   useEffect(() => {
     if (!realMode || !attn) return
     for (const idx of [selectedIndex - 1, selectedIndex + 1]) {
@@ -1384,18 +1374,8 @@ export default function App(): React.JSX.Element {
   useLayoutEffect(() => {
     if (!realMode || sync.phase !== 'error') return
     return registerCommands([
-      {
-        id: 'sync.retry',
-        title: 'Retry mail sync',
-        context: 'global',
-        run: retrySync
-      },
-      {
-        id: 'sync.error.copy',
-        title: 'Copy sync error details',
-        context: 'global',
-        run: () => copySyncError(sync.message)
-      }
+      createCommand('sync.retry', retrySync),
+      createCommand('sync.error.copy', () => copySyncError(sync.message))
     ])
   }, [copySyncError, realMode, retrySync, sync])
 
@@ -1404,7 +1384,7 @@ export default function App(): React.JSX.Element {
     selectedThreadIdRef.current = null
     setView(next)
     setSelectedIndex(0)
-    setPaneOpen(false)
+    setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetId(null)
   }, [])
@@ -1418,7 +1398,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (!attn || !activeAccount) return
     return attn.mail.onFocusThread((threadId) => {
-      // Close the old pane before changing lists. Otherwise the auto-read
+      // Close the old reader before changing lists. Otherwise the auto-read
       // effect can observe the old cursor against Inbox and mutate the wrong thread.
       switchView('inbox')
       clearSelection()
@@ -1430,7 +1410,7 @@ export default function App(): React.JSX.Element {
           if (nextIndex < 0) return
           selectedThreadIdRef.current = threadId
           setSelectedIndex(nextIndex)
-          setPaneOpen(true)
+          setReaderOpen(true)
         })
         .catch(() => {})
     })
@@ -1483,7 +1463,7 @@ export default function App(): React.JSX.Element {
         threadIds: isBulk ? [...selectedIds] : action.threadIds
       }
       if (isBulk) clearSelection()
-      if (action.kind === 'archive' && view === 'inbox' && !paneOpen) {
+      if (action.kind === 'archive' && view === 'inbox' && !readerOpen) {
         setExitingThreadIds((current) => new Set([...current, ...targetedAction.threadIds]))
         const exitDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 550
         deferRefreshUntilRef.current = Math.max(deferRefreshUntilRef.current, Date.now() + exitDuration)
@@ -1507,7 +1487,7 @@ export default function App(): React.JSX.Element {
           })
         })
     },
-    [clearSelection, paneOpen, realMode, selectedIds, selectedIndex, showToast, threads.length, view]
+    [clearSelection, readerOpen, realMode, selectedIds, selectedIndex, showToast, threads.length, view]
   )
 
   const toggleLabel = useCallback(
@@ -1526,9 +1506,10 @@ export default function App(): React.JSX.Element {
   const openSelected = useCallback(() => {
     const thread = threads[selectedIndex]
     if (!thread) return
-    setPaneOpen(true)
-    setSplitFocus('message')
+    setReaderOpen(true)
   }, [selectedIndex, threads])
+
+  const closeReader = useCallback(() => setReaderOpen(false), [])
 
   const snoozeSelected = useCallback(
     (dueAt: number) => {
@@ -1552,7 +1533,7 @@ export default function App(): React.JSX.Element {
   }, [selected, triage])
 
   useEffect(() => {
-    if (!paneOpen) {
+    if (!readerOpen) {
       autoReadThreadRef.current = null
       return
     }
@@ -1563,177 +1544,80 @@ export default function App(): React.JSX.Element {
     } else if (selected.unread) {
       setMockReadIds((current) => (current.has(selected.id) ? current : new Set(current).add(selected.id)))
     }
-  }, [paneOpen, realMode, selected])
+  }, [readerOpen, realMode, selected])
 
-  // Reset the reused reading container before paint, then refocus after in-pane J/K navigation.
+  // Reset the reused reading container before paint, then refocus after reader J/K navigation.
   // biome-ignore lint/correctness/useExhaustiveDependencies: selected id deliberately resets scroll and focus
   useLayoutEffect(() => {
-    if (!paneOpen) return
+    if (!readerOpen) return
     const scroll = conversationScrollRef.current
     if (!scroll) return
     scroll.scrollTop = 0
     scroll.scrollLeft = 0
     scroll.focus({ preventScroll: true })
-  }, [paneOpen, selected?.id])
+  }, [readerOpen, selected?.id])
 
   useLayoutEffect(
     () =>
       registerCommands([
-        {
-          id: 'navigate.next',
-          title: 'Next conversation',
-          shortcut: 'j',
-          context: 'list',
-          run: () => setSelectedIndex((i) => Math.min(i + 1, Math.max(threads.length - 1, 0)))
-        },
-        {
-          id: 'navigate.previous',
-          title: 'Previous conversation',
-          shortcut: 'k',
-          context: 'list',
-          run: () => setSelectedIndex((i) => Math.max(i - 1, 0))
-        },
-        {
-          id: 'selection.toggle',
-          title: 'Toggle selection',
-          shortcut: 'x',
-          context: 'list',
-          run: toggleFocusedSelection
-        },
-        {
-          id: 'selection.extendNext',
-          title: 'Extend selection to next conversation',
-          shortcut: 'Shift+J',
-          context: 'list',
-          run: () => extendSelectionTo(selectedIndex + 1)
-        },
-        {
-          id: 'selection.extendPrevious',
-          title: 'Extend selection to previous conversation',
-          shortcut: 'Shift+K',
-          context: 'list',
-          run: () => extendSelectionTo(selectedIndex - 1)
-        },
-        ...(selectedIds.size > 0
-          ? [
-              {
-                id: 'selection.clear',
-                title: 'Clear selection',
-                shortcut: 'Escape',
-                context: 'global' as const,
-                run: clearSelection
-              }
-            ]
-          : []),
-        ...(paneOpen
-          ? [
-              {
-                id: 'conversation.close',
-                title: 'Close conversation',
-                shortcut: 'Escape',
-                context: 'list' as const,
-                run: () => setPaneOpen(false)
-              }
-            ]
-          : [
-              {
-                id: 'conversation.open',
-                title: 'Open conversation',
-                shortcut: 'Enter',
-                context: 'list' as const,
-                run: openSelected
-              }
-            ]),
-        {
-          id: 'view.inbox',
-          title: 'Go to Inbox',
-          shortcut: 'g i',
-          context: 'global',
-          run: () => switchView('inbox')
-        },
-        {
-          id: 'view.snoozed',
-          title: 'Go to Snoozed',
-          shortcut: 'g h',
-          context: 'global',
-          run: () => switchView('snoozed')
-        },
-        {
-          id: 'triage.archive',
-          title: 'Mark done',
-          shortcut: 'e',
-          context: 'list',
-          run: () => selected && triage({ kind: 'archive', threadIds: [selected.id] })
-        },
-        {
-          id: 'triage.snooze',
-          title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later',
-          shortcut: 'h',
-          context: 'list',
-          run: () => selected && setSnoozeOpen(true)
-        },
-        {
-          id: 'triage.trash',
-          title: 'Move to trash',
-          shortcut: '#',
-          context: 'list',
-          run: () => selected && triage({ kind: 'trash', threadIds: [selected.id] })
-        },
-        {
-          id: 'triage.spam',
-          title: 'Mark as spam',
-          shortcut: '!',
-          context: 'list',
-          run: () => selected && triage({ kind: 'spam', threadIds: [selected.id] })
-        },
-        {
-          id: 'triage.star',
-          title: starOn ? 'Star' : 'Unstar',
-          shortcut: 's',
-          context: 'list',
-          run: () => selected && triage({ kind: 'star', threadIds: [selected.id], on: starOn })
-        },
-        {
-          id: 'triage.unread',
-          title: markUnreadOn ? 'Mark unread' : 'Mark read',
-          shortcut: 'u',
-          context: 'list',
-          run: () => selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: markUnreadOn })
-        },
-        {
-          id: 'triage.label',
-          title: 'Label',
-          shortcut: 'l',
-          context: 'list',
-          run: () => {
-            if (selected && realMode) setLabelTargetId(selected.id)
-          }
-        },
-        {
-          id: 'triage.undo',
-          title: 'Undo',
-          shortcut: 'z',
-          context: 'global',
-          run: () => {
-            if (!realMode || !attn) return
-            preserveSelectionOnRefreshRef.current = false
-            void attn.mail
-              .undo()
-              .then((result) => {
-                if (result) showToast(result.label)
-                else preserveSelectionOnRefreshRef.current = true
-              })
-              .catch(() => {
-                preserveSelectionOnRefreshRef.current = true
-              })
-          }
-        }
+        createCommand('navigate.next', () =>
+          setSelectedIndex((i) => Math.min(i + 1, Math.max(threads.length - 1, 0)))
+        ),
+        createCommand('navigate.previous', () => setSelectedIndex((i) => Math.max(i - 1, 0))),
+        createCommand('selection.toggle', toggleFocusedSelection),
+        createCommand('selection.extendNext', () => extendSelectionTo(selectedIndex + 1)),
+        createCommand('selection.extendPrevious', () => extendSelectionTo(selectedIndex - 1)),
+        ...(selectedIds.size > 0 ? [createCommand('selection.clear', clearSelection)] : []),
+        ...(readerOpen
+          ? [createCommand('conversation.close', closeReader)]
+          : [createCommand('conversation.open', openSelected)]),
+        createCommand('view.inbox', () => switchView('inbox')),
+        createCommand('view.snoozed', () => switchView('snoozed')),
+        createCommand('triage.archive', () => {
+          if (selected) triage({ kind: 'archive', threadIds: [selected.id] })
+        }),
+        createCommand('triage.snooze', () => selected && setSnoozeOpen(true), {
+          title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later'
+        }),
+        createCommand('triage.trash', () => {
+          if (selected) triage({ kind: 'trash', threadIds: [selected.id] })
+        }),
+        createCommand('triage.spam', () => {
+          if (selected) triage({ kind: 'spam', threadIds: [selected.id] })
+        }),
+        createCommand(
+          'triage.star',
+          () => selected && triage({ kind: 'star', threadIds: [selected.id], on: starOn }),
+          { title: starOn ? 'Star' : 'Unstar' }
+        ),
+        createCommand(
+          'triage.unread',
+          () => selected && triage({ kind: 'markUnread', threadIds: [selected.id], on: markUnreadOn }),
+          { title: markUnreadOn ? 'Mark unread' : 'Mark read' }
+        ),
+        createCommand('triage.label', () => {
+          if (selected && realMode) setLabelTargetId(selected.id)
+        }),
+        createCommand('triage.undo', () => {
+          if (!realMode || !attn) return
+          preserveSelectionOnRefreshRef.current = false
+          void attn.mail
+            .undo()
+            .then((result) => {
+              if (result) showToast(result.label)
+              else preserveSelectionOnRefreshRef.current = true
+            })
+            .catch(() => {
+              preserveSelectionOnRefreshRef.current = true
+            })
+        })
       ]),
     [
       clearSelection,
+      closeReader,
       extendSelectionTo,
       openSelected,
-      paneOpen,
+      readerOpen,
       realMode,
       markUnreadOn,
       selected,
@@ -1751,10 +1635,9 @@ export default function App(): React.JSX.Element {
 
   useLayoutEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey
-      const key = e.key.toLowerCase()
-      const pendingGoUntil = goChordUntilRef.current
-      goChordUntilRef.current = 0
+      const key = chordKey(e)
+      const pendingChord = pendingChordRef.current
+      pendingChordRef.current = null
       if (labelTarget) return
       if (snoozeOpen) {
         if (e.key === 'Escape') {
@@ -1768,55 +1651,47 @@ export default function App(): React.JSX.Element {
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       if (isTextEntry) return
       // Focused controls keep their native activation keys, but Escape remains
-      // the app-level Back action from every Tab stop in the reading pane.
+      // the app-level Back action from every Tab stop in the reader.
       if (target && target.tagName === 'BUTTON' && e.key !== 'Escape') return
-      if (paneOpen && plainKey && !e.shiftKey && e.key === 'ArrowLeft') {
+      const context = readerOpen ? 'reader' : 'list'
+      const scroll = conversationScrollRef.current
+      if (readerOpen && scroll) {
+        const scrollDelta = readingScrollDelta(e, scroll.clientHeight)
+        if (scrollDelta !== null) {
+          e.preventDefault()
+          scroll.scrollBy({ top: scrollDelta })
+          return
+        }
+      }
+      if (key !== null && pendingChord && Date.now() <= pendingChord.until) {
+        const command = findCommandByShortcut(`${pendingChord.key} ${key}`, context)
+        if (!command) return
         e.preventDefault()
-        setSplitFocus('list')
+        command.run()
         return
       }
-      if (paneOpen && plainKey && !e.shiftKey && e.key === 'ArrowRight') {
+      if (key !== null && isChordPrefix(key, context)) {
         e.preventDefault()
-        setSplitFocus('message')
-        conversationScrollRef.current?.focus({ preventScroll: true })
+        pendingChordRef.current = { key, until: Date.now() + 500 }
         return
       }
-      if (
-        paneOpen &&
-        splitFocus === 'message' &&
-        plainKey &&
-        !e.shiftKey &&
-        (e.key === 'ArrowDown' || e.key === 'ArrowUp' || key === 'j' || key === 'k')
-      ) {
-        e.preventDefault()
-        conversationScrollRef.current?.scrollBy({
-          top: e.key === 'ArrowDown' || key === 'j' ? READING_SCROLL_STEP : -READING_SCROLL_STEP
-        })
-        return
-      }
-      if (plainKey && Date.now() <= pendingGoUntil && (key === 'h' || key === 'i')) {
-        e.preventDefault()
-        switchView(key === 'h' ? 'snoozed' : 'inbox')
-        return
-      }
-      if (plainKey && key === 'g') {
-        e.preventDefault()
-        goChordUntilRef.current = Date.now() + 500
-        return
-      }
-      const command = matchKey(e, 'list')
+      const command = matchKey(e, context)
       if (!command) return
       e.preventDefault()
       command.run()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [labelTarget, paneOpen, snoozeOpen, splitFocus, switchView])
+  }, [labelTarget, readerOpen, snoozeOpen])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex is a deliberate trigger — scroll after every selection change, ref itself never changes
-  useEffect(() => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedIndex and readerOpen are deliberate triggers — scroll after every selection change, ref itself never changes
+  useLayoutEffect(() => {
+    // While the reader is open the list is display:none, so scrollIntoView is a
+    // no-op and J/K moves leave it at a stale offset. Re-running as the reader
+    // closes brings the cursor back into view; `nearest` scrolls the minimum, so
+    // a conversation opened and closed without navigating keeps its position.
     selectedRowRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [selectedIndex])
+  }, [selectedIndex, readerOpen])
 
   const visibleUnreadTotal = threads.filter((t) => t.unread).length
   const mockReadTotal = threads.filter((t) => t.unread && mockReadIds.has(t.id)).length
@@ -1828,13 +1703,11 @@ export default function App(): React.JSX.Element {
         : visibleUnreadTotal - mockReadTotal
 
   const footerShortcuts: ShortcutHint[] = [
-    ...(paneOpen
+    ...(readerOpen
       ? [
-          ...(splitFocus === 'list'
-            ? [{ id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate threads' }]
-            : [{ id: 'scroll', keys: ['J', 'K', '↑', '↓'], label: 'scroll message' }]),
-          { id: 'focus', keys: ['←', '→'], label: 'switch pane' },
-          { id: 'close', keys: ['Esc'], label: 'close' }
+          { id: 'navigate', keys: ['J', 'K'], label: 'next conversation' },
+          { id: 'scroll', keys: ['↑', '↓', 'Space'], label: 'scroll' },
+          { id: 'back', keys: ['Esc'], label: 'back to list' }
         ]
       : [
           { id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate' },
@@ -1903,11 +1776,9 @@ export default function App(): React.JSX.Element {
       <div className="flex min-h-0 flex-1">
         <main
           data-testid="thread-list"
-          data-pane-open={paneOpen || undefined}
-          data-split-focus={paneOpen && splitFocus === 'list' ? 'true' : undefined}
-          className={`min-h-0 overflow-x-hidden overflow-y-auto py-2 ${
-            paneOpen ? 'w-[380px] flex-none border-r border-edge' : 'flex-1'
-          } ${paneOpen && splitFocus === 'list' ? 'shadow-[inset_0_1px_0_rgba(255,178,36,0.8)]' : ''}`}
+          // `hidden` is display:none, which already removes the list from the
+          // accessibility tree and tab order while reading — no aria-hidden needed.
+          className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
           aria-label="Conversation list"
         >
           {threads.length === 0 && (
@@ -1931,7 +1802,7 @@ export default function App(): React.JSX.Element {
                 {showGroup && (
                   <div
                     data-testid="thread-date-group"
-                    className={`select-none font-semibold text-ink-faint ${paneOpen ? 'px-4 pt-4 pb-1 text-[11px]' : 'px-8 pt-5 pb-2 text-xs'}`}
+                    className="select-none px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint"
                   >
                     {group}
                   </div>
@@ -1945,19 +1816,14 @@ export default function App(): React.JSX.Element {
                   data-checked={isChecked || undefined}
                   data-unread={isUnread || undefined}
                   data-exiting={isExiting || undefined}
-                  className={`cursor-default select-none border-l-[3px] ${
-                    paneOpen
-                      ? 'grid grid-cols-[16px_minmax(72px,0.8fr)_minmax(0,1.5fr)_auto] items-center gap-x-2 px-3 py-2.5'
-                      : 'flex items-center gap-3.5 py-[11px] pr-7 pl-5'
-                  } ${isSelected ? 'border-l-accent' : 'border-l-transparent'} ${
+                  className={`flex cursor-default select-none items-center gap-3.5 border-l-[3px] py-[11px] pr-7 pl-5 ${isSelected ? 'border-l-accent' : 'border-l-transparent'} ${
                     isChecked ? 'bg-accent/[0.12]' : isSelected ? 'bg-accent/[0.07]' : ''
                   } ${isExiting ? 'app-thread-exit' : ''}`}
                   onClick={(event) => {
                     if (event.shiftKey) extendSelectionTo(i)
                     else {
                       setSelectedIndex(i)
-                      setPaneOpen(true)
-                      setSplitFocus('list')
+                      setReaderOpen(true)
                     }
                   }}
                 >
@@ -1974,99 +1840,59 @@ export default function App(): React.JSX.Element {
                       />
                     )}
                   </span>
-                  {paneOpen ? (
-                    <>
+                  <span
+                    data-testid="thread-sender"
+                    className={`w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap ${
+                      isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
+                    }`}
+                  >
+                    {t.from}
+                  </span>
+                  <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
+                    <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
+                    {t.starred && (
+                      <span className="flex-none text-star" title="Starred">
+                        ★
+                      </span>
+                    )}
+                    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                       <span
-                        data-testid="thread-sender"
-                        className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap ${
-                          isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
-                        }`}
+                        data-testid="thread-subject"
+                        className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
                       >
-                        {t.from}
+                        {t.subject}
                       </span>
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
-                        {t.starred && (
-                          <span className="flex-none text-star" title="Starred">
-                            ★
-                          </span>
-                        )}
-                        <span
-                          data-testid="thread-subject"
-                          className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap ${
-                            isUnread ? 'font-medium text-ink' : 'text-ink-faint'
-                          }`}
-                        >
-                          {t.subject}
-                        </span>
-                      </span>
-                      <span
-                        className={`flex items-center gap-1.5 text-xs tabular-nums ${
-                          isUnread ? 'font-medium text-accent' : 'text-ink-faint'
-                        }`}
-                      >
-                        <ReminderChips thread={t} compact />
-                        {t.hasAttachment && <span title="Has attachment">📎</span>}
-                        {t.at}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span
-                        data-testid="thread-sender"
-                        className={`w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap ${
-                          isUnread ? 'font-semibold text-ink' : 'text-ink-dim'
-                        }`}
-                      >
-                        {t.from}
-                      </span>
-                      <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
-                        <ThreadLabels labelIds={t.labelIds} labelsById={userLabelsById} />
-                        {t.starred && (
-                          <span className="flex-none text-star" title="Starred">
-                            ★
-                          </span>
-                        )}
-                        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                          <span
-                            data-testid="thread-subject"
-                            className={isUnread ? 'font-semibold text-ink' : 'text-ink-dim'}
-                          >
-                            {t.subject}
-                          </span>
-                          <span data-testid="thread-snippet"> — {t.snippet}</span>
-                        </span>
-                      </span>
-                      <span className="flex flex-none items-center gap-2.5 text-xs">
-                        <ReminderChips thread={t} />
-                        {t.hasAttachment && <span title="Has attachment">📎</span>}
-                        <span
-                          className={`min-w-[70px] text-right tabular-nums ${
-                            isUnread ? 'font-medium text-accent' : 'text-ink-faint'
-                          }`}
-                        >
-                          {t.at}
-                        </span>
-                      </span>
-                    </>
-                  )}
+                      <span data-testid="thread-snippet"> — {t.snippet}</span>
+                    </span>
+                  </span>
+                  <span className="flex flex-none items-center gap-2.5 text-xs">
+                    <ReminderChips thread={t} />
+                    {t.hasAttachment && <span title="Has attachment">📎</span>}
+                    <span
+                      className={`min-w-[70px] text-right tabular-nums ${
+                        isUnread ? 'font-medium text-accent' : 'text-ink-faint'
+                      }`}
+                    >
+                      {t.at}
+                    </span>
+                  </span>
                 </div>
               </div>
             )
           })}
         </main>
 
-        {paneOpen && selected && (
-          // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard focus moves with ArrowLeft/ArrowRight; click only mirrors pointer intent
-          <aside
-            data-testid="conversation-pane"
-            data-split-focus={splitFocus === 'message' ? 'true' : undefined}
-            className={`flex min-w-0 flex-1 flex-col bg-raised/35 ${
-              splitFocus === 'message' ? 'shadow-[inset_0_1px_0_rgba(255,178,36,0.8)]' : ''
-            }`}
-            onClick={() => setSplitFocus('message')}
-          >
-            <div className="flex items-center gap-3 border-b border-edge px-6 pt-4 pb-3">
+        {readerOpen && selected && (
+          <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">
+            <div className="flex items-center gap-4 border-b border-edge px-6 pt-3 pb-3">
+              <button
+                type="button"
+                data-testid="conversation-back"
+                className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+                onClick={closeReader}
+              >
+                <span aria-hidden>←</span> {view === 'inbox' ? 'Inbox' : 'Snoozed'}
+              </button>
               <h1
                 data-testid="conversation-subject"
                 className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-lg font-bold tracking-tight"
@@ -2103,7 +1929,7 @@ export default function App(): React.JSX.Element {
                 <div className="py-10 text-center text-ink-faint">Loading…</div>
               )}
             </div>
-          </aside>
+          </section>
         )}
       </div>
 

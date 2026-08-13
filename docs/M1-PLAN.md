@@ -1,8 +1,8 @@
 # M1 Completion Plan — Shipped Task Record and Exit Handoff
 
 **Audience:** the engineer(s) closing M1 (triage core) and preparing the M2 handoff.
-**Basis:** [SPEC.md](SPEC.md) v0.11 §8 M1 and the implementation merged through PR #21.
-**Revised 2026-08-12:** T1–T11 are shipped. The sanitized HTML work tracked as T2 shipped across PRs #7 and #11; T9 shipped in PR #20; PR #21 refined inbox grouping, pane focus, compact rows, and HTML/CID rendering. **All planned M1 feature tasks are implemented.** M1 remains in exit audit until the remaining command-registry/CI cleanup and real-Gmail/real-OS checks below are complete.
+**Basis:** [SPEC.md](SPEC.md) v0.12 §8 M1, the implementation merged through PR #23, and the post-dogfood full-window reading revision tracked as T12A below.
+**Revised 2026-08-12:** T1–T11 are shipped. The sanitized HTML work tracked as T2 shipped across PRs #7 and #11; T9 shipped in PR #20; PR #21 refined inbox grouping, pane focus, compact rows, and HTML/CID rendering; PR #23 fixed message collapse and keyboard continuity across Tab stops. Product review subsequently rejected the split as distracting and harder to navigate, so T12A replaced it with a full-window reader while retaining those fixes. **All planned M1 feature capabilities, including the reading-shell simplification, are implemented; only the exit audit remains.**
 **Ground rules:** read [AGENTS.md](../AGENTS.md) first. Every task below is one PR, and no PR is done until `npm run verify` is green. When a task says "spec F4", that's a section of SPEC.md — read it before starting the task.
 
 ---
@@ -16,8 +16,8 @@
 | Triage verbs E/#/S/U/! + auto-advance + `Z` undo + durable queue | ✅ **T3** (#8) |
 | Tray/background mode + launch at login | ✅ **T8** (#9) |
 | Sanitized HTML mail rendering | ✅ shipped (#7, completed by **T11** in #11) |
-| Reading view: on-demand split layout (F3 v0.11, §9 #7/#9) | ✅ **T11** (#11; refined #21) |
-| Full message display: recipients, attachments, quote/signature collapse (F3 v0.11) | ✅ **T11** (#11; refined #21) |
+| Reading view: full-window conversation (F3 v0.12, §9 #11) | ✅ **T12A** (supersedes T11's split shell) |
+| Full message display: recipients, attachments, quote/signature collapse (F3 v0.12) | ✅ **T11** (#11; refined #21/#23) |
 | Label verb (`L`) | ✅ **T5** (#13) |
 | Selection + bulk | ✅ **T4** (#12) |
 | Snooze (`H`) + scheduler | ✅ **T6** (#14; bulk-selection fix #16) |
@@ -59,9 +59,10 @@ The `T11 →` edges record the product ordering used during implementation (only
 
 **Order from here:**
 
-1. Complete **T12**, the M1 closeout task below: command-registry coverage, CI unit-test wiring, and clean visual artifacts.
-2. Execute and record the real-Gmail airplane-mode/relaunch smoke and real-OS notification click-through smoke.
-3. Close the M1 exit checklist; then begin M2 with the crash-safe composer/draft foundation.
+1. Complete the remaining **T12** engineering closeout: CI unit-test wiring and stale-comment cleanup.
+2. Regenerate and review the four visual artifacts after that final closeout edit.
+3. Execute and record the real-Gmail airplane-mode/relaunch smoke and real-OS notification click-through smoke.
+4. Close the M1 exit checklist; then begin M2 with the crash-safe composer/draft foundation.
 
 ---
 
@@ -322,7 +323,7 @@ Bulk archive + single-undo criterion (F4) demonstrated in e2e; `verify` green.
 - New IPC `mail:listLabels()` → `{ id, name, type }[]` from the `labels` table (user labels plus a curated system set: STARRED/IMPORTANT are flags, not picker entries — show user labels only for M1).
 - Centered modal panel (modals stay right for pickers even after T11's split-view change): search input filters as you type; ArrowUp/Down move; Enter toggles the highlighted label on the target threads (focused row or T4 selection). Checkmark states: on-all / on-some / off.
 - Apply via `mail:triage` with `{ kind: 'label', add: […], remove: […] }` — no engine changes.
-- Keyboard: `l` opens (register as a command; works with and without the pane open). The existing keydown guard already ignores keystrokes when an `INPUT` is focused, so the search field won't trigger verbs. `Esc` closes the picker (before it closes the conversation pane).
+- Keyboard: `l` opens (register as a command; works from the list or reader). The existing keydown guard already ignores keystrokes when an `INPUT` is focused, so the search field won't trigger verbs. `Esc` closes the picker before it returns from the conversation.
 - Undo: label changes ride T3's stack automatically.
 - Fixture: T1's seed already carries a user label; add a second so on-some states are testable.
 
@@ -342,7 +343,7 @@ Picker works on single + bulk targets; label ops queue like any triage op; `veri
 
 ### Design (decided — v1 contract)
 
-- **The local `reminders` table is the v1 source of truth** for what's snoozed and when it returns. Snoozing therefore looks like a plain archive in Gmail web. Cross-device labels, exact-time return while the desktop is off, and reinstall recovery move together to the v1.5 companion script (D2/F7); SPEC v0.11 records that product boundary. The existing `TODO(T7+)` is historical and should be removed during T12 documentation/code-comment cleanup rather than treated as an M1 feature gap.
+- **The local `reminders` table is the v1 source of truth** for what's snoozed and when it returns. Snoozing therefore looks like a plain archive in Gmail web. Cross-device labels, exact-time return while the desktop is off, and reinstall recovery move together to the v1.5 companion script (D2/F7); SPEC v0.12 records that product boundary. The existing `TODO(T7+)` is historical and should be removed during T12 documentation/code-comment cleanup rather than treated as an M1 feature gap.
 - The **scheduler** lives in main (`src/main/scheduler.ts`) and owns exactly one armed timer: the next due reminder (re-arm ≤ 24h out to dodge the 32-bit `setTimeout` cap). On fire *or on boot* (catch-up, D2): every `pending` reminder with `due_at <= now` returns.
 - **Returning** = reminder `state='returned'` + `applyThreadDelta` add INBOX + enqueue the server op + `mail:changed`. The "returned" chip renders while `state='returned'`; opening or triaging the thread settles it (`state='done'`).
 
@@ -460,14 +461,14 @@ Lifecycle e2e green on Linux; manual win/mac checklist in the PR; fixture teardo
 ### Design (decided)
 
 - Subscribe to T7's `newMail` emitter. Per poll cycle: ≤ 3 new threads → one notification each (sender · subject · snippet); > 3 → one summary ("7 new conversations"). **Suppress entirely while a window is focused** (you're already looking at the inbox).
-- Notification click → store a short-lived pending thread target, call `showMainWindow()` (T8), then notify the sandboxed renderer to consume it through the typed preload bridge. The renderer switches to Inbox, selects the row, and opens the conversation pane. Targets expire after 60s and clear on account changes so a stale click cannot redirect a later session.
+- Notification click → store a short-lived pending thread target, call `showMainWindow()` (T8), then notify the sandboxed renderer to consume it through the typed preload bridge. The renderer switches to Inbox, selects the row, and opens the full-window conversation. Targets expire after 60s and clear on account changes so a stale click cannot redirect a later session.
 - **Badge:** after every `mail:changed`, macOS `app.setBadgeCount(unreadInboxCount)`. Windows: static-dot `setOverlayIcon` + tooltip count — the numeric-count overlay bitmap is M4 polish (packaging milestone), noted as an accepted deviation. Guard platforms (Linux `setBadgeCount` returns false; ignore).
 - Splits don't exist until M3, so M1 notifies for **all** INBOX new mail; per-split filtering arrives with F11.
 - Tray menu (T8) gains "Pause notifications — 1h / until tomorrow" backed by a `settings` key the notifier checks.
 
 ### Implementation guide
 
-New `src/main/notify.ts`: pure decision function `planNotifications(newMail, { focused, pausedUntil }): Notification[]` plus a thin shell using Electron's `Notification`. Preload: `mail.onFocusThread(cb)` consumes the pending target. Renderer: handler safely leaves Snoozed when necessary, selects the Inbox thread, and opens the conversation pane.
+New `src/main/notify.ts`: pure decision function `planNotifications(newMail, { focused, pausedUntil }): Notification[]` plus a thin shell using Electron's `Notification`. Preload: `mail.onFocusThread(cb)` consumes the pending target. Renderer: handler safely leaves Snoozed when necessary, selects the Inbox thread, and opens the conversation.
 
 ### Testing
 
@@ -487,9 +488,9 @@ Generate a large seed fixture (~2,000 threads) in a script, boot seeded, and ass
 
 ---
 
-## T11 — Reading experience overhaul: split view, HTML mail, full message display
+## T11 — Reading experience overhaul: interim split view, HTML mail, full message display
 
-**Status: shipped in PR #11; refined in PR #21.** · **Depends on:** T1/T3/T8 · **Spec:** F3 (v0.11), D6 (revised), §9 #7/#9 · **PRs:** [#11](https://github.com/stephenw310/attn/pull/11), [#21](https://github.com/stephenw310/attn/pull/21).
+**Status: shipped in PR #11; refined in PRs #21/#23; layout shell superseded by T12A.** · **Depends on:** T1/T3/T8 · **Historical spec:** F3 v0.11, §9 #7/#9 · **PRs:** [#11](https://github.com/stephenw310/attn/pull/11), [#21](https://github.com/stephenw310/attn/pull/21), [#23](https://github.com/stephenw310/attn/pull/23).
 
 ### Why
 
@@ -507,10 +508,12 @@ The T2 guide above is still the contract for sanitizer/iframe/CSP details. The r
 
 ### Part B — Layout: full-width list ⇄ on-demand split (F3 v0.11)
 
+> Historical implementation record: T12A and SPEC v0.12 supersede this layout/focus shell while retaining Parts C–E.
+
 - Remove the centered overlay + backdrop. New structure: when a conversation is open, the root splits — list column left (fixed ~380px), `data-testid="conversation-pane"` right. Put `data-pane-open` on the list container so e2e and CSS key off one attribute.
 - **Compact rows** when the pane is open: PR #21 refined them to one aligned line — selection marker, sender, labels/star + subject, then attachment/time; no snippet. Same `thread-row` testid, same selection/unread attributes.
 - Conversation pane: thread position ("4 of 12") + `Esc` hint in its header (keep the existing `conversation-position` testid); responsive body measure `clamp(720px, 72vw, 1120px)` so wide windows are used without turning prose into an edge-to-edge line; message cards as today plus Parts C–E. The newest message is expanded, while every older message starts as a one-line summary and does not mount its body/HTML frame until expanded. Reserve the vertical scrollbar gutter so expanding a long message cannot shift the centered reading column.
-- **Keyboard:** `Enter` opens into message focus; clicking a row keeps list focus; `Esc` closes the pane with selection and scroll intact. `←`/`→` switches the explicit pane focus. In message focus, `J`/`K` and unmodified ArrowUp/Down scroll the conversation 120px at a time; in list focus those keys move thread selection, make the pane follow, and reset the reused reading scroller to the new thread's top. Modifier+arrow chords are untouched. Keys from the sandboxed iframe are forwarded to the parent, but `Enter` remains unclaimed while the pane is open so a focused mail link keeps its native activation; recipient/attachment/trim buttons blur after click so no control can strand the global keyboard loop. `src/renderer/src/commands.ts` uses `'list' | 'global'` contexts, but T12 still needs to register or explicitly account for the focus/scroll paths currently handled before `matchKey`. Auto-advance is untouched (pane follows selection; empty list closes the pane).
+- **Historical keyboard behavior:** `Enter` opened into message focus; clicking a row kept list focus; `Esc` closed the pane. `←`/`→` switched focus, and `J`/`K` changed meaning by focus. T12A removes this mode while retaining iframe key forwarding, native link Enter, post-control keyboard continuity, and auto-advance.
 - Start visuals from `design/explorations/b2-conversation-side.html` (the side-panel study already in the Dispatch language). Dimming is gone; the tie between panes is the selected-row highlight.
 - **E2E contract:** `Esc` removes `data-pane-open`; compact rows keep sender, subject, and time on one line; message-focus keys scroll without changing the thread; `ArrowLeft` moves focus to the list, where J/K/arrows update selection and pane subject.
 
@@ -558,24 +561,43 @@ The v5 columns populate only for newly synced mail, and this task intentionally 
 
 ### Done when
 
-- Implementation and review fixes shipped in **PRs #11 and #21**; both merge gates are complete.
-- SPEC v0.11 F3's T11 acceptance criteria demonstrably hold (pane/focus semantics, recipients inspectable, remote + inline attachment discovery, CID resolution, and safe/stable collapse); the newly explicit system-mailbox criteria remain assigned to M3.
+- Implementation and review fixes shipped in **PRs #11, #21, and #23**; all merge gates are complete.
+- T11's message-display criteria demonstrably hold (recipients inspectable, remote + inline attachment discovery, CID resolution, and safe/stable collapse). Its pane/focus shell is deliberately superseded by SPEC v0.12 and T12A; the system-mailbox criteria remain assigned to M3.
 - Migration v5 is the only T11 schema entry; the required dev-DB wipe is documented instead of compatibility work.
 - The status table is updated. Final artifact sign-off remains in T12 because the current `simple-mail.png` capture contains an accidental text-selection highlight from test setup.
 
 ---
 
-## T12 — M1 closeout: registry, CI, artifacts, and manual evidence
+## T12A — Full-window reading simplification
 
-**Status: next.** · **Depends on:** all shipped M1 tasks · **Spec:** §8 M1 exit status and F5 engineering rule
+**Status: complete (2026-08-12).** · **Depends on:** T11 · **Spec:** F3 v0.12, D6, §9 #11
+
+The on-demand split retained queue context but created two competing visual targets and an invisible focus mode. Replace only the layout and interaction shell; retain T11's message cards, sanitization, recipients, attachments, trimming, responsive reading measure, and neighbor cache.
+
+1. Opening by `Enter`, click, or notification replaces the list with a full-window conversation. The reader header contains Back/List, subject, queue position (for example, “4 of 12”), and the `Esc` hint. The list DOM may remain hidden to preserve its exact scroll position, but it must not be visible or interactive while reading.
+2. Remove `splitFocus`, compact list rows, focus indicators, and left/right pane switching. `Esc` and Back/List return to the selected list row without losing scroll context.
+3. While reading, `J`/`K` always changes conversation and resets the reader to the top. Arrow, Space/Shift+Space, and Page keys scroll. Adjacent real conversations remain prefetched into the renderer cache so navigation normally renders without a loading state.
+4. Route every semantic keyboard action through the command registry, including `G I`/`G H`; keep reader scrolling plus picker/menu-local navigation, confirmation, and dismissal as explicit non-palette interaction primitives. Unit-test the registry inventory, uniqueness, modifier behavior, aliases, and chord dispatch.
+5. Update e2e behavior and all four screenshots. Screenshot setup opens rows with a single click or keyboard action so it cannot leave a text-selection highlight.
+
+### Done when
+
+- SPEC, plan, README, and AGENTS describe only the full-window reading contract as current behavior.
+- No split-focus state or split-specific keyboard branch remains in the renderer.
+- Registry unit tests and the updated Electron e2e suite pass; all four artifacts are visually clean.
+
+---
+
+## T12 — M1 closeout: CI, artifacts, stale comments, and manual evidence
+
+**Status: next after T12A.** · **Depends on:** all shipped M1 tasks and T12A · **Spec:** §8 M1 exit status
 
 This is a bounded closeout task, not a new product feature:
 
-1. **Documentation:** keep SPEC v0.11, this task record, README, and AGENTS aligned with PRs #20/#21 and the local-only v1 snooze decision. Remove stale implementation comments that still promise a T7 Gmail snooze label.
-2. **Command registry:** account for every keyboard path, including pane focus and context-sensitive reading/list movement, in `listCommands()` or document and test an explicit non-palette navigation primitive. Add unit coverage so the registry cannot silently drift from the keyboard map before M3 renders it in the palette.
-3. **CI contract:** make GitHub Actions execute `npm run test:unit` (or the exact `npm run verify` gate) so README and AGENTS no longer depend on a local-only unit gate.
-4. **Visual artifacts:** replace screenshot-only `dblclick()` setup with a selection-safe open path, regenerate all four images, and review them at the final viewport.
-5. **Manual evidence:** execute the real-Gmail airplane-mode → quit → relaunch-online drain, and a real macOS/Windows notification click-through to the intended thread. Record dates/results in the closing PR.
+1. **Documentation:** keep SPEC v0.12, this task record, README, and AGENTS aligned with PRs #20/#21/#23, T12A, and the local-only v1 snooze decision. Remove stale implementation comments that still promise a T7 Gmail snooze label.
+2. **CI contract:** make GitHub Actions execute `npm run test:unit` (or the exact `npm run verify` gate) so README and AGENTS no longer depend on a local-only unit gate.
+3. **Visual artifacts:** regenerate all four images after the final closeout edit and review them at the final viewport.
+4. **Manual evidence:** execute the real-Gmail airplane-mode → quit → relaunch-online drain, and a real macOS/Windows notification click-through to the intended thread. Record dates/results in the closing PR.
 
 ### Done when
 
@@ -586,14 +608,14 @@ This is a bounded closeout task, not a new product feature:
 
 ## M3 follow-up — System mailbox navigation *(not an M1 task)*
 
-**Status: planned.** · **Depends on:** T7 incremental sync; M2 for editable Draft rows · **Spec:** F3 (v0.11), F5, §9 #10
+**Status: planned.** · **Depends on:** T7 incremental sync; M2 for editable Draft rows · **Spec:** F3 (v0.12), F5, §9 #10
 
 Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, and Trash without introducing a permanent folder sidebar.
 
 1. **Local data coverage:** expand the metadata window beyond `INBOX` so the last 12 months of message/thread system-label membership are cached. All Mail excludes `SPAM`/`TRASH`; the other views map to their Gmail system label, while Snoozed remains backed by local reminders. Reuse T7's serialized pagination and history reconciliation rather than adding a second sync engine.
 2. **Typed query surface:** replace one-off inbox/snoozed reads with a shared `MailboxView` union and `mail:listThreads({ view })`. Keep filtering/order in SQLite; cached view switching must not call Gmail.
-3. **Navigation UI:** reuse the current full-width list ⇄ reading split. Show `view-title`; keep Important/Other/user splits visible only for Inbox; register `Go to …` palette commands and the complete `G` chords (`I/A/T/D/S/H/P/R`). Returning to a view restores its selection and scroll.
-4. **View behavior:** switching mailboxes closes the open pane; Draft rows open the M2 composer; local triage refreshes the active filter immediately. Spam/Trash are browsable, but v1 does not add permanent-delete or empty-folder actions.
+3. **Navigation UI:** reuse the current full-width list ⇄ full-window reader. Show `view-title`; keep Important/Other/user splits visible only for Inbox; register `Go to …` palette commands and the complete `G` chords (`I/A/T/D/S/H/P/R`). Returning to a view restores its selection and scroll.
+4. **View behavior:** switching mailboxes closes the open reader; Draft rows open the M2 composer; local triage refreshes the active filter immediately. Spam/Trash are browsable, but v1 does not add permanent-delete or empty-folder actions.
 5. **Coverage:** seed at least one thread/message per system label. E2e every palette/chord route, label-correct row membership, All Mail exclusion rules, per-view selection/scroll restoration, Draft-to-composer behavior, and offline cached switching. Unit-test the view-to-query mapping and history-driven membership updates.
 
 ### Done when
@@ -628,14 +650,15 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 M1 is done when every SPEC §8 M1 bullet maps to a shipped task above, and:
 
 - [x] T9 notifications + unread badge shipped (#20)
-- [x] Final `npm run verify` green, including 65 unit tests and 50 Electron e2e tests (2026-08-12 audit)
+- [x] T12A full-window reader and simplified command-registry audit complete
+- [x] Current `npm run verify` green, including 76 unit tests and 51 Electron e2e tests (2026-08-12 T12A audit)
 - [x] F4 core paths demonstrated in e2e: bulk archive + single `z` undo; snooze return while running *and* via relaunch catch-up
 - [ ] F2 airplane-mode criterion executed as T7's manual smoke (documented in PR)
 - [x] F16 automated lifecycle criteria: close-window keeps the process alive; explicit quit leaves nothing behind
 - [ ] T9 real-OS smoke: notification appears and click-through opens the intended thread
-- [ ] Every command reachable via keyboard is in the command registry (final spot-check `listCommands()`)
+- [x] Every semantic command reachable via keyboard is in the command registry; reader scrolling and picker/menu-local interactions are explicitly scoped primitives
 - [ ] GitHub Actions executes the unit suite required by `npm run verify`
-- [x] SPEC, M1 plan, README, and AGENTS reflect the PR #21 implementation and current milestone status
+- [x] SPEC, M1 plan, README, and AGENTS reflect the implementation through PR #23 and the current milestone status
 - [x] AGENTS.md reflects the current pipeline/harness behavior
 - [ ] `e2e/.artifacts/*.png` regenerated without selection artifacts and reviewed after the final task
 

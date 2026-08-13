@@ -20,6 +20,13 @@ test('snoozes from the picker, navigates to Snoozed, and undoes', async ({ page 
   await expect(rows.first()).toContainText('Maya Lin')
   await expect(rows.first().getByTestId('chip-snooze-due')).toBeVisible()
 
+  await page.keyboard.press('Shift+G')
+  await page.keyboard.press('i')
+  await expect(page.getByTestId('view-title')).toHaveText('Snoozed')
+  await page.keyboard.press('g')
+  await page.keyboard.press('Shift+I')
+  await expect(page.getByTestId('view-title')).toHaveText('Snoozed')
+
   await page.keyboard.press('z')
   await expect(rows).toHaveCount(0)
   await page.keyboard.press('g')
@@ -129,7 +136,7 @@ test('snoozes every selected conversation, not just the focused one', async ({ p
   await expect(rows).toHaveCount(8)
 })
 
-test('unrelated pane keys disarm a pending go chord', async ({ page }) => {
+test('unrelated reader keys disarm a pending go chord', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-content')).toBeVisible()
