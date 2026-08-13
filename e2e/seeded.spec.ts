@@ -16,6 +16,13 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
   await expect(page.getByTestId('account-menu')).toContainText('seed@attn.test')
   await expect(page.getByTestId('status-note')).toContainText('Live')
   await expect(page.getByTestId('status-note')).toHaveAttribute('data-status', 'live')
+  const statusBox = await page.getByTestId('status-note').boundingBox()
+  const contentBox = await page.getByTestId('status-content').boundingBox()
+  expect(statusBox).not.toBeNull()
+  expect(contentBox).not.toBeNull()
+  expect(
+    Math.abs((statusBox?.x ?? 0) + (statusBox?.width ?? 0) - (contentBox?.x ?? 0) - (contentBox?.width ?? 0))
+  ).toBeLessThan(1)
 
   expect(await page.evaluate(() => window.attn.mail.listThreads())).toHaveLength(8)
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(4)

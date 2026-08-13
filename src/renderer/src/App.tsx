@@ -728,7 +728,7 @@ function SyncStatus({
         <button
           type="button"
           data-testid="status-error-button"
-          className="grid w-full cursor-pointer grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2 text-left"
+          className="grid w-fit cursor-pointer grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2 text-left"
           aria-expanded={detailsOpen}
           aria-controls="sync-error-details"
           onClick={() => setDetailsOpen((open) => !open)}
@@ -736,7 +736,10 @@ function SyncStatus({
           {body}
         </button>
       ) : (
-        <div className="grid w-full grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2">
+        <div
+          data-testid="status-content"
+          className="grid w-fit grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2"
+        >
           {body}
         </div>
       )}
