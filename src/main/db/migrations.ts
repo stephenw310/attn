@@ -118,5 +118,24 @@ export const migrations: string[] = [
     PRIMARY KEY (account_id, thread_id, kind)
   );
   CREATE INDEX idx_reminders_due ON reminders (account_id, state, due_at);
+  `,
+
+  // v7 — sent-mail autocomplete data and RFC threading metadata (M2 T13).
+  // Contact frequency is derived from idempotent per-message contributions,
+  // never from mutable counters that would drift when a thread is refetched.
+  `
+  ALTER TABLE messages ADD COLUMN rfc_message_id TEXT;
+  ALTER TABLE messages ADD COLUMN references_json TEXT;
+  ALTER TABLE sync_state ADD COLUMN sent_synced INTEGER NOT NULL DEFAULT 0;
+
+  CREATE TABLE contact_messages (
+    account_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    email      TEXT NOT NULL,
+    role       TEXT NOT NULL,
+    name       TEXT,
+    PRIMARY KEY (account_id, message_id, email, role)
+  );
+  CREATE INDEX idx_contact_messages_email ON contact_messages (account_id, email);
   `
 ]

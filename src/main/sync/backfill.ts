@@ -1,5 +1,6 @@
-// Resumable staged INBOX backfill: 12 months of metadata first, then full
-// bodies for 90 days. Each completed page checkpoints the next phase/token.
+// Resumable staged backfill: 12 months of INBOX metadata, 90 days of full
+// INBOX bodies, then 12 months of SENT metadata for local autocomplete.
+// Each completed page checkpoints the next phase/token.
 
 import type { SyncStage } from '../../shared/mail'
 import type { Db } from '../db'
@@ -21,7 +22,8 @@ export interface BackfillProgress {
 
 export interface BackfillResult {
   threadCount: number
-  inboxThreadIds: string[]
+  /** Null for the sent-only v7 upgrade, which must not reconcile INBOX. */
+  inboxThreadIds: string[] | null
 }
 
 export interface BackfillOptions {
@@ -31,9 +33,37 @@ export interface BackfillOptions {
 
 export type BackfillPhase = SyncStage
 
-interface ParsedCursor {
+export interface ParsedCursor {
   phase: BackfillPhase
   pageToken?: string
+}
+
+export type BackfillStartPlan =
+  | { kind: 'skip' }
+  | { kind: 'sent-only'; cursor: ParsedCursor }
+  | { kind: 'run'; cursor: ParsedCursor; initialize: boolean }
+
+/** Pure routing for fresh, resumed, completed, and v7-upgrade databases. */
+export function planBackfillStart(
+  rawCursor: string | null | undefined,
+  sentSynced: number,
+  recovery = false
+): BackfillStartPlan {
+  if (rawCursor === 'done' && !recovery) {
+    return sentSynced === 1 ? { kind: 'skip' } : { kind: 'sent-only', cursor: { phase: 'sent' } }
+  }
+  // v6 could already be waiting at reconciliation when v7 lands. Replaying the
+  // idempotent sent phase is also the safe answer to a crash between the sent
+  // page checkpoint and sent_synced update.
+  if (rawCursor === 'reconcile' && sentSynced === 0 && !recovery) {
+    return { kind: 'run', cursor: { phase: 'sent' }, initialize: false }
+  }
+  const resuming = Boolean(rawCursor && rawCursor !== 'done')
+  return {
+    kind: 'run',
+    cursor: resuming ? parseCursor(rawCursor) : { phase: 'metadata' },
+    initialize: !resuming
+  }
 }
 
 export async function runInboxBackfill(
@@ -48,27 +78,29 @@ export async function runInboxBackfill(
     ensureAccount(db, accountId, profile.emailAddress)
 
     const previous = db
-      .prepare('SELECT backfill_cursor, updated_at FROM sync_state WHERE account_id = ?')
-      .get(accountId) as { backfill_cursor: string | null; updated_at: number | null } | undefined
-    if (previous?.backfill_cursor === 'done' && !options.recovery) {
-      return { threadCount: 0, inboxThreadIds: [] }
-    }
+      .prepare('SELECT backfill_cursor, sent_synced, updated_at FROM sync_state WHERE account_id = ?')
+      .get(accountId) as
+      | { backfill_cursor: string | null; sent_synced: number; updated_at: number | null }
+      | undefined
+    const plan = planBackfillStart(previous?.backfill_cursor, previous?.sent_synced ?? 0, options.recovery)
+    if (plan.kind === 'skip') return { threadCount: 0, inboxThreadIds: null }
 
-    const resuming = Boolean(previous?.backfill_cursor && previous.backfill_cursor !== 'done')
-    let cursor = resuming ? parseCursor(previous?.backfill_cursor) : { phase: 'metadata' as const }
-    if (!resuming) {
+    const sentOnly = plan.kind === 'sent-only'
+    let cursor = plan.cursor
+    if (plan.kind === 'run' && plan.initialize) {
       // Record the gapless history checkpoint before the first metadata page.
       db.prepare(
-        `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor, updated_at)
-         VALUES (?, ?, 'metadata', 0)
+        `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor, sent_synced, updated_at)
+         VALUES (?, ?, 'metadata', 0, 0)
          ON CONFLICT(account_id) DO UPDATE SET
            last_history_id = excluded.last_history_id,
            backfill_cursor = excluded.backfill_cursor,
+           sent_synced = excluded.sent_synced,
            updated_at = excluded.updated_at`
       ).run(accountId, profile.historyId)
     }
 
-    upsertLabels(db, accountId, await provider.listLabels())
+    if (!sentOnly) upsertLabels(db, accountId, await provider.listLabels())
     let threadsDone = 0
 
     if (cursor.phase === 'metadata') {
@@ -78,6 +110,7 @@ export async function runInboxBackfill(
         provider,
         accountId,
         query: 'newer_than:12m',
+        labelIds: ['INBOX'],
         phase: 'metadata',
         initialPageToken: cursor.pageToken,
         nextPhase: 'bodies',
@@ -101,9 +134,10 @@ export async function runInboxBackfill(
         provider,
         accountId,
         query: 'newer_than:90d',
+        labelIds: ['INBOX'],
         phase: 'bodies',
         initialPageToken: cursor.pageToken,
-        nextPhase: 'reconcile',
+        nextPhase: 'sent',
         onThread: async (threadId) => {
           const thread = await provider.getThread(threadId, { format: 'full' })
           persistThread(db, accountId, thread)
@@ -114,6 +148,36 @@ export async function runInboxBackfill(
           callbacks.onProgress({ stage: 'bodies', threadsDone, mailChanged: true })
         }
       })
+      cursor = { phase: 'sent' }
+    }
+
+    if (cursor.phase === 'sent') {
+      callbacks.onProgress({ stage: 'sent', threadsDone, mailChanged: false })
+      await runThreadPhase({
+        db,
+        provider,
+        accountId,
+        query: 'newer_than:12m',
+        labelIds: ['SENT'],
+        phase: 'sent',
+        initialPageToken: cursor.pageToken,
+        nextPhase: sentOnly ? 'done' : 'reconcile',
+        onThread: async (threadId) => {
+          persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
+            metadataOnly: true
+          })
+        },
+        onPage: (count) => {
+          threadsDone += count
+          callbacks.onProgress({ stage: 'sent', threadsDone, mailChanged: true })
+        }
+      })
+      db.prepare('UPDATE sync_state SET sent_synced = 1, updated_at = ? WHERE account_id = ?').run(
+        Date.now(),
+        accountId
+      )
+      if (sentOnly) return { threadCount: threadsDone, inboxThreadIds: null }
+      cursor = { phase: 'reconcile' }
     }
 
     // Re-list all INBOX ids for authoritative membership reconciliation. This
@@ -122,16 +186,14 @@ export async function runInboxBackfill(
     const inboxThreadIds = new Set<string>()
     let pageToken: string | undefined
     do {
-      const page = await provider.listThreadIds('', pageToken)
+      const page = await provider.listThreadIds({ labelIds: ['INBOX'], pageToken })
       for (const threadId of page.threadIds) inboxThreadIds.add(threadId)
       pageToken = page.nextPageToken
     } while (pageToken)
 
-    db.prepare('UPDATE sync_state SET backfill_cursor = ?, updated_at = ? WHERE account_id = ?').run(
-      'done',
-      Date.now(),
-      accountId
-    )
+    db.prepare(
+      'UPDATE sync_state SET backfill_cursor = ?, sent_synced = 1, updated_at = ? WHERE account_id = ?'
+    ).run('done', Date.now(), accountId)
     return { threadCount: threadsDone, inboxThreadIds: [...inboxThreadIds] }
   } catch (error) {
     callbacks.onError(error)
@@ -144,9 +206,10 @@ interface ThreadPhaseOptions {
   provider: MailProvider
   accountId: string
   query: string
+  labelIds: readonly string[]
   phase: Exclude<BackfillPhase, 'reconcile'>
   initialPageToken?: string
-  nextPhase: BackfillPhase
+  nextPhase: BackfillPhase | 'done'
   onThread: (threadId: string) => Promise<void>
   onPage: (count: number) => void
 }
@@ -157,7 +220,11 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
   for (;;) {
     let page: ThreadIdPage
     try {
-      page = await options.provider.listThreadIds(options.query, pageToken)
+      page = await options.provider.listThreadIds({
+        q: options.query,
+        labelIds: options.labelIds,
+        pageToken
+      })
     } catch (error) {
       if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
       // Preserve the original history checkpoint while restarting this phase.
@@ -191,9 +258,11 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
 function parseCursor(raw: string | null | undefined): ParsedCursor {
   if (!raw || raw === 'start' || raw === 'metadata') return { phase: 'metadata' }
   if (raw === 'bodies') return { phase: 'bodies' }
+  if (raw === 'sent') return { phase: 'sent' }
   if (raw === 'reconcile') return { phase: 'reconcile' }
   if (raw.startsWith('metadata:')) return { phase: 'metadata', pageToken: raw.slice('metadata:'.length) }
   if (raw.startsWith('bodies:')) return { phase: 'bodies', pageToken: raw.slice('bodies:'.length) }
+  if (raw.startsWith('sent:')) return { phase: 'sent', pageToken: raw.slice('sent:'.length) }
   // Compatibility with the first T7 cursor format, which stored a bare token.
   return { phase: 'metadata', pageToken: raw }
 }

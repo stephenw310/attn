@@ -22,6 +22,10 @@ interface SeedMessage {
   cc?: string
   bcc?: string
   replyTo?: string
+  /** RFC Message-ID header, preferably in canonical angle-bracket form. */
+  messageId?: string
+  /** RFC References chain, written as one folded-capable header value. */
+  references?: string[]
   subject: string
   snippet?: string
   bodyText?: string
@@ -64,7 +68,11 @@ function payloadFor(message: SeedMessage): GmailPart {
       { name: 'Subject', value: message.subject },
       ...(message.cc ? [{ name: 'Cc', value: message.cc }] : []),
       ...(message.bcc ? [{ name: 'Bcc', value: message.bcc }] : []),
-      ...(message.replyTo ? [{ name: 'Reply-To', value: message.replyTo }] : [])
+      ...(message.replyTo ? [{ name: 'Reply-To', value: message.replyTo }] : []),
+      ...(message.messageId ? [{ name: 'Message-ID', value: message.messageId }] : []),
+      ...(message.references?.length
+        ? [{ name: 'References', value: message.references.join('\r\n\t') }]
+        : [])
     ],
     parts: [
       ...bodyParts,
@@ -130,6 +138,16 @@ export function loadSeed(db: Db, path: string): string {
       }
       persistThread(db, fixture.account, gmailThread)
     }
+    // Seeded stores are complete local snapshots and never contact Gmail. Mark
+    // both backfill dimensions complete so relaunches model a settled account.
+    db.prepare(
+      `INSERT INTO sync_state (account_id, backfill_cursor, sent_synced, updated_at)
+       VALUES (?, 'done', 1, ?)
+       ON CONFLICT(account_id) DO UPDATE SET
+         backfill_cursor = excluded.backfill_cursor,
+         sent_synced = excluded.sent_synced,
+         updated_at = excluded.updated_at`
+    ).run(fixture.account, importedAt)
   })()
 
   console.log(`[seed] loaded ${fixture.threads.length} threads for ${fixture.account}`)

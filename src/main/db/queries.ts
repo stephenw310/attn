@@ -1,5 +1,6 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
+import { type ContactSearchResult, type ContactStats, rankContacts } from '../../shared/contacts'
 import type {
   Conversation,
   ConversationMsg,
@@ -156,7 +157,7 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
   const rows = db
     .prepare(
       `SELECT id, from_name, from_email, internal_date, body_text, body_html, recipients_json,
-              attachments_json, snippet
+              attachments_json, snippet, rfc_message_id, references_json
        FROM messages WHERE account_id = ? AND thread_id = ?
        ORDER BY internal_date ASC`
     )
@@ -170,10 +171,14 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
     recipients_json: string | null
     attachments_json: string | null
     snippet: string | null
+    rfc_message_id: string | null
+    references_json: string | null
   }[]
 
   const messages: ConversationMsg[] = rows.map((r) => ({
     id: r.id,
+    rfcMessageId: r.rfc_message_id,
+    references: parseJson(r.references_json, []),
     fromName: r.from_name ?? '',
     fromEmail: r.from_email ?? '',
     at: r.internal_date ?? 0,
@@ -186,6 +191,73 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
   }))
 
   return { threadId, subject: thread.subject ?? '(no subject)', messages }
+}
+
+export function searchContacts(
+  db: Db,
+  accountId: string,
+  query: string,
+  now = Date.now()
+): ContactSearchResult[] {
+  const escaped = query
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[\\%_]/g, '\\$&')
+  const rows = db
+    .prepare(
+      `WITH matching_emails AS (
+         SELECT DISTINCT email
+         FROM contact_messages
+         WHERE account_id = @account_id
+           AND (lower(email) LIKE @pattern ESCAPE '\\'
+                OR lower(COALESCE(name, '')) LIKE @pattern ESCAPE '\\')
+       ),
+       stats AS (
+         SELECT cm.email,
+                SUM(CASE WHEN cm.role = 'to' THEN 1 ELSE 0 END) AS sent_to_count,
+                SUM(CASE WHEN cm.role = 'from' THEN 1 ELSE 0 END) AS received_count,
+                MAX(m.internal_date) AS last_interacted_at
+         FROM contact_messages cm
+         JOIN matching_emails match ON match.email = cm.email
+         JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+         WHERE cm.account_id = @account_id
+         GROUP BY cm.email
+       )
+       SELECT stats.email,
+              COALESCE((
+                SELECT recent.name
+                FROM contact_messages recent
+                JOIN messages recent_message
+                  ON recent_message.account_id = recent.account_id
+                 AND recent_message.id = recent.message_id
+                WHERE recent.account_id = @account_id
+                  AND recent.email = stats.email
+                  AND recent.name IS NOT NULL
+                  AND recent.name != ''
+                ORDER BY recent_message.internal_date DESC, recent.message_id DESC
+                LIMIT 1
+              ), '') AS name,
+              stats.sent_to_count,
+              stats.received_count,
+              stats.last_interacted_at
+       FROM stats`
+    )
+    .all({ account_id: accountId, pattern: `%${escaped}%` }) as {
+    email: string
+    name: string
+    sent_to_count: number
+    received_count: number
+    last_interacted_at: number | null
+  }[]
+
+  const stats: ContactStats[] = rows.map((row) => ({
+    name: row.name,
+    email: row.email,
+    sentToCount: row.sent_to_count,
+    receivedCount: row.received_count,
+    lastInteractedAt: row.last_interacted_at ?? 0
+  }))
+  return rankContacts(stats, query, accountId, now)
 }
 
 export function getInlineAttachmentData(

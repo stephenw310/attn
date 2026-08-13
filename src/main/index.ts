@@ -31,14 +31,15 @@ import {
   getInlineAttachmentData,
   listInboxThreads,
   listSnoozedThreads,
-  listUserLabels
+  listUserLabels,
+  searchContacts
 } from './db/queries'
 import { loadSeed } from './dev/seed'
 import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
 import { MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import { SnoozeScheduler } from './scheduler'
-import { runInboxBackfill } from './sync/backfill'
+import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { syncFailureState } from './sync/failure'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
@@ -154,17 +155,19 @@ function startSync(): void {
     console.error(`[sync] failed: ${message}`)
     return
   }
-  const state = db.prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
-    | { backfill_cursor: string | null }
-    | undefined
-  if (state?.backfill_cursor === 'done') {
+  const state = db
+    .prepare('SELECT backfill_cursor, sent_synced FROM sync_state WHERE account_id = ?')
+    .get(accountId) as { backfill_cursor: string | null; sent_synced: number } | undefined
+  const backfillPlan = planBackfillStart(state?.backfill_cursor, state?.sent_synced ?? 0)
+  if (backfillPlan.kind === 'skip') {
     startHistoryPoller(accountId, provider, generation, true)
     return
   }
   if (backfillRetryGeneration === generation) backfillRetryGeneration = null
   syncRunning = true
-  setSyncState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
-  console.log('[sync] inbox backfill started')
+  const initialStage = backfillPlan.kind === 'sent-only' ? 'sent' : backfillPlan.cursor.phase
+  setSyncState({ phase: 'syncing', stage: initialStage, threadsDone: 0 })
+  console.log(`[sync] ${backfillPlan.kind === 'sent-only' ? 'sent upgrade' : 'mail backfill'} started`)
   const activeDb = db
   void runInboxBackfill(activeDb, provider, {
     onProgress: (progress) => {
@@ -197,10 +200,12 @@ function startSync(): void {
       }
       const retryRequested = backfillRetryGeneration === generation
       if (retryRequested) backfillRetryGeneration = null
-      reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+      if (result.inboxThreadIds !== null) {
+        reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+      }
       setSyncState({ phase: 'idle' })
       broadcastMailChanged()
-      console.log(`[sync] backfill done: ${result.threadCount} inbox threads for ${accountId}`)
+      console.log(`[sync] backfill done: ${result.threadCount} threads for ${accountId}`)
       startHistoryPoller(accountId, provider, generation, retryRequested)
     })
     .catch((error) => {
@@ -257,7 +262,9 @@ function startHistoryPoller(
         )
         if (!result) throw failure
         if (generation !== authSessionGeneration) throw new Error('authentication session changed')
-        reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+        if (result.inboxThreadIds !== null) {
+          reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
+        }
       } finally {
         if (generation === authSessionGeneration) {
           syncRunning = false
@@ -441,6 +448,11 @@ function registerIpc(): void {
 
   ipcMain.handle('sync:getState', () => syncState)
   ipcMain.handle('sync:retry', () => retrySync())
+  ipcMain.handle('contacts:search', (_event, query: unknown) => {
+    if (!db || typeof query !== 'string') return []
+    const account = currentAccountId()
+    return account ? searchContacts(db, account, query.slice(0, 200)) : []
+  })
   ipcMain.handle('mail:takePendingFocus', () => {
     const threadId = takePendingFocus(pendingFocus)
     pendingFocus = null
@@ -664,6 +676,7 @@ if (!gotLock) {
           | { id: string }
           | undefined
         seedAccountId = existing?.id ?? loadSeed(db, seedPath)
+        console.log(`[sync] sent stage skipped for seeded account ${seedAccountId}`)
       } catch (error) {
         console.error(`[seed] failed: ${error instanceof Error ? error.message : String(error)}`)
         app.exit(1)
@@ -690,6 +703,9 @@ if (!gotLock) {
         if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
       })
       ipcMain.on('attn:test:setSyncState', (_event, state: SyncState) => setSyncState(state))
+      ipcMain.on('attn:test:reloadSeed', () => {
+        if (db && seedPath) loadSeed(db, seedPath)
+      })
     }
     if (authStatus().signedIn) void resumeOnlineWork()
     app.on('activate', () => showMainWindow())
@@ -711,6 +727,7 @@ if (!gotLock) {
     mailNotifier = null
     ipcMain.removeAllListeners('attn:test:focusThread')
     ipcMain.removeAllListeners('attn:test:setSyncState')
+    ipcMain.removeAllListeners('attn:test:reloadSeed')
     db?.close()
     db = null
   })
