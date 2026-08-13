@@ -1,6 +1,7 @@
 // Resumable staged INBOX backfill: 12 months of metadata first, then full
 // bodies for 90 days. Each completed page checkpoints the next phase/token.
 
+import type { SyncStage } from '../../shared/mail'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { hydrateMissingThreadBodies } from './bodies'
@@ -15,6 +16,7 @@ export interface BackfillCallbacks {
 export interface BackfillProgress {
   stage: BackfillPhase
   threadsDone: number
+  mailChanged: boolean
 }
 
 export interface BackfillResult {
@@ -27,7 +29,7 @@ export interface BackfillOptions {
   recovery?: boolean
 }
 
-export type BackfillPhase = 'metadata' | 'bodies' | 'reconcile'
+export type BackfillPhase = SyncStage
 
 interface ParsedCursor {
   phase: BackfillPhase
@@ -70,7 +72,7 @@ export async function runInboxBackfill(
     let threadsDone = 0
 
     if (cursor.phase === 'metadata') {
-      callbacks.onProgress({ stage: 'metadata', threadsDone })
+      callbacks.onProgress({ stage: 'metadata', threadsDone, mailChanged: false })
       await runThreadPhase({
         db,
         provider,
@@ -86,14 +88,14 @@ export async function runInboxBackfill(
         },
         onPage: (count) => {
           threadsDone += count
-          callbacks.onProgress({ stage: 'metadata', threadsDone })
+          callbacks.onProgress({ stage: 'metadata', threadsDone, mailChanged: true })
         }
       })
       cursor = { phase: 'bodies' }
     }
 
     if (cursor.phase === 'bodies') {
-      callbacks.onProgress({ stage: 'bodies', threadsDone })
+      callbacks.onProgress({ stage: 'bodies', threadsDone, mailChanged: false })
       await runThreadPhase({
         db,
         provider,
@@ -109,14 +111,14 @@ export async function runInboxBackfill(
         },
         onPage: (count) => {
           threadsDone += count
-          callbacks.onProgress({ stage: 'bodies', threadsDone })
+          callbacks.onProgress({ stage: 'bodies', threadsDone, mailChanged: true })
         }
       })
     }
 
     // Re-list all INBOX ids for authoritative membership reconciliation. This
     // remains metadata-free and prevents older local threads being stripped.
-    callbacks.onProgress({ stage: 'reconcile', threadsDone })
+    callbacks.onProgress({ stage: 'reconcile', threadsDone, mailChanged: false })
     const inboxThreadIds = new Set<string>()
     let pageToken: string | undefined
     do {

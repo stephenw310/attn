@@ -640,7 +640,15 @@ function SyncStatus({
 }): React.JSX.Element {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
-  const displayState = !realMode || !networkOnline ? 'offline' : sync.phase === 'idle' ? 'live' : sync.phase
+  const displayState = !realMode
+    ? 'disconnected'
+    : sync.phase === 'error'
+      ? 'error'
+      : sync.phase === 'offline' || !networkOnline
+        ? 'offline'
+        : sync.phase === 'idle'
+          ? 'live'
+          : 'syncing'
   const syncingStage = sync.phase === 'syncing' ? sync.stage : 'metadata'
 
   const closeDetails = useCallback(() => {
@@ -649,8 +657,8 @@ function SyncStatus({
   }, [])
 
   useEffect(() => {
-    if (!realMode || !networkOnline || sync.phase !== 'error') setDetailsOpen(false)
-  }, [networkOnline, realMode, sync.phase])
+    if (!realMode || sync.phase !== 'error') setDetailsOpen(false)
+  }, [realMode, sync.phase])
 
   useEffect(() => {
     if (!detailsOpen) return
@@ -675,19 +683,23 @@ function SyncStatus({
   const label =
     displayState === 'live'
       ? 'Live'
-      : displayState === 'offline'
-        ? 'Offline'
-        : displayState === 'error'
-          ? 'Error'
-          : `Syncing · ${syncStageLabel(syncingStage)}`
+      : displayState === 'disconnected'
+        ? 'Not connected'
+        : displayState === 'offline'
+          ? 'Offline'
+          : displayState === 'error'
+            ? 'Error'
+            : `Syncing · ${syncStageLabel(syncingStage)}`
   const detail =
     displayState === 'live'
       ? 'Up to date'
-      : displayState === 'offline'
-        ? 'Local mail available'
-        : displayState === 'error'
-          ? 'Click for details'
-          : null
+      : displayState === 'disconnected'
+        ? 'Demo inbox'
+        : displayState === 'offline'
+          ? 'Local mail available'
+          : displayState === 'error'
+            ? 'Click for details'
+            : null
   const title =
     displayState === 'error' && sync.phase === 'error'
       ? sync.message
@@ -758,7 +770,10 @@ function SyncStatus({
             </span>
             Gmail sync error
           </div>
-          <p data-testid="status-error-message" className="my-2 text-[11px] leading-[1.45] text-ink-dim">
+          <p
+            data-testid="status-error-message"
+            className="my-2 max-h-48 overflow-y-auto break-words text-[11px] leading-[1.45] text-ink-dim"
+          >
             {sync.message}
           </p>
           <div className="flex gap-2">
@@ -1365,6 +1380,24 @@ export default function App(): React.JSX.Element {
     },
     [showToast]
   )
+
+  useLayoutEffect(() => {
+    if (!realMode || sync.phase !== 'error') return
+    return registerCommands([
+      {
+        id: 'sync.retry',
+        title: 'Retry mail sync',
+        context: 'global',
+        run: retrySync
+      },
+      {
+        id: 'sync.error.copy',
+        title: 'Copy sync error details',
+        context: 'global',
+        run: () => copySyncError(sync.message)
+      }
+    ])
+  }, [copySyncError, realMode, retrySync, sync])
 
   const switchView = useCallback((next: 'inbox' | 'snoozed') => {
     activeViewRef.current = next

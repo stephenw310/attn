@@ -59,7 +59,8 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(status).toContainText('Local mail available')
   await expect(status).toHaveAttribute('data-status', 'offline')
 
-  const message = 'gmail history failed (403): quota exceeded'
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+  const message = `gmail history failed (403): ${'q'.repeat(300)}`
   await setSyncState(app, { phase: 'error', message })
   await expect(status).toContainText('Error')
   await expect(status).not.toContainText(message)
@@ -68,13 +69,17 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await page.getByTestId('status-error-button').click()
   const details = page.getByTestId('status-error-details')
   await expect(details).toBeVisible()
-  await expect(page.getByTestId('status-error-message')).toHaveText(message)
+  const errorMessage = page.getByTestId('status-error-message')
+  await expect(errorMessage).toHaveText(message)
+  expect(await errorMessage.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect(page.getByTestId('status-copy-error')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(details).toHaveCount(0)
 
   await page.getByTestId('status-error-button').click()
   await page.getByTestId('status-retry').click()
+  await expect(status).toHaveAttribute('data-status', 'offline')
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
   await expect(status).toHaveAttribute('data-status', 'live')
 })
 

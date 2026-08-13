@@ -58,8 +58,9 @@ test('renders the signed-out Dispatch inbox', async ({ page }) => {
   await expect(rows.first()).toContainText(mockThreads[0].subject)
 
   await expect(page.getByTestId('account-menu')).toHaveText(/OAuth not configured/)
-  await expect(page.getByTestId('status-note')).toContainText('Offline')
-  await expect(page.getByTestId('status-note')).toHaveAttribute('data-status', 'offline')
+  await expect(page.getByTestId('status-note')).toContainText('Not connected')
+  await expect(page.getByTestId('status-note')).toContainText('Demo inbox')
+  await expect(page.getByTestId('status-note')).toHaveAttribute('data-status', 'disconnected')
   await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
   await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
   await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/K/↑/↓navigate')

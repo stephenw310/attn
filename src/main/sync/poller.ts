@@ -154,12 +154,15 @@ export interface HistoryPollerOptions {
   runCycle?: typeof runHistoryCycle
 }
 
+export type RunNowRequest = 'started' | 'queued' | 'stopped'
+
 export class HistoryPoller {
   private timer: ReturnType<typeof setTimeout> | null = null
   private executing = false
   private stopped = true
   private lastAttemptAt = 0
   private recoveryPending = false
+  private queuedRunStart: (() => void) | null = null
 
   constructor(private readonly options: HistoryPollerOptions) {}
 
@@ -173,8 +176,20 @@ export class HistoryPoller {
 
   stop(): void {
     this.stopped = true
+    this.queuedRunStart = null
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+  }
+
+  requestRunNow(onStarted: () => void): RunNowRequest {
+    if (this.stopped) return 'stopped'
+    if (this.executing) {
+      this.queuedRunStart = onStarted
+      return 'queued'
+    }
+    onStarted()
+    void this.runNow()
+    return 'started'
   }
 
   async runNow(): Promise<void> {
@@ -212,7 +227,14 @@ export class HistoryPoller {
       if (!this.stopped) this.options.onError(error)
     } finally {
       this.executing = false
-      if (!this.stopped) this.schedule()
+      const queuedRunStart = this.queuedRunStart
+      this.queuedRunStart = null
+      if (!this.stopped && queuedRunStart) {
+        queuedRunStart()
+        void this.runNow()
+      } else if (!this.stopped) {
+        this.schedule()
+      }
     }
   }
 

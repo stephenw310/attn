@@ -41,6 +41,7 @@ import { SnoozeScheduler } from './scheduler'
 import { runInboxBackfill } from './sync/backfill'
 import { syncFailureState } from './sync/failure'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
+import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { sameSyncState } from './sync/state'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
@@ -69,7 +70,8 @@ if (testUserData) {
 let db: Db | null = null
 let syncState: SyncState = { phase: 'idle' }
 let syncRunning = false
-let syncRetryTimer: ReturnType<typeof setTimeout> | null = null
+let backfillRetryGeneration: number | null = null
+const offlineRetryScheduler = new OfflineRetryScheduler(15_000)
 let authSessionGeneration = 0
 let seedAccountId: string | null = null
 let actionExecutor: ActionExecutor | null = null
@@ -102,16 +104,14 @@ function setSyncState(s: SyncState): void {
 }
 
 function clearSyncRetry(): void {
-  if (syncRetryTimer) clearTimeout(syncRetryTimer)
-  syncRetryTimer = null
+  offlineRetryScheduler.clear()
 }
 
 function scheduleOfflineRetry(generation: number): void {
-  if (syncRetryTimer || generation !== authSessionGeneration || !authStatus().signedIn) return
-  syncRetryTimer = setTimeout(() => {
-    syncRetryTimer = null
-    if (generation === authSessionGeneration) startSync()
-  }, 15_000)
+  offlineRetryScheduler.schedule(
+    () => generation === authSessionGeneration && authStatus().signedIn,
+    startSync
+  )
 }
 
 function publishSyncFailure(error: unknown, logPrefix: string): SyncState {
@@ -157,10 +157,10 @@ function startSync(): void {
     | { backfill_cursor: string | null }
     | undefined
   if (state?.backfill_cursor === 'done') {
-    setSyncState({ phase: 'idle' })
-    startHistoryPoller(accountId, provider, generation)
+    startHistoryPoller(accountId, provider, generation, true)
     return
   }
+  if (backfillRetryGeneration === generation) backfillRetryGeneration = null
   syncRunning = true
   setSyncState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
   console.log('[sync] inbox backfill started')
@@ -168,44 +168,62 @@ function startSync(): void {
   void runInboxBackfill(activeDb, provider, {
     onProgress: (progress) => {
       if (generation !== authSessionGeneration) return
-      setSyncState({ phase: 'syncing', ...progress })
-      broadcastMailChanged()
+      const { mailChanged, ...stateProgress } = progress
+      setSyncState({ phase: 'syncing', ...stateProgress })
+      if (mailChanged) broadcastMailChanged()
     },
     onError: (error) => {
+      if (generation !== authSessionGeneration) return
       syncRunning = false
-      if (generation !== authSessionGeneration) {
-        if (authStatus().signedIn) void resumeOnlineWork()
-        return
-      }
       const failure = publishSyncFailure(error, '[sync] failed')
-      if (failure.phase === 'offline') scheduleOfflineRetry(generation)
+      if (backfillRetryGeneration !== generation && failure.phase === 'offline') {
+        scheduleOfflineRetry(generation)
+      }
     }
   })
     .then((result) => {
-      syncRunning = false
-      if (!result) return
+      if (generation === authSessionGeneration) syncRunning = false
       if (generation !== authSessionGeneration) {
         if (authStatus().signedIn) void resumeOnlineWork()
         return
       }
+      if (!result) {
+        if (backfillRetryGeneration === generation) {
+          backfillRetryGeneration = null
+          startSync()
+        }
+        return
+      }
+      const retryRequested = backfillRetryGeneration === generation
+      if (retryRequested) backfillRetryGeneration = null
       reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
       setSyncState({ phase: 'idle' })
       broadcastMailChanged()
       console.log(`[sync] backfill done: ${result.threadCount} inbox threads for ${accountId}`)
-      startHistoryPoller(accountId, provider, generation)
+      startHistoryPoller(accountId, provider, generation, retryRequested)
     })
     .catch((error) => {
-      syncRunning = false
+      if (generation === authSessionGeneration) syncRunning = false
       if (generation !== authSessionGeneration) {
         if (authStatus().signedIn) void resumeOnlineWork()
         return
       }
       const failure = publishSyncFailure(error, '[sync] failed after backfill')
-      if (failure.phase === 'offline') scheduleOfflineRetry(generation)
+      if (backfillRetryGeneration === generation) {
+        backfillRetryGeneration = null
+        startSync()
+      } else if (failure.phase === 'offline') {
+        scheduleOfflineRetry(generation)
+      }
     })
 }
 
-function startHistoryPoller(accountId: string, provider: GmailMailProvider, generation: number): void {
+function startHistoryPoller(
+  accountId: string,
+  provider: GmailMailProvider,
+  generation: number,
+  runImmediately = false
+): void {
   if (!db || generation !== authSessionGeneration || historyPoller) return
   const activeDb = db
   historyPoller = new HistoryPoller({
@@ -225,7 +243,9 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
           {
             onProgress: (progress) => {
               if (generation === authSessionGeneration) {
-                setSyncState({ phase: 'syncing', ...progress })
+                const { mailChanged, ...stateProgress } = progress
+                setSyncState({ phase: 'syncing', ...stateProgress })
+                if (mailChanged) broadcastMailChanged()
               }
             },
             onError: (error) => {
@@ -238,8 +258,9 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
         if (generation !== authSessionGeneration) throw new Error('authentication session changed')
         reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
       } finally {
-        syncRunning = false
-        if (generation !== authSessionGeneration && authStatus().signedIn) {
+        if (generation === authSessionGeneration) {
+          syncRunning = false
+        } else if (authStatus().signedIn) {
           void resumeOnlineWork()
         }
       }
@@ -262,6 +283,9 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
     }
   })
   historyPoller.start()
+  if (runImmediately) {
+    historyPoller.requestRunNow(() => setSyncState({ phase: 'syncing', stage: 'reconcile', threadsDone: 0 }))
+  }
 }
 
 function stopHistoryPoller(): void {
@@ -269,21 +293,27 @@ function stopHistoryPoller(): void {
   historyPoller = null
 }
 
-function retrySync(): SyncState {
+function retrySync(): void {
   clearSyncRetry()
-  if (!authStatus().signedIn) return syncState
-  if (seedAccountId) {
+  const route = syncRetryRoute({
+    signedIn: authStatus().signedIn,
+    seeded: seedAccountId !== null,
+    hasPoller: historyPoller !== null,
+    backfillRunning: syncRunning
+  })
+  if (route === 'none') return
+  if (route === 'seed') {
     setSyncState({ phase: 'idle' })
-    return syncState
+    return
   }
-  if (historyPoller) {
-    setSyncState({ phase: 'syncing', stage: 'reconcile', threadsDone: 0 })
-    void historyPoller.runNow()
+  if (route === 'poller') {
+    historyPoller?.requestRunNow(() => setSyncState({ phase: 'syncing', stage: 'reconcile', threadsDone: 0 }))
+  } else if (route === 'queue-backfill') {
+    backfillRetryGeneration = authSessionGeneration
   } else {
     startSync()
   }
   void actionExecutor?.trigger()
-  return syncState
 }
 
 async function resumeOnlineWork(): Promise<void> {
@@ -368,6 +398,8 @@ function registerIpc(): void {
     try {
       const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
       stopHistoryPoller()
+      backfillRetryGeneration = null
+      syncRunning = false
       authSessionGeneration++
       saveTokens(app.getPath('userData'), tokens)
       // A target queued for the previous account must not survive the switch.
@@ -390,6 +422,8 @@ function registerIpc(): void {
     cancelActiveSignIn()
     clearSyncRetry()
     stopHistoryPoller()
+    backfillRetryGeneration = null
+    syncRunning = false
     authSessionGeneration++
     seedAccountId = null
     clearTokens(app.getPath('userData'))
