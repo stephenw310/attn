@@ -1795,9 +1795,9 @@ function Inbox({
         <div className="text-base font-bold tracking-tight">
           attn<span className="text-accent">:</span>
         </div>
-        <div data-testid="view-title" className="text-sm font-semibold text-ink-dim">
-          {view === 'inbox' ? 'Inbox' : 'Snoozed'}
-        </div>
+        {/* Mailbox switcher, not a split strip: v1 has no Important/Other lanes until
+            F11 lands at M3, and SPEC §9 #10 forbids showing splits as peer mailboxes.
+            The active tab is the header's mailbox name (F3), so it carries view-title. */}
         <nav className="app-no-drag flex gap-1">
           <button
             type="button"
@@ -1806,7 +1806,7 @@ function Inbox({
               view === 'inbox' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
             }`}
           >
-            Important
+            <span data-testid={view === 'inbox' ? 'view-title' : undefined}>Inbox</span>
             {unreadCount !== null && unreadCount > 0 && (
               <span className="ml-1.5 text-xs font-semibold text-accent tabular-nums">{unreadCount}</span>
             )}
@@ -1818,15 +1818,7 @@ function Inbox({
               view === 'snoozed' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
             }`}
           >
-            Snoozed
-          </button>
-          <button
-            type="button"
-            disabled
-            title="Split inbox lands at M3 (F11)"
-            className="rounded-[7px] px-3 py-1.5 text-[13px] font-medium text-ink-faint disabled:opacity-60"
-          >
-            Other
+            <span data-testid={view === 'snoozed' ? 'view-title' : undefined}>Snoozed</span>
           </button>
         </nav>
         <div className="app-no-drag ml-auto flex items-center gap-4">

@@ -22,7 +22,7 @@ graph LR
   T15[T15 MIME builder + reply semantics]
   T16[T16 outbox: send + undo send, exactly-once]
   T17[T17 attachments out]
-  T18[T18 failed-action surface + queue re-pend]
+  T18[T18 self-healing failed actions]
   T19[T19 on-demand body hydration]
   T20[T20 daily-drivable hardening + sign-off]
 
@@ -250,7 +250,7 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 
 - **State machine per outbox row:** `composing → queued → sending → sent` (+ `failed`). Transitions are durable **before** their side effects: a row is `queued` with `send_at` before the toast shows; `sending` is written before the first byte leaves; `sent` is written only on confirmed success.
 - **Exactly-once key = client-generated RFC Message-ID** (`<{uuid}@{account domain}>`), created when the row is queued and baked into the MIME. Recovery after any ambiguity (crash mid-send, network error after the request may have reached Gmail) is: search `messages.list q="rfc822msgid:{id} in:anywhere"` — found ⇒ mark `sent`; not found ⇒ safe to (re)send. **Every retry path goes through this verification when the previous attempt entered `sending`.** This is the F6 "no scenario produces a duplicate send" criterion made mechanical.
-- **Undo window:** queueing sets `send_at = now + delay` (setting stored via the M1 `settings` table: `undoSendDelaySeconds`, default 10; the settings *UI* is M4 — a palette-less default is fine for M2 dogfood). The **scheduler owns the timer** (§6): extend the M1 scheduler pattern with an `OutboxSender` armed on the next due `queued` row; catch-up on boot sends anything whose window elapsed while the app was closed. **Undo (`Z`) rides the existing main-process undo stack:** queueing a send pushes an entry whose inverse flips the row back to `composing`, cancels the timer, and tells the renderer to reopen the composer. Popping it after the send fired reports "Already sent" (no inverse) — deliberately still consuming the stack entry so `Z Z` doesn't skip backwards silently.
+- **Undo window:** queueing sets `send_at = now + delay` (setting stored via the M1 `settings` table: `undoSendDelaySeconds`, **default 8**; the settings *UI* is M4 — a palette-less default is fine for M2 dogfood). The **scheduler owns the timer** (§6): extend the M1 scheduler pattern with an `OutboxSender` armed on the next due `queued` row; catch-up on boot sends anything whose window elapsed while the app was closed. **Undo (`Z`) rides the existing main-process undo stack:** queueing a send pushes an entry whose inverse flips the row back to `composing`, cancels the timer, and tells the renderer to reopen the composer. Popping it after the send fired reports "Already sent" (no inverse) — deliberately still consuming the stack entry so `Z Z` doesn't skip backwards silently.
 - **Send execution** (the only `send` chokepoint, global rule 9): if the row has a `gmail_draft_id`, final `drafts.update` (raw MIME) then `drafts.send` — the sent message atomically replaces the Gmail draft, leaving no husk in Drafts. Otherwise `messages.send` (uploadType=multipart for attachment payloads). Both calls set `threadId` when replying. A 404 on `drafts.send` means the draft vanished (likely a prior attempt succeeded) → run the Message-ID verification, not a blind resend.
 - **After confirmed send:** refetch the returned `threadId` through the provider → `persistThread` → `mail:changed`, so the sent message appears in the local thread within a second (and Sent-view data accrues for M3). Reply-sends leave the inbox untouched; F4 auto-advance is not coupled to sending in v1.
 - **Offline:** rows sit in `queued` past their window while no provider exists; footer pending count includes `queued`/`sending` outbox rows (the local-first visibility contract, same as triage). Toast on queue: **"Sent — Undo (Z)"** with the toast persisting for the window's duration rather than the standard 4s.
@@ -322,20 +322,36 @@ Attach → queue → relaunch → send survives with bytes intact; caps enforced
 
 ---
 
-## T18 — Failed-action surface and queue re-pend (deciding an M1 deferred call)
+## T18 — Self-healing failed actions (deciding an M1 deferred call)
 
-**Depends on:** nothing (parallel-friendly) · **Spec:** F2 action queue; M1 deviations rows 2–3
+**Depends on:** nothing (parallel-friendly) · **Spec:** F2 action queue + conflict rule; M1 deviations rows 2–3
 
-**Product decision (made here so M2 can build it):** failed rows stay visible and recoverable, never silent.
+**Product decision (owner, 2026-08-13):** a permanently failed action **repairs itself and says so** — local state converges back to what the server actually thinks, so an archive Gmail rejected simply reappears in the inbox. No failed-actions panel, no retry button, no error log. Debugging sync is not the user's job.
 
-1. Footer pending readout splits: `· 3 pending` stays amber-neutral; failures append `· 1 failed` in the danger tone. Clicking (and a registered command) opens a small panel listing failed rows: action kind, thread subject (joined from the store), `last_error`, attempts — with **Retry** (row → `pending`, kick executor) and **Discard** (delete row; local state is already what the user sees, so discarding just accepts divergence until the next history refetch corrects it — say exactly that in the panel's microcopy).
-2. **Hard-401 re-pend on sign-in:** successful `auth:signIn` for the same account flips that account's `failed` rows whose `last_error` was an auth failure back to `pending` (the M1 deviation: actions queued across a revoked-token window currently die permanently). Classify auth-failures at failure time with a `failure_kind` column? No — avoid a migration: match on the stored 401 error string from `GmailApiError` formatting, which is stable and test-pinned.
-3. Outbox `failed` rows (T16) appear in the same panel with Retry routing through the verification-first send path.
-- Testing — unit: re-pend classifier; e2e: force a failed row via the seeded DB (insert directly with the test seam), assert badge split + retry/discard flows; the executor test already covers permanent-vs-retryable routing.
+**The mechanism is refetch, not inverse-delta.** Don't compute a reverse of the failed action — delete the queue row and re-fetch that thread (`getThread` → `persistThread`, which already replays any remaining pending intent on top). Server state is the truth by F2's own conflict rule, so this converges exactly and cannot drift the way a hand-rolled inverse can. It costs one request on a path that is, by construction, rare.
+
+**Three nuances the policy must respect — getting these wrong is worse than the old behavior:**
+
+1. **Only *permanent* failures revert.** Offline, 5xx, and 429 stay retryable with their backoff ladder untouched. Reverting on a transient failure would flicker mail back into the inbox during a network blip — the worst outcome available here. `isPermanentActionError` already draws this line; use it, don't widen it.
+2. **Auth failures never revert.** A 401/revoked token doesn't mean "Gmail rejected this", it means "we couldn't ask". The intent is still valid, so those rows re-pend on the next successful sign-in for the same account (the M1 deviation) instead of discarding 20 archives because a token lapsed. Detect via the stored 401 error string from `GmailApiError` formatting (stable, test-pinned) — no migration needed.
+3. **Sends are the exception (T16).** A failed send must never silently vanish or self-repair — the user wrote that message. It reopens the composer with content intact and the error shown. This task's auto-revert covers triage actions only.
+
+**Telling the user.** Silent reappearance is spooky: mail moving on its own reads as a bug. On revert, one plainly-worded, non-actionable toast — *"Couldn't archive 'Q3 roadmap review' — it's back in your inbox."* Batch to a single toast when several revert together. That is the entire surface: no badge state, no panel, no command.
+
+**Consequences (deliberate simplifications):**
+- Footer pending readout stays a single count — the planned `· N failed` split is cut.
+- `pendingActionCount` stops counting permanently-failed rows because they no longer exist; the M1 comment about failed rows haunting the badge forever, and the deviation row behind it, both retire here.
+- The `failed` state effectively disappears from `action_queue` for triage intents (auth-stranded rows sit in `pending`). Keep the column — the outbox reuses it.
+- **Undo-stack hygiene:** an undo entry whose action was reverted must not later re-apply. On revert, drop entries referencing that thread+action rather than leaving a `Z` that resurrects a rejected change.
+
+### Testing
+
+- Unit: three-way permanent / retryable / auth classification (exhaustive); undo-stack invalidation; toast batching.
+- E2e (seeded): drive a permanent failure through the test seam → thread returns to the list, toast appears, pending count returns to zero, and a following `z` does not re-archive it.
 
 ### Done when
 
-No failure mode leaves the queue invisible; sign-in recovers auth-stranded rows; e2e demonstrates both; verify green; the M1 deviations table rows are updated to point here.
+A permanently failed triage action leaves the UI matching the server with one explanatory toast and no user action; auth-stranded actions survive re-sign-in; sends still surface in the composer; verify green; the two M1 deviation rows point here.
 
 ---
 
@@ -374,7 +390,7 @@ The closing pass that turns "features exist" into "this is my mail client":
 - [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links)
 - [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates
 - [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data
-- [ ] Failed actions surfaced + auth re-pend shipped; no silent queue states remain
+- [ ] Failed triage actions self-heal to server truth with an explanatory toast; auth re-pend shipped; no silent queue states remain
 - [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts
 - [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input)
 - [ ] SPEC/README/AGENTS/M1-plan deviation rows updated to the shipped reality

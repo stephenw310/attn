@@ -201,7 +201,7 @@ Composing opens an **overlay panel** above the inbox (context is never lost). `C
 - **Attachments:** drag-and-drop or picker, up to Gmail's 25MB limit, with progress indication.
 - **Drafts:** autosaved locally every second while idle and synced to Gmail Drafts, crash-safe.
 - **Send:** `Mod+Enter`.
-- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/5/**10**/20/30s, default 10). A toast shows "Sent — Undo (Z)". Undo reopens the composer with everything intact. The API call happens only after the window elapses.
+- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/5/**8**/10/20/30s, default 8). A toast shows "Sent — Undo (Z)". Undo reopens the composer with everything intact. The API call happens only after the window elapses.
 - Outbox state machine (`composing → queued → sending → sent`) guarantees exactly-once send across crashes: on relaunch, `sending`-state items are verified against the server before any retry.
 
 **Acceptance criteria**
