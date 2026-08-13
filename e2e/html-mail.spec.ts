@@ -215,6 +215,11 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(
     page.frameLocator('[data-testid="html-body-frame"]').locator('#plain-html-copy')
   ).toContainText('Your order total was $24.00.')
+  await page.evaluate(() => window.getSelection()?.removeAllRanges())
+  await page
+    .frameLocator('[data-testid="html-body-frame"]')
+    .locator('body')
+    .evaluate((body) => body.ownerDocument.getSelection()?.removeAllRanges())
   const simpleMailPath = join(dir, 'simple-mail.png')
   await page.screenshot({ path: simpleMailPath })
   await testInfo.attach('simple mail', { path: simpleMailPath, contentType: 'image/png' })

@@ -8,8 +8,13 @@ import { ensureAccount, persistThread, upsertLabels } from './persist'
 import type { MailProvider, ThreadIdPage } from './provider'
 
 export interface BackfillCallbacks {
-  onProgress: (threadsDone: number) => void
-  onError: (message: string) => void
+  onProgress: (progress: BackfillProgress) => void
+  onError: (error: unknown) => void
+}
+
+export interface BackfillProgress {
+  stage: BackfillPhase
+  threadsDone: number
 }
 
 export interface BackfillResult {
@@ -22,7 +27,7 @@ export interface BackfillOptions {
   recovery?: boolean
 }
 
-type BackfillPhase = 'metadata' | 'bodies' | 'reconcile'
+export type BackfillPhase = 'metadata' | 'bodies' | 'reconcile'
 
 interface ParsedCursor {
   phase: BackfillPhase
@@ -65,6 +70,7 @@ export async function runInboxBackfill(
     let threadsDone = 0
 
     if (cursor.phase === 'metadata') {
+      callbacks.onProgress({ stage: 'metadata', threadsDone })
       await runThreadPhase({
         db,
         provider,
@@ -80,13 +86,14 @@ export async function runInboxBackfill(
         },
         onPage: (count) => {
           threadsDone += count
-          callbacks.onProgress(threadsDone)
+          callbacks.onProgress({ stage: 'metadata', threadsDone })
         }
       })
       cursor = { phase: 'bodies' }
     }
 
     if (cursor.phase === 'bodies') {
+      callbacks.onProgress({ stage: 'bodies', threadsDone })
       await runThreadPhase({
         db,
         provider,
@@ -102,13 +109,14 @@ export async function runInboxBackfill(
         },
         onPage: (count) => {
           threadsDone += count
-          callbacks.onProgress(threadsDone)
+          callbacks.onProgress({ stage: 'bodies', threadsDone })
         }
       })
     }
 
     // Re-list all INBOX ids for authoritative membership reconciliation. This
     // remains metadata-free and prevents older local threads being stripped.
+    callbacks.onProgress({ stage: 'reconcile', threadsDone })
     const inboxThreadIds = new Set<string>()
     let pageToken: string | undefined
     do {
@@ -124,7 +132,7 @@ export async function runInboxBackfill(
     )
     return { threadCount: threadsDone, inboxThreadIds: [...inboxThreadIds] }
   } catch (error) {
-    callbacks.onError(error instanceof Error ? error.message : String(error))
+    callbacks.onError(error)
     return null
   }
 }
@@ -171,7 +179,7 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
       }
       completed++
     })
-    options.onPage(completed)
+    if (completed > 0) options.onPage(completed)
     pageToken = page.nextPageToken
     checkpoint(options.db, options.accountId, pageToken ? `${options.phase}:${pageToken}` : options.nextPhase)
     if (!pageToken) return

@@ -103,6 +103,63 @@
   pointer-events: none;
 }
 
+.app-status-dot {
+  background: #4ade80;
+  box-shadow: 0 0 0 3px rgb(74 222 128 / 8%);
+}
+
+[data-status="syncing"] .app-status-dot {
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px rgb(255 178 36 / 9%);
+  animation: status-dot-pulse 1.5s ease-in-out infinite;
+}
+
+[data-status="offline"] .app-status-dot {
+  background: #737985;
+  box-shadow: 0 0 0 3px rgb(115 121 133 / 8%);
+}
+
+[data-status="error"] .app-status-dot {
+  background: var(--color-danger);
+  box-shadow: 0 0 0 3px rgb(224 108 117 / 10%);
+}
+
+.app-sync-phase-segment[data-phase-state="complete"] {
+  background: rgb(255 178 36 / 62%);
+}
+
+.app-sync-phase-segment[data-phase-state="active"]::after {
+  display: block;
+  width: 72%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgb(255 178 36 / 20%), var(--color-accent), rgb(255 178 36 / 20%));
+  content: "";
+  animation: status-phase-sweep 1.25s ease-in-out infinite;
+}
+
+@keyframes status-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes status-phase-sweep {
+  0% {
+    transform: translateX(-105%);
+  }
+
+  55%,
+  100% {
+    transform: translateX(145%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-confirmation-toast {
     animation: none;
@@ -110,5 +167,15 @@
 
   .app-thread-exit {
     animation: none;
+  }
+
+  [data-status="syncing"] .app-status-dot,
+  .app-sync-phase-segment[data-phase-state="active"]::after {
+    animation: none;
+  }
+
+  .app-sync-phase-segment[data-phase-state="active"]::after {
+    width: 55%;
+    background: var(--color-accent);
   }
 }

@@ -39,6 +39,7 @@ import { GmailMailProvider } from './gmail/provider'
 import { MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import { SnoozeScheduler } from './scheduler'
 import { runInboxBackfill } from './sync/backfill'
+import { syncFailureState } from './sync/failure'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
 import { sameSyncState } from './sync/state'
 
@@ -68,6 +69,7 @@ if (testUserData) {
 let db: Db | null = null
 let syncState: SyncState = { phase: 'idle' }
 let syncRunning = false
+let syncRetryTimer: ReturnType<typeof setTimeout> | null = null
 let authSessionGeneration = 0
 let seedAccountId: string | null = null
 let actionExecutor: ActionExecutor | null = null
@@ -99,6 +101,26 @@ function setSyncState(s: SyncState): void {
   broadcast('sync:state', s)
 }
 
+function clearSyncRetry(): void {
+  if (syncRetryTimer) clearTimeout(syncRetryTimer)
+  syncRetryTimer = null
+}
+
+function scheduleOfflineRetry(generation: number): void {
+  if (syncRetryTimer || generation !== authSessionGeneration || !authStatus().signedIn) return
+  syncRetryTimer = setTimeout(() => {
+    syncRetryTimer = null
+    if (generation === authSessionGeneration) startSync()
+  }, 15_000)
+}
+
+function publishSyncFailure(error: unknown, logPrefix: string): SyncState {
+  const next = syncFailureState(error)
+  setSyncState(next)
+  console.error(`${logPrefix}: ${next.message}`)
+  return next
+}
+
 function makeClient(generation: number): GmailClient | null {
   const config = loadOAuthConfig(oauthSearchDirs())
   const tokens = loadTokens(app.getPath('userData'))
@@ -120,6 +142,7 @@ function currentAccountId(): string | null {
 
 function startSync(): void {
   if (!db || syncRunning || seedAccountId || historyPoller) return
+  clearSyncRetry()
   const generation = authSessionGeneration
   const accountId = currentAccountId()
   const provider = makeProvider()
@@ -134,27 +157,28 @@ function startSync(): void {
     | { backfill_cursor: string | null }
     | undefined
   if (state?.backfill_cursor === 'done') {
+    setSyncState({ phase: 'idle' })
     startHistoryPoller(accountId, provider, generation)
     return
   }
   syncRunning = true
-  setSyncState({ phase: 'syncing', threadsDone: 0 })
+  setSyncState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
   console.log('[sync] inbox backfill started')
   const activeDb = db
   void runInboxBackfill(activeDb, provider, {
-    onProgress: (threadsDone) => {
+    onProgress: (progress) => {
       if (generation !== authSessionGeneration) return
-      setSyncState({ phase: 'syncing', threadsDone })
+      setSyncState({ phase: 'syncing', ...progress })
       broadcastMailChanged()
     },
-    onError: (message) => {
+    onError: (error) => {
       syncRunning = false
       if (generation !== authSessionGeneration) {
         if (authStatus().signedIn) void resumeOnlineWork()
         return
       }
-      setSyncState({ phase: 'error', message })
-      console.error(`[sync] failed: ${message}`)
+      const failure = publishSyncFailure(error, '[sync] failed')
+      if (failure.phase === 'offline') scheduleOfflineRetry(generation)
     }
   })
     .then((result) => {
@@ -176,9 +200,8 @@ function startSync(): void {
         if (authStatus().signedIn) void resumeOnlineWork()
         return
       }
-      const message = error instanceof Error ? error.message : String(error)
-      setSyncState({ phase: 'error', message })
-      console.error(`[sync] failed after backfill: ${message}`)
+      const failure = publishSyncFailure(error, '[sync] failed after backfill')
+      if (failure.phase === 'offline') scheduleOfflineRetry(generation)
     })
 }
 
@@ -193,25 +216,25 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
     recoverExpiredHistory: async () => {
       if (generation !== authSessionGeneration) throw new Error('authentication session changed')
       syncRunning = true
-      setSyncState({ phase: 'syncing', threadsDone: 0 })
-      let failureMessage = 'history recovery backfill failed'
+      setSyncState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
+      let failure: unknown = new Error('history recovery backfill failed')
       try {
         const result = await runInboxBackfill(
           activeDb,
           provider,
           {
-            onProgress: (threadsDone) => {
+            onProgress: (progress) => {
               if (generation === authSessionGeneration) {
-                setSyncState({ phase: 'syncing', threadsDone })
+                setSyncState({ phase: 'syncing', ...progress })
               }
             },
-            onError: (message) => {
-              failureMessage = message
+            onError: (error) => {
+              failure = error
             }
           },
           { recovery: true }
         )
-        if (!result) throw new Error(failureMessage)
+        if (!result) throw failure
         if (generation !== authSessionGeneration) throw new Error('authentication session changed')
         reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
       } finally {
@@ -226,11 +249,10 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
       setSyncState({ phase: 'idle' })
       if (changed) broadcastMailChanged()
     },
-    onError: (message) => {
+    onError: (error) => {
       if (generation !== authSessionGeneration) return
       syncRunning = false
-      setSyncState({ phase: 'error', message })
-      console.error(`[sync] history poll failed: ${message}`)
+      publishSyncFailure(error, '[sync] history poll failed')
     },
     wakeThread: (threadId) => {
       snoozeScheduler?.wakeThread(threadId)
@@ -245,6 +267,23 @@ function startHistoryPoller(accountId: string, provider: GmailMailProvider, gene
 function stopHistoryPoller(): void {
   historyPoller?.stop()
   historyPoller = null
+}
+
+function retrySync(): SyncState {
+  clearSyncRetry()
+  if (!authStatus().signedIn) return syncState
+  if (seedAccountId) {
+    setSyncState({ phase: 'idle' })
+    return syncState
+  }
+  if (historyPoller) {
+    setSyncState({ phase: 'syncing', stage: 'reconcile', threadsDone: 0 })
+    void historyPoller.runNow()
+  } else {
+    startSync()
+  }
+  void actionExecutor?.trigger()
+  return syncState
 }
 
 async function resumeOnlineWork(): Promise<void> {
@@ -349,6 +388,7 @@ function registerIpc(): void {
   ipcMain.handle('auth:signOut', () => {
     const account = currentAccountId()
     cancelActiveSignIn()
+    clearSyncRetry()
     stopHistoryPoller()
     authSessionGeneration++
     seedAccountId = null
@@ -365,6 +405,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('sync:getState', () => syncState)
+  ipcMain.handle('sync:retry', () => retrySync())
   ipcMain.handle('mail:takePendingFocus', () => {
     const threadId = takePendingFocus(pendingFocus)
     pendingFocus = null
@@ -613,6 +654,7 @@ if (!gotLock) {
       ipcMain.on('attn:test:focusThread', (_event, threadId: unknown) => {
         if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
       })
+      ipcMain.on('attn:test:setSyncState', (_event, state: SyncState) => setSyncState(state))
     }
     if (authStatus().signedIn) void resumeOnlineWork()
     app.on('activate', () => showMainWindow())
@@ -624,6 +666,7 @@ if (!gotLock) {
 
   app.on('will-quit', () => {
     stopHistoryPoller()
+    clearSyncRetry()
     powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
     actionExecutor?.stop()
     actionExecutor = null
@@ -632,6 +675,7 @@ if (!gotLock) {
     mailNotifier?.stop()
     mailNotifier = null
     ipcMain.removeAllListeners('attn:test:focusThread')
+    ipcMain.removeAllListeners('attn:test:setSyncState')
     db?.close()
     db = null
   })

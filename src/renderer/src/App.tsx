@@ -8,6 +8,7 @@ import type {
   MessageAttachment,
   MessageRecipients,
   SnoozedThreadRow,
+  SyncStage,
   SyncState,
   ThreadRow
 } from '../../shared/mail'
@@ -593,6 +594,197 @@ function QueueReadout({ unread, pending }: { unread: number | null; pending: num
   )
 }
 
+const SYNC_STAGES: SyncStage[] = ['metadata', 'bodies', 'reconcile']
+
+function syncStageLabel(stage: SyncStage): string {
+  if (stage === 'metadata') return 'Message list'
+  if (stage === 'bodies') return 'Recent mail'
+  return 'Finishing up'
+}
+
+function SyncProgress({ stage }: { stage: SyncStage }): React.JSX.Element {
+  const activeIndex = SYNC_STAGES.indexOf(stage)
+  return (
+    <span
+      data-testid="sync-progress"
+      role="progressbar"
+      aria-label={`Sync phase ${activeIndex + 1} of ${SYNC_STAGES.length}: ${syncStageLabel(stage)}`}
+      aria-valuemin={1}
+      aria-valuemax={SYNC_STAGES.length}
+      aria-valuenow={activeIndex + 1}
+      className="col-start-2 grid h-[3px] w-44 grid-cols-3 gap-[3px] overflow-hidden"
+    >
+      {SYNC_STAGES.map((item, index) => (
+        <i
+          key={item}
+          data-phase-state={index < activeIndex ? 'complete' : index === activeIndex ? 'active' : 'pending'}
+          className="app-sync-phase-segment overflow-hidden rounded-full bg-edge"
+        />
+      ))}
+    </span>
+  )
+}
+
+function SyncStatus({
+  sync,
+  realMode,
+  networkOnline,
+  onRetry,
+  onCopyError
+}: {
+  sync: SyncState
+  realMode: boolean
+  networkOnline: boolean
+  onRetry: () => void
+  onCopyError: (message: string) => void
+}): React.JSX.Element {
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const displayState = !realMode || !networkOnline ? 'offline' : sync.phase === 'idle' ? 'live' : sync.phase
+  const syncingStage = sync.phase === 'syncing' ? sync.stage : 'metadata'
+
+  const closeDetails = useCallback(() => {
+    setDetailsOpen(false)
+    blurActive()
+  }, [])
+
+  useEffect(() => {
+    if (!realMode || !networkOnline || sync.phase !== 'error') setDetailsOpen(false)
+  }, [networkOnline, realMode, sync.phase])
+
+  useEffect(() => {
+    if (!detailsOpen) return
+    const onDown = (event: MouseEvent): void => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) closeDetails()
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        closeDetails()
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey, true)
+    }
+  }, [closeDetails, detailsOpen])
+
+  const label =
+    displayState === 'live'
+      ? 'Live'
+      : displayState === 'offline'
+        ? 'Offline'
+        : displayState === 'error'
+          ? 'Error'
+          : `Syncing · ${syncStageLabel(syncingStage)}`
+  const detail =
+    displayState === 'live'
+      ? 'Up to date'
+      : displayState === 'offline'
+        ? 'Local mail available'
+        : displayState === 'error'
+          ? 'Select for details'
+          : null
+  const title =
+    displayState === 'error' && sync.phase === 'error'
+      ? sync.message
+      : displayState === 'offline' && sync.phase === 'offline'
+        ? sync.message
+        : displayState === 'syncing' && sync.phase === 'syncing'
+          ? `${label} — ${sync.threadsDone} processed`
+          : `${label} — ${detail}`
+
+  const body = (
+    <>
+      <span className="app-status-dot row-start-1 size-[7px] rounded-full" aria-hidden />
+      <span
+        className={`row-start-1 whitespace-nowrap text-[11.5px] font-semibold ${
+          displayState === 'error' ? 'text-danger' : 'text-ink-dim'
+        }`}
+      >
+        {label}
+      </span>
+      {displayState === 'syncing' && sync.phase === 'syncing' ? (
+        <SyncProgress stage={sync.stage} />
+      ) : (
+        <span className="col-start-2 row-start-2 text-[9.5px] leading-[10px] text-ink-faint">{detail}</span>
+      )}
+    </>
+  )
+
+  return (
+    <div
+      ref={wrapRef}
+      data-testid="status-note"
+      data-status={displayState}
+      className="relative ml-auto flex w-[196px] flex-none justify-end"
+      title={title}
+      aria-live="polite"
+    >
+      {displayState === 'error' && sync.phase === 'error' ? (
+        <button
+          type="button"
+          data-testid="status-error-button"
+          className="grid w-full cursor-pointer grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2 text-left"
+          aria-expanded={detailsOpen}
+          aria-controls="sync-error-details"
+          onClick={() => setDetailsOpen((open) => !open)}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="grid w-full grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2">
+          {body}
+        </div>
+      )}
+
+      {detailsOpen && sync.phase === 'error' && (
+        <div
+          id="sync-error-details"
+          data-testid="status-error-details"
+          role="dialog"
+          aria-label="Sync error details"
+          className="absolute right-0 bottom-full z-50 mb-2 w-[330px] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-[0_15px_42px_rgba(0,0,0,0.58)]"
+        >
+          <div className="flex items-center gap-2 text-xs font-bold text-ink">
+            <span className="text-danger" aria-hidden>
+              ●
+            </span>
+            Gmail sync error
+          </div>
+          <p data-testid="status-error-message" className="my-2 text-[11px] leading-[1.45] text-ink-dim">
+            {sync.message}
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              data-testid="status-retry"
+              className="cursor-pointer rounded-md border border-edge bg-active px-2.5 py-1.5 text-[10.5px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
+              onClick={() => {
+                setDetailsOpen(false)
+                onRetry()
+              }}
+            >
+              Retry now
+            </button>
+            <button
+              type="button"
+              data-testid="status-copy-error"
+              className="cursor-pointer rounded-md border border-edge bg-active px-2.5 py-1.5 text-[10.5px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
+              onClick={() => onCopyError(sync.message)}
+            >
+              Copy details
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function blurActive(): void {
   const el = document.activeElement
   if (el instanceof HTMLElement) el.blur()
@@ -894,6 +1086,7 @@ const attn = window.attn
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
+  const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine)
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [realSnoozedThreads, setRealSnoozedThreads] = useState<SnoozedThreadRow[] | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
@@ -943,6 +1136,20 @@ export default function App(): React.JSX.Element {
       .catch(() => {})
     const offSync = attn.sync.onState(setSync)
     return offSync
+  }, [])
+
+  useEffect(() => {
+    const onOffline = (): void => setNetworkOnline(false)
+    const onOnline = (): void => {
+      setNetworkOnline(true)
+      void attn?.sync.retry().catch(() => {})
+    }
+    window.addEventListener('offline', onOffline)
+    window.addEventListener('online', onOnline)
+    return () => {
+      window.removeEventListener('offline', onOffline)
+      window.removeEventListener('online', onOnline)
+    }
   }, [])
 
   useEffect(() => {
@@ -1137,6 +1344,24 @@ export default function App(): React.JSX.Element {
       if (toastTokenRef.current === token) setToast(null)
     }, 4000)
   }, [])
+
+  const retrySync = useCallback(() => {
+    void attn?.sync.retry().catch(() => {})
+  }, [])
+
+  const copySyncError = useCallback(
+    (message: string) => {
+      if (!navigator.clipboard) {
+        showToast('Could not copy error details')
+        return
+      }
+      void navigator.clipboard
+        .writeText(message)
+        .then(() => showToast('Error details copied'))
+        .catch(() => showToast('Could not copy error details'))
+    },
+    [showToast]
+  )
 
   const switchView = useCallback((next: 'inbox' | 'snoozed') => {
     activeViewRef.current = next
@@ -1583,15 +1808,6 @@ export default function App(): React.JSX.Element {
     ...TRIAGE_SHORTCUT_HINTS
   ]
 
-  const statusNote =
-    sync.phase === 'syncing'
-      ? `syncing… ${sync.threadsDone} threads`
-      : sync.phase === 'error'
-        ? `sync failed — ${sync.message.slice(0, 80)}`
-        : realMode
-          ? 'live Gmail data'
-          : 'mock data'
-
   return (
     <div className="flex h-full flex-col">
       <header className="app-drag flex items-center gap-6 border-b border-edge px-6 py-3">
@@ -1886,19 +2102,19 @@ export default function App(): React.JSX.Element {
         </div>
       )}
 
-      <footer className="relative z-40 flex items-center gap-4 border-t border-white/10 bg-raised px-6 py-2 text-xs text-ink-faint shadow-[0_-8px_24px_rgba(0,0,0,0.32)]">
+      <footer className="relative z-40 flex min-h-11 items-center gap-4 border-t border-white/10 bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-[0_-8px_24px_rgba(0,0,0,0.32)]">
         <div data-testid="footer-shortcuts" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
           {footerShortcuts.map((shortcut) => (
             <FooterShortcut key={shortcut.id} {...shortcut} />
           ))}
         </div>
-        <span
-          data-testid="status-note"
-          className={`ml-auto flex-none font-medium ${sync.phase === 'error' ? 'text-danger' : ''}`}
-          title={statusNote}
-        >
-          {statusNote}
-        </span>
+        <SyncStatus
+          sync={sync}
+          realMode={realMode}
+          networkOnline={networkOnline}
+          onRetry={retrySync}
+          onCopyError={copySyncError}
+        />
       </footer>
     </div>
   )

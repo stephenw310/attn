@@ -58,6 +58,11 @@ describe('windowed backfill checkpoints', () => {
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, 'newer_than:90d', undefined)
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(3, '', undefined)
     expect(result).toEqual({ threadCount: 0, inboxThreadIds: [] })
+    expect(callbacks.onProgress.mock.calls.map(([progress]) => progress.stage)).toEqual([
+      'metadata',
+      'bodies',
+      'reconcile'
+    ])
     expect(callbacks.onError).not.toHaveBeenCalled()
   })
 
@@ -119,6 +124,6 @@ describe('windowed backfill checkpoints', () => {
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, 'newer_than:12m', undefined)
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, 'newer_than:90d', undefined)
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(3, '', undefined)
-    expect(callbacks.onError).toHaveBeenCalledWith('offline')
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'offline' }))
   })
 })

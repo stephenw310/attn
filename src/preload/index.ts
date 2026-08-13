@@ -61,6 +61,7 @@ const api = {
   },
   sync: {
     getState: (): Promise<SyncState> => ipcRenderer.invoke('sync:getState'),
+    retry: (): Promise<SyncState> => ipcRenderer.invoke('sync:retry'),
     onState: (cb: (s: SyncState) => void): (() => void) => {
       const listener = (_e: unknown, s: SyncState): void => cb(s)
       ipcRenderer.on('sync:state', listener)

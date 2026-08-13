@@ -148,7 +148,7 @@ export interface HistoryPollerOptions {
   isForeground: () => boolean
   recoverExpiredHistory: () => Promise<void>
   onCycleComplete: (changed: boolean) => void
-  onError: (message: string) => void
+  onError: (error: unknown) => void
   wakeThread?: (threadId: string) => void
   kickExecutor?: () => void
   runCycle?: typeof runHistoryCycle
@@ -209,7 +209,7 @@ export class HistoryPoller {
       this.options.kickExecutor?.()
       if (plan && plan.newMail.length > 0) historyEvents.emit('newMail', plan.newMail)
     } catch (error) {
-      if (!this.stopped) this.options.onError(error instanceof Error ? error.message : String(error))
+      if (!this.stopped) this.options.onError(error)
     } finally {
       this.executing = false
       if (!this.stopped) this.schedule()
