@@ -47,6 +47,37 @@ Typecheck → lint/format → unit tests → production build → Playwright end
 
 The e2e suite writes `inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png` under `e2e/.artifacts/`; failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
 
+## Package & install locally
+
+Packaging uses `electron-builder` and writes installable artifacts to `dist/`. Build on the target
+operating system so Electron and `better-sqlite3` use the correct native architecture.
+
+```bash
+# Fast unpacked app for packaging smoke tests
+npm run package:dir
+
+# macOS: DMG + ZIP for the current Mac architecture
+npm run package:mac
+
+# Windows: NSIS installer for the current Windows architecture
+npm run package:win
+```
+
+On macOS, open the generated `.dmg` in `dist/` and drag **Attn** to Applications. On Windows, run
+the generated `.exe` in `dist/`. macOS personal builds are ad-hoc signed rather than Developer ID
+signed or notarized. Windows personal builds are unsigned and may trigger a Microsoft Defender
+SmartScreen warning. Public signing, notarization, and GitHub Releases auto-update remain M4 work.
+
+The `Package desktop apps` GitHub Actions workflow builds both Apple Silicon and Intel macOS
+artifacts plus the Windows installer only when manually dispatched. It retains the non-release
+installers as workflow artifacts for 14 days.
+
+For a packaged app using real Gmail data, keep `oauth.config.json` outside the installed app in its
+per-user data directory, then restart Attn:
+
+- macOS: `~/Library/Application Support/Attn/oauth.config.json`
+- Windows: `%APPDATA%\Attn\oauth.config.json`
+
 ## Google OAuth client (for real Gmail data)
 
 v1 is deliberately "dev-mode" (SPEC §9.2): you supply your own Google OAuth client, and no Google app verification is involved. Until this is configured, the app runs on mock data and the account chip reads "OAuth not configured".

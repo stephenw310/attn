@@ -23,6 +23,10 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run e2e:only -- --grep <pattern>` | One test while iterating |
 | `npm run typecheck` / `npm run lint` | Fast static passes |
 | `npm run toolchain` | Repair Electron binary / native-module ABI (also runs as postinstall) |
+| `npm run package:dir` | Build and verify an unpacked app for the current platform |
+| `npm run package:mac` / `package:mac:all` | Build and verify macOS artifacts for one/both architectures |
+| `npm run package:win` | Build and verify the Windows installer for the current architecture |
+| `npm run package:verify` | Assert packaged runtime assets and native module architecture |
 
 **Visual self-check:** the e2e suite rewrites `e2e/.artifacts/inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png`. After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
 
