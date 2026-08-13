@@ -68,12 +68,20 @@ export function useMailData(
     if (!bridge || !activeAccount) return
     let cancelled = false
     let deferredRefreshTimer: number | null = null
+    let mailChangedPending = false
     const refresh = (): void => {
       const delay = deferRefreshUntilRef.current - Date.now()
       if (delay > 0) {
         if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
         deferredRefreshTimer = window.setTimeout(refresh, delay)
         return
+      }
+      // Past the defer gate, so conversation caches age out with the thread list
+      // rather than once per raw event: a burst during backfill, or an archive
+      // animation holding the refresh, invalidates once instead of per event.
+      if (mailChangedPending) {
+        mailChangedPending = false
+        setMailRevision((revision) => revision + 1)
       }
       const preserveSelection = preserveSelectionOnRefreshRef.current
       preserveSelectionOnRefreshRef.current = true
@@ -100,7 +108,7 @@ export function useMailData(
     }
     refresh()
     const offMail = bridge.mail.onChanged(() => {
-      setMailRevision((revision) => revision + 1)
+      mailChangedPending = true
       refresh()
     })
     return () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { prunedToVisible } from '../selection'
 
 interface SelectableThread {
   id: string
@@ -27,13 +28,12 @@ export function useSelectionState(
     setBaseIds(new Set())
   }, [])
 
+  // The range-extend base is pruned with the selection. Leaving a dropped id in
+  // `baseIds` lets the next Shift+arrow re-add a thread that is no longer listed,
+  // and this effect would not run again to remove it.
   useEffect(() => {
-    setSelectedIds((current) => {
-      if (current.size === 0) return current
-      const visibleIds = new Set(threads.map((thread) => thread.id))
-      const next = new Set([...current].filter((id) => visibleIds.has(id)))
-      return next.size === current.size ? current : next
-    })
+    setSelectedIds((current) => prunedToVisible(current, threads))
+    setBaseIds((current) => prunedToVisible(current, threads))
   }, [threads])
 
   useEffect(() => {

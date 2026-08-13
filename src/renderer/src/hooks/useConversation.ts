@@ -68,6 +68,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
 
   useEffect(() => {
     if (!window.attn) return
+    let cancelled = false
     const requestedRevision = mailRevision
     for (const index of [selectedIndex - 1, selectedIndex + 1]) {
       const thread = threads[index]
@@ -75,11 +76,15 @@ export function useConversation(options: UseConversationOptions): ConversationSt
       window.attn.mail
         .getConversation(thread.id)
         .then((result) => {
-          if (revisionRef.current === requestedRevision && result) {
-            cache.current.set(thread.id, displayConversation(result))
-          }
+          // The revision alone cannot catch a sign-out: it resets to 0, so a
+          // preload issued at revision 0 would still look current afterwards.
+          if (cancelled || revisionRef.current !== requestedRevision || !result) return
+          cache.current.set(thread.id, displayConversation(result))
         })
         .catch(() => {})
+    }
+    return () => {
+      cancelled = true
     }
   }, [mailRevision, selectedIndex, threads])
 
