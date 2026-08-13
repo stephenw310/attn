@@ -161,6 +161,9 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
   expect(collapsedViewportBox).not.toBeNull()
   const collapsedContentBox = await conversationContent.boundingBox()
   expect(collapsedContentBox).not.toBeNull()
+  // The frame intentionally starts at 1px while MessageBody measures its srcdoc.
+  // Wait for the measured collapsed height before using it as the expand/collapse baseline.
+  await expect.poll(() => frame.evaluate((element) => element.clientHeight)).toBeGreaterThan(1)
   const collapsedHeight = await frame.evaluate((element) => element.clientHeight)
   expect(collapsedHeight).toBeLessThan(1000)
   const collapsedToggleY = await toggle.evaluate((element) => element.getBoundingClientRect().y)
