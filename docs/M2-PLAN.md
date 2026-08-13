@@ -51,7 +51,7 @@ Parallelization: R1 ∥ R2 ∥ T13 touch disjoint files. T15 is pure modules and
 2. **IPC has three parts** (main handler, preload bridge, shared types) — all in the same commit. After R2, channel names and signatures live in the typed channel map in `src/shared/` — never write a raw channel string in main or preload again.
 3. **Mail content is untrusted.** That now includes **outgoing** content: quoted history entering the composer passes the same DOMPurify path as display, and composer output is sanitized against a minimal allowlist before it is stored or built into MIME. Never `dangerouslySetInnerHTML`.
 4. **Select on `data-testid`** in e2e; add testids for every new interactive element.
-5. **Mock mode keeps working.** Signed-out without a seed = the browser-preview mock inbox. The composer may open with autocomplete empty and Send disabled ("sign in to send"), but it must render and navigate without console errors.
+5. **Signed-out means onboarding, not a degraded inbox** (PR #27 removed mock mode). The mail tree — including the composer — only mounts for a signed-in or seeded account, so no composer code may assume it can render without one. Nothing behind the sign-in screen may register commands, IPC subscriptions, or key handlers; the regression test asserting that no key is `preventDefault`-ed on that screen must stay green.
 6. **After UI changes, look at the screenshots** — the suite gains `composer.png` in T14; review it like the other four.
 7. **Every user-facing action is a registered command** (F5). New contexts (`composer`) still register; the M3 palette will assert the full inventory.
 8. **If your task changes the verify pipeline or harness behavior, update AGENTS.md in the same PR.**
@@ -66,14 +66,16 @@ Parallelization: R1 ∥ R2 ∥ T13 touch disjoint files. T15 is pure modules and
 
 ### Why
 
-`App.tsx` is 1,989 lines holding ~25 pieces of state: list, reader, selection, snooze picker, label picker, sync status, account menu, toasts, keyboard dispatch, and the mail-data lifecycle. The composer adds the biggest stateful surface yet (recipients, editor, attachments, autocomplete, outbox status) plus per-keystroke latency budgets (<16ms). Landing that in the current file would push it past 3,000 lines and make the keystroke path re-render the world.
+`App.tsx` is **2,054 lines** (PR #27 added the login screen) and its `Inbox` component alone holds ~25 pieces of state: list, reader, selection, snooze picker, label picker, sync status, account menu, toasts, keyboard dispatch, and the mail-data lifecycle. The composer adds the biggest stateful surface yet (recipients, editor, attachments, autocomplete, outbox status) plus per-keystroke latency budgets (<16ms). Landing that in the current file would push it past 3,000 lines and make the keystroke path re-render the world.
+
+PR #27 already set the precedent worth continuing: it split the file into an **auth shell** (`App`) and a **mail tree** (`Inbox`) so the signed-out screen cannot mount mail hooks. R1 extends that same cut downward — keep the shell/tree boundary intact and pull leaf surfaces out of `Inbox`.
 
 ### Implementation guide
 
 **No behavior change. No new features. The 52-test e2e suite is the safety net and must pass unmodified** (testids and DOM structure stay stable; only import paths move).
 
 1. New `src/renderer/src/components/`: extract, one commit each so review stays mechanical:
-   - `SyncStatus.tsx` (with `SyncProgress`), `AccountMenu.tsx`, `SnoozePicker.tsx`, `Toast.tsx`, `QueueReadout.tsx`
+   - `LoginScreen.tsx`, `SyncStatus.tsx` (with `SyncProgress`), `AccountMenu.tsx`, `SnoozePicker.tsx`, `Toast.tsx`, `QueueReadout.tsx`
    - `ThreadList.tsx` (list container + row + date groups + `ThreadLabels`/`ReminderChips`)
    - `ConversationView.tsx` (reader header + scroll container) and move the existing `MessageCard`/`RecipientLine`/`ConversationMessages` beside it
 2. New `src/renderer/src/hooks/`:
@@ -82,12 +84,12 @@ Parallelization: R1 ∥ R2 ∥ T13 touch disjoint files. T15 is pure modules and
    - `useConversation` — the conversation cache, neighbor preload, and mark-read-on-open effect
    - `useKeyboardDispatch` — the window keydown listener, chord state, and reading-scroll handoff
    - `useToast`
-3. `App.tsx` becomes composition + the triage/command-registration glue. Target: **under ~450 lines**. If a piece resists extraction, that's a finding — write it down in the PR rather than forcing it.
+3. `App.tsx` keeps the auth shell; `Inbox` becomes composition + the triage/command-registration glue. Target: **under ~450 lines for the file**. If a piece resists extraction, that's a finding — write it down in the PR rather than forcing it.
 4. Props stay explicit (no context providers yet); the composer task decides whether a context is warranted when it actually feels the pain.
 
 ### Done when
 
-E2e suite green with zero spec edits; all five screenshot artifacts visually unchanged; `App.tsx` under ~450 lines; no component over ~350.
+E2e suite green with zero spec edits; all five existing screenshot artifacts (`login`, `inbox`, `reading`, `simple-mail`, `label-picker`) visually unchanged; `App.tsx` under ~450 lines; no component over ~350.
 
 ---
 
@@ -200,7 +202,7 @@ Verify green; both upgrade paths demonstrated (fresh + existing DB); autocomplet
 ### Testing
 
 - Unit: outgoing-HTML sanitizer allowlist (hostile paste collapses to allowed tags), plain-text derivation, recipient parse/chip rules, autocomplete ranking integration.
-- E2e (seeded): `c` opens focused at To; chips accept/reject; `Esc` saves and toasts; relaunch → draft reopens with content intact (**the F6 crash acceptance, minus force-kill which the relaunch helper approximates**); typing in the editor never triggers list verbs; mock mode renders with Send disabled.
+- E2e (seeded): `c` opens focused at To; chips accept/reject; `Esc` saves and toasts; relaunch → draft reopens with content intact (**the F6 crash acceptance, minus force-kill which the relaunch helper approximates**); typing in the editor never triggers list verbs; the sign-in screen still registers nothing (the #27 regression test stays green with composer commands in the registry).
 - Perf (@perf): composer open < 100ms CI ceiling; keystroke-to-paint sampled under the 2k-thread seed with a generous CI ceiling (catch order-of-magnitude regressions, not 16ms exactness — that's T20's profiled pass).
 
 ### Done when

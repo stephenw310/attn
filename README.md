@@ -26,7 +26,8 @@ npm run dev
 
 `npm install` downloads Electron and then verifies that `better-sqlite3` actually loads *inside* Electron (postinstall: `scripts/ensure-electron-toolchain.mjs`). better-sqlite3 ships Node-API prebuilds, so normally nothing is compiled. The script rebuilds only if that check fails, and on restricted networks — where Electron's binary and header hosts are blocked — it self-heals using github.com and nodejs.org. If an install ever ends up half-broken, `npm run toolchain` re-runs the repair and reports what it did.
 
-The app starts on mock data. Wiring it to a real inbox is the [Google OAuth client](#google-oauth-client-for-real-gmail-data) section below.
+The app starts on its Google sign-in screen. Connecting a real inbox requires the one-time
+[Google OAuth client](#google-oauth-client-for-real-gmail-data) setup below.
 
 ## Verification
 
@@ -34,7 +35,7 @@ The app starts on mock data. Wiring it to a real inbox is the [Google OAuth clie
 npm run verify
 ```
 
-Typecheck → lint/format → unit tests → production build → Playwright end-to-end tests that drive the **real built Electron app** (main process, SQLite, preload bridge, IPC, keyboard loop). The suite needs no Google credentials: it runs signed out against mock data in throwaway user-data directories, and uses Xvfb automatically on display-less Linux. GitHub Actions runs the same gates as three jobs: static checks + unit tests + build, Electron smoke, and the performance suite.
+Typecheck → lint/format → unit tests → production build → Playwright end-to-end tests that drive the **real built Electron app** (main process, SQLite, preload bridge, IPC, keyboard loop). The suite needs no Google credentials: signed-out tests cover onboarding, while mail features use a deterministic seeded SQLite store in throwaway user-data directories. It uses Xvfb automatically on display-less Linux. GitHub Actions runs the same gates as three jobs: static checks + unit tests + build, Electron smoke, and the performance suite.
 
 | Script | What it does |
 |---|---|
@@ -46,7 +47,7 @@ Typecheck → lint/format → unit tests → production build → Playwright end
 | `npm run build` | Production bundles into `out/` |
 | `npm run toolchain` | Repair the Electron binary / native-module setup |
 
-The e2e suite writes `inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png` under `e2e/.artifacts/`; failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
+The e2e suite writes `login.png`, `inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png` under `e2e/.artifacts/`; failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
 
 ## Package & install locally
 
@@ -81,7 +82,7 @@ per-user data directory, then restart Attn:
 
 ## Google OAuth client (for real Gmail data)
 
-v1 is deliberately "dev-mode" (SPEC §9.2): you supply your own Google OAuth client, and no Google app verification is involved. Until this is configured, the app runs on mock data and the account chip reads "OAuth not configured".
+v1 is deliberately "dev-mode" (SPEC §9.2): you supply your own Google OAuth client, and no Google app verification is involved. Until this is configured, the sign-in screen links the missing setup to these instructions and does not expose an inbox.
 
 In the [Google Cloud Console](https://console.cloud.google.com), accomplish these five things (the console UI moves around; the goals don't):
 

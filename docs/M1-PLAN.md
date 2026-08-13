@@ -3,7 +3,7 @@
 **Audience:** the engineer(s) closing M1 (triage core) and preparing the M2 handoff.
 **Basis:** [SPEC.md](SPEC.md) v0.13 §8 M1 and the implementation merged through PR #26.
 **Revised 2026-08-12:** T1–T11 are shipped. The sanitized HTML work tracked as T2 shipped across PRs #7 and #11; T9 shipped in PR #20; PR #21 refined inbox grouping, pane focus, compact rows, and HTML/CID rendering; PR #23 fixed message collapse and keyboard continuity across Tab stops. Product review subsequently rejected the split as distracting and harder to navigate, so T12A replaced it with a full-window reader while retaining those fixes.
-**Revised 2026-08-13 (exit audit):** T12A shipped in PR #24. Two unplanned-but-accepted additions landed after the plan was written: desktop packaging with a manual build workflow (PR #26) and the sync status surface with staged/resumable backfill (PR #25) — both are now recorded in SPEC v0.13 (§6 Packaging, F2 "Sync visibility", §9 #12). The T12 engineering closeout (CI unit wiring, stale comments, artifact review, doc alignment) is **done**; the only open M1 exit items are the two real-world manual smokes below. **[M2-PLAN.md](M2-PLAN.md) is the next milestone's guide.**
+**Revised 2026-08-13 (exit audit):** T12A shipped in PR #24. Three unplanned-but-accepted additions landed after the plan was written: desktop packaging with a manual build workflow (PR #26), the sync status surface with staged/resumable backfill (PR #25), and the signed-out onboarding screen that replaced mock mode (PR #27) — all three are now recorded in SPEC v0.13 (§6 Packaging, F2 "Sync visibility", F1 "Signed-out state", §9 #12). The T12 engineering closeout (CI unit wiring, stale comments, artifact review, doc alignment) is **done**; the only open M1 exit items are the two real-world manual smokes below. **[M2-PLAN.md](M2-PLAN.md) is the next milestone's guide.**
 **Ground rules:** read [AGENTS.md](../AGENTS.md) first. Every task below is one PR, and no PR is done until `npm run verify` is green. When a task says "spec F4", that's a section of SPEC.md — read it before starting the task.
 
 ---
@@ -27,6 +27,7 @@
 | Post-M1 inbox and mail-rendering refinements | ✅ #21 |
 | Sync status surface + staged/resumable backfill (F2 "Sync visibility", §9 #12) | ✅ #25 (post-plan addition) |
 | Personal-build packaging + manual build workflow (§6 Packaging) | ✅ #26 (M4 scope pulled forward) |
+| Signed-out onboarding screen replacing mock mode (F1 "Signed-out state") | ✅ #27 (post-plan addition) |
 
 Supporting: ✅ **T10** perf smoke shipped (#18). Push-vs-polling is settled on paper now — SPEC §9 #8; don't reopen it in reviews.
 
@@ -75,7 +76,7 @@ The `T11 →` edges record the product ordering used during implementation (only
 2. **IPC has three parts** — a capability is added in `src/main/index.ts` (`ipcMain.handle`), `src/preload/index.ts` (bridge method), and `src/shared/` (types). All three in the same commit. The renderer never imports from `src/main/`.
 3. **Mail content is untrusted.** Outside T11's sanitized iframe, body content goes into text nodes only. Never `dangerouslySetInnerHTML`.
 4. **Select on `data-testid`** in e2e; add testids for every new interactive element. Never select on Tailwind classes.
-5. **Mock mode keeps working.** Signed-out without a seed = the browser-preview mock inbox (`mockData.ts`). New features may be inert there (verbs no-op), but it must render and navigate. The existing smoke tests enforce this.
+5. **Signed-out means onboarding.** An unseeded signed-out launch shows the login screen and no inbox. Mail-feature e2e coverage uses the seeded real-store seam below.
 6. **After UI changes, look at the screenshot** (`e2e/.artifacts/inbox.png`, plus any you add). "Tests pass" is not the same as "looks right".
 7. **From T3 on, every user-facing action is a registered command** in the command registry (T3 introduces it). This is the F5 invariant — the M3 palette will assert it.
 8. **If your task changes the verify pipeline or harness behavior, update AGENTS.md** in the same PR (it's the working agreement).
@@ -89,7 +90,7 @@ The `T11 →` edges record the product ordering used during implementation (only
 
 ### Why
 
-Today the mock inbox lives inside the renderer (`mockData.ts`) and never touches SQLite or IPC. Every triage feature we're about to build lives in the main process (reducer, queue, scheduler). If tests drive the mock, they bypass the entire correctness core. This task adds a way to boot the app against a **seeded real store** — renderer → IPC → SQLite, no Google, no tokens.
+The original renderer-only mock inbox never touched SQLite or IPC. Every triage feature lives in the main process (reducer, queue, scheduler), so testing against that mock would bypass the entire correctness core. This task added a way to boot the app against a **seeded real store** — renderer → IPC → SQLite, no Google, no tokens. The renderer-only mock mode has since been removed.
 
 ### Design (decided)
 
@@ -204,7 +205,7 @@ This is the product. Everything else in M1 hangs off the machinery built here: o
 - **Undo is a session-scoped stack in the main process** (spec: last 50, includes bulk). Undoing performs precise per-thread inverse actions (computed from pre-state at perform time) and does *not* push onto the stack.
 - **Trash uses the dedicated endpoints** (`threads.trash`/`untrash`), not label modify. Spam = modify `+SPAM −INBOX`.
 - **A minimal `MailProvider` interface starts here** (D1): the executor calls `modifyThread`/`trashThread`/`untrashThread` on the interface; `GmailMailProvider` wraps `GmailClient`. T7 extends the same interface with sync methods.
-- **Verbs are inert in mock mode** (signed-out, unseeded). Real mode only.
+- **Verbs are available only in the authenticated inbox.** Signed-out launches stay on onboarding.
 
 ### Implementation guide
 
@@ -287,7 +288,7 @@ Undo stack (module state in main): array of `{ label, undo: TriageAction[] }`, c
 - `z` after archive → thread back in the list (net local state restored; pending count reflects both queued ops — assert exact value).
 - **Durability:** archive 3 → `relaunch()` (T1 helper) → threads still archived locally, pending count still 3 (seed skipped because the store is non-empty), no rows lost or duplicated. This is F2's airplane-mode criterion, minus the network half (T7's manual smoke covers that).
 - Verbs in the overlay work and auto-advance the open conversation.
-- Mock mode: verbs do nothing, no console errors (existing suite must stay green).
+- Signed out: the login screen renders, no inbox and no verbs, no console errors (existing suite must stay green).
 
 ### Done when
 
@@ -413,7 +414,7 @@ Snooze/return/catch-up/undo all demonstrated; snoozed view navigable by keyboard
 
    The shell pages `listHistory` to exhaustion, runs the plan, refetches, replays pending deltas, calls `scheduler.wakeThread` for snoozed threads with new mail (T6's hook), stores the max `historyId`, broadcasts `mail:changed` once per cycle, and emits `newMail` on an internal `EventEmitter` (T9 subscribes; nobody listens yet — that's fine).
 2. **Windowed backfill (F2):** replace the M0 caps in `backfill.ts` — list INBOX threads with `q: 'newer_than:12m'`, page to completion, and persist the `pageToken` into `sync_state.backfill_cursor` as you go so a killed app **resumes** instead of restarting. T7 implements the 90-day body window, but on-demand hydration for older metadata-only threads remains deferred to M3's bodies/FTS work. Remove the 15-minute skip; after a completed backfill, freshness is the poller's job.
-3. **Wiring (`src/main/index.ts`):** start the poller after a successful backfill and whenever a signed-in app boots with `backfill_cursor='done'`; stop it on sign-out (tie into `authSessionGeneration`). Poller absence (mock/seeded/signed-out) must be a silent no-op.
+3. **Wiring (`src/main/index.ts`):** start the poller after a successful backfill and whenever a signed-in app boots with `backfill_cursor='done'`; stop it on sign-out (tie into `authSessionGeneration`). Poller absence (seeded/signed-out) must be a silent no-op.
 4. Executor nudge: a completed cycle with pending queue rows kicks the executor (cheap way to retry quickly after coming back online).
 
 ### Testing

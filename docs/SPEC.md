@@ -95,11 +95,14 @@ Sign in with Google via OAuth 2.0 **authorization-code + PKCE, loopback redirect
 
 Tokens are stored via Electron `safeStorage` (macOS Keychain / Windows DPAPI). No credentials ever touch disk in plaintext.
 
+**Signed-out state (added v0.13, PR #27):** a signed-out launch shows a dedicated sign-in screen, not a preview of someone else's mail — the earlier mock inbox is gone. The mail tree does not mount behind that screen, so no mail keybinding, IPC subscription, or command registration is live while onboarding; the sign-in action is autofocused so `Enter` reaches it directly. When `oauth.config.json` is missing the screen explains the one-time setup and links to it rather than offering a dead button, and a failed auth-status probe offers a retry instead of hanging on a checking state.
+
 ⚠️ **Real-world constraint:** `gmail.modify` is a restricted scope. **Decision for v1: dev-mode distribution** — each user supplies their own Google Cloud OAuth client (unverified-app warning is expected). Google's app verification + security assessment is deferred until/unless there is a public release (§9).
 
 **Acceptance criteria**
 - Fresh install → signed in and reading first conversations in under 60s on a typical inbox (metadata streams in; UI is usable before backfill completes).
 - Revoking access from Google account settings degrades gracefully to a re-auth prompt, never a crash or silent hang.
+- A signed-out launch is fully operable from the keyboard alone, and no mail shortcut does anything there.
 
 ### F2 — Sync engine & offline
 
