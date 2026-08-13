@@ -4,18 +4,30 @@ import { pruneMissingMessages } from './persist'
 
 describe('thread snapshot persistence', () => {
   it('prunes messages absent from the latest surviving thread snapshot', () => {
-    const run = vi.fn()
-    let sql = ''
+    const calls: { sql: string; params: unknown[] }[] = []
+    const statements: string[] = []
     const db = {
       prepare: (statement: string) => {
-        sql = statement
-        return { run }
-      }
+        statements.push(statement)
+        return {
+          all: vi.fn(() => (statement.includes('SELECT DISTINCT cm.email') ? [{ email: 'old@test' }] : [])),
+          get: vi.fn(() => undefined),
+          run: (...params: unknown[]) => calls.push({ sql: statement, params })
+        }
+      },
+      transaction: (callback: () => void) => callback
     } as unknown as Db
 
     pruneMissingMessages(db, 'account', 'thread', ['m2', 'm3'])
 
-    expect(sql).toContain('id NOT IN (?, ?)')
-    expect(run).toHaveBeenCalledWith('account', 'thread', 'm2', 'm3')
+    expect(statements.filter((sql) => sql.includes('id NOT IN (?, ?)'))).toHaveLength(3)
+    expect(calls).toContainEqual({
+      sql: expect.stringContaining('DELETE FROM messages'),
+      params: ['account', 'thread', 'm2', 'm3']
+    })
+    expect(calls).toContainEqual({
+      sql: 'DELETE FROM contacts WHERE account_id = ? AND email = ?',
+      params: ['account', 'old@test']
+    })
   })
 })

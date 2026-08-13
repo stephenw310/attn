@@ -18,7 +18,8 @@ export interface ContactSearchResult {
   score: number
 }
 
-const RECENCY_HALF_LIFE_MS = 90 * 24 * 60 * 60 * 1000
+export const CONTACT_RECENCY_HALF_LIFE_MS = 90 * 24 * 60 * 60 * 1000
+export const CONTACT_SEARCH_LIMIT = 8
 
 /** What an address falls back to when no correspondent ever supplied a display name. */
 export function displayName(name: string | null | undefined, email: string): string {
@@ -36,7 +37,7 @@ export function rankContacts(
   query: string,
   selfEmail: string,
   now = Date.now(),
-  limit = 8
+  limit = CONTACT_SEARCH_LIMIT
 ): RankedContact[] {
   const needle = query.trim().toLocaleLowerCase()
   const self = selfEmail.trim().toLocaleLowerCase()
@@ -47,7 +48,7 @@ export function rankContacts(
       const email = contact.email.trim().toLocaleLowerCase()
       const prefix = needle.length === 0 || contact.nameMatchesPrefix || email.startsWith(needle)
       const age = Math.max(0, now - contact.lastInteractedAt)
-      const recencyMultiplier = 0.5 ** (age / RECENCY_HALF_LIFE_MS)
+      const recencyMultiplier = 0.5 ** (age / CONTACT_RECENCY_HALF_LIFE_MS)
       const score = (3 * contact.sentToCount + contact.receivedCount) * recencyMultiplier
       return { contact, email, prefix, score }
     })

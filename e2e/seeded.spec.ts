@@ -52,13 +52,30 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
     expect.objectContaining({ name: 'Priya Raman', email: 'priya@example.com' })
   ])
   expect(await page.evaluate(() => window.attn.contacts.search('seed@attn.test'))).toEqual([])
+  expect(await page.evaluate(() => window.attn.contacts.search(''))).toHaveLength(8)
 
   // Replay the exact same snapshots through the production persistence path.
   // Contribution PKs make this a no-op for aggregate frequency.
-  await app.evaluate(({ ipcMain }) => ipcMain.emit('attn:test:reloadSeed'))
+  await app.evaluate(
+    ({ ipcMain }) =>
+      new Promise<void>((resolve, reject) => {
+        ipcMain.emit('attn:test:reloadSeed', {}, (error?: string) => {
+          if (error) reject(new Error(error))
+          else resolve()
+        })
+      })
+  )
   const after = await page.evaluate(() => window.attn.contacts.search('maya'))
   expect(after[0]).toMatchObject({ name: 'Maya Lin', email: 'maya@example.com' })
   expect(after[0].score).toBeCloseTo(before[0].score, 5)
+
+  // Removing the only sent contribution drops Priya from the projection while
+  // preserving Maya's independent received-mail contributions.
+  await app.evaluate(({ ipcMain }) => ipcMain.emit('attn:test:deleteThread', {}, 't-sent-history'))
+  expect(await page.evaluate(() => window.attn.contacts.search('pri'))).toEqual([])
+  expect(await page.evaluate(() => window.attn.contacts.search('maya'))).toEqual([
+    expect.objectContaining({ name: 'Maya Lin', email: 'maya@example.com' })
+  ])
 })
 
 test('shows phased sync progress and keeps error details behind an accessible control', async ({

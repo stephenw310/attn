@@ -1,6 +1,11 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
-import { type ContactSearchResult, type ContactStats, displayName, rankContacts } from '../../shared/contacts'
+import {
+  CONTACT_RECENCY_HALF_LIFE_MS,
+  CONTACT_SEARCH_LIMIT,
+  type ContactSearchResult,
+  displayName
+} from '../../shared/contacts'
 import type {
   Conversation,
   ConversationMsg,
@@ -194,10 +199,8 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
 }
 
 /**
- * Local autocomplete over sending history. Matching happens here and only here —
- * one pass over contact_messages, grouped per address, so a single keystroke never
- * degrades into a per-contact subquery. Display names are resolved afterwards for
- * the handful of addresses that survive ranking.
+ * Local autocomplete over the materialized contact projection. Ranking and the
+ * result cap stay in SQLite so IPC returns at most the rows the renderer can show.
  *
  * Known limit: SQLite's lower() folds ASCII only, so a stored name whose uppercase
  * letters are non-ASCII ("Ürsula") will not match a lowercase query ("ürsula").
@@ -212,73 +215,49 @@ export function searchContacts(
     .trim()
     .toLocaleLowerCase()
     .replace(/[\\%_]/g, '\\$&')
-  const rows = db
-    .prepare(
-      `SELECT cm.email AS email,
-              SUM(CASE WHEN cm.role = 'to' THEN 1 ELSE 0 END) AS sent_to_count,
-              SUM(CASE WHEN cm.role = 'from' THEN 1 ELSE 0 END) AS received_count,
-              MAX(m.internal_date) AS last_interacted_at,
-              MAX(CASE WHEN cm.name IS NOT NULL AND lower(cm.name) LIKE @prefix ESCAPE '\\'
-                       THEN 1 ELSE 0 END) AS name_prefix
-       FROM contact_messages cm
-       JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
-       WHERE cm.account_id = @account_id
-       GROUP BY cm.email
-       HAVING lower(cm.email) LIKE @infix ESCAPE '\\'
-           OR MAX(CASE WHEN cm.name IS NOT NULL AND lower(cm.name) LIKE @infix ESCAPE '\\'
-                       THEN 1 ELSE 0 END) = 1`
-    )
-    .all({ account_id: accountId, prefix: `${escaped}%`, infix: `%${escaped}%` }) as {
-    email: string
-    sent_to_count: number
-    received_count: number
-    last_interacted_at: number | null
-    name_prefix: number
-  }[]
-
-  const stats: ContactStats[] = rows.map((row) => ({
-    email: row.email,
-    sentToCount: row.sent_to_count,
-    receivedCount: row.received_count,
-    lastInteractedAt: row.last_interacted_at ?? 0,
-    nameMatchesPrefix: row.name_prefix === 1
-  }))
   // account_id doubles as the email in v1, but read the account row so a future
   // opaque account id (SPEC D4) cannot start suggesting the signed-in address.
   const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
     | { email: string }
     | undefined
-  const ranked = rankContacts(stats, query, account?.email ?? accountId, now)
-  if (ranked.length === 0) return []
-
-  const names = contactDisplayNames(
-    db,
-    accountId,
-    ranked.map((contact) => contact.email)
-  )
-  return ranked.map((contact) => ({
-    name: displayName(names.get(contact.email), contact.email),
-    email: contact.email,
-    score: contact.score
-  }))
-}
-
-/** Most recent non-empty display name per address, for a already-ranked shortlist. */
-function contactDisplayNames(db: Db, accountId: string, emails: string[]): Map<string, string> {
-  const placeholders = emails.map(() => '?').join(', ')
-  // Exactly one MAX() plus a bare column makes SQLite return cm.name from the row
-  // that produced the maximum — the newest message that carried a display name.
   const rows = db
     .prepare(
-      `SELECT cm.email AS email, cm.name AS name, MAX(m.internal_date)
-       FROM contact_messages cm
-       JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
-       WHERE cm.account_id = ? AND cm.name IS NOT NULL AND cm.name != ''
-         AND cm.email IN (${placeholders})
-       GROUP BY cm.email`
+      `SELECT name, email,
+              (3.0 * sent_to_count + received_count) *
+                pow(0.5, max(0, @now - last_interacted_at) / @half_life) AS score
+       FROM contacts
+       WHERE account_id = @account_id
+         AND lower(email) != lower(@self_email)
+         AND (lower(email) LIKE @infix ESCAPE '\\'
+              OR lower(COALESCE(name, '')) LIKE @infix ESCAPE '\\')
+       ORDER BY
+         CASE WHEN lower(email) LIKE @prefix ESCAPE '\\'
+                   OR lower(COALESCE(name, '')) LIKE @prefix ESCAPE '\\'
+              THEN 0 ELSE 1 END,
+         score DESC,
+         last_interacted_at DESC,
+         email
+       LIMIT @limit`
     )
-    .all(accountId, ...emails) as { email: string; name: string }[]
-  return new Map(rows.map((row) => [row.email, row.name]))
+    .all({
+      account_id: accountId,
+      self_email: account?.email ?? accountId,
+      prefix: `${escaped}%`,
+      infix: `%${escaped}%`,
+      now,
+      half_life: CONTACT_RECENCY_HALF_LIFE_MS,
+      limit: CONTACT_SEARCH_LIMIT
+    }) as {
+    name: string | null
+    email: string
+    score: number
+  }[]
+
+  return rows.map((row) => ({
+    name: displayName(row.name, row.email),
+    email: row.email,
+    score: row.score
+  }))
 }
 
 export function getInlineAttachmentData(

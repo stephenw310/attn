@@ -143,7 +143,8 @@ Three M2 features need data the store doesn't have yet: recipient autocomplete n
 - **Contacts are derived, and must be idempotent** (review finding, P2). The obvious design — increment `sent_to_count` while walking `persistThread` — is wrong, because `persistThread` runs again every time a thread is refetched: history polling, body hydration, expiry recovery, and T16's post-send refresh all re-persist the same messages. Counters would inflate with *refetch frequency* rather than interaction frequency, so the threads you touch most would dominate autocomplete regardless of who you actually write to. Nothing about that failure is visible until the rankings are quietly wrong.
   - Instead, record **one contribution row per (message, email, role)** and aggregate. `INSERT OR IGNORE` makes re-persisting a no-op by construction, so correctness doesn't depend on remembering which sync paths can repeat.
   - Roles: `to` (a recipient of a message carrying SENT) and `from` (the sender of a received message). Store the display name seen on that contribution so the aggregate can prefer the most recent one.
-  - Stats are a `GROUP BY` over that table joined to `messages` for the date — no derived counters to drift, and no `rebuildContacts` backfill pass to write, since re-persisting existing threads populates it naturally. Materialize only if the query is measured slow.
+  - `contact_messages` remains the source of truth, while a rebuildable `contacts` projection stores frequency, recency, and the latest display name. `persistThread` recomputes only addresses touched by the authoritative snapshot; pruning or deleting mail does the same after removing its contributions. This keeps refetches idempotent without grouping all message history on every autocomplete keystroke.
+  - The projection was added after measuring the live aggregate at roughly 27–39 ms for a synthetic 50,000-contact store before IPC and display-name resolution. Search now filters, ranks, and caps directly over `contacts`.
 - **Ranking is a pure function** in `src/shared/contacts.ts`: score = `3·sent_to + received` with a recency multiplier (halve per 90 days since the last interaction), prefix matches on address or name beat infix, self is excluded. Exact formula is a starting point — tune during dogfood, keep it pure and tested.
 
 ### Implementation guide
@@ -164,29 +165,42 @@ CREATE TABLE contact_messages (
   PRIMARY KEY (account_id, message_id, email, role)
 );
 CREATE INDEX idx_contact_messages_email ON contact_messages (account_id, email);
+
+-- Rebuildable search projection; contact_messages is authoritative.
+CREATE TABLE contacts (
+  account_id          TEXT NOT NULL,
+  email               TEXT NOT NULL,
+  name                TEXT,
+  sent_to_count       INTEGER NOT NULL DEFAULT 0,
+  received_count      INTEGER NOT NULL DEFAULT 0,
+  last_interacted_at  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, email)
+);
 ```
 
-Search aggregates live, newest display name winning:
+Search works only over the compact projection and applies the exact ranking before `LIMIT 8`:
 
 ```sql
-SELECT cm.email,
-       SUM(cm.role = 'to')   AS sent_to_count,
-       SUM(cm.role = 'from') AS received_count,
-       MAX(m.internal_date)  AS last_interacted_at
-  FROM contact_messages cm
-  JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
- WHERE cm.account_id = ? AND cm.email LIKE ?
- GROUP BY cm.email
+SELECT name, email,
+       (3.0 * sent_to_count + received_count) *
+         pow(0.5, max(0, :now - last_interacted_at) / :half_life) AS score
+  FROM contacts
+ WHERE account_id = :account_id
+   AND (lower(email) LIKE :infix OR lower(COALESCE(name, '')) LIKE :infix)
+ ORDER BY CASE WHEN lower(email) LIKE :prefix OR lower(COALESCE(name, '')) LIKE :prefix
+               THEN 0 ELSE 1 END,
+          score DESC, last_interacted_at DESC, email
+ LIMIT 8
 ```
 
-- IPC (typed map): `contacts:search(query) → { name, email, score }[]` (main runs the SQL narrow, shared ranking orders; cap ~8 rows).
+- IPC (typed map): `contacts:search(query) → { name, email, score }[]` (main matches and ranks in SQL; cap 8 rows).
 - Seed loader: accept optional `messageId`/`references` per fixture message (R3 uses this).
 - `SyncStage` union gains `'sent'`; the footer stage label reads "Sent mail". Keep `sameSyncState`/progress rendering in step.
 
 ### Testing
 
 - Unit: header extraction (angle-bracket forms, folded References), contact ranking (recency decay, prefix beats infix, self-exclusion), cursor routing (fresh, mid-backfill, completed, history-recovery restart).
-- **E2e regression for the idempotency finding:** persist the same seeded thread twice (a refetch is one `relaunch()` plus a poll, or drive `persistThread` through the test seam) and assert the contact aggregate is unchanged. Without this, overcounting reappears the first time someone adds a sync path that re-persists.
+- **E2e regression for the idempotency finding:** persist the same seeded thread twice (a refetch is one `relaunch()` plus a poll, or drive `persistThread` through the test seam) and assert the contact aggregate is unchanged. Then delete the source thread and assert its unique contact disappears while contacts with other contributions survive. Without this, overcounting or stale projection rows reappear when sync paths change.
 - E2e (seeded): seeded fixture exposes headers through `getConversation`; `contacts:search` returns seed senders ranked; boot log shows the sent stage skipped when seeded.
 - Manual smoke (signed in): fresh sign-in runs metadata → bodies → sent → reconcile; contacts populate from real history.
 

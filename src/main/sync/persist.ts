@@ -91,6 +91,7 @@ export function persistThread(
   const incomingMessageIds = messages.map((message) => message.id)
 
   db.transaction(() => {
+    const affectedContactEmails = new Set<string>()
     const labelUnion = new Set<string>()
     let lastMsgAt = 0
     let anyUnread = 0
@@ -137,10 +138,12 @@ export function persistThread(
 
       if (msg.labelIds?.includes('SENT')) {
         for (const recipient of [...recipients.to, ...recipients.cc, ...recipients.bcc]) {
-          insertContactContribution(insertContactMessage, accountId, msg.id, recipient, 'to')
+          const email = insertContactContribution(insertContactMessage, accountId, msg.id, recipient, 'to')
+          if (email) affectedContactEmails.add(email)
         }
       } else {
-        insertContactContribution(insertContactMessage, accountId, msg.id, from, 'from')
+        const email = insertContactContribution(insertContactMessage, accountId, msg.id, from, 'from')
+        if (email) affectedContactEmails.add(email)
       }
 
       for (const label of msg.labelIds ?? []) labelUnion.add(label)
@@ -155,7 +158,10 @@ export function persistThread(
       anyAttachment ||= attach
     }
 
-    pruneMissingMessages(db, accountId, thread.id, incomingMessageIds)
+    for (const email of removeMissingMessages(db, accountId, thread.id, incomingMessageIds)) {
+      affectedContactEmails.add(email)
+    }
+    rebuildContacts(db, accountId, affectedContactEmails)
 
     upsertThread.run({
       account_id: accountId,
@@ -184,8 +190,27 @@ export function pruneMissingMessages(
   threadId: string,
   incomingMessageIds: string[]
 ): void {
-  if (incomingMessageIds.length === 0) return
+  db.transaction(() => {
+    rebuildContacts(db, accountId, removeMissingMessages(db, accountId, threadId, incomingMessageIds))
+  })()
+}
+
+function removeMissingMessages(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  incomingMessageIds: string[]
+): string[] {
+  if (incomingMessageIds.length === 0) return []
   const placeholders = incomingMessageIds.map(() => '?').join(', ')
+  const affected = db
+    .prepare(
+      `SELECT DISTINCT cm.email
+       FROM contact_messages cm
+       JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+       WHERE m.account_id = ? AND m.thread_id = ? AND m.id NOT IN (${placeholders})`
+    )
+    .all(accountId, threadId, ...incomingMessageIds) as { email: string }[]
   db.prepare(
     `DELETE FROM contact_messages
      WHERE account_id = ? AND message_id IN (
@@ -195,11 +220,20 @@ export function pruneMissingMessages(
   db.prepare(
     `DELETE FROM messages WHERE account_id = ? AND thread_id = ? AND id NOT IN (${placeholders})`
   ).run(accountId, threadId, ...incomingMessageIds)
+  return affected.map((row) => row.email)
 }
 
 /** Remove a thread snapshot that Gmail reports as no longer existing. */
 export function deleteThread(db: Db, accountId: string, threadId: string): void {
   db.transaction(() => {
+    const affected = db
+      .prepare(
+        `SELECT DISTINCT cm.email
+         FROM contact_messages cm
+         JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+         WHERE m.account_id = ? AND m.thread_id = ?`
+      )
+      .all(accountId, threadId) as { email: string }[]
     db.prepare('DELETE FROM thread_labels WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare(
       `DELETE FROM contact_messages
@@ -209,6 +243,11 @@ export function deleteThread(db: Db, accountId: string, threadId: string): void 
     ).run(accountId, accountId, threadId)
     db.prepare('DELETE FROM messages WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM threads WHERE account_id = ? AND id = ?').run(accountId, threadId)
+    rebuildContacts(
+      db,
+      accountId,
+      affected.map((row) => row.email)
+    )
   })()
 }
 
@@ -222,8 +261,60 @@ function insertContactContribution(
   messageId: string,
   address: { name: string; email: string },
   role: 'to' | 'from'
-): void {
+): string | null {
   const email = address.email.trim().toLocaleLowerCase()
-  if (!email) return
+  if (!email) return null
   statement.run(accountId, messageId, email, role, address.name.trim() || null)
+  return email
+}
+
+interface ContactAggregate {
+  email: string
+  name: string | null
+  sent_to_count: number
+  received_count: number
+  last_interacted_at: number
+}
+
+/** Rebuild only the search rows touched by an authoritative thread snapshot. */
+function rebuildContacts(db: Db, accountId: string, emails: Iterable<string>): void {
+  const aggregate = db.prepare(
+    `SELECT cm.email,
+            (SELECT named.name
+             FROM contact_messages named
+             JOIN messages named_message
+               ON named_message.account_id = named.account_id
+              AND named_message.id = named.message_id
+             WHERE named.account_id = cm.account_id AND named.email = cm.email
+               AND named.name IS NOT NULL AND trim(named.name) != ''
+             ORDER BY named_message.internal_date DESC, named.message_id DESC, named.role DESC
+             LIMIT 1) AS name,
+            SUM(CASE WHEN cm.role = 'to' THEN 1 ELSE 0 END) AS sent_to_count,
+            SUM(CASE WHEN cm.role = 'from' THEN 1 ELSE 0 END) AS received_count,
+            MAX(m.internal_date) AS last_interacted_at
+     FROM contact_messages cm
+     JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+     WHERE cm.account_id = ? AND cm.email = ?
+     GROUP BY cm.account_id, cm.email`
+  )
+  const upsert = db.prepare(
+    `INSERT INTO contacts
+       (account_id, email, name, sent_to_count, received_count, last_interacted_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(account_id, email) DO UPDATE SET
+       name = excluded.name,
+       sent_to_count = excluded.sent_to_count,
+       received_count = excluded.received_count,
+       last_interacted_at = excluded.last_interacted_at`
+  )
+  const remove = db.prepare('DELETE FROM contacts WHERE account_id = ? AND email = ?')
+
+  for (const email of new Set(emails)) {
+    const row = aggregate.get(accountId, email) as ContactAggregate | undefined
+    if (!row) {
+      remove.run(accountId, email)
+      continue
+    }
+    upsert.run(accountId, row.email, row.name, row.sent_to_count, row.received_count, row.last_interacted_at)
+  }
 }

@@ -41,6 +41,7 @@ import { MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import { SnoozeScheduler } from './scheduler'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { syncFailureState } from './sync/failure'
+import { deleteThread } from './sync/persist'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { sameSyncState } from './sync/state'
@@ -698,8 +699,21 @@ if (!gotLock) {
         if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
       })
       ipcMain.on('attn:test:setSyncState', (_event, state: SyncState) => setSyncState(state))
-      ipcMain.on('attn:test:reloadSeed', () => {
-        if (db && seedPath) loadSeed(db, seedPath)
+      ipcMain.on('attn:test:reloadSeed', (_event, done: (error?: string) => void) => {
+        // Avoid re-entering better-sqlite3 if the renderer is finishing an IPC
+        // read in the same turn, and let the test wait for the replay to commit.
+        setImmediate(() => {
+          try {
+            if (db && seedPath) loadSeed(db, seedPath)
+            done()
+          } catch (error) {
+            done(error instanceof Error ? error.message : String(error))
+          }
+        })
+      })
+      ipcMain.on('attn:test:deleteThread', (_event, threadId: unknown) => {
+        const account = currentAccountId()
+        if (db && account && typeof threadId === 'string') deleteThread(db, account, threadId)
       })
     }
     if (authStatus().signedIn) void resumeOnlineWork()
@@ -723,6 +737,7 @@ if (!gotLock) {
     ipcMain.removeAllListeners('attn:test:focusThread')
     ipcMain.removeAllListeners('attn:test:setSyncState')
     ipcMain.removeAllListeners('attn:test:reloadSeed')
+    ipcMain.removeAllListeners('attn:test:deleteThread')
     db?.close()
     db = null
   })
