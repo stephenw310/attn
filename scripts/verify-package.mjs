@@ -36,7 +36,9 @@ function targetForArchive(archive) {
     ['/mac/', 'darwin', 'x64'],
     ['/win-arm64-unpacked/', 'win32', 'arm64'],
     ['/win-ia32-unpacked/', 'win32', 'ia32'],
-    ['/win-unpacked/', 'win32', 'x64']
+    ['/win-unpacked/', 'win32', 'x64'],
+    ['/linux-arm64-unpacked/', 'linux', 'arm64'],
+    ['/linux-unpacked/', 'linux', 'x64']
   ]
   const target = targets.find(([fragment]) => normalized.includes(fragment))
 

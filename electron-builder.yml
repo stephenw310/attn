@@ -14,6 +14,13 @@ files:
 
 asar: true
 
+# better-sqlite3 ships Node-API prebuilds, which are ABI-stable across Electron
+# versions — the per-arch rebuild only produces a build/ tree the file patterns
+# above then drop. A future non-N-API dependency fails loudly instead of
+# silently: postinstall's in-Electron smoke test catches it, and
+# scripts/verify-package.mjs asserts the one expected prebuild is packaged.
+npmRebuild: false
+
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
 mac:
@@ -37,6 +44,17 @@ win:
     - '!node_modules/better-sqlite3/prebuilds/!(win32-${arch}.node)'
   asarUnpack:
     - node_modules/better-sqlite3/prebuilds/win32-${arch}.node
+
+# Linux is not a shipping target (SPEC: macOS + Windows). It exists so
+# `npm run package:dir` is a real smoke test on a Linux dev box or CI container.
+linux:
+  category: Office
+  target:
+    - dir
+  files:
+    - '!node_modules/better-sqlite3/prebuilds/!(linux-${arch}.node)'
+  asarUnpack:
+    - node_modules/better-sqlite3/prebuilds/linux-${arch}.node
 
 nsis:
   oneClick: false
