@@ -125,7 +125,7 @@ test.describe('@perf 2,000-thread inbox', () => {
       samples.push(await measureConversationOpen(page))
       await expect(page.getByTestId('conversation-content')).toBeVisible()
       await page.keyboard.press('Escape')
-      await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+      await expect(page.getByTestId('conversation-view')).toHaveCount(0)
     }
 
     const medianMs = median(samples)

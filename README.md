@@ -2,9 +2,9 @@
 
 Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
 
-**Current state: M1 feature implementation complete; exit audit in progress.** The Dispatch full-width list ⇄ on-demand conversation split now includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling, sanitized HTML/attachment rendering, background lifecycle, notifications, and unread badges. M2 starts after the remaining manual and engineering closeout checks in the M1 plan.
+**Current state: M1 feature implementation complete; exit audit in progress.** The Dispatch full-width list ⇄ full-window conversation flow now includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling, sanitized HTML/attachment rendering, background lifecycle, notifications, and unread badges. M2 starts after the remaining manual and engineering closeout checks in the M1 plan.
 
-- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.11)
+- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.12)
 - **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist
 - **[AGENTS.md](AGENTS.md)** — working agreement for coding agents (verification contract, test harness, conventions). `.claude/CLAUDE.md` imports it, so Claude Code picks it up automatically; other tools read it directly.
 

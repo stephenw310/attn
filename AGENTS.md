@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ on-demand conversation split). **M1 feature implementation is complete; the exit audit in `docs/M1-PLAN.md` is still open before M2 begins.**
+Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation). **M1 feature implementation is complete; the exit audit in `docs/M1-PLAN.md` is still open before M2 begins.**
 
 This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
 

@@ -53,7 +53,7 @@ test('keeps picker typing isolated and opens it over a conversation', async ({ p
   const first = page.getByTestId('thread-row').first()
   await expect(first).toContainText('Maya Lin')
   await first.click()
-  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('l')
   await expect(page.getByTestId('label-picker')).toBeVisible()
   await expect(page.getByTestId('pending-count')).toContainText('1 pending')
@@ -71,9 +71,9 @@ test('keeps picker typing isolated and opens it over a conversation', async ({ p
 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('label-picker')).toHaveCount(0)
-  await expect(page.getByTestId('conversation-pane')).toBeVisible()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(page.getByTestId('conversation-pane')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
 })
 
 test('shows existing user-label membership without system labels', async ({ page }) => {
@@ -88,7 +88,7 @@ test('shows existing user-label membership without system labels', async ({ page
   await expect(options.filter({ hasText: 'projects' })).toHaveAttribute('data-state', 'off')
 })
 
-test('scrolls the highlighted option into view during keyboard navigation', async ({ page }) => {
+test('wraps picker navigation at both ends and scrolls the highlight into view', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
   await page.keyboard.press('l')
@@ -98,31 +98,24 @@ test('scrolls the highlighted option into view during keyboard navigation', asyn
   await expect(options).toHaveCount(12)
   await expect(options.first()).toHaveAttribute('data-highlighted', 'true')
 
-  for (let index = 0; index < 11; index++) await page.keyboard.press('ArrowDown')
-
+  // Wrapping backwards off the top lands on the last option, which is out of
+  // view until the picker scrolls to it.
+  await page.keyboard.press('ArrowUp')
   await expect(options.last()).toHaveAttribute('data-highlighted', 'true')
   const bottomScroll = await scroller.evaluate((element) => element.scrollTop)
   expect(bottomScroll).toBeGreaterThan(0)
 
-  for (let index = 0; index < 11; index++) await page.keyboard.press('ArrowUp')
-
-  await expect(options.first()).toHaveAttribute('data-highlighted', 'true')
-  expect(await scroller.evaluate((element) => element.scrollTop)).toBeLessThan(bottomScroll)
-  const [scrollerBox, firstBox] = await Promise.all([scroller.boundingBox(), options.first().boundingBox()])
-  expect(firstBox?.y).toBeGreaterThanOrEqual(scrollerBox?.y ?? 0)
-})
-
-test('wraps keyboard navigation across the ends of the label list', async ({ page }) => {
-  await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
-  await page.keyboard.press('l')
-
-  const options = page.getByTestId('label-option')
-  await expect(options.first()).toHaveAttribute('data-highlighted', 'true')
-
-  await page.keyboard.press('ArrowUp')
-  await expect(options.last()).toHaveAttribute('data-highlighted', 'true')
-
   await page.keyboard.press('ArrowDown')
   await expect(options.first()).toHaveAttribute('data-highlighted', 'true')
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBeLessThan(bottomScroll)
+
+  // Walking the full list forwards ends on the same last option and scroll.
+  for (let index = 0; index < 11; index++) await page.keyboard.press('ArrowDown')
+  await expect(options.last()).toHaveAttribute('data-highlighted', 'true')
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(bottomScroll)
+
+  for (let index = 0; index < 11; index++) await page.keyboard.press('ArrowUp')
+  await expect(options.first()).toHaveAttribute('data-highlighted', 'true')
+  const [scrollerBox, firstBox] = await Promise.all([scroller.boundingBox(), options.first().boundingBox()])
+  expect(firstBox?.y).toBeGreaterThanOrEqual(scrollerBox?.y ?? 0)
 })
