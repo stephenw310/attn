@@ -256,8 +256,14 @@ test.describe('seeded inbox smoke coverage', () => {
     // rows, which fits without overflowing. Inflate the rows instead of scrolling
     // by hand, so reaching the end of the list is what produces the scroll — the
     // behaviour under test — rather than a scrollTop the test set itself.
+    //
+    // Wait for the seeded rows first: J/K clamps to the last index, so pressing
+    // ahead of the store's first render silently walks a one-row list and leaves
+    // the cursor — and the scroll — at the top.
+    await expect(page.getByTestId('thread-row')).toHaveCount(seedThreadCount)
     await page.addStyleTag({ content: '[data-testid="thread-row"] { min-height: 120px; }' })
     for (let index = 1; index < seedThreadCount; index++) await page.keyboard.press('j')
+    await expect.poll(() => selectedIndex(page)).toBe(seedThreadCount - 1)
     await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
     const before = await list.evaluate((element) => element.scrollTop)
     const selectedBefore = await selectedIndex(page)

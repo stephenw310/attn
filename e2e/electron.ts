@@ -61,9 +61,26 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     }
     const chunks: string[] = []
     const rendererErrors: string[] = []
+    // The mail fixtures deliberately embed remote assets on reserved `.test`
+    // hosts (RFC 6761: never resolvable) to prove the sanitizer and the
+    // sandboxed frame handle hostile HTML. Chromium logs the resulting fetch
+    // failure, and which failure it is depends on the machine: a bare runner
+    // reports ERR_NAME_NOT_RESOLVED, one behind a proxy reports a tunnel error
+    // or nothing at all. That is the environment answering, not the app
+    // misbehaving, so it must not decide whether a test passes. Scoped by URL —
+    // a failed load from any other host is still a real error.
+    const isFixtureHostUnreachable = (url: string): boolean => {
+      try {
+        return new URL(url).hostname.endsWith('.attn.test')
+      } catch {
+        return false
+      }
+    }
     const watchRenderer = (page: Page): void => {
       page.on('console', (msg) => {
-        if (msg.type() === 'error') rendererErrors.push(msg.text())
+        if (msg.type() !== 'error') return
+        if (isFixtureHostUnreachable(msg.location().url)) return
+        rendererErrors.push(msg.text())
       })
       page.on('pageerror', (err) => rendererErrors.push(String(err)))
     }
