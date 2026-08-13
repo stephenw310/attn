@@ -1,5 +1,4 @@
 import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
-import type { TriageAction } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
@@ -26,10 +25,19 @@ import { takePendingFocus } from './notify'
 import type { SnoozeScheduler } from './scheduler'
 import type { SyncController } from './syncController'
 
+/**
+ * Handler arguments stay `unknown`: the renderer is sandboxed but untrusted, so
+ * the channel map's argument types describe what the preload promises to send,
+ * never what main is allowed to assume. Results stay typed against the map, so
+ * channel renames and result-shape changes are still compile-time failures.
+ * Each handler narrows its own input with a guard below.
+ */
 type Handler<K extends InvokeChannel> = (
   event: IpcMainInvokeEvent,
-  ...args: InvokeChannels[K]['args']
+  ...args: unknown[]
 ) => InvokeChannels[K]['result'] | Promise<InvokeChannels[K]['result']>
+
+type SnoozeRequest = InvokeChannels[typeof IPC_CHANNELS.mailSnooze]['args'][0]
 
 function handle<K extends InvokeChannel>(channel: K, handler: Handler<K>): void {
   ipcMain.handle(channel, handler as Parameters<typeof ipcMain.handle>[1])
@@ -79,6 +87,18 @@ function isInlineImageRequest(value: unknown): value is InlineImageRequest {
     isAttachmentDataRequest(value) &&
     typeof (value as Partial<InlineImageRequest>).mimeType === 'string' &&
     /^(?:image\/(?:png|jpeg|gif|webp))$/i.test((value as InlineImageRequest).mimeType)
+  )
+}
+
+function isSnoozeRequest(value: unknown): value is SnoozeRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<SnoozeRequest>
+  return (
+    Array.isArray(candidate.threadIds) &&
+    candidate.threadIds.length > 0 &&
+    candidate.threadIds.every((id) => typeof id === 'string' && id.length > 0) &&
+    typeof candidate.dueAt === 'number' &&
+    Number.isFinite(candidate.dueAt)
   )
 }
 
@@ -173,22 +193,14 @@ export function registerIpc(context: IpcContext): void {
   handle(IPC_CHANNELS.mailTriage, (_event, action) => {
     if (!isTriageAction(action)) throw new Error('invalid triage action')
     const account = requireAccount(context)
-    const result = performTriage(context.db, account, action as TriageAction)
+    const result = performTriage(context.db, account, action)
     context.scheduler()?.refresh()
     context.broadcastMailChanged()
     void context.executor()?.trigger()
     return result
   })
   handle(IPC_CHANNELS.mailSnooze, (_event, input) => {
-    if (
-      !Array.isArray(input.threadIds) ||
-      input.threadIds.length === 0 ||
-      !input.threadIds.every((id) => typeof id === 'string' && id.length > 0) ||
-      typeof input.dueAt !== 'number' ||
-      !Number.isFinite(input.dueAt)
-    ) {
-      throw new Error('invalid snooze request')
-    }
+    if (!isSnoozeRequest(input)) throw new Error('invalid snooze request')
     const result = snoozeThreads(context.db, requireAccount(context), input.threadIds, input.dueAt)
     context.scheduler()?.refresh()
     context.broadcastMailChanged()
