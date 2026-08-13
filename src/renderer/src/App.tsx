@@ -25,7 +25,6 @@ import {
 import { dateGroup } from './dateGroup'
 import { type LabelCheckState, LabelPicker } from './LabelPicker'
 import { MessageBody } from './MessageBody'
-import { getConversation as getMockConversation, mockThreads } from './mockData'
 import { refreshedSelectionIndex } from './selection'
 
 interface DisplayThread {
@@ -40,7 +39,7 @@ interface DisplayThread {
   returned: boolean
   dueAt?: number
   labelIds: string[]
-  lastMsgAt?: number
+  lastMsgAt: number
 }
 
 interface DisplayMsg {
@@ -163,30 +162,6 @@ function displayFromReal(c: Conversation): DisplayConversation {
       attachments: m.attachments,
       text: m.bodyText,
       html: m.bodyHtml
-    }))
-  }
-}
-
-function displayFromMockId(threadId: string): DisplayConversation {
-  const c = getMockConversation(threadId)
-  return {
-    threadId,
-    subject: c.subject,
-    messages: c.messages.map((m) => ({
-      id: m.id,
-      fromName: m.fromName,
-      fromEmail: m.fromEmail,
-      at: m.at,
-      fullDate: m.at,
-      recipients: {
-        to: [{ name: m.to === 'you' ? 'me' : m.to, email: m.to }],
-        cc: [],
-        bcc: [],
-        replyTo: []
-      },
-      attachments: [],
-      text: m.body.join('\n\n'),
-      html: null
     }))
   }
 }
@@ -575,7 +550,10 @@ function QueueReadout({ unread, pending }: { unread: number | null; pending: num
         <span className="font-medium">counting…</span>
       ) : unread > 0 ? (
         <span className="font-medium text-ink-dim tabular-nums">
-          <b className="font-semibold text-accent">{unread}</b> to zero
+          <b data-testid="queue-unread" className="font-semibold text-accent">
+            {unread}
+          </b>{' '}
+          to zero
         </span>
       ) : (
         <span className="font-medium">at zero</span>
@@ -618,22 +596,19 @@ function SyncProgress({ stage }: { stage: SyncStage }): React.JSX.Element {
 
 function SyncStatus({
   sync,
-  realMode,
   networkOnline,
   onRetry,
   onCopyError
 }: {
   sync: SyncState
-  realMode: boolean
   networkOnline: boolean
   onRetry: () => void
   onCopyError: (message: string) => void
 }): React.JSX.Element {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
-  const displayState = !realMode
-    ? 'disconnected'
-    : sync.phase === 'error'
+  const displayState =
+    sync.phase === 'error'
       ? 'error'
       : sync.phase === 'offline' || !networkOnline
         ? 'offline'
@@ -650,8 +625,8 @@ function SyncStatus({
   }, [])
 
   useEffect(() => {
-    if (!realMode || sync.phase !== 'error') setDetailsOpen(false)
-  }, [realMode, sync.phase])
+    if (sync.phase !== 'error') setDetailsOpen(false)
+  }, [sync.phase])
 
   useEffect(() => {
     if (!detailsOpen) return
@@ -676,27 +651,23 @@ function SyncStatus({
   const label =
     displayState === 'live'
       ? 'Live'
-      : displayState === 'disconnected'
-        ? 'Not connected'
-        : displayState === 'offline'
-          ? 'Offline'
-          : displayState === 'error'
-            ? 'Error'
-            : displayState === 'checking'
-              ? 'Checking mail'
-              : `Syncing · ${syncStageLabel(syncingStage)}`
+      : displayState === 'offline'
+        ? 'Offline'
+        : displayState === 'error'
+          ? 'Error'
+          : displayState === 'checking'
+            ? 'Checking mail'
+            : `Syncing · ${syncStageLabel(syncingStage)}`
   const detail =
     displayState === 'live'
       ? 'Up to date'
-      : displayState === 'disconnected'
-        ? 'Demo inbox'
-        : displayState === 'offline'
-          ? 'Local mail available'
-          : displayState === 'error'
-            ? 'Click for details'
-            : displayState === 'checking'
-              ? 'Looking for new mail'
-              : null
+      : displayState === 'offline'
+        ? 'Local mail available'
+        : displayState === 'error'
+          ? 'Click for details'
+          : displayState === 'checking'
+            ? 'Looking for new mail'
+            : null
   const title =
     displayState === 'error' && sync.phase === 'error'
       ? sync.message
@@ -805,15 +776,147 @@ function blurActive(): void {
   if (el instanceof HTMLElement) el.blur()
 }
 
+function LoginScreen({
+  status,
+  statusError,
+  onRetryStatus,
+  onStatus
+}: {
+  status: AuthStatus | null
+  statusError: string | null
+  onRetryStatus: () => void
+  onStatus: (status: AuthStatus) => void
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const configured = status?.configured === true
+  const bridgeAvailable = Boolean(attn)
+
+  const signIn = useCallback(() => {
+    if (!attn || !configured) return
+    setBusy(true)
+    setError(null)
+    attn.auth
+      .signIn()
+      .then(onStatus)
+      .catch((reason: unknown) => {
+        const message = reason instanceof Error ? reason.message : 'Could not sign in'
+        if (!message.includes('sign-in canceled')) setError(message)
+      })
+      .finally(() => setBusy(false))
+  }, [configured, onStatus])
+
+  const setupMessage = !bridgeAvailable
+    ? 'Open Attn as a desktop app to continue.'
+    : statusError !== null
+      ? `Could not check sign-in status. ${statusError}`
+      : status === null
+        ? 'Checking sign-in availability…'
+        : !configured
+          ? 'This development build needs a Google OAuth client. Follow the setup steps in README.md, then restart Attn.'
+          : null
+
+  return (
+    <div
+      data-testid="login-screen"
+      className="app-drag relative flex h-full flex-col overflow-hidden bg-ground"
+    >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-80"
+        style={{
+          background:
+            'radial-gradient(circle at 50% 38%, rgba(255, 178, 36, 0.11), transparent 29%), radial-gradient(circle at 12% 100%, rgba(72, 82, 112, 0.13), transparent 34%)'
+        }}
+      />
+      <header className="relative flex items-center px-7 py-5">
+        <div className="text-base font-bold tracking-tight">
+          attn<span className="text-accent">:</span>
+        </div>
+      </header>
+
+      <main className="relative flex min-h-0 flex-1 items-center justify-center px-6 pb-14">
+        <section className="app-no-drag w-full max-w-[430px] text-center">
+          <div className="mx-auto mb-7 flex size-14 items-center justify-center rounded-2xl border border-accent/25 bg-accent/[0.08] text-accent shadow-[0_18px_60px_rgba(0,0,0,0.32)]">
+            <svg aria-hidden viewBox="0 0 24 24" className="size-6" fill="none">
+              <title>Mail</title>
+              <path
+                d="M4 7.5 12 13l8-5.5M5.5 18h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 18.5 6h-13A1.5 1.5 0 0 0 4 7.5v9A1.5 1.5 0 0 0 5.5 18Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <p className="mb-3 text-[11px] font-semibold tracking-[0.18em] text-accent uppercase">
+            Your inbox, in focus
+          </p>
+          <h1 className="text-[32px] font-semibold tracking-[-0.035em] text-ink">
+            Make space for what matters.
+          </h1>
+          <p className="mx-auto mt-4 max-w-[390px] text-sm leading-6 text-ink-dim">
+            Sign in with Google to bring your Gmail into a fast, keyboard-first inbox that keeps its local
+            copy on this device.
+          </p>
+
+          {/* Keyboard-first: the screen's only action answers Enter on arrival, so
+              signing in never needs a Tab first. Disabled while unconfigured, which
+              is exactly when there is nothing to activate. */}
+          <button
+            type="button"
+            data-testid="login-google"
+            // biome-ignore lint/a11y/noAutofocus: sole action on a dedicated screen
+            autoFocus
+            disabled={!configured || busy || !bridgeAvailable}
+            onClick={signIn}
+            className="mt-8 flex h-12 w-full cursor-pointer items-center justify-center gap-3 rounded-[9px] border border-white/15 bg-[#f3f4f7] px-5 text-sm font-semibold text-[#202124] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:bg-white disabled:cursor-default disabled:opacity-45"
+          >
+            <span className="flex size-5 items-center justify-center rounded-full border border-[#dadce0] bg-white text-[12px] font-bold text-[#4285f4]">
+              G
+            </span>
+            {busy ? 'Waiting for Google…' : 'Continue with Google'}
+          </button>
+
+          <div className="mt-4 min-h-10 text-xs leading-5 text-ink-faint" aria-live="polite">
+            {error ? (
+              <span data-testid="login-error" className="text-danger">
+                Sign-in failed. {error}
+              </span>
+            ) : (
+              setupMessage && <span data-testid="login-setup-message">{setupMessage}</span>
+            )}
+            {statusError !== null && (
+              <button
+                type="button"
+                data-testid="login-status-retry"
+                onClick={onRetryStatus}
+                className="ml-1.5 cursor-pointer underline underline-offset-2 hover:text-ink-dim"
+              >
+                Try again
+              </button>
+            )}
+          </div>
+
+          <div className="mt-7 flex items-center justify-center gap-3 text-[11px] text-ink-faint">
+            <span>Local-first</span>
+            <span className="text-edge">•</span>
+            <span>Keyboard-first</span>
+            <span className="text-edge">•</span>
+            <span>Private by design</span>
+          </div>
+        </section>
+      </main>
+    </div>
+  )
+}
+
 function AccountMenu({
   status,
   onStatus
 }: {
-  status: AuthStatus | null
+  status: AuthStatus
   onStatus: (s: AuthStatus) => void
 }): React.JSX.Element {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
 
@@ -821,20 +924,6 @@ function AccountMenu({
     setOpen(false)
     blurActive()
   }, [])
-
-  const signIn = useCallback(() => {
-    setBusy(true)
-    setError(null)
-    window.attn?.auth
-      .signIn()
-      .then(onStatus)
-      .catch((e: unknown) => {
-        const msg = e instanceof Error ? e.message : 'sign-in failed'
-        // A canceled flow means the user retried — the new attempt owns the UI.
-        if (!msg.includes('sign-in canceled')) setError(msg)
-      })
-      .finally(() => setBusy(false))
-  }, [onStatus])
 
   const signOut = useCallback(() => {
     closeMenu()
@@ -862,32 +951,6 @@ function AccountMenu({
       document.removeEventListener('keydown', onKey, true)
     }
   }, [closeMenu, open])
-
-  if (!window.attn) return <div className={CHIP_CLASS}>mock data · browser preview</div>
-  if (!status) return <div className={CHIP_CLASS}>…</div>
-  if (!status.signedIn) {
-    if (!status.configured) {
-      return (
-        <div
-          className={CHIP_CLASS}
-          title="Create your Google OAuth client, then add oauth.config.json — see the README"
-        >
-          OAuth not configured · see README
-        </div>
-      )
-    }
-    if (busy) return <div className={CHIP_CLASS}>waiting for Google…</div>
-    return (
-      <button
-        type="button"
-        className={`${CHIP_CLASS} cursor-pointer bg-active text-ink hover:border-accent`}
-        onClick={signIn}
-        title={error ?? undefined}
-      >
-        {error ? 'sign-in failed — retry' : 'Sign in with Google'}
-      </button>
-    )
-  }
 
   return (
     <div ref={wrapRef} className="app-no-drag relative">
@@ -1098,8 +1161,50 @@ function SnoozePicker({
 // safe to read once at module scope (undefined in the plain-browser preview).
 const attn = window.attn
 
+// Auth is the only state above the inbox: `Inbox` mounts once a signed-in status
+// exists and unmounts on sign-out, so the whole mail hook tree — IPC
+// subscriptions, the command registry, the global key handler — is inert while
+// the login screen is up. Keeping the split here also means everything below can
+// assume a live bridge and a signed-in account.
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<AuthStatus | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
+
+  // A rejected probe used to leave the screen on "checking…" forever. Surface it
+  // instead, so the login screen can offer a retry rather than hanging.
+  const loadStatus = useCallback(() => {
+    if (!attn) return
+    setStatusError(null)
+    attn.auth
+      .getStatus()
+      .then(setStatus)
+      .catch((reason: unknown) =>
+        setStatusError(reason instanceof Error ? reason.message : 'Could not read sign-in status')
+      )
+  }, [])
+
+  useEffect(loadStatus, [loadStatus])
+
+  if (!attn || !status?.signedIn) {
+    return (
+      <LoginScreen
+        status={status}
+        statusError={statusError}
+        onRetryStatus={loadStatus}
+        onStatus={setStatus}
+      />
+    )
+  }
+  return <Inbox status={status} onStatus={setStatus} />
+}
+
+function Inbox({
+  status,
+  onStatus
+}: {
+  status: AuthStatus
+  onStatus: (status: AuthStatus) => void
+}): React.JSX.Element {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine)
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
@@ -1115,7 +1220,6 @@ export default function App(): React.JSX.Element {
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
-  const [mockReadIds, setMockReadIds] = useState<ReadonlySet<string>>(new Set())
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null)
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
@@ -1131,16 +1235,8 @@ export default function App(): React.JSX.Element {
   const deferRefreshUntilRef = useRef(0)
   const earliestExitIndexRef = useRef<number | null>(null)
 
-  const activeAccount = status?.signedIn ? (status.email ?? null) : null
-  const realMode = Boolean(attn && status?.signedIn)
+  const activeAccount = status.email ?? null
   const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
-
-  useEffect(() => {
-    attn?.auth
-      .getStatus()
-      .then(setStatus)
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     if (!attn) return
@@ -1179,7 +1275,6 @@ export default function App(): React.JSX.Element {
     setSnoozeOpen(false)
     setLabelTargetId(null)
     setPendingCount(0)
-    setMockReadIds(new Set())
     setConversation(null)
     setExitingThreadIds(new Set())
     selectedThreadIdRef.current = null
@@ -1233,26 +1328,13 @@ export default function App(): React.JSX.Element {
     }
   }, [activeAccount])
 
-  const threads: DisplayThread[] = useMemo(() => {
-    if (realMode) {
-      return view === 'inbox'
+  const threads: DisplayThread[] = useMemo(
+    () =>
+      view === 'inbox'
         ? (realThreads ?? []).map(fromThreadRow)
-        : (realSnoozedThreads ?? []).map(fromSnoozedThreadRow)
-    }
-    if (view === 'snoozed') return []
-    return mockThreads.map((t) => ({
-      id: t.id,
-      from: t.from,
-      subject: t.subject,
-      snippet: t.snippet,
-      at: t.at,
-      unread: t.unread,
-      starred: t.starred ?? false,
-      hasAttachment: t.hasAttachment ?? false,
-      returned: false,
-      labelIds: []
-    }))
-  }, [realMode, realSnoozedThreads, realThreads, view])
+        : (realSnoozedThreads ?? []).map(fromSnoozedThreadRow),
+    [realSnoozedThreads, realThreads, view]
+  )
 
   useEffect(() => {
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
@@ -1310,10 +1392,6 @@ export default function App(): React.JSX.Element {
       setConversation(null)
       return
     }
-    if (!realMode) {
-      setConversation(displayFromMockId(selected.id))
-      return
-    }
     const cached = convCache.current.get(selected.id)
     if (cached) {
       setConversation(cached)
@@ -1334,11 +1412,11 @@ export default function App(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [selected, realMode])
+  }, [selected])
 
   // Preload neighbors so opening and reader J/K navigation normally have no loading state (F3).
   useEffect(() => {
-    if (!realMode || !attn) return
+    if (!attn) return
     for (const idx of [selectedIndex - 1, selectedIndex + 1]) {
       const t = threads[idx]
       if (!t || convCache.current.has(t.id)) continue
@@ -1349,7 +1427,7 @@ export default function App(): React.JSX.Element {
         })
         .catch(() => {})
     }
-  }, [selectedIndex, threads, realMode])
+  }, [selectedIndex, threads])
 
   const showToast = useCallback((message: string) => {
     const token = ++toastTokenRef.current
@@ -1378,12 +1456,12 @@ export default function App(): React.JSX.Element {
   )
 
   useLayoutEffect(() => {
-    if (!realMode || sync.phase !== 'error') return
+    if (sync.phase !== 'error') return
     return registerCommands([
       createCommand('sync.retry', retrySync),
       createCommand('sync.error.copy', () => copySyncError(sync.message))
     ])
-  }, [copySyncError, realMode, retrySync, sync])
+  }, [copySyncError, retrySync, sync])
 
   const switchView = useCallback((next: 'inbox' | 'snoozed') => {
     activeViewRef.current = next
@@ -1461,7 +1539,7 @@ export default function App(): React.JSX.Element {
 
   const triage = useCallback(
     (action: TriageAction) => {
-      if (!realMode || !attn) return
+      if (!attn) return
       preserveSelectionOnRefreshRef.current = false
       const isBulk = selectedIds.size > 0
       const targetedAction = {
@@ -1493,7 +1571,7 @@ export default function App(): React.JSX.Element {
           })
         })
     },
-    [clearSelection, readerOpen, realMode, selectedIds, selectedIndex, showToast, threads.length, view]
+    [clearSelection, readerOpen, selectedIds, selectedIndex, showToast, threads.length, view]
   )
 
   const toggleLabel = useCallback(
@@ -1519,7 +1597,7 @@ export default function App(): React.JSX.Element {
 
   const snoozeSelected = useCallback(
     (dueAt: number) => {
-      if (!realMode || !attn || !selected) return
+      if (!attn || !selected) return
       const isBulk = selectedIds.size > 0
       const threadIds = isBulk ? [...selectedIds] : [selected.id]
       setSnoozeOpen(false)
@@ -1529,7 +1607,7 @@ export default function App(): React.JSX.Element {
         .then((result) => showToast(result.label))
         .catch(() => {})
     },
-    [clearSelection, realMode, selected, selectedIds, showToast]
+    [clearSelection, selected, selectedIds, showToast]
   )
 
   const unsnoozeSelected = useCallback(() => {
@@ -1545,12 +1623,8 @@ export default function App(): React.JSX.Element {
     }
     if (!selected || autoReadThreadRef.current === selected.id) return
     autoReadThreadRef.current = selected.id
-    if (realMode) {
-      void attn?.mail.markReadOnOpen(selected.id).catch(() => {})
-    } else if (selected.unread) {
-      setMockReadIds((current) => (current.has(selected.id) ? current : new Set(current).add(selected.id)))
-    }
-  }, [readerOpen, realMode, selected])
+    void attn?.mail.markReadOnOpen(selected.id).catch(() => {})
+  }, [readerOpen, selected])
 
   // Reset the reused reading container before paint, then refocus after reader J/K navigation.
   // biome-ignore lint/correctness/useExhaustiveDependencies: selected id deliberately resets scroll and focus
@@ -1602,10 +1676,10 @@ export default function App(): React.JSX.Element {
           { title: markUnreadOn ? 'Mark unread' : 'Mark read' }
         ),
         createCommand('triage.label', () => {
-          if (selected && realMode) setLabelTargetId(selected.id)
+          if (selected) setLabelTargetId(selected.id)
         }),
         createCommand('triage.undo', () => {
-          if (!realMode || !attn) return
+          if (!attn) return
           preserveSelectionOnRefreshRef.current = false
           void attn.mail
             .undo()
@@ -1624,7 +1698,6 @@ export default function App(): React.JSX.Element {
       extendSelectionTo,
       openSelected,
       readerOpen,
-      realMode,
       markUnreadOn,
       selected,
       selectedIds.size,
@@ -1699,14 +1772,7 @@ export default function App(): React.JSX.Element {
     selectedRowRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [selectedIndex, readerOpen])
 
-  const visibleUnreadTotal = threads.filter((t) => t.unread).length
-  const mockReadTotal = threads.filter((t) => t.unread && mockReadIds.has(t.id)).length
-  const unreadCount =
-    realMode && realUnreadTotal === null
-      ? null
-      : realMode
-        ? (realUnreadTotal ?? 0)
-        : visibleUnreadTotal - mockReadTotal
+  const unreadCount = realUnreadTotal
 
   const footerShortcuts: ShortcutHint[] = [
     ...(readerOpen
@@ -1774,7 +1840,7 @@ export default function App(): React.JSX.Element {
           )}
           <QueueReadout unread={unreadCount} pending={pendingCount} />
           <div data-testid="account-menu">
-            <AccountMenu status={status} onStatus={setStatus} />
+            <AccountMenu status={status} onStatus={onStatus} />
           </div>
         </div>
       </header>
@@ -1799,7 +1865,7 @@ export default function App(): React.JSX.Element {
           {threads.map((t, i) => {
             const isSelected = i === selectedIndex
             const isChecked = selectedIds.has(t.id)
-            const isUnread = t.unread && !mockReadIds.has(t.id)
+            const isUnread = t.unread
             const group = dateGroup(t)
             const showGroup = view === 'inbox' && (i === 0 || dateGroup(threads[i - 1]) !== group)
             const isExiting = exitingThreadIds.has(t.id)
@@ -1978,7 +2044,6 @@ export default function App(): React.JSX.Element {
         </div>
         <SyncStatus
           sync={sync}
-          realMode={realMode}
           networkOnline={networkOnline}
           onRetry={retrySync}
           onCopyError={copySyncError}

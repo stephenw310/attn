@@ -31,7 +31,7 @@ test.describe('login launch', () => {
   test('a --hidden launch is windowless until asked to show (F16)', async ({ app, page }) => {
     // Wait for the renderer to fully render first — before that, an invisible
     // window proves nothing about the startHidden path.
-    await expect(page.getByTestId('thread-row').first()).toBeVisible()
+    await expect(page.getByTestId('login-screen')).toBeVisible()
     expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
     expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible())).toBe(
       false

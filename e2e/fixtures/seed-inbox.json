@@ -23,7 +23,8 @@
         {
           "id": "m-roadmap-1",
           "labelIds": ["INBOX", "UNREAD", "IMPORTANT"],
-          "internalDate": "1754800000000",
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:41",
           "from": "Maya Lin <maya@example.com>",
           "to": "seed@attn.test, Priya Raman <priya@example.com>",
           "cc": "Daniel Okafor <daniel@example.com>",
@@ -35,7 +36,8 @@
         {
           "id": "m-roadmap-2",
           "labelIds": ["INBOX", "UNREAD", "IMPORTANT"],
-          "internalDate": "1754803600000",
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:12",
           "from": "Maya Lin <maya@example.com>",
           "to": "seed@attn.test",
           "subject": "Q3 roadmap review",
@@ -51,7 +53,8 @@
         {
           "id": "m-receipt",
           "labelIds": ["INBOX", "Label_1"],
-          "internalDate": "1754700000000",
+          "receivedDaysAgo": 0,
+          "receivedAt": "08:55",
           "from": "Northstar Books <orders@northstar.test>",
           "to": "seed@attn.test",
           "subject": "Your receipt",
@@ -76,7 +79,8 @@
         {
           "id": "m-design",
           "labelIds": ["INBOX", "UNREAD", "STARRED", "Label_2"],
-          "internalDate": "1754600000000",
+          "receivedDaysAgo": 1,
+          "receivedAt": "16:20",
           "from": "Theo Park <theo@example.com>",
           "to": "seed@attn.test",
           "subject": "Design notes",
@@ -92,7 +96,8 @@
         {
           "id": "m-lunch",
           "labelIds": ["INBOX"],
-          "internalDate": "1754500000000",
+          "receivedDaysAgo": 1,
+          "receivedAt": "09:05",
           "from": "Amara Singh <amara@example.com>",
           "to": "seed@attn.test",
           "subject": "Lunch next week",
@@ -109,7 +114,8 @@
         {
           "id": "m-budget",
           "labelIds": ["INBOX", "UNREAD"],
-          "internalDate": "1754400000000",
+          "receivedDaysAgo": 3,
+          "receivedAt": "14:30",
           "from": "Finance Team <finance@example.com>",
           "to": "seed@attn.test",
           "subject": "August budget",
@@ -125,7 +131,8 @@
         {
           "id": "m-travel",
           "labelIds": ["INBOX"],
-          "internalDate": "1754300000000",
+          "receivedDaysAgo": 5,
+          "receivedAt": "11:15",
           "from": "Travel Desk <travel@example.com>",
           "to": "seed@attn.test",
           "subject": "Flight options",
@@ -142,7 +149,8 @@
         {
           "id": "m-research",
           "labelIds": ["INBOX", "UNREAD"],
-          "internalDate": "1754200000000",
+          "receivedDaysAgo": 6,
+          "receivedAt": "08:40",
           "from": "Ravi Shah <ravi@example.com>",
           "to": "seed@attn.test",
           "subject": "Research summary",
@@ -158,7 +166,8 @@
         {
           "id": "m-weekly",
           "labelIds": ["INBOX"],
-          "internalDate": "1754100000000",
+          "receivedDaysAgo": 40,
+          "receivedAt": "07:30",
           "from": "Attn Weekly <weekly@attn.test>",
           "to": "seed@attn.test",
           "subject": "This week in focus",

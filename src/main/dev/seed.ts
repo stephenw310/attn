@@ -6,7 +6,17 @@ import { ensureAccount, persistThread, upsertLabels } from '../sync/persist'
 interface SeedMessage {
   id: string
   labelIds?: string[]
-  internalDate: string
+  /** Absolute epoch ms. Mutually exclusive with `receivedDaysAgo`. */
+  internalDate?: string
+  /**
+   * Day-anchored age: 0 is today, 1 yesterday, and so on. Resolved against local
+   * midnight rather than the clock, so a fixture lands in the same date group no
+   * matter what time of day the suite runs. Prefer this over `internalDate` —
+   * absolute stamps age into "Older" and make screenshots read as stale mail.
+   */
+  receivedDaysAgo?: number
+  /** Local wall-clock time within that day, `HH:MM`. Defaults to 09:00. */
+  receivedAt?: string
   from: string
   to: string
   cc?: string
@@ -73,9 +83,32 @@ function payloadFor(message: SeedMessage): GmailPart {
   }
 }
 
+export function resolveInternalDate(message: SeedMessage, now = Date.now()): string {
+  if (message.receivedDaysAgo === undefined) {
+    if (message.internalDate === undefined) {
+      throw new Error(`Seed message ${message.id} needs internalDate or receivedDaysAgo`)
+    }
+    return message.internalDate
+  }
+  const [hours, minutes] = (message.receivedAt ?? '09:00').split(':').map(Number)
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    throw new Error(`Seed message ${message.id} has an unparseable receivedAt`)
+  }
+  const today = new Date(now)
+  const at = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate() - message.receivedDaysAgo,
+    hours,
+    minutes
+  )
+  return String(at.getTime())
+}
+
 export function loadSeed(db: Db, path: string): string {
   const fixture = JSON.parse(readFileSync(path, 'utf8')) as SeedFixture
   if (!fixture.account || !Array.isArray(fixture.threads)) throw new Error('Invalid ATTN_TEST_SEED fixture')
+  const importedAt = Date.now()
 
   db.transaction(() => {
     // Same write path as real sync (persist.ts) — the seam must never grow
@@ -90,7 +123,7 @@ export function loadSeed(db: Db, path: string): string {
           id: message.id,
           threadId: thread.id,
           labelIds: message.labelIds,
-          internalDate: message.internalDate,
+          internalDate: resolveInternalDate(message, importedAt),
           snippet: message.snippet,
           payload: payloadFor(message)
         }))
