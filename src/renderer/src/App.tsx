@@ -13,6 +13,7 @@ import type {
 } from '../../shared/mail'
 import { formatSnoozeDate, parseSnoozeText, snoozePresets } from '../../shared/snooze'
 import {
+  chordKey,
   createCommand,
   findCommandByShortcut,
   isChordPrefix,
@@ -1383,8 +1384,7 @@ export default function App(): React.JSX.Element {
 
   useLayoutEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey
-      const key = e.key.toLowerCase()
+      const key = chordKey(e)
       const pendingChord = pendingChordRef.current
       pendingChordRef.current = null
       if (labelTarget) return
@@ -1412,14 +1412,14 @@ export default function App(): React.JSX.Element {
           return
         }
       }
-      if (plainKey && pendingChord && Date.now() <= pendingChord.until) {
+      if (key !== null && pendingChord && Date.now() <= pendingChord.until) {
         const command = findCommandByShortcut(`${pendingChord.key} ${key}`, context)
         if (!command) return
         e.preventDefault()
         command.run()
         return
       }
-      if (plainKey && isChordPrefix(key, context)) {
+      if (key !== null && isChordPrefix(key, context)) {
         e.preventDefault()
         pendingChordRef.current = { key, until: Date.now() + 500 }
         return

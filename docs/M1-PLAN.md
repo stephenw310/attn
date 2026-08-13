@@ -651,7 +651,7 @@ M1 is done when every SPEC §8 M1 bullet maps to a shipped task above, and:
 
 - [x] T9 notifications + unread badge shipped (#20)
 - [x] T12A full-window reader and simplified command-registry audit complete
-- [x] Current `npm run verify` green, including 73 unit tests and 51 Electron e2e tests (2026-08-12 T12A audit)
+- [x] Current `npm run verify` green, including 76 unit tests and 51 Electron e2e tests (2026-08-12 T12A audit)
 - [x] F4 core paths demonstrated in e2e: bulk archive + single `z` undo; snooze return while running *and* via relaunch catch-up
 - [ ] F2 airplane-mode criterion executed as T7's manual smoke (documented in PR)
 - [x] F16 automated lifecycle criteria: close-window keeps the process alive; explicit quit leaves nothing behind

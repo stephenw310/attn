@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import {
   COMMAND_SPECS,
+  chordKey,
   createCommand,
   findCommandByShortcut,
   isChordPrefix,
@@ -164,6 +165,15 @@ describe('keyboard dispatch', () => {
     expect(findCommandByShortcut('m t', 'list')?.id).toBe('view.snoozed')
     // A chord prefix is not itself a single-key shortcut.
     expect(matchKey(key('m'), 'list')).toBeNull()
+  })
+
+  test('requires unmodified keys for chord prefixes and completions', () => {
+    expect(chordKey(key('g'))).toBe('g')
+    expect(chordKey(key('G', { shiftKey: true }))).toBeNull()
+    expect(chordKey(key('I', { shiftKey: true }))).toBeNull()
+    expect(chordKey(key('h', { ctrlKey: true }))).toBeNull()
+    expect(chordKey(key('h', { metaKey: true }))).toBeNull()
+    expect(chordKey(key('h', { altKey: true }))).toBeNull()
   })
 
   test('keeps scrolling as an explicit non-command reader primitive', () => {

@@ -116,6 +116,11 @@ export function isChordPrefix(key: string, context: 'list' | 'reader'): boolean 
   )
 }
 
+export function chordKey(event: KeyboardEvent): string | null {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null
+  return event.key.toLowerCase()
+}
+
 export function findCommandByShortcut(shortcut: string, context: 'list' | 'reader'): Command | null {
   const normalized = shortcut.toLowerCase()
   return (
