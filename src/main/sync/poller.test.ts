@@ -148,8 +148,11 @@ describe('history poller lifecycle', () => {
   it('reports healthy empty cycles without broadcasting a mail change', async () => {
     const options = pollerOptions()
     const poller = new HistoryPoller(options)
+    const onStarted = vi.fn()
     poller.start()
-    await poller.runNow()
+    expect(poller.requestRunNow(onStarted)).toBe('started')
+    expect(onStarted).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(options.onCycleComplete).toHaveBeenCalledOnce())
     expect(options.onCycleComplete).toHaveBeenCalledWith(false)
     poller.stop()
   })
@@ -186,6 +189,29 @@ describe('history poller lifecycle', () => {
     finish?.(plan(['changed']))
     await running
     expect(options.onCycleComplete).not.toHaveBeenCalled()
+  })
+
+  it('queues a requested retry and reports start only when the follow-up cycle begins', async () => {
+    const finishes: Array<(value: FetchedHistoryPlan) => void> = []
+    const options = pollerOptions({
+      runCycle: vi.fn(() => new Promise<FetchedHistoryPlan>((resolve) => finishes.push(resolve)))
+    })
+    const poller = new HistoryPoller(options)
+    const onRetryStarted = vi.fn()
+    poller.start()
+
+    const firstCycle = poller.runNow()
+    expect(poller.requestRunNow(onRetryStarted)).toBe('queued')
+    expect(onRetryStarted).not.toHaveBeenCalled()
+
+    finishes[0]?.(plan())
+    await firstCycle
+    await vi.waitFor(() => expect(options.runCycle).toHaveBeenCalledTimes(2))
+    expect(onRetryStarted).toHaveBeenCalledOnce()
+
+    finishes[1]?.(plan())
+    await vi.waitFor(() => expect(options.onCycleComplete).toHaveBeenCalledTimes(2))
+    poller.stop()
   })
 
   it('uses 15-second foreground and 60-second background cadence', async () => {

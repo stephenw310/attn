@@ -148,11 +148,13 @@ export interface HistoryPollerOptions {
   isForeground: () => boolean
   recoverExpiredHistory: () => Promise<void>
   onCycleComplete: (changed: boolean) => void
-  onError: (message: string) => void
+  onError: (error: unknown) => void
   wakeThread?: (threadId: string) => void
   kickExecutor?: () => void
   runCycle?: typeof runHistoryCycle
 }
+
+export type RunNowRequest = 'started' | 'queued' | 'stopped'
 
 export class HistoryPoller {
   private timer: ReturnType<typeof setTimeout> | null = null
@@ -160,6 +162,7 @@ export class HistoryPoller {
   private stopped = true
   private lastAttemptAt = 0
   private recoveryPending = false
+  private queuedRunStart: (() => void) | null = null
 
   constructor(private readonly options: HistoryPollerOptions) {}
 
@@ -173,8 +176,20 @@ export class HistoryPoller {
 
   stop(): void {
     this.stopped = true
+    this.queuedRunStart = null
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+  }
+
+  requestRunNow(onStarted: () => void): RunNowRequest {
+    if (this.stopped) return 'stopped'
+    if (this.executing) {
+      this.queuedRunStart = onStarted
+      return 'queued'
+    }
+    onStarted()
+    void this.runNow()
+    return 'started'
   }
 
   async runNow(): Promise<void> {
@@ -209,10 +224,17 @@ export class HistoryPoller {
       this.options.kickExecutor?.()
       if (plan && plan.newMail.length > 0) historyEvents.emit('newMail', plan.newMail)
     } catch (error) {
-      if (!this.stopped) this.options.onError(error instanceof Error ? error.message : String(error))
+      if (!this.stopped) this.options.onError(error)
     } finally {
       this.executing = false
-      if (!this.stopped) this.schedule()
+      const queuedRunStart = this.queuedRunStart
+      this.queuedRunStart = null
+      if (!this.stopped && queuedRunStart) {
+        queuedRunStart()
+        void this.runNow()
+      } else if (!this.stopped) {
+        this.schedule()
+      }
     }
   }
 

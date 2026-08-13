@@ -24,6 +24,8 @@ export const COMMAND_SPECS = {
   'conversation.open': { title: 'Open conversation', shortcut: 'Enter', context: 'list' },
   'conversation.close': { title: 'Back to conversation list', shortcut: 'Escape', context: 'reader' },
   'message.trim.toggle': { title: 'Show or hide trimmed message content', context: 'reader' },
+  'sync.retry': { title: 'Retry mail sync', context: 'global' },
+  'sync.error.copy': { title: 'Copy sync error details', context: 'global' },
   'view.inbox': { title: 'Go to Inbox', shortcut: 'g i', context: 'global' },
   'view.snoozed': { title: 'Go to Snoozed', shortcut: 'g h', context: 'global' },
   'triage.archive': { title: 'Mark done', shortcut: 'e', context: 'mail' },

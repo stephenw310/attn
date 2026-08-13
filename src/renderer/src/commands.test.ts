@@ -50,6 +50,8 @@ describe('command catalog', () => {
       'conversation.open',
       'conversation.close',
       'message.trim.toggle',
+      'sync.retry',
+      'sync.error.copy',
       'view.inbox',
       'view.snoozed',
       'triage.archive',

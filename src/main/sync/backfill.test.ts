@@ -58,6 +58,11 @@ describe('windowed backfill checkpoints', () => {
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, 'newer_than:90d', undefined)
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(3, '', undefined)
     expect(result).toEqual({ threadCount: 0, inboxThreadIds: [] })
+    expect(callbacks.onProgress.mock.calls.map(([progress]) => progress)).toEqual([
+      { stage: 'metadata', threadsDone: 0, mailChanged: false },
+      { stage: 'bodies', threadsDone: 0, mailChanged: false },
+      { stage: 'reconcile', threadsDone: 0, mailChanged: false }
+    ])
     expect(callbacks.onError).not.toHaveBeenCalled()
   })
 
@@ -72,6 +77,13 @@ describe('windowed backfill checkpoints', () => {
 
     expect(provider.getThread).toHaveBeenNthCalledWith(1, 'old', { format: 'metadata' })
     expect(provider.getThread).toHaveBeenNthCalledWith(2, 'recent', { format: 'full' })
+    expect(callbacks.onProgress.mock.calls.map(([progress]) => progress.mailChanged)).toEqual([
+      false,
+      true,
+      false,
+      true,
+      false
+    ])
   })
 
   it('resumes directly at reconciliation without replaying fetch phases', async () => {
@@ -119,6 +131,6 @@ describe('windowed backfill checkpoints', () => {
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, 'newer_than:12m', undefined)
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, 'newer_than:90d', undefined)
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(3, '', undefined)
-    expect(callbacks.onError).toHaveBeenCalledWith('offline')
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'offline' }))
   })
 })
