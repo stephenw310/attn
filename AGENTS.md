@@ -28,11 +28,11 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run package:win` | Build and verify the Windows installer for the current architecture |
 | `npm run package:verify` | Assert packaged runtime assets and native module architecture |
 
-**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png`. After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
+**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/login.png`, `inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png`. After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
 
 ## How the e2e harness works
 
-- Tests run **signed out**, on the deterministic mock inbox (`src/renderer/src/mockData.ts`). OAuth and Gmail are never involved; the suite must stay runnable with zero credentials.
+- Signed-out tests exercise the onboarding screen. Mail-feature suites use a deterministic seeded real SQLite store, so OAuth and Gmail are never involved and the suite stays runnable with zero credentials.
 - Electron windows stay hidden by default so local e2e runs do not flash or steal focus. Pass `--visible` through either e2e script (for example, `npm run e2e -- --visible`) when debugging with an OS-visible window; specs that explicitly launch with `--hidden` remain hidden.
 - Specs can opt into a seeded real SQLite store with `test.use({ seed: 'fixtures/seed-inbox.json' })`; the underlying `ATTN_TEST_SEED` seam is honored only alongside `ATTN_TEST_USER_DATA`.
 - The `boot.relaunch()` helper restarts Electron against the same userData directory and returns the new app and page, so durability tests exercise persisted state without reseeding.

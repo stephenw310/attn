@@ -11,7 +11,7 @@ import {
 
 // Each test boots the built app (out/main/index.js) with a throwaway userData
 // dir: fresh SQLite store, no tokens, no oauth.config.json — so runs are
-// hermetic and deterministic (signed-out mock-data mode) on any machine.
+// hermetic and deterministic (signed-out onboarding or a seeded store) on any machine.
 
 const ROOT = join(__dirname, '..')
 
