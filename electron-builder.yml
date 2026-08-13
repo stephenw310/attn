@@ -1,0 +1,34 @@
+appId: com.stephenw310.attn
+productName: Attn
+
+directories:
+  buildResources: resources
+  output: dist
+
+files:
+  - out/**/*
+  - package.json
+
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+mac:
+  category: public.app-category.productivity
+  identity: '-'
+  hardenedRuntime: false
+  icon: icon.icns
+  target:
+    - dmg
+    - zip
+
+win:
+  icon: icon.ico
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

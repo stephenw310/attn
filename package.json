@@ -3,6 +3,12 @@
   "productName": "Attn",
   "version": "0.0.1",
   "description": "Attn — keyboard-first, local-first desktop email client for macOS and Windows",
+  "author": "Attn contributors",
+  "homepage": "https://github.com/stephenw310/attn",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stephenw310/attn.git"
+  },
   "private": true,
   "engines": {
     "node": ">=22.12.0"
@@ -19,6 +25,10 @@
     "e2e:perf": "npm run build && node scripts/generate-perf-seed.mjs && node scripts/run-e2e.mjs --perf --grep @perf",
     "e2e:perf:only": "node scripts/generate-perf-seed.mjs && node scripts/run-e2e.mjs --perf --grep @perf",
     "verify": "npm run typecheck && npx biome ci . && npm run test:unit && npm run e2e",
+    "package:dir": "npm run build && electron-builder --dir",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:mac:all": "npm run build && electron-builder --mac --arm64 --x64",
+    "package:win": "npm run build && electron-builder --win",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "postinstall": "node scripts/ensure-electron-toolchain.mjs",
@@ -36,6 +46,7 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "lefthook": "^2.1.10",
     "tailwindcss": "^4.3.3",
