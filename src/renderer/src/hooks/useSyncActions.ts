@@ -2,7 +2,12 @@ import { useCallback, useLayoutEffect } from 'react'
 import type { SyncState } from '../../../shared/mail'
 import { createCommand, registerCommands } from '../commands'
 
-export function useSyncActions(sync: SyncState, showToast: (message: string) => void) {
+interface SyncActions {
+  retrySync: () => void
+  copySyncError: (message: string) => void
+}
+
+export function useSyncActions(sync: SyncState, showToast: (message: string) => void): SyncActions {
   const retry = useCallback(() => {
     void window.attn?.sync.retry().catch(() => {})
   }, [])

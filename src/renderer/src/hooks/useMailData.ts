@@ -2,12 +2,26 @@ import { useEffect, useRef, useState } from 'react'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
 import { refreshedSelectionIndex } from '../selection'
 
+interface MailDataState {
+  sync: SyncState
+  networkOnline: boolean
+  realThreads: ThreadRow[] | null
+  setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
+  realSnoozedThreads: SnoozedThreadRow[] | null
+  realUnreadTotal: number | null
+  labels: MailLabel[]
+  pendingCount: number
+  mailRevision: number
+  preserveSelectionOnRefreshRef: React.RefObject<boolean>
+  deferRefreshUntilRef: React.RefObject<number>
+}
+
 export function useMailData(
   activeAccount: string | null,
   activeViewRef: React.RefObject<'inbox' | 'snoozed'>,
   selectedThreadIdRef: React.RefObject<string | null>,
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
-) {
+): MailDataState {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine)
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
@@ -15,6 +29,7 @@ export function useMailData(
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [pendingCount, setPendingCount] = useState(0)
+  const [mailRevision, setMailRevision] = useState(0)
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
 
@@ -47,6 +62,7 @@ export function useMailData(
     setRealUnreadTotal(null)
     setLabels([])
     setPendingCount(0)
+    setMailRevision(0)
     preserveSelectionOnRefreshRef.current = true
     const bridge = window.attn
     if (!bridge || !activeAccount) return
@@ -83,7 +99,10 @@ export function useMailData(
         .catch(() => {})
     }
     refresh()
-    const offMail = bridge.mail.onChanged(refresh)
+    const offMail = bridge.mail.onChanged(() => {
+      setMailRevision((revision) => revision + 1)
+      refresh()
+    })
     return () => {
       cancelled = true
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
@@ -100,6 +119,7 @@ export function useMailData(
     realUnreadTotal,
     labels,
     pendingCount,
+    mailRevision,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
   }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AuthStatus } from '../../shared/auth'
-import { Inbox, LoginScreen } from './components/Inbox'
+import { Inbox } from './components/Inbox'
+import { LoginScreen } from './components/LoginScreen'
 
 const attn = window.attn
 

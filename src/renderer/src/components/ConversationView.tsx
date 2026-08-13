@@ -1,10 +1,63 @@
-import type { DisplayConversation, DisplayThread } from './Inbox'
+import { useCallback, useLayoutEffect, useState } from 'react'
+import { createCommand, registerCommands } from '../commands'
+import type { DisplayConversation, DisplayThread } from '../mailDisplay'
+import { Kbd } from './Kbd'
+import { MessageCard } from './MessageCard'
 
-function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
+interface ConversationMessagesProps {
+  conversation: DisplayConversation
+  account: string | null
+  onToast: (message: string) => void
+}
+
+function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
+  const { conversation, account, onToast } = props
+  const newestIndex = conversation.messages.length - 1
+  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
+    const newestMessage = conversation.messages[newestIndex]
+    return new Set(newestMessage ? [newestMessage.id] : [])
+  })
+  const [expandedTrimIds, setExpandedTrimIds] = useState<Set<string>>(() => new Set())
+
+  const toggleMessage = useCallback((messageId: string) => {
+    setExpandedMessageIds((current) => {
+      const next = new Set(current)
+      if (next.has(messageId)) next.delete(messageId)
+      else next.add(messageId)
+      return next
+    })
+  }, [])
+
+  const toggleTrim = useCallback((messageId: string) => {
+    setExpandedTrimIds((current) => {
+      const next = new Set(current)
+      if (next.has(messageId)) next.delete(messageId)
+      else next.add(messageId)
+      return next
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    const newestMessage = conversation.messages[newestIndex]
+    if (!newestMessage) return
+    return registerCommands([createCommand('message.trim.toggle', () => toggleTrim(newestMessage.id))])
+  }, [conversation.messages, newestIndex, toggleTrim])
+
   return (
-    <kbd className="rounded-[5px] border border-edge bg-active px-1.5 py-px text-[10.5px] font-medium text-ink-dim">
-      {children}
-    </kbd>
+    <>
+      {conversation.messages.map((message) => (
+        <MessageCard
+          key={message.id}
+          message={message}
+          account={account}
+          onToast={onToast}
+          collapsed={!expandedMessageIds.has(message.id)}
+          onToggleCollapsed={() => toggleMessage(message.id)}
+          trimExpanded={expandedTrimIds.has(message.id)}
+          onToggleTrim={() => toggleTrim(message.id)}
+        />
+      ))}
+    </>
   )
 }
 
@@ -14,13 +67,14 @@ interface ConversationViewProps {
   threadCount: number
   view: 'inbox' | 'snoozed'
   conversation: DisplayConversation | null
+  account: string | null
   scrollRef: React.RefObject<HTMLDivElement | null>
   onClose: () => void
-  renderMessages: (conversation: DisplayConversation) => React.ReactNode
+  onToast: (message: string) => void
 }
 
 export function ConversationView(props: ConversationViewProps): React.JSX.Element {
-  const { selected, selectedIndex, threadCount, view, conversation, scrollRef, onClose, renderMessages } =
+  const { selected, selectedIndex, threadCount, view, conversation, account, scrollRef, onClose, onToast } =
     props
   return (
     <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">
@@ -58,10 +112,17 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
             className="mx-auto flex w-full flex-col gap-3.5"
             style={{ maxWidth: 'clamp(720px, 72vw, 1120px)' }}
           >
-            {renderMessages(conversation)}
+            <ConversationMessages
+              key={conversation.threadId}
+              conversation={conversation}
+              account={account}
+              onToast={onToast}
+            />
           </div>
         ) : (
-          <div className="py-10 text-center text-ink-faint">Loading…</div>
+          <div data-testid="conversation-loading" className="py-10 text-center text-ink-faint">
+            Loading…
+          </div>
         )}
       </div>
     </section>

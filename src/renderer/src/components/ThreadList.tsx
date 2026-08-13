@@ -1,6 +1,6 @@
 import type { MailLabel } from '../../../shared/mail'
 import { dateGroup } from '../dateGroup'
-import type { DisplayThread } from './Inbox'
+import type { DisplayThread } from '../mailDisplay'
 
 const LABEL_PALETTE = [
   { backgroundColor: '#44351b', borderColor: '#765b26', color: '#ffd789' },

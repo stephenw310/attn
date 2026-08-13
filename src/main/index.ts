@@ -79,6 +79,7 @@ let historyPoller: HistoryPoller | null = null
 let snoozeScheduler: SnoozeScheduler | null = null
 let mailNotifier: MailNotifier | null = null
 let pendingFocus: PendingFocus | null = null
+let testConversationDelay: { threadId: string; delayMs: number } | null = null
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -469,8 +470,11 @@ function registerIpc(): void {
     const account = currentAccountId()
     return account ? countInboxUnread(db, account) : 0
   })
-  ipcMain.handle('mail:getConversation', (_e, threadId: unknown) => {
+  ipcMain.handle('mail:getConversation', async (_e, threadId: unknown) => {
     if (!db || typeof threadId !== 'string') return null
+    if (testUserData && testConversationDelay?.threadId === threadId) {
+      await new Promise((resolve) => setTimeout(resolve, testConversationDelay?.delayMs ?? 0))
+    }
     const account = currentAccountId()
     return account ? getConversation(db, account, threadId) : null
   })
@@ -690,6 +694,21 @@ if (!gotLock) {
         if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
       })
       ipcMain.on('attn:test:setSyncState', (_event, state: SyncState) => setSyncState(state))
+      ipcMain.on('attn:test:delayConversation', (_event, threadId: unknown, delayMs: unknown) => {
+        if (typeof threadId !== 'string' || typeof delayMs !== 'number' || delayMs < 0) return
+        testConversationDelay = { threadId, delayMs }
+      })
+      ipcMain.on('attn:test:updateMessageBody', (_event, messageId: unknown, bodyText: unknown) => {
+        if (!db || typeof messageId !== 'string' || typeof bodyText !== 'string') return
+        const account = currentAccountId()
+        if (!account) return
+        db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?').run(
+          bodyText,
+          account,
+          messageId
+        )
+        broadcastMailChanged()
+      })
     }
     if (authStatus().signedIn) void resumeOnlineWork()
     app.on('activate', () => showMainWindow())

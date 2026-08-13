@@ -26,70 +26,105 @@ interface Options {
 }
 
 export function useInboxCommands(options: Options): void {
+  const {
+    threadCount,
+    selected,
+    selectedCount,
+    selectedIndex,
+    readerOpen,
+    view,
+    starOn,
+    markUnreadOn,
+    preserveSelectionOnRefreshRef,
+    setSelectedIndex,
+    clearSelection,
+    toggleSelection,
+    extendSelection,
+    openSelected,
+    closeReader,
+    switchView,
+    triage,
+    openSnooze,
+    openLabel,
+    showToast
+  } = options
   useLayoutEffect(
     () =>
       registerCommands([
         createCommand('navigate.next', () =>
-          options.setSelectedIndex((index) => Math.min(index + 1, Math.max(options.threadCount - 1, 0)))
+          setSelectedIndex((index) => Math.min(index + 1, Math.max(threadCount - 1, 0)))
         ),
-        createCommand('navigate.previous', () => options.setSelectedIndex((index) => Math.max(index - 1, 0))),
-        createCommand('selection.toggle', options.toggleSelection),
-        createCommand('selection.extendNext', () => options.extendSelection(options.selectedIndex + 1)),
-        createCommand('selection.extendPrevious', () => options.extendSelection(options.selectedIndex - 1)),
-        ...(options.selectedCount > 0 ? [createCommand('selection.clear', options.clearSelection)] : []),
-        ...(options.readerOpen
-          ? [createCommand('conversation.close', options.closeReader)]
-          : [createCommand('conversation.open', options.openSelected)]),
-        createCommand('view.inbox', () => options.switchView('inbox')),
-        createCommand('view.snoozed', () => options.switchView('snoozed')),
+        createCommand('navigate.previous', () => setSelectedIndex((index) => Math.max(index - 1, 0))),
+        createCommand('selection.toggle', toggleSelection),
+        createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
+        createCommand('selection.extendPrevious', () => extendSelection(selectedIndex - 1)),
+        ...(selectedCount > 0 ? [createCommand('selection.clear', clearSelection)] : []),
+        ...(readerOpen
+          ? [createCommand('conversation.close', closeReader)]
+          : [createCommand('conversation.open', openSelected)]),
+        createCommand('view.inbox', () => switchView('inbox')),
+        createCommand('view.snoozed', () => switchView('snoozed')),
         createCommand(
           'triage.archive',
-          () => options.selected && options.triage({ kind: 'archive', threadIds: [options.selected.id] })
+          () => selected && triage({ kind: 'archive', threadIds: [selected.id] })
         ),
-        createCommand('triage.snooze', options.openSnooze, {
-          title: options.view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later'
+        createCommand('triage.snooze', openSnooze, {
+          title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later'
         }),
-        createCommand(
-          'triage.trash',
-          () => options.selected && options.triage({ kind: 'trash', threadIds: [options.selected.id] })
-        ),
-        createCommand(
-          'triage.spam',
-          () => options.selected && options.triage({ kind: 'spam', threadIds: [options.selected.id] })
-        ),
+        createCommand('triage.trash', () => selected && triage({ kind: 'trash', threadIds: [selected.id] })),
+        createCommand('triage.spam', () => selected && triage({ kind: 'spam', threadIds: [selected.id] })),
         createCommand(
           'triage.star',
-          () =>
-            options.selected &&
-            options.triage({ kind: 'star', threadIds: [options.selected.id], on: options.starOn }),
-          { title: options.starOn ? 'Star' : 'Unstar' }
+          () => selected && triage({ kind: 'star', threadIds: [selected.id], on: starOn }),
+          { title: starOn ? 'Star' : 'Unstar' }
         ),
         createCommand(
           'triage.unread',
           () =>
-            options.selected &&
-            options.triage({
+            selected &&
+            triage({
               kind: 'markUnread',
-              threadIds: [options.selected.id],
-              on: options.markUnreadOn
+              threadIds: [selected.id],
+              on: markUnreadOn
             }),
-          { title: options.markUnreadOn ? 'Mark unread' : 'Mark read' }
+          { title: markUnreadOn ? 'Mark unread' : 'Mark read' }
         ),
-        createCommand('triage.label', options.openLabel),
+        createCommand('triage.label', openLabel),
         createCommand('triage.undo', () => {
           if (!window.attn) return
-          options.preserveSelectionOnRefreshRef.current = false
+          preserveSelectionOnRefreshRef.current = false
           void window.attn.mail
             .undo()
             .then((result) => {
-              if (result) options.showToast(result.label)
-              else options.preserveSelectionOnRefreshRef.current = true
+              if (result) showToast(result.label)
+              else preserveSelectionOnRefreshRef.current = true
             })
             .catch(() => {
-              options.preserveSelectionOnRefreshRef.current = true
+              preserveSelectionOnRefreshRef.current = true
             })
         })
       ]),
-    [options]
+    [
+      clearSelection,
+      closeReader,
+      extendSelection,
+      markUnreadOn,
+      openLabel,
+      openSelected,
+      openSnooze,
+      preserveSelectionOnRefreshRef,
+      readerOpen,
+      selected,
+      selectedCount,
+      selectedIndex,
+      setSelectedIndex,
+      showToast,
+      starOn,
+      switchView,
+      threadCount,
+      toggleSelection,
+      triage,
+      view
+    ]
   )
 }
