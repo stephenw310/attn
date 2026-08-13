@@ -119,14 +119,36 @@ test('Enter opens the full-window reader; J/K navigates; Back and Esc restore th
   await expect(page.getByTestId('conversation-back')).toHaveText('← Inbox')
   await expect(page.getByTestId('conversation-subject')).toHaveText(mockThreads[0].subject)
   await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${mockThreads.length}`)
-  await expect(page.getByTestId('footer-shortcut-open')).toHaveCount(0)
   await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knext conversation')
   await expect(page.getByTestId('footer-shortcut-scroll')).toContainText('↑/↓/Spacescroll')
   await expect(page.getByTestId('footer-shortcut-back')).toContainText('Escback to list')
-  await expect(page.getByTestId('footer-shortcut-trim')).toHaveCount(0)
-  await expect(page.getByTestId('footer-shortcut-focus')).toHaveCount(0)
-  await expect(page.getByTestId('footer-shortcut-close')).toHaveCount(0)
   await expect(page.getByTestId('footer-shortcut-done')).toContainText('Edone')
+  // Pin the whole reader hint set rather than the absence of named hints: this
+  // fails on a stray hint too, and cannot go vacuous when an id is renamed.
+  await expect
+    .poll(() =>
+      page
+        .getByTestId('footer-shortcuts')
+        .evaluate((element) =>
+          Array.from(element.querySelectorAll('[data-testid^="footer-shortcut-"]')).map((hint) =>
+            hint.getAttribute('data-testid')?.replace('footer-shortcut-', '')
+          )
+        )
+    )
+    .toEqual([
+      'navigate',
+      'scroll',
+      'back',
+      'select',
+      'done',
+      'snooze',
+      'label',
+      'trash',
+      'star',
+      'unread',
+      'spam',
+      'undo'
+    ])
   await expect(page.getByTestId('message-card')).toHaveCount(1)
   await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
   await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')
@@ -176,7 +198,7 @@ test('Enter opens the full-window reader; J/K navigates; Back and Esc restore th
   await expect.poll(() => selectedIndex(page)).toBe(0)
 })
 
-test('returning from the reader preserves the list scroll position', async ({ app, page }) => {
+test('restores list scroll on reader exit, and follows a cursor moved by J/K', async ({ app, page }) => {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setContentSize(1200, 480))
   await expect.poll(() => page.evaluate(() => window.innerHeight)).toBeLessThan(700)
 
@@ -187,40 +209,28 @@ test('returning from the reader preserves the list scroll position', async ({ ap
   const selectedBefore = await selectedIndex(page)
   expect(selectedBefore).toBeGreaterThan(0)
 
+  // Reading without navigating must land back on the exact same offset.
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
-
-  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await expect(list).toBeVisible()
   await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(before)
   await expect.poll(() => selectedIndex(page)).toBe(selectedBefore)
-})
 
-test('returning from the reader brings a cursor moved by J/K back into view', async ({ page }) => {
-  const list = page.getByTestId('thread-list')
-  await expect(page.getByTestId('thread-row')).toHaveCount(mockThreads.length)
-  // Precondition: the list must overflow, or "scrolled back into view" proves nothing.
-  expect(await list.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
-
+  // Navigating inside the reader moves the cursor while the list is
+  // display:none and cannot scroll — returning has to bring it back into view.
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
-  // The list is display:none while reading, so these moves cannot scroll it.
-  for (let index = 1; index < mockThreads.length; index++) await page.keyboard.press('j')
-  await expect(page.getByTestId('conversation-position')).toHaveText(
-    `${mockThreads.length} of ${mockThreads.length}`
-  )
+  for (let index = selectedBefore; index > 0; index--) await page.keyboard.press('k')
+  await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${mockThreads.length}`)
   await page.keyboard.press('Escape')
 
   await expect(list).toBeVisible()
-  await expect.poll(() => selectedIndex(page)).toBe(mockThreads.length - 1)
-  // The cursor the reader left behind must be inside the restored list viewport.
+  await expect.poll(() => selectedIndex(page)).toBe(0)
   await expect
     .poll(async () => {
       const viewport = await list.boundingBox()
-      const row = await page
-        .getByTestId('thread-row')
-        .nth(mockThreads.length - 1)
-        .boundingBox()
+      const row = await page.getByTestId('thread-row').first().boundingBox()
       if (!viewport || !row) return false
       return row.y >= viewport.y - 1 && row.y + row.height <= viewport.y + viewport.height + 1
     })
