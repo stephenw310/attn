@@ -284,7 +284,7 @@ Undo stack (module state in main): array of `{ label, undo: TriageAction[] }`, c
 - `z` after archive → thread back in the list (net local state restored; pending count reflects both queued ops — assert exact value).
 - **Durability:** archive 3 → `relaunch()` (T1 helper) → threads still archived locally, pending count still 3 (seed skipped because the store is non-empty), no rows lost or duplicated. This is F2's airplane-mode criterion, minus the network half (T7's manual smoke covers that).
 - Verbs in the overlay work and auto-advance the open conversation.
-- Mock mode: verbs do nothing, no console errors (existing suite must stay green).
+- Signed out: the login screen renders, no inbox and no verbs, no console errors (existing suite must stay green).
 
 ### Done when
 

@@ -39,7 +39,7 @@ interface DisplayThread {
   returned: boolean
   dueAt?: number
   labelIds: string[]
-  lastMsgAt?: number
+  lastMsgAt: number
 }
 
 interface DisplayMsg {
@@ -550,7 +550,10 @@ function QueueReadout({ unread, pending }: { unread: number | null; pending: num
         <span className="font-medium">counting…</span>
       ) : unread > 0 ? (
         <span className="font-medium text-ink-dim tabular-nums">
-          <b className="font-semibold text-accent">{unread}</b> to zero
+          <b data-testid="queue-unread" className="font-semibold text-accent">
+            {unread}
+          </b>{' '}
+          to zero
         </span>
       ) : (
         <span className="font-medium">at zero</span>
@@ -775,9 +778,13 @@ function blurActive(): void {
 
 function LoginScreen({
   status,
+  statusError,
+  onRetryStatus,
   onStatus
 }: {
   status: AuthStatus | null
+  statusError: string | null
+  onRetryStatus: () => void
   onStatus: (status: AuthStatus) => void
 }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
@@ -801,11 +808,13 @@ function LoginScreen({
 
   const setupMessage = !bridgeAvailable
     ? 'Open Attn as a desktop app to continue.'
-    : status === null
-      ? 'Checking sign-in availability…'
-      : !configured
-        ? 'This development build needs a Google OAuth client. Follow the setup steps in README.md, then restart Attn.'
-        : null
+    : statusError !== null
+      ? `Could not check sign-in status. ${statusError}`
+      : status === null
+        ? 'Checking sign-in availability…'
+        : !configured
+          ? 'This development build needs a Google OAuth client. Follow the setup steps in README.md, then restart Attn.'
+          : null
 
   return (
     <div
@@ -850,9 +859,14 @@ function LoginScreen({
             copy on this device.
           </p>
 
+          {/* Keyboard-first: the screen's only action answers Enter on arrival, so
+              signing in never needs a Tab first. Disabled while unconfigured, which
+              is exactly when there is nothing to activate. */}
           <button
             type="button"
             data-testid="login-google"
+            // biome-ignore lint/a11y/noAutofocus: sole action on a dedicated screen
+            autoFocus
             disabled={!configured || busy || !bridgeAvailable}
             onClick={signIn}
             className="mt-8 flex h-12 w-full cursor-pointer items-center justify-center gap-3 rounded-[9px] border border-white/15 bg-[#f3f4f7] px-5 text-sm font-semibold text-[#202124] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:bg-white disabled:cursor-default disabled:opacity-45"
@@ -870,6 +884,16 @@ function LoginScreen({
               </span>
             ) : (
               setupMessage && <span data-testid="login-setup-message">{setupMessage}</span>
+            )}
+            {statusError !== null && (
+              <button
+                type="button"
+                data-testid="login-status-retry"
+                onClick={onRetryStatus}
+                className="ml-1.5 cursor-pointer underline underline-offset-2 hover:text-ink-dim"
+              >
+                Try again
+              </button>
             )}
           </div>
 
@@ -1137,8 +1161,50 @@ function SnoozePicker({
 // safe to read once at module scope (undefined in the plain-browser preview).
 const attn = window.attn
 
+// Auth is the only state above the inbox: `Inbox` mounts once a signed-in status
+// exists and unmounts on sign-out, so the whole mail hook tree — IPC
+// subscriptions, the command registry, the global key handler — is inert while
+// the login screen is up. Keeping the split here also means everything below can
+// assume a live bridge and a signed-in account.
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<AuthStatus | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
+
+  // A rejected probe used to leave the screen on "checking…" forever. Surface it
+  // instead, so the login screen can offer a retry rather than hanging.
+  const loadStatus = useCallback(() => {
+    if (!attn) return
+    setStatusError(null)
+    attn.auth
+      .getStatus()
+      .then(setStatus)
+      .catch((reason: unknown) =>
+        setStatusError(reason instanceof Error ? reason.message : 'Could not read sign-in status')
+      )
+  }, [])
+
+  useEffect(loadStatus, [loadStatus])
+
+  if (!attn || !status?.signedIn) {
+    return (
+      <LoginScreen
+        status={status}
+        statusError={statusError}
+        onRetryStatus={loadStatus}
+        onStatus={setStatus}
+      />
+    )
+  }
+  return <Inbox status={status} onStatus={setStatus} />
+}
+
+function Inbox({
+  status,
+  onStatus
+}: {
+  status: AuthStatus
+  onStatus: (status: AuthStatus) => void
+}): React.JSX.Element {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine)
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
@@ -1169,16 +1235,8 @@ export default function App(): React.JSX.Element {
   const deferRefreshUntilRef = useRef(0)
   const earliestExitIndexRef = useRef<number | null>(null)
 
-  const activeAccount = status?.signedIn ? (status.email ?? null) : null
-  const realMode = Boolean(attn && status?.signedIn)
+  const activeAccount = status.email ?? null
   const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
-
-  useEffect(() => {
-    attn?.auth
-      .getStatus()
-      .then(setStatus)
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     if (!attn) return
@@ -1270,12 +1328,13 @@ export default function App(): React.JSX.Element {
     }
   }, [activeAccount])
 
-  const threads: DisplayThread[] = useMemo(() => {
-    if (!realMode) return []
-    return view === 'inbox'
-      ? (realThreads ?? []).map(fromThreadRow)
-      : (realSnoozedThreads ?? []).map(fromSnoozedThreadRow)
-  }, [realMode, realSnoozedThreads, realThreads, view])
+  const threads: DisplayThread[] = useMemo(
+    () =>
+      view === 'inbox'
+        ? (realThreads ?? []).map(fromThreadRow)
+        : (realSnoozedThreads ?? []).map(fromSnoozedThreadRow),
+    [realSnoozedThreads, realThreads, view]
+  )
 
   useEffect(() => {
     setSelectedIndex((i) => Math.max(0, Math.min(i, Math.max(threads.length - 1, 0))))
@@ -1333,10 +1392,6 @@ export default function App(): React.JSX.Element {
       setConversation(null)
       return
     }
-    if (!realMode) {
-      setConversation(null)
-      return
-    }
     const cached = convCache.current.get(selected.id)
     if (cached) {
       setConversation(cached)
@@ -1357,11 +1412,11 @@ export default function App(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [selected, realMode])
+  }, [selected])
 
   // Preload neighbors so opening and reader J/K navigation normally have no loading state (F3).
   useEffect(() => {
-    if (!realMode || !attn) return
+    if (!attn) return
     for (const idx of [selectedIndex - 1, selectedIndex + 1]) {
       const t = threads[idx]
       if (!t || convCache.current.has(t.id)) continue
@@ -1372,7 +1427,7 @@ export default function App(): React.JSX.Element {
         })
         .catch(() => {})
     }
-  }, [selectedIndex, threads, realMode])
+  }, [selectedIndex, threads])
 
   const showToast = useCallback((message: string) => {
     const token = ++toastTokenRef.current
@@ -1401,12 +1456,12 @@ export default function App(): React.JSX.Element {
   )
 
   useLayoutEffect(() => {
-    if (!realMode || sync.phase !== 'error') return
+    if (sync.phase !== 'error') return
     return registerCommands([
       createCommand('sync.retry', retrySync),
       createCommand('sync.error.copy', () => copySyncError(sync.message))
     ])
-  }, [copySyncError, realMode, retrySync, sync])
+  }, [copySyncError, retrySync, sync])
 
   const switchView = useCallback((next: 'inbox' | 'snoozed') => {
     activeViewRef.current = next
@@ -1484,7 +1539,7 @@ export default function App(): React.JSX.Element {
 
   const triage = useCallback(
     (action: TriageAction) => {
-      if (!realMode || !attn) return
+      if (!attn) return
       preserveSelectionOnRefreshRef.current = false
       const isBulk = selectedIds.size > 0
       const targetedAction = {
@@ -1516,7 +1571,7 @@ export default function App(): React.JSX.Element {
           })
         })
     },
-    [clearSelection, readerOpen, realMode, selectedIds, selectedIndex, showToast, threads.length, view]
+    [clearSelection, readerOpen, selectedIds, selectedIndex, showToast, threads.length, view]
   )
 
   const toggleLabel = useCallback(
@@ -1542,7 +1597,7 @@ export default function App(): React.JSX.Element {
 
   const snoozeSelected = useCallback(
     (dueAt: number) => {
-      if (!realMode || !attn || !selected) return
+      if (!attn || !selected) return
       const isBulk = selectedIds.size > 0
       const threadIds = isBulk ? [...selectedIds] : [selected.id]
       setSnoozeOpen(false)
@@ -1552,7 +1607,7 @@ export default function App(): React.JSX.Element {
         .then((result) => showToast(result.label))
         .catch(() => {})
     },
-    [clearSelection, realMode, selected, selectedIds, showToast]
+    [clearSelection, selected, selectedIds, showToast]
   )
 
   const unsnoozeSelected = useCallback(() => {
@@ -1568,8 +1623,8 @@ export default function App(): React.JSX.Element {
     }
     if (!selected || autoReadThreadRef.current === selected.id) return
     autoReadThreadRef.current = selected.id
-    if (realMode) void attn?.mail.markReadOnOpen(selected.id).catch(() => {})
-  }, [readerOpen, realMode, selected])
+    void attn?.mail.markReadOnOpen(selected.id).catch(() => {})
+  }, [readerOpen, selected])
 
   // Reset the reused reading container before paint, then refocus after reader J/K navigation.
   // biome-ignore lint/correctness/useExhaustiveDependencies: selected id deliberately resets scroll and focus
@@ -1621,10 +1676,10 @@ export default function App(): React.JSX.Element {
           { title: markUnreadOn ? 'Mark unread' : 'Mark read' }
         ),
         createCommand('triage.label', () => {
-          if (selected && realMode) setLabelTargetId(selected.id)
+          if (selected) setLabelTargetId(selected.id)
         }),
         createCommand('triage.undo', () => {
-          if (!realMode || !attn) return
+          if (!attn) return
           preserveSelectionOnRefreshRef.current = false
           void attn.mail
             .undo()
@@ -1643,7 +1698,6 @@ export default function App(): React.JSX.Element {
       extendSelectionTo,
       openSelected,
       readerOpen,
-      realMode,
       markUnreadOn,
       selected,
       selectedIds.size,
@@ -1718,8 +1772,6 @@ export default function App(): React.JSX.Element {
     selectedRowRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [selectedIndex, readerOpen])
 
-  if (!status?.signedIn) return <LoginScreen status={status} onStatus={setStatus} />
-
   const unreadCount = realUnreadTotal
 
   const footerShortcuts: ShortcutHint[] = [
@@ -1788,7 +1840,7 @@ export default function App(): React.JSX.Element {
           )}
           <QueueReadout unread={unreadCount} pending={pendingCount} />
           <div data-testid="account-menu">
-            <AccountMenu status={status} onStatus={setStatus} />
+            <AccountMenu status={status} onStatus={onStatus} />
           </div>
         </div>
       </header>

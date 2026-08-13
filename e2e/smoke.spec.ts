@@ -58,6 +58,36 @@ test('shows onboarding instead of mock mail while signed out', async ({ page }) 
   await expect(page.getByTestId('footer-shortcuts')).toHaveCount(0)
 })
 
+test('leaves the inbox keyboard loop unmounted while signed out', async ({ page }) => {
+  await expect(page.getByTestId('login-screen')).toBeVisible()
+
+  // The button carries autoFocus so Enter signs in without a Tab first, but it is
+  // disabled in a credential-free run and a disabled control cannot take focus.
+  // What is assertable here is that nothing else grabbed it either — the sign-in
+  // screen leaves the keyboard alone. Enter-to-sign-in needs an OAuth client and
+  // so stays outside the hermetic suite.
+  await expect(page.getByTestId('login-google')).toBeDisabled()
+
+  // Inbox shortcuts must not be swallowed by a mail key handler that has no mail
+  // to act on: with `Inbox` unmounted there is no window listener to call
+  // preventDefault, so every key reaches the page untouched. Before the split this
+  // returned every key, because the inbox hook tree mounted behind the login screen.
+  const swallowed = await page.evaluate(async () => {
+    const seen: string[] = []
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.defaultPrevented) seen.push(e.key)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    document.body.focus()
+    for (const key of ['j', 'k', 'e', 'x', 'g', '#']) {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    }
+    window.removeEventListener('keydown', onKeyDown)
+    return seen
+  })
+  expect(swallowed).toEqual([])
+})
+
 test('captures signed-out onboarding for visual review', async ({ page }, testInfo) => {
   await expect(page.getByTestId('login-screen')).toBeVisible()
   const dir = join(__dirname, '.artifacts')
@@ -69,6 +99,31 @@ test('captures signed-out onboarding for visual review', async ({ page }, testIn
 
 test.describe('seeded inbox smoke coverage', () => {
   test.use({ seed: 'fixtures/seed-inbox.json' })
+
+  test('groups the list by age and labels the list-context shortcuts', async ({ page }) => {
+    // The fixture is day-anchored (`receivedDaysAgo`), so these headers hold on
+    // any calendar day — the reason absolute stamps were retired from the seed.
+    await expect(page.getByTestId('thread-date-group')).toHaveText([
+      'Today',
+      'Yesterday',
+      'Last 7 days',
+      'Older'
+    ])
+    await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
+    await expect(page.getByTestId('pending-count')).toHaveCount(0)
+    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/K/↑/↓navigate')
+    await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
+    for (const [id, text] of [
+      ['done', 'Edone'],
+      ['trash', '#trash'],
+      ['star', 'Sstar'],
+      ['unread', 'Uunread'],
+      ['spam', '!spam'],
+      ['undo', 'Zundo']
+    ]) {
+      await expect(page.getByTestId(`footer-shortcut-${id}`)).toContainText(text)
+    }
+  })
 
   test('J/K and arrow keys move list selection without opening a conversation', async ({ page }) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(seedThreadCount)
@@ -138,7 +193,11 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('message-card')).toHaveCount(2)
     await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
     await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')
-    await expect(page.getByTestId('queue-readout')).toContainText(`${initialUnread - 1} to zero`)
+    // Scoped to the count itself: the readout also carries the pending-action
+    // suffix once opening a thread queues its mark-read, and a substring match on
+    // "3 to zero" would happily match "13 to zero".
+    await expect(page.getByTestId('queue-unread')).toHaveText(String(initialUnread - 1))
+    await expect(page.getByTestId('pending-count')).toContainText('1 pending')
 
     await page
       .getByTestId('conversation-content')
@@ -163,13 +222,13 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(rows.nth(2)).toHaveAttribute('data-unread', 'true')
     await page.keyboard.press('j')
     await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
-    await expect(page.getByTestId('queue-readout')).toContainText(`${initialUnread - 1} to zero`)
+    await expect(page.getByTestId('queue-unread')).toHaveText(String(initialUnread - 1))
     await page.keyboard.press('j')
     await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
     await expect(page.getByTestId('conversation-position')).toHaveText(`3 of ${seedThreadCount}`)
     await expect.poll(() => selectedIndex(page)).toBe(2)
     await expect(rows.nth(2)).not.toHaveAttribute('data-unread', 'true')
-    await expect(page.getByTestId('queue-readout')).toContainText(`${initialUnread - 2} to zero`)
+    await expect(page.getByTestId('queue-unread')).toHaveText(String(initialUnread - 2))
 
     await page.keyboard.press('ArrowUp')
     await expect(page.getByTestId('conversation-position')).toHaveText(`3 of ${seedThreadCount}`)
@@ -189,15 +248,16 @@ test.describe('seeded inbox smoke coverage', () => {
   })
 
   test('restores list scroll on reader exit, and follows a cursor moved by J/K', async ({ app, page }) => {
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setContentSize(1200, 360))
+    // Clamped up to the window's 600px minimum height; the point is a short window.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setContentSize(1200, 600))
     await expect.poll(() => page.evaluate(() => window.innerHeight)).toBeLessThan(700)
     const list = page.getByTestId('thread-list')
-    // The production window has a minimum height and this compact real-store fixture
-    // has only eight rows. Add test-only trailing space to exercise list scrolling
-    // without introducing a second renderer-only mail fixture.
-    await list.evaluate((element) => element.style.setProperty('padding-bottom', '800px'))
-    for (let index = 1; index < 5; index++) await page.keyboard.press('j')
-    await list.evaluate((element) => element.scrollTo({ top: 160, behavior: 'instant' }))
+    // The window has a 600px minimum height and the real-store fixture is eight
+    // rows, which fits without overflowing. Inflate the rows instead of scrolling
+    // by hand, so reaching the end of the list is what produces the scroll — the
+    // behaviour under test — rather than a scrollTop the test set itself.
+    await page.addStyleTag({ content: '[data-testid="thread-row"] { min-height: 120px; }' })
+    for (let index = 1; index < seedThreadCount; index++) await page.keyboard.press('j')
     await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
     const before = await list.evaluate((element) => element.scrollTop)
     const selectedBefore = await selectedIndex(page)
