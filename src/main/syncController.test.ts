@@ -343,4 +343,32 @@ describe('stop', () => {
 
     expect(mocks.FakePoller.instances[0].stopped).toBe(true)
   })
+
+  it('makes retry and queued online work inert', async () => {
+    const { controller, trigger } = harness()
+
+    controller.stop()
+    controller.retry()
+    await controller.resumeOnlineWork()
+
+    expect(mocks.runInboxBackfill).not.toHaveBeenCalled()
+    expect(trigger).not.toHaveBeenCalled()
+  })
+
+  it('invalidates an in-flight backfill before resources are torn down', async () => {
+    const { controller, backfills, states, broadcastMailChanged } = harness()
+    controller.retry()
+    const inFlight = backfills[0]
+    states.length = 0
+    broadcastMailChanged.mockClear()
+
+    controller.stop()
+    inFlight.callbacks.onProgress?.({ stage: 'metadata', threadsDone: 1, mailChanged: true })
+    inFlight.result.resolve({ threadCount: 1, inboxThreadIds: ['t1'] })
+    await flush()
+
+    expect(states).toEqual([])
+    expect(broadcastMailChanged).not.toHaveBeenCalled()
+    expect(mocks.reconcileInboxMembership).not.toHaveBeenCalled()
+  })
 })

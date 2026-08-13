@@ -32,6 +32,7 @@ interface SyncControllerContext {
 export class SyncController {
   private state: SyncState = { phase: 'idle' }
   private running = false
+  private stopped = false
   private backfillRetryGeneration: number | null = null
   private generation = 0
   private poller: HistoryPoller | null = null
@@ -49,25 +50,30 @@ export class SyncController {
 
   /** E2E-only seam for exercising renderer state transitions through real IPC. */
   setStateForTest(state: SyncState): void {
+    if (this.stopped) return
     this.setState(state)
   }
 
   onSignIn(): void {
+    if (this.stopped) return
     this.resetSession()
     void this.resumeOnlineWork()
   }
 
   onSignOut(): void {
+    if (this.stopped) return
     this.resetSession()
     this.setState({ phase: 'idle' })
   }
 
   stop(): void {
-    this.stopHistoryPoller()
-    this.offlineRetry.clear()
+    if (this.stopped) return
+    this.stopped = true
+    this.resetSession()
   }
 
   retry(): void {
+    if (this.stopped) return
     this.offlineRetry.clear()
     const route = syncRetryRoute({
       signedIn: this.context.isSignedIn(),
@@ -91,10 +97,12 @@ export class SyncController {
   }
 
   async resumeOnlineWork(): Promise<void> {
+    if (this.stopped) return
     // Remote changes must keep flowing even when a queued local action is in
     // Gmail's retry/backoff loop. The executor and history poller are independent.
     if (this.context.isSignedIn()) this.startSync()
     await this.context.getActionExecutor()?.trigger()
+    if (this.stopped) return
     // A sign-out/account switch can make an active drain finish early. A second
     // pass picks up the newly active account.
     await this.context.getActionExecutor()?.trigger()
@@ -109,6 +117,7 @@ export class SyncController {
   }
 
   private setState(state: SyncState): void {
+    if (this.stopped) return
     if (sameSyncState(this.state, state)) return
     this.state = state
     this.context.broadcastState(state)
@@ -123,13 +132,13 @@ export class SyncController {
 
   private scheduleOfflineRetry(generation: number): void {
     this.offlineRetry.schedule(
-      () => generation === this.generation && this.context.isSignedIn(),
+      () => !this.stopped && generation === this.generation && this.context.isSignedIn(),
       () => this.startSync()
     )
   }
 
   private startSync(): void {
-    if (this.running || this.context.isSeeded() || this.poller) return
+    if (this.stopped || this.running || this.context.isSeeded() || this.poller) return
     this.offlineRetry.clear()
     const generation = this.generation
     const accountId = this.context.currentAccountId()
@@ -211,7 +220,7 @@ export class SyncController {
     generation: number,
     runImmediately = false
   ): void {
-    if (generation !== this.generation || this.poller) return
+    if (this.stopped || generation !== this.generation || this.poller) return
     this.poller = new HistoryPoller({
       db: this.context.db,
       accountId,
@@ -244,7 +253,9 @@ export class SyncController {
     provider: GmailMailProvider,
     generation: number
   ): Promise<void> {
-    if (generation !== this.generation) throw new Error('authentication session changed')
+    if (this.stopped || generation !== this.generation) {
+      throw new Error('authentication session changed')
+    }
     this.running = true
     this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
     let failure: unknown = new Error('history recovery backfill failed')

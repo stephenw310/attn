@@ -20,7 +20,7 @@ import {
   listUserLabels
 } from './db/queries'
 import type { GmailClient } from './gmail/client'
-import type { MailNotifier, PendingFocus } from './notify'
+import type { PendingFocus } from './notify'
 import { takePendingFocus } from './notify'
 import type { SnoozeScheduler } from './scheduler'
 import type { SyncController } from './syncController'
@@ -53,10 +53,9 @@ export interface IpcContext {
   isSeeded: () => boolean
   executor: () => ActionExecutor | null
   scheduler: () => SnoozeScheduler | null
-  notifier: () => MailNotifier | null
-  syncController: SyncController
+  syncController: () => SyncController | null
   broadcastMailChanged: () => void
-  takePendingFocus: () => PendingFocus | null
+  pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
   testUserData: boolean
 }
@@ -124,18 +123,20 @@ export function registerIpc(context: IpcContext): void {
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
   handle(IPC_CHANNELS.authSignOut, () => context.signOut())
-  handle(IPC_CHANNELS.syncGetState, () => context.syncController.getState())
+  handle(IPC_CHANNELS.syncGetState, () => context.syncController()?.getState() ?? { phase: 'idle' })
   handle(IPC_CHANNELS.syncRetry, () => {
-    context.syncController.retry()
+    context.syncController()?.retry()
     return undefined
   })
   handle(IPC_CHANNELS.mailTakePendingFocus, () => {
-    const threadId = takePendingFocus(context.takePendingFocus())
+    const threadId = takePendingFocus(context.pendingFocus())
     context.clearPendingFocus()
     return threadId
   })
   handle(IPC_CHANNELS.mailListThreads, () => {
     const account = context.currentAccountId()
+    // Production deliberately keeps its M1 query cap. The perf-only seam lifts
+    // it so the renderer benchmark actually mounts the generated 2,000 rows.
     const limit = context.testUserData && process.env.ATTN_E2E_PERF === '1' ? 2_000 : undefined
     return account ? listInboxThreads(context.db, account, limit) : []
   })

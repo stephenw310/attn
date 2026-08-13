@@ -20,9 +20,15 @@ import { MailNotifier, type PendingFocus } from './notify'
 import { SnoozeScheduler } from './scheduler'
 import { SyncController } from './syncController'
 
+// E2E seam: an isolated userData dir gives each test run a fresh DB and empty
+// token store. Must be set before requestSingleInstanceLock() so concurrent
+// test apps (distinct dirs) don't share an instance lock.
 const testUserData = process.env.ATTN_TEST_USER_DATA
 if (testUserData) {
   app.setPath('userData', testUserData)
+  // Mirror console output to a file the e2e fixture attaches on failure —
+  // Playwright consumes early stdout before test listeners can attach, so
+  // boot-time lines would otherwise be lost to diagnostics.
   const logFile = join(testUserData, 'main.log')
   for (const level of ['log', 'warn', 'error'] as const) {
     const original = console[level].bind(console)
@@ -63,7 +69,13 @@ function focusInboxThread(threadId: string): void {
 }
 
 function oauthSearchDirs(): string[] {
+  // Under e2e, only the isolated dir — a developer's real oauth.config.json in
+  // either checkout must never leak into test runs.
   return oauthConfigSearchDirs(app.getAppPath(), app.getPath('userData'), Boolean(testUserData))
+}
+
+function isSeeded(): boolean {
+  return seedAccountId !== null
 }
 
 function authStatus(): AuthStatus {
@@ -77,7 +89,7 @@ function currentAccountId(): string | null {
   return seedAccountId ?? loadTokens(app.getPath('userData'))?.email ?? null
 }
 
-function makeClient(generation = syncController?.getGeneration() ?? 0): GmailClient | null {
+function makeClient(generation: number): GmailClient | null {
   const config = loadOAuthConfig(oauthSearchDirs())
   const tokens = loadTokens(app.getPath('userData'))
   if (!config || !tokens) return null
@@ -88,10 +100,20 @@ function makeClient(generation = syncController?.getGeneration() ?? 0): GmailCli
   })
 }
 
+function makeCurrentClient(): GmailClient | null {
+  const controller = syncController
+  return controller ? makeClient(controller.getGeneration()) : null
+}
+
 function makeProvider(generation: number): GmailMailProvider | null {
   if (seedAccountId) return null
   const client = makeClient(generation)
   return client ? new GmailMailProvider(client) : null
+}
+
+function makeCurrentProvider(): GmailMailProvider | null {
+  const controller = syncController
+  return controller ? makeProvider(controller.getGeneration()) : null
 }
 
 async function signIn(): Promise<AuthStatus> {
@@ -147,6 +169,10 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       nodeIntegration: false
     }
   })
+  // HTML mail lives in our scriptless srcdoc frame. Some legitimate senders
+  // serve images with CORP: same-origin, which Chromium otherwise blocks in
+  // that frame. Remove only that embedding response header for image requests
+  // from the mail frame; the renderer still loads the original URL directly.
   win.webContents.session.webRequest.onHeadersReceived(
     { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
     (details, callback) => {
@@ -168,6 +194,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     if (shouldShow) win.show()
   })
   attachBackgroundWindow(win)
+  // All external links open in the system browser, never in-app (SPEC §6).
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
@@ -193,7 +220,7 @@ function initialize(): void {
     db: activeDb,
     currentAccountId,
     isSignedIn: () => authStatus().signedIn,
-    isSeeded: () => seedAccountId !== null,
+    isSeeded,
     makeProvider,
     isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
     broadcastState: (state) => broadcast(IPC_CHANNELS.syncState, state),
@@ -207,25 +234,19 @@ function initialize(): void {
     authStatus,
     signIn,
     signOut,
-    makeClient,
-    isSeeded: () => seedAccountId !== null,
+    makeClient: makeCurrentClient,
+    isSeeded,
     executor: () => actionExecutor,
     scheduler: () => snoozeScheduler,
-    notifier: () => mailNotifier,
-    syncController,
+    syncController: () => syncController,
     broadcastMailChanged,
-    takePendingFocus: () => pendingFocus,
+    pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
       pendingFocus = null
     },
     testUserData: Boolean(testUserData)
   })
-  actionExecutor = new ActionExecutor(
-    activeDb,
-    currentAccountId,
-    () => makeProvider(syncController?.getGeneration() ?? 0),
-    broadcastMailChanged
-  )
+  actionExecutor = new ActionExecutor(activeDb, currentAccountId, makeCurrentProvider, broadcastMailChanged)
   snoozeScheduler = new SnoozeScheduler(
     activeDb,
     currentAccountId,
@@ -252,6 +273,9 @@ function registerTestIpc(): void {
 }
 
 function teardown(): void {
+  // Invoke handlers close over process-owned resources, so remove them before
+  // stopping those resources. Iterating the channel map keeps this exhaustive.
+  for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel)
   syncController?.stop()
   syncController = null
   powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
@@ -280,9 +304,12 @@ else {
       initialize()
     } catch (error) {
       console.error(`[boot] failed: ${error instanceof Error ? error.message : String(error)}`)
+      teardown()
       app.exit(1)
     }
   })
+  // Deliberately keep the process alive with no windows so sync and
+  // notifications continue running in the background on every platform.
   app.on('window-all-closed', () => {})
   app.on('will-quit', teardown)
 }
