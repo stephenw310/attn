@@ -1,6 +1,6 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
-import { type ContactSearchResult, type ContactStats, rankContacts } from '../../shared/contacts'
+import { type ContactSearchResult, type ContactStats, displayName, rankContacts } from '../../shared/contacts'
 import type {
   Conversation,
   ConversationMsg,
@@ -193,6 +193,15 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
   return { threadId, subject: thread.subject ?? '(no subject)', messages }
 }
 
+/**
+ * Local autocomplete over sending history. Matching happens here and only here —
+ * one pass over contact_messages, grouped per address, so a single keystroke never
+ * degrades into a per-contact subquery. Display names are resolved afterwards for
+ * the handful of addresses that survive ranking.
+ *
+ * Known limit: SQLite's lower() folds ASCII only, so a stored name whose uppercase
+ * letters are non-ASCII ("Ürsula") will not match a lowercase query ("ürsula").
+ */
 export function searchContacts(
   db: Db,
   accountId: string,
@@ -205,59 +214,71 @@ export function searchContacts(
     .replace(/[\\%_]/g, '\\$&')
   const rows = db
     .prepare(
-      `WITH matching_emails AS (
-         SELECT DISTINCT email
-         FROM contact_messages
-         WHERE account_id = @account_id
-           AND (lower(email) LIKE @pattern ESCAPE '\\'
-                OR lower(COALESCE(name, '')) LIKE @pattern ESCAPE '\\')
-       ),
-       stats AS (
-         SELECT cm.email,
-                SUM(CASE WHEN cm.role = 'to' THEN 1 ELSE 0 END) AS sent_to_count,
-                SUM(CASE WHEN cm.role = 'from' THEN 1 ELSE 0 END) AS received_count,
-                MAX(m.internal_date) AS last_interacted_at
-         FROM contact_messages cm
-         JOIN matching_emails match ON match.email = cm.email
-         JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
-         WHERE cm.account_id = @account_id
-         GROUP BY cm.email
-       )
-       SELECT stats.email,
-              COALESCE((
-                SELECT recent.name
-                FROM contact_messages recent
-                JOIN messages recent_message
-                  ON recent_message.account_id = recent.account_id
-                 AND recent_message.id = recent.message_id
-                WHERE recent.account_id = @account_id
-                  AND recent.email = stats.email
-                  AND recent.name IS NOT NULL
-                  AND recent.name != ''
-                ORDER BY recent_message.internal_date DESC, recent.message_id DESC
-                LIMIT 1
-              ), '') AS name,
-              stats.sent_to_count,
-              stats.received_count,
-              stats.last_interacted_at
-       FROM stats`
+      `SELECT cm.email AS email,
+              SUM(CASE WHEN cm.role = 'to' THEN 1 ELSE 0 END) AS sent_to_count,
+              SUM(CASE WHEN cm.role = 'from' THEN 1 ELSE 0 END) AS received_count,
+              MAX(m.internal_date) AS last_interacted_at,
+              MAX(CASE WHEN cm.name IS NOT NULL AND lower(cm.name) LIKE @prefix ESCAPE '\\'
+                       THEN 1 ELSE 0 END) AS name_prefix
+       FROM contact_messages cm
+       JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+       WHERE cm.account_id = @account_id
+       GROUP BY cm.email
+       HAVING lower(cm.email) LIKE @infix ESCAPE '\\'
+           OR MAX(CASE WHEN cm.name IS NOT NULL AND lower(cm.name) LIKE @infix ESCAPE '\\'
+                       THEN 1 ELSE 0 END) = 1`
     )
-    .all({ account_id: accountId, pattern: `%${escaped}%` }) as {
+    .all({ account_id: accountId, prefix: `${escaped}%`, infix: `%${escaped}%` }) as {
     email: string
-    name: string
     sent_to_count: number
     received_count: number
     last_interacted_at: number | null
+    name_prefix: number
   }[]
 
   const stats: ContactStats[] = rows.map((row) => ({
-    name: row.name,
     email: row.email,
     sentToCount: row.sent_to_count,
     receivedCount: row.received_count,
-    lastInteractedAt: row.last_interacted_at ?? 0
+    lastInteractedAt: row.last_interacted_at ?? 0,
+    nameMatchesPrefix: row.name_prefix === 1
   }))
-  return rankContacts(stats, query, accountId, now)
+  // account_id doubles as the email in v1, but read the account row so a future
+  // opaque account id (SPEC D4) cannot start suggesting the signed-in address.
+  const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
+    | { email: string }
+    | undefined
+  const ranked = rankContacts(stats, query, account?.email ?? accountId, now)
+  if (ranked.length === 0) return []
+
+  const names = contactDisplayNames(
+    db,
+    accountId,
+    ranked.map((contact) => contact.email)
+  )
+  return ranked.map((contact) => ({
+    name: displayName(names.get(contact.email), contact.email),
+    email: contact.email,
+    score: contact.score
+  }))
+}
+
+/** Most recent non-empty display name per address, for a already-ranked shortlist. */
+function contactDisplayNames(db: Db, accountId: string, emails: string[]): Map<string, string> {
+  const placeholders = emails.map(() => '?').join(', ')
+  // Exactly one MAX() plus a bare column makes SQLite return cm.name from the row
+  // that produced the maximum — the newest message that carried a display name.
+  const rows = db
+    .prepare(
+      `SELECT cm.email AS email, cm.name AS name, MAX(m.internal_date)
+       FROM contact_messages cm
+       JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+       WHERE cm.account_id = ? AND cm.name IS NOT NULL AND cm.name != ''
+         AND cm.email IN (${placeholders})
+       GROUP BY cm.email`
+    )
+    .all(accountId, ...emails) as { email: string; name: string }[]
+  return new Map(rows.map((row) => [row.email, row.name]))
 }
 
 export function getInlineAttachmentData(

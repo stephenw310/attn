@@ -6,7 +6,6 @@ import type { MailProvider, ThreadIdPage } from './provider'
 
 interface FakeSyncState {
   backfill_cursor: string | null
-  sent_synced: number
   updated_at: number | null
   last_history_id?: string
 }
@@ -17,21 +16,11 @@ function fakeDb(state: FakeSyncState | undefined): Db {
       get: () => (sql.startsWith('SELECT backfill_cursor') ? state : undefined),
       run: (...args: unknown[]) => {
         if (sql.includes('INSERT INTO sync_state')) {
-          state = {
-            backfill_cursor: 'metadata',
-            sent_synced: 0,
-            updated_at: 0,
-            last_history_id: args[1] as string
-          }
+          state = { backfill_cursor: 'metadata', updated_at: 0, last_history_id: args[1] as string }
         } else if (sql.includes('UPDATE sync_state SET backfill_cursor')) {
-          if (!state) state = { backfill_cursor: null, sent_synced: 0, updated_at: null }
+          if (!state) state = { backfill_cursor: null, updated_at: null }
           state.backfill_cursor = args[0] as string
           state.updated_at = args.length === 3 ? (args[1] as number) : 0
-          if (sql.includes('sent_synced = 1')) state.sent_synced = 1
-        } else if (sql.includes('UPDATE sync_state SET sent_synced = 1')) {
-          if (!state) state = { backfill_cursor: null, sent_synced: 0, updated_at: null }
-          state.sent_synced = 1
-          state.updated_at = args[0] as number
         }
         return { changes: 1 }
       }
@@ -121,7 +110,7 @@ describe('windowed backfill checkpoints', () => {
   it('resumes directly at reconciliation after sent metadata is complete', async () => {
     const provider = emptyProvider()
     const result = await runInboxBackfill(
-      fakeDb({ backfill_cursor: 'reconcile', sent_synced: 1, updated_at: 0, last_history_id: '88' }),
+      fakeDb({ backfill_cursor: 'reconcile', updated_at: 0, last_history_id: '88' }),
       provider,
       callbacks
     )
@@ -139,12 +128,7 @@ describe('windowed backfill checkpoints', () => {
     })
 
     const result = await runInboxBackfill(
-      fakeDb({
-        backfill_cursor: 'metadata:expired',
-        sent_synced: 0,
-        updated_at: 0,
-        last_history_id: '88'
-      }),
+      fakeDb({ backfill_cursor: 'metadata:expired', updated_at: 0, last_history_id: '88' }),
       provider,
       callbacks
     )
@@ -166,12 +150,7 @@ describe('windowed backfill checkpoints', () => {
   it('restarts a completed cursor for expired-history recovery', async () => {
     const provider = emptyProvider()
     vi.mocked(provider.getProfile).mockRejectedValueOnce(new Error('offline'))
-    const db = fakeDb({
-      backfill_cursor: 'done',
-      sent_synced: 1,
-      updated_at: 1,
-      last_history_id: '88'
-    })
+    const db = fakeDb({ backfill_cursor: 'done', updated_at: 1, last_history_id: '88' })
 
     const failed = await runInboxBackfill(db, provider, callbacks, { recovery: true })
     const recovered = await runInboxBackfill(db, provider, callbacks, { recovery: true })
@@ -200,7 +179,7 @@ describe('windowed backfill checkpoints', () => {
 
 describe('backfill cursor routing', () => {
   it('routes a fresh account through the full sequence', () => {
-    expect(planBackfillStart(undefined, 0)).toEqual({
+    expect(planBackfillStart(undefined)).toEqual({
       kind: 'run',
       cursor: { phase: 'metadata' },
       initialize: true
@@ -208,42 +187,29 @@ describe('backfill cursor routing', () => {
   })
 
   it('resumes mid-backfill without resetting its checkpoint', () => {
-    expect(planBackfillStart('bodies:page-2', 0)).toEqual({
+    expect(planBackfillStart('bodies:page-2')).toEqual({
       kind: 'run',
       cursor: { phase: 'bodies', pageToken: 'page-2' },
       initialize: false
     })
-    expect(planBackfillStart('reconcile', 0)).toEqual({
+    expect(planBackfillStart('sent:page-3')).toEqual({
       kind: 'run',
-      cursor: { phase: 'sent' },
+      cursor: { phase: 'sent', pageToken: 'page-3' },
+      initialize: false
+    })
+    expect(planBackfillStart('reconcile')).toEqual({
+      kind: 'run',
+      cursor: { phase: 'reconcile' },
       initialize: false
     })
   })
 
-  it('runs only sent metadata for a completed pre-v7 account', async () => {
-    expect(planBackfillStart('done', 0)).toEqual({ kind: 'sent-only', cursor: { phase: 'sent' } })
-    const provider = emptyProvider()
-    const state: FakeSyncState = {
-      backfill_cursor: 'done',
-      sent_synced: 0,
-      updated_at: 1,
-      last_history_id: '88'
-    }
-
-    const result = await runInboxBackfill(fakeDb(state), provider, callbacks)
-
-    expect(provider.listLabels).not.toHaveBeenCalled()
-    expect(provider.listThreadIds).toHaveBeenCalledOnce()
-    expect(provider.listThreadIds).toHaveBeenCalledWith({
-      q: 'newer_than:12m',
-      labelIds: ['SENT'],
-      pageToken: undefined
+  it('skips a completed account but still restarts it for history recovery', () => {
+    expect(planBackfillStart('done')).toEqual({ kind: 'skip' })
+    expect(planBackfillStart('done', true)).toEqual({
+      kind: 'run',
+      cursor: { phase: 'metadata' },
+      initialize: true
     })
-    expect(result).toEqual({ threadCount: 0, inboxThreadIds: null })
-    expect(state).toMatchObject({ backfill_cursor: 'done', sent_synced: 1 })
-  })
-
-  it('skips a completed account after sent metadata has been synced', () => {
-    expect(planBackfillStart('done', 1)).toEqual({ kind: 'skip' })
   })
 })

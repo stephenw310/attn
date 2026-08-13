@@ -1,9 +1,15 @@
 export interface ContactStats {
-  name: string
   email: string
   sentToCount: number
   receivedCount: number
   lastInteractedAt: number
+  /** True when any stored display name for this contact starts with the query. */
+  nameMatchesPrefix: boolean
+}
+
+export interface RankedContact {
+  email: string
+  score: number
 }
 
 export interface ContactSearchResult {
@@ -14,10 +20,16 @@ export interface ContactSearchResult {
 
 const RECENCY_HALF_LIFE_MS = 90 * 24 * 60 * 60 * 1000
 
+/** What an address falls back to when no correspondent ever supplied a display name. */
+export function displayName(name: string | null | undefined, email: string): string {
+  return name?.trim() || email.split('@')[0] || email
+}
+
 /**
- * Rank local contacts without touching the store so the renderer can apply the
- * same ordering while the user types. Prefix matches always precede infix
- * matches; interaction score breaks ties within each match class.
+ * Order candidates the store has already matched against the query. Matching lives
+ * in SQL so there is exactly one filter; this only scores and sorts, which keeps the
+ * comparator pure and unit-testable. Prefix matches always precede infix matches;
+ * interaction score breaks ties within each match class.
  */
 export function rankContacts(
   contacts: readonly ContactStats[],
@@ -25,7 +37,7 @@ export function rankContacts(
   selfEmail: string,
   now = Date.now(),
   limit = 8
-): ContactSearchResult[] {
+): RankedContact[] {
   const needle = query.trim().toLocaleLowerCase()
   const self = selfEmail.trim().toLocaleLowerCase()
 
@@ -33,16 +45,12 @@ export function rankContacts(
     .filter((contact) => contact.email.trim().toLocaleLowerCase() !== self)
     .map((contact) => {
       const email = contact.email.trim().toLocaleLowerCase()
-      const name = contact.name.trim()
-      const searchableName = name.toLocaleLowerCase()
-      const prefix = needle.length === 0 || email.startsWith(needle) || searchableName.startsWith(needle)
-      const infix = prefix || email.includes(needle) || searchableName.includes(needle)
+      const prefix = needle.length === 0 || contact.nameMatchesPrefix || email.startsWith(needle)
       const age = Math.max(0, now - contact.lastInteractedAt)
       const recencyMultiplier = 0.5 ** (age / RECENCY_HALF_LIFE_MS)
       const score = (3 * contact.sentToCount + contact.receivedCount) * recencyMultiplier
-      return { contact, email, name, prefix, infix, score }
+      return { contact, email, prefix, score }
     })
-    .filter((candidate) => candidate.infix)
     .sort((left, right) => {
       if (left.prefix !== right.prefix) return left.prefix ? -1 : 1
       if (left.score !== right.score) return right.score - left.score
@@ -52,9 +60,5 @@ export function rankContacts(
       return left.email.localeCompare(right.email)
     })
     .slice(0, Math.max(0, limit))
-    .map(({ email, name, score }) => ({
-      name: name || email.split('@')[0] || email,
-      email,
-      score
-    }))
+    .map(({ email, score }) => ({ email, score }))
 }

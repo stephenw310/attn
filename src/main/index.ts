@@ -155,19 +155,18 @@ function startSync(): void {
     console.error(`[sync] failed: ${message}`)
     return
   }
-  const state = db
-    .prepare('SELECT backfill_cursor, sent_synced FROM sync_state WHERE account_id = ?')
-    .get(accountId) as { backfill_cursor: string | null; sent_synced: number } | undefined
-  const backfillPlan = planBackfillStart(state?.backfill_cursor, state?.sent_synced ?? 0)
+  const state = db.prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
+    | { backfill_cursor: string | null }
+    | undefined
+  const backfillPlan = planBackfillStart(state?.backfill_cursor)
   if (backfillPlan.kind === 'skip') {
     startHistoryPoller(accountId, provider, generation, true)
     return
   }
   if (backfillRetryGeneration === generation) backfillRetryGeneration = null
   syncRunning = true
-  const initialStage = backfillPlan.kind === 'sent-only' ? 'sent' : backfillPlan.cursor.phase
-  setSyncState({ phase: 'syncing', stage: initialStage, threadsDone: 0 })
-  console.log(`[sync] ${backfillPlan.kind === 'sent-only' ? 'sent upgrade' : 'mail backfill'} started`)
+  setSyncState({ phase: 'syncing', stage: backfillPlan.cursor.phase, threadsDone: 0 })
+  console.log('[sync] mail backfill started')
   const activeDb = db
   void runInboxBackfill(activeDb, provider, {
     onProgress: (progress) => {
@@ -200,9 +199,7 @@ function startSync(): void {
       }
       const retryRequested = backfillRetryGeneration === generation
       if (retryRequested) backfillRetryGeneration = null
-      if (result.inboxThreadIds !== null) {
-        reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
-      }
+      reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
       setSyncState({ phase: 'idle' })
       broadcastMailChanged()
       console.log(`[sync] backfill done: ${result.threadCount} threads for ${accountId}`)
@@ -262,9 +259,7 @@ function startHistoryPoller(
         )
         if (!result) throw failure
         if (generation !== authSessionGeneration) throw new Error('authentication session changed')
-        if (result.inboxThreadIds !== null) {
-          reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
-        }
+        reconcileInboxMembership(activeDb, accountId, result.inboxThreadIds)
       } finally {
         if (generation === authSessionGeneration) {
           syncRunning = false

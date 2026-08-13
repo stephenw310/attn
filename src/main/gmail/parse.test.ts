@@ -82,6 +82,13 @@ describe('Gmail message parsing', () => {
       '<reply@example.com>'
     ])
     expect(parseMessageIds('bare@example.com')).toEqual(['<bare@example.com>'])
+    expect(parseMessageIds('one@example.com, two@example.com')).toEqual([
+      '<one@example.com>',
+      '<two@example.com>'
+    ])
+    // Junk without an addr-spec must not become an invented id on a later reply.
+    expect(parseMessageIds('unknown')).toEqual([])
+    expect(parseMessageIds('see the thread below')).toEqual([])
 
     expect(
       extractThreadingHeaders({

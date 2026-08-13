@@ -49,10 +49,12 @@ export function parseMessageIds(raw: string): string[] {
   const bracketed = [...unfolded.matchAll(/<([^<>\s]+)>/g)].map((match) => `<${match[1]}>`)
   if (bracketed.length > 0) return bracketed
 
+  // Bare ids do occur in the wild. Require the RFC 5322 msg-id "@" so a malformed
+  // header cannot invent ids that a later reply would put on the wire.
   return unfolded
-    .split(/\s+/)
-    .map((value) => value.replace(/^[<,]+|[>,]+$/g, ''))
-    .filter((value) => value.length > 0 && !/\s/.test(value))
+    .split(/[\s,]+/)
+    .map((value) => value.replace(/^<+|>+$/g, ''))
+    .filter((value) => value.includes('@'))
     .map((value) => `<${value}>`)
 }
 

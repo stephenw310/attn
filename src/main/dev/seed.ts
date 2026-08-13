@@ -138,14 +138,13 @@ export function loadSeed(db: Db, path: string): string {
       }
       persistThread(db, fixture.account, gmailThread)
     }
-    // Seeded stores are complete local snapshots and never contact Gmail. Mark
-    // both backfill dimensions complete so relaunches model a settled account.
+    // Seeded stores are complete local snapshots and never contact Gmail. Mark the
+    // backfill complete so relaunches model a settled account.
     db.prepare(
-      `INSERT INTO sync_state (account_id, backfill_cursor, sent_synced, updated_at)
-       VALUES (?, 'done', 1, ?)
+      `INSERT INTO sync_state (account_id, backfill_cursor, updated_at)
+       VALUES (?, 'done', ?)
        ON CONFLICT(account_id) DO UPDATE SET
          backfill_cursor = excluded.backfill_cursor,
-         sent_synced = excluded.sent_synced,
          updated_at = excluded.updated_at`
     ).run(fixture.account, importedAt)
   })()

@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { type ContactStats, rankContacts } from './contacts'
+import { type ContactStats, displayName, rankContacts } from './contacts'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = Date.UTC(2026, 7, 13)
 
 function contact(overrides: Partial<ContactStats> = {}): ContactStats {
   return {
-    name: 'Avery Stone',
     email: 'avery@example.com',
     sentToCount: 1,
     receivedCount: 1,
     lastInteractedAt: NOW,
+    nameMatchesPrefix: false,
     ...overrides
   }
 }
@@ -28,12 +28,9 @@ describe('contact ranking', () => {
     expect(old.score).toBe(2)
   })
 
-  it('places name or address prefixes ahead of stronger infix matches', () => {
+  it('places address prefixes ahead of stronger infix matches', () => {
     const ranked = rankContacts(
-      [
-        contact({ name: 'Malik', email: 'malik@example.com', sentToCount: 100 }),
-        contact({ name: 'Ali Chen', email: 'ali@example.com', sentToCount: 1 })
-      ],
+      [contact({ email: 'malik@example.com', sentToCount: 100 }), contact({ email: 'ali@example.com' })],
       'ali',
       'self@example.com',
       NOW
@@ -42,14 +39,33 @@ describe('contact ranking', () => {
     expect(ranked.map((result) => result.email)).toEqual(['ali@example.com', 'malik@example.com'])
   })
 
+  it('treats a store-reported name prefix as a prefix match', () => {
+    const ranked = rankContacts(
+      [
+        contact({ email: 'm@example.com', sentToCount: 100 }),
+        contact({ email: 'z@example.com', nameMatchesPrefix: true })
+      ],
+      'ali',
+      'self@example.com',
+      NOW
+    )
+
+    expect(ranked.map((result) => result.email)).toEqual(['z@example.com', 'm@example.com'])
+  })
+
   it('excludes the signed-in address case-insensitively', () => {
     expect(
-      rankContacts(
-        [contact({ name: 'Me', email: 'SELF@EXAMPLE.COM' }), contact()],
-        '',
-        'self@example.com',
-        NOW
-      ).map((result) => result.email)
+      rankContacts([contact({ email: 'SELF@EXAMPLE.COM' }), contact()], '', 'self@example.com', NOW).map(
+        (result) => result.email
+      )
     ).toEqual(['avery@example.com'])
+  })
+})
+
+describe('display name fallback', () => {
+  it('falls back to the local part when no correspondent supplied a name', () => {
+    expect(displayName('Maya Lin', 'maya@example.com')).toBe('Maya Lin')
+    expect(displayName('  ', 'maya@example.com')).toBe('maya')
+    expect(displayName(null, 'maya@example.com')).toBe('maya')
   })
 })

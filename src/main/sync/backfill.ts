@@ -22,8 +22,12 @@ export interface BackfillProgress {
 
 export interface BackfillResult {
   threadCount: number
-  /** Null for the sent-only v7 upgrade, which must not reconcile INBOX. */
-  inboxThreadIds: string[] | null
+  /**
+   * Authoritative INBOX membership from the reconcile phase. Only meaningful for a
+   * run that reached reconciliation — callers must check the plan for 'skip' first,
+   * because reconciling against an empty list would strip INBOX from every thread.
+   */
+  inboxThreadIds: string[]
 }
 
 export interface BackfillOptions {
@@ -38,26 +42,11 @@ export interface ParsedCursor {
   pageToken?: string
 }
 
-export type BackfillStartPlan =
-  | { kind: 'skip' }
-  | { kind: 'sent-only'; cursor: ParsedCursor }
-  | { kind: 'run'; cursor: ParsedCursor; initialize: boolean }
+export type BackfillStartPlan = { kind: 'skip' } | { kind: 'run'; cursor: ParsedCursor; initialize: boolean }
 
-/** Pure routing for fresh, resumed, completed, and v7-upgrade databases. */
-export function planBackfillStart(
-  rawCursor: string | null | undefined,
-  sentSynced: number,
-  recovery = false
-): BackfillStartPlan {
-  if (rawCursor === 'done' && !recovery) {
-    return sentSynced === 1 ? { kind: 'skip' } : { kind: 'sent-only', cursor: { phase: 'sent' } }
-  }
-  // v6 could already be waiting at reconciliation when v7 lands. Replaying the
-  // idempotent sent phase is also the safe answer to a crash between the sent
-  // page checkpoint and sent_synced update.
-  if (rawCursor === 'reconcile' && sentSynced === 0 && !recovery) {
-    return { kind: 'run', cursor: { phase: 'sent' }, initialize: false }
-  }
+/** Pure routing for fresh, resumed, and completed databases. */
+export function planBackfillStart(rawCursor: string | null | undefined, recovery = false): BackfillStartPlan {
+  if (rawCursor === 'done' && !recovery) return { kind: 'skip' }
   const resuming = Boolean(rawCursor && rawCursor !== 'done')
   return {
     kind: 'run',
@@ -78,29 +67,25 @@ export async function runInboxBackfill(
     ensureAccount(db, accountId, profile.emailAddress)
 
     const previous = db
-      .prepare('SELECT backfill_cursor, sent_synced, updated_at FROM sync_state WHERE account_id = ?')
-      .get(accountId) as
-      | { backfill_cursor: string | null; sent_synced: number; updated_at: number | null }
-      | undefined
-    const plan = planBackfillStart(previous?.backfill_cursor, previous?.sent_synced ?? 0, options.recovery)
-    if (plan.kind === 'skip') return { threadCount: 0, inboxThreadIds: null }
+      .prepare('SELECT backfill_cursor, updated_at FROM sync_state WHERE account_id = ?')
+      .get(accountId) as { backfill_cursor: string | null; updated_at: number | null } | undefined
+    const plan = planBackfillStart(previous?.backfill_cursor, options.recovery)
+    if (plan.kind === 'skip') return { threadCount: 0, inboxThreadIds: [] }
 
-    const sentOnly = plan.kind === 'sent-only'
     let cursor = plan.cursor
-    if (plan.kind === 'run' && plan.initialize) {
+    if (plan.initialize) {
       // Record the gapless history checkpoint before the first metadata page.
       db.prepare(
-        `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor, sent_synced, updated_at)
-         VALUES (?, ?, 'metadata', 0, 0)
+        `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor, updated_at)
+         VALUES (?, ?, 'metadata', 0)
          ON CONFLICT(account_id) DO UPDATE SET
            last_history_id = excluded.last_history_id,
            backfill_cursor = excluded.backfill_cursor,
-           sent_synced = excluded.sent_synced,
            updated_at = excluded.updated_at`
       ).run(accountId, profile.historyId)
     }
 
-    if (!sentOnly) upsertLabels(db, accountId, await provider.listLabels())
+    upsertLabels(db, accountId, await provider.listLabels())
     let threadsDone = 0
 
     if (cursor.phase === 'metadata') {
@@ -161,7 +146,7 @@ export async function runInboxBackfill(
         labelIds: ['SENT'],
         phase: 'sent',
         initialPageToken: cursor.pageToken,
-        nextPhase: sentOnly ? 'done' : 'reconcile',
+        nextPhase: 'reconcile',
         onThread: async (threadId) => {
           persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
             metadataOnly: true
@@ -172,11 +157,6 @@ export async function runInboxBackfill(
           callbacks.onProgress({ stage: 'sent', threadsDone, mailChanged: true })
         }
       })
-      db.prepare('UPDATE sync_state SET sent_synced = 1, updated_at = ? WHERE account_id = ?').run(
-        Date.now(),
-        accountId
-      )
-      if (sentOnly) return { threadCount: threadsDone, inboxThreadIds: null }
       cursor = { phase: 'reconcile' }
     }
 
@@ -191,9 +171,11 @@ export async function runInboxBackfill(
       pageToken = page.nextPageToken
     } while (pageToken)
 
-    db.prepare(
-      'UPDATE sync_state SET backfill_cursor = ?, sent_synced = 1, updated_at = ? WHERE account_id = ?'
-    ).run('done', Date.now(), accountId)
+    db.prepare('UPDATE sync_state SET backfill_cursor = ?, updated_at = ? WHERE account_id = ?').run(
+      'done',
+      Date.now(),
+      accountId
+    )
     return { threadCount: threadsDone, inboxThreadIds: [...inboxThreadIds] }
   } catch (error) {
     callbacks.onError(error)
@@ -209,7 +191,7 @@ interface ThreadPhaseOptions {
   labelIds: readonly string[]
   phase: Exclude<BackfillPhase, 'reconcile'>
   initialPageToken?: string
-  nextPhase: BackfillPhase | 'done'
+  nextPhase: BackfillPhase
   onThread: (threadId: string) => Promise<void>
   onPage: (count: number) => void
 }
