@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import type { AuthStatus } from '../shared/auth'
-import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
+import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
 import { clearUndo } from './actions'
 import { ActionExecutor } from './actions/executor'
@@ -195,6 +195,7 @@ function initialize(): void {
     isSignedIn: () => authStatus().signedIn,
     isSeeded: () => seedAccountId !== null,
     makeProvider,
+    isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
     broadcastState: (state) => broadcast(IPC_CHANNELS.syncState, state),
     broadcastMailChanged,
     getActionExecutor: () => actionExecutor,
@@ -244,10 +245,10 @@ function initialize(): void {
 
 function registerTestIpc(): void {
   if (!testUserData) return
-  ipcMain.on('attn:test:focusThread', (_event, threadId: unknown) => {
+  ipcMain.on(TEST_CHANNELS.focusThread, (_event, threadId: unknown) => {
     if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
   })
-  ipcMain.on('attn:test:setSyncState', (_event, state: SyncState) => syncController?.setStateForTest(state))
+  ipcMain.on(TEST_CHANNELS.setSyncState, (_event, state: SyncState) => syncController?.setStateForTest(state))
 }
 
 function teardown(): void {
@@ -260,8 +261,7 @@ function teardown(): void {
   snoozeScheduler = null
   mailNotifier?.stop()
   mailNotifier = null
-  ipcMain.removeAllListeners('attn:test:focusThread')
-  ipcMain.removeAllListeners('attn:test:setSyncState')
+  for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
   db?.close()
   db = null
 }

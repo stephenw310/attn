@@ -1,4 +1,3 @@
-import { BrowserWindow } from 'electron'
 import type { SyncState } from '../shared/mail'
 import { pendingActionCount } from './actions'
 import type { ActionExecutor } from './actions/executor'
@@ -17,6 +16,8 @@ interface SyncControllerContext {
   isSignedIn: () => boolean
   isSeeded: () => boolean
   makeProvider: (generation: number) => GmailMailProvider | null
+  /** Drives the poller's foreground/background cadence; owned by index.ts so this stays Electron-free. */
+  isForeground: () => boolean
   broadcastState: (state: SyncState) => void
   broadcastMailChanged: () => void
   getActionExecutor: () => ActionExecutor | null
@@ -90,8 +91,12 @@ export class SyncController {
   }
 
   async resumeOnlineWork(): Promise<void> {
+    // Remote changes must keep flowing even when a queued local action is in
+    // Gmail's retry/backoff loop. The executor and history poller are independent.
     if (this.context.isSignedIn()) this.startSync()
     await this.context.getActionExecutor()?.trigger()
+    // A sign-out/account switch can make an active drain finish early. A second
+    // pass picks up the newly active account.
     await this.context.getActionExecutor()?.trigger()
   }
 
@@ -211,7 +216,7 @@ export class SyncController {
       db: this.context.db,
       accountId,
       provider,
-      isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
+      isForeground: this.context.isForeground,
       recoverExpiredHistory: () => this.recoverExpiredHistory(accountId, provider, generation),
       onCycleComplete: (changed) => {
         if (generation !== this.generation) return

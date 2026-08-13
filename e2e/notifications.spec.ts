@@ -1,14 +1,21 @@
+import type { ElectronApplication } from '@playwright/test'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
+
+async function emitFocusThread(app: ElectronApplication, threadId: string): Promise<void> {
+  await app.evaluate(({ ipcMain }, { channel, id }) => ipcMain.emit(channel, {}, id), {
+    channel: TEST_CHANNELS.focusThread,
+    id: threadId
+  })
+}
 
 test('focus-thread push selects the requested row and opens its conversation', async ({ app, page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await expect(page.getByTestId('conversation-view')).toHaveCount(0)
 
-  await app.evaluate(({ ipcMain }) => {
-    ipcMain.emit('attn:test:focusThread', {}, 't-budget')
-  })
+  await emitFocusThread(app, 't-budget')
 
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await expect(page.getByTestId('conversation-subject')).toHaveText('August budget')
@@ -21,10 +28,10 @@ test('focus-thread push selects the requested row and opens its conversation', a
 test('a notification target survives recreating a closed window', async ({ app, page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   const windowCreated = app.waitForEvent('window')
-  await app.evaluate(({ BrowserWindow, ipcMain }) => {
+  await app.evaluate(({ BrowserWindow, ipcMain }, channel) => {
     for (const win of BrowserWindow.getAllWindows()) win.destroy()
-    ipcMain.emit('attn:test:focusThread', {}, 't-budget')
-  })
+    ipcMain.emit(channel, {}, 't-budget')
+  }, TEST_CHANNELS.focusThread)
 
   const reopened = await windowCreated
   await expect(reopened.getByTestId('thread-row')).toHaveCount(8)
@@ -54,9 +61,7 @@ test('focus-thread safely leaves an open Snoozed conversation before opening Inb
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
   const pendingBefore = await page.evaluate(() => window.attn.mail.getPendingActionCount())
 
-  await app.evaluate(({ ipcMain }) => {
-    ipcMain.emit('attn:test:focusThread', {}, 't-travel')
-  })
+  await emitFocusThread(app, 't-travel')
 
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Flight options')

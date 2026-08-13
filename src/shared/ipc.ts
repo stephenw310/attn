@@ -36,6 +36,18 @@ export const IPC_CHANNELS = {
   syncState: 'sync:state'
 } as const
 
+/**
+ * E2E-only channels, registered by the main process solely under
+ * ATTN_TEST_USER_DATA. They live here so main and the specs share one literal
+ * and a rename fails at compile time rather than silently at runtime.
+ */
+export const TEST_CHANNELS = {
+  focusThread: 'attn:test:focusThread',
+  setSyncState: 'attn:test:setSyncState'
+} as const
+
+export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]
+
 export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthStatus }
