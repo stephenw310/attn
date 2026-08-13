@@ -162,6 +162,23 @@ export function takePendingFocus(pending: PendingFocus | null, now = Date.now())
   return now - pending.at > PENDING_FOCUS_TTL_MS ? null : pending.threadId
 }
 
+/**
+ * A banner outlives the session that created it: it can sit in Notification
+ * Center across a sign-out and sign-in. Clicking it must not aim a previous
+ * account's thread id at the current one — the renderer would leave whatever the
+ * user is reading, reset the selection, and only then discover the thread is not
+ * there. `pendingFocus` is already cleared on account changes for this reason;
+ * a retained click handler would otherwise route straight around that guard.
+ */
+export function notificationTarget(
+  threadId: string | undefined,
+  notifiedAccount: string | null,
+  currentAccount: string | null
+): string | null {
+  if (!threadId) return null
+  return notifiedAccount !== null && notifiedAccount === currentAccount ? threadId : null
+}
+
 export function candidatesFor(
   db: Db,
   accountId: string,
@@ -276,6 +293,9 @@ export class MailNotifier {
 
   setAccountId(accountId: string | null): void {
     this.accountId = accountId
+    // Nothing retained can still be actionable for the new account; the click
+    // guard makes this safe either way, so this is purely releasing memory.
+    this.shown.clear()
     this.updateBadge()
   }
 
@@ -293,8 +313,10 @@ export class MailNotifier {
       this.shown.retain(notification)
       notification.on('click', () => {
         this.shown.release(notification)
-        console.log(`[notify] click${threadId ? ` → focus ${threadId}` : ' → summary, no target'}`)
-        if (threadId) this.focusThread(threadId)
+        // Resolve against the account live *now*, not the one captured at show time.
+        const target = notificationTarget(threadId, accountId, this.accountId)
+        console.log(`[notify] click${target ? ` → focus ${target}` : ' → show window (no live target)'}`)
+        if (target) this.focusThread(target)
         else this.showMainWindow()
       })
       notification.on('failed', () => this.shown.release(notification))

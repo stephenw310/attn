@@ -7,6 +7,7 @@ import {
   candidatesFor,
   isolateNotificationFailure,
   notificationPausedUntil,
+  notificationTarget,
   oneHourFrom,
   PENDING_FOCUS_TTL_MS,
   planNotifications,
@@ -259,5 +260,24 @@ describe('notification retention', () => {
     retainer.retain({})
     retainer.clear()
     expect(retainer.size).toBe(0)
+  })
+})
+
+describe('notificationTarget', () => {
+  it('focuses the thread while the notifying account is still signed in', () => {
+    expect(notificationTarget('t-budget', 'a@attn.test', 'a@attn.test')).toBe('t-budget')
+  })
+
+  it('drops a target whose account was switched out from under the banner', () => {
+    // A banner can sit in Notification Center across a sign-out/sign-in. Honouring
+    // it would pull the new account away from whatever it is showing to hunt a
+    // thread it does not have.
+    expect(notificationTarget('t-budget', 'a@attn.test', 'b@attn.test')).toBeNull()
+    expect(notificationTarget('t-budget', 'a@attn.test', null)).toBeNull()
+    expect(notificationTarget('t-budget', null, null)).toBeNull()
+  })
+
+  it('has no target for a summary notification', () => {
+    expect(notificationTarget(undefined, 'a@attn.test', 'a@attn.test')).toBeNull()
   })
 })
