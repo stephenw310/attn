@@ -8,10 +8,11 @@ directories:
 files:
   - out/**/*
   - package.json
+  - resources/icon.png
+  - resources/tray.png
+  - '!node_modules/better-sqlite3/{build,deps,src}/**/*'
 
 asar: true
-asarUnpack:
-  - node_modules/better-sqlite3/**/*
 
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
@@ -23,11 +24,19 @@ mac:
   target:
     - dmg
     - zip
+  files:
+    - '!node_modules/better-sqlite3/prebuilds/!(darwin-${arch}.node)'
+  asarUnpack:
+    - node_modules/better-sqlite3/prebuilds/darwin-${arch}.node
 
 win:
   icon: icon.ico
   target:
     - nsis
+  files:
+    - '!node_modules/better-sqlite3/prebuilds/!(win32-${arch}.node)'
+  asarUnpack:
+    - node_modules/better-sqlite3/prebuilds/win32-${arch}.node
 
 nsis:
   oneClick: false

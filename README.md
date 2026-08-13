@@ -64,9 +64,9 @@ npm run package:win
 ```
 
 On macOS, open the generated `.dmg` in `dist/` and drag **Attn** to Applications. On Windows, run
-the generated `.exe` in `dist/`. macOS personal builds are ad-hoc signed so they run locally, but
-the artifacts are not Developer ID signed or notarized; public signing and GitHub Releases
-auto-update remain M4 work.
+the generated `.exe` in `dist/`. macOS personal builds are ad-hoc signed rather than Developer ID
+signed or notarized. Windows personal builds are unsigned and may trigger a Microsoft Defender
+SmartScreen warning. Public signing, notarization, and GitHub Releases auto-update remain M4 work.
 
 The `Package desktop apps` GitHub Actions workflow builds both Apple Silicon and Intel macOS
 artifacts plus the Windows installer only when manually dispatched. It retains the non-release
