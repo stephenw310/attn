@@ -1,4 +1,4 @@
-# Attn — Product & Technical Spec (v0.12)
+# Attn — Product & Technical Spec (v0.13)
 
 A desktop email client for **macOS and Windows** modeled on Superhuman's core idea: email triage so fast and keyboard-driven that reaching inbox zero is the default state, not an aspiration.
 
@@ -95,15 +95,20 @@ Sign in with Google via OAuth 2.0 **authorization-code + PKCE, loopback redirect
 
 Tokens are stored via Electron `safeStorage` (macOS Keychain / Windows DPAPI). No credentials ever touch disk in plaintext.
 
+**Signed-out state (added v0.13, PR #27):** a signed-out launch shows a dedicated sign-in screen, not a preview of someone else's mail — the earlier mock inbox is gone. The mail tree does not mount behind that screen, so no mail keybinding, IPC subscription, or command registration is live while onboarding; the sign-in action is autofocused so `Enter` reaches it directly. When `oauth.config.json` is missing the screen explains the one-time setup and links to it rather than offering a dead button, and a failed auth-status probe offers a retry instead of hanging on a checking state.
+
 ⚠️ **Real-world constraint:** `gmail.modify` is a restricted scope. **Decision for v1: dev-mode distribution** — each user supplies their own Google Cloud OAuth client (unverified-app warning is expected). Google's app verification + security assessment is deferred until/unless there is a public release (§9).
 
 **Acceptance criteria**
 - Fresh install → signed in and reading first conversations in under 60s on a typical inbox (metadata streams in; UI is usable before backfill completes).
 - Revoking access from Google account settings degrades gracefully to a re-auth prompt, never a crash or silent hang.
+- A signed-out launch is fully operable from the keyboard alone, and no mail shortcut does anything there.
 
 ### F2 — Sync engine & offline
 
-**Backfill:** on first sync, fetch all labels, thread/message metadata for the last 12 months (headers, snippets, label sets), then message bodies for the last 90 days, newest first. Older content is fetched on demand and cached permanently. UI renders as soon as the first page of metadata lands.
+**Backfill:** on first sync, fetch all labels, thread/message metadata for the last 12 months (headers, snippets, label sets), then message bodies for the last 90 days, newest first. The backfill runs as checkpointed stages (metadata → bodies → membership reconcile) with the cursor persisted per page, so a killed or offline-interrupted app resumes where it stopped instead of restarting. Older content is fetched on demand and cached permanently. UI renders as soon as the first page of metadata lands.
+
+*M1 staging:* the synced window covers **Inbox** threads only, and on-demand hydration of older bodies is not yet built. M3's system-mailbox work broadens the window to all cached system labels (§9 #10); on-demand body fetch arrives with the FTS5/bodies milestone.
 
 **Incremental:** poll `history.list` from the last stored `historyId` (15s foreground / 60s background). On `historyId` expiry (HTTP 404), fall back to a delta re-list. All writes funnel through a single reducer so server-originated and locally-originated changes apply identically.
 
@@ -114,10 +119,13 @@ Tokens are stored via Electron `safeStorage` (macOS Keychain / Windows DPAPI). N
 
 Conflict rule: server state wins, except locally-pending actions replay on top of it.
 
+**Sync visibility (added v0.13; shipped at M1 exit):** local-first hides the network, so the app must say what the network is doing. The footer carries a persistent sync status — **Live**, **Checking**, **Syncing** (with backfill stage progress), **Offline**, or **Error** — distinguishing "network down, local mail fully usable" from "sync is failing". The error state opens details with **Retry now** and **Copy details** actions (both also registered commands); offline failures retry automatically when connectivity returns. The top-bar queue readout appends "· N pending" whenever local actions await server replay.
+
 **Acceptance criteria**
 - Airplane mode: archive 20 conversations, quit the app, relaunch online → all 20 sync; none lost, none duplicated.
 - Kill the app mid-sync → no corruption; next launch resumes from stored `historyId`.
 - A change made in Gmail web (e.g. archive) is reflected locally within one poll interval.
+- Losing the network mid-session flips the status to Offline while reads and triage keep working; restoring it returns to Live and drains the queue with no user action.
 
 ### F3 — Inbox list & conversation view
 
@@ -193,7 +201,7 @@ Composing opens an **overlay panel** above the inbox (context is never lost). `C
 - **Attachments:** drag-and-drop or picker, up to Gmail's 25MB limit, with progress indication.
 - **Drafts:** autosaved locally every second while idle and synced to Gmail Drafts, crash-safe.
 - **Send:** `Mod+Enter`.
-- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/5/**10**/20/30s, default 10). A toast shows "Sent — Undo (Z)". Undo reopens the composer with everything intact. The API call happens only after the window elapses.
+- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/5/**8**/10/20/30s, default 8). A toast shows "Sent — Undo (Z)". Undo reopens the composer with everything intact. The API call happens only after the window elapses.
 - Outbox state machine (`composing → queued → sending → sent`) guarantees exactly-once send across crashes: on relaunch, `sending`-state items are verified against the server before any retry.
 
 **Acceptance criteria**
@@ -252,6 +260,7 @@ The inbox is divided into **splits** — tabs above the list, each an independen
 ### F12 — Notifications & badging
 
 - Native OS notifications (macOS Notification Center / Windows toast) for new mail in notification-enabled splits: sender + subject + snippet; click opens the thread.
+- **Batching:** a poll cycle delivering more than 3 new conversations collapses into one summary notification ("7 new conversations") instead of a burst of toasts. A summary names no single thread, so clicking it raises the window on the inbox rather than opening a conversation — only per-message notifications carry a thread target. Notifications are suppressed entirely while a window is focused.
 - Unread badge: macOS dock badge; Windows taskbar overlay. Counts only notification-enabled splits (i.e., the number that matters, not all mail).
 - Notification latency is bounded by polling: ≤ ~30s foregrounded (D2).
 - **M1 staging:** before splits exist, notifications and the badge cover every unread Inbox conversation. Windows uses a static-dot overlay with the numeric count in its tooltip. Per-split filtering arrives with F11 in M3; a rendered Windows numeric overlay is M4 packaging polish.
@@ -404,9 +413,9 @@ Guardrails:
 
 **Security & privacy:** OAuth tokens and LLM API keys via `safeStorage` (Keychain/DPAPI); DB under the OS user profile; TLS to Google only — plus the opt-in LLM provider (F17), which receives content solely on explicit invocation; **no telemetry, no other third-party services** in v1. Remote images in HTML mail load directly (no proxy without a server, D2), with a global "block remote images" toggle and per-sender overrides — default is load (decision log, §9).
 
-**HTML mail rendering:** sanitized (DOMPurify-class allowlist), rendered in a sandboxed `<iframe>`/webview with no script execution, links open in the system browser. The frame is measured after load and on resize, preserves horizontal overflow inside the frame, and remains mounted when quote/signature visibility changes. If sanitized HTML has no visible content or exceeds the defensive height ceiling, the plain-text fallback uses the same readable white surface. Filename-bearing MIME parts count as attachments whether Gmail supplies an attachment ID or inline base64url data. The stored `inlineData` field is withheld from `ConversationMsg`, and inline-delivered attachments can download without a network request. For `cid:` rendering, however, `mail:getInlineImage` deliberately sends matching image content through the typed preload bridge as an allowlisted-MIME base64 `dataUrl`, capped at 10 MB; the renderer assigns that value to the image in the scriptless mail iframe. Unresolved references remain inert broken-image placeholders.
+**HTML mail rendering:** sanitized (DOMPurify-class allowlist), rendered in a sandboxed `<iframe>`/webview with no script execution, links open in the system browser. Some legitimate senders serve images with `Cross-Origin-Resource-Policy: same-origin`, which Chromium would block inside that frame; the app removes only that response header, only for image requests originating from the mail frame — no other request or header is modified. The frame is measured after load and on resize, preserves horizontal overflow inside the frame, and remains mounted when quote/signature visibility changes. If sanitized HTML has no visible content or exceeds the defensive height ceiling, the plain-text fallback uses the same readable white surface. Filename-bearing MIME parts count as attachments whether Gmail supplies an attachment ID or inline base64url data. The stored `inlineData` field is withheld from `ConversationMsg`, and inline-delivered attachments can download without a network request. For `cid:` rendering, however, `mail:getInlineImage` deliberately sends matching image content through the typed preload bridge as an allowlisted-MIME base64 `dataUrl`, capped at 10 MB; the renderer assigns that value to the image in the scriptless mail iframe. Unresolved references remain inert broken-image placeholders.
 
-**Packaging:** `electron-builder`; auto-update via GitHub Releases. macOS notarization + Windows code signing required for public distribution (skippable for personal builds).
+**Packaging:** `electron-builder`; auto-update via GitHub Releases. macOS notarization + Windows code signing required for public distribution (skippable for personal builds). *Status:* personal-build packaging shipped early, at M1 exit — a manually dispatched GitHub Actions workflow produces macOS DMG/ZIP for both architectures (ad-hoc signed) and a Windows NSIS installer (unsigned), each verified by `npm run package:verify`. Auto-update and real signing/notarization remain M4.
 
 **Testing:** unit tests on the reducer/sync engine (the correctness core — replay recorded history streams), command-registry tests (every command has a handler + palette entry), Playwright smoke e2e (sign-in stubbed, triage loop, compose/send against a mock provider).
 
@@ -434,13 +443,13 @@ M1 ships a dedicated 2,000-thread Electron performance job with absolute CI guar
 
 Each milestone ends in a usable app; the daily-drivable bar is M2.
 
-**Status (2026-08-12):** all planned M1 feature capabilities are implemented through PR #23 plus the local v0.12 full-window reading revision. M1 remains in exit audit until the documented real-Gmail/offline and real-OS notification checks, CI unit-test wiring, stale-comment cleanup, and final artifact review are complete.
+**Status (2026-08-13):** all planned M1 feature capabilities are implemented through PR #26 — including the v0.12 full-window reader (#24), the sync status surface (#25, v0.13), and early personal-build packaging (#26). The engineering exit audit (CI unit-test wiring, stale-comment cleanup, artifact review, doc alignment) is complete; M1 formally closes when the two real-world smokes documented in docs/M1-PLAN.md are executed: the real-Gmail airplane-mode drain and the real-OS notification click-through.
 
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading view, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
 - **M1 — Triage core.** First items: **apply the Dispatch direction** (D6 — graphite/amber tokens, `attn:` wordmark, layout per D6, split strip, account menu) and **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). The reading work adds recipients, attachments, quote/signature collapse, and—after M1 dogfood—the full-window conversation that supersedes the interim split. Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
 - **M2 — Mail out.** Composer (rich text, attachments, autocomplete), reply/all/forward, crash-safe drafts, send + undo send, exactly-once outbox. **← daily-drivable.**
 - **M3 — Find & focus.** FTS5 instant search + operators, system mailbox navigation (Inbox/All Mail/Sent/Drafts/Starred/Snoozed/Spam/Trash), split inbox + rules, inbox-zero states, themes, command palette hardened (every command registered).
-- **M4 — Power finish.** Snippets, follow-up reminders, AI reply drafting (F17), settings surface, badge polish, packaging + auto-update + signing.
+- **M4 — Power finish.** Snippets, follow-up reminders, AI reply drafting (F17), settings surface, badge polish, auto-update + signing/notarization (personal-build packaging shipped early, at M1 exit — §6 Packaging).
 
 **Post-v1 sequence:** v1.1 — global-hotkey quick panel (quick compose + quick search), multi-account (switcher `Mod+1..9`; unified inbox stays out), and custom themes (user token sets over D6's semantic names). v1.5 — companion Apps Script: send later + exact-time snooze return (F7). v2 — hosted backend: read statuses, true multi-device state.
 
@@ -461,3 +470,4 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 9. **Reading interaction refined (2026-08-11; updated through PR #23):** real-mail dogfood replaces F3's fixed ~720px reading column and detached quote controls with a responsive 720–1120px measure and an inline, position-stable `...` boundary control. HTML-mail overflow stays inside the message frame, while a stable outer scrollbar gutter prevents reader-width jumps. PR #23 makes expanded-message collapse and keyboard continuity across Tab stops explicit. The split-specific focus behavior from this iteration is superseded by #11.
 10. **System mailbox navigation is explicit v1 scope (2026-08-11):** Important/Other are Inbox splits, not substitutes for Gmail's system mailboxes. M3 adds local-first Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, and Trash filters in the existing list/reading shell. Palette commands and `G` chords replace a permanent sidebar; supporting them requires expanding cached metadata/system-label coverage beyond the M1 Inbox-only query.
 11. **Full-window reading replaces the split (2026-08-12):** showing the compact queue beside the message made reading more distracting and introduced an invisible list/message focus mode. Attn returns to D5's one-clear-focus principle: opening replaces the list with a full-window reader, `J`/`K` always changes conversation, dedicated reading keys scroll, and `Esc`/Back restores the preserved list. Neighbor preloading retains preview-like speed without simultaneous panes. The split is not kept as an option in v1 because that would preserve two interaction models through composer and command-palette work.
+12. **Sync status is a product surface (2026-08-13, PR #25):** local-first deliberately hides the network, which also hid real failures — a missing OAuth config or expired history checkpoint previously failed silently while the inbox quietly went stale. The footer now always shows Live/Checking/Syncing/Offline/Error (F2 "Sync visibility"), with stage-granular backfill progress and retry/copy actions on error. Offline is deliberately calm — local mail keeps working and retry is automatic; error is deliberately loud. The same PR made the backfill itself staged and resumable (metadata → bodies → reconcile with per-page cursor checkpoints).

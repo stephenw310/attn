@@ -2,10 +2,11 @@
 
 Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
 
-**Current state: M1 feature implementation complete; exit audit in progress.** The Dispatch full-width list ⇄ full-window conversation flow now includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling, sanitized HTML/attachment rendering, background lifecycle, notifications, and unread badges. M2 starts after the remaining manual and engineering closeout checks in the M1 plan.
+**Current state: M1 complete pending two manual smokes; M2 (mail out) is planned and ready to start.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. The only open M1 exit items are the real-Gmail airplane-mode drain and the real-OS notification click-through (see the M1 plan); M2 work may begin per its plan.
 
-- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.12)
+- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.13)
 - **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist
+- **[docs/M2-PLAN.md](docs/M2-PLAN.md)** — M2 implementation plan: pre-M2 refactors, composer, drafts, send + undo send, exactly-once outbox
 - **[AGENTS.md](AGENTS.md)** — working agreement for coding agents (verification contract, test harness, conventions). `.claude/CLAUDE.md` imports it, so Claude Code picks it up automatically; other tools read it directly.
 
 ## Prerequisites
@@ -34,7 +35,7 @@ The app starts on its Google sign-in screen. Connecting a real inbox requires th
 npm run verify
 ```
 
-Typecheck → lint/format → unit tests → production build → Playwright end-to-end tests that drive the **real built Electron app** (main process, SQLite, preload bridge, IPC, keyboard loop). The suite needs no Google credentials: signed-out tests cover onboarding, while mail features use a deterministic seeded SQLite store in throwaway user-data directories. It uses Xvfb automatically on display-less Linux. GitHub Actions currently runs static/build, Electron smoke, and performance jobs separately; adding the unit step to CI is an explicit M1 exit item.
+Typecheck → lint/format → unit tests → production build → Playwright end-to-end tests that drive the **real built Electron app** (main process, SQLite, preload bridge, IPC, keyboard loop). The suite needs no Google credentials: signed-out tests cover onboarding, while mail features use a deterministic seeded SQLite store in throwaway user-data directories. It uses Xvfb automatically on display-less Linux. GitHub Actions runs the same gates as three jobs: static checks + unit tests + build, Electron smoke, and the performance suite.
 
 | Script | What it does |
 |---|---|
@@ -46,7 +47,7 @@ Typecheck → lint/format → unit tests → production build → Playwright end
 | `npm run build` | Production bundles into `out/` |
 | `npm run toolchain` | Repair the Electron binary / native-module setup |
 
-The e2e suite writes `inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png` under `e2e/.artifacts/`; failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
+The e2e suite writes `login.png`, `inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png` under `e2e/.artifacts/`; failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
 
 ## Package & install locally
 

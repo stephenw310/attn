@@ -103,7 +103,9 @@ function applySnooze(db: Db, accountId: string, threadIds: string[], dueAt: numb
     const wasInInbox = labelsFor(db, accountId, threadId).has('INBOX')
     upsertReminder.run(accountId, threadId, dueAt, now)
     applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
-    // TODO(T7+): mirror the local reminder with an [Attn]/Snoozed Gmail label.
+    // v1 snooze is local-only by decision (SPEC §9 #6): Gmail sees a plain
+    // archive. Gmail-side labels + exact-time return arrive with the v1.5
+    // companion script (SPEC F7).
     if (wasInInbox) {
       enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }), now)
     }
@@ -196,8 +198,8 @@ function stringArray(value: unknown): value is string[] {
 }
 
 // Deliberately counts 'failed' rows: an action that never reached Gmail must not
-// silently vanish from the badge. Surfacing/clearing failed rows is a deferred
-// decision — see "Accepted deviations" in docs/M1-PLAN.md.
+// silently vanish from the badge. M2 removes the need — permanently failed triage
+// actions will self-heal to server truth instead of lingering (M2-PLAN T18).
 export function pendingActionCount(db: Db, accountId: string): number {
   const row = db
     .prepare('SELECT COUNT(*) AS count FROM action_queue WHERE account_id = ?')

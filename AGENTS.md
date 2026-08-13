@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation). **M1 feature implementation is complete; the exit audit in `docs/M1-PLAN.md` is still open before M2 begins.**
+Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation). **M1 is implemented and audit-clean except for two human-run smokes tracked in `docs/M1-PLAN.md`; `docs/M2-PLAN.md` is the guide for the milestone now starting (composer, drafts, send + undo send, exactly-once outbox).**
 
 This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
 
@@ -73,6 +73,8 @@ Violating these is a correctness bug, not a style preference:
 AGENTS.md            This file — the working agreement, shared by every agent tool
 .claude/             Claude Code config: CLAUDE.md (imports this file), settings, hooks
 docs/SPEC.md         Product & technical spec — source of truth for behavior
+docs/M1-PLAN.md      Shipped M1 task record + the two remaining exit smokes
+docs/M2-PLAN.md      Current milestone: refactors + composer/outbox task guide
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies
 src/main/            Main process: windows, OAuth, SQLite (db/), Gmail (gmail/, sync/)

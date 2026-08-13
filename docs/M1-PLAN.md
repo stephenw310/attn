@@ -1,8 +1,9 @@
 # M1 Completion Plan — Shipped Task Record and Exit Handoff
 
 **Audience:** the engineer(s) closing M1 (triage core) and preparing the M2 handoff.
-**Basis:** [SPEC.md](SPEC.md) v0.12 §8 M1, the implementation merged through PR #23, and the post-dogfood full-window reading revision tracked as T12A below.
-**Revised 2026-08-12:** T1–T11 are shipped. The sanitized HTML work tracked as T2 shipped across PRs #7 and #11; T9 shipped in PR #20; PR #21 refined inbox grouping, pane focus, compact rows, and HTML/CID rendering; PR #23 fixed message collapse and keyboard continuity across Tab stops. Product review subsequently rejected the split as distracting and harder to navigate, so T12A replaced it with a full-window reader while retaining those fixes. **All planned M1 feature capabilities, including the reading-shell simplification, are implemented; only the exit audit remains.**
+**Basis:** [SPEC.md](SPEC.md) v0.13 §8 M1 and the implementation merged through PR #26.
+**Revised 2026-08-12:** T1–T11 are shipped. The sanitized HTML work tracked as T2 shipped across PRs #7 and #11; T9 shipped in PR #20; PR #21 refined inbox grouping, pane focus, compact rows, and HTML/CID rendering; PR #23 fixed message collapse and keyboard continuity across Tab stops. Product review subsequently rejected the split as distracting and harder to navigate, so T12A replaced it with a full-window reader while retaining those fixes.
+**Revised 2026-08-13 (exit audit):** T12A shipped in PR #24. Three unplanned-but-accepted additions landed after the plan was written: desktop packaging with a manual build workflow (PR #26), the sync status surface with staged/resumable backfill (PR #25), and the signed-out onboarding screen that replaced mock mode (PR #27) — all three are now recorded in SPEC v0.13 (§6 Packaging, F2 "Sync visibility", F1 "Signed-out state", §9 #12). The T12 engineering closeout (CI unit wiring, stale comments, artifact review, doc alignment) is **done**; the only open M1 exit items are the two real-world manual smokes below. **[M2-PLAN.md](M2-PLAN.md) is the next milestone's guide.**
 **Ground rules:** read [AGENTS.md](../AGENTS.md) first. Every task below is one PR, and no PR is done until `npm run verify` is green. When a task says "spec F4", that's a section of SPEC.md — read it before starting the task.
 
 ---
@@ -16,7 +17,7 @@
 | Triage verbs E/#/S/U/! + auto-advance + `Z` undo + durable queue | ✅ **T3** (#8) |
 | Tray/background mode + launch at login | ✅ **T8** (#9) |
 | Sanitized HTML mail rendering | ✅ shipped (#7, completed by **T11** in #11) |
-| Reading view: full-window conversation (F3 v0.12, §9 #11) | ✅ **T12A** (supersedes T11's split shell) |
+| Reading view: full-window conversation (F3 v0.12, §9 #11) | ✅ **T12A** (#24; supersedes T11's split shell) |
 | Full message display: recipients, attachments, quote/signature collapse (F3 v0.12) | ✅ **T11** (#11; refined #21/#23) |
 | Label verb (`L`) | ✅ **T5** (#13) |
 | Selection + bulk | ✅ **T4** (#12) |
@@ -24,6 +25,9 @@
 | Incremental sync (F2 "offline correctness") | ✅ **T7** (#15) |
 | Basic notifications + unread badge | ✅ **T9** (#20) |
 | Post-M1 inbox and mail-rendering refinements | ✅ #21 |
+| Sync status surface + staged/resumable backfill (F2 "Sync visibility", §9 #12) | ✅ #25 (post-plan addition) |
+| Personal-build packaging + manual build workflow (§6 Packaging) | ✅ #26 (M4 scope pulled forward) |
+| Signed-out onboarding screen replacing mock mode (F1 "Signed-out state") | ✅ #27 (post-plan addition) |
 
 Supporting: ✅ **T10** perf smoke shipped (#18). Push-vs-polling is settled on paper now — SPEC §9 #8; don't reopen it in reviews.
 
@@ -59,10 +63,10 @@ The `T11 →` edges record the product ordering used during implementation (only
 
 **Order from here:**
 
-1. Complete the remaining **T12** engineering closeout: CI unit-test wiring and stale-comment cleanup.
-2. Regenerate and review the four visual artifacts after that final closeout edit.
-3. Execute and record the real-Gmail airplane-mode/relaunch smoke and real-OS notification click-through smoke.
-4. Close the M1 exit checklist; then begin M2 with the crash-safe composer/draft foundation.
+1. ~~Complete the remaining **T12** engineering closeout: CI unit-test wiring and stale-comment cleanup.~~ Done 2026-08-13.
+2. ~~Regenerate and review the four visual artifacts after that final closeout edit.~~ Done 2026-08-13 (all four clean; no selection artifacts).
+3. Execute and record the real-Gmail airplane-mode/relaunch smoke and real-OS notification click-through smoke — **the only remaining M1 exit work; needs a human with a signed-in build on macOS/Windows.**
+4. Close the M1 exit checklist; M2 ([M2-PLAN.md](M2-PLAN.md)) starts with the pre-M2 refactors and the crash-safe composer/draft foundation. The refactors (M2 R1–R3) may begin immediately — they don't depend on the smokes.
 
 ---
 
@@ -570,7 +574,7 @@ The v5 columns populate only for newly synced mail, and this task intentionally 
 
 ## T12A — Full-window reading simplification
 
-**Status: complete (2026-08-12).** · **Depends on:** T11 · **Spec:** F3 v0.12, D6, §9 #11
+**Status: shipped in PR #24 (2026-08-12).** · **Depends on:** T11 · **Spec:** F3 v0.12, D6, §9 #11
 
 The on-demand split retained queue context but created two competing visual targets and an invisible focus mode. Replace only the layout and interaction shell; retain T11's message cards, sanitization, recipients, attachments, trimming, responsive reading measure, and neighbor cache.
 
@@ -590,19 +594,19 @@ The on-demand split retained queue context but created two competing visual targ
 
 ## T12 — M1 closeout: CI, artifacts, stale comments, and manual evidence
 
-**Status: next after T12A.** · **Depends on:** all shipped M1 tasks and T12A · **Spec:** §8 M1 exit status
+**Status: engineering closeout complete (2026-08-13); manual evidence outstanding.** · **Depends on:** all shipped M1 tasks and T12A · **Spec:** §8 M1 exit status
 
 This is a bounded closeout task, not a new product feature:
 
-1. **Documentation:** keep SPEC v0.12, this task record, README, and AGENTS aligned with PRs #20/#21/#23, T12A, and the local-only v1 snooze decision. Remove stale implementation comments that still promise a T7 Gmail snooze label.
-2. **CI contract:** make GitHub Actions execute `npm run test:unit` (or the exact `npm run verify` gate) so README and AGENTS no longer depend on a local-only unit gate.
-3. **Visual artifacts:** regenerate all four images after the final closeout edit and review them at the final viewport.
-4. **Manual evidence:** execute the real-Gmail airplane-mode → quit → relaunch-online drain, and a real macOS/Windows notification click-through to the intended thread. Record dates/results in the closing PR.
+1. ✅ **Documentation:** SPEC v0.13, this task record, README, and AGENTS are aligned with the implementation through PR #26, including the post-plan sync-status (#25) and packaging (#26) additions and the local-only v1 snooze decision. The stale `TODO(T7+)` snooze-label comment, the stale `TODO(M0-final)` refresh-flow comment, and the milestone-expired `TODO(M1)` limiter comment are gone (2026-08-13).
+2. ✅ **CI contract:** the Verify workflow's static job now runs `npm run test:unit` between typecheck and build, so every `npm run verify` gate (typecheck, lint, unit, build, e2e, perf) executes in CI (2026-08-13).
+3. ✅ **Visual artifacts:** all four images regenerated from a green full-suite run and reviewed at final viewport on 2026-08-13 — no selection artifacts; hostile-fixture rendering in `reading.png` is the intended sanitizer output.
+4. ⬜ **Manual evidence:** execute the real-Gmail airplane-mode → quit → relaunch-online drain, and a real macOS/Windows notification click-through to the intended thread. Record dates/results in the closing PR. **These need a human with a signed-in build; they are the only remaining M1 work.**
 
 ### Done when
 
 - The exit checklist below is entirely checked, `npm run verify` is green, all artifacts are visually clean, and no planned M1 work remains.
-- M2 may then start with the crash-safe composer/draft foundation.
+- M2 may then start per [M2-PLAN.md](M2-PLAN.md); its pre-M2 refactors are unblocked already.
 
 ---
 
@@ -632,8 +636,8 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 | Deviation | Where | Revisit |
 |---|---|---|
 | Sync engine remains in the main process instead of the target utility-process hardening (§6) | all | M2/M3 — move when polling + executor are proven; interfaces are already Electron-free (`db/`, `sync/` are plain Node modules) |
-| Permanently-failed queue rows count toward the pending badge forever; `last_error` has no UI surface and no retry/clear affordance | T3 | M2 — needs a product call: surface failed actions, auto-expire, or re-queue on sign-in |
-| Hard 401s mark queue rows `failed` permanently — actions queued across a revoked-token window never retry after re-sign-in | T3 | With the failed-action surface above (re-pend on sign-in) |
+| Permanently-failed queue rows count toward the pending badge forever; `last_error` has no UI surface and no retry/clear affordance | T3 | **Resolved by product call (2026-08-13):** failed triage actions self-heal to server truth with an explanatory toast — no panel, no retry button. Built in M2-PLAN T18 |
+| Hard 401s mark queue rows `failed` permanently — actions queued across a revoked-token window never retry after re-sign-in | T3 | M2-PLAN T18 — auth failures never revert; they re-pend on the next successful sign-in |
 | `matchKey` drops all Ctrl/Alt/Meta chords, so AltGr-layout keys can't trigger verbs (AZERTY `#` = AltGr+3 = Ctrl+Alt on Windows) | T3 | M3 — F5 palette / configurable keybindings |
 | Executor broadcasts `mail:changed` once per drained row (no batching) | T3 | T10 perf data, if large-queue drains show up |
 | HTML mail renders on a white card in dark theme | T11 | F14 at M3 (sanitize/invert) |
@@ -642,6 +646,10 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 | Notifications cover all INBOX mail (no split filtering) | T9 | M3 (F11 splits) |
 | Opening a 90-day-to-12-month-old metadata-only thread does not fetch and cache its bodies; the 90-day body staging itself is implemented | T7 | M2 hardening before daily-drivable sign-off; reuse for M3 bodies/FTS5 work |
 | List virtualization deferred | — | M2 hardening if T10/10k data misses the F3 budget; required before daily-drivable sign-off |
+| Inbox and Snoozed list queries cap at 300 rows — an inbox beyond that renders its newest 300 threads (perf seam lifts the cap only under e2e) | T3 | M3 mailbox/query rework, together with the virtualization decision |
+| SPEC §5 conversation keys `N`/`P` (message navigation) and `O` (expand/collapse) are unbound; older-message expand/collapse is pointer-only | T12A | M3 palette milestone — the registry-completeness assertion will force the decision |
+| Gmail 403/429 quota handling is per-request backoff only; no client-side token-bucket limiter (was `TODO(M1)`) | T3/T7 | M2 hardening (M2-PLAN T20) |
+| With a multi-selection active, the label picker's first toggle bulk-applies and clears the selection, but its checkstates reflect only the focused row; later toggles in the same picker session target the focused thread alone | T5 | M3 palette/picker polish — don't copy this pattern into the composer |
 
 ---
 
@@ -650,16 +658,16 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 M1 is done when every SPEC §8 M1 bullet maps to a shipped task above, and:
 
 - [x] T9 notifications + unread badge shipped (#20)
-- [x] T12A full-window reader and simplified command-registry audit complete
-- [x] Current `npm run verify` green, including 76 unit tests and 51 Electron e2e tests (2026-08-12 T12A audit)
+- [x] T12A full-window reader and simplified command-registry audit complete (#24)
+- [x] Current `npm run verify` green, including 83 unit tests and 52 Electron e2e tests (2026-08-13 exit audit)
 - [x] F4 core paths demonstrated in e2e: bulk archive + single `z` undo; snooze return while running *and* via relaunch catch-up
-- [ ] F2 airplane-mode criterion executed as T7's manual smoke (documented in PR)
+- [x] F2 airplane-mode criterion executed as T7's manual smoke — **verified by owner 2026-08-13** against real Gmail (offline triage → quit → relaunch online → queue drained)
 - [x] F16 automated lifecycle criteria: close-window keeps the process alive; explicit quit leaves nothing behind
-- [ ] T9 real-OS smoke: notification appears and click-through opens the intended thread
+- [ ] **T9 real-OS smoke: notification appears and click-through opens the intended thread** — needs a human on real macOS/Windows
 - [x] Every semantic command reachable via keyboard is in the command registry; reader scrolling and picker/menu-local interactions are explicitly scoped primitives
-- [ ] GitHub Actions executes the unit suite required by `npm run verify`
-- [x] SPEC, M1 plan, README, and AGENTS reflect the implementation through PR #23 and the current milestone status
+- [x] GitHub Actions executes the unit suite required by `npm run verify` (2026-08-13 — Verify workflow static job)
+- [x] SPEC v0.13, M1 plan, README, and AGENTS reflect the implementation through PR #26 and the current milestone status
 - [x] AGENTS.md reflects the current pipeline/harness behavior
-- [ ] `e2e/.artifacts/*.png` regenerated without selection artifacts and reviewed after the final task
+- [x] `e2e/.artifacts/*.png` regenerated without selection artifacts and reviewed after the final task (2026-08-13)
 
-Then M2 (composer, drafts, send + undo send, exactly-once outbox) starts from a genuinely daily-drivable triage loop.
+Then M2 (composer, drafts, send + undo send, exactly-once outbox — [M2-PLAN.md](M2-PLAN.md)) starts from a genuinely daily-drivable triage loop.
