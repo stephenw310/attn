@@ -247,7 +247,7 @@ function registerTestIpc(): void {
   ipcMain.on('attn:test:focusThread', (_event, threadId: unknown) => {
     if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
   })
-  ipcMain.on('attn:test:setSyncState', (_event, state: SyncState) => broadcast(IPC_CHANNELS.syncState, state))
+  ipcMain.on('attn:test:setSyncState', (_event, state: SyncState) => syncController?.setStateForTest(state))
 }
 
 function teardown(): void {

@@ -46,6 +46,11 @@ export class SyncController {
     return this.generation
   }
 
+  /** E2E-only seam for exercising renderer state transitions through real IPC. */
+  setStateForTest(state: SyncState): void {
+    this.setState(state)
+  }
+
   onSignIn(): void {
     this.resetSession()
     void this.resumeOnlineWork()
