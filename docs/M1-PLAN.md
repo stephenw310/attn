@@ -663,7 +663,7 @@ M1 is done when every SPEC §8 M1 bullet maps to a shipped task above, and:
 - [x] F4 core paths demonstrated in e2e: bulk archive + single `z` undo; snooze return while running *and* via relaunch catch-up
 - [x] F2 airplane-mode criterion executed as T7's manual smoke — **verified by owner 2026-08-13** against real Gmail (offline triage → quit → relaunch online → queue drained)
 - [x] F16 automated lifecycle criteria: close-window keeps the process alive; explicit quit leaves nothing behind
-- [ ] **T9 real-OS smoke: notification appears and click-through opens the intended thread** — needs a human on real macOS/Windows
+- [ ] **T9 real-OS smoke: notification appears and click-through opens the intended thread** — needs a human on real macOS/Windows. *First run (2026-08-13) failed and found a real defect: shown `Notification` objects were unreferenced, so the GC could reclaim them before the click and the handler never ran — the OS kept the banner clickable, and clicking only raised the window through `app.on('activate')`, which looks exactly like "opens the inbox but not the email". Fixed by retaining shown notifications (`BoundedRetainer`); awaiting re-test.*
 - [x] Every semantic command reachable via keyboard is in the command registry; reader scrolling and picker/menu-local interactions are explicitly scoped primitives
 - [x] GitHub Actions executes the unit suite required by `npm run verify` (2026-08-13 — Verify workflow static job)
 - [x] SPEC v0.13, M1 plan, README, and AGENTS reflect the implementation through PR #26 and the current milestone status
