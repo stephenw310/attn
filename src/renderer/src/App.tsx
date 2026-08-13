@@ -686,7 +686,7 @@ function SyncStatus({
       : displayState === 'offline'
         ? 'Local mail available'
         : displayState === 'error'
-          ? 'Select for details'
+          ? 'Click for details'
           : null
   const title =
     displayState === 'error' && sync.phase === 'error'
