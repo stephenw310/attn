@@ -661,7 +661,7 @@ M1 is done when every SPEC §8 M1 bullet maps to a shipped task above, and:
 - [x] T12A full-window reader and simplified command-registry audit complete (#24)
 - [x] Current `npm run verify` green, including 83 unit tests and 52 Electron e2e tests (2026-08-13 exit audit)
 - [x] F4 core paths demonstrated in e2e: bulk archive + single `z` undo; snooze return while running *and* via relaunch catch-up
-- [ ] **F2 airplane-mode criterion executed as T7's manual smoke (documented in PR)** — needs a human with a signed-in real-Gmail build
+- [x] F2 airplane-mode criterion executed as T7's manual smoke — **verified by owner 2026-08-13** against real Gmail (offline triage → quit → relaunch online → queue drained)
 - [x] F16 automated lifecycle criteria: close-window keeps the process alive; explicit quit leaves nothing behind
 - [ ] **T9 real-OS smoke: notification appears and click-through opens the intended thread** — needs a human on real macOS/Windows
 - [x] Every semantic command reachable via keyboard is in the command registry; reader scrolling and picker/menu-local interactions are explicitly scoped primitives

@@ -136,11 +136,15 @@ Three M2 features need data the store doesn't have yet: recipient autocomplete n
 
 ### Design (decided)
 
-- **Backfill gains a `sent` metadata stage** after `bodies`: `listThreadIds('in:sent newer_than:12m')`, persisted `metadataOnly` through the same `runThreadPhase` machinery (checkpointed cursor `sent:<token>`, resumable). The history poller already refetches *any* thread that appears in history records, so sent mail stays current after backfill without poller changes; the `newMail` exclusion of self-sent messages (SENT label) is untouched.
+- **`listThreadIds` must stop hardcoding INBOX first** (review finding, P1). `GmailMailProvider.listThreadIds` sets `labelIds: 'INBOX'` unconditionally (`src/main/gmail/provider.ts`), so a naive `q: 'in:sent'` stage would request INBOX ∩ SENT — near-empty, and autocomplete would silently ship with no data. Change the signature to take the label explicitly (`listThreadIds({ q?, labelIds?, pageToken? })`) and pass `['INBOX']` at the **three existing call sites** — backfill's metadata stage, its bodies stage, and the reconcile re-list, where the implicit filter is load-bearing. Do this as the task's first commit, mechanically, with the existing suite as the check.
+- **Backfill gains a `sent` metadata stage** after `bodies`: `listThreadIds({ labelIds: ['SENT'], q: 'newer_than:12m' })`, persisted `metadataOnly` through the same `runThreadPhase` machinery (checkpointed cursor `sent:<token>`, resumable). The history poller already refetches *any* thread that appears in history records, so sent mail stays current after backfill without poller changes; the `newMail` exclusion of self-sent messages (SENT label) is untouched.
 - **Upgrade path for existing accounts:** `backfill_cursor='done'` databases must run the sent stage exactly once without redoing metadata/bodies. Add a `sent_synced` flag column to `sync_state` (v7). `startSync` routes: cursor `done` + `sent_synced=0` → run only the sent stage, then set the flag. Fresh backfills set it as part of the normal sequence. **Do not reset anyone's `done` cursor.**
 - **Threading headers:** `parse.ts` extracts `Message-ID` and `References` (plus `In-Reply-To` as a References fallback); `persistThread` stores them. Only newly-synced mail carries them — T15 handles the missing-header case at reply time.
-- **Contacts are derived, not authoritative.** A `contacts` row per (account, email) with `sent_to_count`, `received_count`, `last_interacted_at`, `name` (best display name seen). Updated incrementally inside `persistThread` (cheap upserts on the rows it already walks: recipients of SENT messages increment `sent_to_count`; From of received messages increments `received_count`). A one-shot `rebuildContacts(db, accountId)` SQL pass runs when the sent stage completes, covering mail persisted before this migration.
-- **Ranking is a pure function** in `src/shared/contacts.ts` (shared — the renderer ranks as the user types): score = `3·sent_to + received` with a recency multiplier (halve per 90 days since `last_interacted_at`), prefix matches on address or name beat infix, self is excluded. Exact formula is a starting point — tune during dogfood, keep it pure and tested.
+- **Contacts are derived, and must be idempotent** (review finding, P2). The obvious design — increment `sent_to_count` while walking `persistThread` — is wrong, because `persistThread` runs again every time a thread is refetched: history polling, body hydration, expiry recovery, and T16's post-send refresh all re-persist the same messages. Counters would inflate with *refetch frequency* rather than interaction frequency, so the threads you touch most would dominate autocomplete regardless of who you actually write to. Nothing about that failure is visible until the rankings are quietly wrong.
+  - Instead, record **one contribution row per (message, email, role)** and aggregate. `INSERT OR IGNORE` makes re-persisting a no-op by construction, so correctness doesn't depend on remembering which sync paths can repeat.
+  - Roles: `to` (a recipient of a message carrying SENT) and `from` (the sender of a received message). Store the display name seen on that contribution so the aggregate can prefer the most recent one.
+  - Stats are a `GROUP BY` over that table joined to `messages` for the date — no derived counters to drift, and no `rebuildContacts` backfill pass to write, since re-persisting existing threads populates it naturally. Materialize only if the query is measured slow.
+- **Ranking is a pure function** in `src/shared/contacts.ts` (shared — the renderer ranks as the user types): score = `3·sent_to + received` with a recency multiplier (halve per 90 days since the last interaction), prefix matches on address or name beat infix, self is excluded. Exact formula is a starting point — tune during dogfood, keep it pure and tested.
 
 ### Implementation guide
 
@@ -150,15 +154,30 @@ Three M2 features need data the store doesn't have yet: recipient autocomplete n
 ALTER TABLE messages ADD COLUMN rfc_message_id TEXT;
 ALTER TABLE messages ADD COLUMN references_json TEXT;
 ALTER TABLE sync_state ADD COLUMN sent_synced INTEGER NOT NULL DEFAULT 0;
-CREATE TABLE contacts (
-  account_id         TEXT NOT NULL,
-  email              TEXT NOT NULL,
-  name               TEXT,
-  sent_to_count      INTEGER NOT NULL DEFAULT 0,
-  received_count     INTEGER NOT NULL DEFAULT 0,
-  last_interacted_at INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (account_id, email)
+-- One idempotent contribution per (message, email, role): re-persisting a
+-- thread can never double-count, whatever sync path triggered it.
+CREATE TABLE contact_messages (
+  account_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  email      TEXT NOT NULL,
+  role       TEXT NOT NULL,          -- 'to' (we wrote to them) | 'from' (they wrote to us)
+  name       TEXT,
+  PRIMARY KEY (account_id, message_id, email, role)
 );
+CREATE INDEX idx_contact_messages_email ON contact_messages (account_id, email);
+```
+
+Search aggregates live, newest display name winning:
+
+```sql
+SELECT cm.email,
+       SUM(cm.role = 'to')   AS sent_to_count,
+       SUM(cm.role = 'from') AS received_count,
+       MAX(m.internal_date)  AS last_interacted_at
+  FROM contact_messages cm
+  JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+ WHERE cm.account_id = ? AND cm.email LIKE ?
+ GROUP BY cm.email
 ```
 
 - IPC (typed map): `contacts:search(query) → { name, email, score }[]` (main runs the SQL narrow, shared ranking orders; cap ~8 rows).
@@ -168,6 +187,7 @@ CREATE TABLE contacts (
 ### Testing
 
 - Unit: header extraction (angle-bracket forms, folded References), contact ranking (recency decay, prefix beats infix, self-exclusion), cursor routing for the three upgrade shapes (fresh, mid-backfill, done-without-sent).
+- **E2e regression for the idempotency finding:** persist the same seeded thread twice (a refetch is one `relaunch()` plus a poll, or drive `persistThread` through the test seam) and assert the contact aggregate is unchanged. Without this, overcounting reappears the first time someone adds a sync path that re-persists.
 - E2e (seeded): seeded fixture exposes headers through `getConversation`; `contacts:search` returns seed senders ranked; boot log shows the sent stage skipped when seeded.
 - Manual smoke (signed in): fresh sign-in runs metadata → bodies → sent; an existing done-cursor DB runs only sent; contacts populate from real history.
 
@@ -184,7 +204,8 @@ Verify green; both upgrade paths demonstrated (fresh + existing DB); autocomplet
 ### Design (decided)
 
 - **Overlay panel above the current view** (F6: context is never lost) — a bottom-right docked panel in the Dispatch language, not a modal takeover: the list/reader stays visible and interactive scroll-wise behind it; app keyboard verbs suspend while the composer has focus (the existing text-entry guard already does most of this).
-- **The local `outbox` row is the draft's source of truth from the first keystroke** (state `composing`, T16's table — T14 lands the table's *draft* subset if it merges first; coordinate migration order with T16, they must not share one migration). Autosave: debounced 1s-idle write of the full composer state. Crash-safe means: force-quit at any moment loses at most the last second of typing.
+- **The local `outbox` row is the draft's source of truth from the moment the composer opens** (state `composing`, T16's table — T14 lands the table's *draft* subset if it merges first; coordinate migration order with T16, they must not share one migration). Create the row on open, before any typing, so there is always something to recover into.
+- **Autosave needs a bounded checkpoint, not just an idle debounce** (review finding, P1). A trailing 1s-idle debounce does *not* bound loss to one second: every keystroke resets the timer, so someone typing continuously for three minutes has written nothing to disk, and a force-quit loses the whole draft — the exact scenario F6's crash-safety criterion is about. Pair the 1s idle trigger with a **hard max-wait (5s) while dirty**, so continuous typing still checkpoints on a fixed interval. Note the test trap the same finding names: a relaunch test that pauses before quitting silently passes, because the pause fires the idle save. The regression test must type *continuously* and relaunch with no idle gap.
 - **Gmail Drafts mirror is best-effort and asynchronous:** debounced (~3s idle) `drafts.create`/`drafts.update` through the provider, storing `gmail_draft_id`. Mirror failures never block typing or local autosave; offline composing is fully supported (mirror catches up when the executor comes back — the mirror op rides the existing action queue as a new intent kind, so it inherits retry/offline semantics).
 - **Editor: Lexical** (owner decision, 2026-08-13 — `npm i lexical @lexical/react @lexical/rich-text @lexical/list @lexical/link @lexical/html`). Rejected alternative: raw `contenteditable` + `document.execCommand`. The deciding argument is **M4, not M2** — F8 snippets must expand as a *single* undoable step with `{cursor}` placement, and F17 streams an AI draft into a live editable box. Both are programmatic edits that need correct undo grouping and selection preservation, which a document model provides and `execCommand` (also deprecated) does not. Paste normalization from other mail clients is the second reason. The usual headline reason — cross-browser normalization — is explicitly *not* why we're adopting it: Electron pins one Chromium (D3).
   - **Constrain the schema to F6's surface and nothing more:** bold/italic/underline, ordered/unordered lists, links, blockquote. A narrow schema is the point — it makes output predictable and rejects pasted junk by construction. Do not enable tables, images, code blocks, or collaborative extensions "because they're available".
@@ -207,7 +228,7 @@ Verify green; both upgrade paths demonstrated (fresh + existing DB); autocomplet
 ### Testing
 
 - Unit: outgoing-HTML sanitizer allowlist (hostile paste collapses to allowed tags), plain-text derivation, recipient parse/chip rules, autocomplete ranking integration. **Serialization is testable without a DOM** — build editor states with `@lexical/headless` so these stay in the plain-Node vitest suite (global rule 10) instead of becoming e2e-only.
-- E2e (seeded): `c` opens focused at To; chips accept/reject; `Esc` saves and toasts; relaunch → draft reopens with content intact (**the F6 crash acceptance, minus force-kill which the relaunch helper approximates**); typing in the editor never triggers list verbs; the sign-in screen still registers nothing (the #27 regression test stays green with composer commands in the registry).
+- E2e (seeded): `c` opens focused at To; chips accept/reject; `Esc` saves and toasts; relaunch → draft reopens with content intact (**the F6 crash acceptance, minus force-kill which the relaunch helper approximates**); **a second relaunch case that types continuously and never idles, proving the max-wait checkpoint rather than the debounce**; typing in the editor never triggers list verbs; the sign-in screen still registers nothing (the #27 regression test stays green with composer commands in the registry).
 - Perf (@perf): composer open < 100ms CI ceiling; keystroke-to-paint sampled under the 2k-thread seed with a generous CI ceiling (catch order-of-magnitude regressions, not 16ms exactness — that's T20's profiled pass).
 
 ### Done when
@@ -253,10 +274,15 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 
 ### Design (decided — the invariant lives here)
 
-- **State machine per outbox row:** `composing → queued → sending → sent` (+ `failed`). Transitions are durable **before** their side effects: a row is `queued` with `send_at` before the toast shows; `sending` is written before the first byte leaves; `sent` is written only on confirmed success.
-- **Exactly-once key = client-generated RFC Message-ID** (`<{uuid}@{account domain}>`), created when the row is queued and baked into the MIME. Recovery after any ambiguity (crash mid-send, network error after the request may have reached Gmail) is: search `messages.list q="rfc822msgid:{id} in:anywhere"` — found ⇒ mark `sent`; not found ⇒ safe to (re)send. **Every retry path goes through this verification when the previous attempt entered `sending`.** This is the F6 "no scenario produces a duplicate send" criterion made mechanical.
+- **State machine per outbox row:** `composing → queued → sending → sent` (+ `failed`, + `needs-review` for the unresolvable-ambiguity case below). Transitions are durable **before** their side effects: a row is `queued` with `send_at` before the toast shows; `sending` is written before the first byte leaves; `sent` is written only on confirmed success.
+- **Exactly-once rests on the Gmail draft id, not on a search** (revised after a review finding, P1). The original design generated a client RFC Message-ID, baked it into the MIME, and on any ambiguity searched `rfc822msgid:` — treating "not found" as proof the send never happened. That inference is unsound: Gmail's search index is not synchronously consistent with send, and Gmail does not honor a supplied Message-ID as an idempotency key. A message accepted seconds ago can be genuinely absent from search, so "not found ⇒ resend" manufactures exactly the duplicate this machine exists to prevent.
+  - **Always send through a Gmail draft.** At send time, if the row has no `gmail_draft_id`, `drafts.create` first (with our Message-ID in the MIME), persist the id, then `drafts.update` + `drafts.send`. The draft id is a *strong, immediately-consistent* handle — no search index involved — and `drafts.send` atomically consumes the draft, so its disappearance is a real signal rather than an inference.
+  - **Recovery when a `sending` row is found after a crash or ambiguous error:** `drafts.get(gmail_draft_id)` — **present ⇒ the send did not complete, resend is safe**; **404 ⇒ it did, mark `sent`**. This is the common path and it is decisive.
+  - **The residual ambiguity is narrow:** a crash between `drafts.create` and persisting its id. There the Message-ID search is a *secondary* check, run with a bounded verification window (re-check over ~60s rather than trusting one negative), and it searches drafts as well as messages, since an orphaned draft carries the same Message-ID.
+  - **When still unresolved, do not send.** A message that failed to send is recoverable by the user; a duplicate is not, and F6 makes "no duplicate send" the acceptance criterion. Park the row in a `needs-review` state and reopen the composer with a plain explanation ("We couldn't confirm this was sent — check your Sent mail before resending"). Silent dropping is not acceptable either; the user must be told.
+  - Keep the client Message-ID regardless — it is what makes both the secondary search and any manual reconciliation possible.
 - **Undo window:** queueing sets `send_at = now + delay` (setting stored via the M1 `settings` table: `undoSendDelaySeconds`, **default 8**; the settings *UI* is M4 — a palette-less default is fine for M2 dogfood). The **scheduler owns the timer** (§6): extend the M1 scheduler pattern with an `OutboxSender` armed on the next due `queued` row; catch-up on boot sends anything whose window elapsed while the app was closed. **Undo (`Z`) rides the existing main-process undo stack:** queueing a send pushes an entry whose inverse flips the row back to `composing`, cancels the timer, and tells the renderer to reopen the composer. Popping it after the send fired reports "Already sent" (no inverse) — deliberately still consuming the stack entry so `Z Z` doesn't skip backwards silently.
-- **Send execution** (the only `send` chokepoint, global rule 9): if the row has a `gmail_draft_id`, final `drafts.update` (raw MIME) then `drafts.send` — the sent message atomically replaces the Gmail draft, leaving no husk in Drafts. Otherwise `messages.send` (uploadType=multipart for attachment payloads). Both calls set `threadId` when replying. A 404 on `drafts.send` means the draft vanished (likely a prior attempt succeeded) → run the Message-ID verification, not a blind resend.
+- **Send execution** (the only `send` chokepoint, global rule 9): always the draft path — `drafts.create` if no `gmail_draft_id` yet (persist it *before* sending), then `drafts.update` (raw MIME) and `drafts.send`, which replaces the draft atomically and leaves no husk in Drafts. `messages.send` is deliberately **not** used: it would forfeit the draft-id handle that makes recovery decisive. Calls set `threadId` when replying; attachment payloads use `uploadType=multipart`. A 404 on `drafts.send` means the draft is already consumed — treat as sent, never as a reason to blind-resend.
 - **After confirmed send:** refetch the returned `threadId` through the provider → `persistThread` → `mail:changed`, so the sent message appears in the local thread within a second (and Sent-view data accrues for M3). Reply-sends leave the inbox untouched; F4 auto-advance is not coupled to sending in v1.
 - **Offline:** rows sit in `queued` past their window while no provider exists; footer pending count includes `queued`/`sending` outbox rows (the local-first visibility contract, same as triage). Toast on queue: **"Sent — Undo (Z)"** with the toast persisting for the window's duration rather than the standard 4s.
 - **Failures:** permanent 4xx (bad recipient, size) → `failed` + toast + composer reopens with the error banner and content intact. Retryable errors follow the executor's backoff ladder with the verification-first rule above.
@@ -269,7 +295,7 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 CREATE TABLE outbox (
   id              TEXT PRIMARY KEY,
   account_id      TEXT NOT NULL,
-  state           TEXT NOT NULL DEFAULT 'composing',
+  state           TEXT NOT NULL DEFAULT 'composing',  -- composing|queued|sending|sent|failed|needs-review
   kind            TEXT NOT NULL DEFAULT 'new',      -- new | reply | replyAll | forward
   thread_id       TEXT,
   source_message_id TEXT,
@@ -295,15 +321,15 @@ CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
 (If T14 merged first with the draft-subset table, this becomes the additive completion — coordinate; the two PRs must not share a migration.)
 
 - **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` (thin, e2e-covered).
-- Provider grows `createDraft/updateDraft/sendDraft/sendMessage/findMessageByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths).
+- Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.
 - IPC: `outbox:send(draftId)`, `outbox:undoSend(outboxId)` (also reachable via the undo stack), broadcast `outbox:changed` for composer/toast state.
 - Reply entry points: `r`/`a`/`f` commands (reader context) call `planReply` and open the composer prefilled; register in the registry (§5 keys).
 
 ### Testing
 
-- **Unit (the heart of the task):** machine transition matrix including every crash point (kill before/after `sending` write, kill after network-ambiguous error), verification-first retry, window catch-up on boot, undo-after-fire, draft-404 path — all against a fake provider + injected clock. This is the M1 "sync-engine correctness" bar applied to send.
+- **Unit (the heart of the task):** machine transition matrix including every crash point (kill before/after `sending` write, kill after network-ambiguous error, **kill between `drafts.create` and persisting its id** — the one genuinely ambiguous window), draft-present-⇒-resend and draft-404-⇒-sent recovery, the bounded secondary search never resending on a single negative, `needs-review` parking, window catch-up on boot, and undo-after-fire — all against a fake provider + injected clock. This is the M1 "sync-engine correctness" bar applied to send.
 - **E2e (seeded, no network):** `Mod+Enter` queues + toast with undo; `z` inside the window reopens the composer intact; window elapse moves the row to the provider-gate (visible as pending); relaunch with a queued row preserves it (durability); reply prefill shows quoted history collapsed and correct recipients from the fixture's Reply-To thread.
-- **Manual smoke (signed in, documented in the PR):** real send → lands threaded in Gmail web; undo inside window → nothing sent, composer restored; force-quit during the window → sends on relaunch; force-kill mid-send → exactly one copy in Sent after relaunch (run it several times); reply threading renders correctly in Gmail + one external client.
+- **Manual smoke (signed in, documented in the PR):** real send → lands threaded in Gmail web and leaves **no leftover draft**; undo inside window → nothing sent, composer restored; force-quit during the window → sends on relaunch; force-kill mid-send → exactly one copy in Sent after relaunch (run it several times, since this is the criterion the whole design exists for); reply threading renders correctly in Gmail + one external client.
 
 ### Done when
 
@@ -318,7 +344,7 @@ The unit matrix and e2e above are green; the manual exactly-once checklist is ex
 - **Spool at attach time:** copying the file into `userData/outbox/{draftId}/` immediately makes the draft self-contained (the original can move/delete before send — crash-safety includes attachments). Spool entries are recorded in `attachments_json` (filename, mimeType, sizeBytes, spool path) and cleaned on discard/sent.
 - Drag-and-drop onto the composer + a picker button (`dialog.showOpenDialog` via a new typed IPC). Per-file and total caps enforced at attach time: reject past **25MB total** with a clear toast (Gmail's own limit; oversize handoff links are out of scope v1).
 - MIME: T15 already frames attachments; the sender streams spool files into the multipart upload. Progress: per-outbox-row send progress event (`outbox:progress`) driving a thin bar on the composer/toast — coarse (per-attachment) granularity is fine at these sizes.
-- Mirror behavior: Gmail draft mirrors include attachments only at final send-time build (mirroring megabytes on every autosave would hammer quota; the local spool is the durability story, the mirror is convenience). Document this bound in the PR.
+- Mirror behavior: Gmail draft mirrors include attachments only at final send-time build (mirroring megabytes on every autosave would hammer quota; the local spool is the durability story, the mirror is convenience). Note the interaction with T16's draft-only send path: since every send now goes through `drafts.update` + `drafts.send`, the attachment bytes upload as part of that final update — one upload, not two. Document this bound in the PR.
 - Testing — unit: spool naming/cleanup, cap math, MIME framing with spooled files; e2e: attach via a seeded fixture file, chip renders with size, discard cleans the spool (assert via relaunch), oversize rejection toast; manual: real send with mixed attachments arrives intact (checksum the received files).
 
 ### Done when
@@ -411,7 +437,8 @@ Then M3 (search, system mailboxes, splits, palette, themes) starts — with the 
 | **Lexical** for the composer editor, over raw `contenteditable`/`execCommand` (owner, 2026-08-13) | M4's snippets (single-undo expansion, `{cursor}`) and AI draft streaming are programmatic edits that need a real document model; `execCommand` is deprecated and paste normalization is otherwise hand-rolled. Cross-browser normalization is *not* a factor — Electron pins one Chromium | Only if Lexical's HTML output fights real-world mail rendering; the sanitizer stays either way |
 | Gmail draft mirror is async/best-effort; local row is the source of truth | Typing latency and offline composing must never wait on Gmail | v2 multi-device story |
 | Attachments mirror to Gmail only at send time | Autosave-frequency × megabytes would burn quota for convenience | If dogfood shows draft-handoff-to-phone matters |
-| Client Message-ID + `rfc822msgid:` search as the exactly-once mechanism | Only client-controllable idempotency signal Gmail honors end-to-end | v2 backend could own send |
+| Gmail draft id (always send via `drafts.send`) as the exactly-once handle; client Message-ID demoted to a secondary check | Draft existence is immediately consistent and `drafts.send` consumes it atomically, so recovery is decisive. Search-based verification is not: Gmail's index lags sends and it honors no client idempotency key, so a single negative result cannot authorize a resend | v2 backend could own send |
+| On unresolvable send ambiguity, park in `needs-review` and tell the user rather than resending | F6 makes "no duplicate send" an acceptance criterion; an unsent message is user-recoverable, a duplicate is not | If dogfood shows the state never occurs in practice |
 | Replies to pre-v7 cached mail may lack `References` (threadId still set) | Server-side threading intact; external-client threading degrades rarely and temporarily | Fades as the cache refreshes |
 | One live composer at a time | Single window, single account; multiple drafts arrive with M3's Drafts view | M3 |
 | Utility-process move deferred to M3 | Don't move the process boundary under the outbox build | M3 first hardening task |
