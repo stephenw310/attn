@@ -3,9 +3,11 @@ import type { Db } from './db'
 import type { NotificationCandidate } from './notify'
 import {
   applyUnreadBadge,
+  BoundedRetainer,
   candidatesFor,
   isolateNotificationFailure,
   notificationPausedUntil,
+  notificationTarget,
   oneHourFrom,
   PENDING_FOCUS_TTL_MS,
   planNotifications,
@@ -220,3 +222,62 @@ function fakeSettingsDb(): { db: Db; values: Map<string, string> } {
   } as unknown as Db
   return { db, values }
 }
+
+describe('notification retention', () => {
+  it('holds shown notifications so a collected object cannot swallow the click', () => {
+    const retainer = new BoundedRetainer<object>(50)
+    const banner = { id: 'shown' }
+    retainer.retain(banner)
+    expect(retainer.size).toBe(1)
+  })
+
+  it('releases a notification once its click has been handled', () => {
+    const retainer = new BoundedRetainer<object>(50)
+    const first = { id: 'first' }
+    const second = { id: 'second' }
+    retainer.retain(first)
+    retainer.retain(second)
+    retainer.release(first)
+    expect(retainer.size).toBe(1)
+    // Releasing something never retained (or released twice) is a no-op, not a throw.
+    retainer.release(first)
+    expect(retainer.size).toBe(1)
+  })
+
+  it('evicts the oldest beyond the cap rather than growing without bound', () => {
+    const retainer = new BoundedRetainer<number>(3)
+    for (const value of [1, 2, 3, 4, 5]) retainer.retain(value)
+    expect(retainer.size).toBe(3)
+    // The evicted entries are the oldest, which are the least likely to be clicked.
+    retainer.release(4)
+    retainer.release(5)
+    expect(retainer.size).toBe(1)
+  })
+
+  it('drops every reference when the notifier stops', () => {
+    const retainer = new BoundedRetainer<object>(50)
+    retainer.retain({})
+    retainer.retain({})
+    retainer.clear()
+    expect(retainer.size).toBe(0)
+  })
+})
+
+describe('notificationTarget', () => {
+  it('focuses the thread while the notifying account is still signed in', () => {
+    expect(notificationTarget('t-budget', 'a@attn.test', 'a@attn.test')).toBe('t-budget')
+  })
+
+  it('drops a target whose account was switched out from under the banner', () => {
+    // A banner can sit in Notification Center across a sign-out/sign-in. Honouring
+    // it would pull the new account away from whatever it is showing to hunt a
+    // thread it does not have.
+    expect(notificationTarget('t-budget', 'a@attn.test', 'b@attn.test')).toBeNull()
+    expect(notificationTarget('t-budget', 'a@attn.test', null)).toBeNull()
+    expect(notificationTarget('t-budget', null, null)).toBeNull()
+  })
+
+  it('has no target for a summary notification', () => {
+    expect(notificationTarget(undefined, 'a@attn.test', 'a@attn.test')).toBeNull()
+  })
+})

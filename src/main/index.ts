@@ -94,6 +94,7 @@ function broadcastMailChanged(): void {
 function focusInboxThread(threadId: string): void {
   pendingFocus = { threadId, at: Date.now() }
   const win = showMainWindow()
+  console.log(`[notify] focus requested for ${threadId} (window ${win ? 'available' : 'pending'})`)
   win?.webContents.send('mail:focusThreadAvailable')
 }
 
