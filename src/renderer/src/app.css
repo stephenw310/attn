@@ -110,7 +110,8 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-live) 8%, transparent);
 }
 
-[data-status="syncing"] .app-status-dot {
+[data-status="syncing"] .app-status-dot,
+[data-status="checking"] .app-status-dot {
   background: var(--color-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 9%, transparent);
   animation: status-dot-pulse 1.5s ease-in-out infinite;
@@ -173,6 +174,7 @@
   }
 
   [data-status="syncing"] .app-status-dot,
+  [data-status="checking"] .app-status-dot,
   .app-sync-phase-segment[data-phase-state="active"]::after {
     animation: none;
   }

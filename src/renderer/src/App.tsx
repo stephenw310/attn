@@ -639,7 +639,9 @@ function SyncStatus({
         ? 'offline'
         : sync.phase === 'idle'
           ? 'live'
-          : 'syncing'
+          : sync.phase === 'checking'
+            ? 'checking'
+            : 'syncing'
   const syncingStage = sync.phase === 'syncing' ? sync.stage : 'metadata'
 
   const closeDetails = useCallback(() => {
@@ -680,7 +682,9 @@ function SyncStatus({
           ? 'Offline'
           : displayState === 'error'
             ? 'Error'
-            : `Syncing · ${syncStageLabel(syncingStage)}`
+            : displayState === 'checking'
+              ? 'Checking mail'
+              : `Syncing · ${syncStageLabel(syncingStage)}`
   const detail =
     displayState === 'live'
       ? 'Up to date'
@@ -690,7 +694,9 @@ function SyncStatus({
           ? 'Local mail available'
           : displayState === 'error'
             ? 'Click for details'
-            : null
+            : displayState === 'checking'
+              ? 'Looking for new mail'
+              : null
   const title =
     displayState === 'error' && sync.phase === 'error'
       ? sync.message

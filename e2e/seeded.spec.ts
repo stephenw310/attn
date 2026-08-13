@@ -54,6 +54,14 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(progress.locator('[data-phase-state]').nth(0)).toHaveAttribute('data-phase-state', 'complete')
   await expect(progress.locator('[data-phase-state]').nth(1)).toHaveAttribute('data-phase-state', 'active')
 
+  // An incremental poll is not a backfill phase: no stage label, no progress bar.
+  await setSyncState(app, { phase: 'checking' })
+  await expect(status).toContainText('Checking mail')
+  await expect(status).toContainText('Looking for new mail')
+  await expect(status).toHaveAttribute('data-status', 'checking')
+  await expect(status).toHaveAttribute('title', 'Checking mail — Looking for new mail')
+  await expect(page.getByTestId('sync-progress')).toHaveCount(0)
+
   await setSyncState(app, { phase: 'offline', message: 'fetch failed' })
   await expect(status).toContainText('Offline')
   await expect(status).toContainText('Local mail available')

@@ -82,6 +82,8 @@ export type SyncStage = 'metadata' | 'bodies' | 'reconcile'
 
 export type SyncState =
   | { phase: 'idle' }
+  // An incremental history poll, not a staged backfill: no stage, no progress.
+  | { phase: 'checking' }
   | { phase: 'syncing'; stage: SyncStage; threadsDone: number }
   | { phase: 'offline'; message: string }
   | { phase: 'error'; message: string }

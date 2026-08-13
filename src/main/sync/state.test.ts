@@ -19,6 +19,7 @@ describe('sync state publication', () => {
     expect(
       sameSyncState({ phase: 'error', message: 'offline' }, { phase: 'error', message: 'offline' })
     ).toBe(true)
+    expect(sameSyncState({ phase: 'checking' }, { phase: 'checking' })).toBe(true)
   })
 
   it('publishes phase, progress, and error changes', () => {
@@ -40,5 +41,9 @@ describe('sync state publication', () => {
     expect(sameSyncState({ phase: 'error', message: 'offline' }, { phase: 'error', message: 'quota' })).toBe(
       false
     )
+    expect(sameSyncState({ phase: 'checking' }, { phase: 'idle' })).toBe(false)
+    expect(
+      sameSyncState({ phase: 'checking' }, { phase: 'syncing', stage: 'reconcile', threadsDone: 0 })
+    ).toBe(false)
   })
 })

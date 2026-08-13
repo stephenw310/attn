@@ -284,7 +284,7 @@ function startHistoryPoller(
   })
   historyPoller.start()
   if (runImmediately) {
-    historyPoller.requestRunNow(() => setSyncState({ phase: 'syncing', stage: 'reconcile', threadsDone: 0 }))
+    historyPoller.requestRunNow(() => setSyncState({ phase: 'checking' }))
   }
 }
 
@@ -307,7 +307,7 @@ function retrySync(): void {
     return
   }
   if (route === 'poller') {
-    historyPoller?.requestRunNow(() => setSyncState({ phase: 'syncing', stage: 'reconcile', threadsDone: 0 }))
+    historyPoller?.requestRunNow(() => setSyncState({ phase: 'checking' }))
   } else if (route === 'queue-backfill') {
     backfillRetryGeneration = authSessionGeneration
   } else {

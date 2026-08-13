@@ -12,5 +12,6 @@ export function sameSyncState(left: SyncState, right: SyncState): boolean {
   if (left.phase === 'error' && right.phase === 'error') {
     return left.message === right.message
   }
-  return left.phase === 'idle' && right.phase === 'idle'
+  // 'idle' and 'checking' carry no payload, so matching phases are identical.
+  return true
 }
