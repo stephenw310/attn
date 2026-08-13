@@ -23,7 +23,6 @@ export interface TokenSet {
   refresh_token?: string
   expires_at: number
   email?: string
-  // TODO(M0-final): refresh flow — untestable until a real client exists.
 }
 
 let activeCancel: (() => void) | null = null

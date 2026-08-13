@@ -103,7 +103,9 @@ function applySnooze(db: Db, accountId: string, threadIds: string[], dueAt: numb
     const wasInInbox = labelsFor(db, accountId, threadId).has('INBOX')
     upsertReminder.run(accountId, threadId, dueAt, now)
     applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
-    // TODO(T7+): mirror the local reminder with an [Attn]/Snoozed Gmail label.
+    // v1 snooze is local-only by decision (SPEC §9 #6): Gmail sees a plain
+    // archive. Gmail-side labels + exact-time return arrive with the v1.5
+    // companion script (SPEC F7).
     if (wasInInbox) {
       enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }), now)
     }

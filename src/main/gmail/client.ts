@@ -102,8 +102,8 @@ export class GmailClient {
         continue
       }
       // Gmail reports per-user rate/quota limits as 403, not 429. Per-MINUTE
-      // quota windows need long backoff — wait into the next window.
-      // TODO(M1): replace with a token-bucket limiter in the sync process.
+      // quota windows need long backoff — wait into the next window. A proper
+      // token-bucket limiter is deferred M2 hardening (docs/M2-PLAN.md).
       const quotaHit = res.status === 403 && /quota|rate ?limit/i.test(text)
       if ((res.status === 429 || res.status >= 500 || quotaHit) && attempt < 7) {
         attempt++

@@ -1,0 +1,394 @@
+# M2 Implementation Plan — Mail Out (Composer, Drafts, Send, Undo Send, Exactly-Once Outbox)
+
+**Audience:** the engineer(s) building M2. Written to the same contract as [M1-PLAN.md](M1-PLAN.md): every task is one PR, nothing is done until `npm run verify` is green, and "spec F6" means a section of [SPEC.md](SPEC.md) (v0.13) — read it before starting the task.
+**Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase as merged through PR #26.
+**Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
+
+**Prerequisite from M1:** the two remaining M1 exit smokes (real-Gmail airplane-mode drain; real-OS notification click-through) must be recorded in the M1 plan before M2 *sign-off* — but they do not block starting R1–R3 or any T-task.
+
+---
+
+## Why this order
+
+The composer is the largest single UI surface in the product, and it lands in a renderer whose root component is already 1,989 lines. The outbox is the first subsystem where a bug destroys trust irreversibly (a duplicate send cannot be undone). So M2 starts with refactors that make room (R1–R3), builds the data foundation next (T13), then the composer and the send machinery on top of clean seams, and ends with the hardening pass (T20) that makes "daily-drivable" honest.
+
+```mermaid
+graph LR
+  R1[R1 renderer decomposition]
+  R2[R2 main-process seams + typed IPC]
+  R3[R3 test scaffolding]
+  T13[T13 sent metadata + threading headers + contacts]
+  T14[T14 composer shell + crash-safe drafts]
+  T15[T15 MIME builder + reply semantics]
+  T16[T16 outbox: send + undo send, exactly-once]
+  T17[T17 attachments out]
+  T18[T18 failed-action surface + queue re-pend]
+  T19[T19 on-demand body hydration]
+  T20[T20 daily-drivable hardening + sign-off]
+
+  R1 --> T14
+  R2 --> T16
+  R3 --> T14
+  T13 --> T14
+  T13 --> T15
+  T14 --> T16
+  T15 --> T16
+  T16 --> T17
+  T14 --> T17
+  T16 --> T20
+  T17 --> T20
+  T18 --> T20
+  T19 --> T20
+```
+
+Parallelization: R1 ∥ R2 ∥ T13 touch disjoint files. T15 is pure modules and can run beside T14. T18 and T19 are independent of the composer chain and fit whenever someone is free.
+
+---
+
+## Global rules (every task — carried over from M1, plus two new ones)
+
+1. **Migrations are an append-only array** (`src/main/db/migrations.ts`). Next index is **v7**; merge order decides numbering; two tasks never share one migration. No dev-only rewrites this milestone — M2 schema changes must be additive because dogfooding databases now carry real state (T11's authorized v5 rewrite is not a precedent).
+2. **IPC has three parts** (main handler, preload bridge, shared types) — all in the same commit. After R2, channel names and signatures live in the typed channel map in `src/shared/` — never write a raw channel string in main or preload again.
+3. **Mail content is untrusted.** That now includes **outgoing** content: quoted history entering the composer passes the same DOMPurify path as display, and composer output is sanitized against a minimal allowlist before it is stored or built into MIME. Never `dangerouslySetInnerHTML`.
+4. **Select on `data-testid`** in e2e; add testids for every new interactive element.
+5. **Mock mode keeps working.** Signed-out without a seed = the browser-preview mock inbox. The composer may open with autocomplete empty and Send disabled ("sign in to send"), but it must render and navigate without console errors.
+6. **After UI changes, look at the screenshots** — the suite gains `composer.png` in T14; review it like the other four.
+7. **Every user-facing action is a registered command** (F5). New contexts (`composer`) still register; the M3 palette will assert the full inventory.
+8. **If your task changes the verify pipeline or harness behavior, update AGENTS.md in the same PR.**
+9. **New (exactly-once discipline):** any code path that can call `messages.send`/`drafts.send` must be reachable only from the outbox state machine in T16. No convenience send helpers anywhere else — one chokepoint, one invariant.
+10. **New (pure-core discipline):** better-sqlite3 cannot load under vitest (Electron ABI), so DB-touching logic stays thin and e2e-covered while decisions live in pure planner modules (the T7 poller and T9 notifier pattern). The outbox machine, reply computation, MIME builder, and contact ranking are all built as pure functions with exhaustive unit tests.
+
+---
+
+## R1 — Decompose the renderer before the composer lands
+
+**Depends on:** nothing · **Unblocks:** T14 · **Parallel with:** R2, T13
+
+### Why
+
+`App.tsx` is 1,989 lines holding ~25 pieces of state: list, reader, selection, snooze picker, label picker, sync status, account menu, toasts, keyboard dispatch, and the mail-data lifecycle. The composer adds the biggest stateful surface yet (recipients, editor, attachments, autocomplete, outbox status) plus per-keystroke latency budgets (<16ms). Landing that in the current file would push it past 3,000 lines and make the keystroke path re-render the world.
+
+### Implementation guide
+
+**No behavior change. No new features. The 52-test e2e suite is the safety net and must pass unmodified** (testids and DOM structure stay stable; only import paths move).
+
+1. New `src/renderer/src/components/`: extract, one commit each so review stays mechanical:
+   - `SyncStatus.tsx` (with `SyncProgress`), `AccountMenu.tsx`, `SnoozePicker.tsx`, `Toast.tsx`, `QueueReadout.tsx`
+   - `ThreadList.tsx` (list container + row + date groups + `ThreadLabels`/`ReminderChips`)
+   - `ConversationView.tsx` (reader header + scroll container) and move the existing `MessageCard`/`RecipientLine`/`ConversationMessages` beside it
+2. New `src/renderer/src/hooks/`:
+   - `useMailData` — auth status, sync state, threads/snoozed/labels/unread/pending, the `refresh` + `mail:changed` wiring, and the deferred-refresh machinery (`deferRefreshUntilRef`)
+   - `useSelectionState` — `selectedIds`/anchor/base + toggle/extend/clear (the pure parts already live in `selection.ts`)
+   - `useConversation` — the conversation cache, neighbor preload, and mark-read-on-open effect
+   - `useKeyboardDispatch` — the window keydown listener, chord state, and reading-scroll handoff
+   - `useToast`
+3. `App.tsx` becomes composition + the triage/command-registration glue. Target: **under ~450 lines**. If a piece resists extraction, that's a finding — write it down in the PR rather than forcing it.
+4. Props stay explicit (no context providers yet); the composer task decides whether a context is warranted when it actually feels the pain.
+
+### Done when
+
+E2e suite green with zero spec edits; all five screenshot artifacts visually unchanged; `App.tsx` under ~450 lines; no component over ~350.
+
+---
+
+## R2 — Main-process seams and the typed IPC map
+
+**Depends on:** nothing · **Unblocks:** T16 · **Parallel with:** R1, T13
+
+### Why
+
+`src/main/index.ts` is 720 lines mixing boot wiring, window creation, sync orchestration (the generation-guard logic — the subtlest code in the app), and every IPC handler. T16 adds an outbox sender, more IPC, and boot recovery; without seams, index.ts becomes the next App.tsx. And IPC channel names are currently bare strings repeated in three files — a typo compiles fine and fails at runtime.
+
+### Implementation guide
+
+1. **`src/shared/ipc.ts` — the typed channel map.** One interface listing every invoke channel with request/response types, and every broadcast channel with payload type. `preload/index.ts` and the main-process registrar both derive from it (a small `handle<K extends Channel>(channel, fn)` wrapper in main; the preload methods keyed off the same names). Renaming or retyping a channel becomes a compile error everywhere. No runtime behavior change.
+2. **`src/main/ipc.ts`** — move `registerIpc` there, taking its dependencies (`db`, `currentAccountId`, executor, scheduler, notifier, sync controller) as an explicit context object instead of closing over module globals.
+3. **`src/main/syncController.ts`** — extract the sync orchestration state machine: `startSync`, `startHistoryPoller`, `stopHistoryPoller`, `retrySync`, `resumeOnlineWork`, the `authSessionGeneration` counter, `backfillRetryGeneration`, `syncRunning`, and sync-state publishing. Give it a narrow interface (`onSignIn()`, `onSignOut()`, `retry()`, `getState()`) and keep the generation-guard rules in one documented place. Extract the pure routing decisions (which already exist as `syncRetryRoute`) plus any new ones into unit-testable functions.
+4. `index.ts` keeps: env seams, single-instance lock, window creation, boot sequence, will-quit teardown. Target under ~350 lines.
+5. Grep-proof: after R2, `ipcMain.handle('` appears only in `ipc.ts`, and no channel string literal appears more than once in the codebase.
+
+### Done when
+
+Verify green with no e2e edits; channel map adopted by all three layers; `index.ts` under ~350 lines; sync generation logic isolated with its routing decisions unit-tested.
+
+---
+
+## R3 — Test scaffolding for mail-out
+
+**Depends on:** R1 (file layout) · **Unblocks:** T14, T16 · **Small task**
+
+1. **Seed fixture growth:** add to `e2e/fixtures/seed-inbox.json` a thread whose messages carry `Message-ID`/`References` headers (T13 exposes them) and a message with a `Reply-To` differing from `From` — reply-computation e2e needs both. Keep existing thread indices stable (triage specs assert fixture math; append, don't reorder).
+2. **Composer page object:** `e2e/composer.ts` helper (open via `c`/`r`, read recipient chips, type in editor, trigger send, read outbox state via the footer/pending readout) so T14–T17 specs stay declarative.
+3. **Clock seam for unit tests:** the outbox machine and undo-send window are time-driven. Standardize on injectable `now()`/timer factories (the M1 scheduler already takes this shape) so vitest covers window elapse without real waits.
+4. Document all three in AGENTS.md's harness section.
+
+---
+
+## T13 — Sent-mail metadata, threading headers, and the contacts store
+
+**Depends on:** nothing (main-process only) · **Unblocks:** T14 (autocomplete data), T15 (threading fields) · **Spec:** F6 (autocomplete "built locally from synced sent mail"), F2
+
+### Why
+
+Three M2 features need data the store doesn't have yet: recipient autocomplete needs the user's sending history; reply threading needs each message's RFC `Message-ID`/`References`; and the M3 Sent view will need SENT membership anyway. One sync-layer task supplies all three.
+
+### Design (decided)
+
+- **Backfill gains a `sent` metadata stage** after `bodies`: `listThreadIds('in:sent newer_than:12m')`, persisted `metadataOnly` through the same `runThreadPhase` machinery (checkpointed cursor `sent:<token>`, resumable). The history poller already refetches *any* thread that appears in history records, so sent mail stays current after backfill without poller changes; the `newMail` exclusion of self-sent messages (SENT label) is untouched.
+- **Upgrade path for existing accounts:** `backfill_cursor='done'` databases must run the sent stage exactly once without redoing metadata/bodies. Add a `sent_synced` flag column to `sync_state` (v7). `startSync` routes: cursor `done` + `sent_synced=0` → run only the sent stage, then set the flag. Fresh backfills set it as part of the normal sequence. **Do not reset anyone's `done` cursor.**
+- **Threading headers:** `parse.ts` extracts `Message-ID` and `References` (plus `In-Reply-To` as a References fallback); `persistThread` stores them. Only newly-synced mail carries them — T15 handles the missing-header case at reply time.
+- **Contacts are derived, not authoritative.** A `contacts` row per (account, email) with `sent_to_count`, `received_count`, `last_interacted_at`, `name` (best display name seen). Updated incrementally inside `persistThread` (cheap upserts on the rows it already walks: recipients of SENT messages increment `sent_to_count`; From of received messages increments `received_count`). A one-shot `rebuildContacts(db, accountId)` SQL pass runs when the sent stage completes, covering mail persisted before this migration.
+- **Ranking is a pure function** in `src/shared/contacts.ts` (shared — the renderer ranks as the user types): score = `3·sent_to + received` with a recency multiplier (halve per 90 days since `last_interacted_at`), prefix matches on address or name beat infix, self is excluded. Exact formula is a starting point — tune during dogfood, keep it pure and tested.
+
+### Implementation guide
+
+**Migration v7 (single migration for the task):**
+
+```sql
+ALTER TABLE messages ADD COLUMN rfc_message_id TEXT;
+ALTER TABLE messages ADD COLUMN references_json TEXT;
+ALTER TABLE sync_state ADD COLUMN sent_synced INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE contacts (
+  account_id         TEXT NOT NULL,
+  email              TEXT NOT NULL,
+  name               TEXT,
+  sent_to_count      INTEGER NOT NULL DEFAULT 0,
+  received_count     INTEGER NOT NULL DEFAULT 0,
+  last_interacted_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, email)
+);
+```
+
+- IPC (typed map): `contacts:search(query) → { name, email, score }[]` (main runs the SQL narrow, shared ranking orders; cap ~8 rows).
+- Seed loader: accept optional `messageId`/`references` per fixture message (R3 uses this).
+- `SyncStage` union gains `'sent'`; the footer stage label reads "Sent mail". Keep `sameSyncState`/progress rendering in step.
+
+### Testing
+
+- Unit: header extraction (angle-bracket forms, folded References), contact ranking (recency decay, prefix beats infix, self-exclusion), cursor routing for the three upgrade shapes (fresh, mid-backfill, done-without-sent).
+- E2e (seeded): seeded fixture exposes headers through `getConversation`; `contacts:search` returns seed senders ranked; boot log shows the sent stage skipped when seeded.
+- Manual smoke (signed in): fresh sign-in runs metadata → bodies → sent; an existing done-cursor DB runs only sent; contacts populate from real history.
+
+### Done when
+
+Verify green; both upgrade paths demonstrated (fresh + existing DB); autocomplete data queryable over IPC; AGENTS harness notes updated if the fixture shape changed.
+
+---
+
+## T14 — Composer shell: overlay panel, crash-safe local drafts, autocomplete
+
+**Depends on:** R1, R3, T13 (can start against a stubbed `contacts:search`) · **Unblocks:** T16, T17 · **Spec:** F6, §5 composer keys
+
+### Design (decided)
+
+- **Overlay panel above the current view** (F6: context is never lost) — a bottom-right docked panel in the Dispatch language, not a modal takeover: the list/reader stays visible and interactive scroll-wise behind it; app keyboard verbs suspend while the composer has focus (the existing text-entry guard already does most of this).
+- **The local `outbox` row is the draft's source of truth from the first keystroke** (state `composing`, T16's table — T14 lands the table's *draft* subset if it merges first; coordinate migration order with T16, they must not share one migration). Autosave: debounced 1s-idle write of the full composer state. Crash-safe means: force-quit at any moment loses at most the last second of typing.
+- **Gmail Drafts mirror is best-effort and asynchronous:** debounced (~3s idle) `drafts.create`/`drafts.update` through the provider, storing `gmail_draft_id`. Mirror failures never block typing or local autosave; offline composing is fully supported (mirror catches up when the executor comes back — the mirror op rides the existing action queue as a new intent kind, so it inherits retry/offline semantics).
+- **Editor:** `contenteditable` with the frozen-but-stable Chromium editing commands, constrained to F6's v1 surface (bold/italic/underline, ordered/unordered lists, links, blockquote). The DOM is the working state; serialization passes DOMPurify with a **minimal allowlist** (`p/div/br/b/strong/i/em/u/a[href]/ul/ol/li/blockquote`) on every autosave and on send. Plain-text alternative is derived (`innerText`-based, blockquote → `>` prefixes).
+- **Recipient fields:** chip-based To/Cc/Bcc (Cc/Bcc revealed on demand), free-text parse on comma/Enter/blur with the existing `parseAddressList` semantics, invalid addresses visibly rejected at chip-creation time. Autocomplete dropdown from `contacts:search`; `Tab`/`Enter` accepts the highlighted suggestion (F6).
+- **Keys:** `c` (global) opens a new message. `Mod+Enter` send (wired fully in T16; until then it saves + closes with a "Sending lands with T16" toast behind a flag — or hold the PR until T16 if the flag feels dishonest; prefer holding). `Esc` closes (draft saved, toast "Draft saved"). `Mod+B/I/U`, `Mod+Shift+K` (link). All registered as commands with a new `'composer'` context; the registry's `matchKey` currently drops modifier chords, so composer-context dispatch happens inside the composer's own key handler while the registry entries carry the shortcut strings for the palette (extend `COMMAND_SPECS` typing to allow `Mod+` shortcuts without loosening the global matcher).
+- **Reopen behavior:** exactly one composer at a time in v1. `c` with a live `composing` row reopens it (single-account, single-window reality); a second draft requires discarding or sending the first. On boot, a `composing` row that is dirtier than its Gmail mirror reopens automatically — that is F6's crash-recovery acceptance made visible. M3's Drafts view generalizes this.
+
+### Implementation guide
+
+- New `src/renderer/src/composer/` (Composer.tsx, RecipientField.tsx, EditorToolbar.tsx, useComposerDraft.ts, useAutocomplete.ts). Keep every module under the R1 size bars.
+- IPC (typed map): `draft:save(draft) → { id }`, `draft:get(id)`, `draft:discard(id)`, `draft:takeRecovered() → draft | null` (boot recovery pull, mirroring the pending-focus pattern).
+- Main: draft persistence module `src/main/outbox/drafts.ts` (row CRUD + mirror enqueue). No send paths here (global rule 9).
+- Testids: `composer`, `composer-to`, `composer-subject`, `composer-editor`, `composer-attachments`, `autocomplete-option`, `composer-close`.
+- Screenshot artifact: `composer.png` (open composer over the inbox, one recipient chip, styled body line).
+
+### Testing
+
+- Unit: outgoing-HTML sanitizer allowlist (hostile paste collapses to allowed tags), plain-text derivation, recipient parse/chip rules, autocomplete ranking integration.
+- E2e (seeded): `c` opens focused at To; chips accept/reject; `Esc` saves and toasts; relaunch → draft reopens with content intact (**the F6 crash acceptance, minus force-kill which the relaunch helper approximates**); typing in the editor never triggers list verbs; mock mode renders with Send disabled.
+- Perf (@perf): composer open < 100ms CI ceiling; keystroke-to-paint sampled under the 2k-thread seed with a generous CI ceiling (catch order-of-magnitude regressions, not 16ms exactness — that's T20's profiled pass).
+
+### Done when
+
+Draft lifecycle (open/type/autosave/close/reopen/relaunch-recover) fully demonstrated in e2e without network; mirror ops visible in the pending queue when seeded; `composer.png` reviewed; verify green.
+
+---
+
+## T15 — MIME builder and reply/reply-all/forward semantics
+
+**Depends on:** T13 (headers) · **Unblocks:** T16 · **Parallel with:** T14 · **Spec:** F6
+
+### Why a dedicated task
+
+Everything here is a pure function from stored state to bytes or to a prefilled draft — the most unit-testable code in M2 and the code most likely to embarrass us in other people's mail clients. It gets its own task so it is exhaustively tested before the outbox ever calls it.
+
+### Implementation guide
+
+**`src/main/outbox/mime.ts`** — RFC 5322/2045 builder, no dependencies:
+- `buildMime(draft, { accountEmail, rfcMessageId, date }): string` → complete message: headers (`From`, `To`/`Cc`/`Bcc`, `Subject` with RFC 2047 encoded-words for non-ASCII, `Message-ID` (the caller-supplied one — exactly-once depends on it), `In-Reply-To`/`References` when replying, `Date`, `MIME-Version`), body as `multipart/alternative` (text + html), wrapped in `multipart/mixed` when attachments exist (base64, 76-col lines, `Content-Disposition: attachment; filename*=` RFC 2231 for non-ASCII names; `Content-ID` for future inline use).
+- Deterministic boundaries derived from the message id (stable output = testable with fixture files).
+
+**`src/main/outbox/replyPlan.ts`:**
+- `planReply(kind, conversation, accountEmail)` → `{ to, cc, subject, quoteHtml, quoteText, inReplyTo, references, threadId }`.
+- Recipients: reply → `Reply-To ?? From` of the latest non-self message (fall back to latest message if all are self), minus self. Reply-all → that plus To+Cc of the source message, minus self, deduped case-insensitively. Forward → empty.
+- Subject: `Re: `/`Fwd: ` prefixed once, case-insensitive detection, existing prefix preserved (`Re: Re:` never produced).
+- Quote: attribution line ("On {date}, {name} <{email}> wrote:") + the source body inside `blockquote` (HTML path reuses the display sanitizer **before** embedding; text path `>`-prefixes). Forward uses the forwarded-message header block instead. The quote is stored separately on the draft (`quote_html`) and collapsed in the composer (F6) — the user's text never mixes into it unless they expand and edit, which folds it into the body.
+- References: source's `References` + source's `Message-ID` (RFC 5322 §3.6.4), truncated from the front if the header would exceed ~998 octets. **Missing headers** (mail cached before v7): plan returns `references: []` and T16 still sets `threadId` on the API call — Gmail threads it server-side; external recipients may see a new thread, which is the accepted cost, logged in the PR.
+
+### Testing
+
+Unit only (this task ships no UI): golden-file MIME fixtures (simple text, html+text, attachment, non-ASCII subject + filename, reply with References chain); reply-plan table tests (self-only thread, Reply-To divergence, dedupe, prefix cases, missing headers); property check that every generated message parses back with a naive header splitter. Update `parse.ts` fixtures if header extraction needs sharing.
+
+### Done when
+
+Builder + planner land with the test matrix above; no send path exists yet; verify green.
+
+---
+
+## T16 — Outbox: send, undo send, exactly-once
+
+**Depends on:** R2, T14, T15 · **Unblocks:** T17, T20 · **Spec:** F6 (undo send, outbox state machine), F2 (queue), §6 (scheduler owns undo-send windows)
+
+### Design (decided — the invariant lives here)
+
+- **State machine per outbox row:** `composing → queued → sending → sent` (+ `failed`). Transitions are durable **before** their side effects: a row is `queued` with `send_at` before the toast shows; `sending` is written before the first byte leaves; `sent` is written only on confirmed success.
+- **Exactly-once key = client-generated RFC Message-ID** (`<{uuid}@{account domain}>`), created when the row is queued and baked into the MIME. Recovery after any ambiguity (crash mid-send, network error after the request may have reached Gmail) is: search `messages.list q="rfc822msgid:{id} in:anywhere"` — found ⇒ mark `sent`; not found ⇒ safe to (re)send. **Every retry path goes through this verification when the previous attempt entered `sending`.** This is the F6 "no scenario produces a duplicate send" criterion made mechanical.
+- **Undo window:** queueing sets `send_at = now + delay` (setting stored via the M1 `settings` table: `undoSendDelaySeconds`, default 10; the settings *UI* is M4 — a palette-less default is fine for M2 dogfood). The **scheduler owns the timer** (§6): extend the M1 scheduler pattern with an `OutboxSender` armed on the next due `queued` row; catch-up on boot sends anything whose window elapsed while the app was closed. **Undo (`Z`) rides the existing main-process undo stack:** queueing a send pushes an entry whose inverse flips the row back to `composing`, cancels the timer, and tells the renderer to reopen the composer. Popping it after the send fired reports "Already sent" (no inverse) — deliberately still consuming the stack entry so `Z Z` doesn't skip backwards silently.
+- **Send execution** (the only `send` chokepoint, global rule 9): if the row has a `gmail_draft_id`, final `drafts.update` (raw MIME) then `drafts.send` — the sent message atomically replaces the Gmail draft, leaving no husk in Drafts. Otherwise `messages.send` (uploadType=multipart for attachment payloads). Both calls set `threadId` when replying. A 404 on `drafts.send` means the draft vanished (likely a prior attempt succeeded) → run the Message-ID verification, not a blind resend.
+- **After confirmed send:** refetch the returned `threadId` through the provider → `persistThread` → `mail:changed`, so the sent message appears in the local thread within a second (and Sent-view data accrues for M3). Reply-sends leave the inbox untouched; F4 auto-advance is not coupled to sending in v1.
+- **Offline:** rows sit in `queued` past their window while no provider exists; footer pending count includes `queued`/`sending` outbox rows (the local-first visibility contract, same as triage). Toast on queue: **"Sent — Undo (Z)"** with the toast persisting for the window's duration rather than the standard 4s.
+- **Failures:** permanent 4xx (bad recipient, size) → `failed` + toast + composer reopens with the error banner and content intact. Retryable errors follow the executor's backoff ladder with the verification-first rule above.
+
+### Implementation guide
+
+**Migration v8:**
+
+```sql
+CREATE TABLE outbox (
+  id              TEXT PRIMARY KEY,
+  account_id      TEXT NOT NULL,
+  state           TEXT NOT NULL DEFAULT 'composing',
+  kind            TEXT NOT NULL DEFAULT 'new',      -- new | reply | replyAll | forward
+  thread_id       TEXT,
+  source_message_id TEXT,
+  to_json         TEXT NOT NULL DEFAULT '[]',
+  cc_json         TEXT NOT NULL DEFAULT '[]',
+  bcc_json        TEXT NOT NULL DEFAULT '[]',
+  subject         TEXT NOT NULL DEFAULT '',
+  body_html       TEXT NOT NULL DEFAULT '',
+  body_text       TEXT NOT NULL DEFAULT '',
+  quote_html      TEXT,
+  attachments_json TEXT NOT NULL DEFAULT '[]',
+  rfc_message_id  TEXT,
+  gmail_draft_id  TEXT,
+  send_at         INTEGER,
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  last_error      TEXT,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
+```
+
+(If T14 merged first with the draft-subset table, this becomes the additive completion — coordinate; the two PRs must not share a migration.)
+
+- **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` (thin, e2e-covered).
+- Provider grows `createDraft/updateDraft/sendDraft/sendMessage/findMessageByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths).
+- IPC: `outbox:send(draftId)`, `outbox:undoSend(outboxId)` (also reachable via the undo stack), broadcast `outbox:changed` for composer/toast state.
+- Reply entry points: `r`/`a`/`f` commands (reader context) call `planReply` and open the composer prefilled; register in the registry (§5 keys).
+
+### Testing
+
+- **Unit (the heart of the task):** machine transition matrix including every crash point (kill before/after `sending` write, kill after network-ambiguous error), verification-first retry, window catch-up on boot, undo-after-fire, draft-404 path — all against a fake provider + injected clock. This is the M1 "sync-engine correctness" bar applied to send.
+- **E2e (seeded, no network):** `Mod+Enter` queues + toast with undo; `z` inside the window reopens the composer intact; window elapse moves the row to the provider-gate (visible as pending); relaunch with a queued row preserves it (durability); reply prefill shows quoted history collapsed and correct recipients from the fixture's Reply-To thread.
+- **Manual smoke (signed in, documented in the PR):** real send → lands threaded in Gmail web; undo inside window → nothing sent, composer restored; force-quit during the window → sends on relaunch; force-kill mid-send → exactly one copy in Sent after relaunch (run it several times); reply threading renders correctly in Gmail + one external client.
+
+### Done when
+
+The unit matrix and e2e above are green; the manual exactly-once checklist is executed and pasted into the PR; no send call exists outside the sender; verify green.
+
+---
+
+## T17 — Attachments out
+
+**Depends on:** T14, T16 · **Spec:** F6 (drag-drop/picker, 25MB, progress)
+
+- **Spool at attach time:** copying the file into `userData/outbox/{draftId}/` immediately makes the draft self-contained (the original can move/delete before send — crash-safety includes attachments). Spool entries are recorded in `attachments_json` (filename, mimeType, sizeBytes, spool path) and cleaned on discard/sent.
+- Drag-and-drop onto the composer + a picker button (`dialog.showOpenDialog` via a new typed IPC). Per-file and total caps enforced at attach time: reject past **25MB total** with a clear toast (Gmail's own limit; oversize handoff links are out of scope v1).
+- MIME: T15 already frames attachments; the sender streams spool files into the multipart upload. Progress: per-outbox-row send progress event (`outbox:progress`) driving a thin bar on the composer/toast — coarse (per-attachment) granularity is fine at these sizes.
+- Mirror behavior: Gmail draft mirrors include attachments only at final send-time build (mirroring megabytes on every autosave would hammer quota; the local spool is the durability story, the mirror is convenience). Document this bound in the PR.
+- Testing — unit: spool naming/cleanup, cap math, MIME framing with spooled files; e2e: attach via a seeded fixture file, chip renders with size, discard cleans the spool (assert via relaunch), oversize rejection toast; manual: real send with mixed attachments arrives intact (checksum the received files).
+
+### Done when
+
+Attach → queue → relaunch → send survives with bytes intact; caps enforced; spool leaks impossible in the e2e lifecycle; verify green.
+
+---
+
+## T18 — Failed-action surface and queue re-pend (deciding an M1 deferred call)
+
+**Depends on:** nothing (parallel-friendly) · **Spec:** F2 action queue; M1 deviations rows 2–3
+
+**Product decision (made here so M2 can build it):** failed rows stay visible and recoverable, never silent.
+
+1. Footer pending readout splits: `· 3 pending` stays amber-neutral; failures append `· 1 failed` in the danger tone. Clicking (and a registered command) opens a small panel listing failed rows: action kind, thread subject (joined from the store), `last_error`, attempts — with **Retry** (row → `pending`, kick executor) and **Discard** (delete row; local state is already what the user sees, so discarding just accepts divergence until the next history refetch corrects it — say exactly that in the panel's microcopy).
+2. **Hard-401 re-pend on sign-in:** successful `auth:signIn` for the same account flips that account's `failed` rows whose `last_error` was an auth failure back to `pending` (the M1 deviation: actions queued across a revoked-token window currently die permanently). Classify auth-failures at failure time with a `failure_kind` column? No — avoid a migration: match on the stored 401 error string from `GmailApiError` formatting, which is stable and test-pinned.
+3. Outbox `failed` rows (T16) appear in the same panel with Retry routing through the verification-first send path.
+- Testing — unit: re-pend classifier; e2e: force a failed row via the seeded DB (insert directly with the test seam), assert badge split + retry/discard flows; the executor test already covers permanent-vs-retryable routing.
+
+### Done when
+
+No failure mode leaves the queue invisible; sign-in recovers auth-stranded rows; e2e demonstrates both; verify green; the M1 deviations table rows are updated to point here.
+
+---
+
+## T19 — On-demand body hydration for metadata-only threads
+
+**Depends on:** nothing · **Spec:** F2 ("older content is fetched on demand"), M1 deviation row
+
+Opening a 90-day-to-12-month-old thread today renders snippets only, forever. Close the gap:
+
+- `mail:getConversation` returns what the store has, immediately (never block the open — F3's <50ms). When any returned message lacks both `body_text`-beyond-snippet and `body_html`, and a provider exists, kick a background hydrate: `getThread(full)` → `persistThread` → `hydrateMissingThreadBodies` → `mail:changed`. The renderer's existing refresh path repaints the open conversation; add a quiet "Loading full message…" placeholder on body-less cards so the beat is legible.
+- Debounce per thread (one in-flight hydrate; failures fall back silently to snippet view and retry on next open). Seeded/offline: no provider → placeholder text becomes "Full message loads when signed in" (mirrors the attachment toast language).
+- SENT metadata threads from T13 get bodies the same way when opened.
+- Testing — unit: the "needs hydration" predicate; e2e: seeded metadata-only fixture thread opens instantly with placeholder, then (with a stub provider seam? no — seeded has no provider) asserts the offline placeholder; the online path is a documented manual smoke. Perf: conversation-open budget unaffected (hydrate is post-paint).
+
+### Done when
+
+Old threads read like new ones when signed in; opens never block; verify green; deviation row updated.
+
+---
+
+## T20 — Daily-drivable hardening and M2 sign-off
+
+**Depends on:** T16, T17, T18, T19 · **Spec:** §7 budgets, §8 M2 bar, M1 deviations
+
+The closing pass that turns "features exist" into "this is my mail client":
+
+1. **10k-thread decision (F3):** generate a 10k perf seed locally, measure list render + scroll frame times + memory against §7. If the mounted list misses, implement fixed-height windowing by hand (rows are uniform; ~150 lines, no dependency) and re-measure; if it passes, raise the 300-row query cap to the measured-safe bound and record the evidence. Either way the deviation rows (virtualization, 300-cap) resolve with data, not vibes.
+2. **Composer latency profile:** measure keystroke-to-paint under a 2k store with the profiler, not just the CI ceiling; fix anything over ~8ms median so the 16ms budget has headroom.
+3. **Gmail client token-bucket limiter** (the reworded M1 TODO): a simple bucket (e.g. 200 units/user/100s tracked client-side) in front of `request()` smoothing backfill+poller+sender bursts, replacing pure backoff-on-403 as the primary defense. Unit-test the bucket; keep the backoff as the fallback.
+4. **Dogfood checklist executed and recorded** (the M2 exit evidence): a full week of real use by at least one of us, plus the F6 acceptance list — composer <50ms open, imperceptible typing, force-quit recovery, undo-send reliability, zero duplicate sends across the week, attachment round-trips — and the M1 leftovers if still open (airplane-mode drain, notification click-through).
+5. **Docs:** SPEC status + milestone table updated (M2 shipped state, any new accepted deviations), AGENTS pipeline notes if the harness changed, README "current state" paragraph.
+
+### Done when — the M2 exit checklist
+
+- [ ] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites
+- [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links)
+- [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates
+- [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data
+- [ ] Failed actions surfaced + auth re-pend shipped; no silent queue states remain
+- [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts
+- [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input)
+- [ ] SPEC/README/AGENTS/M1-plan deviation rows updated to the shipped reality
+
+Then M3 (search, system mailboxes, splits, palette, themes) starts — with the sync-engine → utility-process move as its first hardening candidate, deliberately **not** done in M2 (moving the process boundary while building the outbox would risk the exactly-once invariant for a jank win whose real driver is M3's FTS indexing).
+
+---
+
+## Accepted-risk register (decisions made by this plan — don't relitigate ad hoc)
+
+| Decision | Rationale | Revisit |
+|---|---|---|
+| `contenteditable` + Chromium editing commands for the v1 editor | F6's formatting surface is tiny; a custom editor model is weeks for zero v1 capability | M3+ if editing bugs accumulate |
+| Gmail draft mirror is async/best-effort; local row is the source of truth | Typing latency and offline composing must never wait on Gmail | v2 multi-device story |
+| Attachments mirror to Gmail only at send time | Autosave-frequency × megabytes would burn quota for convenience | If dogfood shows draft-handoff-to-phone matters |
+| Client Message-ID + `rfc822msgid:` search as the exactly-once mechanism | Only client-controllable idempotency signal Gmail honors end-to-end | v2 backend could own send |
+| Replies to pre-v7 cached mail may lack `References` (threadId still set) | Server-side threading intact; external-client threading degrades rarely and temporarily | Fades as the cache refreshes |
+| One live composer at a time | Single window, single account; multiple drafts arrive with M3's Drafts view | M3 |
+| Utility-process move deferred to M3 | Don't move the process boundary under the outbox build | M3 first hardening task |
