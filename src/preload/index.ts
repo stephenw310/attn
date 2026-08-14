@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import type { ContactSearchResult } from '../shared/contacts'
+import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   Conversation,
   DownloadAttachmentRequest,
@@ -14,62 +15,69 @@ import type {
   ThreadRow
 } from '../shared/mail'
 
+function invoke<K extends InvokeChannel>(
+  channel: K,
+  ...args: InvokeChannels[K]['args']
+): Promise<InvokeChannels[K]['result']> {
+  return ipcRenderer.invoke(channel, ...args)
+}
+
 const api = {
   platform: process.platform,
   auth: {
-    getStatus: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:getStatus'),
-    signIn: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:signIn'),
-    signOut: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:signOut')
+    getStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authGetStatus),
+    signIn: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignIn),
+    signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut)
   },
   mail: {
-    listThreads: (): Promise<ThreadRow[]> => ipcRenderer.invoke('mail:listThreads'),
-    listSnoozed: (): Promise<SnoozedThreadRow[]> => ipcRenderer.invoke('mail:listSnoozed'),
-    listLabels: (): Promise<MailLabel[]> => ipcRenderer.invoke('mail:listLabels'),
-    getUnreadCount: (): Promise<number> => ipcRenderer.invoke('mail:getUnreadCount'),
+    listThreads: (): Promise<ThreadRow[]> => invoke(IPC_CHANNELS.mailListThreads),
+    listSnoozed: (): Promise<SnoozedThreadRow[]> => invoke(IPC_CHANNELS.mailListSnoozed),
+    listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
+    getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),
     getConversation: (threadId: string): Promise<Conversation | null> =>
-      ipcRenderer.invoke('mail:getConversation', threadId),
+      invoke(IPC_CHANNELS.mailGetConversation, threadId),
     downloadAttachment: (request: DownloadAttachmentRequest): Promise<DownloadAttachmentResult> =>
-      ipcRenderer.invoke('mail:downloadAttachment', request),
+      invoke(IPC_CHANNELS.mailDownloadAttachment, request),
     getInlineImage: (request: InlineImageRequest): Promise<InlineImageResult> =>
-      ipcRenderer.invoke('mail:getInlineImage', request),
-    triage: (action: TriageAction): Promise<TriageResult> => ipcRenderer.invoke('mail:triage', action),
+      invoke(IPC_CHANNELS.mailGetInlineImage, request),
+    triage: (action: TriageAction): Promise<TriageResult> => invoke(IPC_CHANNELS.mailTriage, action),
     snooze: (threadIds: string[], dueAt: number): Promise<TriageResult> =>
-      ipcRenderer.invoke('mail:snooze', { threadIds, dueAt }),
-    markReadOnOpen: (threadId: string): Promise<void> => ipcRenderer.invoke('mail:markReadOnOpen', threadId),
-    undo: (): Promise<TriageResult | null> => ipcRenderer.invoke('mail:undo'),
-    getPendingActionCount: (): Promise<number> => ipcRenderer.invoke('mail:getPendingActionCount'),
+      invoke(IPC_CHANNELS.mailSnooze, { threadIds, dueAt }),
+    markReadOnOpen: (threadId: string): Promise<void> => invoke(IPC_CHANNELS.mailMarkReadOnOpen, threadId),
+    undo: (): Promise<TriageResult | null> => invoke(IPC_CHANNELS.mailUndo),
+    getPendingActionCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetPendingActionCount),
     onChanged: (cb: () => void): (() => void) => {
       const listener = (): void => cb()
-      ipcRenderer.on('mail:changed', listener)
-      return () => ipcRenderer.removeListener('mail:changed', listener)
+      ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },
     onFocusThread: (cb: (threadId: string) => void): (() => void) => {
       let active = true
       const takePendingFocus = async (): Promise<void> => {
-        const threadId: unknown = await ipcRenderer.invoke('mail:takePendingFocus')
+        const threadId = await invoke(IPC_CHANNELS.mailTakePendingFocus)
         if (active && typeof threadId === 'string' && threadId.length > 0) cb(threadId)
       }
       const listener = (): void => void takePendingFocus()
-      ipcRenderer.on('mail:focusThreadAvailable', listener)
+      ipcRenderer.on(IPC_CHANNELS.mailFocusThreadAvailable, listener)
       // A newly-created renderer may miss the availability signal while it is
       // mounting, so it always pulls the pending target after subscribing.
       void takePendingFocus()
       return () => {
         active = false
-        ipcRenderer.removeListener('mail:focusThreadAvailable', listener)
+        ipcRenderer.removeListener(IPC_CHANNELS.mailFocusThreadAvailable, listener)
       }
     }
   },
   contacts: {
-    search: (query: string): Promise<ContactSearchResult[]> => ipcRenderer.invoke('contacts:search', query)
+    search: (query: string): Promise<ContactSearchResult[]> => invoke(IPC_CHANNELS.contactsSearch, query)
   },
   sync: {
-    getState: (): Promise<SyncState> => ipcRenderer.invoke('sync:getState'),
-    retry: (): Promise<void> => ipcRenderer.invoke('sync:retry'),
+    getState: (): Promise<SyncState> => invoke(IPC_CHANNELS.syncGetState),
+    retry: (): Promise<void> => invoke(IPC_CHANNELS.syncRetry),
     onState: (cb: (s: SyncState) => void): (() => void) => {
       const listener = (_e: unknown, s: SyncState): void => cb(s)
-      ipcRenderer.on('sync:state', listener)
-      return () => ipcRenderer.removeListener('sync:state', listener)
+      ipcRenderer.on(IPC_CHANNELS.syncState, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.syncState, listener)
     }
   }
 }

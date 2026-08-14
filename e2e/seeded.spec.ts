@@ -1,11 +1,15 @@
 import type { ElectronApplication } from '@playwright/test'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import type { SyncState } from '../src/shared/mail'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
 async function setSyncState(app: ElectronApplication, state: SyncState): Promise<void> {
-  await app.evaluate(({ ipcMain }, next) => ipcMain.emit('attn:test:setSyncState', {}, next), state)
+  await app.evaluate(({ ipcMain }, { channel, next }) => ipcMain.emit(channel, {}, next), {
+    channel: TEST_CHANNELS.setSyncState,
+    next: state
+  })
 }
 
 test('renders seeded mail through IPC and the real SQLite store', async ({ page, mainLog }) => {
@@ -67,13 +71,14 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
   // Replay the exact same snapshots through the production persistence path.
   // Contribution PKs make this a no-op for aggregate frequency.
   await app.evaluate(
-    ({ ipcMain }) =>
+    ({ ipcMain }, channel) =>
       new Promise<void>((resolve, reject) => {
-        ipcMain.emit('attn:test:reloadSeed', {}, (error?: string) => {
+        ipcMain.emit(channel, {}, (error?: string) => {
           if (error) reject(new Error(error))
           else resolve()
         })
-      })
+      }),
+    TEST_CHANNELS.reloadSeed
   )
   const after = await page.evaluate(() => window.attn.contacts.search('maya'))
   expect(after[0]).toMatchObject({ name: 'Maya Lin', email: 'maya@example.com' })
@@ -81,7 +86,10 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
 
   // Removing the only sent contribution drops Priya from the projection while
   // preserving Maya's independent received-mail contributions.
-  await app.evaluate(({ ipcMain }) => ipcMain.emit('attn:test:deleteThread', {}, 't-sent-history'))
+  await app.evaluate(
+    ({ ipcMain }, channel) => ipcMain.emit(channel, {}, 't-sent-history'),
+    TEST_CHANNELS.deleteThread
+  )
   expect(await page.evaluate(() => window.attn.contacts.search('pri'))).toEqual([])
   expect(await page.evaluate(() => window.attn.contacts.search('maya'))).toEqual([
     expect.objectContaining({ name: 'Maya Lin', email: 'maya@example.com' })

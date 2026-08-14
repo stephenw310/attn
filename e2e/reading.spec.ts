@@ -1,6 +1,42 @@
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
+
+test('invalidates viewed conversation data when local mail changes', async ({ app, page }) => {
+  await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).click()
+  await expect(page.getByTestId('plain-text-visible').last()).toContainText(
+    'I added the launch milestones and owner notes.'
+  )
+
+  await app.evaluate(
+    ({ ipcMain }, { channel, messageId, bodyText }) => ipcMain.emit(channel, {}, messageId, bodyText),
+    {
+      channel: TEST_CHANNELS.updateMessageBody,
+      messageId: 'm-roadmap-2',
+      bodyText: 'A newly synced reply is now visible.'
+    }
+  )
+
+  await expect(page.getByTestId('message-card').last()).toContainText('A newly synced reply is now visible.')
+})
+
+test('clears the previous conversation while an uncached thread loads', async ({ app, page }) => {
+  await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).click()
+  await expect(page.getByTestId('plain-text-visible').last()).toContainText('launch milestones')
+  await page.keyboard.press('Escape')
+
+  await app.evaluate(
+    ({ ipcMain }, { channel, threadId, delayMs }) => ipcMain.emit(channel, {}, threadId, delayMs),
+    { channel: TEST_CHANNELS.delayConversation, threadId: 't-weekly', delayMs: 500 }
+  )
+  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
+
+  await expect(page.getByTestId('conversation-subject')).toHaveText('This week in focus')
+  await expect(page.getByTestId('conversation-loading')).toBeVisible()
+  await expect(page.getByTestId('conversation-content')).toHaveCount(0)
+  await expect(page.frameLocator('[data-testid="html-body-frame"]').locator('#viewport-hero')).toBeVisible()
+})
 
 test('shows inspectable recipients and collapses plain-text signatures and quotes', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
@@ -141,11 +177,15 @@ test('keeps HTML fallbacks readable and never collapses an all-quote message', a
 
 test('collapses sanitized HTML quote and signature blocks behind an expander', async ({ page }) => {
   const pixel = Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64')
-  for (const host of ['remote.attn.test', 'handler.attn.test']) {
+  const imageHosts = ['remote.attn.test', 'handler.attn.test']
+  for (const host of imageHosts) {
     await page.route(`https://${host}/**`, (route) =>
       route.fulfill({ contentType: 'image/gif', body: pixel })
     )
   }
+  const imageResponses = Promise.all(
+    imageHosts.map((host) => page.waitForResponse((response) => new URL(response.url()).hostname === host))
+  )
   await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
   const frameBody = page.frameLocator('[data-testid="html-body-frame"]')
   const toggle = page.getByTestId('mail-trim-toggle')
@@ -161,7 +201,20 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
   expect(collapsedViewportBox).not.toBeNull()
   const collapsedContentBox = await conversationContent.boundingBox()
   expect(collapsedContentBox).not.toBeNull()
-  const collapsedHeight = await frame.evaluate((element) => element.clientHeight)
+  // The frame starts at 1px, then ResizeObserver remeasures as remote images
+  // settle. Capture the baseline only after both routed images load and two
+  // consecutive measurements agree.
+  await imageResponses
+  let previousHeight = 0
+  await expect
+    .poll(async () => {
+      const height = await frame.evaluate((element) => element.clientHeight)
+      const settled = height > 1 && height === previousHeight
+      previousHeight = height
+      return settled
+    })
+    .toBe(true)
+  const collapsedHeight = previousHeight
   expect(collapsedHeight).toBeLessThan(1000)
   const collapsedToggleY = await toggle.evaluate((element) => element.getBoundingClientRect().y)
   expect(
