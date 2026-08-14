@@ -106,7 +106,33 @@ Tokens are stored via Electron `safeStorage` (macOS Keychain / Windows DPAPI). N
 
 ### F2 — Sync engine & offline
 
-**Backfill:** on first sync, fetch all labels, thread/message metadata for the last 12 months (headers, snippets, label sets), then message bodies for the last 90 days, newest first. The backfill runs as checkpointed stages (metadata → bodies → membership reconcile) with the cursor persisted per page, so a killed or offline-interrupted app resumes where it stopped instead of restarting. Older content is fetched on demand and cached permanently. UI renders as soon as the first page of metadata lands.
+**Backfill:** on first sync, fetch all labels, Inbox thread/message metadata for the last 12 months
+(headers, snippets, label sets), message bodies for the last 90 days, and Sent metadata for the last 12
+months, newest first. The backfill runs as checkpointed stages (metadata → bodies → sent → membership
+reconcile) with the cursor persisted per page, so a killed or offline-interrupted app resumes where it
+stopped instead of restarting. Older content is fetched on demand and cached permanently. UI renders as
+soon as the first page of metadata lands.
+
+**Window rationale and completion semantics:** the 12-month metadata window gives a useful year of
+mailbox context without cloning an account's lifetime history; the 90-day body window makes recent mail
+offline-readable without eagerly downloading every old body and attachment; the 12-month Sent window
+provides enough frequency and recency history for autocomplete and seeds the future Sent view. These are
+eventual time windows, not item caps — an API page size such as 500 must never be presented or implemented
+as “only sync 500 messages.” A count cap may bound the first interactive bootstrap only when the remaining
+window continues in the background or is available on demand.
+
+Backfill has two distinct completion points:
+
+1. **Interactive-ready:** the first recent page is committed and the user can read and triage local mail.
+   The fresh-install target remains under 60 seconds on a typical inbox.
+2. **Background index complete:** every configured time window is exhausted. Its duration is proportional
+   to mailbox size, Gmail's per-method quota costs, and rate-limit waits; it has no fixed five-minute SLA and
+   must never make an already-usable inbox look unavailable.
+
+After interactive readiness, the footer reports **Live · indexing older mail** rather than a blocking
+“Syncing” state. It exposes stage, processed count, estimated total/ETA when Gmail supplies one, and an
+explicit quota-wait state instead of appearing stuck during backoff. The top-bar “N to zero” value is the
+total unread Inbox count, not sync progress, and may exceed the current rendered-list window.
 
 *M1 staging:* the synced window covers **Inbox** threads only, and on-demand hydration of older bodies is not yet built. M3's system-mailbox work broadens the window to all cached system labels (§9 #10); on-demand body fetch arrives with the FTS5/bodies milestone.
 
@@ -405,7 +431,12 @@ Guardrails:
 ```
 
 - **Renderer** is sandboxed (no Node integration, `contextBridge` + typed IPC only). It reads from lightweight query APIs over the local store and issues *commands*; it never talks to Google.
-- **M1 hosts the sync engine in the Electron main process** behind Electron-free store/provider interfaces. Moving that service layer to a utility process remains an M2/M3 hardening task so backfill/indexing can never jank the UI.
+- **M1/M2 host the sync engine in the Electron main process** behind Electron-free store/provider
+  interfaces. M3 begins by moving Gmail fetch, backfill, derived-data rebuilds, and FTS indexing into an
+  Electron utility process. The main process remains the typed IPC/lifecycle broker; the utility process
+  owns background service work and resumes from durable checkpoints after a crash. Interactive actions and
+  outbox work have priority over historical indexing, and moving the boundary must preserve the one-reducer
+  and exactly-once invariants.
 - **One reducer, two sources:** server history events and local optimistic actions flow through the same state-transition code, which is what keeps optimistic UI and sync convergent.
 - **Scheduler** owns every timer (snooze due-times, follow-up deadlines, undo-send windows); on launch it executes anything that came due while the app was closed (catch-up, D2).
 
@@ -436,6 +467,11 @@ Guardrails:
 | Memory, steady state (50k messages synced) | < 500MB |
 
 M1 ships a dedicated 2,000-thread Electron performance job with absolute CI guardrails for list render, conversation open, and triage feedback. Full percentile/10k-thread budget enforcement and regression baselining remain part of the M2 daily-drivable hardening pass.
+
+Initial sync is measured at both completion points above: time to interactive-ready is a product budget;
+time to finish background indexing is reported with mailbox size, stage request counts, effective
+threads/minute, and quota-wait time. A single wall-clock target for full indexing would be misleading across
+mailboxes and Gmail quota regimes. Background work must preserve every interaction budget in this table.
 
 ---
 

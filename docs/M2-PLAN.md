@@ -138,6 +138,7 @@ Three M2 features need data the store doesn't have yet: recipient autocomplete n
 
 - **`listThreadIds` must stop hardcoding INBOX first** (review finding, P1). `GmailMailProvider.listThreadIds` sets `labelIds: 'INBOX'` unconditionally (`src/main/gmail/provider.ts`), so a naive `q: 'in:sent'` stage would request INBOX ∩ SENT — near-empty, and autocomplete would silently ship with no data. Change the signature to take the label explicitly (`listThreadIds({ q?, labelIds?, pageToken? })`) and pass `['INBOX']` at the **three existing call sites** — backfill's metadata stage, its bodies stage, and the reconcile re-list, where the implicit filter is load-bearing. Do this as the task's first commit, mechanically, with the existing suite as the check.
 - **Backfill gains a `sent` metadata stage** after `bodies`: `listThreadIds({ labelIds: ['SENT'], q: 'newer_than:12m' })`, persisted `metadataOnly` through the same `runThreadPhase` machinery (checkpointed cursor `sent:<token>`, resumable). The history poller already refetches *any* thread that appears in history records, so sent mail stays current after backfill without poller changes; the `newMail` exclusion of self-sent messages (SENT label) is untouched.
+- **The windows are product heuristics, not count caps:** 12 months of Inbox metadata gives one year of list/threading context; 90 days of bodies makes recent mail offline-readable without eagerly downloading every old payload; 12 months of Sent metadata supports autocomplete frequency/recency and the future Sent view. Gmail's `maxResults` is a page size, never a total-sync ceiling. T13 preserves the full eventual windows; M3's utility-process task below separates the fast interactive bootstrap from quota-paced background completion.
 - **No upgrade path (decided 2026-08-13, owner):** this is a development build with no users on a pre-v7 store, so the sent stage ships as an ordinary phase of the normal backfill and nothing special-cases an already-`done` cursor. An earlier draft added a `sent_synced` flag to `sync_state` plus a sent-only route through `startSync`; that was removed as machinery serving zero databases. It also closed a real hazard — the sent-only route checkpointed `done` and set the flag in two statements, so a crash between them replayed the whole 12-month sent scan. The normal pipeline writes cursor and completion in one statement and never opens that window. **If this ever ships to a real user, reintroducing an upgrade route is a prerequisite for any later schema change here.**
 - **Threading headers:** `parse.ts` extracts `Message-ID` and `References` (plus `In-Reply-To` as a References fallback); `persistThread` stores them. Only newly-synced mail carries them — T15 handles the missing-header case at reply time.
 - **Contacts are derived, and must be idempotent** (review finding, P2). The obvious design — increment `sent_to_count` while walking `persistThread` — is wrong, because `persistThread` runs again every time a thread is refetched: history polling, body hydration, expiry recovery, and T16's post-send refresh all re-persist the same messages. Counters would inflate with *refetch frequency* rather than interaction frequency, so the threads you touch most would dominate autocomplete regardless of who you actually write to. Nothing about that failure is visible until the rankings are quietly wrong.
@@ -202,7 +203,7 @@ SELECT name, email,
 - Unit: header extraction (angle-bracket forms, folded References), contact ranking (recency decay, prefix beats infix, self-exclusion), cursor routing (fresh, mid-backfill, completed, history-recovery restart).
 - **E2e regression for the idempotency finding:** persist the same seeded thread twice (a refetch is one `relaunch()` plus a poll, or drive `persistThread` through the test seam) and assert the contact aggregate is unchanged. Then delete the source thread and assert its unique contact disappears while contacts with other contributions survive. Without this, overcounting or stale projection rows reappear when sync paths change.
 - E2e (seeded): seeded fixture exposes headers through `getConversation`; `contacts:search` returns seed senders ranked; boot log shows the sent stage skipped when seeded.
-- Manual smoke (signed in): fresh sign-in runs metadata → bodies → sent → reconcile; contacts populate from real history.
+- Manual smoke (signed in): fresh sign-in runs metadata → bodies → sent → reconcile; contacts populate from real history. Record time to first readable page separately from full completion, plus per-stage thread totals/durations and any quota-wait intervals. A large-mailbox run is expected to remain usable while background completion continues; a five-minute full-sync target is not implied.
 
 ### Done when
 
@@ -424,9 +425,10 @@ The closing pass that turns "features exist" into "this is my mail client":
 
 1. **10k-thread decision (F3):** generate a 10k perf seed locally, measure list render + scroll frame times + memory against §7. If the mounted list misses, implement fixed-height windowing by hand (rows are uniform; ~150 lines, no dependency) and re-measure; if it passes, raise the 300-row query cap to the measured-safe bound and record the evidence. Either way the deviation rows (virtualization, 300-cap) resolve with data, not vibes.
 2. **Composer latency profile:** measure keystroke-to-paint under a 2k store with the profiler, not just the CI ceiling; fix anything over ~8ms median so the 16ms budget has headroom.
-3. **Gmail client token-bucket limiter** (the reworded M1 TODO): a simple bucket (e.g. 200 units/user/100s tracked client-side) in front of `request()` smoothing backfill+poller+sender bursts, replacing pure backoff-on-403 as the primary defense. Unit-test the bucket; keep the backoff as the fallback.
-4. **Dogfood checklist executed and recorded** (the M2 exit evidence): a full week of real use by at least one of us, plus the F6 acceptance list — composer <50ms open, imperceptible typing, force-quit recovery, undo-send reliability, zero duplicate sends across the week, attachment round-trips — and the M1 leftovers if still open (airplane-mode drain, notification click-through).
-5. **Docs:** SPEC status + milestone table updated (M2 shipped state, any new accepted deviations), AGENTS pipeline notes if the harness changed, README "current state" paragraph.
+3. **Gmail client weighted token-bucket limiter** (the reworded M1 TODO): pace requests by their per-method quota cost and the OAuth project's actual quota, reserving capacity for sends, queued user actions, and history polling before background backfill. Google's quota model changed in May 2026, so do not fossilize the old “200 units/user/100s” example; keep costs/configuration explicit and link the [authoritative Gmail quota table](https://developers.google.com/workspace/gmail/api/reference/quota). Unit-test scheduling with a fake clock; exponential backoff remains the fallback, not the normal pacing mechanism.
+4. **Bootstrap/backfill evidence:** instrument time to first readable page separately from full index completion. Record per-stage estimated total, processed count, effective threads/minute, and quota-wait time on a typical real mailbox and the 10k seed. M2 may still display the existing stage UI, but the measurements and protocol fields must be ready for M3's background-process move; “N to zero” remains explicitly the unread count, never progress.
+5. **Dogfood checklist executed and recorded** (the M2 exit evidence): a full week of real use by at least one of us, plus the F6 acceptance list — composer <50ms open, imperceptible typing, force-quit recovery, undo-send reliability, zero duplicate sends across the week, attachment round-trips — and the M1 leftovers if still open (airplane-mode drain, notification click-through).
+6. **Docs:** SPEC status + milestone table updated (M2 shipped state, any new accepted deviations), AGENTS pipeline notes if the harness changed, README "current state" paragraph.
 
 ### Done when — the M2 exit checklist
 
@@ -434,12 +436,49 @@ The closing pass that turns "features exist" into "this is my mail client":
 - [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links)
 - [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates
 - [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data
+- [ ] Initial-sync evidence separates first-readable-page latency from full background completion and records
+      per-stage totals, effective rate, and quota-wait time
 - [ ] Failed triage actions self-heal to server truth with an explanatory toast; auth re-pend shipped; no silent queue states remain
 - [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts
 - [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input)
 - [ ] SPEC/README/AGENTS/M1-plan deviation rows updated to the shipped reality
 
-Then M3 (search, system mailboxes, splits, palette, themes) starts — with the sync-engine → utility-process move as its first hardening candidate, deliberately **not** done in M2 (moving the process boundary while building the outbox would risk the exactly-once invariant for a jank win whose real driver is M3's FTS indexing).
+Then M3 (search, system mailboxes, splits, palette, themes) starts with the utility-process task below. It is deliberately **not** done in M2: moving the process boundary while building the outbox would risk the exactly-once invariant for a jank win whose real driver is M3's FTS indexing.
+
+### M3 kickoff handoff — utility-process sync and background indexing
+
+This is M3's first hardening task, before FTS indexing or broader system-mailbox backfills increase the
+workload. “Background” means an Electron **utility process**, not merely another async callback on the main
+event loop.
+
+1. **Move the service boundary:** Gmail fetch/backfill, history polling, contact projection rebuilds, and FTS
+   indexing execute in the utility process behind the existing Electron-free provider/store interfaces. The
+   main process owns windows, OAuth/safeStorage, OS integration, and typed renderer IPC. Define one explicit
+   main ↔ utility protocol for commands, snapshots/progress, authentication-generation changes, and shutdown.
+2. **Preserve correctness before optimizing:** durable cursors remain the source of resume truth; killing or
+   crashing the utility process restarts from the last page without double-counting contacts, replaying a
+   completed send, losing an optimistic action, or allowing two active workers for one account. Keep one
+   reducer path and document SQLite write ownership so process isolation does not become writer contention.
+3. **Prioritize foreground intent:** outbox sends, queued user actions, on-demand body hydration, and history
+   polling consume quota before historical metadata/body/Sent indexing. The weighted token bucket exposes an
+   explicit `running | quota-wait | offline | error` reason; backoff never masquerades as active progress.
+4. **Separate readiness from completion:** commit and publish the first recent page within the existing
+   fresh-install target, then report `Live · indexing older mail` with stage, processed count, Gmail
+   `resultSizeEstimate` when available, effective rate, and ETA. “N to zero” stays the unread Inbox total.
+   Background completion has no universal wall-clock SLA; evidence always includes mailbox size and quota
+   regime.
+5. **Reduce duplicate work without silent truncation:** skip Sent-thread metadata already authoritatively
+   processed during the Inbox stage, use the largest checkpoint-safe list pages, and evaluate Gmail batches
+   for transport overhead while respecting Google's recommended batch size and unchanged quota cost. A
+   foreground count cap is permitted only when the rest of the configured time window continues in the
+   background or can be fetched on demand.
+6. **Prove isolation:** a 10k-thread/indexing run preserves the SPEC interaction budgets; worker crash/restart,
+   sign-out/account switch, offline recovery, quota waits, and app quit all have deterministic tests. The real
+   Gmail smoke records first-page time, every stage's count/duration, quota-wait time, and total completion.
+
+Done when the inbox becomes interactive within the existing target, the main process remains responsive
+through a 10k background run, progress cannot appear stuck during quota waits, and forced utility-process
+restarts preserve sync, action-queue, contact, and exactly-once outbox invariants.
 
 ---
 
