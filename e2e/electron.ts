@@ -115,7 +115,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     } catch (err) {
       // A boot failure reports as an opaque firstWindow() rejection — attach
       // the main log BEFORE deleting the dir so the app's own last words
-      // (e.g. "[seed] failed: …") survive into the test report.
+      // (e.g. "[boot] failed: …") survive into the test report.
       await testInfo.attach('main-process-log', { body: mainLog(), contentType: 'text/plain' })
       // Never leak the temp dir when the app can't even start.
       rmSync(userData, { recursive: true, force: true, maxRetries: 3 })

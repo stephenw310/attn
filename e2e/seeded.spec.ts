@@ -1,11 +1,15 @@
 import type { ElectronApplication } from '@playwright/test'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import type { SyncState } from '../src/shared/mail'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
 async function setSyncState(app: ElectronApplication, state: SyncState): Promise<void> {
-  await app.evaluate(({ ipcMain }, next) => ipcMain.emit('attn:test:setSyncState', {}, next), state)
+  await app.evaluate(({ ipcMain }, { channel, next }) => ipcMain.emit(channel, {}, next), {
+    channel: TEST_CHANNELS.setSyncState,
+    next: state
+  })
 }
 
 test('renders seeded mail through IPC and the real SQLite store', async ({ page, mainLog }) => {
