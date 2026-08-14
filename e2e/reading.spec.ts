@@ -1,3 +1,4 @@
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
@@ -8,9 +9,14 @@ test('invalidates viewed conversation data when local mail changes', async ({ ap
     'I added the launch milestones and owner notes.'
   )
 
-  await app.evaluate(({ ipcMain }) => {
-    ipcMain.emit('attn:test:updateMessageBody', {}, 'm-roadmap-2', 'A newly synced reply is now visible.')
-  })
+  await app.evaluate(
+    ({ ipcMain }, { channel, messageId, bodyText }) => ipcMain.emit(channel, {}, messageId, bodyText),
+    {
+      channel: TEST_CHANNELS.updateMessageBody,
+      messageId: 'm-roadmap-2',
+      bodyText: 'A newly synced reply is now visible.'
+    }
+  )
 
   await expect(page.getByTestId('message-card').last()).toContainText('A newly synced reply is now visible.')
 })
@@ -20,9 +26,10 @@ test('clears the previous conversation while an uncached thread loads', async ({
   await expect(page.getByTestId('plain-text-visible').last()).toContainText('launch milestones')
   await page.keyboard.press('Escape')
 
-  await app.evaluate(({ ipcMain }) => {
-    ipcMain.emit('attn:test:delayConversation', {}, 't-weekly', 500)
-  })
+  await app.evaluate(
+    ({ ipcMain }, { channel, threadId, delayMs }) => ipcMain.emit(channel, {}, threadId, delayMs),
+    { channel: TEST_CHANNELS.delayConversation, threadId: 't-weekly', delayMs: 500 }
+  )
   await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
 
   await expect(page.getByTestId('conversation-subject')).toHaveText('This week in focus')
