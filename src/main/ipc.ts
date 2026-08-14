@@ -57,6 +57,7 @@ export interface IpcContext {
   broadcastMailChanged: () => void
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
+  waitForConversation: (threadId: string) => Promise<void>
   testUserData: boolean
 }
 
@@ -152,9 +153,11 @@ export function registerIpc(context: IpcContext): void {
     const account = context.currentAccountId()
     return account ? countInboxUnread(context.db, account) : 0
   })
-  handle(IPC_CHANNELS.mailGetConversation, (_event, threadId) => {
+  handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId) => {
+    if (typeof threadId !== 'string') return null
+    await context.waitForConversation(threadId)
     const account = context.currentAccountId()
-    return account && typeof threadId === 'string' ? getConversation(context.db, account, threadId) : null
+    return account ? getConversation(context.db, account, threadId) : null
   })
   handle(IPC_CHANNELS.mailDownloadAttachment, async (_event, request) => {
     if (!isDownloadAttachmentRequest(request)) return { error: 'Invalid attachment' }

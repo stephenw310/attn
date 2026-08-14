@@ -43,7 +43,9 @@ export const IPC_CHANNELS = {
  */
 export const TEST_CHANNELS = {
   focusThread: 'attn:test:focusThread',
-  setSyncState: 'attn:test:setSyncState'
+  setSyncState: 'attn:test:setSyncState',
+  delayConversation: 'attn:test:delayConversation',
+  updateMessageBody: 'attn:test:updateMessageBody'
 } as const
 
 export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]

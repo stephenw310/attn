@@ -50,6 +50,7 @@ let snoozeScheduler: SnoozeScheduler | null = null
 let mailNotifier: MailNotifier | null = null
 let syncController: SyncController | null = null
 let pendingFocus: PendingFocus | null = null
+let testConversationDelay: { threadId: string; delayMs: number } | null = null
 let signInInFlight = false
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
@@ -114,6 +115,12 @@ function makeProvider(generation: number): GmailMailProvider | null {
 function makeCurrentProvider(): GmailMailProvider | null {
   const controller = syncController
   return controller ? makeProvider(controller.getGeneration()) : null
+}
+
+async function waitForConversation(threadId: string): Promise<void> {
+  const delay = testConversationDelay
+  if (!testUserData || delay?.threadId !== threadId) return
+  await new Promise((resolve) => setTimeout(resolve, delay.delayMs))
 }
 
 async function signIn(): Promise<AuthStatus> {
@@ -244,6 +251,7 @@ function initialize(): void {
     clearPendingFocus: () => {
       pendingFocus = null
     },
+    waitForConversation,
     testUserData: Boolean(testUserData)
   })
   actionExecutor = new ActionExecutor(activeDb, currentAccountId, makeCurrentProvider, broadcastMailChanged)
@@ -270,6 +278,21 @@ function registerTestIpc(): void {
     if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
   })
   ipcMain.on(TEST_CHANNELS.setSyncState, (_event, state: SyncState) => syncController?.setStateForTest(state))
+  ipcMain.on(TEST_CHANNELS.delayConversation, (_event, threadId: unknown, delayMs: unknown) => {
+    if (typeof threadId !== 'string' || typeof delayMs !== 'number' || delayMs < 0) return
+    testConversationDelay = { threadId, delayMs }
+  })
+  ipcMain.on(TEST_CHANNELS.updateMessageBody, (_event, messageId: unknown, bodyText: unknown) => {
+    if (!db || typeof messageId !== 'string' || typeof bodyText !== 'string') return
+    const account = currentAccountId()
+    if (!account) return
+    db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?').run(
+      bodyText,
+      account,
+      messageId
+    )
+    broadcastMailChanged()
+  })
 }
 
 function teardown(): void {
