@@ -54,7 +54,13 @@ export function useInboxCommands(options: Options): void {
         createCommand('navigate.next', () =>
           setSelectedIndex((index) => Math.min(index + 1, Math.max(threadCount - 1, 0)))
         ),
-        createCommand('navigate.previous', () => setSelectedIndex((index) => Math.max(index - 1, 0))),
+        createCommand('navigate.previous', () => {
+          if (readerOpen && selectedIndex === 0) {
+            closeReader()
+            return
+          }
+          setSelectedIndex((index) => Math.max(index - 1, 0))
+        }),
         createCommand('selection.toggle', toggleSelection),
         createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
         createCommand('selection.extendPrevious', () => extendSelection(selectedIndex - 1)),

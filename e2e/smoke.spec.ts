@@ -146,7 +146,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('conversation-view')).toHaveCount(0)
   })
 
-  test('Enter opens the full-window reader; J/K navigates; Back and Esc restore the list', async ({
+  test('Enter opens the reader; J/K navigates; boundary K, Back, and Esc restore the list', async ({
     page
   }) => {
     const rows = page.getByTestId('thread-row')
@@ -235,6 +235,12 @@ test.describe('seeded inbox smoke coverage', () => {
     await page.keyboard.press('k')
     await page.keyboard.press('k')
     await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
+    await page.keyboard.press('k')
+    await expect(page.getByTestId('conversation-view')).toHaveCount(0)
+    await expect(page.getByTestId('thread-list')).toBeVisible()
+    await expect.poll(() => selectedIndex(page)).toBe(0)
+
+    await page.keyboard.press('Enter')
     await page.getByTestId('conversation-back').click()
     await expect(page.getByTestId('conversation-view')).toHaveCount(0)
     await expect(page.getByTestId('thread-list')).toBeVisible()
