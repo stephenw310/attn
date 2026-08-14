@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthStatus } from '../../../shared/auth'
+import { type Draft, emptyDraftInput } from '../../../shared/drafts'
 import type { MailLabel } from '../../../shared/mail'
+import { Composer } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
 import { useInboxCommands } from '../hooks/useInboxCommands'
 import { useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
@@ -30,6 +32,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
+  const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
   const [toast, showToast] = useToast()
   const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
@@ -37,6 +40,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const activeViewRef = useRef<'inbox' | 'snoozed'>('inbox')
   const earliestExitIndexRef = useRef<number | null>(null)
   const resetAccountRef = useRef<string | null | undefined>(undefined)
+  const composerOpeningRef = useRef(false)
 
   const activeAccount = status.email ?? null
   const {
@@ -72,10 +76,25 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetId(null)
+    setComposerDraft(null)
     setExitingThreadIds(new Set())
     selectedThreadIdRef.current = null
     resetSelection()
   }, [activeAccount, resetSelection])
+
+  useEffect(() => {
+    if (!window.attn || !activeAccount) return
+    let active = true
+    void window.attn.draft
+      .takeRecovered()
+      .then((draft) => {
+        if (active && draft) setComposerDraft(draft)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [activeAccount])
 
   useEffect(() => {
     setSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(threads.length - 1, 0))))
@@ -194,6 +213,20 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSelectedIndex(index)
     setReaderOpen(true)
   }, [])
+  const openComposer = useCallback(() => {
+    if (!window.attn || composerDraft || composerOpeningRef.current) return
+    composerOpeningRef.current = true
+    void window.attn.draft
+      .save(emptyDraftInput())
+      .then(({ id }) => window.attn?.draft.get(id) ?? null)
+      .then((draft) => {
+        if (draft) setComposerDraft(draft)
+      })
+      .catch(() => {})
+      .finally(() => {
+        composerOpeningRef.current = false
+      })
+  }, [composerDraft])
 
   const snoozeSelected = useCallback(
     (dueAt: number) => {
@@ -236,11 +269,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     triage,
     openSnooze,
     openLabel,
+    openComposer,
     showToast
   })
 
   useKeyboardDispatch({
-    blocked: labelTarget !== undefined,
+    blocked: labelTarget !== undefined || composerDraft !== null,
     readerOpen,
     snoozeOpen,
     onCloseSnooze: closeSnooze,
@@ -307,6 +341,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           onClose={closeLabel}
           onToggle={toggleLabel}
         />
+      )}
+
+      {composerDraft && (
+        <Composer draft={composerDraft} onClose={() => setComposerDraft(null)} onToast={showToast} />
       )}
 
       <Toast toast={toast} />

@@ -1,6 +1,7 @@
 import type { TriageAction, TriageResult } from './actions'
 import type { AuthStatus } from './auth'
 import type { ContactSearchResult } from './contacts'
+import type { Draft, DraftSaveInput } from './drafts'
 import type {
   Conversation,
   DownloadAttachmentRequest,
@@ -18,6 +19,11 @@ export const IPC_CHANNELS = {
   authSignIn: 'auth:signIn',
   authSignOut: 'auth:signOut',
   contactsSearch: 'contacts:search',
+  draftSave: 'draft:save',
+  draftGet: 'draft:get',
+  draftDiscard: 'draft:discard',
+  draftMirror: 'draft:mirror',
+  draftTakeRecovered: 'draft:takeRecovered',
   syncGetState: 'sync:getState',
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
@@ -59,6 +65,11 @@ export interface InvokeChannels {
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
+  [IPC_CHANNELS.draftSave]: { args: [draft: DraftSaveInput]; result: { id: string } }
+  [IPC_CHANNELS.draftGet]: { args: [id: string]; result: Draft | null }
+  [IPC_CHANNELS.draftDiscard]: { args: [id: string]; result: undefined }
+  [IPC_CHANNELS.draftMirror]: { args: [id: string]; result: undefined }
+  [IPC_CHANNELS.draftTakeRecovered]: { args: []; result: Draft | null }
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: string | null }

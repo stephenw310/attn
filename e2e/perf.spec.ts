@@ -5,6 +5,8 @@ const SAMPLE_COUNT = 5
 const LIST_RENDER_CEILING_MS = 1_500
 const CONVERSATION_OPEN_CEILING_MS = 1_500
 const TRIAGE_FEEDBACK_CEILING_MS = 2_500
+const COMPOSER_OPEN_CEILING_MS = 100
+const COMPOSER_KEYSTROKE_CEILING_MS = 250
 
 test.use({ seed: '.artifacts/perf-seed.json' })
 // A retry would hide the instability this smoke is intended to expose.
@@ -104,6 +106,45 @@ async function measureTriageFeedback(page: Page): Promise<number> {
   })
 }
 
+async function measureComposerOpen(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const started = performance.now()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
+    if (document.querySelector('[data-testid="composer"]')) return performance.now() - started
+    return new Promise<number>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        observer.disconnect()
+        reject(new Error('Timed out opening composer'))
+      }, 10_000)
+      const observer = new MutationObserver(() => {
+        if (!document.querySelector('[data-testid="composer"]')) return
+        window.clearTimeout(timeout)
+        observer.disconnect()
+        resolve(performance.now() - started)
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
+    })
+  })
+}
+
+async function measureComposerKeystroke(page: Page, key: string): Promise<number> {
+  const editor = page.getByTestId('composer-editor')
+  await editor.evaluate((element) => {
+    delete element.dataset.keystrokePaintMs
+    const started = performance.now()
+    const observer = new MutationObserver(() => {
+      observer.disconnect()
+      requestAnimationFrame(() => {
+        element.dataset.keystrokePaintMs = String(performance.now() - started)
+      })
+    })
+    observer.observe(element, { characterData: true, childList: true, subtree: true })
+  })
+  await page.keyboard.type(key)
+  await expect.poll(() => editor.getAttribute('data-keystroke-paint-ms')).not.toBeNull()
+  return Number(await editor.getAttribute('data-keystroke-paint-ms'))
+}
+
 test.describe('@perf 2,000-thread inbox', () => {
   test('renders the list within the CI-safe ceiling', async ({ boot, page }, testInfo) => {
     const samples: number[] = []
@@ -146,5 +187,22 @@ test.describe('@perf 2,000-thread inbox', () => {
     await reportMetric(testInfo, 'triage-feedback', samples, medianMs)
     expect(medianMs, 'median e keydown to selected row removed').toBeLessThan(TRIAGE_FEEDBACK_CEILING_MS)
     await expect(page.getByTestId('thread-row')).toHaveCount(2_000 - SAMPLE_COUNT)
+  })
+
+  test('opens and types in the composer within CI-safe ceilings', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-row')).toHaveCount(2_000)
+    const openMs = await measureComposerOpen(page)
+    await expect(page.getByTestId('composer')).toBeVisible()
+    await reportMetric(testInfo, 'composer-open', [openMs], openMs)
+    expect(openMs, 'c keydown to composer mounted').toBeLessThan(COMPOSER_OPEN_CEILING_MS)
+
+    await page.getByTestId('composer-editor').click()
+    const samples: number[] = []
+    for (const key of ['a', 't', 't', 'n', '.']) {
+      samples.push(await measureComposerKeystroke(page, key))
+    }
+    const medianMs = median(samples)
+    await reportMetric(testInfo, 'composer-keystroke-paint', samples, medianMs)
+    expect(medianMs, 'median key input to next paint').toBeLessThan(COMPOSER_KEYSTROKE_CEILING_MS)
   })
 })

@@ -2,6 +2,10 @@
 // Both body formats are UNTRUSTED input. Plain text must stay in text nodes;
 // raw HTML is sanitized and isolated by the renderer at display time.
 
+import { parseAddress, parseAddressList } from '../../shared/address'
+
+export { parseAddress, parseAddressList }
+
 export interface GmailHeader {
   name: string
   value: string
@@ -65,55 +69,6 @@ export function extractThreadingHeaders(message: GmailMessage): ThreadingHeaders
     rfcMessageId: parseMessageIds(header(message, 'Message-ID'))[0] ?? null,
     references: references.length > 0 ? references : parseMessageIds(header(message, 'In-Reply-To'))
   }
-}
-
-export function parseAddress(raw: string): { name: string; email: string } {
-  const m = raw.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/)
-  if (m) {
-    const name = m[1].trim()
-    const email = m[2].trim()
-    return { name: name || email.split('@')[0], email }
-  }
-  const email = raw.trim()
-  return { name: email.split('@')[0] || email, email }
-}
-
-/** Split an RFC-style address header without breaking quoted display names. */
-export function parseAddressList(raw: string): { name: string; email: string }[] {
-  const parts: string[] = []
-  let start = 0
-  let quoted = false
-  let escaped = false
-  let angleDepth = 0
-
-  for (let i = 0; i < raw.length; i++) {
-    const char = raw[i]
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (char === '\\' && quoted) {
-      escaped = true
-      continue
-    }
-    if (char === '"') {
-      quoted = !quoted
-      continue
-    }
-    if (!quoted && char === '<') angleDepth++
-    else if (!quoted && char === '>') angleDepth = Math.max(0, angleDepth - 1)
-    else if (!quoted && angleDepth === 0 && char === ',') {
-      parts.push(raw.slice(start, i))
-      start = i + 1
-    }
-  }
-  parts.push(raw.slice(start))
-
-  return parts
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map(parseAddress)
-    .filter((address) => address.email.length > 0)
 }
 
 export interface ParsedAttachment {

@@ -50,6 +50,8 @@ export interface MailActionProvider {
   modifyThread(threadId: string, add: string[], remove: string[]): Promise<void>
   trashThread(threadId: string): Promise<void>
   untrashThread(threadId: string): Promise<void>
+  /** Optional for test providers predating M2; production providers implement it. */
+  saveDraft?(draft: { id: string | null; raw: string }): Promise<string>
 }
 
 export interface MailProvider extends MailActionProvider {

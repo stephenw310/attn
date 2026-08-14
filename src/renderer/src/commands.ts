@@ -1,4 +1,4 @@
-export type CommandContext = 'list' | 'reader' | 'mail' | 'global'
+export type CommandContext = 'list' | 'reader' | 'mail' | 'composer' | 'global'
 
 interface CommandSpec {
   title: string
@@ -28,6 +28,16 @@ export const COMMAND_SPECS = {
   'sync.error.copy': { title: 'Copy sync error details', context: 'global' },
   'view.inbox': { title: 'Go to Inbox', shortcut: 'g i', context: 'global' },
   'view.snoozed': { title: 'Go to Snoozed', shortcut: 'g h', context: 'global' },
+  'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
+  'composer.close': { title: 'Save and close draft', shortcut: 'Escape', context: 'composer' },
+  'composer.send': { title: 'Send message', shortcut: 'Mod+Enter', context: 'composer' },
+  'composer.bold': { title: 'Bold', shortcut: 'Mod+B', context: 'composer' },
+  'composer.italic': { title: 'Italic', shortcut: 'Mod+I', context: 'composer' },
+  'composer.underline': { title: 'Underline', shortcut: 'Mod+U', context: 'composer' },
+  'composer.bullets': { title: 'Bulleted list', context: 'composer' },
+  'composer.numbering': { title: 'Numbered list', context: 'composer' },
+  'composer.quote': { title: 'Block quote', context: 'composer' },
+  'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
   'triage.archive': { title: 'Mark done', shortcut: 'e', context: 'mail' },
   'triage.snooze': { title: 'Snooze / remind me later', shortcut: 'h', context: 'mail' },
   'triage.trash': { title: 'Move to trash', shortcut: '#', context: 'mail' },

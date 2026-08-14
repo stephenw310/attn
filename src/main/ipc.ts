@@ -1,5 +1,7 @@
 import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
+import { isValidEmail } from '../shared/address'
 import type { AuthStatus } from '../shared/auth'
+import type { DraftSaveInput } from '../shared/drafts'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   DownloadAttachmentRequest,
@@ -23,6 +25,7 @@ import {
 import type { GmailClient } from './gmail/client'
 import type { PendingFocus } from './notify'
 import { takePendingFocus } from './notify'
+import { discardDraft, getDraft, requestDraftMirror, saveDraft, takeRecoveredDraft } from './outbox/drafts'
 import type { SnoozeScheduler } from './scheduler'
 import type { SyncController } from './syncController'
 
@@ -103,6 +106,35 @@ function isSnoozeRequest(value: unknown): value is SnoozeRequest {
   )
 }
 
+function isDraftSaveInput(value: unknown): value is DraftSaveInput {
+  if (!value || typeof value !== 'object') return false
+  const draft = value as Partial<DraftSaveInput>
+  const recipientsValid = (recipients: unknown): boolean =>
+    Array.isArray(recipients) &&
+    recipients.every(
+      (recipient) =>
+        recipient !== null &&
+        typeof recipient === 'object' &&
+        typeof (recipient as { name?: unknown }).name === 'string' &&
+        typeof (recipient as { email?: unknown }).email === 'string' &&
+        isValidEmail((recipient as { email: string }).email)
+    )
+  return (
+    (draft.id === null || typeof draft.id === 'string') &&
+    recipientsValid(draft.to) &&
+    recipientsValid(draft.cc) &&
+    recipientsValid(draft.bcc) &&
+    typeof draft.subject === 'string' &&
+    typeof draft.bodyHtml === 'string' &&
+    typeof draft.bodyText === 'string' &&
+    Array.isArray(draft.attachments) &&
+    (draft.threadId === null || typeof draft.threadId === 'string') &&
+    (draft.inReplyTo === null || typeof draft.inReplyTo === 'string') &&
+    Array.isArray(draft.references) &&
+    draft.references.every((reference) => typeof reference === 'string')
+  )
+}
+
 async function resolveAttachmentData(
   context: IpcContext,
   request: AttachmentDataRequest
@@ -130,6 +162,30 @@ export function registerIpc(context: IpcContext): void {
     if (!account || typeof query !== 'string') return []
     return searchContacts(context.db, account, query.slice(0, 200))
   })
+  handle(IPC_CHANNELS.draftSave, (_event, draft) => {
+    if (!isDraftSaveInput(draft)) throw new Error('invalid draft')
+    const id = saveDraft(context.db, requireAccount(context), draft)
+    context.broadcastMailChanged()
+    return { id }
+  })
+  handle(IPC_CHANNELS.draftGet, (_event, id) => {
+    if (typeof id !== 'string') return null
+    return getDraft(context.db, requireAccount(context), id)
+  })
+  handle(IPC_CHANNELS.draftDiscard, (_event, id) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    discardDraft(context.db, requireAccount(context), id)
+    context.broadcastMailChanged()
+    return undefined
+  })
+  handle(IPC_CHANNELS.draftMirror, (_event, id) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    requestDraftMirror(context.db, requireAccount(context), id)
+    context.broadcastMailChanged()
+    void context.executor()?.trigger()
+    return undefined
+  })
+  handle(IPC_CHANNELS.draftTakeRecovered, () => takeRecoveredDraft(context.db, requireAccount(context)))
   handle(IPC_CHANNELS.syncGetState, () => context.syncController()?.getState() ?? { phase: 'idle' })
   handle(IPC_CHANNELS.syncRetry, () => {
     context.syncController()?.retry()

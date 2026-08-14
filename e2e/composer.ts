@@ -34,6 +34,9 @@ export class ComposerPage {
   }
 
   async openNew(): Promise<void> {
+    // firstWindow() can resolve while React is still mounting; wait for the
+    // inbox command registry before sending the single global keystroke.
+    await this.page.getByTestId('thread-list').waitFor()
     await this.page.keyboard.press('c')
     await this.root.waitFor()
   }

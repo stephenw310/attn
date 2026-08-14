@@ -22,6 +22,7 @@ interface Options {
   triage: (action: TriageAction) => void
   openSnooze: () => void
   openLabel: () => void
+  openComposer: () => void
   showToast: (message: string) => void
 }
 
@@ -46,6 +47,7 @@ export function useInboxCommands(options: Options): void {
     triage,
     openSnooze,
     openLabel,
+    openComposer,
     showToast
   } = options
   useLayoutEffect(
@@ -70,6 +72,7 @@ export function useInboxCommands(options: Options): void {
           : [createCommand('conversation.open', openSelected)]),
         createCommand('view.inbox', () => switchView('inbox')),
         createCommand('view.snoozed', () => switchView('snoozed')),
+        createCommand('composer.new', openComposer),
         createCommand(
           'triage.archive',
           () => selected && triage({ kind: 'archive', threadIds: [selected.id] })
@@ -116,6 +119,7 @@ export function useInboxCommands(options: Options): void {
       extendSelection,
       markUnreadOn,
       openLabel,
+      openComposer,
       openSelected,
       openSnooze,
       preserveSelectionOnRefreshRef,

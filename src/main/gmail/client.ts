@@ -65,8 +65,12 @@ export class GmailClient {
     return this.request('POST', path, { body })
   }
 
+  async put<T>(path: string, body: unknown): Promise<T> {
+    return this.request('PUT', path, { body })
+  }
+
   private async request<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     options: { params?: Record<string, string | string[]>; body?: unknown }
   ): Promise<T> {
