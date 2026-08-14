@@ -129,10 +129,9 @@ describe('reply planning', () => {
     })
     const plan = planReply('reply', conversation([source]), SELF)
 
-    expect(plan.quoteHtml).toContain(
-      '<blockquote><p>Hello <a href="https://example.com">link</a></p></blockquote>'
-    )
-    expect(plan.quoteHtml).not.toMatch(/script|onclick|onmouseover|onerror|<img/i)
+    expect(plan.quoteHtml).toContain('<p style="color:red">Hello <a href="https://example.com">link</a></p>')
+    expect(plan.quoteHtml).toContain('<img src="x">')
+    expect(plan.quoteHtml).not.toMatch(/script|onclick|onmouseover|onerror/i)
     expect(plan.quoteText).toMatch(/wrote:\n> Hello\n>\n> World$/)
   })
 
@@ -157,23 +156,68 @@ describe('reply planning', () => {
     expect(plan.quoteHtml).toContain('Priya &lt;priya@example.com&gt;')
   })
 
+  it('forwards the newest message even when it was sent by self', () => {
+    const inbound = message()
+    const latestSelf = message({
+      id: 'm2',
+      fromName: 'Me',
+      fromEmail: SELF,
+      at: inbound.at + 1_000,
+      bodyText: 'My latest update',
+      bodyHtml: '<p>My latest update</p>'
+    })
+
+    const plan = planReply('forward', conversation([inbound, latestSelf]), SELF)
+
+    expect(plan.quoteText).toContain('From: Me <me@example.com>')
+    expect(plan.quoteText).toContain('My latest update')
+    expect(plan.quoteText).not.toContain('From: Maya Lin <maya@example.com>')
+  })
+
   it('rejects an empty conversation', () => {
     expect(() => planReply('reply', conversation([]), SELF)).toThrow('empty conversation')
   })
 })
 
 describe('quote HTML sanitizer', () => {
-  it('keeps only the outgoing formatting allowlist and safe link schemes', () => {
-    expect(
-      sanitizeQuoteHtml(
-        '<div class=x>Safe <span>text</span><a href="javascript:alert(1)">bad</a><a href="mailto:a@example.com">mail</a><svg><script>alert(1)</script></svg></div>'
-      )
-    ).toBe('<div>Safe text<a>bad</a><a href="mailto:a@example.com">mail</a></div>')
+  it('uses the display DOMPurify policy and removes active content', () => {
+    const sanitized = sanitizeQuoteHtml(
+      '<div class=x>Safe <span>text</span><a href="javascript:alert(1)">bad</a><a href="mailto:a@example.com">mail</a><svg><script>alert(1)</script></svg></div>'
+    )
+
+    expect(sanitized).toBe(
+      '<div class="x">Safe <span>text</span><a>bad</a><a href="mailto:a@example.com">mail</a><svg></svg></div>'
+    )
   })
 
   it('does not reconstruct nested or malformed active tags', () => {
     const sanitized = sanitizeQuoteHtml('<scr<script>ipt>alert(1)</scr</script>ipt><p>Kept</p>')
     expect(sanitized).toBe('ipt&gt;alert(1)ipt&gt;<p>Kept</p>')
     expect(sanitized).not.toContain('<script')
+  })
+
+  it('preserves content after void and malformed forbidden elements', () => {
+    expect(sanitizeQuoteHtml('<p>Before</p><img src="cid:image"><p>After the image</p><p>More</p>')).toBe(
+      '<p>Before</p><img src="cid:image"><p>After the image</p><p>More</p>'
+    )
+
+    const malformed = sanitizeQuoteHtml('<svg><style></svg></style><p>After malformed nesting</p>')
+    expect(malformed).toContain('<p>After malformed nesting</p>')
+  })
+
+  it('reads href from the parsed attribute instead of attribute text', () => {
+    expect(
+      sanitizeQuoteHtml('<a title="see href=https://evil.example" href="https://real.example">click</a>')
+    ).toBe('<a title="see href=https://evil.example" href="https://real.example">click</a>')
+  })
+
+  it('preserves document and table structure instead of flattening text', () => {
+    const sanitized = sanitizeQuoteHtml(
+      '<html><head><title>Newsletter Title</title></head><body><table><tr><td>Cell A</td><td>Cell B</td></tr></table><p>Real body</p></body></html>'
+    )
+
+    expect(sanitized).toContain('<table><tbody><tr><td>Cell A</td><td>Cell B</td></tr></tbody></table>')
+    expect(sanitized).toContain('<p>Real body</p>')
+    expect(sanitized).not.toContain('Cell ACell B')
   })
 })

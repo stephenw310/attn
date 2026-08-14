@@ -4,7 +4,7 @@ Cc: Dev Team <dev@example.com>
 Bcc: archive@example.com
 Subject: Quarterly update
 Message-ID: <attn-123@example.com>
-Date: Thu, 13 Aug 2026 12:34:56 GMT
+Date: Thu, 13 Aug 2026 12:34:56 +0000
 MIME-Version: 1.0
 Content-Type: multipart/alternative; boundary="attn-alternative-78000d330135fe25b98221b7"
 

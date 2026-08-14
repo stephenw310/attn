@@ -4,10 +4,13 @@
 
 import { createHash } from 'node:crypto'
 import type { MailAddress } from '../../shared/mail'
+import { escapeHtml, singleLine } from './text'
 
 const CRLF = '\r\n'
 const RECOMMENDED_HEADER_WIDTH = 78
 const ENCODED_WORD_MAX_BYTES = 45
+const RFC2231_SEGMENT_WIDTH = 45
+const MAX_FILENAME_FALLBACK_LENGTH = 40
 
 export interface MimeAttachment {
   filename: string
@@ -37,17 +40,13 @@ export interface BuildMimeOptions {
   date: Date
 }
 
-function singleLine(value: string): string {
-  return value.replace(/[\r\n]+/g, ' ').trim()
-}
-
 function normalizeBodyNewlines(value: string): string {
   return value.replace(/\r\n?|\n/g, CRLF)
 }
 
 function base64Lines(value: Uint8Array | string): string {
   const encoded = Buffer.from(value).toString('base64')
-  return encoded.match(/.{1,76}/g)?.join(CRLF) ?? ''
+  return encoded.replace(/(.{76})(?=.)/g, `$1${CRLF}`)
 }
 
 function utf8Chunks(value: string, maxBytes: number): string[] {
@@ -90,8 +89,31 @@ function formatDisplayName(name: string): string {
   return quoteHeaderValue(clean)
 }
 
+function validAddrSpec(value: string): string {
+  const email = singleLine(value)
+  const at = email.indexOf('@')
+  const local = email.slice(0, at)
+  const domain = email.slice(at + 1)
+  const validLocal =
+    local.length > 0 &&
+    local.length <= 64 &&
+    /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$/.test(local) &&
+    !local.startsWith('.') &&
+    !local.endsWith('.') &&
+    !local.includes('..')
+  const validDomain =
+    domain.length > 0 &&
+    domain.length <= 253 &&
+    domain.split('.').every((label) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label))
+
+  if (at <= 0 || at !== email.lastIndexOf('@') || !validLocal || !validDomain) {
+    throw new Error('MIME address must contain one valid addr-spec')
+  }
+  return email
+}
+
 function formatAddress(address: MailAddress): string {
-  const email = singleLine(address.email).replace(/[<>]/g, '')
+  const email = validAddrSpec(address.email)
   const name = singleLine(address.name)
   return name ? `${formatDisplayName(name)} <${email}>` : email
 }
@@ -146,43 +168,81 @@ function alternativeParts(boundary: string, text: string, html: string): string[
 
 function safeMimeType(value: string): string {
   const clean = singleLine(value).toLowerCase()
-  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(clean) ? clean : 'application/octet-stream'
+  return clean.length <= 60 && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(clean)
+    ? clean
+    : 'application/octet-stream'
 }
 
 function asciiFilenameFallback(filename: string): string {
   const fallback = singleLine(filename)
     .replace(/[^\x20-\x7e]/g, '_')
     .replace(/[\\/]/g, '_')
-  return fallback || 'attachment'
+  return fallback.slice(0, MAX_FILENAME_FALLBACK_LENGTH) || 'attachment'
 }
 
-function rfc2231Value(value: string): string {
-  return [...Buffer.from(value)]
-    .map((byte) => {
-      const character = String.fromCharCode(byte)
-      return /^[A-Za-z0-9!#$&+.^_`|~-]$/.test(character)
-        ? character
-        : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`
-    })
-    .join('')
+function rfc2231Atoms(value: string): string[] {
+  return [...Buffer.from(value)].map((byte) => {
+    const character = String.fromCharCode(byte)
+    return /^[A-Za-z0-9!#$&+.^_`|~-]$/.test(character)
+      ? character
+      : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`
+  })
+}
+
+function rfc2231Parameters(name: string, value: string): string[] {
+  const chunks: string[] = []
+  let chunk = ''
+  for (const atom of rfc2231Atoms(value)) {
+    if (chunk && chunk.length + atom.length > RFC2231_SEGMENT_WIDTH) {
+      chunks.push(chunk)
+      chunk = ''
+    }
+    chunk += atom
+  }
+  if (chunk || chunks.length === 0) chunks.push(chunk)
+
+  if (chunks.length === 1) return [`${name}*=UTF-8''${chunks[0]}`]
+  return chunks.map((part, index) => `${name}*${index}*=${index === 0 ? "UTF-8''" : ''}${part}`)
+}
+
+function parameterizedHeader(name: string, value: string, parameters: readonly string[]): string[] {
+  const lines: string[] = []
+  let line = `${name}: ${value}`
+  for (const [index, parameter] of parameters.entries()) {
+    const appended = `${line}; ${parameter}`
+    const trailingSemicolonWidth = index < parameters.length - 1 ? 1 : 0
+    if (appended.length + trailingSemicolonWidth <= RECOMMENDED_HEADER_WIDTH) {
+      line = appended
+      continue
+    }
+    lines.push(`${line};`)
+    line = ` ${parameter}`
+  }
+  lines.push(line)
+  return lines
+}
+
+function filenameParameters(name: string, filename: string): string[] {
+  const fallback = asciiFilenameFallback(filename)
+  const parameters = [`${name}=${quoteHeaderValue(fallback)}`]
+  if (/[^\x20-\x7e]/.test(filename) || filename.length > MAX_FILENAME_FALLBACK_LENGTH) {
+    parameters.push(...rfc2231Parameters(name, filename))
+  }
+  return parameters
 }
 
 function attachmentPart(attachment: MimeAttachment): string[] {
   const filename = singleLine(attachment.filename) || 'attachment'
-  const fallback = asciiFilenameFallback(filename)
-  const nonAscii = /[^\x20-\x7e]/.test(filename)
-  const disposition = nonAscii
-    ? `attachment; filename=${quoteHeaderValue(fallback)}; filename*=UTF-8''${rfc2231Value(filename)}`
-    : `attachment; filename=${quoteHeaderValue(fallback)}`
-  const contentType = nonAscii
-    ? `${safeMimeType(attachment.mimeType)}; name=${quoteHeaderValue(fallback)}; name*=UTF-8''${rfc2231Value(filename)}`
-    : `${safeMimeType(attachment.mimeType)}; name=${quoteHeaderValue(fallback)}`
   const contentId = attachment.contentId ? singleLine(attachment.contentId).replace(/^<|>$/g, '') : ''
 
   return [
-    ...foldHeader('Content-Type', contentType),
+    ...parameterizedHeader(
+      'Content-Type',
+      safeMimeType(attachment.mimeType),
+      filenameParameters('name', filename)
+    ),
     'Content-Transfer-Encoding: base64',
-    ...foldHeader('Content-Disposition', disposition),
+    ...parameterizedHeader('Content-Disposition', 'attachment', filenameParameters('filename', filename)),
     ...(contentId ? [`Content-ID: <${contentId}>`] : []),
     '',
     base64Lines(attachment.content)
@@ -197,14 +257,12 @@ function combinedBody(primary: string, quote: string | null | undefined, separat
 
 function plainTextHtml(value: string): string {
   if (!value) return ''
-  const escaped = value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/\r\n?|\n/g, '<br>')
+  const escaped = escapeHtml(value).replace(/\r\n?|\n/g, '<br>')
   return `<div>${escaped}</div>`
+}
+
+function rfc5322Date(date: Date): string {
+  return date.toUTCString().replace(/GMT$/, '+0000')
 }
 
 /** Build a complete CRLF-delimited message suitable for Gmail's raw MIME field. */
@@ -213,6 +271,12 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
 
   const messageId = singleLine(options.rfcMessageId)
   if (!messageId) throw new Error('MIME Message-ID is required')
+
+  const cc = draft.cc ?? []
+  const bcc = draft.bcc ?? []
+  if (draft.to.length + cc.length + bcc.length === 0) {
+    throw new Error('MIME message requires at least one recipient')
+  }
 
   const alternativeBoundary = deterministicBoundary('alternative', messageId)
   const mixedBoundary = deterministicBoundary('mixed', messageId)
@@ -223,15 +287,15 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
   const headers = [
     ...foldHeader('From', formatAddress({ name: '', email: options.accountEmail })),
     ...addressHeader('To', draft.to),
-    ...addressHeader('Cc', draft.cc ?? []),
-    ...addressHeader('Bcc', draft.bcc ?? []),
+    ...addressHeader('Cc', cc),
+    ...addressHeader('Bcc', bcc),
     ...foldHeader('Subject', encodeSubject(draft.subject)),
     ...foldHeader('Message-ID', messageId),
     ...(draft.inReplyTo ? foldHeader('In-Reply-To', singleLine(draft.inReplyTo)) : []),
     ...(draft.references?.length
       ? foldHeader('References', draft.references.map(singleLine).filter(Boolean).join(' '))
       : []),
-    ...foldHeader('Date', options.date.toUTCString()),
+    ...foldHeader('Date', rfc5322Date(options.date)),
     'MIME-Version: 1.0'
   ]
 

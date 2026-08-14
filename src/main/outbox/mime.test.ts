@@ -153,6 +153,54 @@ describe('MIME builder', () => {
     )
   })
 
+  it('rejects missing recipients and addr-spec separator injection', () => {
+    expect(() => buildMime({ ...CASES[0].draft, to: [] }, OPTIONS)).toThrow('at least one recipient')
+    expect(() =>
+      buildMime(
+        {
+          ...CASES[0].draft,
+          to: [{ name: '', email: 'maya@example.com, spy@evil.example' }]
+        },
+        OPTIONS
+      )
+    ).toThrow('one valid addr-spec')
+    expect(() =>
+      buildMime(CASES[0].draft, { ...OPTIONS, accountEmail: 'me@example.com; spy@evil.example' })
+    ).toThrow('one valid addr-spec')
+  })
+
+  it('uses RFC 2231 continuations for long Unicode filenames', () => {
+    const filename = `${'界'.repeat(85)}.pdf`
+    const raw = buildMime(
+      {
+        ...CASES[0].draft,
+        attachments: [
+          {
+            filename,
+            mimeType: 'application/pdf',
+            content: Buffer.from('data')
+          }
+        ]
+      },
+      OPTIONS
+    )
+    const attachmentStart = raw.indexOf('Content-Type: application/pdf')
+    const attachmentEnd = raw.indexOf('\r\n\r\n', attachmentStart)
+    const attachmentHeaders = raw.slice(attachmentStart, attachmentEnd).split('\r\n')
+    const continuations = [...raw.matchAll(/filename\*(\d+)\*=([^;\r\n]+)/g)]
+
+    expect(continuations.length).toBeGreaterThan(1)
+    expect(continuations.map((match) => Number(match[1]))).toEqual(
+      Array.from({ length: continuations.length }, (_, index) => index)
+    )
+    const encoded = continuations
+      .map((match) => match[2])
+      .join('')
+      .replace(/^UTF-8''/, '')
+    expect(decodeURIComponent(encoded)).toBe(filename)
+    expect(attachmentHeaders.every((line) => Buffer.byteLength(line) <= 78)).toBe(true)
+  })
+
   it('round-trips generated top-level headers through a naive splitter', () => {
     const names = ['', 'Plain Name', 'Dvořák, Antonín']
     const subjects = ['', 'ASCII subject', 'Привет мир', 'line one\r\nBcc: injected']
@@ -161,13 +209,29 @@ describe('MIME builder', () => {
         name: names[index % names.length],
         email: `person${index}@example.com`
       }
+      const bcc =
+        index % 4 === 0
+          ? Array.from({ length: 5 }, (_, recipient) => ({
+              name: `Blind Copy ${recipient}`,
+              email: `blind-${index}-${recipient}@example.com`
+            }))
+          : []
+      const references = Array.from(
+        { length: 12 + (index % 8) },
+        (_, reference) => `<thread-${index}-${reference}-${'x'.repeat(18)}@example.com>`
+      )
       const raw = buildMime(
         {
           to: [address],
           cc: index % 2 ? [{ name: 'Copy', email: 'copy@example.com' }] : [],
+          bcc,
           subject: subjects[index % subjects.length],
           bodyText: `Text ${index}`,
           bodyHtml: `<p>Text ${index}</p>`,
+          quoteText: `On an earlier message:\n> Quote ${index}`,
+          quoteHtml: `<blockquote><p>Quote ${index}</p></blockquote>`,
+          inReplyTo: `<reply-${index}@example.com>`,
+          references,
           attachments:
             index % 3 === 0
               ? [{ filename: `file-${index}.txt`, mimeType: 'text/plain', content: Buffer.from('data') }]
@@ -178,9 +242,17 @@ describe('MIME builder', () => {
       const headers = parseTopHeaders(raw)
       expect(headers.get('from')).toBe('me@example.com')
       expect(headers.get('message-id')).toBe(`<attn-${index}@example.com>`)
+      expect(headers.get('in-reply-to')).toBe(`<reply-${index}@example.com>`)
+      expect(headers.get('references')).toBe(references.join(' '))
       expect(headers.get('mime-version')).toBe('1.0')
       expect(headers.get('content-type')).toMatch(/^multipart\/(?:alternative|mixed); boundary=/)
-      expect([...headers.keys()].filter((name) => name === 'bcc')).toHaveLength(0)
+      if (bcc.length > 0) {
+        expect(headers.get('bcc')).toBe(bcc.map((address) => `${address.name} <${address.email}>`).join(', '))
+      } else {
+        expect(headers.has('bcc')).toBe(false)
+      }
+      const topHeaderBlock = raw.split('\r\n\r\n', 1)[0]
+      expect(topHeaderBlock.split('\r\n').every((line) => Buffer.byteLength(line) <= 998)).toBe(true)
     }
   })
 })
