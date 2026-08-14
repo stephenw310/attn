@@ -21,6 +21,10 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(composer.root).toBeVisible()
   await expect(page.getByTestId('thread-list')).toBeHidden()
   await expect(page.getByTestId('footer-shortcuts')).toHaveCount(0)
+  const showCopies = page.getByTestId('composer-show-copies')
+  await expect(showCopies).toBeVisible()
+  await expect(showCopies).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByTestId('composer-discard')).toHaveAccessibleName('Discard draft')
 
   const toInput = composer.recipientField().locator('input')
   await expect.poll(() => toInput.evaluate((input) => document.activeElement === input)).toBe(true)
@@ -65,6 +69,9 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await composer.expectRecipients(['maya@example.com'])
   await expect(composer.subject).toHaveValue('A calmer inbox')
   await expect(composer.editor).toContainText('Focused work deserves focused mail. jke')
+  await showCopies.click()
+  await expect(composer.recipientField('cc')).toBeVisible()
+  await expect(composer.recipientField('bcc')).toBeVisible()
 })
 
 test('restores the same full-window reader after composing', async ({ page }) => {

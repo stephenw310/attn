@@ -35,6 +35,22 @@ interface ComposerProps {
   onToast: (message: string) => void
 }
 
+function TrashIcon(): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+    >
+      <title>Discard draft</title>
+      <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function InitialHtmlPlugin({ html }: { html: string }): null {
   const [editor] = useLexicalComposerContext()
   useEffect(() => {
@@ -165,15 +181,6 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            className="rounded px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-danger"
-            data-testid="composer-discard"
-            aria-label="Discard draft"
-            onClick={discard}
-          >
-            Discard
-          </button>
           <span className="flex items-center gap-1.5 text-[11px] text-ink-faint">
             save &amp; close <Kbd>Esc</Kbd>
           </span>
@@ -195,10 +202,24 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           {!showCopies && (
             <button
               type="button"
-              className="absolute right-5 top-2.5 text-[11px] text-ink-faint hover:text-ink"
+              className="absolute right-3 top-1.5 inline-flex h-7 items-center gap-1 rounded-md border border-transparent px-2 text-xs text-ink-faint hover:border-edge hover:bg-active hover:text-ink"
+              data-testid="composer-show-copies"
+              aria-label="Show Cc and Bcc fields"
+              aria-expanded="false"
               onClick={() => setShowCopies(true)}
             >
               Cc Bcc
+              <svg
+                aria-hidden
+                viewBox="0 0 12 12"
+                className="size-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <title>Show Cc and Bcc fields</title>
+                <path d="m3 4.5 3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
           )}
         </div>
@@ -225,7 +246,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           </>
         )}
         <input
-          className="h-12 shrink-0 border-b border-edge bg-transparent px-5 text-base font-semibold text-ink outline-none placeholder:text-ink-faint"
+          className="h-12 shrink-0 border-b border-edge bg-transparent px-4 text-sm font-medium text-ink outline-none placeholder:text-ink-faint"
           data-testid="composer-subject"
           aria-label="Subject"
           placeholder="Subject"
@@ -273,14 +294,26 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
                 Attachments coming soon
               </div>
             </div>
-            <button
-              type="button"
-              className="shrink-0 rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent"
-              title="Sending is implemented in T16"
-              onClick={unavailableSend}
-            >
-              Send <span className="ml-1 opacity-65">⌘↵</span>
-            </button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger"
+                data-testid="composer-discard"
+                aria-label="Discard draft"
+                title="Discard draft"
+                onClick={discard}
+              >
+                <TrashIcon />
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent"
+                title="Sending is implemented in T16"
+                onClick={unavailableSend}
+              >
+                Send <span className="ml-1 opacity-65">⌘↵</span>
+              </button>
+            </div>
           </footer>
         </LexicalComposer>
       </div>

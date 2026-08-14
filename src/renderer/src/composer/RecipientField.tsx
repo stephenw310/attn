@@ -58,9 +58,7 @@ export function RecipientField({
       className="relative flex min-h-10 items-start border-b border-edge px-4"
       data-testid={`composer-${field}`}
     >
-      <span className="w-9 shrink-0 pt-2.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-faint">
-        {label}
-      </span>
+      <span className="w-10 shrink-0 pt-2.5 text-sm font-medium text-ink-faint">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-1.5">
         {recipients.map((recipient) => (
           <span
