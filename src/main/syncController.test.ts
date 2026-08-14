@@ -34,7 +34,12 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock('./sync/backfill', () => ({ runInboxBackfill: mocks.runInboxBackfill }))
+// planBackfillStart is a pure cursor router, so the real one runs here — mocking
+// it would stop these tests from covering how a cursor picks the starting phase.
+vi.mock('./sync/backfill', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./sync/backfill')>()),
+  runInboxBackfill: mocks.runInboxBackfill
+}))
 vi.mock('./sync/poller', () => ({
   HistoryPoller: mocks.FakePoller,
   reconcileInboxMembership: mocks.reconcileInboxMembership

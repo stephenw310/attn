@@ -1,5 +1,6 @@
-// Resumable staged INBOX backfill: 12 months of metadata first, then full
-// bodies for 90 days. Each completed page checkpoints the next phase/token.
+// Resumable staged backfill: 12 months of INBOX metadata, 90 days of full
+// INBOX bodies, then 12 months of SENT metadata for local autocomplete.
+// Each completed page checkpoints the next phase/token.
 
 import type { SyncStage } from '../../shared/mail'
 import type { Db } from '../db'
@@ -21,6 +22,11 @@ export interface BackfillProgress {
 
 export interface BackfillResult {
   threadCount: number
+  /**
+   * Authoritative INBOX membership from the reconcile phase. Only meaningful for a
+   * run that reached reconciliation — callers must check the plan for 'skip' first,
+   * because reconciling against an empty list would strip INBOX from every thread.
+   */
   inboxThreadIds: string[]
 }
 
@@ -31,9 +37,22 @@ export interface BackfillOptions {
 
 export type BackfillPhase = SyncStage
 
-interface ParsedCursor {
+export interface ParsedCursor {
   phase: BackfillPhase
   pageToken?: string
+}
+
+export type BackfillStartPlan = { kind: 'skip' } | { kind: 'run'; cursor: ParsedCursor; initialize: boolean }
+
+/** Pure routing for fresh, resumed, and completed databases. */
+export function planBackfillStart(rawCursor: string | null | undefined, recovery = false): BackfillStartPlan {
+  if (rawCursor === 'done' && !recovery) return { kind: 'skip' }
+  const resuming = Boolean(rawCursor && rawCursor !== 'done')
+  return {
+    kind: 'run',
+    cursor: resuming ? parseCursor(rawCursor) : { phase: 'metadata' },
+    initialize: !resuming
+  }
 }
 
 export async function runInboxBackfill(
@@ -50,13 +69,11 @@ export async function runInboxBackfill(
     const previous = db
       .prepare('SELECT backfill_cursor, updated_at FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null; updated_at: number | null } | undefined
-    if (previous?.backfill_cursor === 'done' && !options.recovery) {
-      return { threadCount: 0, inboxThreadIds: [] }
-    }
+    const plan = planBackfillStart(previous?.backfill_cursor, options.recovery)
+    if (plan.kind === 'skip') return { threadCount: 0, inboxThreadIds: [] }
 
-    const resuming = Boolean(previous?.backfill_cursor && previous.backfill_cursor !== 'done')
-    let cursor = resuming ? parseCursor(previous?.backfill_cursor) : { phase: 'metadata' as const }
-    if (!resuming) {
+    let cursor = plan.cursor
+    if (plan.initialize) {
       // Record the gapless history checkpoint before the first metadata page.
       db.prepare(
         `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor, updated_at)
@@ -78,6 +95,7 @@ export async function runInboxBackfill(
         provider,
         accountId,
         query: 'newer_than:12m',
+        labelIds: ['INBOX'],
         phase: 'metadata',
         initialPageToken: cursor.pageToken,
         nextPhase: 'bodies',
@@ -101,9 +119,10 @@ export async function runInboxBackfill(
         provider,
         accountId,
         query: 'newer_than:90d',
+        labelIds: ['INBOX'],
         phase: 'bodies',
         initialPageToken: cursor.pageToken,
-        nextPhase: 'reconcile',
+        nextPhase: 'sent',
         onThread: async (threadId) => {
           const thread = await provider.getThread(threadId, { format: 'full' })
           persistThread(db, accountId, thread)
@@ -114,6 +133,31 @@ export async function runInboxBackfill(
           callbacks.onProgress({ stage: 'bodies', threadsDone, mailChanged: true })
         }
       })
+      cursor = { phase: 'sent' }
+    }
+
+    if (cursor.phase === 'sent') {
+      callbacks.onProgress({ stage: 'sent', threadsDone, mailChanged: false })
+      await runThreadPhase({
+        db,
+        provider,
+        accountId,
+        query: 'newer_than:12m',
+        labelIds: ['SENT'],
+        phase: 'sent',
+        initialPageToken: cursor.pageToken,
+        nextPhase: 'reconcile',
+        onThread: async (threadId) => {
+          persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
+            metadataOnly: true
+          })
+        },
+        onPage: (count) => {
+          threadsDone += count
+          callbacks.onProgress({ stage: 'sent', threadsDone, mailChanged: true })
+        }
+      })
+      cursor = { phase: 'reconcile' }
     }
 
     // Re-list all INBOX ids for authoritative membership reconciliation. This
@@ -122,7 +166,7 @@ export async function runInboxBackfill(
     const inboxThreadIds = new Set<string>()
     let pageToken: string | undefined
     do {
-      const page = await provider.listThreadIds('', pageToken)
+      const page = await provider.listThreadIds({ labelIds: ['INBOX'], pageToken })
       for (const threadId of page.threadIds) inboxThreadIds.add(threadId)
       pageToken = page.nextPageToken
     } while (pageToken)
@@ -144,6 +188,7 @@ interface ThreadPhaseOptions {
   provider: MailProvider
   accountId: string
   query: string
+  labelIds: readonly string[]
   phase: Exclude<BackfillPhase, 'reconcile'>
   initialPageToken?: string
   nextPhase: BackfillPhase
@@ -157,7 +202,11 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
   for (;;) {
     let page: ThreadIdPage
     try {
-      page = await options.provider.listThreadIds(options.query, pageToken)
+      page = await options.provider.listThreadIds({
+        q: options.query,
+        labelIds: options.labelIds,
+        pageToken
+      })
     } catch (error) {
       if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
       // Preserve the original history checkpoint while restarting this phase.
@@ -191,9 +240,11 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
 function parseCursor(raw: string | null | undefined): ParsedCursor {
   if (!raw || raw === 'start' || raw === 'metadata') return { phase: 'metadata' }
   if (raw === 'bodies') return { phase: 'bodies' }
+  if (raw === 'sent') return { phase: 'sent' }
   if (raw === 'reconcile') return { phase: 'reconcile' }
   if (raw.startsWith('metadata:')) return { phase: 'metadata', pageToken: raw.slice('metadata:'.length) }
   if (raw.startsWith('bodies:')) return { phase: 'bodies', pageToken: raw.slice('bodies:'.length) }
+  if (raw.startsWith('sent:')) return { phase: 'sent', pageToken: raw.slice('sent:'.length) }
   // Compatibility with the first T7 cursor format, which stored a bare token.
   return { phase: 'metadata', pageToken: raw }
 }

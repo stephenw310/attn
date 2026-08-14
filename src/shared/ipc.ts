@@ -1,5 +1,6 @@
 import type { TriageAction, TriageResult } from './actions'
 import type { AuthStatus } from './auth'
+import type { ContactSearchResult } from './contacts'
 import type {
   Conversation,
   DownloadAttachmentRequest,
@@ -16,6 +17,7 @@ export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',
   authSignIn: 'auth:signIn',
   authSignOut: 'auth:signOut',
+  contactsSearch: 'contacts:search',
   syncGetState: 'sync:getState',
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
@@ -44,6 +46,8 @@ export const IPC_CHANNELS = {
 export const TEST_CHANNELS = {
   focusThread: 'attn:test:focusThread',
   setSyncState: 'attn:test:setSyncState',
+  reloadSeed: 'attn:test:reloadSeed',
+  deleteThread: 'attn:test:deleteThread',
   delayConversation: 'attn:test:delayConversation',
   updateMessageBody: 'attn:test:updateMessageBody'
 } as const
@@ -54,6 +58,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
+  [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: string | null }

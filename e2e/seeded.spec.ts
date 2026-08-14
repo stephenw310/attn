@@ -37,8 +37,71 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
   await expect(page.getByTestId('message-card').last()).toContainText(
     'I added the launch milestones and owner notes.'
   )
-  await expect.poll(mainLog).toContain('[seed] loaded 8 threads for seed@attn.test')
+  await expect.poll(mainLog).toContain('[seed] loaded 9 threads for seed@attn.test')
+  await expect.poll(mainLog).toContain('[sync] sent stage skipped for seeded account seed@attn.test')
   expect(mainLog()).not.toContain('[sync] history poller started')
+})
+
+test('exposes threading headers and idempotent contact ranking over IPC', async ({ app, page }) => {
+  const conversation = await page.evaluate(() => window.attn.mail.getConversation('t-sent-history'))
+  expect(conversation?.messages).toHaveLength(1)
+  expect(conversation?.messages[0]).toMatchObject({
+    rfcMessageId: '<sent-history@attn.test>',
+    references: ['<roadmap-root@example.com>', '<roadmap-reply@example.com>']
+  })
+
+  const before = await page.evaluate(() => window.attn.contacts.search('maya'))
+  expect(before[0]).toMatchObject({ name: 'Maya Lin', email: 'maya@example.com' })
+  expect(await page.evaluate(() => window.attn.contacts.search('pri'))).toEqual([
+    expect.objectContaining({ name: 'Priya Raman', email: 'priya@example.com' })
+  ])
+  expect(await page.evaluate(() => window.attn.contacts.search('seed@attn.test'))).toEqual([])
+  expect(await page.evaluate(() => window.attn.contacts.search(''))).toHaveLength(8)
+
+  // Non-ASCII case folding: "ürsula" appears in neither the address nor any
+  // ASCII-lowercased form of the name, so this only matches if the store folded
+  // the name in JS rather than through SQLite's ASCII-only lower().
+  expect(await page.evaluate(() => window.attn.contacts.search('ürsula'))).toEqual([
+    expect.objectContaining({ name: 'Ürsula Groß', email: 'ursula@example.com' })
+  ])
+  expect(await page.evaluate(() => window.attn.contacts.search('groß'))).toEqual([
+    expect.objectContaining({ email: 'ursula@example.com' })
+  ])
+
+  // Prefix precedence — the invariant candidate truncation used to break. "ma"
+  // prefixes maya@ while genuinely infix-matching amara@ and Priya Raman, so a
+  // regression that ranks infix alongside prefix fails here. The truncation
+  // itself needs >200 matches to reproduce and is covered by construction: the
+  // prefix scan is uncapped, only the infix fill is bounded.
+  const prefixFirst = await page.evaluate(() => window.attn.contacts.search('ma'))
+  expect(prefixFirst[0]).toMatchObject({ email: 'maya@example.com' })
+
+  // Replay the exact same snapshots through the production persistence path.
+  // Contribution PKs make this a no-op for aggregate frequency.
+  await app.evaluate(
+    ({ ipcMain }, channel) =>
+      new Promise<void>((resolve, reject) => {
+        ipcMain.emit(channel, {}, (error?: string) => {
+          if (error) reject(new Error(error))
+          else resolve()
+        })
+      }),
+    TEST_CHANNELS.reloadSeed
+  )
+  const after = await page.evaluate(() => window.attn.contacts.search('maya'))
+  expect(after[0]).toMatchObject({ name: 'Maya Lin', email: 'maya@example.com' })
+  expect(after[0].score).toBeCloseTo(before[0].score, 5)
+
+  // Removing the only sent contribution drops Priya from the projection while
+  // preserving Maya's independent received-mail contributions.
+  await app.evaluate(
+    ({ ipcMain }, channel) => ipcMain.emit(channel, {}, 't-sent-history'),
+    TEST_CHANNELS.deleteThread
+  )
+  expect(await page.evaluate(() => window.attn.contacts.search('pri'))).toEqual([])
+  expect(await page.evaluate(() => window.attn.contacts.search('maya'))).toEqual([
+    expect.objectContaining({ name: 'Maya Lin', email: 'maya@example.com' })
+  ])
 })
 
 test('shows phased sync progress and keeps error details behind an accessible control', async ({
@@ -54,9 +117,13 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(status).toHaveAttribute('title', 'Syncing · Recent mail — 428 processed')
   const progress = page.getByTestId('sync-progress')
   await expect(progress).toHaveAttribute('aria-valuenow', '2')
-  await expect(progress.locator('[data-phase-state]')).toHaveCount(3)
+  await expect(progress.locator('[data-phase-state]')).toHaveCount(4)
   await expect(progress.locator('[data-phase-state]').nth(0)).toHaveAttribute('data-phase-state', 'complete')
   await expect(progress.locator('[data-phase-state]').nth(1)).toHaveAttribute('data-phase-state', 'active')
+
+  await setSyncState(app, { phase: 'syncing', stage: 'sent', threadsDone: 512 })
+  await expect(status).toContainText('Syncing · Sent mail')
+  await expect(progress).toHaveAttribute('aria-valuenow', '3')
 
   // An incremental poll is not a backfill phase: no stage label, no progress bar.
   await setSyncState(app, { phase: 'checking' })

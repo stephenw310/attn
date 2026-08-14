@@ -1,6 +1,7 @@
 import type {
   GetThreadOptions,
   HistoryPage,
+  ListThreadIdsOptions,
   MailProvider,
   ProviderLabel,
   ProviderProfile,
@@ -9,7 +10,17 @@ import type {
 import { GmailApiError, type GmailClient } from './client'
 import type { GmailThread } from './parse'
 
-const METADATA_HEADERS = ['From', 'To', 'Cc', 'Bcc', 'Reply-To', 'Subject']
+const METADATA_HEADERS = [
+  'From',
+  'To',
+  'Cc',
+  'Bcc',
+  'Reply-To',
+  'Subject',
+  'Message-ID',
+  'References',
+  'In-Reply-To'
+]
 
 export class GmailMailProvider implements MailProvider {
   constructor(private readonly client: GmailClient) {}
@@ -38,10 +49,11 @@ export class GmailMailProvider implements MailProvider {
     return result.labels ?? []
   }
 
-  async listThreadIds(q: string, pageToken?: string): Promise<ThreadIdPage> {
-    const params: Record<string, string> = { labelIds: 'INBOX', maxResults: '100' }
-    if (q) params.q = q
-    if (pageToken) params.pageToken = pageToken
+  async listThreadIds(options: ListThreadIdsOptions = {}): Promise<ThreadIdPage> {
+    const params: Record<string, string | string[]> = { maxResults: '100' }
+    if (options.q) params.q = options.q
+    if (options.labelIds?.length) params.labelIds = [...options.labelIds]
+    if (options.pageToken) params.pageToken = options.pageToken
     const result = await this.client.get<{
       threads?: { id: string }[]
       nextPageToken?: string

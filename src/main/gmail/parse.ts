@@ -36,6 +36,37 @@ export function header(msg: GmailMessage, name: string): string {
   return h?.value ?? ''
 }
 
+export interface ThreadingHeaders {
+  rfcMessageId: string | null
+  references: string[]
+}
+
+/** Canonicalize RFC message-id header values while preserving their brackets. */
+export function parseMessageIds(raw: string): string[] {
+  const unfolded = raw.replace(/\r?\n[ \t]+/g, ' ').trim()
+  if (!unfolded) return []
+
+  const bracketed = [...unfolded.matchAll(/<([^<>\s]+)>/g)].map((match) => `<${match[1]}>`)
+  if (bracketed.length > 0) return bracketed
+
+  // Bare ids do occur in the wild. Require the RFC 5322 msg-id "@" so a malformed
+  // header cannot invent ids that a later reply would put on the wire.
+  return unfolded
+    .split(/[\s,]+/)
+    .map((value) => value.replace(/^<+|>+$/g, ''))
+    .filter((value) => value.includes('@'))
+    .map((value) => `<${value}>`)
+}
+
+/** Extract the headers needed to build standards-compliant reply threading. */
+export function extractThreadingHeaders(message: GmailMessage): ThreadingHeaders {
+  const references = parseMessageIds(header(message, 'References'))
+  return {
+    rfcMessageId: parseMessageIds(header(message, 'Message-ID'))[0] ?? null,
+    references: references.length > 0 ? references : parseMessageIds(header(message, 'In-Reply-To'))
+  }
+}
+
 export function parseAddress(raw: string): { name: string; email: string } {
   const m = raw.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/)
   if (m) {

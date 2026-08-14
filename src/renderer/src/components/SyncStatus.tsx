@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SyncStage, SyncState } from '../../../shared/mail'
 import { blurActive } from './blurActive'
 
-const SYNC_STAGES: SyncStage[] = ['metadata', 'bodies', 'reconcile']
+const SYNC_STAGES: SyncStage[] = ['metadata', 'bodies', 'sent', 'reconcile']
 
 function syncStageLabel(stage: SyncStage): string {
   if (stage === 'metadata') return 'Message list'
   if (stage === 'bodies') return 'Recent mail'
+  if (stage === 'sent') return 'Sent mail'
   return 'Finishing up'
 }
 
@@ -20,7 +21,7 @@ function SyncProgress({ stage }: { stage: SyncStage }): React.JSX.Element {
       aria-valuemin={1}
       aria-valuemax={SYNC_STAGES.length}
       aria-valuenow={activeIndex + 1}
-      className="col-start-2 grid h-[3px] w-44 grid-cols-3 gap-[3px] overflow-hidden"
+      className="col-start-2 grid h-[3px] w-44 grid-cols-4 gap-[3px] overflow-hidden"
     >
       {SYNC_STAGES.map((item, index) => (
         <i

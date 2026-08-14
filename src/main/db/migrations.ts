@@ -118,5 +118,44 @@ export const migrations: string[] = [
     PRIMARY KEY (account_id, thread_id, kind)
   );
   CREATE INDEX idx_reminders_due ON reminders (account_id, state, due_at);
+  `,
+
+  // v7 — sent-mail autocomplete data and RFC threading metadata (M2 T13).
+  // Contact frequency is derived from idempotent per-message contributions.
+  // contacts is a rebuildable search projection so autocomplete never groups
+  // the full message history while the user types.
+  `
+  ALTER TABLE messages ADD COLUMN rfc_message_id TEXT;
+  ALTER TABLE messages ADD COLUMN references_json TEXT;
+
+  CREATE TABLE contact_messages (
+    account_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    email      TEXT NOT NULL,
+    role       TEXT NOT NULL,
+    name       TEXT,
+    PRIMARY KEY (account_id, message_id, email, role)
+  );
+  -- Covers the per-address rebuild aggregate. Without message_id/role the planner
+  -- prefers the covering primary key, which constrains account_id only and rescans
+  -- every contribution row in the account on each rebuild.
+  CREATE INDEX idx_contact_messages_email
+    ON contact_messages (account_id, email, message_id, role);
+
+  -- email and name_folded are stored pre-folded by shared/contacts.foldForSearch,
+  -- so autocomplete matches without a per-row lower() and folds non-ASCII names
+  -- that SQLite's ASCII-only lower() would leave uppercase.
+  CREATE TABLE contacts (
+    account_id          TEXT NOT NULL,
+    email               TEXT NOT NULL,
+    name                TEXT,
+    name_folded         TEXT,
+    sent_to_count       INTEGER NOT NULL DEFAULT 0,
+    received_count      INTEGER NOT NULL DEFAULT 0,
+    last_interacted_at  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, email)
+  );
+  -- Prefix autocomplete range-scans folded names; addresses ride the primary key.
+  CREATE INDEX idx_contacts_name_folded ON contacts (account_id, name_folded);
   `
 ]

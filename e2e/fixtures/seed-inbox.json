@@ -185,6 +185,25 @@
           ]
         }
       ]
+    },
+    {
+      "id": "t-sent-history",
+      "historyId": "1008",
+      "messages": [
+        {
+          "id": "m-sent-history",
+          "labelIds": ["SENT"],
+          "receivedDaysAgo": 2,
+          "receivedAt": "13:10",
+          "from": "Attn Seed <seed@attn.test>",
+          "to": "Maya Lin <maya@example.com>, Priya Raman <priya@example.com>, \u00dcrsula Gro\u00df <ursula@example.com>",
+          "subject": "Re: Q3 roadmap review",
+          "snippet": "Thanks — I added my notes.",
+          "bodyText": "Thanks — I added my notes.",
+          "messageId": "<sent-history@attn.test>",
+          "references": ["<roadmap-root@example.com>", "<roadmap-reply@example.com>"]
+        }
+      ]
     }
   ]
 }

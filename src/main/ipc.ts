@@ -17,7 +17,8 @@ import {
   getInlineAttachmentData,
   listInboxThreads,
   listSnoozedThreads,
-  listUserLabels
+  listUserLabels,
+  searchContacts
 } from './db/queries'
 import type { GmailClient } from './gmail/client'
 import type { PendingFocus } from './notify'
@@ -124,6 +125,11 @@ export function registerIpc(context: IpcContext): void {
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
   handle(IPC_CHANNELS.authSignOut, () => context.signOut())
+  handle(IPC_CHANNELS.contactsSearch, (_event, query) => {
+    const account = context.currentAccountId()
+    if (!account || typeof query !== 'string') return []
+    return searchContacts(context.db, account, query.slice(0, 200))
+  })
   handle(IPC_CHANNELS.syncGetState, () => context.syncController()?.getState() ?? { phase: 'idle' })
   handle(IPC_CHANNELS.syncRetry, () => {
     context.syncController()?.retry()

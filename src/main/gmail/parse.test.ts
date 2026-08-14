@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { collectAttachments, extractBodyText, hasAttachment, parseAddress, parseAddressList } from './parse'
+import {
+  collectAttachments,
+  extractBodyText,
+  extractThreadingHeaders,
+  hasAttachment,
+  parseAddress,
+  parseAddressList,
+  parseMessageIds
+} from './parse'
 
 describe('Gmail message parsing', () => {
   it('prefers plain text and decodes base64url bodies', () => {
@@ -66,5 +74,51 @@ describe('Gmail message parsing', () => {
       { name: 'solo', email: 'solo@test.dev' }
     ])
     expect(parseAddressList('')).toEqual([])
+  })
+
+  it('extracts canonical angle-bracket message ids from folded References', () => {
+    expect(parseMessageIds('<root@example.com>\r\n\t<reply@example.com>')).toEqual([
+      '<root@example.com>',
+      '<reply@example.com>'
+    ])
+    expect(parseMessageIds('bare@example.com')).toEqual(['<bare@example.com>'])
+    expect(parseMessageIds('one@example.com, two@example.com')).toEqual([
+      '<one@example.com>',
+      '<two@example.com>'
+    ])
+    // Junk without an addr-spec must not become an invented id on a later reply.
+    expect(parseMessageIds('unknown')).toEqual([])
+    expect(parseMessageIds('see the thread below')).toEqual([])
+
+    expect(
+      extractThreadingHeaders({
+        id: 'm1',
+        threadId: 't1',
+        payload: {
+          headers: [
+            { name: 'Message-ID', value: '<message@example.com>' },
+            { name: 'References', value: '<root@example.com>\r\n <reply@example.com>' }
+          ]
+        }
+      })
+    ).toEqual({
+      rfcMessageId: '<message@example.com>',
+      references: ['<root@example.com>', '<reply@example.com>']
+    })
+  })
+
+  it('uses In-Reply-To only when References is absent', () => {
+    expect(
+      extractThreadingHeaders({
+        id: 'm1',
+        threadId: 't1',
+        payload: {
+          headers: [
+            { name: 'Message-ID', value: 'message@example.com' },
+            { name: 'In-Reply-To', value: '<parent@example.com>' }
+          ]
+        }
+      })
+    ).toEqual({ rfcMessageId: '<message@example.com>', references: ['<parent@example.com>'] })
   })
 })

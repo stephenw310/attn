@@ -4,7 +4,7 @@ import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
 import type { GmailMailProvider } from './gmail/provider'
 import type { SnoozeScheduler } from './scheduler'
-import { runInboxBackfill } from './sync/backfill'
+import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { syncFailureState } from './sync/failure'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
@@ -153,14 +153,15 @@ export class SyncController {
     const state = this.context.db
       .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null } | undefined
-    if (state?.backfill_cursor === 'done') {
+    const backfillPlan = planBackfillStart(state?.backfill_cursor)
+    if (backfillPlan.kind === 'skip') {
       this.startHistoryPoller(accountId, provider, generation, true)
       return
     }
     if (this.backfillRetryGeneration === generation) this.backfillRetryGeneration = null
     this.running = true
-    this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
-    console.log('[sync] inbox backfill started')
+    this.setState({ phase: 'syncing', stage: backfillPlan.cursor.phase, threadsDone: 0 })
+    console.log('[sync] mail backfill started')
     void runInboxBackfill(this.context.db, provider, {
       onProgress: (progress) => {
         if (generation !== this.generation) return
@@ -195,7 +196,7 @@ export class SyncController {
         reconcileInboxMembership(this.context.db, accountId, result.inboxThreadIds)
         this.setState({ phase: 'idle' })
         this.context.broadcastMailChanged()
-        console.log(`[sync] backfill done: ${result.threadCount} inbox threads for ${accountId}`)
+        console.log(`[sync] backfill done: ${result.threadCount} threads for ${accountId}`)
         this.startHistoryPoller(accountId, provider, generation, retryRequested)
       })
       .catch((error) => {

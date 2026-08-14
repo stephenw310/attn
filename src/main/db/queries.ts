@@ -1,5 +1,14 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
+import {
+  CONTACT_CANDIDATE_LIMIT,
+  CONTACT_SEARCH_LIMIT,
+  type ContactSearchResult,
+  type ContactStats,
+  displayName,
+  foldForSearch,
+  rankContacts
+} from '../../shared/contacts'
 import type {
   Conversation,
   ConversationMsg,
@@ -156,7 +165,7 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
   const rows = db
     .prepare(
       `SELECT id, from_name, from_email, internal_date, body_text, body_html, recipients_json,
-              attachments_json, snippet
+              attachments_json, snippet, rfc_message_id, references_json
        FROM messages WHERE account_id = ? AND thread_id = ?
        ORDER BY internal_date ASC`
     )
@@ -170,10 +179,14 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
     recipients_json: string | null
     attachments_json: string | null
     snippet: string | null
+    rfc_message_id: string | null
+    references_json: string | null
   }[]
 
   const messages: ConversationMsg[] = rows.map((r) => ({
     id: r.id,
+    rfcMessageId: r.rfc_message_id,
+    references: parseJson(r.references_json, []),
     fromName: r.from_name ?? '',
     fromEmail: r.from_email ?? '',
     at: r.internal_date ?? 0,
@@ -186,6 +199,133 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
   }))
 
   return { threadId, subject: thread.subject ?? '(no subject)', messages }
+}
+
+interface ContactRow {
+  email: string
+  name: string | null
+  sent_to_count: number
+  received_count: number
+  last_interacted_at: number
+  name_prefix: number
+}
+
+const CONTACT_COLUMNS = 'email, name, sent_to_count, received_count, last_interacted_at'
+
+/**
+ * Half-open upper bound for a prefix range scan: the needle with its final code
+ * point incremented. Range bounds rather than LIKE 'x%' so the comparison is
+ * unambiguously index-driven — the columns are pre-folded, so a binary range is
+ * exactly the right match semantics.
+ */
+function prefixUpperBound(prefix: string): string {
+  const points = [...prefix]
+  const last = points.pop()
+  if (last === undefined) return ''
+  return points.join('') + String.fromCodePoint((last.codePointAt(0) ?? 0) + 1)
+}
+
+/**
+ * Local autocomplete over the materialized contact projection. SQL owns matching
+ * and rankContacts owns ordering — one implementation each, so tuning the formula
+ * in shared/contacts.ts actually changes what the user sees.
+ *
+ * Prefix matches outrank every infix match, so they are fetched in full and are
+ * never subject to a candidate cap: capping them would let 200 newer or heavier
+ * infix matches bury the exact address the user is typing. The prefix scan is a
+ * bounded index range, so fetching all of them is cheap. The infix scan is the
+ * expensive one — a broad needle matches nearly every address — so it runs only
+ * when prefix matches cannot already fill the result, and is capped there. A
+ * dropped infix candidate can only reorder the low-confidence tail; a dropped
+ * prefix candidate loses the thing the user meant.
+ *
+ * Addresses and names are stored pre-folded, so matching needs no per-row lower()
+ * and non-ASCII names fold correctly — SQLite's lower() would leave "Ürsula"
+ * unmatched by "ürsula".
+ */
+export function searchContacts(
+  db: Db,
+  accountId: string,
+  query: string,
+  now = Date.now()
+): ContactSearchResult[] {
+  const needle = foldForSearch(query)
+  // account_id doubles as the email in v1, but read the account row so a future
+  // opaque account id (SPEC D4) cannot start suggesting the signed-in address.
+  const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
+    | { email: string }
+    | undefined
+  const selfEmail = account?.email ?? accountId
+
+  const rows = needle ? contactPrefixMatches(db, accountId, needle) : []
+  const ranked = rankContacts(toStats(rows), query, selfEmail, now)
+  const candidates =
+    ranked.length >= CONTACT_SEARCH_LIMIT
+      ? rows
+      : mergeContacts(rows, contactInfixMatches(db, accountId, needle))
+
+  const names = new Map(candidates.map((row) => [row.email, row.name]))
+  return rankContacts(toStats(candidates), query, selfEmail, now).map((contact) => ({
+    name: displayName(names.get(contact.email), contact.email),
+    email: contact.email,
+    score: contact.score
+  }))
+}
+
+function toStats(rows: readonly ContactRow[]): ContactStats[] {
+  return rows.map((row) => ({
+    email: row.email,
+    sentToCount: row.sent_to_count,
+    receivedCount: row.received_count,
+    lastInteractedAt: row.last_interacted_at,
+    nameMatchesPrefix: row.name_prefix === 1
+  }))
+}
+
+function mergeContacts(primary: readonly ContactRow[], extra: readonly ContactRow[]): ContactRow[] {
+  const seen = new Set(primary.map((row) => row.email))
+  return [...primary, ...extra.filter((row) => !seen.has(row.email))]
+}
+
+/** Every address or name starting with the needle — uncapped, index-ranged. */
+function contactPrefixMatches(db: Db, accountId: string, needle: string): ContactRow[] {
+  return db
+    .prepare(
+      `SELECT ${CONTACT_COLUMNS},
+              CASE WHEN name_folded >= @lo AND name_folded < @hi THEN 1 ELSE 0 END AS name_prefix
+       FROM contacts
+       WHERE account_id = @account_id
+         AND ((email >= @lo AND email < @hi) OR (name_folded >= @lo AND name_folded < @hi))`
+    )
+    .all({ account_id: accountId, lo: needle, hi: prefixUpperBound(needle) }) as ContactRow[]
+}
+
+/**
+ * Capped infix fill, run only when prefix matches cannot fill the result. One scan
+ * ordered by recency rather than a union of recency and weight: prefix matches are
+ * now exhaustive, so this cap can only reorder the low-confidence tail beneath
+ * them, and the second ordering cost a whole extra table scan to defend it.
+ */
+function contactInfixMatches(db: Db, accountId: string, needle: string): ContactRow[] {
+  const escaped = needle.replace(/[\\%_]/g, '\\$&')
+  return db
+    .prepare(
+      `SELECT ${CONTACT_COLUMNS},
+              CASE WHEN COALESCE(name_folded, '') LIKE @prefix ESCAPE '\\'
+                   THEN 1 ELSE 0 END AS name_prefix
+       FROM contacts
+       WHERE account_id = @account_id
+         AND (email LIKE @infix ESCAPE '\\'
+              OR COALESCE(name_folded, '') LIKE @infix ESCAPE '\\')
+       ORDER BY last_interacted_at DESC
+       LIMIT @candidates`
+    )
+    .all({
+      account_id: accountId,
+      prefix: `${escaped}%`,
+      infix: `%${escaped}%`,
+      candidates: CONTACT_CANDIDATE_LIMIT
+    }) as ContactRow[]
 }
 
 export function getInlineAttachmentData(

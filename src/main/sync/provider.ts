@@ -16,6 +16,12 @@ export interface ThreadIdPage {
   nextPageToken?: string
 }
 
+export interface ListThreadIdsOptions {
+  q?: string
+  labelIds?: readonly string[]
+  pageToken?: string
+}
+
 export interface HistoryMessageEvent {
   message: GmailMessage
   labelIds?: string[]
@@ -49,7 +55,7 @@ export interface MailActionProvider {
 export interface MailProvider extends MailActionProvider {
   getProfile(): Promise<ProviderProfile>
   listLabels(): Promise<ProviderLabel[]>
-  listThreadIds(q: string, pageToken?: string): Promise<ThreadIdPage>
+  listThreadIds(options?: ListThreadIdsOptions): Promise<ThreadIdPage>
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
   getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined>
   listHistory(startHistoryId: string, pageToken?: string): Promise<HistoryPage>

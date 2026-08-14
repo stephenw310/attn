@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
+import type { ContactSearchResult } from '../shared/contacts'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   Conversation,
@@ -66,6 +67,9 @@ const api = {
         ipcRenderer.removeListener(IPC_CHANNELS.mailFocusThreadAvailable, listener)
       }
     }
+  },
+  contacts: {
+    search: (query: string): Promise<ContactSearchResult[]> => invoke(IPC_CHANNELS.contactsSearch, query)
   },
   sync: {
     getState: (): Promise<SyncState> => invoke(IPC_CHANNELS.syncGetState),

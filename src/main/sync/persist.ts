@@ -1,8 +1,10 @@
+import { foldForSearch } from '../../shared/contacts'
 import type { Db } from '../db'
 import {
   collectAttachments,
   extractBodyHtml,
   extractBodyText,
+  extractThreadingHeaders,
   type GmailThread,
   header,
   parseAddress,
@@ -51,10 +53,10 @@ export function persistThread(
   const upsertMsg = db.prepare(
     `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, to_json, subject, snippet,
                            internal_date, is_unread, body_text, body_html, recipients_json,
-                           attachments_json)
+                           attachments_json, rfc_message_id, references_json)
      VALUES (@account_id, @id, @thread_id, @from_name, @from_email, @to_json, @subject, @snippet,
              @internal_date, @is_unread, @body_text, @body_html, @recipients_json,
-             @attachments_json)
+             @attachments_json, @rfc_message_id, @references_json)
      ON CONFLICT(account_id, id) DO UPDATE SET
        is_unread = excluded.is_unread, snippet = excluded.snippet,
        body_text = CASE WHEN messages.body_text IS NULL OR messages.body_text = ''
@@ -63,7 +65,9 @@ export function persistThread(
                         THEN excluded.body_html ELSE messages.body_html END,
        recipients_json = excluded.recipients_json,
        attachments_json = CASE WHEN @metadata_only = 1
-                               THEN messages.attachments_json ELSE excluded.attachments_json END`
+                               THEN messages.attachments_json ELSE excluded.attachments_json END,
+       rfc_message_id = excluded.rfc_message_id,
+       references_json = excluded.references_json`
   )
   const upsertThread = db.prepare(
     `INSERT INTO threads (account_id, id, history_id, subject, snippet, last_msg_at,
@@ -81,9 +85,14 @@ export function persistThread(
   const insertLabel = db.prepare(
     'INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)'
   )
+  const insertContactMessage = db.prepare(
+    `INSERT OR IGNORE INTO contact_messages (account_id, message_id, email, role, name)
+     VALUES (?, ?, ?, ?, ?)`
+  )
   const incomingMessageIds = messages.map((message) => message.id)
 
   db.transaction(() => {
+    const affectedContactEmails = new Set<string>()
     const labelUnion = new Set<string>()
     let lastMsgAt = 0
     let anyUnread = 0
@@ -99,6 +108,14 @@ export function persistThread(
       const unread = msg.labelIds?.includes('UNREAD') ? 1 : 0
       const attachments = collectAttachments(msg.payload)
       const attach = attachments.length > 0 ? 1 : 0
+      const recipients = {
+        to: parseAddressList(header(msg, 'To')),
+        cc: parseAddressList(header(msg, 'Cc')),
+        // Gmail exposes Bcc only on the signed-in user's own sent copy.
+        bcc: parseAddressList(header(msg, 'Bcc')),
+        replyTo: parseAddressList(header(msg, 'Reply-To'))
+      }
+      const threading = extractThreadingHeaders(msg)
 
       upsertMsg.run({
         account_id: accountId,
@@ -113,16 +130,22 @@ export function persistThread(
         is_unread: unread,
         body_text: extractBodyText(msg.payload),
         body_html: extractBodyHtml(msg.payload) || null,
-        recipients_json: JSON.stringify({
-          to: parseAddressList(header(msg, 'To')),
-          cc: parseAddressList(header(msg, 'Cc')),
-          // Gmail exposes Bcc only on the signed-in user's own sent copy.
-          bcc: parseAddressList(header(msg, 'Bcc')),
-          replyTo: parseAddressList(header(msg, 'Reply-To'))
-        }),
+        recipients_json: JSON.stringify(recipients),
         attachments_json: JSON.stringify(attachments),
+        rfc_message_id: threading.rfcMessageId,
+        references_json: JSON.stringify(threading.references),
         metadata_only: options.metadataOnly ? 1 : 0
       })
+
+      if (msg.labelIds?.includes('SENT')) {
+        for (const recipient of [...recipients.to, ...recipients.cc, ...recipients.bcc]) {
+          const email = insertContactContribution(insertContactMessage, accountId, msg.id, recipient, 'to')
+          if (email) affectedContactEmails.add(email)
+        }
+      } else {
+        const email = insertContactContribution(insertContactMessage, accountId, msg.id, from, 'from')
+        if (email) affectedContactEmails.add(email)
+      }
 
       for (const label of msg.labelIds ?? []) labelUnion.add(label)
       if (!subject) subject = header(msg, 'Subject')
@@ -136,7 +159,10 @@ export function persistThread(
       anyAttachment ||= attach
     }
 
-    pruneMissingMessages(db, accountId, thread.id, incomingMessageIds)
+    for (const email of removeMissingMessages(db, accountId, thread.id, incomingMessageIds)) {
+      affectedContactEmails.add(email)
+    }
+    rebuildContacts(db, accountId, affectedContactEmails)
 
     upsertThread.run({
       account_id: accountId,
@@ -165,18 +191,143 @@ export function pruneMissingMessages(
   threadId: string,
   incomingMessageIds: string[]
 ): void {
-  if (incomingMessageIds.length === 0) return
+  db.transaction(() => {
+    rebuildContacts(db, accountId, removeMissingMessages(db, accountId, threadId, incomingMessageIds))
+  })()
+}
+
+function removeMissingMessages(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  incomingMessageIds: string[]
+): string[] {
+  if (incomingMessageIds.length === 0) return []
   const placeholders = incomingMessageIds.map(() => '?').join(', ')
+  const affected = db
+    .prepare(
+      `SELECT DISTINCT cm.email
+       FROM contact_messages cm
+       JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+       WHERE m.account_id = ? AND m.thread_id = ? AND m.id NOT IN (${placeholders})`
+    )
+    .all(accountId, threadId, ...incomingMessageIds) as { email: string }[]
+  db.prepare(
+    `DELETE FROM contact_messages
+     WHERE account_id = ? AND message_id IN (
+       SELECT id FROM messages WHERE account_id = ? AND thread_id = ? AND id NOT IN (${placeholders})
+     )`
+  ).run(accountId, accountId, threadId, ...incomingMessageIds)
   db.prepare(
     `DELETE FROM messages WHERE account_id = ? AND thread_id = ? AND id NOT IN (${placeholders})`
   ).run(accountId, threadId, ...incomingMessageIds)
+  return affected.map((row) => row.email)
 }
 
 /** Remove a thread snapshot that Gmail reports as no longer existing. */
 export function deleteThread(db: Db, accountId: string, threadId: string): void {
   db.transaction(() => {
+    const affected = db
+      .prepare(
+        `SELECT DISTINCT cm.email
+         FROM contact_messages cm
+         JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+         WHERE m.account_id = ? AND m.thread_id = ?`
+      )
+      .all(accountId, threadId) as { email: string }[]
     db.prepare('DELETE FROM thread_labels WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
+    db.prepare(
+      `DELETE FROM contact_messages
+       WHERE account_id = ? AND message_id IN (
+         SELECT id FROM messages WHERE account_id = ? AND thread_id = ?
+       )`
+    ).run(accountId, accountId, threadId)
     db.prepare('DELETE FROM messages WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM threads WHERE account_id = ? AND id = ?').run(accountId, threadId)
+    rebuildContacts(
+      db,
+      accountId,
+      affected.map((row) => row.email)
+    )
   })()
+}
+
+interface ContactStatement {
+  run(...params: unknown[]): unknown
+}
+
+function insertContactContribution(
+  statement: ContactStatement,
+  accountId: string,
+  messageId: string,
+  address: { name: string; email: string },
+  role: 'to' | 'from'
+): string | null {
+  const email = foldForSearch(address.email)
+  if (!email) return null
+  statement.run(accountId, messageId, email, role, address.name.trim() || null)
+  return email
+}
+
+interface ContactAggregate {
+  email: string
+  name: string | null
+  sent_to_count: number
+  received_count: number
+  last_interacted_at: number
+}
+
+/** Rebuild only the search rows touched by an authoritative thread snapshot. */
+function rebuildContacts(db: Db, accountId: string, emails: Iterable<string>): void {
+  const aggregate = db.prepare(
+    `SELECT cm.email,
+            (SELECT named.name
+             FROM contact_messages named
+             JOIN messages named_message
+               ON named_message.account_id = named.account_id
+              AND named_message.id = named.message_id
+             WHERE named.account_id = cm.account_id AND named.email = cm.email
+               AND named.name IS NOT NULL AND trim(named.name) != ''
+             ORDER BY named_message.internal_date DESC, named.message_id DESC, named.role DESC
+             LIMIT 1) AS name,
+            SUM(CASE WHEN cm.role = 'to' THEN 1 ELSE 0 END) AS sent_to_count,
+            SUM(CASE WHEN cm.role = 'from' THEN 1 ELSE 0 END) AS received_count,
+            MAX(m.internal_date) AS last_interacted_at
+     FROM contact_messages cm
+     JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+     WHERE cm.account_id = ? AND cm.email = ?
+     GROUP BY cm.account_id, cm.email`
+  )
+  const upsert = db.prepare(
+    `INSERT INTO contacts
+       (account_id, email, name, name_folded, sent_to_count, received_count, last_interacted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(account_id, email) DO UPDATE SET
+       name = excluded.name,
+       name_folded = excluded.name_folded,
+       sent_to_count = excluded.sent_to_count,
+       received_count = excluded.received_count,
+       last_interacted_at = excluded.last_interacted_at`
+  )
+  const remove = db.prepare('DELETE FROM contacts WHERE account_id = ? AND email = ?')
+
+  for (const email of new Set(emails)) {
+    const row = aggregate.get(accountId, email) as ContactAggregate | undefined
+    if (!row) {
+      remove.run(accountId, email)
+      continue
+    }
+    // Fold in JS, not SQL: SQLite's lower() is ASCII-only and would leave a name
+    // like "Ürsula" unmatched by the lowercase needle the query folds through the
+    // same helper.
+    upsert.run(
+      accountId,
+      row.email,
+      row.name,
+      row.name ? foldForSearch(row.name) : null,
+      row.sent_to_count,
+      row.received_count,
+      row.last_interacted_at
+    )
+  }
 }

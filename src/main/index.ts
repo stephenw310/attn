@@ -18,6 +18,7 @@ import { GmailMailProvider } from './gmail/provider'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
 import { SnoozeScheduler } from './scheduler'
+import { deleteThread } from './sync/persist'
 import { SyncController } from './syncController'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
@@ -45,6 +46,7 @@ if (testUserData) {
 
 let db: Db | null = null
 let seedAccountId: string | null = null
+let seedPath: string | undefined
 let actionExecutor: ActionExecutor | null = null
 let snoozeScheduler: SnoozeScheduler | null = null
 let mailNotifier: MailNotifier | null = null
@@ -215,12 +217,13 @@ function initialize(): void {
   const dbPath = join(app.getPath('userData'), 'attn.db')
   db = openDatabase(dbPath)
   console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
-  const seedPath = testUserData ? process.env.ATTN_TEST_SEED : undefined
+  seedPath = testUserData ? process.env.ATTN_TEST_SEED : undefined
   if (seedPath) {
     const existing = db.prepare('SELECT id FROM accounts ORDER BY created_at LIMIT 1').get() as
       | { id: string }
       | undefined
     seedAccountId = existing?.id ?? loadSeed(db, seedPath)
+    console.log(`[sync] sent stage skipped for seeded account ${seedAccountId}`)
   }
   const activeDb = db
   syncController = new SyncController({
@@ -278,6 +281,22 @@ function registerTestIpc(): void {
     if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
   })
   ipcMain.on(TEST_CHANNELS.setSyncState, (_event, state: SyncState) => syncController?.setStateForTest(state))
+  ipcMain.on(TEST_CHANNELS.reloadSeed, (_event, done: (error?: string) => void) => {
+    // Avoid re-entering better-sqlite3 if the renderer is finishing an IPC read
+    // in the same turn, and let the test wait for the replay to commit.
+    setImmediate(() => {
+      try {
+        if (db && seedPath) loadSeed(db, seedPath)
+        done()
+      } catch (error) {
+        done(error instanceof Error ? error.message : String(error))
+      }
+    })
+  })
+  ipcMain.on(TEST_CHANNELS.deleteThread, (_event, threadId: unknown) => {
+    const account = currentAccountId()
+    if (db && account && typeof threadId === 'string') deleteThread(db, account, threadId)
+  })
   ipcMain.on(TEST_CHANNELS.delayConversation, (_event, threadId: unknown, delayMs: unknown) => {
     if (typeof threadId !== 'string' || typeof delayMs !== 'number' || delayMs < 0) return
     testConversationDelay = { threadId, delayMs }
