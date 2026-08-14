@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation). **M1 is implemented and audit-clean except for two human-run smokes tracked in `docs/M1-PLAN.md`; `docs/M2-PLAN.md` is the guide for the milestone now starting (composer, drafts, send + undo send, exactly-once outbox).**
+Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation). **M1 feature work is implemented and audit-clean; only the real-OS notification click-through smoke remains in `docs/M1-PLAN.md`. M2 is underway: R1, R2, and T13 are shipped, and `docs/M2-PLAN.md` guides the composer/outbox work.**
 
 This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
 
@@ -45,7 +45,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 
 Violating these is a correctness bug, not a style preference:
 
-- **The renderer is sandboxed** (`contextIsolation`, no `nodeIntegration`) and never talks to Google or the filesystem. Everything crosses through the typed `contextBridge` API in `src/preload/index.ts` plus an `ipcMain.handle` in `src/main/index.ts` — add both halves, and the type in `src/shared/`, when you add a capability.
+- **The renderer is sandboxed** (`contextIsolation`, no `nodeIntegration`) and never talks to Google or the filesystem. Everything crosses through the typed `contextBridge` API in `src/preload/index.ts` plus the handlers registered in `src/main/ipc.ts` — add both halves, and the channel type in `src/shared/ipc.ts`, when you add a capability.
 - **Mail bodies are untrusted input.** Plain text stays in text nodes. HTML must pass through
   DOMPurify and render only in the scriptless sandbox used by `MessageBody`; never add `allow-scripts`
   or use `dangerouslySetInnerHTML` (SPEC §6). Stored attachment `inlineData` is omitted from
@@ -54,6 +54,7 @@ Violating these is a correctness bug, not a style preference:
   Treat the bridged value as untrusted attachment content; it is not confined to the main process.
 - **Local-first:** reads and writes hit the local SQLite store and apply optimistically. Never block the UI on the network.
 - **Every row is keyed by `account_id`** — the schema is multi-account-ready even though v1 ships single-account (SPEC D4).
+- **Development data is disposable.** `src/main/db/schema.ts` is the single current schema snapshot. Bump its version when the schema changes; stale profiles are deleted and re-synced rather than carried through compatibility migrations or data backfills.
 - Secrets live in the OS keychain via `safeStorage`; `oauth.config.json` is gitignored and must never be committed or read into a test.
 
 ## When you add a feature
@@ -75,7 +76,7 @@ Violating these is a correctness bug, not a style preference:
 AGENTS.md            This file — the working agreement, shared by every agent tool
 .claude/             Claude Code config: CLAUDE.md (imports this file), settings, hooks
 docs/SPEC.md         Product & technical spec — source of truth for behavior
-docs/M1-PLAN.md      Shipped M1 task record + the two remaining exit smokes
+docs/M1-PLAN.md      Shipped M1 task record + the remaining notification smoke
 docs/M2-PLAN.md      Current milestone: refactors + composer/outbox task guide
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies

@@ -6,7 +6,6 @@ import type { MailProvider, ThreadIdPage } from './provider'
 
 interface FakeSyncState {
   backfill_cursor: string | null
-  updated_at: number | null
   last_history_id?: string
 }
 
@@ -16,11 +15,10 @@ function fakeDb(state: FakeSyncState | undefined): Db {
       get: () => (sql.startsWith('SELECT backfill_cursor') ? state : undefined),
       run: (...args: unknown[]) => {
         if (sql.includes('INSERT INTO sync_state')) {
-          state = { backfill_cursor: 'metadata', updated_at: 0, last_history_id: args[1] as string }
+          state = { backfill_cursor: 'metadata', last_history_id: args[1] as string }
         } else if (sql.includes('UPDATE sync_state SET backfill_cursor')) {
-          if (!state) state = { backfill_cursor: null, updated_at: null }
+          if (!state) state = { backfill_cursor: null }
           state.backfill_cursor = args[0] as string
-          state.updated_at = args.length === 3 ? (args[1] as number) : 0
         }
         return { changes: 1 }
       }
@@ -110,7 +108,7 @@ describe('windowed backfill checkpoints', () => {
   it('resumes directly at reconciliation after sent metadata is complete', async () => {
     const provider = emptyProvider()
     const result = await runInboxBackfill(
-      fakeDb({ backfill_cursor: 'reconcile', updated_at: 0, last_history_id: '88' }),
+      fakeDb({ backfill_cursor: 'reconcile', last_history_id: '88' }),
       provider,
       callbacks
     )
@@ -128,7 +126,7 @@ describe('windowed backfill checkpoints', () => {
     })
 
     const result = await runInboxBackfill(
-      fakeDb({ backfill_cursor: 'metadata:expired', updated_at: 0, last_history_id: '88' }),
+      fakeDb({ backfill_cursor: 'metadata:expired', last_history_id: '88' }),
       provider,
       callbacks
     )
@@ -150,7 +148,7 @@ describe('windowed backfill checkpoints', () => {
   it('restarts a completed cursor for expired-history recovery', async () => {
     const provider = emptyProvider()
     vi.mocked(provider.getProfile).mockRejectedValueOnce(new Error('offline'))
-    const db = fakeDb({ backfill_cursor: 'done', updated_at: 1, last_history_id: '88' })
+    const db = fakeDb({ backfill_cursor: 'done', last_history_id: '88' })
 
     const failed = await runInboxBackfill(db, provider, callbacks, { recovery: true })
     const recovered = await runInboxBackfill(db, provider, callbacks, { recovery: true })

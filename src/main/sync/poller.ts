@@ -130,11 +130,7 @@ export async function runHistoryCycle(
   for (const threadId of new Set(plan.newMail.map((mail) => mail.threadId))) {
     effects.wakeThread?.(threadId)
   }
-  db.prepare('UPDATE sync_state SET last_history_id = ?, updated_at = ? WHERE account_id = ?').run(
-    plan.historyId,
-    Date.now(),
-    accountId
-  )
+  db.prepare('UPDATE sync_state SET last_history_id = ? WHERE account_id = ?').run(plan.historyId, accountId)
   return plan
 }
 

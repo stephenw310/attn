@@ -51,14 +51,14 @@ export function persistThread(
   if (messages.length === 0) return
 
   const upsertMsg = db.prepare(
-    `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, to_json, subject, snippet,
-                           internal_date, is_unread, body_text, body_html, recipients_json,
-                           attachments_json, rfc_message_id, references_json)
-     VALUES (@account_id, @id, @thread_id, @from_name, @from_email, @to_json, @subject, @snippet,
-             @internal_date, @is_unread, @body_text, @body_html, @recipients_json,
+    `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
+                           body_text, body_html, recipients_json, attachments_json, rfc_message_id,
+                           references_json)
+     VALUES (@account_id, @id, @thread_id, @from_name, @from_email, @snippet, @internal_date,
+             @body_text, @body_html, @recipients_json,
              @attachments_json, @rfc_message_id, @references_json)
      ON CONFLICT(account_id, id) DO UPDATE SET
-       is_unread = excluded.is_unread, snippet = excluded.snippet,
+       snippet = excluded.snippet,
        body_text = CASE WHEN messages.body_text IS NULL OR messages.body_text = ''
                         THEN excluded.body_text ELSE messages.body_text END,
        body_html = CASE WHEN messages.body_html IS NULL OR messages.body_html = ''
@@ -70,12 +70,12 @@ export function persistThread(
        references_json = excluded.references_json`
   )
   const upsertThread = db.prepare(
-    `INSERT INTO threads (account_id, id, history_id, subject, snippet, last_msg_at,
+    `INSERT INTO threads (account_id, id, subject, snippet, last_msg_at,
                           from_display, is_unread, is_starred, has_attachment)
-     VALUES (@account_id, @id, @history_id, @subject, @snippet, @last_msg_at,
+     VALUES (@account_id, @id, @subject, @snippet, @last_msg_at,
              @from_display, @is_unread, @is_starred, @has_attachment)
      ON CONFLICT(account_id, id) DO UPDATE SET
-       history_id = excluded.history_id, subject = excluded.subject, snippet = excluded.snippet,
+       subject = excluded.subject, snippet = excluded.snippet,
        last_msg_at = excluded.last_msg_at, from_display = excluded.from_display,
        is_unread = excluded.is_unread, is_starred = excluded.is_starred,
        has_attachment = CASE WHEN @metadata_only = 1
@@ -123,11 +123,8 @@ export function persistThread(
         thread_id: thread.id,
         from_name: from.name,
         from_email: from.email,
-        to_json: JSON.stringify([header(msg, 'To')]),
-        subject: header(msg, 'Subject'),
         snippet: msg.snippet ?? '',
         internal_date: at,
-        is_unread: unread,
         body_text: extractBodyText(msg.payload),
         body_html: extractBodyHtml(msg.payload) || null,
         recipients_json: JSON.stringify(recipients),
@@ -167,7 +164,6 @@ export function persistThread(
     upsertThread.run({
       account_id: accountId,
       id: thread.id,
-      history_id: thread.historyId ?? null,
       subject,
       snippet,
       last_msg_at: lastMsgAt,
