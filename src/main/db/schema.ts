@@ -1,5 +1,6 @@
-// Development schema snapshot. Bump the version whenever this SQL changes;
-// existing profiles are intentionally reset instead of migrated.
+// Development schema snapshot. Bump the version whenever this SQL changes.
+// Runtime compatibility migrations stay out of the app; AGENTS.md documents the
+// manual additive-upgrade procedure for preserving a local dogfood profile.
 export const CURRENT_SCHEMA_VERSION = 9
 
 export const CURRENT_SCHEMA = `

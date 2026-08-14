@@ -23,6 +23,7 @@ import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
 import { createCommand, registerCommands } from '../commands'
+import { Kbd } from '../components/Kbd'
 import { EditorToolbar, promptForLink } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
 import { RecipientField } from './RecipientField'
@@ -131,7 +132,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
 
   return (
     <section
-      className="fixed bottom-10 right-5 z-40 flex max-h-[calc(100vh-72px)] w-[min(680px,calc(100vw-40px))] flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-[0_24px_80px_rgb(0_0_0/0.55)]"
+      className="flex min-h-0 flex-1 flex-col bg-raised/35"
       data-testid="composer"
       aria-label="New message"
       onKeyDownCapture={(event) => {
@@ -146,15 +147,24 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
         }
       }}
     >
-      <header className="flex h-11 shrink-0 items-center justify-between border-b border-edge bg-ground/60 px-4">
-        <div className="flex items-center gap-2">
+      <header className="flex min-h-13 shrink-0 items-center gap-4 border-b border-edge px-6 py-2.5">
+        <button
+          type="button"
+          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+          data-testid="composer-close"
+          aria-label="Save draft and go back"
+          onClick={closeAndSave}
+        >
+          <span aria-hidden>←</span> Back
+        </button>
+        <div className="flex min-w-0 items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-accent" />
-          <h2 className="text-sm font-semibold tracking-tight text-ink">New message</h2>
+          <h1 className="text-base font-bold tracking-tight text-ink">New message</h1>
           <span className="text-[11px] text-ink-faint">
             {controller.saveStatus === 'saving' ? 'Saving…' : 'Saved locally'}
           </span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
             className="rounded px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-danger"
@@ -164,120 +174,116 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           >
             Discard
           </button>
-          <button
-            type="button"
-            className="rounded px-2 py-1 text-lg leading-none text-ink-faint hover:bg-active hover:text-ink"
-            data-testid="composer-close"
-            aria-label="Save and close"
-            onClick={closeAndSave}
-          >
-            ×
-          </button>
+          <span className="flex items-center gap-1.5 text-[11px] text-ink-faint">
+            save &amp; close <Kbd>Esc</Kbd>
+          </span>
         </div>
       </header>
 
-      <div className="relative">
-        <RecipientField
-          field="to"
-          label="To"
-          recipients={to}
-          autoFocus
-          onChange={(recipients) => {
-            setTo(recipients)
-            controller.updateFields({ to: recipients })
+      <div className="mx-auto flex min-h-0 w-full max-w-[900px] flex-1 flex-col border-x border-edge bg-raised">
+        <div className="relative">
+          <RecipientField
+            field="to"
+            label="To"
+            recipients={to}
+            autoFocus
+            onChange={(recipients) => {
+              setTo(recipients)
+              controller.updateFields({ to: recipients })
+            }}
+          />
+          {!showCopies && (
+            <button
+              type="button"
+              className="absolute right-5 top-2.5 text-[11px] text-ink-faint hover:text-ink"
+              onClick={() => setShowCopies(true)}
+            >
+              Cc Bcc
+            </button>
+          )}
+        </div>
+        {showCopies && (
+          <>
+            <RecipientField
+              field="cc"
+              label="Cc"
+              recipients={cc}
+              onChange={(recipients) => {
+                setCc(recipients)
+                controller.updateFields({ cc: recipients })
+              }}
+            />
+            <RecipientField
+              field="bcc"
+              label="Bcc"
+              recipients={bcc}
+              onChange={(recipients) => {
+                setBcc(recipients)
+                controller.updateFields({ bcc: recipients })
+              }}
+            />
+          </>
+        )}
+        <input
+          className="h-12 shrink-0 border-b border-edge bg-transparent px-5 text-base font-semibold text-ink outline-none placeholder:text-ink-faint"
+          data-testid="composer-subject"
+          aria-label="Subject"
+          placeholder="Subject"
+          value={subject}
+          onChange={(event) => {
+            setSubject(event.target.value)
+            controller.updateFields({ subject: event.target.value })
           }}
         />
-        {!showCopies && (
-          <button
-            type="button"
-            className="absolute right-4 top-2.5 text-[11px] text-ink-faint hover:text-ink"
-            onClick={() => setShowCopies(true)}
-          >
-            Cc Bcc
-          </button>
-        )}
-      </div>
-      {showCopies && (
-        <>
-          <RecipientField
-            field="cc"
-            label="Cc"
-            recipients={cc}
-            onChange={(recipients) => {
-              setCc(recipients)
-              controller.updateFields({ cc: recipients })
-            }}
-          />
-          <RecipientField
-            field="bcc"
-            label="Bcc"
-            recipients={bcc}
-            onChange={(recipients) => {
-              setBcc(recipients)
-              controller.updateFields({ bcc: recipients })
-            }}
-          />
-        </>
-      )}
-      <input
-        className="h-11 shrink-0 border-b border-edge bg-transparent px-4 text-sm font-medium text-ink outline-none placeholder:text-ink-faint"
-        data-testid="composer-subject"
-        aria-label="Subject"
-        placeholder="Subject"
-        value={subject}
-        onChange={(event) => {
-          setSubject(event.target.value)
-          controller.updateFields({ subject: event.target.value })
-        }}
-      />
 
-      <LexicalComposer initialConfig={editorConfig}>
-        <div className="relative min-h-48 flex-1 overflow-y-auto">
-          <RichTextPlugin
-            contentEditable={
-              <ContentEditable
-                className="min-h-48 px-4 py-3 text-sm leading-6 text-ink outline-none"
-                data-testid="composer-editor"
-                aria-label="Message body"
-              />
-            }
-            placeholder={
-              <div className="pointer-events-none absolute left-4 top-3 text-sm leading-6 text-ink-faint">
-                Write a message…
-              </div>
-            }
-            ErrorBoundary={LexicalErrorBoundary}
-          />
-          <HistoryPlugin />
-          <ListPlugin />
-          <LinkPlugin validateUrl={(url) => /^(?:https?:|mailto:)/i.test(url)} />
-          <InitialHtmlPlugin html={draft.bodyHtml} />
-          <OnChangePlugin
-            ignoreSelectionChange
-            onChange={(editorState, editor, tags) => controller.captureEditor(editorState, editor, tags)}
-          />
-          <ComposerCommandPlugin onClose={closeAndSave} onUnavailableSend={unavailableSend} />
-        </div>
-        <footer className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-t border-edge px-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <EditorToolbar />
-            <div
-              className="border-l border-edge pl-2 text-xs text-ink-faint"
-              data-testid="composer-attachments"
-            >
-              Attachments coming soon
-            </div>
+        <LexicalComposer initialConfig={editorConfig}>
+          <div className="relative min-h-48 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+            <RichTextPlugin
+              contentEditable={
+                <ContentEditable
+                  className="min-h-full px-5 py-5 text-[15px] leading-7 text-ink outline-none"
+                  data-testid="composer-editor"
+                  aria-label="Message body"
+                />
+              }
+              placeholder={
+                <div className="pointer-events-none absolute left-5 top-5 text-[15px] leading-7 text-ink-faint">
+                  Write a message…
+                </div>
+              }
+              ErrorBoundary={LexicalErrorBoundary}
+            />
+            <HistoryPlugin />
+            <ListPlugin />
+            <LinkPlugin validateUrl={(url) => /^(?:https?:|mailto:)/i.test(url)} />
+            <InitialHtmlPlugin html={draft.bodyHtml} />
+            <OnChangePlugin
+              ignoreSelectionChange
+              onChange={(editorState, editor, tags) => controller.captureEditor(editorState, editor, tags)}
+            />
+            <ComposerCommandPlugin onClose={closeAndSave} onUnavailableSend={unavailableSend} />
           </div>
-          <button
-            type="button"
-            className="shrink-0 rounded-md bg-accent/20 px-3 py-1.5 text-xs font-semibold text-accent"
-            title="Sending is implemented in T16"
-            onClick={unavailableSend}
-          >
-            Send <span className="ml-1 opacity-65">⌘↵</span>
-          </button>
-        </footer>
-      </LexicalComposer>
+          <footer className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4">
+            <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+              <EditorToolbar />
+              <div
+                className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
+                data-testid="composer-attachments"
+              >
+                Attachments coming soon
+              </div>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent"
+              title="Sending is implemented in T16"
+              onClick={unavailableSend}
+            >
+              Send <span className="ml-1 opacity-65">⌘↵</span>
+            </button>
+          </footer>
+        </LexicalComposer>
+      </div>
     </section>
   )
 }

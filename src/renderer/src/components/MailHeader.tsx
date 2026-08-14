@@ -131,43 +131,47 @@ interface MailHeaderProps {
   unreadCount: number | null
   pendingCount: number
   selectionCount: number
+  composerOpen: boolean
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
   onSwitchView: (view: 'inbox' | 'snoozed') => void
 }
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
-  const { view, unreadCount, pendingCount, selectionCount, status, onStatus, onSwitchView } = props
+  const { view, unreadCount, pendingCount, selectionCount, composerOpen, status, onStatus, onSwitchView } =
+    props
   return (
     <header className="app-drag flex items-center gap-6 border-b border-edge px-6 py-3">
       <div className="text-base font-bold tracking-tight">
         attn<span className="text-accent">:</span>
       </div>
-      <nav className="app-no-drag flex gap-1">
-        <button
-          type="button"
-          onClick={() => onSwitchView('inbox')}
-          className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
-            view === 'inbox' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
-          }`}
-        >
-          <span data-testid={view === 'inbox' ? 'view-title' : undefined}>Inbox</span>
-          {unreadCount !== null && unreadCount > 0 && (
-            <span className="ml-1.5 text-xs font-semibold text-accent tabular-nums">{unreadCount}</span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => onSwitchView('snoozed')}
-          className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
-            view === 'snoozed' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
-          }`}
-        >
-          <span data-testid={view === 'snoozed' ? 'view-title' : undefined}>Snoozed</span>
-        </button>
-      </nav>
+      {!composerOpen && (
+        <nav className="app-no-drag flex gap-1">
+          <button
+            type="button"
+            onClick={() => onSwitchView('inbox')}
+            className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
+              view === 'inbox' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
+            }`}
+          >
+            <span data-testid={view === 'inbox' ? 'view-title' : undefined}>Inbox</span>
+            {unreadCount !== null && unreadCount > 0 && (
+              <span className="ml-1.5 text-xs font-semibold text-accent tabular-nums">{unreadCount}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onSwitchView('snoozed')}
+            className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
+              view === 'snoozed' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
+            }`}
+          >
+            <span data-testid={view === 'snoozed' ? 'view-title' : undefined}>Snoozed</span>
+          </button>
+        </nav>
+      )}
       <div className="app-no-drag ml-auto flex items-center gap-4">
-        {selectionCount > 0 && (
+        {!composerOpen && selectionCount > 0 && (
           <span
             data-testid="selection-count"
             className="rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent tabular-nums"

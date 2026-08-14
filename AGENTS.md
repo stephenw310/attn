@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation). **M1 feature work is implemented and audit-clean; only the real-OS notification click-through smoke remains in `docs/M1-PLAN.md`. M2 is underway: R1, R2, and T13 are shipped, and `docs/M2-PLAN.md` guides the composer/outbox work.**
+Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation/composer). **M1 feature work is implemented and audit-clean; only the real-OS notification click-through smoke remains in `docs/M1-PLAN.md`. M2 is underway: R1, R2, R3, and T13 are shipped, T14 is in draft PR #38, and `docs/M2-PLAN.md` guides the remaining composer/outbox work.**
 
 This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
 
@@ -56,7 +56,7 @@ Violating these is a correctness bug, not a style preference:
   Treat the bridged value as untrusted attachment content; it is not confined to the main process.
 - **Local-first:** reads and writes hit the local SQLite store and apply optimistically. Never block the UI on the network.
 - **Every row is keyed by `account_id`** — the schema is multi-account-ready even though v1 ships single-account (SPEC D4).
-- **Development data is disposable.** `src/main/db/schema.ts` is the single current schema snapshot. Bump its version when the schema changes; stale profiles are deleted and re-synced rather than carried through compatibility migrations or data backfills.
+- **The product has no runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single current schema snapshot and every schema change bumps its version. Throwaway profiles may be deleted and re-synced. When a maintainer needs to preserve a real dogfood database across an additive schema bump, use the manual local-upgrade procedure below; never improvise by deleting the whole profile or its `tokens.bin`.
 - Secrets live in the OS keychain via `safeStorage`; `oauth.config.json` is gitignored and must never be committed or read into a test.
 
 ## When you add a feature
@@ -67,6 +67,20 @@ Violating these is a correctness bug, not a style preference:
 - Match the surrounding code: Biome formatting (single quotes, no semicolons, 110 cols) is enforced by `npm run lint` and a pre-commit hook.
 
 ## Environment notes
+
+### Preserving a local dogfood database across a schema bump
+
+This is an operator procedure for local development, not application migration code. Use it only when the schema diff is additive and data-preserving; destructive or semantic rewrites still require an explicit task-level migration design or a clean re-sync.
+
+1. Stop every Attn/Electron development process. Never modify a database while the app may still hold it open.
+2. Read the exact database path from the app's `[db] open at …` boot line. Do not guess a profile path, use a broad directory, or touch `tokens.bin`.
+3. Record `PRAGMA user_version`, representative row counts, and `PRAGMA quick_check`. Create an untouched, timestamped backup beside the profile before changing the active database; include any `-wal`/`-shm` state by opening the stopped database through SQLite rather than copying a live file.
+4. Diff the old and current snapshots and write down the exact task-specific DDL. Proceed manually only for changes such as adding tables, indexes, or nullable/defaulted columns that preserve every existing row.
+5. Apply the DDL and `PRAGMA user_version = <new-version>` in the same `BEGIN IMMEDIATE … COMMIT` transaction. Never bump the version separately from the schema change.
+6. Re-run `PRAGMA quick_check`, verify every expected table/index/column, and compare the recorded row counts. Keep the untouched backup until the upgraded app has been dogfooded successfully.
+7. Relaunch normally and confirm the boot log opens the expected schema and resumes incremental history polling instead of starting a fresh backfill. If any validation fails, stop, restore the untouched backup, and either correct the DDL or re-sync.
+
+Every task that bumps the schema must state its exact local-development DDL in the task/PR notes when the change qualifies for this procedure. Do not add a general runtime migration framework unless a separate product task explicitly calls for one.
 
 - `npm install` runs `scripts/ensure-electron-toolchain.mjs`, which verifies better-sqlite3 actually loads **inside Electron** and self-heals what restricted networks break (Electron binary download, native-module headers) — see that script's header comment for the mechanism. Never set `ELECTRON_RUN_AS_NODE` in the environment of the app under test.
 - **Claude Code on the web:** the SessionStart hook (`.claude/hooks/session-start.sh`) runs `npm install` + build so a fresh container can verify immediately. These containers block `www.electronjs.org` / `artifacts.electronjs.org`; the toolchain script routes around it via github.com + nodejs.org. **Allowlisting those two hosts in the environment's network policy would let plain `npm install` work and retire the fallback.**

@@ -290,12 +290,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         unreadCount={realUnreadTotal}
         pendingCount={pendingCount}
         selectionCount={selectedIds.size}
+        composerOpen={composerDraft !== null}
         status={status}
         onStatus={onStatus}
         onSwitchView={switchView}
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className={`min-h-0 flex-1 ${composerDraft ? 'hidden' : 'flex'}`} aria-hidden={!!composerDraft}>
         <ThreadList
           threads={threads}
           view={view}
@@ -325,7 +326,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         )}
       </div>
 
-      {snoozeOpen && selected && (
+      {!composerDraft && snoozeOpen && selected && (
         <SnoozePicker
           targetCount={targetedThreads.length}
           onCancel={closeSnooze}
@@ -334,7 +335,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         />
       )}
 
-      {labelTarget && (
+      {!composerDraft && labelTarget && (
         <LabelPicker
           labels={labels}
           targets={[{ id: labelTarget.id, labelIds: labelTarget.labelIds }]}
@@ -349,13 +350,15 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
       <Toast toast={toast} />
 
-      <MailFooter
-        readerOpen={readerOpen}
-        sync={sync}
-        networkOnline={networkOnline}
-        onRetry={retrySync}
-        onCopyError={copySyncError}
-      />
+      {!composerDraft && (
+        <MailFooter
+          readerOpen={readerOpen}
+          sync={sync}
+          networkOnline={networkOnline}
+          onRetry={retrySync}
+          onCopyError={copySyncError}
+        />
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-# Attn — Product & Technical Spec (v0.13)
+# Attn — Product & Technical Spec (v0.14)
 
 A desktop email client for **macOS and Windows** modeled on Superhuman's core idea: email triage so fast and keyboard-driven that reaching inbox zero is the default state, not an aspiration.
 
@@ -79,7 +79,7 @@ Serverless roadmap: **v1** pure client → **v1.5** optional *companion Apps Scr
 
 **D5 — SQLite + FTS5 as the local store.** All metadata for the last 12 months, full bodies for the last 90 days, older bodies fetched on demand and cached. Search runs entirely locally against FTS5.
 
-**D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. Layout (revised 2026-08-12 after M1 dogfood, §9 #7/#9/#11): full-width list ⇄ **full-window conversation** — the list owns the window while triaging; opening a conversation replaces it with a dedicated reading surface; `Esc` or the visible Back/List control restores the list at the same selection and scroll position. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing two competing panes. This supersedes the centered overlay and the interim on-demand split; both simultaneous list/reader variants are rejected. Inbox splits render as a horizontal strip (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Settings live behind the account-chip menu (Settings, keyboard shortcuts, split rules, sign out) — no hamburger. Light theme derives from the same tokens at M3 (F14).
+**D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. Layout (revised 2026-08-12 after M1 dogfood and 2026-08-14 after composer dogfood, §9 #7/#9/#11/#13): full-width list ⇄ **full-window conversation or composer** — the active task owns the window; `Esc` or the visible Back/List control restores the prior view at the same selection and scroll position. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing competing panes. This supersedes the centered overlay, the interim reading split, and the docked composer; simultaneous list/reader/composer variants are rejected. Inbox splits render as a horizontal strip (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Settings live behind the account-chip menu (Settings, keyboard shortcuts, split rules, sign out) — no hamburger. Light theme derives from the same tokens at M3 (F14).
 
 **Modifier convention:** `Mod` = `Cmd` on macOS, `Ctrl` on Windows. All shortcuts in this spec are written platform-neutrally.
 
@@ -116,10 +116,19 @@ soon as the first page of metadata lands.
 **Window rationale and completion semantics:** the 12-month metadata window gives a useful year of
 mailbox context without cloning an account's lifetime history; the 90-day body window makes recent mail
 offline-readable without eagerly downloading every old body and attachment; the 12-month Sent window
-provides enough frequency and recency history for autocomplete and seeds the future Sent view. These are
-eventual time windows, not item caps — an API page size such as 500 must never be presented or implemented
-as “only sync 500 messages.” A count cap may bound the first interactive bootstrap only when the remaining
-window continues in the background or is available on demand.
+provides a fast autocomplete bootstrap and seeds the future Sent view. These are eventual time windows,
+not item caps — an API page size such as 500 must never be presented or implemented as “only sync 500
+messages.” A count cap may bound the first interactive bootstrap only when the remaining window continues
+in the background or is available on demand.
+
+**Lifetime contact index (planned as T13A, separate from mail backfill):** after interactive readiness,
+a resumable low-priority pass scans lifetime Sent message headers for recipient addresses and display names.
+It persists its own cursor and aggregate contact statistics, but does not download old bodies or attachments
+and does not create browsable synthetic Sent rows outside the mail window. Recent contacts remain useful
+immediately; while the lifetime pass runs, sync status reads **Live · indexing contacts** with progress and
+quota-wait detail. Importing a user's saved Google Contacts through the People API is a separate opt-in
+product decision because it adds OAuth scope and consent requirements; autocomplete must not imply that the
+Sent-derived index contains an address book the user has never emailed.
 
 Backfill has two distinct completion points:
 
@@ -163,6 +172,8 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 - Mailbox queries run entirely against the local store. M3 expands metadata sync beyond the current Inbox window so the last 12 months of system-label membership are cached; switching a cached mailbox never waits on Gmail. Older content follows F2's on-demand policy.
 - Switching mailboxes closes any open conversation and restores that mailbox's prior selection and scroll when revisited. Opening a conversation otherwise uses the same full-window behavior in every message mailbox. A Draft row opens its crash-safe M2 composer draft rather than a read-only conversation.
 - Triage actions immediately remove a row when it no longer matches the active mailbox. Spam and Trash are browsable but v1 still provides no permanent-delete or empty-folder action.
+- Drafts merges locally composing outbox rows with cached Gmail Drafts. A local draft is discoverable offline before its first successful Gmail mirror, and multiple simultaneous drafts remain distinct. M3 owns the unified Drafts mailbox behavior.
+- Outbox is an on-demand local operational view, not a permanent sidebar item. T16 makes the top-bar pending readout and **Go to Outbox** command open queued, sending, failed, and needs-review items; actionable rows reopen in the composer without discarding local content.
 
 - The full-width list groups conversations under relative date headings (Today, Yesterday, Last 7 days, then older periods) and shows sender(s), subject, a 1–2 line snippet, timestamp, and chips (attachment, starred, snoozed-return, follow-up). Unread rows are visually distinct. Virtualization remains required before the M2 daily-drivable sign-off if performance data shows the current mounted list cannot meet the 10k-thread budget.
 - In the list, `J`/`K` and unmodified `ArrowUp`/`ArrowDown` move the selection.
@@ -214,13 +225,24 @@ combinations such as `Shift+J/K`. Printable symbols that require Shift, includin
 - Ranking: exact prefix > fuzzy score, with recently/frequently used commands boosted.
 - **Engineering rule:** every user-facing feature must register a palette command. No feature ships reachable only by mouse.
 
+The shortcut footer becomes a context-aware guide in a separate M3 task. Its default state is a single,
+non-wrapping line of only the commands relevant to the active view. Pressing a chord prefix such as `G`
+temporarily replaces that line with the valid next keys derived from the same command registry: fixed
+mailboxes use `I/A/T/D/S/H/P/R`, while `1`–`9` maps to Inbox splits in configured order. The guide remains
+visible until completion, `Esc`, a view change, or a short 2–3 second timeout. The command palette (`Mod+K`)
+and cheat sheet (`Mod+/`) remain the exhaustive discovery surfaces; T14 does not implement this footer.
+
 **Acceptance criteria**
 - Opens in < 50ms; results re-rank per keystroke in < 30ms.
 - Every spec'd feature in this document is invocable from the palette.
 
 ### F6 — Compose, send & undo send
 
-Composing opens an **overlay panel** above the inbox (context is never lost). `C` for new mail; `R`/`A`/`F` for reply/reply-all/forward with quoted history attached but collapsed.
+Composing opens a **full-window focused surface** with a centered 800–900px writing measure. The prior list
+or conversation remains mounted but hidden so its selection and scroll are restored exactly when `Esc` or
+the visible Back control saves and closes the draft. `C` starts new mail; `R`/`A`/`F` start reply,
+reply-all, or forward with quoted history attached but collapsed. While composing, the global mail shortcut
+footer is absent and the composer owns its action footer, so editing controls can never overlap global hints.
 
 - **Recipient autocomplete** ranked by interaction frequency + recency, built locally from synced sent mail. First suggestion accepted with `Tab`/`Enter`.
 - **Rich text:** bold/italic/underline, bulleted & numbered lists, links, blockquote. Nothing more in v1.
@@ -275,7 +297,9 @@ The inbox is divided into **splits** — tabs above the list, each an independen
 
 - Defaults: **Important** (Gmail's importance/category signals) and **Other**.
 - User-defined splits match rules on: sender address, sender domain, mailing-list (`List-Id`), or label. First matching split wins (user orders them); every thread appears in exactly one split. Splits are views — mail is never moved by splitting.
-- Navigate: `←`/`→` between splits; each split keeps its own selection and unread count.
+- Navigate: `←`/`→` between splits; `G` then `1`–`9` jumps by configured split order. Each split
+  keeps its own selection and unread count, and the context-aware shortcut footer shows the valid digit
+  completions while the `G` chord is active.
 - **Strip scaling (D6):** splits render as a horizontal top-bar strip — hot splits show unread counts, cold ones stay quiet, and past ~8 the strip scrolls with overflow behind `···`. The full jump-list lives in the palette ("Go to: <split>"). Chrome stays proportional to hot lanes, not total lanes.
 - Per-split notification settings (see F12): by default only Important notifies.
 
@@ -376,6 +400,7 @@ Guardrails:
 | `G` then `H` | Go to Snoozed / Reminders |
 | `G` then `P` | Go to Spam |
 | `G` then `R` | Go to Trash |
+| `G` then `1`–`9` | Go directly to an Inbox split by configured order (M3) |
 
 **Triage** (list or conversation)
 
@@ -479,7 +504,7 @@ mailboxes and Gmail quota regimes. Background work must preserve every interacti
 
 Each milestone ends in a usable app; the daily-drivable bar is M2.
 
-**Status (2026-08-13):** all planned M1 feature capabilities are implemented. The engineering exit audit and real-Gmail airplane-mode drain are complete; only the real-OS notification click-through smoke in docs/M1-PLAN.md remains. M2 is underway: the renderer decomposition (#31), main-process seams (#30), and sent-mail/contact foundation (#32) have shipped.
+**Status (2026-08-14):** all planned M1 feature capabilities are implemented. The engineering exit audit and real-Gmail airplane-mode drain are complete; only the real-OS notification click-through smoke in docs/M1-PLAN.md remains. M2 is underway: the renderer decomposition (#31), main-process seams (#30), mail-out test scaffolding (#37), and sent-mail/contact foundation (#32) have shipped; the full-window composer/draft task is underway in draft PR #38.
 
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading view, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
 - **M1 — Triage core.** First items: **apply the Dispatch direction** (D6 — graphite/amber tokens, `attn:` wordmark, layout per D6, split strip, account menu) and **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). The reading work adds recipients, attachments, quote/signature collapse, and—after M1 dogfood—the full-window conversation that supersedes the interim split. Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
@@ -507,3 +532,6 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 10. **System mailbox navigation is explicit v1 scope (2026-08-11):** Important/Other are Inbox splits, not substitutes for Gmail's system mailboxes. M3 adds local-first Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, and Trash filters in the existing list/reading shell. Palette commands and `G` chords replace a permanent sidebar; supporting them requires expanding cached metadata/system-label coverage beyond the M1 Inbox-only query.
 11. **Full-window reading replaces the split (2026-08-12):** showing the compact queue beside the message made reading more distracting and introduced an invisible list/message focus mode. Attn returns to D5's one-clear-focus principle: opening replaces the list with a full-window reader, `J`/`K` always changes conversation, dedicated reading keys scroll, and `Esc`/Back restores the preserved list. Neighbor preloading retains preview-like speed without simultaneous panes. The split is not kept as an option in v1 because that would preserve two interaction models through composer and command-palette work.
 12. **Sync status is a product surface (2026-08-13, PR #25):** local-first deliberately hides the network, which also hid real failures — a missing OAuth config or expired history checkpoint previously failed silently while the inbox quietly went stale. The footer now always shows Live/Checking/Syncing/Offline/Error (F2 "Sync visibility"), with stage-granular backfill progress and retry/copy actions on error. Offline is deliberately calm — local mail keeps working and retry is automatic; error is deliberately loud. The same PR made the backfill itself staged and resumable (metadata → bodies → reconcile with per-page cursor checkpoints).
+13. **Full-window composer replaces the docked overlay (2026-08-14):** the bottom-right panel made writing feel secondary and could collide with the global shortcut footer. Compose now owns the active window at a centered writing measure, preserves the hidden list/reader state, and restores it on `Esc`/Back. Its action footer replaces the global mail footer while active.
+14. **The shortcut footer becomes a contextual chord guide (2026-08-14):** default hints stay minimal and view-specific. A prefix such as `G` temporarily shows valid next keys from the command registry, including fixed mailbox letters and dynamic split digits. The palette and cheat sheet remain the complete references; implementation is an M3 follow-up, separate from composer work.
+15. **Lifetime contact indexing is decoupled from mail history (2026-08-14):** the recent Sent window makes autocomplete useful quickly, then a resumable low-priority header-only pass derives recipients across lifetime Sent without cloning old bodies or creating old browsable mail rows. Importing saved Google Contacts remains a separate OAuth/product decision.
