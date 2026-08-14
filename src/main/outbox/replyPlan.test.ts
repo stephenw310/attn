@@ -217,6 +217,21 @@ describe('quote HTML sanitizer', () => {
     expect(plan.quoteHtml).not.toMatch(/<style|display\s*:\s*none/i)
   })
 
+  it('strips inline positioning so a quote cannot cover the authored reply', () => {
+    const source = message({
+      bodyText: 'Please pay.',
+      bodyHtml:
+        '<div style="position:fixed;inset:0;background:white;z-index:9999">OVERLAY</div><p style="color:red">Please pay.</p>'
+    })
+
+    const plan = planReply('reply', conversation([source]), SELF)
+
+    expect(plan.quoteHtml).not.toMatch(/position|z-index|inset/i)
+    // The harmless half of the same declaration survives, as does authored colour.
+    expect(plan.quoteHtml).toContain('<div style="background:white">OVERLAY</div>')
+    expect(plan.quoteHtml).toContain('<p style="color:red">Please pay.</p>')
+  })
+
   it('drops document metadata that a full-page mail body carries into the quote', () => {
     const source = message({
       bodyText: 'Real body',
