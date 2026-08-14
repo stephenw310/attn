@@ -9,6 +9,7 @@ const requiredEntries = [
   '/out/main/index.js',
   '/out/preload/index.js',
   '/out/renderer/index.html',
+  '/node_modules/jsdom/lib/api.js',
   '/package.json',
   '/resources/icon.png',
   '/resources/tray.png'

@@ -1,0 +1,24 @@
+From: me@example.com
+To: Maya Lin <maya@example.com>
+Subject: Re: Roadmap
+Message-ID: <attn-123@example.com>
+In-Reply-To: <reply@example.com>
+References: <root@example.com> <reply@example.com>
+Date: Thu, 13 Aug 2026 12:34:56 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="attn-alternative-78000d330135fe25b98221b7"
+
+--attn-alternative-78000d330135fe25b98221b7
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+U291bmRzIGdvb2QuDQoNCk9uIFRodSwgMTMgQXVnIDIwMjYgMTE6MDA6MDAgR01ULCBNYXlhIExp
+biA8bWF5YUBleGFtcGxlLmNvbT4gd3JvdGU6DQo+IFNoaXAgaXQu
+--attn-alternative-78000d330135fe25b98221b7
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PHA+U291bmRzIGdvb2QuPC9wPg0KPGRpdj5PbiBUaHUsIDEzIEF1ZyAyMDI2IDExOjAwOjAwIEdN
+VCwgTWF5YSBMaW4gJmx0O21heWFAZXhhbXBsZS5jb20mZ3Q7IHdyb3RlOjwvZGl2PjxibG9ja3F1
+b3RlPjxwPlNoaXAgaXQuPC9wPjwvYmxvY2txdW90ZT4=
+--attn-alternative-78000d330135fe25b98221b7--

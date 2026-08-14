@@ -1,6 +1,11 @@
 import DOMPurify from 'dompurify'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MessageAttachment } from '../../shared/mail'
+import {
+  MAIL_CID_SOURCE_MARKER as CID_SOURCE_MARKER,
+  sanitizeMailHtml,
+  MAIL_TRIM_MARKER as TRIM_MARKER
+} from '../../shared/mailSanitizer'
 import { forceLightMailCss } from './mailCss'
 import { findTrimIndex } from './mailTrim'
 
@@ -20,8 +25,6 @@ const HORIZONTAL_SCROLLBAR_HEIGHT = 16
 const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
 const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
-const TRIM_MARKER = 'data-attn-trim-start'
-const CID_SOURCE_MARKER = 'data-attn-cid-source'
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
@@ -101,17 +104,7 @@ function hasRenderableContentBefore(content: DocumentFragment, boundary: Element
 
 function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
   if (!html.trim()) return null
-  const clean = DOMPurify.sanitize(html, {
-    FORBID_TAGS: ['script', 'form', 'input', 'button', 'select', 'textarea'],
-    // DOMPurify passes data-* through by default, so a sender could otherwise ship
-    // our own markers: an early data-attn-trim-start moves the trim fold wherever
-    // they like, and data-attn-cid-source aims the inline-image patch at their
-    // element. FORBID_ATTR is checked before the data-* allowance, so both lose.
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', TRIM_MARKER, CID_SOURCE_MARKER],
-    ADD_TAGS: ['style'],
-    ADD_ATTR: ['target'],
-    FORCE_BODY: true
-  })
+  const clean = sanitizeMailHtml(DOMPurify, html)
 
   const template = document.createElement('template')
   template.innerHTML = clean
