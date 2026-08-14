@@ -1,10 +1,11 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
 import {
-  CONTACT_RECENCY_HALF_LIFE_MS,
-  CONTACT_SEARCH_LIMIT,
+  CONTACT_CANDIDATE_LIMIT,
   type ContactSearchResult,
-  displayName
+  type ContactStats,
+  displayName,
+  rankContacts
 } from '../../shared/contacts'
 import type {
   Conversation,
@@ -199,8 +200,16 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
 }
 
 /**
- * Local autocomplete over the materialized contact projection. Ranking and the
- * result cap stay in SQLite so IPC returns at most the rows the renderer can show.
+ * Local autocomplete over the materialized contact projection. SQL owns matching
+ * and rankContacts owns ordering — one implementation each, so tuning the formula
+ * in shared/contacts.ts actually changes what the user sees.
+ *
+ * SQL hands over a bounded candidate set rather than every match, because a broad
+ * first keystroke matches nearly every address and ranking 50k rows in JS costs
+ * ~100ms. Candidates are the union of the most recent and the heaviest matches:
+ * score is weight × recency-decay, so a contact can earn a top slot by either,
+ * and taking only one proxy would drop the other kind. Ranking the union in JS
+ * then agrees with ranking every match in all but pathological ties.
  *
  * Known limit: SQLite's lower() folds ASCII only, so a stored name whose uppercase
  * letters are non-ASCII ("Ürsula") will not match a lowercase query ("ürsula").
@@ -215,48 +224,54 @@ export function searchContacts(
     .trim()
     .toLocaleLowerCase()
     .replace(/[\\%_]/g, '\\$&')
+  const rows = db
+    .prepare(
+      `WITH matches AS (
+         SELECT email, name, sent_to_count, received_count, last_interacted_at,
+                CASE WHEN lower(COALESCE(name, '')) LIKE @prefix ESCAPE '\\'
+                     THEN 1 ELSE 0 END AS name_prefix
+         FROM contacts
+         WHERE account_id = @account_id
+           AND (lower(email) LIKE @infix ESCAPE '\\'
+                OR lower(COALESCE(name, '')) LIKE @infix ESCAPE '\\')
+       )
+       SELECT * FROM (SELECT * FROM matches ORDER BY last_interacted_at DESC LIMIT @candidates)
+       UNION
+       SELECT * FROM (
+         SELECT * FROM matches ORDER BY (3 * sent_to_count + received_count) DESC LIMIT @candidates
+       )`
+    )
+    .all({
+      account_id: accountId,
+      prefix: `${escaped}%`,
+      infix: `%${escaped}%`,
+      candidates: CONTACT_CANDIDATE_LIMIT
+    }) as {
+    email: string
+    name: string | null
+    sent_to_count: number
+    received_count: number
+    last_interacted_at: number
+    name_prefix: number
+  }[]
+
+  const stats: ContactStats[] = rows.map((row) => ({
+    email: row.email,
+    sentToCount: row.sent_to_count,
+    receivedCount: row.received_count,
+    lastInteractedAt: row.last_interacted_at,
+    nameMatchesPrefix: row.name_prefix === 1
+  }))
   // account_id doubles as the email in v1, but read the account row so a future
   // opaque account id (SPEC D4) cannot start suggesting the signed-in address.
   const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
     | { email: string }
     | undefined
-  const rows = db
-    .prepare(
-      `SELECT name, email,
-              (3.0 * sent_to_count + received_count) *
-                pow(0.5, max(0, @now - last_interacted_at) / @half_life) AS score
-       FROM contacts
-       WHERE account_id = @account_id
-         AND lower(email) != lower(@self_email)
-         AND (lower(email) LIKE @infix ESCAPE '\\'
-              OR lower(COALESCE(name, '')) LIKE @infix ESCAPE '\\')
-       ORDER BY
-         CASE WHEN lower(email) LIKE @prefix ESCAPE '\\'
-                   OR lower(COALESCE(name, '')) LIKE @prefix ESCAPE '\\'
-              THEN 0 ELSE 1 END,
-         score DESC,
-         last_interacted_at DESC,
-         email
-       LIMIT @limit`
-    )
-    .all({
-      account_id: accountId,
-      self_email: account?.email ?? accountId,
-      prefix: `${escaped}%`,
-      infix: `%${escaped}%`,
-      now,
-      half_life: CONTACT_RECENCY_HALF_LIFE_MS,
-      limit: CONTACT_SEARCH_LIMIT
-    }) as {
-    name: string | null
-    email: string
-    score: number
-  }[]
-
-  return rows.map((row) => ({
-    name: displayName(row.name, row.email),
-    email: row.email,
-    score: row.score
+  const names = new Map(rows.map((row) => [row.email, row.name]))
+  return rankContacts(stats, query, account?.email ?? accountId, now).map((contact) => ({
+    name: displayName(names.get(contact.email), contact.email),
+    email: contact.email,
+    score: contact.score
   }))
 }
 

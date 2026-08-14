@@ -136,7 +136,11 @@ export const migrations: string[] = [
     name       TEXT,
     PRIMARY KEY (account_id, message_id, email, role)
   );
-  CREATE INDEX idx_contact_messages_email ON contact_messages (account_id, email);
+  -- Covers the per-address rebuild aggregate. Without message_id/role the planner
+  -- prefers the covering primary key, which constrains account_id only and rescans
+  -- every contribution row in the account on each rebuild.
+  CREATE INDEX idx_contact_messages_email
+    ON contact_messages (account_id, email, message_id, role);
 
   CREATE TABLE contacts (
     account_id          TEXT NOT NULL,

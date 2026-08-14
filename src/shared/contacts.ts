@@ -20,6 +20,8 @@ export interface ContactSearchResult {
 
 export const CONTACT_RECENCY_HALF_LIFE_MS = 90 * 24 * 60 * 60 * 1000
 export const CONTACT_SEARCH_LIMIT = 8
+/** Matches handed to rankContacts per recency/weight proxy — see searchContacts. */
+export const CONTACT_CANDIDATE_LIMIT = 200
 
 /** What an address falls back to when no correspondent ever supplied a display name. */
 export function displayName(name: string | null | undefined, email: string): string {
