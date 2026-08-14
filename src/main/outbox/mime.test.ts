@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { MailAddress } from '../../shared/mail'
-import { buildMime, type MimeDraft } from './mime'
+import { buildMime, type MimeDraft, validateMimeRecipients } from './mime'
 
 const OPTIONS = {
   accountEmail: 'me@example.com',
@@ -154,7 +154,9 @@ describe('MIME builder', () => {
   })
 
   it('rejects missing recipients and addr-spec separator injection', () => {
-    expect(() => buildMime({ ...CASES[0].draft, to: [] }, OPTIONS)).toThrow('at least one recipient')
+    expect(() => validateMimeRecipients({ ...CASES[0].draft, to: [] }, OPTIONS.accountEmail)).toThrow(
+      'at least one recipient'
+    )
     expect(() =>
       buildMime(
         {
@@ -167,6 +169,18 @@ describe('MIME builder', () => {
     expect(() =>
       buildMime(CASES[0].draft, { ...OPTIONS, accountEmail: 'me@example.com; spy@evil.example' })
     ).toThrow('one valid addr-spec')
+  })
+
+  it('serializes internationalized domains as an ASCII IDN', () => {
+    const raw = buildMime(
+      {
+        ...CASES[0].draft,
+        to: [{ name: 'München', email: 'user@münchen.de' }]
+      },
+      OPTIONS
+    )
+
+    expect(parseTopHeaders(raw).get('to')).toBe('=?UTF-8?B?TcO8bmNoZW4=?= <user@xn--mnchen-3ya.de>')
   })
 
   it('uses RFC 2231 continuations for long Unicode filenames', () => {
@@ -199,6 +213,26 @@ describe('MIME builder', () => {
       .replace(/^UTF-8''/, '')
     expect(decodeURIComponent(encoded)).toBe(filename)
     expect(attachmentHeaders.every((line) => Buffer.byteLength(line) <= 78)).toBe(true)
+  })
+
+  it('preserves the extension in a truncated ASCII filename fallback', () => {
+    const raw = buildMime(
+      {
+        ...CASES[0].draft,
+        attachments: [
+          {
+            filename: 'quarterly-report-for-the-board-of-directors-2026.pdf',
+            mimeType: 'application/pdf',
+            content: Buffer.from('data')
+          }
+        ]
+      },
+      OPTIONS
+    )
+    const fallback = raw.match(/filename="([^"]+)"/)?.[1]
+
+    expect(fallback).toHaveLength(40)
+    expect(fallback).toMatch(/\.pdf$/)
   })
 
   it('round-trips generated top-level headers through a naive splitter', () => {

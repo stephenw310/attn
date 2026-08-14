@@ -205,6 +205,18 @@ describe('quote HTML sanitizer', () => {
     expect(malformed).toContain('<p>After malformed nesting</p>')
   })
 
+  it('strips sender styles before embedding quoted HTML into an outgoing document', () => {
+    const source = message({
+      bodyText: 'Please pay.',
+      bodyHtml: '<style>body{display:none !important}</style><p>Please pay.</p>'
+    })
+
+    const plan = planReply('reply', conversation([source]), SELF)
+
+    expect(plan.quoteHtml).toContain('<blockquote><p>Please pay.</p></blockquote>')
+    expect(plan.quoteHtml).not.toMatch(/<style|display\s*:\s*none/i)
+  })
+
   it('reads href from the parsed attribute instead of attribute text', () => {
     expect(
       sanitizeQuoteHtml('<a title="see href=https://evil.example" href="https://real.example">click</a>')

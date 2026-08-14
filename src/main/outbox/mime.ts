@@ -3,6 +3,7 @@
 // durable Message-ID and sends the returned bytes through the outbox chokepoint.
 
 import { createHash } from 'node:crypto'
+import { domainToASCII } from 'node:url'
 import type { MailAddress } from '../../shared/mail'
 import { escapeHtml, singleLine } from './text'
 
@@ -93,7 +94,7 @@ function validAddrSpec(value: string): string {
   const email = singleLine(value)
   const at = email.indexOf('@')
   const local = email.slice(0, at)
-  const domain = email.slice(at + 1)
+  const domain = domainToASCII(email.slice(at + 1))
   const validLocal =
     local.length > 0 &&
     local.length <= 64 &&
@@ -109,7 +110,7 @@ function validAddrSpec(value: string): string {
   if (at <= 0 || at !== email.lastIndexOf('@') || !validLocal || !validDomain) {
     throw new Error('MIME address must contain one valid addr-spec')
   }
-  return email
+  return `${local}@${domain}`
 }
 
 function formatAddress(address: MailAddress): string {
@@ -177,7 +178,13 @@ function asciiFilenameFallback(filename: string): string {
   const fallback = singleLine(filename)
     .replace(/[^\x20-\x7e]/g, '_')
     .replace(/[\\/]/g, '_')
-  return fallback.slice(0, MAX_FILENAME_FALLBACK_LENGTH) || 'attachment'
+  if (!fallback) return 'attachment'
+  if (fallback.length <= MAX_FILENAME_FALLBACK_LENGTH) return fallback
+
+  const extension = fallback.slice(fallback.lastIndexOf('.'))
+  return extension.length > 1 && extension.length < MAX_FILENAME_FALLBACK_LENGTH
+    ? `${fallback.slice(0, MAX_FILENAME_FALLBACK_LENGTH - extension.length)}${extension}`
+    : fallback.slice(0, MAX_FILENAME_FALLBACK_LENGTH)
 }
 
 function rfc2231Atoms(value: string): string[] {
@@ -272,11 +279,9 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
   const messageId = singleLine(options.rfcMessageId)
   if (!messageId) throw new Error('MIME Message-ID is required')
 
+  validateMimeRecipients(draft, options.accountEmail)
   const cc = draft.cc ?? []
   const bcc = draft.bcc ?? []
-  if (draft.to.length + cc.length + bcc.length === 0) {
-    throw new Error('MIME message requires at least one recipient')
-  }
 
   const alternativeBoundary = deterministicBoundary('alternative', messageId)
   const mixedBoundary = deterministicBoundary('mixed', messageId)
@@ -327,4 +332,17 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
     ...mixedParts,
     ''
   ].join(CRLF)
+}
+
+/** Validate before queue persistence; buildMime repeats this as a final boundary. */
+export function validateMimeRecipients(
+  draft: Pick<MimeDraft, 'to' | 'cc' | 'bcc'>,
+  accountEmail: string
+): void {
+  validAddrSpec(accountEmail)
+  const cc = draft.cc ?? []
+  const bcc = draft.bcc ?? []
+  const recipients = [...draft.to, ...cc, ...bcc]
+  if (recipients.length === 0) throw new Error('MIME message requires at least one recipient')
+  for (const address of recipients) validAddrSpec(address.email)
 }

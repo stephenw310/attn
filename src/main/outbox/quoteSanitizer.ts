@@ -1,12 +1,19 @@
-import createDOMPurify, { type WindowLike } from 'dompurify'
-import { JSDOM } from 'jsdom'
-import { sanitizeMailHtml } from '../../shared/mailSanitizer'
+import createDOMPurify, { type DOMPurify, type WindowLike } from 'dompurify'
+import { sanitizeQuotedMailHtml } from '../../shared/mailSanitizer'
 
-// T15 runs in the main process, which has no browser DOM. A single inert jsdom
-// window gives DOMPurify the same standards-based parsing boundary as display.
-const sanitizerWindow = new JSDOM('').window as unknown as WindowLike
-const purifier = createDOMPurify(sanitizerWindow)
+let purifier: DOMPurify | null = null
+
+function quotePurifier(): DOMPurify {
+  if (!purifier) {
+    // Keep the large parser and its DOM out of main-process startup. Both load
+    // only when a reply or forward actually needs quote sanitization.
+    const { JSDOM } = require('jsdom') as typeof import('jsdom')
+    const sanitizerWindow = new JSDOM('').window as unknown as WindowLike
+    purifier = createDOMPurify(sanitizerWindow)
+  }
+  return purifier
+}
 
 export function sanitizeQuoteHtml(html: string): string {
-  return sanitizeMailHtml(purifier, html).trim()
+  return sanitizeQuotedMailHtml(quotePurifier(), html).trim()
 }
