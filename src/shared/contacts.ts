@@ -33,9 +33,14 @@ export function displayName(name: string | null | undefined, email: string): str
  * this function and queries fold their needle through it too, so the two can never
  * disagree — and folding in JS rather than SQLite's ASCII-only lower() is what lets
  * "ürsula" match a contact stored as "Ürsula".
+ *
+ * Deliberately toLowerCase, not toLocaleLowerCase: the folded address is a primary
+ * key, and Turkish casing maps 'I' to 'ı', so a locale-tailored fold would file
+ * INFO@example.com under a key that a typed "info@example.com" never matches.
+ * toLowerCase is Unicode-aware regardless, so "Ürsula" still folds correctly.
  */
 export function foldForSearch(value: string): string {
-  return value.trim().toLocaleLowerCase()
+  return value.trim().toLowerCase()
 }
 
 /**

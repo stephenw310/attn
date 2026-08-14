@@ -155,5 +155,7 @@ export const migrations: string[] = [
     last_interacted_at  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (account_id, email)
   );
+  -- Prefix autocomplete range-scans folded names; addresses ride the primary key.
+  CREATE INDEX idx_contacts_name_folded ON contacts (account_id, name_folded);
   `
 ]

@@ -68,6 +68,14 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
     expect.objectContaining({ email: 'ursula@example.com' })
   ])
 
+  // Prefix precedence — the invariant candidate truncation used to break. "ma"
+  // prefixes maya@ while genuinely infix-matching amara@ and Priya Raman, so a
+  // regression that ranks infix alongside prefix fails here. The truncation
+  // itself needs >200 matches to reproduce and is covered by construction: the
+  // prefix scan is uncapped, only the infix fill is bounded.
+  const prefixFirst = await page.evaluate(() => window.attn.contacts.search('ma'))
+  expect(prefixFirst[0]).toMatchObject({ email: 'maya@example.com' })
+
   // Replay the exact same snapshots through the production persistence path.
   // Contribution PKs make this a no-op for aggregate frequency.
   await app.evaluate(
