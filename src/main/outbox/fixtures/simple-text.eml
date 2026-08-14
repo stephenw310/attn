@@ -1,0 +1,19 @@
+From: me@example.com
+To: Maya Lin <maya@example.com>
+Subject: Hello
+Message-ID: <attn-123@example.com>
+Date: Thu, 13 Aug 2026 12:34:56 GMT
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="attn-alternative-78000d330135fe25b98221b7"
+
+--attn-alternative-78000d330135fe25b98221b7
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+SGVsbG8gdGhlcmUu
+--attn-alternative-78000d330135fe25b98221b7
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PGRpdj5IZWxsbyB0aGVyZS48L2Rpdj4=
+--attn-alternative-78000d330135fe25b98221b7--

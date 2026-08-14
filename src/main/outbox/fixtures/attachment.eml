@@ -1,0 +1,30 @@
+From: me@example.com
+To: Maya Lin <maya@example.com>
+Subject: Receipt
+Message-ID: <attn-123@example.com>
+Date: Thu, 13 Aug 2026 12:34:56 GMT
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="attn-mixed-7210ef2d654ddc167c4c62e8"
+
+--attn-mixed-7210ef2d654ddc167c4c62e8
+Content-Type: multipart/alternative; boundary="attn-alternative-78000d330135fe25b98221b7"
+
+--attn-alternative-78000d330135fe25b98221b7
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+QXR0YWNoZWQu
+--attn-alternative-78000d330135fe25b98221b7
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PHA+QXR0YWNoZWQuPC9wPg==
+--attn-alternative-78000d330135fe25b98221b7--
+--attn-mixed-7210ef2d654ddc167c4c62e8
+Content-Type: application/pdf; name="receipt.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="receipt.pdf"
+Content-ID: <future-inline@example.com>
+
+UERGLURBVEEK
+--attn-mixed-7210ef2d654ddc167c4c62e8--

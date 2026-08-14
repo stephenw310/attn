@@ -1,0 +1,21 @@
+From: me@example.com
+To: Maya Lin <maya@example.com>
+Cc: Dev Team <dev@example.com>
+Bcc: archive@example.com
+Subject: Quarterly update
+Message-ID: <attn-123@example.com>
+Date: Thu, 13 Aug 2026 12:34:56 GMT
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="attn-alternative-78000d330135fe25b98221b7"
+
+--attn-alternative-78000d330135fe25b98221b7
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+SGkgdGVhbSwNCg0KVGhlIHBsYW4gaXMgcmVhZHku
+--attn-alternative-78000d330135fe25b98221b7
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PHA+SGkgPHN0cm9uZz50ZWFtPC9zdHJvbmc+LDwvcD48cD5UaGUgcGxhbiBpcyByZWFkeS48L3A+
+--attn-alternative-78000d330135fe25b98221b7--
