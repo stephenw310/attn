@@ -4,6 +4,7 @@ import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { applyThreadDelta } from '../store/mutate'
 import { replayPendingThreadDeltas } from '../store/replay'
+import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { hydrateMissingThreadBodies } from './bodies'
 import { deleteThread, persistThread } from './persist'
 import type { HistoryRecord, MailProvider } from './provider'
@@ -148,24 +149,28 @@ export interface HistoryPollerOptions {
   wakeThread?: (threadId: string) => void
   kickExecutor?: () => void
   runCycle?: typeof runHistoryCycle
+  time?: SchedulerTime
 }
 
 export type RunNowRequest = 'started' | 'queued' | 'stopped'
 
 export class HistoryPoller {
-  private timer: ReturnType<typeof setTimeout> | null = null
+  private timer: TimerHandle | null = null
   private executing = false
   private stopped = true
   private lastAttemptAt = 0
   private recoveryPending = false
   private queuedRunStart: (() => void) | null = null
+  private readonly time: SchedulerTime
 
-  constructor(private readonly options: HistoryPollerOptions) {}
+  constructor(private readonly options: HistoryPollerOptions) {
+    this.time = options.time ?? systemTime
+  }
 
   start(): void {
     if (!this.stopped) return
     this.stopped = false
-    this.lastAttemptAt = Date.now()
+    this.lastAttemptAt = this.time.now()
     console.log(`[sync] history poller started for ${this.options.accountId}`)
     this.schedule()
   }
@@ -173,7 +178,7 @@ export class HistoryPoller {
   stop(): void {
     this.stopped = true
     this.queuedRunStart = null
-    if (this.timer) clearTimeout(this.timer)
+    if (this.timer) this.time.timers.clearTimeout(this.timer)
     this.timer = null
   }
 
@@ -190,10 +195,10 @@ export class HistoryPoller {
 
   async runNow(): Promise<void> {
     if (this.executing || this.stopped) return
-    if (this.timer) clearTimeout(this.timer)
+    if (this.timer) this.time.timers.clearTimeout(this.timer)
     this.timer = null
     this.executing = true
-    this.lastAttemptAt = Date.now()
+    this.lastAttemptAt = this.time.now()
     try {
       let plan: FetchedHistoryPlan | null = null
       if (this.recoveryPending) {
@@ -239,13 +244,13 @@ export class HistoryPoller {
     // Wake at the foreground cadence so a newly focused window does not wait
     // out a previously scheduled 60-second background timer. Network work is
     // still limited to once per minute while no window is focused.
-    this.timer = setTimeout(() => void this.runScheduled(), FOREGROUND_POLL_MS)
+    this.timer = this.time.timers.setTimeout(() => void this.runScheduled(), FOREGROUND_POLL_MS)
   }
 
   private runScheduled(): void {
     this.timer = null
     const interval = this.options.isForeground() ? FOREGROUND_POLL_MS : BACKGROUND_POLL_MS
-    if (Date.now() - this.lastAttemptAt < interval) {
+    if (this.time.now() - this.lastAttemptAt < interval) {
       this.schedule()
       return
     }

@@ -29,6 +29,7 @@
           "to": "seed@attn.test, Priya Raman <priya@example.com>",
           "cc": "Daniel Okafor <daniel@example.com>",
           "replyTo": "Maya Lin <maya+roadmap@example.com>",
+          "messageId": "<roadmap-root@example.com>",
           "subject": "Q3 roadmap review",
           "snippet": "The roadmap is ready for review.",
           "bodyText": "Here is the first draft of the Q3 roadmap."
@@ -40,6 +41,9 @@
           "receivedAt": "10:12",
           "from": "Maya Lin <maya@example.com>",
           "to": "seed@attn.test",
+          "replyTo": "Maya Lin <maya+roadmap@example.com>",
+          "messageId": "<roadmap-reply@example.com>",
+          "references": ["<roadmap-root@example.com>"],
           "subject": "Q3 roadmap review",
           "snippet": "I added the launch milestones.",
           "bodyText": "I added the launch milestones and owner notes.\n\n-- \nMaya Lin\n\nOn Friday, Priya wrote:\n> Please include owners for each milestone."

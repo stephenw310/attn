@@ -1,16 +1,18 @@
 import type { Db } from './db'
 import { applyThreadDelta } from './store/mutate'
+import { type SchedulerTime, systemTime, type TimerHandle } from './time'
 
 const MAX_TIMER_DELAY_MS = 24 * 60 * 60 * 1000
 
 export class SnoozeScheduler {
-  private timer: ReturnType<typeof setTimeout> | null = null
+  private timer: TimerHandle | null = null
 
   constructor(
     private readonly db: Db,
     private readonly getAccountId: () => string | null,
     private readonly onChanged: () => void,
-    private readonly onQueueChanged: () => void
+    private readonly onQueueChanged: () => void,
+    private readonly time: SchedulerTime = systemTime
   ) {}
 
   start(): void {
@@ -18,7 +20,7 @@ export class SnoozeScheduler {
   }
 
   stop(): void {
-    if (this.timer) clearTimeout(this.timer)
+    if (this.timer) this.time.timers.clearTimeout(this.timer)
     this.timer = null
   }
 
@@ -52,7 +54,7 @@ export class SnoozeScheduler {
         `SELECT thread_id FROM reminders
          WHERE account_id = ? AND kind = 'snooze' AND state = 'pending' AND due_at <= ?`
       )
-      .all(accountId, Date.now()) as { thread_id: string }[]
+      .all(accountId, this.time.now()) as { thread_id: string }[]
     return (
       this.returnThreads(
         accountId,
@@ -92,7 +94,7 @@ export class SnoozeScheduler {
       )
       .get(accountId) as { due_at: number } | undefined
     if (!next) return
-    const delay = Math.min(Math.max(next.due_at - Date.now(), 0), MAX_TIMER_DELAY_MS)
-    this.timer = setTimeout(() => this.refresh(), delay)
+    const delay = Math.min(Math.max(next.due_at - this.time.now(), 0), MAX_TIMER_DELAY_MS)
+    this.timer = this.time.timers.setTimeout(() => this.refresh(), delay)
   }
 }

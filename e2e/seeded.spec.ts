@@ -43,6 +43,16 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
 })
 
 test('exposes threading headers and idempotent contact ranking over IPC', async ({ app, page }) => {
+  const replyConversation = await page.evaluate(() => window.attn.mail.getConversation('t-roadmap'))
+  expect(replyConversation?.messages).toHaveLength(2)
+  expect(replyConversation?.messages[1]).toMatchObject({
+    rfcMessageId: '<roadmap-reply@example.com>',
+    references: ['<roadmap-root@example.com>'],
+    recipients: {
+      replyTo: [{ name: 'Maya Lin', email: 'maya+roadmap@example.com' }]
+    }
+  })
+
   const conversation = await page.evaluate(() => window.attn.mail.getConversation('t-sent-history'))
   expect(conversation?.messages).toHaveLength(1)
   expect(conversation?.messages[0]).toMatchObject({
