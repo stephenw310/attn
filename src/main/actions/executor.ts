@@ -1,6 +1,7 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
+import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { executeIntent, isPermanentActionError, type QueueIntent, retryDelayMs } from './execute'
 import { decodeLabelDelta } from './queuePayload'
 
@@ -15,13 +16,14 @@ interface QueueRow {
 export class ActionExecutor {
   private drainPromise: Promise<void> | null = null
   private stopping = false
-  private timer: ReturnType<typeof setTimeout> | null = null
+  private timer: TimerHandle | null = null
 
   constructor(
     private readonly db: Db,
     private readonly accountId: () => string | null,
     private readonly provider: () => MailActionProvider | null,
-    private readonly notify: () => void = () => {}
+    private readonly notify: () => void = () => {},
+    private readonly time: SchedulerTime = systemTime
   ) {
     db.prepare("UPDATE action_queue SET state = 'pending' WHERE state = 'inflight'").run()
   }
@@ -39,7 +41,7 @@ export class ActionExecutor {
 
   stop(): void {
     this.stopping = true
-    if (this.timer) clearTimeout(this.timer)
+    if (this.timer) this.time.timers.clearTimeout(this.timer)
     this.timer = null
   }
 
@@ -99,7 +101,7 @@ export class ActionExecutor {
       }
     } finally {
       if (!this.stopping && retryMs !== null) {
-        this.timer = setTimeout(() => {
+        this.timer = this.time.timers.setTimeout(() => {
           this.timer = null
           void this.trigger()
         }, retryMs)
