@@ -1,3 +1,4 @@
+import { decodeLabelDelta } from '../actions/queuePayload'
 import type { Db } from '../db'
 import { applyThreadDelta } from './mutate'
 
@@ -14,17 +15,7 @@ export function replayPendingThreadDeltas(db: Db, accountId: string, threadId: s
     )
     .all(accountId, threadId) as PendingRow[]
   for (const row of rows) {
-    try {
-      const payload = JSON.parse(row.payload) as { add?: unknown; remove?: unknown }
-      const add = stringArray(payload.add) ? payload.add : []
-      const remove = stringArray(payload.remove) ? payload.remove : []
-      applyThreadDelta(db, accountId, { threadId, add, remove })
-    } catch {
-      // Malformed durable intent is handled by the executor; don't block sync.
-    }
+    const { add, remove } = decodeLabelDelta(row.payload)
+    applyThreadDelta(db, accountId, { threadId, add, remove })
   }
-}
-
-function stringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }

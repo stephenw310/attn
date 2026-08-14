@@ -48,8 +48,8 @@ function apply(db: Db, accountId: string, action: TriageAction): UndoAction[] {
     return inverseForThread(action, labelsBefore.get(id) ?? new Set(), id)
   })
   const enqueue = db.prepare(
-    `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, created_at)
-     VALUES (?, ?, ?, ?, 'pending', ?)`
+    `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
+     VALUES (?, ?, ?, ?, 'pending')`
   )
   db.transaction(() => {
     for (const threadId of action.threadIds) {
@@ -77,8 +77,7 @@ function apply(db: Db, accountId: string, action: TriageAction): UndoAction[] {
           accountId,
           plan.queueKind,
           threadId,
-          JSON.stringify({ add: plan.add, remove: plan.remove }),
-          Date.now()
+          JSON.stringify({ add: plan.add, remove: plan.remove })
         )
       }
     }
@@ -87,27 +86,26 @@ function apply(db: Db, accountId: string, action: TriageAction): UndoAction[] {
 }
 
 function applySnooze(db: Db, accountId: string, threadIds: string[], dueAt: number): void {
-  const now = Date.now()
   const upsertReminder = db.prepare(
-    `INSERT INTO reminders (account_id, thread_id, kind, due_at, created_at, state)
-     VALUES (?, ?, 'snooze', ?, ?, 'pending')
+    `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+     VALUES (?, ?, 'snooze', ?, 'pending')
      ON CONFLICT(account_id, thread_id, kind) DO UPDATE SET
-       due_at = excluded.due_at, created_at = excluded.created_at, state = 'pending'`
+       due_at = excluded.due_at, state = 'pending'`
   )
   const enqueue = db.prepare(
-    `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, created_at)
-     VALUES (?, 'modifyLabels', ?, ?, 'pending', ?)`
+    `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
+     VALUES (?, 'modifyLabels', ?, ?, 'pending')`
   )
 
   for (const threadId of threadIds) {
     const wasInInbox = labelsFor(db, accountId, threadId).has('INBOX')
-    upsertReminder.run(accountId, threadId, dueAt, now)
+    upsertReminder.run(accountId, threadId, dueAt)
     applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
     // v1 snooze is local-only by decision (SPEC §9 #6): Gmail sees a plain
     // archive. Gmail-side labels + exact-time return arrive with the v1.5
     // companion script (SPEC F7).
     if (wasInInbox) {
-      enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }), now)
+      enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }))
     }
   }
 }

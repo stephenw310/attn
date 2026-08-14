@@ -141,12 +141,11 @@ export function loadSeed(db: Db, path: string): string {
     // Seeded stores are complete local snapshots and never contact Gmail. Mark the
     // backfill complete so relaunches model a settled account.
     db.prepare(
-      `INSERT INTO sync_state (account_id, backfill_cursor, updated_at)
-       VALUES (?, 'done', ?)
+      `INSERT INTO sync_state (account_id, backfill_cursor)
+       VALUES (?, 'done')
        ON CONFLICT(account_id) DO UPDATE SET
-         backfill_cursor = excluded.backfill_cursor,
-         updated_at = excluded.updated_at`
-    ).run(fixture.account, importedAt)
+         backfill_cursor = excluded.backfill_cursor`
+    ).run(fixture.account)
   })()
 
   console.log(`[seed] loaded ${fixture.threads.length} threads for ${fixture.account}`)

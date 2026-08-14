@@ -22,12 +22,5 @@ export function applyThreadDelta(db: Db, accountId: string, delta: ThreadDelta):
          is_starred = EXISTS(SELECT 1 FROM thread_labels WHERE account_id = ? AND thread_id = ? AND label_id = 'STARRED')
        WHERE account_id = ? AND id = ?`
     ).run(accountId, delta.threadId, accountId, delta.threadId, accountId, delta.threadId)
-    if (delta.add.includes('UNREAD') || delta.remove.includes('UNREAD')) {
-      db.prepare('UPDATE messages SET is_unread = ? WHERE account_id = ? AND thread_id = ?').run(
-        delta.add.includes('UNREAD') ? 1 : 0,
-        accountId,
-        delta.threadId
-      )
-    }
   })()
 }

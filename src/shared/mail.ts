@@ -45,7 +45,7 @@ export interface MessageAttachment {
 
 export interface ConversationMsg {
   id: string
-  /** RFC Message-ID header, including angle brackets, when synced under schema v7+. */
+  /** RFC Message-ID header, including angle brackets. */
   rfcMessageId: string | null
   /** Canonical RFC message ids from References, or In-Reply-To as a fallback. */
   references: string[]
