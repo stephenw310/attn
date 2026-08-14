@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type ContactStats, displayName, rankContacts } from './contacts'
+import { type ContactStats, displayName, foldForSearch, rankContacts } from './contacts'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = Date.UTC(2026, 7, 13)
@@ -59,6 +59,13 @@ describe('contact ranking', () => {
         (result) => result.email
       )
     ).toEqual(['avery@example.com'])
+  })
+})
+
+describe('search folding', () => {
+  it('folds non-ASCII case, which SQLite lower() leaves alone', () => {
+    expect(foldForSearch('  Ürsula Groß  ')).toBe('ürsula groß')
+    expect(foldForSearch('Maya@Example.COM')).toBe('maya@example.com')
   })
 })
 

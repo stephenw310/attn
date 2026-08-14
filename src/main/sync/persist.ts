@@ -1,3 +1,4 @@
+import { foldForSearch } from '../../shared/contacts'
 import type { Db } from '../db'
 import {
   collectAttachments,
@@ -262,7 +263,7 @@ function insertContactContribution(
   address: { name: string; email: string },
   role: 'to' | 'from'
 ): string | null {
-  const email = address.email.trim().toLocaleLowerCase()
+  const email = foldForSearch(address.email)
   if (!email) return null
   statement.run(accountId, messageId, email, role, address.name.trim() || null)
   return email
@@ -299,10 +300,11 @@ function rebuildContacts(db: Db, accountId: string, emails: Iterable<string>): v
   )
   const upsert = db.prepare(
     `INSERT INTO contacts
-       (account_id, email, name, sent_to_count, received_count, last_interacted_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+       (account_id, email, name, name_folded, sent_to_count, received_count, last_interacted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, email) DO UPDATE SET
        name = excluded.name,
+       name_folded = excluded.name_folded,
        sent_to_count = excluded.sent_to_count,
        received_count = excluded.received_count,
        last_interacted_at = excluded.last_interacted_at`
@@ -315,6 +317,17 @@ function rebuildContacts(db: Db, accountId: string, emails: Iterable<string>): v
       remove.run(accountId, email)
       continue
     }
-    upsert.run(accountId, row.email, row.name, row.sent_to_count, row.received_count, row.last_interacted_at)
+    // Fold in JS, not SQL: SQLite's lower() is ASCII-only and would leave a name
+    // like "Ürsula" unmatched by the lowercase needle the query folds through the
+    // same helper.
+    upsert.run(
+      accountId,
+      row.email,
+      row.name,
+      row.name ? foldForSearch(row.name) : null,
+      row.sent_to_count,
+      row.received_count,
+      row.last_interacted_at
+    )
   }
 }

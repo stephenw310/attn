@@ -5,6 +5,7 @@ import {
   type ContactSearchResult,
   type ContactStats,
   displayName,
+  foldForSearch,
   rankContacts
 } from '../../shared/contacts'
 import type {
@@ -211,8 +212,9 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
  * and taking only one proxy would drop the other kind. Ranking the union in JS
  * then agrees with ranking every match in all but pathological ties.
  *
- * Known limit: SQLite's lower() folds ASCII only, so a stored name whose uppercase
- * letters are non-ASCII ("Ürsula") will not match a lowercase query ("ürsula").
+ * Addresses and names are stored pre-folded, so matching needs no per-row lower()
+ * and non-ASCII names fold correctly — SQLite's lower() would leave "Ürsula"
+ * unmatched by "ürsula".
  */
 export function searchContacts(
   db: Db,
@@ -220,20 +222,17 @@ export function searchContacts(
   query: string,
   now = Date.now()
 ): ContactSearchResult[] {
-  const escaped = query
-    .trim()
-    .toLocaleLowerCase()
-    .replace(/[\\%_]/g, '\\$&')
+  const escaped = foldForSearch(query).replace(/[\\%_]/g, '\\$&')
   const rows = db
     .prepare(
       `WITH matches AS (
          SELECT email, name, sent_to_count, received_count, last_interacted_at,
-                CASE WHEN lower(COALESCE(name, '')) LIKE @prefix ESCAPE '\\'
+                CASE WHEN COALESCE(name_folded, '') LIKE @prefix ESCAPE '\\'
                      THEN 1 ELSE 0 END AS name_prefix
          FROM contacts
          WHERE account_id = @account_id
-           AND (lower(email) LIKE @infix ESCAPE '\\'
-                OR lower(COALESCE(name, '')) LIKE @infix ESCAPE '\\')
+           AND (email LIKE @infix ESCAPE '\\'
+                OR COALESCE(name_folded, '') LIKE @infix ESCAPE '\\')
        )
        SELECT * FROM (SELECT * FROM matches ORDER BY last_interacted_at DESC LIMIT @candidates)
        UNION

@@ -29,6 +29,16 @@ export function displayName(name: string | null | undefined, email: string): str
 }
 
 /**
+ * Case-fold a name or address for search. Contacts are stored pre-folded through
+ * this function and queries fold their needle through it too, so the two can never
+ * disagree — and folding in JS rather than SQLite's ASCII-only lower() is what lets
+ * "ürsula" match a contact stored as "Ürsula".
+ */
+export function foldForSearch(value: string): string {
+  return value.trim().toLocaleLowerCase()
+}
+
+/**
  * Order candidates the store has already matched against the query. Matching lives
  * in SQL so there is exactly one filter; this only scores and sorts, which keeps the
  * comparator pure and unit-testable. Prefix matches always precede infix matches;
@@ -41,13 +51,13 @@ export function rankContacts(
   now = Date.now(),
   limit = CONTACT_SEARCH_LIMIT
 ): RankedContact[] {
-  const needle = query.trim().toLocaleLowerCase()
-  const self = selfEmail.trim().toLocaleLowerCase()
+  const needle = foldForSearch(query)
+  const self = foldForSearch(selfEmail)
 
   return contacts
-    .filter((contact) => contact.email.trim().toLocaleLowerCase() !== self)
+    .filter((contact) => foldForSearch(contact.email) !== self)
     .map((contact) => {
-      const email = contact.email.trim().toLocaleLowerCase()
+      const email = foldForSearch(contact.email)
       const prefix = needle.length === 0 || contact.nameMatchesPrefix || email.startsWith(needle)
       const age = Math.max(0, now - contact.lastInteractedAt)
       const recencyMultiplier = 0.5 ** (age / CONTACT_RECENCY_HALF_LIFE_MS)

@@ -196,7 +196,7 @@
           "receivedDaysAgo": 2,
           "receivedAt": "13:10",
           "from": "Attn Seed <seed@attn.test>",
-          "to": "Maya Lin <maya@example.com>, Priya Raman <priya@example.com>",
+          "to": "Maya Lin <maya@example.com>, Priya Raman <priya@example.com>, \u00dcrsula Gro\u00df <ursula@example.com>",
           "subject": "Re: Q3 roadmap review",
           "snippet": "Thanks — I added my notes.",
           "bodyText": "Thanks — I added my notes.",

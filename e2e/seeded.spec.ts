@@ -54,6 +54,16 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
   expect(await page.evaluate(() => window.attn.contacts.search('seed@attn.test'))).toEqual([])
   expect(await page.evaluate(() => window.attn.contacts.search(''))).toHaveLength(8)
 
+  // Non-ASCII case folding: "ürsula" appears in neither the address nor any
+  // ASCII-lowercased form of the name, so this only matches if the store folded
+  // the name in JS rather than through SQLite's ASCII-only lower().
+  expect(await page.evaluate(() => window.attn.contacts.search('ürsula'))).toEqual([
+    expect.objectContaining({ name: 'Ürsula Groß', email: 'ursula@example.com' })
+  ])
+  expect(await page.evaluate(() => window.attn.contacts.search('groß'))).toEqual([
+    expect.objectContaining({ email: 'ursula@example.com' })
+  ])
+
   // Replay the exact same snapshots through the production persistence path.
   // Contribution PKs make this a no-op for aggregate frequency.
   await app.evaluate(

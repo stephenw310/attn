@@ -142,10 +142,14 @@ export const migrations: string[] = [
   CREATE INDEX idx_contact_messages_email
     ON contact_messages (account_id, email, message_id, role);
 
+  -- email and name_folded are stored pre-folded by shared/contacts.foldForSearch,
+  -- so autocomplete matches without a per-row lower() and folds non-ASCII names
+  -- that SQLite's ASCII-only lower() would leave uppercase.
   CREATE TABLE contacts (
     account_id          TEXT NOT NULL,
     email               TEXT NOT NULL,
     name                TEXT,
+    name_folded         TEXT,
     sent_to_count       INTEGER NOT NULL DEFAULT 0,
     received_count      INTEGER NOT NULL DEFAULT 0,
     last_interacted_at  INTEGER NOT NULL DEFAULT 0,
