@@ -2,6 +2,7 @@ import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
 import { executeIntent, isPermanentActionError, type QueueIntent, retryDelayMs } from './execute'
+import { decodeLabelDelta } from './queuePayload'
 
 interface QueueRow {
   id: number
@@ -59,14 +60,14 @@ export class ActionExecutor {
         if (!row) break
         this.db.prepare("UPDATE action_queue SET state = 'inflight' WHERE id = ?").run(row.id)
         try {
-          const payload = JSON.parse(row.payload) as { add?: string[]; remove?: string[] }
+          const payload = decodeLabelDelta(row.payload)
           const intent: QueueIntent =
             row.kind === 'modifyLabels'
               ? {
                   kind: row.kind,
                   threadId: row.thread_id,
-                  add: payload.add ?? [],
-                  remove: payload.remove ?? []
+                  add: payload.add,
+                  remove: payload.remove
                 }
               : { kind: row.kind, threadId: row.thread_id }
           await executeIntent(provider, intent)

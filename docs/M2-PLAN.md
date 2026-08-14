@@ -1,16 +1,16 @@
 # M2 Implementation Plan — Mail Out (Composer, Drafts, Send, Undo Send, Exactly-Once Outbox)
 
 **Audience:** the engineer(s) building M2. Written to the same contract as [M1-PLAN.md](M1-PLAN.md): every task is one PR, nothing is done until `npm run verify` is green, and "spec F6" means a section of [SPEC.md](SPEC.md) (v0.13) — read it before starting the task.
-**Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase as merged through PR #26.
+**Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through PR #34.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Prerequisite from M1:** the two remaining M1 exit smokes (real-Gmail airplane-mode drain; real-OS notification click-through) must be recorded in the M1 plan before M2 *sign-off* — but they do not block starting R1–R3 or any T-task.
+**Current progress:** R1 (#31), R2 (#30), and T13 (#32) are shipped. R3 and the T14 composer are next. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
 ## Why this order
 
-The composer is the largest single UI surface in the product, and it lands in a renderer whose root component is already 1,989 lines. The outbox is the first subsystem where a bug destroys trust irreversibly (a duplicate send cannot be undone). So M2 starts with refactors that make room (R1–R3), builds the data foundation next (T13), then the composer and the send machinery on top of clean seams, and ends with the hardening pass (T20) that makes "daily-drivable" honest.
+The composer is the largest single UI surface in the product, and the outbox is the first subsystem where a bug destroys trust irreversibly (a duplicate send cannot be undone). M2 therefore began with renderer/main-process decomposition and the sent-mail data foundation. Those pieces are now shipped; the composer and send machinery build on them before the hardening pass (T20).
 
 ```mermaid
 graph LR
@@ -47,7 +47,7 @@ Parallelization: R1 ∥ R2 ∥ T13 touch disjoint files. T15 is pure modules and
 
 ## Global rules (every task — carried over from M1, plus two new ones)
 
-1. **Migrations are an append-only array** (`src/main/db/migrations.ts`). Next index is **v7**; merge order decides numbering; two tasks never share one migration. No dev-only rewrites this milestone — M2 schema changes must be additive because dogfooding databases now carry real state (T11's authorized v5 rewrite is not a precedent).
+1. **The database is disposable development data.** `src/main/db/schema.ts` is the single authoritative schema snapshot. Every schema change updates that snapshot and bumps `CURRENT_SCHEMA_VERSION`; stale profiles are deleted and re-synced. Do not add compatibility migrations or data backfills before the project has real users.
 2. **IPC has three parts** (main handler, preload bridge, shared types) — all in the same commit. After R2, channel names and signatures live in the typed channel map in `src/shared/` — never write a raw channel string in main or preload again.
 3. **Mail content is untrusted.** That now includes **outgoing** content: quoted history entering the composer passes the same DOMPurify path as display, and composer output is sanitized against a minimal allowlist before it is stored or built into MIME. Never `dangerouslySetInnerHTML`.
 4. **Select on `data-testid`** in e2e; add testids for every new interactive element.
@@ -62,6 +62,8 @@ Parallelization: R1 ∥ R2 ∥ T13 touch disjoint files. T15 is pure modules and
 
 ## R1 — Decompose the renderer before the composer lands
 
+**Status: shipped in PR #31.**
+
 **Depends on:** nothing · **Unblocks:** T14 · **Parallel with:** R2, T13
 
 ### Why
@@ -72,7 +74,7 @@ PR #27 already set the precedent worth continuing: it split the file into an **a
 
 ### Implementation guide
 
-**No behavior change. No new features. The 52-test e2e suite is the safety net and must pass unmodified** (testids and DOM structure stay stable; only import paths move).
+**No behavior change. No new features. The then-current e2e suite is the safety net and must pass unmodified** (testids and DOM structure stay stable; only import paths move).
 
 1. New `src/renderer/src/components/`: extract, one commit each so review stays mechanical:
    - `LoginScreen.tsx`, `SyncStatus.tsx` (with `SyncProgress`), `AccountMenu.tsx`, `SnoozePicker.tsx`, `Toast.tsx`, `QueueReadout.tsx`
@@ -94,6 +96,8 @@ E2e suite green with zero spec edits; all five existing screenshot artifacts (`l
 ---
 
 ## R2 — Main-process seams and the typed IPC map
+
+**Status: shipped in PR #30.**
 
 **Depends on:** nothing · **Unblocks:** T16 · **Parallel with:** R1, T13
 
@@ -128,6 +132,8 @@ Verify green with no e2e edits; channel map adopted by all three layers; `index.
 
 ## T13 — Sent-mail metadata, threading headers, and the contacts store
 
+**Status: shipped in PR #32.**
+
 **Depends on:** nothing (main-process only) · **Unblocks:** T14 (autocomplete data), T15 (threading fields) · **Spec:** F6 (autocomplete "built locally from synced sent mail"), F2
 
 ### Why
@@ -150,7 +156,7 @@ Three M2 features need data the store doesn't have yet: recipient autocomplete n
 
 ### Implementation guide
 
-**Migration v7 (single migration for the task):**
+**Shipped schema revision 7:**
 
 ```sql
 ALTER TABLE messages ADD COLUMN rfc_message_id TEXT;
@@ -218,7 +224,7 @@ Verify green; fresh backfill demonstrated end to end; autocomplete data queryabl
 ### Design (decided)
 
 - **Overlay panel above the current view** (F6: context is never lost) — a bottom-right docked panel in the Dispatch language, not a modal takeover: the list/reader stays visible and interactive scroll-wise behind it; app keyboard verbs suspend while the composer has focus (the existing text-entry guard already does most of this).
-- **The local `outbox` row is the draft's source of truth from the moment the composer opens** (state `composing`, T16's table — T14 lands the table's *draft* subset if it merges first; coordinate migration order with T16, they must not share one migration). Create the row on open, before any typing, so there is always something to recover into.
+- **The local `outbox` row is the draft's source of truth from the moment the composer opens** (state `composing`). T14 adds the draft fields to the current schema snapshot; T16 completes the same table and bumps the schema version again. Create the row on open, before any typing, so there is always something to recover into.
 - **Autosave needs a bounded checkpoint, not just an idle debounce** (review finding, P1). A trailing 1s-idle debounce does *not* bound loss to one second: every keystroke resets the timer, so someone typing continuously for three minutes has written nothing to disk, and a force-quit loses the whole draft — the exact scenario F6's crash-safety criterion is about. Pair the 1s idle trigger with a **hard max-wait (5s) while dirty**, so continuous typing still checkpoints on a fixed interval. Note the test trap the same finding names: a relaunch test that pauses before quitting silently passes, because the pause fires the idle save. The regression test must type *continuously* and relaunch with no idle gap.
 - **Gmail Drafts mirror is best-effort and asynchronous:** debounced (~3s idle) `drafts.create`/`drafts.update` through the provider, storing `gmail_draft_id`. Mirror failures never block typing or local autosave; offline composing is fully supported (mirror catches up when the executor comes back — the mirror op rides the existing action queue as a new intent kind, so it inherits retry/offline semantics).
 - **Editor: Lexical** (owner decision, 2026-08-13 — `npm i lexical @lexical/react @lexical/rich-text @lexical/list @lexical/link @lexical/html`). Rejected alternative: raw `contenteditable` + `document.execCommand`. The deciding argument is **M4, not M2** — F8 snippets must expand as a *single* undoable step with `{cursor}` placement, and F17 streams an AI draft into a live editable box. Both are programmatic edits that need correct undo grouping and selection preservation, which a document model provides and `execCommand` (also deprecated) does not. Paste normalization from other mail clients is the second reason. The usual headline reason — cross-browser normalization — is explicitly *not* why we're adopting it: Electron pins one Chromium (D3).
@@ -303,7 +309,7 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 
 ### Implementation guide
 
-**Migration v8:**
+**Schema addition** (update the current snapshot and bump its version):
 
 ```sql
 CREATE TABLE outbox (
@@ -331,8 +337,6 @@ CREATE TABLE outbox (
 );
 CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
 ```
-
-(If T14 merged first with the draft-subset table, this becomes the additive completion — coordinate; the two PRs must not share a migration.)
 
 - **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` (thin, e2e-covered).
 - Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.
@@ -427,7 +431,7 @@ The closing pass that turns "features exist" into "this is my mail client":
 2. **Composer latency profile:** measure keystroke-to-paint under a 2k store with the profiler, not just the CI ceiling; fix anything over ~8ms median so the 16ms budget has headroom.
 3. **Gmail client weighted token-bucket limiter** (the reworded M1 TODO): pace requests by their per-method quota cost and the OAuth project's actual quota, reserving capacity for sends, queued user actions, and history polling before background backfill. Google's quota model changed in May 2026, so do not fossilize the old “200 units/user/100s” example; keep costs/configuration explicit and link the [authoritative Gmail quota table](https://developers.google.com/workspace/gmail/api/reference/quota). Unit-test scheduling with a fake clock; exponential backoff remains the fallback, not the normal pacing mechanism.
 4. **Bootstrap/backfill evidence:** instrument time to first readable page separately from full index completion. Record per-stage estimated total, processed count, effective threads/minute, and quota-wait time on a typical real mailbox and the 10k seed. M2 may still display the existing stage UI, but the measurements and protocol fields must be ready for M3's background-process move; “N to zero” remains explicitly the unread count, never progress.
-5. **Dogfood checklist executed and recorded** (the M2 exit evidence): a full week of real use by at least one of us, plus the F6 acceptance list — composer <50ms open, imperceptible typing, force-quit recovery, undo-send reliability, zero duplicate sends across the week, attachment round-trips — and the M1 leftovers if still open (airplane-mode drain, notification click-through).
+5. **Dogfood checklist executed and recorded** (the M2 exit evidence): a full week of real use by at least one of us, plus the F6 acceptance list — composer <50ms open, imperceptible typing, force-quit recovery, undo-send reliability, zero duplicate sends across the week, attachment round-trips — and the notification click-through smoke if it is still open.
 6. **Docs:** SPEC status + milestone table updated (M2 shipped state, any new accepted deviations), AGENTS pipeline notes if the harness changed, README "current state" paragraph.
 
 ### Done when — the M2 exit checklist
@@ -491,6 +495,6 @@ restarts preserve sync, action-queue, contact, and exactly-once outbox invariant
 | Attachments mirror to Gmail only at send time | Autosave-frequency × megabytes would burn quota for convenience | If dogfood shows draft-handoff-to-phone matters |
 | Gmail draft id (always send via `drafts.send`) as the exactly-once handle; client Message-ID demoted to a secondary check | Draft existence is immediately consistent and `drafts.send` consumes it atomically, so recovery is decisive. Search-based verification is not: Gmail's index lags sends and it honors no client idempotency key, so a single negative result cannot authorize a resend | v2 backend could own send |
 | On unresolvable send ambiguity, park in `needs-review` and tell the user rather than resending | F6 makes "no duplicate send" an acceptance criterion; an unsent message is user-recoverable, a duplicate is not | If dogfood shows the state never occurs in practice |
-| Replies to mail cached before the headers landed may lack `References` (threadId still set) | Server-side threading intact; external-client threading degrades rarely. No pre-v7 store exists, so this is confined to rows a future schema change might strand | Revisit if the app ships before M2 closes |
+| Replies to mail cached before the headers landed may lack `References` (threadId still set) | Server-side threading remains intact; during development, reset and re-sync instead of maintaining a header backfill | Revisit before the app has external users |
 | One live composer at a time | Single window, single account; multiple drafts arrive with M3's Drafts view | M3 |
 | Utility-process move deferred to M3 | Don't move the process boundary under the outbox build | M3 first hardening task |

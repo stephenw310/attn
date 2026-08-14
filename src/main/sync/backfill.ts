@@ -67,8 +67,8 @@ export async function runInboxBackfill(
     ensureAccount(db, accountId, profile.emailAddress)
 
     const previous = db
-      .prepare('SELECT backfill_cursor, updated_at FROM sync_state WHERE account_id = ?')
-      .get(accountId) as { backfill_cursor: string | null; updated_at: number | null } | undefined
+      .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
+      .get(accountId) as { backfill_cursor: string | null } | undefined
     const plan = planBackfillStart(previous?.backfill_cursor, options.recovery)
     if (plan.kind === 'skip') return { threadCount: 0, inboxThreadIds: [] }
 
@@ -76,12 +76,11 @@ export async function runInboxBackfill(
     if (plan.initialize) {
       // Record the gapless history checkpoint before the first metadata page.
       db.prepare(
-        `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor, updated_at)
-         VALUES (?, ?, 'metadata', 0)
+        `INSERT INTO sync_state (account_id, last_history_id, backfill_cursor)
+         VALUES (?, ?, 'metadata')
          ON CONFLICT(account_id) DO UPDATE SET
            last_history_id = excluded.last_history_id,
-           backfill_cursor = excluded.backfill_cursor,
-           updated_at = excluded.updated_at`
+           backfill_cursor = excluded.backfill_cursor`
       ).run(accountId, profile.historyId)
     }
 
@@ -171,11 +170,7 @@ export async function runInboxBackfill(
       pageToken = page.nextPageToken
     } while (pageToken)
 
-    db.prepare('UPDATE sync_state SET backfill_cursor = ?, updated_at = ? WHERE account_id = ?').run(
-      'done',
-      Date.now(),
-      accountId
-    )
+    db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run('done', accountId)
     return { threadCount: threadsDone, inboxThreadIds: [...inboxThreadIds] }
   } catch (error) {
     callbacks.onError(error)
@@ -238,22 +233,18 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
 }
 
 function parseCursor(raw: string | null | undefined): ParsedCursor {
-  if (!raw || raw === 'start' || raw === 'metadata') return { phase: 'metadata' }
+  if (!raw || raw === 'metadata') return { phase: 'metadata' }
   if (raw === 'bodies') return { phase: 'bodies' }
   if (raw === 'sent') return { phase: 'sent' }
   if (raw === 'reconcile') return { phase: 'reconcile' }
   if (raw.startsWith('metadata:')) return { phase: 'metadata', pageToken: raw.slice('metadata:'.length) }
   if (raw.startsWith('bodies:')) return { phase: 'bodies', pageToken: raw.slice('bodies:'.length) }
   if (raw.startsWith('sent:')) return { phase: 'sent', pageToken: raw.slice('sent:'.length) }
-  // Compatibility with the first T7 cursor format, which stored a bare token.
-  return { phase: 'metadata', pageToken: raw }
+  throw new Error(`Invalid backfill cursor: ${raw}`)
 }
 
 function checkpoint(db: Db, accountId: string, cursor: string): void {
-  db.prepare('UPDATE sync_state SET backfill_cursor = ?, updated_at = 0 WHERE account_id = ?').run(
-    cursor,
-    accountId
-  )
+  db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run(cursor, accountId)
 }
 
 function isExpiredPageToken(error: unknown): boolean {

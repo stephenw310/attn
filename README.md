@@ -2,7 +2,7 @@
 
 Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
 
-**Current state: M1 complete pending two manual smokes; M2 (mail out) is planned and ready to start.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. The only open M1 exit items are the real-Gmail airplane-mode drain and the real-OS notification click-through (see the M1 plan); M2 work may begin per its plan.
+**Current state: M1 feature work is complete; M2 (mail out) is underway.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. M2's renderer decomposition, main-process seams, and sent-mail/contact foundation have shipped; the composer is next. The only open M1 evidence item is a real-OS notification click-through smoke (see the M1 plan).
 
 - **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.13)
 - **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist

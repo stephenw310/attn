@@ -68,8 +68,8 @@ export class SnoozeScheduler {
        WHERE account_id = ? AND thread_id = ? AND kind = 'snooze' AND state = 'pending'`
     )
     const enqueue = this.db.prepare(
-      `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, created_at)
-       VALUES (?, 'modifyLabels', ?, ?, 'pending', ?)`
+      `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
+       VALUES (?, 'modifyLabels', ?, ?, 'pending')`
     )
     let returned = 0
     this.db.transaction(() => {
@@ -77,7 +77,7 @@ export class SnoozeScheduler {
         if (markReturned.run(accountId, threadId).changes === 0) continue
         returned++
         applyThreadDelta(this.db, accountId, { threadId, add: ['INBOX'], remove: [] })
-        enqueue.run(accountId, threadId, JSON.stringify({ add: ['INBOX'], remove: [] }), Date.now())
+        enqueue.run(accountId, threadId, JSON.stringify({ add: ['INBOX'], remove: [] }))
       }
     })()
     return returned
