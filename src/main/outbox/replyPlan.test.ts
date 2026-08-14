@@ -217,6 +217,18 @@ describe('quote HTML sanitizer', () => {
     expect(plan.quoteHtml).not.toMatch(/<style|display\s*:\s*none/i)
   })
 
+  it('drops document metadata that a full-page mail body carries into the quote', () => {
+    const source = message({
+      bodyText: 'Real body',
+      bodyHtml: '<html><head><title>Newsletter Title</title></head><body><p>Real body</p></body></html>'
+    })
+
+    const plan = planReply('reply', conversation([source]), SELF)
+
+    expect(plan.quoteHtml).toContain('<blockquote><p>Real body</p></blockquote>')
+    expect(plan.quoteHtml).not.toMatch(/<title|Newsletter Title/i)
+  })
+
   it('reads href from the parsed attribute instead of attribute text', () => {
     expect(
       sanitizeQuoteHtml('<a title="see href=https://evil.example" href="https://real.example">click</a>')
