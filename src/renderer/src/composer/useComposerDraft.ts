@@ -15,7 +15,7 @@ function toSaveInput(draft: Draft): DraftSaveInput {
 }
 
 export interface ComposerDraftController {
-  saveStatus: 'saved' | 'saving'
+  saveStatus: 'saved' | 'unsaved' | 'saving' | 'error'
   updateFields: (patch: Partial<MutableDraftFields>) => void
   captureEditor: (editorState: EditorState, editor: LexicalEditor, tags: Set<string>) => void
   saveNow: () => Promise<void>
@@ -24,13 +24,14 @@ export interface ComposerDraftController {
 export function useComposerDraft(draft: Draft): ComposerDraftController {
   const draftRef = useRef<DraftSaveInput>(toSaveInput(draft))
   const editorRef = useRef<{ state: EditorState; editor: LexicalEditor } | null>(null)
-  const dirtyRef = useRef(false)
+  const localRevisionRef = useRef(0)
+  const savedRevisionRef = useRef(0)
   const idleTimerRef = useRef<number | null>(null)
   const maxTimerRef = useRef<number | null>(null)
   const mirrorTimerRef = useRef<number | null>(null)
-  const saveChainRef = useRef<Promise<void>>(Promise.resolve())
+  const commitPromiseRef = useRef<Promise<void> | null>(null)
   const commitRef = useRef<() => Promise<void>>(async () => {})
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved')
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'unsaved' | 'saving' | 'error'>('saved')
 
   const clearTimers = useCallback(() => {
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current)
@@ -39,34 +40,62 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
     maxTimerRef.current = null
   }, [])
 
-  const commit = useCallback(async () => {
-    if (!dirtyRef.current || !window.attn) return saveChainRef.current
-    dirtyRef.current = false
+  const armSaveTimers = useCallback((resetIdle: boolean) => {
+    if (resetIdle && idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current)
+    if (idleTimerRef.current === null || resetIdle) {
+      idleTimerRef.current = window.setTimeout(() => {
+        idleTimerRef.current = null
+        void commitRef.current().catch(() => {})
+      }, IDLE_SAVE_MS)
+    }
+    if (maxTimerRef.current === null) {
+      maxTimerRef.current = window.setTimeout(() => {
+        maxTimerRef.current = null
+        void commitRef.current().catch(() => {})
+      }, MAX_CHECKPOINT_MS)
+    }
+  }, [])
+
+  const commit = useCallback((): Promise<void> => {
+    if (commitPromiseRef.current) {
+      return commitPromiseRef.current.then(() => commitRef.current())
+    }
+    if (savedRevisionRef.current >= localRevisionRef.current || !window.attn) {
+      return Promise.resolve()
+    }
+
     clearTimers()
     const editor = editorRef.current
     if (editor) Object.assign(draftRef.current, serializeEditorState(editor.state, editor.editor))
+    const revision = localRevisionRef.current
     const snapshot = structuredClone(draftRef.current)
     setSaveStatus('saving')
-    saveChainRef.current = saveChainRef.current
-      .catch(() => {})
-      .then(async () => {
-        await window.attn?.draft.save(snapshot)
+
+    const attempt = window.attn.draft
+      .save(snapshot)
+      .then(() => {
+        savedRevisionRef.current = Math.max(savedRevisionRef.current, revision)
+        setSaveStatus(savedRevisionRef.current >= localRevisionRef.current ? 'saved' : 'unsaved')
       })
-      .finally(() => setSaveStatus('saved'))
-    return saveChainRef.current
-  }, [clearTimers])
+      .catch((error: unknown) => {
+        // Keep the same revision dirty and restore both checkpoints. The caller
+        // still receives the rejection, while background autosave retries it.
+        setSaveStatus('error')
+        armSaveTimers(false)
+        throw error
+      })
+      .finally(() => {
+        commitPromiseRef.current = null
+      })
+    commitPromiseRef.current = attempt
+    return attempt
+  }, [armSaveTimers, clearTimers])
   commitRef.current = commit
 
   const markDirty = useCallback(() => {
-    dirtyRef.current = true
-    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current)
-    idleTimerRef.current = window.setTimeout(() => void commitRef.current().catch(() => {}), IDLE_SAVE_MS)
-    if (maxTimerRef.current === null) {
-      maxTimerRef.current = window.setTimeout(
-        () => void commitRef.current().catch(() => {}),
-        MAX_CHECKPOINT_MS
-      )
-    }
+    localRevisionRef.current++
+    setSaveStatus('unsaved')
+    armSaveTimers(true)
     if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
     mirrorTimerRef.current = window.setTimeout(() => {
       mirrorTimerRef.current = null
@@ -75,7 +104,7 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
         .then(() => window.attn?.draft.mirror(draft.id))
         .catch(() => {})
     }, MIRROR_IDLE_MS)
-  }, [draft.id])
+  }, [armSaveTimers, draft.id])
 
   const updateFields = useCallback(
     (patch: Partial<MutableDraftFields>) => {

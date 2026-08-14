@@ -86,6 +86,12 @@ export class ComposerPage {
     await expect.poll(() => this.readPending()).toBe(count)
   }
 
+  async expectSaved(): Promise<void> {
+    const status = this.page.getByTestId('composer-save-status')
+    await expect(status).not.toHaveAttribute('data-save-status', 'saved')
+    await expect(status).toHaveAttribute('data-save-status', 'saved')
+  }
+
   private async readPending(): Promise<number> {
     // `evaluateAll` neither waits nor throws on an empty match, which is what
     // makes it safe inside a poll: the retry lives in the assertion above.

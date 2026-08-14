@@ -1,5 +1,6 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
+import { isValidEmail } from '../../shared/address'
 import {
   CONTACT_CANDIDATE_LIMIT,
   CONTACT_SEARCH_LIMIT,
@@ -257,12 +258,17 @@ export function searchContacts(
     | undefined
   const selfEmail = account?.email ?? accountId
 
-  const rows = needle ? contactPrefixMatches(db, accountId, needle) : []
+  const rows = (needle ? contactPrefixMatches(db, accountId, needle) : []).filter((row) =>
+    isValidEmail(row.email)
+  )
   const ranked = rankContacts(toStats(rows), query, selfEmail, now)
   const candidates =
     ranked.length >= CONTACT_SEARCH_LIMIT
       ? rows
-      : mergeContacts(rows, contactInfixMatches(db, accountId, needle))
+      : mergeContacts(
+          rows,
+          contactInfixMatches(db, accountId, needle).filter((row) => isValidEmail(row.email))
+        )
 
   const names = new Map(candidates.map((row) => [row.email, row.name]))
   return rankContacts(toStats(candidates), query, selfEmail, now).map((contact) => ({

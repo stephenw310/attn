@@ -26,6 +26,7 @@ import type { GmailClient } from './gmail/client'
 import type { PendingFocus } from './notify'
 import { takePendingFocus } from './notify'
 import { discardDraft, getDraft, requestDraftMirror, saveDraft, takeRecoveredDraft } from './outbox/drafts'
+import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import type { SyncController } from './syncController'
 
@@ -56,12 +57,14 @@ export interface IpcContext {
   makeClient: () => GmailClient | null
   isSeeded: () => boolean
   executor: () => ActionExecutor | null
+  draftMirrorExecutor: () => DraftMirrorExecutor | null
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
   broadcastMailChanged: () => void
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
   waitForConversation: (threadId: string) => Promise<void>
+  consumeTestDraftSaveFailure: () => boolean
   testUserData: boolean
 }
 
@@ -164,8 +167,8 @@ export function registerIpc(context: IpcContext): void {
   })
   handle(IPC_CHANNELS.draftSave, (_event, draft) => {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')
+    if (context.consumeTestDraftSaveFailure()) throw new Error('injected draft save failure')
     const id = saveDraft(context.db, requireAccount(context), draft)
-    context.broadcastMailChanged()
     return { id }
   })
   handle(IPC_CHANNELS.draftGet, (_event, id) => {
@@ -176,13 +179,14 @@ export function registerIpc(context: IpcContext): void {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
     discardDraft(context.db, requireAccount(context), id)
     context.broadcastMailChanged()
+    void context.draftMirrorExecutor()?.trigger()
     return undefined
   })
   handle(IPC_CHANNELS.draftMirror, (_event, id) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
-    requestDraftMirror(context.db, requireAccount(context), id)
-    context.broadcastMailChanged()
-    void context.executor()?.trigger()
+    if (requestDraftMirror(context.db, requireAccount(context), id)) {
+      void context.draftMirrorExecutor()?.trigger()
+    }
     return undefined
   })
   handle(IPC_CHANNELS.draftTakeRecovered, () => takeRecoveredDraft(context.db, requireAccount(context)))

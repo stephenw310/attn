@@ -1,5 +1,4 @@
 import { $generateNodesFromDOM } from '@lexical/html'
-import { TOGGLE_LINK_COMMAND } from '@lexical/link'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
@@ -22,9 +21,9 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
-import { createCommand, registerCommands } from '../commands'
+import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
-import { EditorToolbar, promptForLink } from './EditorToolbar'
+import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
 import { RecipientField } from './RecipientField'
 import { useComposerDraft } from './useComposerDraft'
@@ -82,11 +81,6 @@ function ComposerCommandPlugin({ onClose, onUnavailableSend }: CommandPluginProp
       if ($isRangeSelection(selection)) $setBlocksType(selection, () => $createQuoteNode())
     })
   }, [editor])
-  const link = useCallback(() => {
-    const url = promptForLink()
-    if (url) editor.dispatchCommand(TOGGLE_LINK_COMMAND, url)
-  }, [editor])
-
   useLayoutEffect(
     () =>
       registerCommands([
@@ -101,10 +95,9 @@ function ComposerCommandPlugin({ onClose, onUnavailableSend }: CommandPluginProp
         createCommand('composer.numbering', () =>
           editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)
         ),
-        createCommand('composer.quote', quote),
-        createCommand('composer.link', link)
+        createCommand('composer.quote', quote)
       ]),
-    [editor, link, onClose, onUnavailableSend, quote]
+    [editor, onClose, onUnavailableSend, quote]
   )
   return null
 }
@@ -127,12 +120,30 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
         onClose()
         onToast('Draft saved')
       })
-      .catch(() => setClosing(false))
+      .catch(() => {
+        setClosing(false)
+        onToast('Draft could not be saved — retrying')
+      })
   }, [closing, controller, onClose, onToast])
 
   const unavailableSend = useCallback(() => {
     onToast('Send is not available yet')
   }, [onToast])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const command = matchComposerKey(event)
+      if (!command) return
+      event.preventDefault()
+      event.stopPropagation()
+      command.run()
+    }
+    // The composer is full-window, but the persistent account control remains
+    // outside its subtree. A bubble listener preserves Escape after that control
+    // has handled and closed its own transient menu.
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   const discard = (): void => {
     if (closing || !window.attn) return
@@ -152,15 +163,13 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
       data-testid="composer"
       aria-label="New message"
       onKeyDownCapture={(event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          event.stopPropagation()
-          closeAndSave()
-        } else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-          event.preventDefault()
-          event.stopPropagation()
-          unavailableSend()
-        }
+        const target = event.target as HTMLElement | null
+        if (event.key === 'Escape' && target?.closest('[data-composer-transient]')) return
+        const command = matchComposerKey(event.nativeEvent)
+        if (!command) return
+        event.preventDefault()
+        event.stopPropagation()
+        command.run()
       }}
     >
       <header className="flex min-h-13 shrink-0 items-center gap-4 border-b border-edge px-6 py-2.5">
@@ -176,8 +185,18 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
         <div className="flex min-w-0 items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-accent" />
           <h1 className="text-base font-bold tracking-tight text-ink">New message</h1>
-          <span className="text-[11px] text-ink-faint">
-            {controller.saveStatus === 'saving' ? 'Saving…' : 'Saved locally'}
+          <span
+            className="text-[11px] text-ink-faint"
+            data-testid="composer-save-status"
+            data-save-status={controller.saveStatus}
+          >
+            {controller.saveStatus === 'saving'
+              ? 'Saving…'
+              : controller.saveStatus === 'unsaved'
+                ? 'Unsaved changes'
+                : controller.saveStatus === 'error'
+                  ? 'Save failed — retrying'
+                  : 'Saved locally'}
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">

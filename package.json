@@ -42,6 +42,13 @@
     "@electron/asar": "^3.4.1",
     "@electron/rebuild": "^4.2.0",
     "@fontsource-variable/inter": "^5.3.0",
+    "@lexical/headless": "^0.49.0",
+    "@lexical/html": "^0.49.0",
+    "@lexical/link": "^0.49.0",
+    "@lexical/list": "^0.49.0",
+    "@lexical/react": "^0.49.0",
+    "@lexical/rich-text": "^0.49.0",
+    "@lexical/selection": "^0.49.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/better-sqlite3": "^9.6.0",
@@ -54,7 +61,9 @@
     "electron": "^43.3.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "jsdom": "^26.1.0",
     "lefthook": "^2.1.10",
+    "lexical": "^0.49.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tailwindcss": "^4.3.3",
@@ -63,14 +72,6 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "@lexical/headless": "^0.49.0",
-    "@lexical/html": "^0.49.0",
-    "@lexical/link": "^0.49.0",
-    "@lexical/list": "^0.49.0",
-    "@lexical/react": "^0.49.0",
-    "@lexical/rich-text": "^0.49.0",
-    "@lexical/selection": "^0.49.0",
-    "better-sqlite3": "^13.0.3",
-    "lexical": "^0.49.0"
+    "better-sqlite3": "^13.0.3"
   }
 }

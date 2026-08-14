@@ -1,6 +1,5 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
-import { mirrorDraft } from '../outbox/drafts'
 import type { MailActionProvider } from '../sync/provider'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { executeIntent, isPermanentActionError, type QueueIntent, retryDelayMs } from './execute'
@@ -8,7 +7,7 @@ import { decodeLabelDelta } from './queuePayload'
 
 interface QueueRow {
   id: number
-  kind: QueueIntent['kind'] | 'mirrorDraft'
+  kind: QueueIntent['kind']
   thread_id: string
   payload: string
   attempts: number
@@ -63,21 +62,17 @@ export class ActionExecutor {
         if (!row) break
         this.db.prepare("UPDATE action_queue SET state = 'inflight' WHERE id = ?").run(row.id)
         try {
-          if (row.kind === 'mirrorDraft') {
-            await mirrorDraft(this.db, accountId, row.thread_id, provider)
-          } else {
-            const payload = decodeLabelDelta(row.payload)
-            const intent: QueueIntent =
-              row.kind === 'modifyLabels'
-                ? {
-                    kind: row.kind,
-                    threadId: row.thread_id,
-                    add: payload.add,
-                    remove: payload.remove
-                  }
-                : { kind: row.kind, threadId: row.thread_id }
-            await executeIntent(provider, intent)
-          }
+          const payload = decodeLabelDelta(row.payload)
+          const intent: QueueIntent =
+            row.kind === 'modifyLabels'
+              ? {
+                  kind: row.kind,
+                  threadId: row.thread_id,
+                  add: payload.add,
+                  remove: payload.remove
+                }
+              : { kind: row.kind, threadId: row.thread_id }
+          await executeIntent(provider, intent)
           if (this.stopping) break
           this.db.prepare('DELETE FROM action_queue WHERE id = ?').run(row.id)
           this.notify()

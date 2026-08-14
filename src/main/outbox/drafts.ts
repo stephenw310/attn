@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import type { MailAddress } from '../../shared/address'
 import type { Draft, DraftAttachment, DraftSaveInput } from '../../shared/drafts'
 import type { Db } from '../db'
-import type { MailActionProvider } from '../sync/provider'
 
 interface DraftRow {
   id: string
@@ -135,7 +134,7 @@ export function saveDraft(db: Db, accountId: string, input: DraftSaveInput, now 
   return id
 }
 
-export function requestDraftMirror(db: Db, accountId: string, draftId: string): void {
+export function requestDraftMirror(db: Db, accountId: string, draftId: string): boolean {
   const draft = db
     .prepare(
       `SELECT to_json, cc_json, bcc_json, subject, body_text, attachments_json
@@ -162,93 +161,16 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
       references: []
     })
   ) {
-    return
+    return false
   }
-  db.prepare(
-    `DELETE FROM action_queue
-     WHERE account_id = ? AND kind = 'mirrorDraft' AND thread_id = ? AND state != 'inflight'`
-  ).run(accountId, draftId)
-  db.prepare(
-    `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
-     VALUES (?, 'mirrorDraft', ?, '{}', 'pending')`
-  ).run(accountId, draftId)
+  return true
 }
 
 export function discardDraft(db: Db, accountId: string, id: string): void {
-  db.transaction(() => {
-    db.prepare(
-      "DELETE FROM action_queue WHERE account_id = ? AND kind = 'mirrorDraft' AND thread_id = ?"
-    ).run(accountId, id)
-    db.prepare("DELETE FROM outbox WHERE account_id = ? AND id = ? AND state = 'composing'").run(
-      accountId,
-      id
-    )
-  })()
-}
-
-interface DraftMirrorRow {
-  gmail_draft_id: string | null
-  to_json: string
-  cc_json: string
-  bcc_json: string
-  subject: string
-  body_html: string
-  body_text: string
-  local_revision: number
-}
-
-/** Execute one best-effort Gmail Drafts checkpoint; send is intentionally absent. */
-export async function mirrorDraft(
-  db: Db,
-  accountId: string,
-  draftId: string,
-  provider: MailActionProvider
-): Promise<void> {
-  if (!provider.saveDraft) throw new Error('draft mirroring is unavailable')
-  const row = db
-    .prepare(
-      `SELECT gmail_draft_id, to_json, cc_json, bcc_json, subject, body_html, body_text,
-              local_revision
-       FROM outbox WHERE account_id = ? AND id = ? AND state = 'composing'`
-    )
-    .get(accountId, draftId) as DraftMirrorRow | undefined
-  if (!row) return
-
-  const gmailDraftId = await provider.saveDraft({
-    id: row.gmail_draft_id,
-    raw: encodeDraftMessage(row)
-  })
   db.prepare(
-    `UPDATE outbox SET gmail_draft_id = ?, mirror_revision = ?
+    `UPDATE outbox SET state = 'discarding', to_json = '[]', cc_json = '[]', bcc_json = '[]',
+       subject = '', body_html = '', body_text = '', attachments_json = '[]', thread_id = NULL,
+       in_reply_to = NULL, references_json = '[]', updated_at = ?
      WHERE account_id = ? AND id = ? AND state = 'composing'`
-  ).run(gmailDraftId, row.local_revision, accountId, draftId)
-}
-
-function encodeDraftMessage(row: DraftMirrorRow): string {
-  const header = (name: string, value: string): string =>
-    value ? `${name}: ${value.replace(/[\r\n]+/g, ' ')}` : ''
-  const addresses = (value: string): string =>
-    parseJson<MailAddress[]>(value)
-      .map((address) =>
-        address.name ? `"${address.name.replace(/["\r\n]/g, '')}" <${address.email}>` : address.email
-      )
-      .join(', ')
-  const body = row.body_html || `<p>${escapeHtml(row.body_text).replace(/\n/g, '<br>')}</p>`
-  const raw = [
-    header('To', addresses(row.to_json)),
-    header('Cc', addresses(row.cc_json)),
-    header('Bcc', addresses(row.bcc_json)),
-    header('Subject', row.subject),
-    'MIME-Version: 1.0',
-    'Content-Type: text/html; charset=UTF-8',
-    '',
-    body
-  ]
-    .filter((line, index) => line || index >= 6)
-    .join('\r\n')
-  return Buffer.from(raw).toString('base64url')
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  ).run(Date.now(), accountId, id)
 }

@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 
@@ -39,6 +40,13 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(composer.chips()).toHaveCount(1)
   await toInput.fill('')
 
+  expect(await page.evaluate(() => window.attn.contacts.search('support'))).toEqual([])
+  await toInput.fill('support')
+  await expect(page.getByTestId('autocomplete-option')).toHaveCount(0)
+  await toInput.press('Enter')
+  await expect(toInput).toHaveAttribute('aria-invalid', 'true')
+  await toInput.fill('')
+
   await composer.subject.fill('A calmer inbox')
   await composer.editor.click()
   await page.keyboard.press('ControlOrMeta+b')
@@ -62,7 +70,7 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(page.getByTestId('thread-list')).toBeVisible()
   expect(await selectedIndex(page)).toBe(before)
   await expect(page.getByTestId('toast')).toContainText('Draft saved')
-  await composer.expectPending(1)
+  await composer.expectPending(0)
 
   // `c` reopens the single live composing row rather than creating another.
   await composer.openNew()
@@ -72,6 +80,24 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await showCopies.click()
   await expect(composer.recipientField('cc')).toBeVisible()
   await expect(composer.recipientField('bcc')).toBeVisible()
+})
+
+test('adds links from the toolbar and the registered composer shortcut', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.typeBody('Visit Attn')
+  await composer.editor.selectText()
+
+  await page.getByTestId('composer-link').click()
+  await page.getByTestId('composer-link-url').fill('attn.test')
+  await page.getByTestId('composer-link-url').press('Enter')
+  await expect(composer.editor.locator('a').first()).toHaveAttribute('href', 'https://attn.test')
+
+  await page.keyboard.press('ControlOrMeta+Shift+k')
+  await expect(page.getByTestId('composer-link-popover')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer-link-popover')).toHaveCount(0)
+  await expect(composer.root).toBeVisible()
 })
 
 test('restores the same full-window reader after composing', async ({ page }) => {
@@ -86,6 +112,10 @@ test('restores the same full-window reader after composing', async ({ page }) =>
   await expect(conversation).toBeHidden()
   await expect(page.getByTestId('footer-shortcuts')).toHaveCount(0)
 
+  const account = page.getByTestId('account-menu').getByRole('button').first()
+  await account.click()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
   await expect(conversation).toBeVisible()
@@ -102,7 +132,7 @@ test('recovers an idle-autosaved draft after a relaunch', async ({ boot, page })
   await composer.typeBody('This draft survives a renderer and main-process restart.')
 
   // Let the trailing one-second checkpoint finish before simulating the crash.
-  await composer.expectPending(1)
+  await composer.expectSaved()
   ;({ page } = await boot.relaunch())
   composer = new ComposerPage(page)
 
@@ -126,4 +156,33 @@ test('checkpoints continuously typed content without waiting for an idle gap', a
 
   await expect(composer.root).toBeVisible()
   await expect(composer.editor).toContainText(continuous.slice(0, 40))
+})
+
+test('retries a failed autosave without clearing the dirty checkpoint', async ({ app, boot, page }) => {
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}), TEST_CHANNELS.failNextDraftSave)
+
+  await composer.subject.fill('Retry this checkpoint')
+  await expect(page.getByTestId('composer-save-status')).toHaveAttribute('data-save-status', 'error')
+  await composer.expectSaved()
+
+  ;({ page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await expect(composer.subject).toHaveValue('Retry this checkpoint')
+})
+
+test('discard removes the local recovery surface', async ({ boot, page }) => {
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Sensitive local draft')
+  await composer.typeBody('Do not recover this text.')
+  await composer.expectSaved()
+  await page.getByTestId('composer-discard').click()
+  await expect(composer.root).toHaveCount(0)
+
+  ;({ page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await expect(composer.root).toHaveCount(0)
 })

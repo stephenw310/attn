@@ -1,18 +1,6 @@
 import { $generateHtmlFromNodes } from '@lexical/html'
-import createDOMPurify, { type WindowLike } from 'dompurify'
 import type { EditorState, LexicalEditor, SerializedEditorState, SerializedLexicalNode } from 'lexical'
-
-const ALLOWED_TAGS = ['p', 'div', 'br', 'b', 'strong', 'i', 'em', 'u', 'a', 'ul', 'ol', 'li', 'blockquote']
-
-export function sanitizeOutgoingHtml(html: string, windowLike: WindowLike): string {
-  return createDOMPurify(windowLike).sanitize(html, {
-    ALLOWED_TAGS,
-    ALLOWED_ATTR: ['href'],
-    ALLOW_ARIA_ATTR: false,
-    ALLOW_DATA_ATTR: false,
-    ALLOWED_URI_REGEXP: /^(?:https?:|mailto:)/i
-  })
-}
+import { sanitizeOutgoingHtml } from './sanitize'
 
 interface SerializedElement extends SerializedLexicalNode {
   children?: SerializedLexicalNode[]
@@ -65,7 +53,7 @@ export function serializeEditorState(
   let bodyHtml = ''
   editorState.read(
     () => {
-      bodyHtml = sanitizeOutgoingHtml($generateHtmlFromNodes(editor), window)
+      bodyHtml = sanitizeOutgoingHtml($generateHtmlFromNodes(editor))
     },
     { editor }
   )

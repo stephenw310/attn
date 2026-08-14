@@ -156,6 +156,21 @@ export function matchKey(event: KeyboardEvent, context: 'list' | 'reader'): Comm
   )
 }
 
+/** Modifier dispatch stays scoped to the mounted composer so mail verbs cannot fire in text fields. */
+export function matchComposerKey(event: KeyboardEvent): Command | null {
+  if (event.altKey || event.key === 'Tab') return null
+  const modifiers = [event.metaKey || event.ctrlKey ? 'mod' : '', event.shiftKey ? 'shift' : ''].filter(
+    Boolean
+  )
+  const shortcut = [...modifiers, event.key.toLowerCase()].join('+')
+  return (
+    commands.find(
+      (command) =>
+        command.context === 'composer' && command.shortcut?.toLowerCase() === shortcut.toLowerCase()
+    ) ?? null
+  )
+}
+
 const ARROW_STEP = 120
 
 // Reader scrolling is deliberately a local interaction primitive rather than a

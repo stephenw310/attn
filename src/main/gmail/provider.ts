@@ -48,6 +48,10 @@ export class GmailMailProvider implements MailProvider {
     return result.id
   }
 
+  async deleteDraft(id: string): Promise<void> {
+    await this.client.delete(`/drafts/${encodeURIComponent(id)}`)
+  }
+
   getProfile(): Promise<ProviderProfile> {
     return this.client.get('/profile')
   }

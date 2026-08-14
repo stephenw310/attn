@@ -55,7 +55,8 @@ export const TEST_CHANNELS = {
   reloadSeed: 'attn:test:reloadSeed',
   deleteThread: 'attn:test:deleteThread',
   delayConversation: 'attn:test:delayConversation',
-  updateMessageBody: 'attn:test:updateMessageBody'
+  updateMessageBody: 'attn:test:updateMessageBody',
+  failNextDraftSave: 'attn:test:failNextDraftSave'
 } as const
 
 export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]

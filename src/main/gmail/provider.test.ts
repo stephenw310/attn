@@ -35,4 +35,12 @@ describe('GmailMailProvider.saveDraft', () => {
     await expect(provider.saveDraft({ id: 'gmail-draft-1', raw: 'bmV4dA' })).resolves.toBe('gmail-draft-1')
     expect(put).toHaveBeenCalledWith('/drafts/gmail-draft-1', { message: { raw: 'bmV4dA' } })
   })
+
+  it('deletes a mirrored Gmail draft without exposing a send endpoint', async () => {
+    const deleteRequest = vi.fn(async () => {})
+    const provider = new GmailMailProvider({ delete: deleteRequest } as unknown as GmailClient)
+
+    await expect(provider.deleteDraft('gmail/draft 1')).resolves.toBeUndefined()
+    expect(deleteRequest).toHaveBeenCalledWith('/drafts/gmail%2Fdraft%201')
+  })
 })

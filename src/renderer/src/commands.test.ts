@@ -6,6 +6,7 @@ import {
   findCommandByShortcut,
   isChordPrefix,
   listCommands,
+  matchComposerKey,
   matchKey,
   readingScrollDelta,
   registerCommands
@@ -140,6 +141,19 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('j', { metaKey: true }), 'reader')).toBeNull()
     expect(matchKey(key('j', { ctrlKey: true }), 'list')).toBeNull()
     expect(matchKey(key('j', { altKey: true }), 'list')).toBeNull()
+  })
+
+  test('dispatches only registered composer modifier shortcuts in composer context', () => {
+    useCommands([
+      createCommand('composer.close', () => {}),
+      createCommand('composer.send', () => {}),
+      createCommand('composer.link', () => {})
+    ])
+    expect(matchComposerKey(key('Escape'))?.id).toBe('composer.close')
+    expect(matchComposerKey(key('Enter', { metaKey: true }))?.id).toBe('composer.send')
+    expect(matchComposerKey(key('k', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.link')
+    expect(matchComposerKey(key('k', { ctrlKey: true }))).toBeNull()
+    expect(matchComposerKey(key('k', { ctrlKey: true, shiftKey: true, altKey: true }))).toBeNull()
   })
 
   test('respects list, reader, mail, and global contexts', () => {

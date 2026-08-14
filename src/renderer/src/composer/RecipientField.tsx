@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { type MailAddress, parseRecipientInput } from '../../../shared/address'
+import { isValidEmail, type MailAddress, parseRecipientInput } from '../../../shared/address'
 import type { ContactSearchResult } from '../../../shared/contacts'
 import { useAutocomplete } from './useAutocomplete'
 
@@ -11,8 +11,9 @@ interface RecipientFieldProps {
   onChange: (recipients: MailAddress[]) => void
 }
 
-function fromContact(contact: ContactSearchResult): MailAddress {
-  return { name: contact.name, email: contact.email }
+function fromContact(contact: ContactSearchResult): MailAddress | null {
+  const parsed = parseRecipientInput(`${contact.name} <${contact.email}>`)
+  return parsed.invalid.length === 0 ? (parsed.recipients[0] ?? null) : null
 }
 
 export function RecipientField({
@@ -27,7 +28,8 @@ export function RecipientField({
   const [highlighted, setHighlighted] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const suggestions = useAutocomplete(query).filter(
-    (suggestion) => !recipients.some((recipient) => recipient.email === suggestion.email)
+    (suggestion) =>
+      isValidEmail(suggestion.email) && !recipients.some((recipient) => recipient.email === suggestion.email)
   )
 
   useEffect(() => {
@@ -35,6 +37,11 @@ export function RecipientField({
   }, [autoFocus])
 
   const add = (next: readonly MailAddress[]): void => {
+    const invalidRecipient = next.find((recipient) => !isValidEmail(recipient.email))
+    if (invalidRecipient) {
+      setInvalid(invalidRecipient.email)
+      return
+    }
     const seen = new Set(recipients.map((recipient) => recipient.email.toLowerCase()))
     const unique = next.filter((recipient) => !seen.has(recipient.email.toLowerCase()))
     if (unique.length > 0) onChange([...recipients, ...unique])
@@ -99,7 +106,8 @@ export function RecipientField({
               setHighlighted((index) => Math.max(index - 1, 0))
             } else if ((event.key === 'Enter' || event.key === 'Tab') && suggestions[highlighted]) {
               event.preventDefault()
-              add([fromContact(suggestions[highlighted])])
+              const recipient = fromContact(suggestions[highlighted])
+              if (recipient) add([recipient])
             } else if (event.key === 'Enter' || event.key === ',') {
               event.preventDefault()
               commit()
@@ -128,7 +136,8 @@ export function RecipientField({
               data-testid="autocomplete-option"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                add([fromContact(suggestion)])
+                const recipient = fromContact(suggestion)
+                if (recipient) add([recipient])
                 inputRef.current?.focus()
               }}
             >
