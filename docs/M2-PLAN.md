@@ -4,7 +4,7 @@
 **Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through draft PR #38.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Current progress:** R1 (#31), R2 (#30), R3 (#37), and T13 (#32) are shipped. T14's crash-safe composer is underway in draft PR #38 and is being revised to the full-window layout after dogfood. T13A is a planned contact-index follow-up. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
+**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39) and T14 (#38, full-window) are shipped. Dogfood of the shipped composer produced four revision tasks, T14A–T14D, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, and two-way Gmail Drafts sync. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A is a planned contact-index follow-up. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
@@ -263,6 +263,8 @@ progress never masquerades as a blocked inbox sync, and the saved-Google-Contact
 
 ## T14 — Composer shell: full-window focus, crash-safe local drafts, autocomplete
 
+**Shipped (#38). Kept as the record of what landed. Its draft behaviour, editor schema, and one-draft-per-account rule (enforced in `saveDraft`, not just the UI) are superseded by T14A–T14D; amend those tasks rather than this one.**
+
 **Status: underway in draft PR #38; full-window revision requested after dogfood.**
 
 **Depends on:** R1, R3, T13 (can start against a stubbed `contacts:search`) · **Unblocks:** T16, T17 · **Spec:** F6, §5 composer keys
@@ -337,7 +339,201 @@ Draft lifecycle (open/type/autosave retry/close/discard/reopen/relaunch-recover)
 
 ---
 
+## T14A — Drafts as first-class objects
+
+**Depends on:** T14 (shipped) · **Unblocks:** T14B, T14C, T14D · **Spec:** F6 (drafts), §5 `G` `D`
+
+**Revision task.** T14 shipped the composer and stays as the record of what landed; this task changes the behaviour it defined. Do not rewrite T14.
+
+### Why
+
+T14 shipped **one draft slot per account**. An id-less save reuses the newest `composing`/`drafted` row and flips it back to `composing` (`outbox/drafts.ts:87-103`), so `c` reopens your last draft rather than starting a new one. Drafts are therefore reachable today, including across a restart; what you cannot do is have a second one. Starting a new message means sending or discarding the first.
+
+That is a deliberate v1 simplification, and the spec always expected it to be outgrown: SPEC's M3 Drafts bullet already states that *"multiple simultaneous drafts remain distinct"* and that a Draft row *"opens its crash-safe M2 composer draft"*. This task brings the shipped code up to that, and brings the surface M3 planned forward into M2.
+
+**Dropping the rule and adding the list are one change, not two.** Today's behaviour is self-consistent: one draft, always reachable via `c`. The moment `c` creates instead of reusing, every earlier draft loses its only entry point. Shipping the rule change without the list would create an unreachable-drafts bug that does not exist today.
+
+Two smaller things ride along: empty drafts are marked `drafted` rather than discarded (`isEmptyDraft` only suppresses the mirror revision bump, not the state change), and `takeRecoveredDraft` reads a single `composing` row, which stops being sufficient once several drafts can exist.
+
+### Design (decided)
+
+- **Drop the one-composer restriction in both places it lives.** The UI guard is the `|| composerDraft` clause in `openComposer` (`Inbox.tsx:229`); the real enforcement is the id-less reuse branch in `saveDraft` (`drafts.ts:88-103`), which must start creating rather than reusing. Update the doc comment above it too, since it cites the rule as the reason. `c` then always starts a new draft, and only one composer is *mounted* at a time, which is a rendering fact rather than a limit on how many drafts exist.
+- **Uniqueness is per conversation, not per app:** at most one `reply`/`replyAll` draft and one `forward` draft per thread. `r` on a thread with an existing reply draft reopens it rather than creating a second. New-message drafts (`thread_id IS NULL`) are unlimited.
+- **Drafts view, pulled forward from M3.** Third value in the view union, third nav button, `g d`, already promised in §5 and by decision #10. The M2/M3 boundary is deliberate and narrow:
+  - **M2 (here):** a Drafts view listing local drafts, merged with remote ones once T14D lands; `g d`; opening a row into the composer; the Draft chip on thread rows.
+  - **M3 (unchanged):** the other seven mailboxes, the shared list/reading shell, palette `Go to …`, and the expanded 12-month system-label metadata sync those require. M3 absorbs this view into the unified mailbox rather than building on it, so keep it small and do not let it become load-bearing.
+- **`Esc` on an empty draft discards it** instead of marking it `drafted`.
+- **Thread-bound drafts show a `Draft` chip** on their conversation row, reusing the existing chip system in `ThreadList.tsx`.
+
+### Implementation guide
+
+Schema (bump `CURRENT_SCHEMA_VERSION` to 10):
+
+```sql
+ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';  -- new|reply|replyAll|forward
+ALTER TABLE outbox ADD COLUMN source_message_id TEXT;
+CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (account_id, thread_id, kind)
+  WHERE state IN ('composing', 'drafted') AND thread_id IS NOT NULL;
+```
+
+- IPC: `mail:listDrafts` returning `composing` + `drafted` rows, empties excluded, newest first; `draft:reopen(id)` moving `drafted → composing`.
+- `takeRecoveredDraft` reopens the single `composing` row (a crash with the composer open) and leaves everything else to the list.
+- Testids: `view-drafts`, `draft-row`, `chip-draft`.
+
+### Testing
+
+- Unit: uniqueness rule, empty-draft discard, list ordering and empty exclusion.
+- E2e: write two drafts and reach both from `g d`; `Esc` on an empty draft leaves no row; reply draft shows a chip on its thread row and reopens via `r`; relaunch with three drafts lists all three.
+
+### Done when
+
+`c` starts a new draft while earlier ones remain, and every one of them is reachable from `g d`; verify green. The regression this guards is the one the change itself could introduce: no draft may become unreachable once `c` stops reusing the newest row.
+
+---
+
+## T14B — Reply and forward entry points
+
+**Depends on:** T14A, T15 (shipped) · **Spec:** F6, §5 `R`/`A`/`F`
+
+**Revision task.** T15 shipped `planReply` with a full unit matrix, but nothing calls it: `r`/`a`/`f` are absent from `commands.ts`, and the plan buries the wiring in T16, blocking reply behind the send machinery for no reason.
+
+### Design (decided)
+
+- `r`/`a`/`f` in the reader context call the shipped `planReply(kind, conversation, accountEmail)` and open the composer prefilled, writing `kind`, `thread_id`, `source_message_id`, `in_reply_to` and `references` onto the row.
+- **Fix the mirror's lost threading.** `DraftMimeInput` (`outbox/draftMime.ts:3`) carries only to/cc/bcc/subject/body, and `saveDraft` posts `{ message: { raw } }` with no `threadId` (`gmail/provider.ts:44`). A reply draft written in Attn therefore arrives in Gmail Drafts detached from its conversation. Add `In-Reply-To`/`References` to the draft MIME and `threadId` to the `saveDraft` payload.
+- **Exclude `DRAFT`-labelled messages from the message store — a correctness fix this task forces.** Nothing in `src/` filters the `DRAFT` label today (`grep -rn "'DRAFT'" src/ --include=*.ts | grep -v test` returns nothing). `persistThread` writes every message in a thread snapshot into `messages`, and the history poller refetches any touched thread and calls it. That is latent only because Attn's drafts are currently unthreaded and lack `INBOX`, so they never reach `listInboxThreads`. **Adding `threadId` above breaks that:** the draft message lands in a real conversation, the next poll refetches the thread, `persistThread` stores the draft as an ordinary message, and `getConversation` renders it as though it had been sent — while the same draft also exists as an `outbox` row. Fix at the single choke point both callers share: `persistThread` skips messages whose `labelIds` include `DRAFT`, at the top of the message loop so a draft also cannot drive the thread's `last_msg_at` or snippet.
+- **Forwards attempt threading.** `planReply` already returns `threadId` for every kind and Gmail's own client keeps forwards in the conversation, so match it. **Unverified:** Gmail may require the `Subject` to match the thread for `threadId` to be honoured, and forwards are prefixed `Fwd: `. This is a named line in T16's manual smoke, not an assumption: *"forward from a thread lands in the same conversation, or record the observed behaviour."*
+
+### Testing
+
+- Unit: prefill mapping from `planReply` output onto an outbox row for all three kinds; `persistThread` skips a `DRAFT`-labelled message and leaves `last_msg_at`/snippet driven by the newest real message.
+- E2e (seeded): a threaded reply draft never appears as a message in its conversation.
+- E2e (seeded): `r` on the fixture's Reply-To thread prefills the correct recipient and quoted history collapsed; `a` includes To+Cc minus self; `f` starts with empty recipients.
+
+### Done when
+
+Reply, reply-all and forward open prefilled and their drafts mirror into Gmail threaded; verify green.
+
+---
+
+## T14C — Rich content and the zero-loss invariant
+
+**Depends on:** T14A · **Unblocks:** T14D · **Spec:** F6 (rich text, zero formatting loss), §9 #16
+
+**Revision task.** It reverses a settled policy; read §9 #16 before starting. The *policy* change is the significant part — the implementation is smaller than it first appears (see Cost below).
+
+### Why
+
+Two consequences were rejected in dogfood: you cannot paste an image into a message, and opening a Gmail-authored draft would silently flatten it, after which the next autosave overwrites the rich original.
+
+**Content is dropped by two gates, both of them ours.** Neither is a Lexical limitation:
+
+1. **The node registry.** `editorConfig.ts:8` registers four nodes (`LinkNode, ListNode, ListItemNode, QuoteNode`). Lexical only converts HTML elements that a registered node's `importDOM()` claims, so `<table>` and `<img>` are not dropped because Lexical cannot represent them — nothing ever told Lexical they exist.
+2. **The outgoing sanitizer.** `composer/sanitize.ts` allows 13 tags with `ALLOWED_ATTR: ['href']`, applied by `serialize.ts` after `$generateHtmlFromNodes`. Anything surviving gate 1 still dies here.
+
+**Both gates must widen together.** Register a node without allowing its tag and content dies on serialize; allow a tag without registering a node and it dies on import. Doing one half produces a silent drop that reads like a bug.
+
+That this is a choice rather than a constraint is already demonstrated in-repo: `replyPlan.test.ts:132-133` asserts that quoted history retains `<img src="x">` and `<p style="color:red">`, because the quote path runs the far wider `sanitizeQuotedMailHtml`. Attn already preserves images on one path and strips them on another; only the allowlist differs. Note the quote path is currently built but unwired — `quoteHtml` appears only in `replyPlan.ts` and its tests, there is no `quote_html` column, and `r`/`a`/`f` land in T14B — so no rich foreign HTML has reached the editor yet, which is why none of this has visibly broken.
+
+### Design (decided)
+
+Two mechanisms, and **both** are required. Widening alone does not guarantee zero loss, because Lexical drops any node its schema does not know; the preservation layer is what turns the promise into an invariant.
+
+1. **Widen the editor to Gmail's authoring surface**, in both gates: inline images, tables, font family and size, text and background colour, alignment, and strikethrough. The sanitizer's allowlist widens alongside — `img` with `src`, table elements, `span`, a bounded `style` subset, and strikethrough tags — and `ALLOWED_URI_REGEXP` gains `cid:`. Outgoing content stays untrusted (global rule 3); this is a wider allowlist, not a permissive one.
+   - **Headings are deliberately excluded from the parity set.** Gmail's composer has no heading levels; its Small/Normal/Large/Huge control emits `<span style="font-size:…">`. Supporting `h1`–`h6` would be a superset rather than parity, and is left as an optional follow-up so this task stays scoped to closing the gap.
+2. **Preserve what remains.** Any element the widened schema still cannot represent becomes an opaque region: a Lexical `DecoratorNode` holding the original HTML verbatim, rendered through the same scriptless path as incoming mail, not editable inline, and serialized back byte-for-byte on save and send. Editing continues around it.
+
+- **Fidelity check on open.** Walk incoming HTML against the allowlist before rendering, so the app knows exactly what it cannot represent rather than discovering it after the fact. Drafts with no unrepresentable content — the large majority — open with no banner and no difference.
+- **Inline images** spool to disk like attachments (`DraftAttachment.spoolPath` already exists), are referenced by `cid:`, and reach the editor as data URLs over the typed bridge, reusing the `mail:getInlineImage` pattern and its 10 MB cap.
+
+### Cost
+
+Widening is closer to configuration than to engineering; two pieces are genuine work:
+
+| Piece | Cost |
+|---|---|
+| Tables | Install `@lexical/table` (an official package on the same 0.49.0 line, simply not in `package.json` today) and register `TableNode`, `TableRowNode`, `TableCellNode` |
+| Colour, font size, alignment, strikethrough | Largely present already: Lexical has native text-format flags, and `@lexical/selection` (already installed) provides `$patchStyleText` for inline styles |
+| Sanitizer widening | Config |
+| **Inline images** | Real work: a custom `ImageNode` (`DecoratorNode` is Lexical's designed extension point; the Lexical playground ships a reference implementation), spool/`cid:` plumbing, and `multipart/related` in the MIME builder |
+| **Preservation layer** | Real work: a `DecoratorNode` holding verbatim HTML |
+
+Schedule it as two custom nodes plus configuration, not as a rebuild of the composer.
+
+### Implementation guide
+
+- `mime.ts` gains `multipart/related` wrapping `multipart/alternative` plus the inline image parts. T15 already anticipated this (`Content-ID` for future inline use); its golden-file fixtures grow a related-with-inline-image case.
+- Paste handling: clipboard image → spool → insert image node. Paste of foreign HTML runs the same fidelity check.
+- Size: inline images count against F6's 25 MB ceiling alongside attachments.
+
+### Testing
+
+- Unit: fidelity check flags exactly the unrepresentable elements; opaque regions round-trip byte-identical through parse → serialize; MIME golden file for `multipart/related`.
+- E2e: paste an image into the composer and see it in the body and in `composer.png`; open a seeded draft containing a table and confirm it renders, survives an edit elsewhere in the body, and is unchanged on save.
+- **The invariant test:** a fixture draft containing an image, a table, and a `style`-coloured span opens, is edited, saves, and comes back byte-identical outside the edited region.
+
+### Done when
+
+No draft loses formatting by being opened in Attn, demonstrated by the invariant test; verify green.
+
+---
+
+## T14D — Two-way Gmail Drafts sync
+
+**Depends on:** T14A, T14C · **Spec:** F6 (draft sync)
+
+**Revision task.** The shipped mirror is one-way by construction: `saveDraft`/`deleteDraft` are the only draft provider methods (`sync/provider.ts:54`), backfill fetches `INBOX` and `SENT` only, and nothing ever reads a draft back.
+
+### Design (decided)
+
+- **Provider grows `listDrafts`/`getDraft`.**
+- **`drafts.list` is the mechanism, not the history feed.** Gmail addresses a draft by a *draft* id (`drafts.list` → `{ id: "r-8842", message: { id: "18f2a" } }`) and `outbox.gmail_draft_id` stores that draft id, but `history.list` only ever reports *message* ids. Editing a draft in Gmail keeps the draft id stable and replaces the underlying message, so history reports a delete plus an add of ids we have never seen, and mapping them back to a draft still requires `drafts.list`. Routing through history therefore adds a call rather than saving one. `drafts.list` alone returns the authoritative set, including — by absence — anything deleted elsewhere.
+- **It runs inside the existing history poller, not a new scheduler.** Add an optional `syncDrafts` effect to `HistoryPollerOptions`, in the same seam style as `wakeThread` and `kickExecutor`, invoked in `runNow` after the history cycle and before `onCycleComplete`. It inherits the foreground/background cadence, the `executing` guard, `stopped` handling, teardown, the generation guard, and the offline retry route. A sixth time-driven scheduler would duplicate all six for one API call.
+  - **Draft failures must not fail the mail poll.** Wrap the effect in its own try/catch: a `drafts.list` error leaves the inbox syncing and the footer calm, matching the best-effort posture the outbound mirror already takes.
+  - Every 15s is one small extra call per cycle and is acceptable. If that proves wasteful, gate the effect on a last-swept timestamp using the injected clock rather than introducing a timer.
+- **Conflict resolution is last-write-wins, with two rules that keep it honest:**
+  - **An open composer always wins.** LWW applies only to `drafted` rows. A remote change never rewrites text under the cursor; it reconciles when the draft closes.
+  - **Prefer the revision pair over clocks.** If `local_revision == mirror_revision` (nothing changed locally since the last push) and the remote differs, take the remote outright — no timestamp comparison, so no clock-skew hazard. Only when both sides changed does LWW by timestamp apply.
+- **Remote drafts open like local ones.** T14C's preservation layer is what makes this safe; without it, reading a Gmail draft in would flatten it.
+- **Attachments on remote drafts fetch on demand,** matching how message attachments already work.
+- Whole-draft granularity, not per-field.
+
+### First-sync backfill
+
+Two-way sync also needs the *first* sync to pull existing Gmail drafts; without this, a fresh profile never sees drafts written before Attn was installed. Add a `drafts` stage to the staged backfill:
+
+```
+metadata   12m INBOX headers    → inbox usable
+bodies     90d INBOX full       → reading works
+drafts     all drafts           ← new
+sent       12m SENT headers     → autocomplete data
+reconcile
+```
+
+Placed before `sent` because drafts are user-visible content and few in number, while the SENT pass is a long background sweep whose only purpose is autocomplete ranking. A first-run user should not wait behind it to see their own drafts.
+
+Touch points, all mechanical but crossing the shared type:
+
+- `SyncStage` in `src/shared/mail.ts:91` gains `'drafts'`.
+- `parseCursor` and the checkpoint strings in `sync/backfill.ts` gain the phase, keeping `phase:pageToken` resume semantics.
+- `SYNC_STAGES` and the stage label switch in `renderer/src/components/SyncStatus.tsx:5-9` gain an entry ("Drafts").
+- The stage needs its own small phase runner: `runThreadPhase` pages *thread* ids, and `drafts.list` returns draft ids.
+
+### Testing
+
+- Unit: the three-way decision table (local-only change, remote-only change, both changed) against a fake provider and injected clock; open-composer immunity; backfill cursor resume across the new `drafts` phase.
+- E2e (seeded): a simulated remote edit to a closed draft is adopted; the same edit against an open draft is deferred until close.
+- **Verify Bcc round-trips.** Silently dropping Bcc through a sync cycle would be a data-loss bug; test it explicitly.
+
+### Done when
+
+A draft edited in Gmail appears correctly in Attn and vice versa, with no formatting loss in either direction; verify green.
+
+---
+
 ## T15 — MIME builder and reply/reply-all/forward semantics
+
+**Shipped (#39). Extended by T14B (entry points, threading headers in the draft mirror) and T14C (`multipart/related` for inline images).**
 
 **Depends on:** T13 (headers) · **Unblocks:** T16 · **Parallel with:** T14 · **Spec:** F6
 
@@ -369,6 +565,8 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 ---
 
 ## T16 — Outbox: send, undo send, exactly-once
+
+**Amended by T14A–T14D:** the outbox now holds many drafts at once, so "one chokepoint" in global rule 9 constrains *code paths*, never the number of messages in flight. Its "Reply entry points" bullet moves to T14B. Add the forward-threading check named there to the manual smoke list.
 
 **Depends on:** R2, T14, T15 · **Unblocks:** T17, T20 · **Spec:** F6 (undo send, outbox state machine), F2 (queue), §6 (scheduler owns undo-send windows)
 
