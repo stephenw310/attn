@@ -583,14 +583,14 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           <footer className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4">
             <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
               <EditorToolbar />
-              <div
-                className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
-                data-testid="composer-attachments"
-              >
-                {attachments.length > 0
-                  ? `${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`
-                  : 'Paste an image inline'}
-              </div>
+              {attachments.length > 0 && (
+                <div
+                  className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
+                  data-testid="composer-attachments"
+                >
+                  {attachments.length} attachment{attachments.length === 1 ? '' : 's'}
+                </div>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <button
