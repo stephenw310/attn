@@ -401,11 +401,13 @@ CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (account_id, thread_id, kin
 
 - `r`/`a`/`f` in the reader context call the shipped `planReply(kind, conversation, accountEmail)` and open the composer prefilled, writing `kind`, `thread_id`, `source_message_id`, `in_reply_to` and `references` onto the row.
 - **Fix the mirror's lost threading.** `DraftMimeInput` (`outbox/draftMime.ts:3`) carries only to/cc/bcc/subject/body, and `saveDraft` posts `{ message: { raw } }` with no `threadId` (`gmail/provider.ts:44`). A reply draft written in Attn therefore arrives in Gmail Drafts detached from its conversation. Add `In-Reply-To`/`References` to the draft MIME and `threadId` to the `saveDraft` payload.
+- **Exclude `DRAFT`-labelled messages from the message store — a correctness fix this task forces.** Nothing in `src/` filters the `DRAFT` label today (`grep -rn "'DRAFT'" src/ --include=*.ts | grep -v test` returns nothing). `persistThread` writes every message in a thread snapshot into `messages`, and the history poller refetches any touched thread and calls it. That is latent only because Attn's drafts are currently unthreaded and lack `INBOX`, so they never reach `listInboxThreads`. **Adding `threadId` above breaks that:** the draft message lands in a real conversation, the next poll refetches the thread, `persistThread` stores the draft as an ordinary message, and `getConversation` renders it as though it had been sent — while the same draft also exists as an `outbox` row. Fix at the single choke point both callers share: `persistThread` skips messages whose `labelIds` include `DRAFT`, at the top of the message loop so a draft also cannot drive the thread's `last_msg_at` or snippet.
 - **Forwards attempt threading.** `planReply` already returns `threadId` for every kind and Gmail's own client keeps forwards in the conversation, so match it. **Unverified:** Gmail may require the `Subject` to match the thread for `threadId` to be honoured, and forwards are prefixed `Fwd: `. This is a named line in T16's manual smoke, not an assumption: *"forward from a thread lands in the same conversation, or record the observed behaviour."*
 
 ### Testing
 
-- Unit: prefill mapping from `planReply` output onto an outbox row for all three kinds.
+- Unit: prefill mapping from `planReply` output onto an outbox row for all three kinds; `persistThread` skips a `DRAFT`-labelled message and leaves `last_msg_at`/snippet driven by the newest real message.
+- E2e (seeded): a threaded reply draft never appears as a message in its conversation.
 - E2e (seeded): `r` on the fixture's Reply-To thread prefills the correct recipient and quoted history collapsed; `a` includes To+Cc minus self; `f` starts with empty recipients.
 
 ### Done when
@@ -484,7 +486,11 @@ No draft loses formatting by being opened in Attn, demonstrated by the invariant
 
 ### Design (decided)
 
-- **Provider grows `listDrafts`/`getDraft`.** Drafts carry the `DRAFT` label, so remote changes should surface through the existing history poller rather than a second polling loop. **Verify during implementation:** Gmail may mint a new message id on each draft save, in which case an edit appears as delete + add; if the history feed proves unreliable for edits, fall back to a periodic `drafts.list`.
+- **Provider grows `listDrafts`/`getDraft`.**
+- **`drafts.list` is the mechanism, not the history feed.** Gmail addresses a draft by a *draft* id (`drafts.list` → `{ id: "r-8842", message: { id: "18f2a" } }`) and `outbox.gmail_draft_id` stores that draft id, but `history.list` only ever reports *message* ids. Editing a draft in Gmail keeps the draft id stable and replaces the underlying message, so history reports a delete plus an add of ids we have never seen, and mapping them back to a draft still requires `drafts.list`. Routing through history therefore adds a call rather than saving one. `drafts.list` alone returns the authoritative set, including — by absence — anything deleted elsewhere.
+- **It runs inside the existing history poller, not a new scheduler.** Add an optional `syncDrafts` effect to `HistoryPollerOptions`, in the same seam style as `wakeThread` and `kickExecutor`, invoked in `runNow` after the history cycle and before `onCycleComplete`. It inherits the foreground/background cadence, the `executing` guard, `stopped` handling, teardown, the generation guard, and the offline retry route. A sixth time-driven scheduler would duplicate all six for one API call.
+  - **Draft failures must not fail the mail poll.** Wrap the effect in its own try/catch: a `drafts.list` error leaves the inbox syncing and the footer calm, matching the best-effort posture the outbound mirror already takes.
+  - Every 15s is one small extra call per cycle and is acceptable. If that proves wasteful, gate the effect on a last-swept timestamp using the injected clock rather than introducing a timer.
 - **Conflict resolution is last-write-wins, with two rules that keep it honest:**
   - **An open composer always wins.** LWW applies only to `drafted` rows. A remote change never rewrites text under the cursor; it reconciles when the draft closes.
   - **Prefer the revision pair over clocks.** If `local_revision == mirror_revision` (nothing changed locally since the last push) and the remote differs, take the remote outright — no timestamp comparison, so no clock-skew hazard. Only when both sides changed does LWW by timestamp apply.
@@ -492,9 +498,30 @@ No draft loses formatting by being opened in Attn, demonstrated by the invariant
 - **Attachments on remote drafts fetch on demand,** matching how message attachments already work.
 - Whole-draft granularity, not per-field.
 
+### First-sync backfill
+
+Two-way sync also needs the *first* sync to pull existing Gmail drafts; without this, a fresh profile never sees drafts written before Attn was installed. Add a `drafts` stage to the staged backfill:
+
+```
+metadata   12m INBOX headers    → inbox usable
+bodies     90d INBOX full       → reading works
+drafts     all drafts           ← new
+sent       12m SENT headers     → autocomplete data
+reconcile
+```
+
+Placed before `sent` because drafts are user-visible content and few in number, while the SENT pass is a long background sweep whose only purpose is autocomplete ranking. A first-run user should not wait behind it to see their own drafts.
+
+Touch points, all mechanical but crossing the shared type:
+
+- `SyncStage` in `src/shared/mail.ts:91` gains `'drafts'`.
+- `parseCursor` and the checkpoint strings in `sync/backfill.ts` gain the phase, keeping `phase:pageToken` resume semantics.
+- `SYNC_STAGES` and the stage label switch in `renderer/src/components/SyncStatus.tsx:5-9` gain an entry ("Drafts").
+- The stage needs its own small phase runner: `runThreadPhase` pages *thread* ids, and `drafts.list` returns draft ids.
+
 ### Testing
 
-- Unit: the three-way decision table (local-only change, remote-only change, both changed) against a fake provider and injected clock; open-composer immunity.
+- Unit: the three-way decision table (local-only change, remote-only change, both changed) against a fake provider and injected clock; open-composer immunity; backfill cursor resume across the new `drafts` phase.
 - E2e (seeded): a simulated remote edit to a closed draft is adopted; the same edit against an open draft is deferred until close.
 - **Verify Bcc round-trips.** Silently dropping Bcc through a sync cycle would be a data-loss bug; test it explicitly.
 
