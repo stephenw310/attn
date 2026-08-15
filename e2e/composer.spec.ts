@@ -169,10 +169,10 @@ test('persists content supplied while creating an id-less draft', async ({ page 
 })
 
 test('restores the same full-window reader after composing', async ({ page }) => {
-  await page.getByTestId('thread-row').nth(2).click()
+  await page.getByTestId('thread-subject').getByText('Design notes', { exact: true }).click()
   const conversation = page.getByTestId('conversation-view')
   await expect(conversation).toBeVisible()
-  const subject = await page.getByTestId('conversation-subject').textContent()
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   const before = await selectedIndex(page)
 
   const composer = new ComposerPage(page)
@@ -187,7 +187,7 @@ test('restores the same full-window reader after composing', async ({ page }) =>
   await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
   await expect(conversation).toBeVisible()
-  await expect(page.getByTestId('conversation-subject')).toHaveText(subject ?? '')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   expect(await selectedIndex(page)).toBe(before)
 })
 
