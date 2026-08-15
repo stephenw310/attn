@@ -52,6 +52,21 @@ describe('draft checkpoint MIME', () => {
     expect(decodeTextPart(raw, 'text/html')).toBe('<p>Olá 👋</p>')
   })
 
+  it('preserves repeated ASCII whitespace in short subjects', () => {
+    const raw = decode(
+      encodeDraftMessage({
+        to: [{ name: '', email: 'to@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'Q3  report',
+        bodyHtml: '<p>Body</p>',
+        bodyText: 'Body'
+      })
+    )
+
+    expect(raw).toContain('Subject: Q3  report\r\n')
+  })
+
   it('preserves ordinary attachments alongside the editable body', () => {
     const bytes = Buffer.from('PDF-DATA')
     const raw = decode(

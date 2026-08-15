@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import type { MailAddress } from '../../shared/address'
 import type { DraftKind, DraftSaveInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import {
@@ -15,7 +16,7 @@ import {
 } from '../gmail/parse'
 import { mergeExternalBodies } from '../sync/mergeBodies'
 import type { MailProvider, ProviderDraft } from '../sync/provider'
-import type { StoredDraftAttachment } from './draftAttachments'
+import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import { draftHtmlBody } from './draftMime'
 
 export type DraftConflictDecision = 'defer' | 'local' | 'remote'
@@ -82,6 +83,22 @@ interface LocalSyncRow {
   mirror_revision: number
   updated_at: number
   remote_fingerprint: string | null
+  matchedCurrentContent?: boolean
+}
+
+interface UnboundLocalSyncRow extends LocalSyncRow {
+  to_json: string
+  cc_json: string
+  bcc_json: string
+  subject: string
+  body_html: string
+  body_text: string
+  attachments_json: string
+  thread_id: string
+  in_reply_to: string | null
+  references_json: string
+  quote_html: string
+  quote_text: string
 }
 
 export interface ParsedRemoteDraft {
@@ -196,13 +213,33 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
     .get(accountId, remote.gmailDraftId) as LocalSyncRow | undefined
   if (byId || remote.input.threadId === null || remote.input.kind === 'new') return byId
   const kinds = remote.input.kind === 'forward' ? ['forward'] : ['reply', 'replyAll']
-  return db
+  const candidates = db
     .prepare(
-      `SELECT id, state, kind, local_revision, mirror_revision, updated_at, remote_fingerprint
+      `SELECT id, state, kind, local_revision, mirror_revision, updated_at, remote_fingerprint,
+              to_json, cc_json, bcc_json, subject, body_html, body_text, attachments_json, thread_id,
+              in_reply_to, references_json, quote_html, quote_text
        FROM outbox WHERE account_id = ? AND thread_id = ? AND kind IN (${kinds.map(() => '?').join(', ')})
-         AND state IN ('composing', 'drafted') ORDER BY updated_at DESC LIMIT 1`
+         AND gmail_draft_id IS NULL AND state IN ('composing', 'drafted') ORDER BY updated_at DESC`
     )
-    .get(accountId, remote.input.threadId, ...kinds) as LocalSyncRow | undefined
+    .all(accountId, remote.input.threadId, ...kinds) as UnboundLocalSyncRow[]
+  const matched = candidates.find(
+    (candidate) =>
+      draftContentFingerprint({
+        to: JSON.parse(candidate.to_json) as MailAddress[],
+        cc: JSON.parse(candidate.cc_json) as MailAddress[],
+        bcc: JSON.parse(candidate.bcc_json) as MailAddress[],
+        subject: candidate.subject,
+        bodyHtml: candidate.body_html,
+        bodyText: candidate.body_text,
+        attachments: parseStoredDraftAttachments(candidate.attachments_json),
+        threadId: candidate.thread_id,
+        inReplyTo: candidate.in_reply_to,
+        references: JSON.parse(candidate.references_json) as string[],
+        quoteHtml: candidate.quote_html,
+        quoteText: candidate.quote_text
+      }) === remote.fingerprint
+  )
+  return matched ? { ...matched, matchedCurrentContent: true } : undefined
 }
 
 function writeRemoteDraft(
@@ -274,6 +311,20 @@ export async function reconcileRemoteDraft(
   if (!local) {
     writeRemoteDraft(db, accountId, remote, undefined)
     return 'remote'
+  }
+  if (local.matchedCurrentContent) {
+    db.prepare(
+      `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?, mirror_revision = local_revision,
+       remote_updated_at = ?, remote_fingerprint = ? WHERE account_id = ? AND id = ?`
+    ).run(
+      remote.gmailDraftId,
+      remote.gmailMessageId,
+      remote.updatedAt,
+      remote.fingerprint,
+      accountId,
+      local.id
+    )
+    return 'local'
   }
   const decision = planDraftConflict({
     state: local.state,

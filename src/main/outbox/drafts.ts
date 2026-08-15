@@ -107,13 +107,10 @@ export function listDrafts(db: Db, accountId: string): Draft[] {
 }
 
 export function reopenDraft(db: Db, accountId: string, id: string, now = Date.now()): Draft | null {
-  const changed = db
-    .prepare(
-      `UPDATE outbox SET state = 'composing', updated_at = ?
+  db.prepare(
+    `UPDATE outbox SET state = 'composing', updated_at = ?
        WHERE account_id = ? AND id = ? AND state = 'drafted'`
-    )
-    .run(now, accountId, id).changes
-  if (changed === 0) return getDraft(db, accountId, id)
+  ).run(now, accountId, id)
   return getDraft(db, accountId, id)
 }
 
@@ -135,6 +132,54 @@ export function reopenThreadDraft(
     )
     .get(accountId, threadId, ...group) as { id: string } | undefined
   return row ? reopenDraft(db, accountId, row.id, now) : null
+}
+
+function addressKey(address: MailAddress): string {
+  return address.email.trim().toLowerCase()
+}
+
+function mergeAddresses(
+  existing: readonly MailAddress[],
+  planned: readonly MailAddress[],
+  excluded = new Set<string>()
+): MailAddress[] {
+  const merged: MailAddress[] = []
+  const seen = new Set(excluded)
+  for (const address of [...existing, ...planned]) {
+    const key = addressKey(address)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    merged.push(address)
+  }
+  return merged
+}
+
+/** Upgrade the shared reply slot without overwriting authored content or manually added recipients. */
+export function upgradeReplyToReplyAll(
+  db: Db,
+  accountId: string,
+  id: string,
+  plannedTo: readonly MailAddress[],
+  plannedCc: readonly MailAddress[],
+  now = Date.now()
+): Draft | null {
+  const row = db
+    .prepare(
+      `SELECT to_json, cc_json FROM outbox
+       WHERE account_id = ? AND id = ? AND state = 'composing' AND kind = 'reply'`
+    )
+    .get(accountId, id) as Pick<DraftRow, 'to_json' | 'cc_json'> | undefined
+  if (!row) return getDraft(db, accountId, id)
+
+  const to = mergeAddresses(parseJson<MailAddress[]>(row.to_json), plannedTo)
+  const toEmails = new Set(to.map(addressKey))
+  const cc = mergeAddresses(parseJson<MailAddress[]>(row.cc_json), plannedCc, toEmails)
+  db.prepare(
+    `UPDATE outbox SET kind = 'replyAll', to_json = ?, cc_json = ?, updated_at = ?,
+       local_revision = local_revision + 1
+     WHERE account_id = ? AND id = ? AND state = 'composing' AND kind = 'reply'`
+  ).run(JSON.stringify(to), JSON.stringify(cc), now, accountId, id)
+  return getDraft(db, accountId, id)
 }
 
 export function takeRecoveredDraft(db: Db, accountId: string): Draft | null {
@@ -300,12 +345,16 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
   return 'discarded'
 }
 
-export function discardDraft(db: Db, accountId: string, id: string): void {
-  db.prepare(
-    `UPDATE outbox SET state = 'discarding', to_json = '[]', cc_json = '[]', bcc_json = '[]',
+export function discardDraft(db: Db, accountId: string, id: string): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE outbox SET state = 'discarding', to_json = '[]', cc_json = '[]', bcc_json = '[]',
        subject = '', body_html = '', body_text = '', attachments_json = '[]', thread_id = NULL,
        source_message_id = NULL, in_reply_to = NULL, references_json = '[]', quote_html = '',
        quote_text = '', updated_at = ?
      WHERE account_id = ? AND id = ? AND state = 'composing'`
-  ).run(Date.now(), accountId, id)
+      )
+      .run(Date.now(), accountId, id).changes > 0
+  )
 }

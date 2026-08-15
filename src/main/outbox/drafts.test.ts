@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import { publicDraftAttachment, type StoredDraftAttachment } from './draftAttachments'
-import { canonicalizeRendererDraft } from './drafts'
+import { canonicalizeRendererDraft, discardDraft } from './drafts'
 
 const stored: StoredDraftAttachment = {
   id: 'owned-attachment',
@@ -49,5 +49,23 @@ describe('draft attachment trust boundary', () => {
 
     const canonical = canonicalizeRendererDraft(db, 'account', malicious)
     expect(canonical.attachments).toEqual([stored])
+  })
+})
+
+describe('draft lifecycle guards', () => {
+  it('reports whether discard actually transitioned an open composer', () => {
+    const discarded = vi.fn(() => ({ changes: 1 }))
+    const unavailable = vi.fn(() => ({ changes: 0 }))
+
+    expect(
+      discardDraft({ prepare: vi.fn(() => ({ run: discarded })) } as unknown as Db, 'account', 'open-draft')
+    ).toBe(true)
+    expect(
+      discardDraft(
+        { prepare: vi.fn(() => ({ run: unavailable })) } as unknown as Db,
+        'account',
+        'closed-draft'
+      )
+    ).toBe(false)
   })
 })

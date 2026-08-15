@@ -5,10 +5,33 @@ import { $createListItemNode, $createListNode, ListItemNode, ListNode } from '@l
 import { $createQuoteNode, QuoteNode } from '@lexical/rich-text'
 import { $createParagraphNode, $createTextNode, $getRoot, type SerializedEditorState } from 'lexical'
 import { describe, expect, it } from 'vitest'
+import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
-import { editorStateToPlainText } from './serialize'
+import { editorStateToPlainText, serializeEditorState } from './serialize'
 
 describe('plain-text alternative', () => {
+  it('serializes inline images to CID without leaking the private marker', () => {
+    const editor = createHeadlessEditor({ nodes: [ImageNode] })
+    editor.update(
+      () => {
+        $getRoot().append(
+          $createParagraphNode().append(
+            $createImageNode('data:image/png;base64,iVBORw0KGgo=', 'image@attn.local', 'a > b', 120, 80)
+          )
+        )
+      },
+      { discrete: true }
+    )
+
+    const { bodyHtml } = serializeEditorState(editor.getEditorState(), editor)
+    expect(bodyHtml).toContain('src="cid:image@attn.local"')
+    expect(bodyHtml).toContain('alt="a > b"')
+    expect(bodyHtml).toContain('width="120"')
+    expect(bodyHtml).toContain('height="80"')
+    expect(bodyHtml).not.toContain('data-attn-cid')
+    expect(bodyHtml).not.toContain('data:image')
+  })
+
   it('preserves list markers and quote prefixes from the editor model', () => {
     const editor = createHeadlessEditor({ nodes: [ListNode, ListItemNode, QuoteNode] })
     editor.update(

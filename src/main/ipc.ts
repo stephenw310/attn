@@ -47,9 +47,10 @@ import {
   reopenThreadDraft,
   requestDraftMirror,
   saveDraft,
-  takeRecoveredDraft
+  takeRecoveredDraft,
+  upgradeReplyToReplyAll
 } from './outbox/drafts'
-import { addInlineImage } from './outbox/inlineImages'
+import { addInlineImage, isSupportedInlineImageMimeType } from './outbox/inlineImages'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import { planReply } from './outbox/replyPlan'
 import type { SnoozeScheduler } from './scheduler'
@@ -125,7 +126,7 @@ function isInlineImageRequest(value: unknown): value is InlineImageRequest {
   return (
     isAttachmentDataRequest(value) &&
     typeof (value as Partial<InlineImageRequest>).mimeType === 'string' &&
-    /^(?:image\/(?:png|jpeg|gif|webp))$/i.test((value as InlineImageRequest).mimeType)
+    isSupportedInlineImageMimeType((value as InlineImageRequest).mimeType)
   )
 }
 
@@ -211,7 +212,7 @@ function isDraftInlineImageInput(value: unknown): value is DraftInlineImageInput
     typeof image.filename === 'string' &&
     image.filename.length <= 500 &&
     typeof image.mimeType === 'string' &&
-    /^image\/(?:png|jpeg|gif|webp)$/i.test(image.mimeType) &&
+    isSupportedInlineImageMimeType(image.mimeType) &&
     typeof image.dataBase64 === 'string' &&
     image.dataBase64.length <= 14 * 1024 * 1024
   )
@@ -300,10 +301,20 @@ export function registerIpc(context: IpcContext): () => void {
     }
     const account = requireAccount(context)
     const existing = reopenThreadDraft(context.db, account, threadId, kind as Exclude<DraftKind, 'new'>)
-    if (existing) return existing
+    const shouldUpgradeReplyAll = kind === 'replyAll' && existing?.kind === 'reply'
+    if (existing && !shouldUpgradeReplyAll) return existing
     await context.waitForConversation(threadId)
     let conversation = getConversation(context.db, account, threadId, 'unavailable')
-    if (!conversation) return null
+    if (!conversation) return existing
+    if (existing) {
+      // Recipient headers are available even when a message body is not. The
+      // reused reply already owns its quote, so Reply-All stays local-first and
+      // never waits on body hydration merely to add the planned To/Cc set.
+      const plan = planReply('replyAll', conversation, account)
+      const upgraded = upgradeReplyToReplyAll(context.db, account, existing.id, plan.to, plan.cc)
+      context.broadcastMailChanged()
+      return upgraded
+    }
     if (conversation.messages.some((message) => message.bodyState !== 'complete')) {
       const provider = context.makeProvider()
       if (provider) {
@@ -311,8 +322,9 @@ export function registerIpc(context: IpcContext): () => void {
         conversation = getConversation(context.db, account, threadId, 'unavailable')
       }
     }
-    if (!conversation || conversation.messages.some((message) => message.bodyState !== 'complete'))
+    if (!conversation || conversation.messages.some((message) => message.bodyState !== 'complete')) {
       return null
+    }
     const plan = planReply(kind as Exclude<DraftKind, 'new'>, conversation, account)
     const source = conversation.messages.find((message) => message.id === plan.sourceMessageId)
     const quotedAttachments: StoredDraftAttachment[] = (source?.attachments ?? [])
@@ -379,7 +391,9 @@ export function registerIpc(context: IpcContext): () => void {
           (candidate) => candidate.contentId?.toLowerCase() === contentId.toLowerCase()
         )
       : undefined
-    if (!attachment?.mimeType.startsWith('image/')) return { error: 'Inline image unavailable' }
+    if (!attachment || !isSupportedInlineImageMimeType(attachment.mimeType)) {
+      return { error: 'Inline image unavailable' }
+    }
     try {
       let data: Buffer
       if (attachment.spoolPath) {
@@ -419,7 +433,7 @@ export function registerIpc(context: IpcContext): () => void {
   })
   handle(IPC_CHANNELS.draftDiscard, (_event, id) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
-    discardDraft(context.db, requireAccount(context), id)
+    if (!discardDraft(context.db, requireAccount(context), id)) throw new Error('draft is unavailable')
     cleanDraftSpool(id)
     context.broadcastMailChanged()
     void context.draftMirrorExecutor()?.trigger()

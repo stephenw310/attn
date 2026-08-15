@@ -65,16 +65,18 @@ function formatAddress(address: MailAddress): string {
 }
 
 function foldHeader(name: string, value: string): string {
-  const tokens = value.split(/\s+/).filter(Boolean)
-  const lines = [`${name}:`]
-  for (const token of tokens) {
-    const current = lines.at(-1) ?? `${name}:`
-    if (`${current} ${token}`.length <= RECOMMENDED_HEADER_WIDTH) {
-      lines[lines.length - 1] = `${current} ${token}`
-    } else {
-      lines.push(` ${token}`)
-    }
+  const lines: string[] = []
+  let prefix = `${name}: `
+  let remaining = value
+  while (prefix.length + remaining.length > RECOMMENDED_HEADER_WIDTH) {
+    let splitAt = remaining.lastIndexOf(' ', RECOMMENDED_HEADER_WIDTH - prefix.length)
+    if (splitAt <= 0) splitAt = remaining.indexOf(' ')
+    if (splitAt <= 0) break
+    lines.push(`${prefix}${remaining.slice(0, splitAt)}`)
+    remaining = remaining.slice(splitAt + 1)
+    prefix = ' '
   }
+  lines.push(`${prefix}${remaining}`)
   return lines.join('\r\n')
 }
 

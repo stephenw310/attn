@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 10
+export const CURRENT_SCHEMA_VERSION = 11
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -144,7 +144,7 @@ CREATE TABLE outbox (
   remote_fingerprint TEXT
 );
 CREATE INDEX idx_outbox_composing ON outbox (account_id, state, updated_at DESC);
-CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (
+CREATE INDEX idx_outbox_thread_kind ON outbox (
   account_id,
   thread_id,
   CASE WHEN kind IN ('reply', 'replyAll') THEN 'reply' ELSE kind END

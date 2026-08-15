@@ -20,8 +20,11 @@ describe('composer HTML fidelity', () => {
 
     expect(prepared.issues).toEqual([])
     expect(prepared.html).toContain('data-surl="cid:ii_gmail"')
+    expect(prepared.html).toContain('width="320"')
     expect(prepared.html).not.toContain('data-attn-opaque')
-    expect(sanitizeOutgoingHtml(prepared.html)).toContain('data-surl="cid:ii_gmail"')
+    const outgoing = sanitizeOutgoingHtml(prepared.html)
+    expect(outgoing).toContain('data-surl="cid:ii_gmail"')
+    expect(outgoing).toContain('width="320"')
   })
 
   it('keeps a Gmail signature wrapper on the editable path', () => {

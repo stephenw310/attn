@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
-import { sanitizeOutgoingHtml } from './sanitize'
+import { sanitizeDraftHtmlForImport, sanitizeOutgoingHtml } from './sanitize'
 
 describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
   it('retains only the constrained composer surface', () => {
@@ -32,5 +32,19 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
     expect(sanitized.gmailSignature).toContain('target="_blank"')
     expect(sanitized.fakeSignature).toBe('<div>Fake</div>')
     expect(Object.values(sanitized).join('')).not.toMatch(/<script|onclick|data-secret|javascript:/)
+  })
+
+  it('keeps supported numeric formatting attributes without widening URI schemes', () => {
+    const html =
+      '<img src="cid:a@b" alt="x" width="120" height="80"><table><tbody><tr><td colspan="2" rowspan="3">Cell</td></tr></tbody></table><ol start="4"><li>Fourth</li></ol><a href="javascript:bad()">bad</a>'
+
+    for (const sanitized of [sanitizeDraftHtmlForImport(html), sanitizeOutgoingHtml(html)]) {
+      expect(sanitized).toContain('width="120"')
+      expect(sanitized).toContain('height="80"')
+      expect(sanitized).toContain('colspan="2"')
+      expect(sanitized).toContain('rowspan="3"')
+      expect(sanitized).toContain('start="4"')
+      expect(sanitized).not.toContain('javascript:')
+    }
   })
 })

@@ -332,17 +332,36 @@ function registerTestIpc(): void {
   ipcMain.on(TEST_CHANNELS.delayDraftInlineImage, (_event, delayMs: unknown) => {
     testDraftInlineImageDelayMs = typeof delayMs === 'number' && delayMs >= 0 ? delayMs : 0
   })
-  ipcMain.on(TEST_CHANNELS.updateMessageBody, (_event, messageId: unknown, bodyText: unknown) => {
-    if (!db || typeof messageId !== 'string' || typeof bodyText !== 'string') return
-    const account = currentAccountId()
-    if (!account) return
-    db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?').run(
-      bodyText,
-      account,
-      messageId
-    )
-    broadcastMailChanged()
-  })
+  ipcMain.on(
+    TEST_CHANNELS.updateMessageBody,
+    (_event, messageId: unknown, bodyText: unknown, done?: (error?: string) => void) => {
+      // electronApplication.evaluate can interrupt a synchronous SQLite read
+      // in the inspector context. Queue the mutation onto the next main-loop
+      // turn and let the test wait until the write and invalidation complete.
+      setImmediate(() => {
+        try {
+          if (!db || typeof messageId !== 'string' || typeof bodyText !== 'string') {
+            done?.('invalid message update')
+            return
+          }
+          const account = currentAccountId()
+          if (!account) {
+            done?.('account unavailable')
+            return
+          }
+          db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?').run(
+            bodyText,
+            account,
+            messageId
+          )
+          broadcastMailChanged()
+          done?.()
+        } catch (error) {
+          done?.(error instanceof Error ? error.message : String(error))
+        }
+      })
+    }
+  )
   ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
     testDraftSaveFailures++
   })

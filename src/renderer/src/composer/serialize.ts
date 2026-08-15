@@ -64,11 +64,14 @@ function blockText(node: SerializedLexicalNode): string {
 }
 
 function inlineImageSourcesToCid(html: string): string {
-  return html.replace(/<img\b[^>]*>/gi, (image) => {
-    const contentId = /\sdata-attn-cid="([^"]+)"/i.exec(image)?.[1]
-    if (!contentId) return image
-    return image.replace(/\ssrc="[^"]*"/i, ` src="cid:${contentId}"`)
-  })
+  const template = document.createElement('template')
+  template.innerHTML = html
+  for (const image of template.content.querySelectorAll<HTMLImageElement>('img[data-attn-cid]')) {
+    const contentId = image.getAttribute('data-attn-cid')
+    image.removeAttribute('data-attn-cid')
+    if (contentId) image.setAttribute('src', `cid:${contentId}`)
+  }
+  return template.innerHTML
 }
 
 export function editorStateToPlainText(state: SerializedEditorState): string {

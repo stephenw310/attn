@@ -13,6 +13,10 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_DRAFT_BYTES = 25 * 1024 * 1024
 const IMAGE_MIME = /^image\/(?:png|jpeg|gif|webp)$/i
 
+export function isSupportedInlineImageMimeType(value: string): boolean {
+  return IMAGE_MIME.test(value)
+}
+
 function safeFilename(value: string): string {
   return basename(value.replace(/[\0\r\n]/g, '').trim()) || 'pasted-image'
 }
@@ -25,7 +29,7 @@ export async function addInlineImage(
   input: DraftInlineImageInput,
   now = Date.now()
 ): Promise<DraftInlineImageResult> {
-  if (!IMAGE_MIME.test(input.mimeType)) throw new Error('unsupported inline image type')
+  if (!isSupportedInlineImageMimeType(input.mimeType)) throw new Error('unsupported inline image type')
   if (input.dataBase64.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 4) {
     throw new Error('inline image must be between 1 byte and 10 MB')
   }

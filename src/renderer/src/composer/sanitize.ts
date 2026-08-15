@@ -104,6 +104,7 @@ function installStyleHook(purifier: DOMPurify): void {
 }
 
 const SAFE_URI = /^(?:(?:https?|mailto|cid):|data:image\/(?:png|jpeg|gif|webp);base64,)/i
+const URI_SAFE_ATTRIBUTES = ['width', 'height', 'colspan', 'rowspan', 'start']
 
 function purifier(): DOMPurify {
   outgoingPurifier ??= createDOMPurify(window)
@@ -163,6 +164,7 @@ export function sanitizeOutgoingHtml(html: string): string {
       'height',
       'colspan',
       'rowspan',
+      'start',
       'style',
       'data-attn-cid',
       'data-attn-opaque',
@@ -177,6 +179,7 @@ export function sanitizeOutgoingHtml(html: string): string {
     // DOMPurify otherwise strips them even when listed in ALLOWED_ATTR, which
     // would silently lose inline images or preserved HTML.
     ALLOW_DATA_ATTR: true,
+    ADD_URI_SAFE_ATTR: URI_SAFE_ATTRIBUTES,
     ALLOWED_URI_REGEXP: SAFE_URI
   })
 }
@@ -205,6 +208,7 @@ export function sanitizeDraftHtmlForImport(html: string): string {
     ADD_ATTR: ['dir', 'target'],
     FORBID_TAGS: ['script', 'style', 'form', 'input', 'button', 'select', 'textarea', 'iframe', 'object'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
+    ADD_URI_SAFE_ATTR: URI_SAFE_ATTRIBUTES,
     ALLOWED_URI_REGEXP: SAFE_URI,
     ALLOW_ARIA_ATTR: false
   })
