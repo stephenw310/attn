@@ -101,7 +101,9 @@ jobs:
         run: npm ci
 
       - name: Run Electron performance smoke
-        run: npm run e2e:perf
+        # This job measures requestAnimationFrame paint latency. Keep the app
+        # visible inside xvfb so Chromium does not apply its hidden-window cadence.
+        run: npm run e2e:perf -- --visible
 
       - name: Upload performance traces and metrics
         if: always()

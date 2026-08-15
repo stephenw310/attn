@@ -176,10 +176,6 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      // E2e windows are deliberately hidden, but their performance smoke measures
-      // input-to-paint latency. Keep that isolated renderer on the same frame
-      // cadence as a visible app instead of Chromium's ~1 Hz background cadence.
-      backgroundThrottling: !testUserData,
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
