@@ -65,8 +65,16 @@ export class GmailClient {
     return this.request('POST', path, { body })
   }
 
+  async put<T>(path: string, body: unknown): Promise<T> {
+    return this.request('PUT', path, { body })
+  }
+
+  async delete(path: string): Promise<void> {
+    await this.request('DELETE', path, {})
+  }
+
   private async request<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     options: { params?: Record<string, string | string[]>; body?: unknown }
   ): Promise<T> {

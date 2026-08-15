@@ -3,6 +3,7 @@ import { pendingActionCount } from './actions'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
 import type { GmailMailProvider } from './gmail/provider'
+import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { syncFailureState } from './sync/failure'
@@ -21,6 +22,7 @@ interface SyncControllerContext {
   broadcastState: (state: SyncState) => void
   broadcastMailChanged: () => void
   getActionExecutor: () => ActionExecutor | null
+  getDraftMirrorExecutor: () => DraftMirrorExecutor | null
   getSnoozeScheduler: () => SnoozeScheduler | null
 }
 
@@ -94,6 +96,7 @@ export class SyncController {
       this.startSync()
     }
     void this.context.getActionExecutor()?.trigger()
+    void this.context.getDraftMirrorExecutor()?.trigger()
   }
 
   async resumeOnlineWork(): Promise<void> {
@@ -101,11 +104,17 @@ export class SyncController {
     // Remote changes must keep flowing even when a queued local action is in
     // Gmail's retry/backoff loop. The executor and history poller are independent.
     if (this.context.isSignedIn()) this.startSync()
-    await this.context.getActionExecutor()?.trigger()
+    await Promise.all([
+      this.context.getActionExecutor()?.trigger(),
+      this.context.getDraftMirrorExecutor()?.trigger()
+    ])
     if (this.stopped) return
     // A sign-out/account switch can make an active drain finish early. A second
     // pass picks up the newly active account.
-    await this.context.getActionExecutor()?.trigger()
+    await Promise.all([
+      this.context.getActionExecutor()?.trigger(),
+      this.context.getDraftMirrorExecutor()?.trigger()
+    ])
   }
 
   private resetSession(): void {

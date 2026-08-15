@@ -110,5 +110,11 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     scroll.focus({ preventScroll: true })
   }, [readerOpen, selectedId])
 
-  return { conversation, scrollRef }
+  // Effects clear stale cached data after a selection change, but that is one
+  // render too late for the reader: never let the previous thread's subject or
+  // body flash under the newly selected thread while its conversation loads.
+  return {
+    conversation: conversation?.threadId === selectedId ? conversation : null,
+    scrollRef
+  }
 }

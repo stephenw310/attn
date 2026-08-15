@@ -1,6 +1,7 @@
-// Development schema snapshot. Bump the version whenever this SQL changes;
-// existing profiles are intentionally reset instead of migrated.
-export const CURRENT_SCHEMA_VERSION = 8
+// Development schema snapshot. Bump the version whenever this SQL changes.
+// Runtime compatibility migrations stay out of the app; AGENTS.md documents the
+// manual additive-upgrade procedure for preserving a local dogfood profile.
+export const CURRENT_SCHEMA_VERSION = 9
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -114,4 +115,26 @@ CREATE TABLE contacts (
   PRIMARY KEY (account_id, email)
 );
 CREATE INDEX idx_contacts_name_folded ON contacts (account_id, name_folded);
+
+CREATE TABLE outbox (
+  id                TEXT PRIMARY KEY,
+  account_id        TEXT NOT NULL,
+  gmail_draft_id    TEXT,
+  state             TEXT NOT NULL DEFAULT 'composing',
+  to_json           TEXT NOT NULL DEFAULT '[]',
+  cc_json           TEXT NOT NULL DEFAULT '[]',
+  bcc_json          TEXT NOT NULL DEFAULT '[]',
+  subject           TEXT NOT NULL DEFAULT '',
+  body_html         TEXT NOT NULL DEFAULT '',
+  body_text         TEXT NOT NULL DEFAULT '',
+  attachments_json  TEXT NOT NULL DEFAULT '[]',
+  thread_id         TEXT,
+  in_reply_to       TEXT,
+  references_json   TEXT NOT NULL DEFAULT '[]',
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL,
+  local_revision    INTEGER NOT NULL DEFAULT 0,
+  mirror_revision   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_outbox_composing ON outbox (account_id, state, updated_at DESC);
 `

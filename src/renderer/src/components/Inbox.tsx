@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthStatus } from '../../../shared/auth'
+import { type Draft, emptyDraftInput } from '../../../shared/drafts'
 import type { MailLabel } from '../../../shared/mail'
+import { Composer } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
 import { useInboxCommands } from '../hooks/useInboxCommands'
 import { useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
@@ -30,6 +32,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
+  const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
   const [toast, showToast] = useToast()
   const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
@@ -37,6 +40,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const activeViewRef = useRef<'inbox' | 'snoozed'>('inbox')
   const earliestExitIndexRef = useRef<number | null>(null)
   const resetAccountRef = useRef<string | null | undefined>(undefined)
+  const composerOpeningRef = useRef(false)
 
   const activeAccount = status.email ?? null
   const {
@@ -72,10 +76,25 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetId(null)
+    setComposerDraft(null)
     setExitingThreadIds(new Set())
     selectedThreadIdRef.current = null
     resetSelection()
   }, [activeAccount, resetSelection])
+
+  useEffect(() => {
+    if (!window.attn || !activeAccount) return
+    let active = true
+    void window.attn.draft
+      .takeRecovered()
+      .then((draft) => {
+        if (active && draft) setComposerDraft(draft)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [activeAccount])
 
   useEffect(() => {
     setSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(threads.length - 1, 0))))
@@ -179,7 +198,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   )
 
   const openSelected = useCallback(() => {
-    if (threads[selectedIndex]) setReaderOpen(true)
+    const thread = threads[selectedIndex]
+    if (!thread) return
+    selectedThreadIdRef.current = thread.id
+    setReaderOpen(true)
   }, [selectedIndex, threads])
   const closeReader = useCallback(() => setReaderOpen(false), [])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
@@ -190,10 +212,33 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const openLabel = useCallback(() => {
     if (selected) setLabelTargetId(selected.id)
   }, [selected])
-  const openThread = useCallback((index: number) => {
-    setSelectedIndex(index)
-    setReaderOpen(true)
-  }, [])
+  const openThread = useCallback(
+    (index: number) => {
+      const thread = threads[index]
+      if (!thread) return
+      // Opening unread mail can immediately broadcast a mark-read refresh. Pin
+      // the identity before that refresh starts; the effect that mirrors index
+      // changes is deliberately too late for this transition.
+      selectedThreadIdRef.current = thread.id
+      setSelectedIndex(index)
+      setReaderOpen(true)
+    },
+    [threads]
+  )
+  const openComposer = useCallback(() => {
+    if (!window.attn || composerDraft || composerOpeningRef.current) return
+    composerOpeningRef.current = true
+    void window.attn.draft
+      .save(emptyDraftInput())
+      .then(({ id }) => window.attn?.draft.get(id) ?? null)
+      .then((draft) => {
+        if (draft) setComposerDraft(draft)
+      })
+      .catch(() => {})
+      .finally(() => {
+        composerOpeningRef.current = false
+      })
+  }, [composerDraft])
 
   const snoozeSelected = useCallback(
     (dueAt: number) => {
@@ -236,11 +281,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     triage,
     openSnooze,
     openLabel,
+    openComposer,
     showToast
   })
 
   useKeyboardDispatch({
-    blocked: labelTarget !== undefined,
+    blocked: labelTarget !== undefined || composerDraft !== null,
     readerOpen,
     snoozeOpen,
     onCloseSnooze: closeSnooze,
@@ -256,12 +302,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         unreadCount={realUnreadTotal}
         pendingCount={pendingCount}
         selectionCount={selectedIds.size}
+        composerOpen={composerDraft !== null}
         status={status}
         onStatus={onStatus}
         onSwitchView={switchView}
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className={`min-h-0 flex-1 ${composerDraft ? 'hidden' : 'flex'}`} aria-hidden={!!composerDraft}>
         <ThreadList
           threads={threads}
           view={view}
@@ -291,7 +338,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         )}
       </div>
 
-      {snoozeOpen && selected && (
+      {!composerDraft && snoozeOpen && selected && (
         <SnoozePicker
           targetCount={targetedThreads.length}
           onCancel={closeSnooze}
@@ -300,7 +347,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         />
       )}
 
-      {labelTarget && (
+      {!composerDraft && labelTarget && (
         <LabelPicker
           labels={labels}
           targets={[{ id: labelTarget.id, labelIds: labelTarget.labelIds }]}
@@ -309,15 +356,21 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         />
       )}
 
+      {composerDraft && (
+        <Composer draft={composerDraft} onClose={() => setComposerDraft(null)} onToast={showToast} />
+      )}
+
       <Toast toast={toast} />
 
-      <MailFooter
-        readerOpen={readerOpen}
-        sync={sync}
-        networkOnline={networkOnline}
-        onRetry={retrySync}
-        onCopyError={copySyncError}
-      />
+      {!composerDraft && (
+        <MailFooter
+          readerOpen={readerOpen}
+          sync={sync}
+          networkOnline={networkOnline}
+          onRetry={retrySync}
+          onCopyError={copySyncError}
+        />
+      )}
     </div>
   )
 }

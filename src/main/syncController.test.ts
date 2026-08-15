@@ -3,6 +3,7 @@ import type { SyncState } from '../shared/mail'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
 import type { GmailMailProvider } from './gmail/provider'
+import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import type { BackfillCallbacks, BackfillResult } from './sync/backfill'
 import type { HistoryPollerOptions } from './sync/poller'
@@ -74,6 +75,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
   const states: SyncState[] = []
   const backfills: Array<{ callbacks: BackfillCallbacks; result: Deferred<BackfillResult | null> }> = []
   const trigger = vi.fn(async () => {})
+  const mirrorTrigger = vi.fn(async () => {})
   const wakeThread = vi.fn()
   const broadcastMailChanged = vi.fn()
   const provider = { id: 'provider' } as unknown as GmailMailProvider
@@ -98,6 +100,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     broadcastState: (state) => states.push(state),
     broadcastMailChanged,
     getActionExecutor: () => ({ trigger }) as unknown as ActionExecutor,
+    getDraftMirrorExecutor: () => ({ trigger: mirrorTrigger }) as unknown as DraftMirrorExecutor,
     getSnoozeScheduler: () => ({ wakeThread }) as unknown as SnoozeScheduler
   })
 

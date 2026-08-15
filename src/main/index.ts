@@ -17,6 +17,7 @@ import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
+import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import { SnoozeScheduler } from './scheduler'
 import { deleteThread } from './sync/persist'
 import { SyncController } from './syncController'
@@ -48,11 +49,13 @@ let db: Db | null = null
 let seedAccountId: string | null = null
 let seedPath: string | undefined
 let actionExecutor: ActionExecutor | null = null
+let draftMirrorExecutor: DraftMirrorExecutor | null = null
 let snoozeScheduler: SnoozeScheduler | null = null
 let mailNotifier: MailNotifier | null = null
 let syncController: SyncController | null = null
 let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
+let testDraftSaveFailures = 0
 let signInInFlight = false
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
@@ -236,6 +239,7 @@ function initialize(): void {
     broadcastState: (state) => broadcast(IPC_CHANNELS.syncState, state),
     broadcastMailChanged,
     getActionExecutor: () => actionExecutor,
+    getDraftMirrorExecutor: () => draftMirrorExecutor,
     getSnoozeScheduler: () => snoozeScheduler
   })
   registerIpc({
@@ -248,6 +252,7 @@ function initialize(): void {
     makeProvider: makeCurrentProvider,
     isSeeded,
     executor: () => actionExecutor,
+    draftMirrorExecutor: () => draftMirrorExecutor,
     scheduler: () => snoozeScheduler,
     syncController: () => syncController,
     broadcastMailChanged,
@@ -256,9 +261,15 @@ function initialize(): void {
       pendingFocus = null
     },
     waitForConversation,
+    consumeTestDraftSaveFailure: () => {
+      if (testDraftSaveFailures === 0) return false
+      testDraftSaveFailures--
+      return true
+    },
     testUserData: Boolean(testUserData)
   })
   actionExecutor = new ActionExecutor(activeDb, currentAccountId, makeCurrentProvider, broadcastMailChanged)
+  draftMirrorExecutor = new DraftMirrorExecutor(activeDb, currentAccountId, makeCurrentProvider)
   snoozeScheduler = new SnoozeScheduler(
     activeDb,
     currentAccountId,
@@ -313,6 +324,17 @@ function registerTestIpc(): void {
     )
     broadcastMailChanged()
   })
+  ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
+    testDraftSaveFailures++
+  })
+  ipcMain.on(TEST_CHANNELS.markDraftMirrored, (_event, draftId: unknown) => {
+    const account = currentAccountId()
+    if (!db || !account || typeof draftId !== 'string') return
+    db.prepare(
+      `UPDATE outbox SET mirror_revision = local_revision
+       WHERE account_id = ? AND id = ? AND state = 'composing'`
+    ).run(account, draftId)
+  })
 }
 
 function teardown(): void {
@@ -324,11 +346,14 @@ function teardown(): void {
   powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
   actionExecutor?.stop()
   actionExecutor = null
+  void draftMirrorExecutor?.stop()
+  draftMirrorExecutor = null
   snoozeScheduler?.stop()
   snoozeScheduler = null
   mailNotifier?.stop()
   mailNotifier = null
   for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
+  testDraftSaveFailures = 0
   db?.close()
   db = null
 }
@@ -340,6 +365,20 @@ function refreshSnoozesAfterResume(): void {
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 else {
+  let quitPrepared = false
+  let preparingQuit = false
+  app.on('before-quit', (event) => {
+    if (quitPrepared) return
+    event.preventDefault()
+    if (preparingQuit) return
+    preparingQuit = true
+    // A Gmail draft create is not idempotent. Let the active checkpoint persist
+    // its returned id before will-quit closes SQLite, then stop before another row.
+    void (draftMirrorExecutor?.stop() ?? Promise.resolve()).finally(() => {
+      quitPrepared = true
+      app.quit()
+    })
+  })
   app.on('second-instance', () => showMainWindow())
   app.whenReady().then(() => {
     if (process.platform === 'darwin') app.dock?.setIcon(appIcon)

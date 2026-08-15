@@ -2,9 +2,9 @@
 
 Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
 
-**Current state: M1 feature work is complete; M2 (mail out) is underway.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. M2's renderer decomposition, main-process seams, and sent-mail/contact foundation have shipped; the composer is next. The only open M1 evidence item is a real-OS notification click-through smoke (see the M1 plan).
+**Current state: M1 feature work is complete; M2 (mail out) is underway.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. M2's renderer decomposition, main-process seams, mail-out test scaffolding, and sent-mail/contact foundation have shipped; the crash-safe composer is underway in draft PR #38 and is moving to the same full-window focus model. The only open M1 evidence item is a real-OS notification click-through smoke (see the M1 plan).
 
-- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.13)
+- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.14)
 - **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist
 - **[docs/M2-PLAN.md](docs/M2-PLAN.md)** — M2 implementation plan: pre-M2 refactors, composer, drafts, send + undo send, exactly-once outbox
 - **[AGENTS.md](AGENTS.md)** — working agreement for coding agents (verification contract, test harness, conventions). `.claude/CLAUDE.md` imports it, so Claude Code picks it up automatically; other tools read it directly.

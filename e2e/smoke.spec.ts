@@ -79,13 +79,14 @@ test('leaves the inbox keyboard loop unmounted while signed out', async ({ page 
     }
     window.addEventListener('keydown', onKeyDown)
     document.body.focus()
-    for (const key of ['j', 'k', 'e', 'x', 'g', '#']) {
+    for (const key of ['j', 'k', 'e', 'x', 'g', 'c', '#']) {
       window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
     }
     window.removeEventListener('keydown', onKeyDown)
     return seen
   })
   expect(swallowed).toEqual([])
+  await expect(page.getByTestId('composer')).toHaveCount(0)
 })
 
 test('captures signed-out onboarding for visual review', async ({ page }, testInfo) => {

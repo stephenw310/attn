@@ -40,6 +40,18 @@ export class GmailMailProvider implements MailProvider {
     await this.client.post(`/threads/${encodeURIComponent(threadId)}/untrash`, {})
   }
 
+  async saveDraft(draft: { id: string | null; raw: string }): Promise<string> {
+    const body = { message: { raw: draft.raw } }
+    const result = draft.id
+      ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body)
+      : await this.client.post<{ id: string }>('/drafts', body)
+    return result.id
+  }
+
+  async deleteDraft(id: string): Promise<void> {
+    await this.client.delete(`/drafts/${encodeURIComponent(id)}`)
+  }
+
   getProfile(): Promise<ProviderProfile> {
     return this.client.get('/profile')
   }

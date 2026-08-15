@@ -15,6 +15,8 @@ export type RecipientField = 'to' | 'cc' | 'bcc'
  * the wrong reason, which is exactly the failure an undo-send spec cannot catch.
  */
 export class ComposerPage {
+  private lastSavedRevision = 0
+
   constructor(private readonly page: Page) {}
 
   get root(): Locator {
@@ -34,6 +36,9 @@ export class ComposerPage {
   }
 
   async openNew(): Promise<void> {
+    // firstWindow() can resolve while React is still mounting; wait for the
+    // inbox command registry before sending the single global keystroke.
+    await this.page.getByTestId('thread-list').waitFor({ state: 'attached' })
     await this.page.keyboard.press('c')
     await this.root.waitFor()
   }
@@ -81,6 +86,32 @@ export class ComposerPage {
   /** Retries until the header's pending readout settles on `count`. */
   async expectPending(count: number): Promise<void> {
     await expect.poll(() => this.readPending()).toBe(count)
+  }
+
+  async expectSaved(): Promise<void> {
+    await expect
+      .poll(async () => {
+        const revisions = await this.readSaveRevisions()
+        return revisions.local > this.lastSavedRevision && revisions.saved === revisions.local
+      })
+      .toBe(true)
+    this.lastSavedRevision = (await this.readSaveRevisions()).saved
+  }
+
+  private async readSaveRevisions(): Promise<{ local: number; saved: number }> {
+    const status = this.page.getByTestId('composer-save-status')
+    const [local, saved] = await Promise.all([
+      status.getAttribute('data-local-revision'),
+      status.getAttribute('data-saved-revision')
+    ])
+    if (local === null || saved === null) {
+      throw new Error(`missing composer revisions: local=${local}, saved=${saved}`)
+    }
+    const parsed = { local: Number(local), saved: Number(saved) }
+    if (!Number.isInteger(parsed.local) || !Number.isInteger(parsed.saved)) {
+      throw new Error(`invalid composer revisions: local=${local}, saved=${saved}`)
+    }
+    return parsed
   }
 
   private async readPending(): Promise<number> {
