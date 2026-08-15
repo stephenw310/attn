@@ -148,7 +148,7 @@ describe('reply planning', () => {
 
     expect(plan.to).toEqual([])
     expect(plan.cc).toEqual([])
-    expect(plan.threadId).toBeNull()
+    expect(plan.threadId).toBe('thread-1')
     expect(plan.inReplyTo).toBeNull()
     expect(plan.references).toEqual([])
     expect(plan.quoteText).toContain('---------- Forwarded message ---------')

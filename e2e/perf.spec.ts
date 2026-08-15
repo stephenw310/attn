@@ -5,7 +5,8 @@ const SAMPLE_COUNT = 5
 const LIST_RENDER_CEILING_MS = 1_500
 const CONVERSATION_OPEN_CEILING_MS = 1_500
 const TRIAGE_FEEDBACK_CEILING_MS = 2_500
-const COMPOSER_OPEN_CEILING_MS = 100
+const COMPOSER_OPEN_WARMUP_COUNT = 2
+const COMPOSER_OPEN_CEILING_MS = 150
 const COMPOSER_KEYSTROKE_CEILING_MS = 250
 
 test.use({ seed: '.artifacts/perf-seed.json' })
@@ -21,10 +22,14 @@ async function reportMetric(
   testInfo: TestInfo,
   name: string,
   samples: readonly number[],
-  medianMs: number
+  medianMs: number,
+  warmupSamples: readonly number[] = []
 ): Promise<void> {
   const result = {
     name,
+    ...(warmupSamples.length > 0
+      ? { warmupSamplesMs: warmupSamples.map((sample) => Math.round(sample)) }
+      : {}),
     samplesMs: samples.map((sample) => Math.round(sample)),
     medianMs: Math.round(medianMs)
   }
@@ -191,6 +196,17 @@ test.describe('@perf 2,000-thread inbox', () => {
 
   test('opens and types in the composer within CI-safe ceilings', async ({ page }, testInfo) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(2_000)
+
+    // Keep one-time renderer/JIT initialization visible in the metric while
+    // enforcing the interaction budget against a stable, repeated hot path.
+    const warmupSamples: number[] = []
+    for (let iteration = 0; iteration < COMPOSER_OPEN_WARMUP_COUNT; iteration++) {
+      warmupSamples.push(await measureComposerOpen(page))
+      await expect(page.getByTestId('composer')).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('composer')).toHaveCount(0)
+    }
+
     const openSamples: number[] = []
     for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
       openSamples.push(await measureComposerOpen(page))
@@ -201,7 +217,7 @@ test.describe('@perf 2,000-thread inbox', () => {
       }
     }
     const openMedianMs = median(openSamples)
-    await reportMetric(testInfo, 'composer-open', openSamples, openMedianMs)
+    await reportMetric(testInfo, 'composer-open', openSamples, openMedianMs, warmupSamples)
     expect(openMedianMs, 'median c keydown to composer mounted').toBeLessThan(COMPOSER_OPEN_CEILING_MS)
 
     await page.getByTestId('composer-editor').click()

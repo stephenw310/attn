@@ -358,7 +358,7 @@ Two smaller things ride along: empty drafts are marked `drafted` rather than dis
 ### Design (decided)
 
 - **Drop the one-composer restriction in both places it lives.** The UI guard is the `|| composerDraft` clause in `openComposer` (`Inbox.tsx:229`); the real enforcement is the id-less reuse branch in `saveDraft` (`drafts.ts:88-103`), which must start creating rather than reusing. Update the doc comment above it too, since it cites the rule as the reason. `c` then always starts a new draft, and only one composer is *mounted* at a time, which is a rendering fact rather than a limit on how many drafts exist.
-- **Uniqueness is per conversation, not per app:** at most one `reply`/`replyAll` draft and one `forward` draft per thread. `r` on a thread with an existing reply draft reopens it rather than creating a second. New-message drafts (`thread_id IS NULL`) are unlimited.
+- **Attn-created slots are per conversation, not per app:** `r`/`a` reopen one shared local `reply`/`replyAll` slot and `f` reopens one local `forward` slot per thread. New-message drafts (`thread_id IS NULL`) are unlimited. Gmail draft resource ids remain authoritative during two-way sync, so separately identified remote drafts never collapse merely because they share a thread and kind.
 - **Drafts view, pulled forward from M3.** Third value in the view union, third nav button, `g d`, already promised in §5 and by decision #10. The M2/M3 boundary is deliberate and narrow:
   - **M2 (here):** a Drafts view listing local drafts, merged with remote ones once T14D lands; `g d`; opening a row into the composer; the Draft chip on thread rows.
   - **M3 (unchanged):** the other seven mailboxes, the shared list/reading shell, palette `Go to …`, and the expanded 12-month system-label metadata sync those require. M3 absorbs this view into the unified mailbox rather than building on it, so keep it small and do not let it become load-bearing.
@@ -367,12 +367,16 @@ Two smaller things ride along: empty drafts are marked `drafted` rather than dis
 
 ### Implementation guide
 
-Schema (bump `CURRENT_SCHEMA_VERSION` to 10):
+Schema (initially revision 10; revised to 11 when remote draft identity became authoritative):
 
 ```sql
 ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';  -- new|reply|replyAll|forward
 ALTER TABLE outbox ADD COLUMN source_message_id TEXT;
-CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (account_id, thread_id, kind)
+CREATE INDEX idx_outbox_thread_kind ON outbox (
+  account_id,
+  thread_id,
+  CASE WHEN kind IN ('reply', 'replyAll') THEN 'reply' ELSE kind END
+)
   WHERE state IN ('composing', 'drafted') AND thread_id IS NOT NULL;
 ```
 
@@ -382,7 +386,7 @@ CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (account_id, thread_id, kin
 
 ### Testing
 
-- Unit: uniqueness rule, empty-draft discard, list ordering and empty exclusion.
+- Unit: local thread-slot reuse, empty-draft discard, list ordering and empty exclusion.
 - E2e: write two drafts and reach both from `g d`; `Esc` on an empty draft leaves no row; reply draft shows a chip on its thread row and reopens via `r`; relaunch with three drafts lists all three.
 
 ### Done when
@@ -524,10 +528,47 @@ Touch points, all mechanical but crossing the shared type:
 - Unit: the three-way decision table (local-only change, remote-only change, both changed) against a fake provider and injected clock; open-composer immunity; backfill cursor resume across the new `drafts` phase.
 - E2e (seeded): a simulated remote edit to a closed draft is adopted; the same edit against an open draft is deferred until close.
 - **Verify Bcc round-trips.** Silently dropping Bcc through a sync cycle would be a data-loss bug; test it explicitly.
+- Reconcile two separately identified Gmail drafts on the same thread twice; both local ids must remain distinct and stable rather than rebinding on every poll.
 
 ### Done when
 
 A draft edited in Gmail appears correctly in Attn and vice versa, with no formatting loss in either direction; verify green.
+
+### Local dogfood schema upgrade for the T14A–T14D implementation
+
+This implementation originally batched the four revision tasks into schema revision 10. Revision 11 removes
+the unique thread/kind constraint because Gmail permits multiple draft resources on one thread. For an
+additive manual upgrade of a stopped revision-9 dogfood profile directly to the current snapshot, use the
+`AGENTS.md` procedure with this exact task-specific DDL and set `user_version` in the same transaction:
+
+```sql
+ALTER TABLE outbox ADD COLUMN gmail_message_id TEXT;
+ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';
+ALTER TABLE outbox ADD COLUMN source_message_id TEXT;
+ALTER TABLE outbox ADD COLUMN quote_html TEXT NOT NULL DEFAULT '';
+ALTER TABLE outbox ADD COLUMN quote_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE outbox ADD COLUMN remote_updated_at INTEGER;
+ALTER TABLE outbox ADD COLUMN remote_fingerprint TEXT;
+CREATE INDEX idx_outbox_thread_kind ON outbox (
+  account_id,
+  thread_id,
+  CASE WHEN kind IN ('reply', 'replyAll') THEN 'reply' ELSE kind END
+) WHERE state IN ('composing', 'drafted') AND thread_id IS NOT NULL;
+PRAGMA user_version = 11;
+```
+
+For a stopped revision-10 dogfood profile, replace only the constraint index and bump the version in the
+same transaction:
+
+```sql
+DROP INDEX idx_outbox_thread_kind;
+CREATE INDEX idx_outbox_thread_kind ON outbox (
+  account_id,
+  thread_id,
+  CASE WHEN kind IN ('reply', 'replyAll') THEN 'reply' ELSE kind END
+) WHERE state IN ('composing', 'drafted') AND thread_id IS NOT NULL;
+PRAGMA user_version = 11;
+```
 
 ---
 
@@ -588,12 +629,9 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 
 ### Implementation guide
 
-**Schema evolution from T14 revision 9** (update the current snapshot and bump to revision 10):
+**Schema evolution from the T14A–T14D revision-10 snapshot** (update the current snapshot and bump to revision 11):
 
 ```sql
-ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';
-ALTER TABLE outbox ADD COLUMN source_message_id TEXT;
-ALTER TABLE outbox ADD COLUMN quote_html TEXT;
 ALTER TABLE outbox ADD COLUMN rfc_message_id TEXT;
 ALTER TABLE outbox ADD COLUMN send_at INTEGER;
 ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
@@ -601,9 +639,9 @@ ALTER TABLE outbox ADD COLUMN last_error TEXT;
 CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
 ```
 
-T16 owns the final revision-10 names and exact DDL if implementation discoveries change this list. The PR
+T16 owns the final revision-11 names and exact DDL if implementation discoveries change this list. The PR
 must update this block before merge, then use the `AGENTS.md` manual procedure for any preserved dogfood
-profile: all `ALTER` statements, index creation, and `PRAGMA user_version = 10` happen in one transaction.
+profile: all `ALTER` statements, index creation, and `PRAGMA user_version = 11` happen in one transaction.
 
 - **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` (thin, e2e-covered).
 - Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.

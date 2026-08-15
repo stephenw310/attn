@@ -1,5 +1,6 @@
 import { $generateHtmlFromNodes } from '@lexical/html'
 import type { EditorState, LexicalEditor, SerializedEditorState, SerializedLexicalNode } from 'lexical'
+import { opaqueHtmlText, restoreOpaqueHtml } from './preserve'
 import { sanitizeOutgoingHtml } from './sanitize'
 
 interface SerializedElement extends SerializedLexicalNode {
@@ -7,6 +8,8 @@ interface SerializedElement extends SerializedLexicalNode {
   listType?: 'bullet' | 'number' | 'check'
   start?: number
   text?: string
+  altText?: string
+  html?: string
 }
 
 function childrenOf(node: SerializedLexicalNode): SerializedLexicalNode[] {
@@ -15,8 +18,10 @@ function childrenOf(node: SerializedLexicalNode): SerializedLexicalNode[] {
 
 function inlineText(node: SerializedLexicalNode): string {
   const element = node as SerializedElement
-  if (node.type === 'text') return element.text ?? ''
+  if (node.type === 'text' || node.type === 'styled-text') return element.text ?? ''
   if (node.type === 'linebreak') return '\n'
+  if (node.type === 'composer-image') return element.altText ? `[Image: ${element.altText}]` : '[Image]'
+  if (node.type === 'opaque-html') return element.html ? opaqueHtmlText(element.html) : ''
   return childrenOf(node).map(inlineText).join('')
 }
 
@@ -43,6 +48,9 @@ function listText(node: SerializedLexicalNode, depth = 0): string {
 }
 
 function blockText(node: SerializedLexicalNode): string {
+  if (node.type === 'gmail-signature') {
+    return childrenOf(node).map(blockText).join('\n')
+  }
   if (node.type === 'quote') {
     return inlineText(node)
       .split('\n')
@@ -53,6 +61,17 @@ function blockText(node: SerializedLexicalNode): string {
     return listText(node)
   }
   return inlineText(node)
+}
+
+function inlineImageSourcesToCid(html: string): string {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  for (const image of template.content.querySelectorAll<HTMLImageElement>('img[data-attn-cid]')) {
+    const contentId = image.getAttribute('data-attn-cid')
+    image.removeAttribute('data-attn-cid')
+    if (contentId) image.setAttribute('src', `cid:${contentId}`)
+  }
+  return template.innerHTML
 }
 
 export function editorStateToPlainText(state: SerializedEditorState): string {
@@ -70,7 +89,9 @@ export function serializeEditorState(
   let bodyHtml = ''
   editorState.read(
     () => {
-      bodyHtml = sanitizeOutgoingHtml($generateHtmlFromNodes(editor))
+      bodyHtml = restoreOpaqueHtml(
+        inlineImageSourcesToCid(sanitizeOutgoingHtml($generateHtmlFromNodes(editor)))
+      )
     },
     { editor }
   )

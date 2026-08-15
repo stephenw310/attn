@@ -52,7 +52,10 @@ export function listInboxThreads(db: Db, accountId: string, limit = 300): Thread
               t.is_unread, t.is_starred, t.has_attachment,
               EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
-                       AND r.kind = 'snooze' AND r.state = 'returned') AS returned
+                       AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
+              EXISTS(SELECT 1 FROM outbox o
+                     WHERE o.account_id = t.account_id AND o.thread_id = t.id
+                       AND o.state IN ('composing', 'drafted')) AS has_draft
        FROM threads t
        WHERE t.account_id = ?
          AND EXISTS (SELECT 1 FROM thread_labels tl
@@ -70,6 +73,7 @@ export function listInboxThreads(db: Db, accountId: string, limit = 300): Thread
     is_starred: number
     has_attachment: number
     returned: number
+    has_draft: number
   }[]
 
   const labelIds = labelIdsForThreads(
@@ -87,6 +91,7 @@ export function listInboxThreads(db: Db, accountId: string, limit = 300): Thread
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
     returned: r.returned === 1,
+    hasDraft: r.has_draft === 1,
     labelIds: labelIds.get(r.id) ?? []
   }))
 }
@@ -95,7 +100,10 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = 300): Snoo
   const rows = db
     .prepare(
       `SELECT t.id, t.from_display, t.subject, t.snippet, t.last_msg_at,
-              t.is_unread, t.is_starred, t.has_attachment, r.due_at
+              t.is_unread, t.is_starred, t.has_attachment, r.due_at,
+              EXISTS(SELECT 1 FROM outbox o
+                     WHERE o.account_id = t.account_id AND o.thread_id = t.id
+                       AND o.state IN ('composing', 'drafted')) AS has_draft
        FROM reminders r
        JOIN threads t ON t.account_id = r.account_id AND t.id = r.thread_id
        WHERE r.account_id = ? AND r.kind = 'snooze' AND r.state = 'pending'
@@ -112,6 +120,7 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = 300): Snoo
     is_starred: number
     has_attachment: number
     due_at: number
+    has_draft: number
   }[]
 
   const labelIds = labelIdsForThreads(
@@ -129,6 +138,7 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = 300): Snoo
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
     returned: false,
+    hasDraft: r.has_draft === 1,
     labelIds: labelIds.get(r.id) ?? [],
     dueAt: r.due_at
   }))

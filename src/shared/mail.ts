@@ -10,6 +10,7 @@ export interface ThreadRow {
   starred: boolean
   hasAttachment: boolean
   returned: boolean
+  hasDraft: boolean
   labelIds: string[]
 }
 
@@ -92,7 +93,7 @@ export interface InlineImageRepairRequest {
   threadId: string
 }
 
-export type SyncStage = 'metadata' | 'bodies' | 'sent' | 'reconcile'
+export type SyncStage = 'metadata' | 'bodies' | 'drafts' | 'sent' | 'reconcile'
 
 export type SyncState =
   | { phase: 'idle' }

@@ -10,7 +10,13 @@ test('invalidates viewed conversation data when local mail changes', async ({ ap
   )
 
   await app.evaluate(
-    ({ ipcMain }, { channel, messageId, bodyText }) => ipcMain.emit(channel, {}, messageId, bodyText),
+    ({ ipcMain }, { channel, messageId, bodyText }) =>
+      new Promise<void>((resolve, reject) => {
+        ipcMain.emit(channel, {}, messageId, bodyText, (error?: string) => {
+          if (error) reject(new Error(error))
+          else resolve()
+        })
+      }),
     {
       channel: TEST_CHANNELS.updateMessageBody,
       messageId: 'm-roadmap-2',

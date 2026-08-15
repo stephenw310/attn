@@ -2,7 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import type { ContactSearchResult } from '../shared/contacts'
-import type { Draft, DraftSaveInput } from '../shared/drafts'
+import type {
+  Draft,
+  DraftInlineImageInput,
+  DraftInlineImageResult,
+  DraftKind,
+  DraftSaveInput
+} from '../shared/drafts'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   Conversation,
@@ -82,9 +88,18 @@ const api = {
     search: (query: string): Promise<ContactSearchResult[]> => invoke(IPC_CHANNELS.contactsSearch, query)
   },
   draft: {
-    save: (draft: DraftSaveInput): Promise<{ id: string }> => invoke(IPC_CHANNELS.draftSave, draft),
+    save: (draft: DraftSaveInput): Promise<{ id: string; draft: Draft | null }> =>
+      invoke(IPC_CHANNELS.draftSave, draft),
     get: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftGet, id),
-    close: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftClose, id),
+    list: (): Promise<Draft[]> => invoke(IPC_CHANNELS.draftList),
+    reopen: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftReopen, id),
+    createReply: (threadId: string, kind: Exclude<DraftKind, 'new'>): Promise<Draft | null> =>
+      invoke(IPC_CHANNELS.draftCreateReply, threadId, kind),
+    addInlineImage: (id: string, image: DraftInlineImageInput): Promise<DraftInlineImageResult> =>
+      invoke(IPC_CHANNELS.draftAddInlineImage, id, image),
+    getInlineImage: (id: string, contentId: string): Promise<InlineImageResult> =>
+      invoke(IPC_CHANNELS.draftGetInlineImage, id, contentId),
+    close: (id: string): Promise<'saved' | 'discarded'> => invoke(IPC_CHANNELS.draftClose, id),
     discard: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftDiscard, id),
     mirror: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftMirror, id),
     takeRecovered: (): Promise<Draft | null> => invoke(IPC_CHANNELS.draftTakeRecovered)

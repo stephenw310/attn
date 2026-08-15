@@ -18,6 +18,7 @@ export interface DisplayThread {
   starred: boolean
   hasAttachment: boolean
   returned: boolean
+  hasDraft: boolean
   dueAt?: number
   dueLabel?: string
   labelIds: string[]
@@ -81,6 +82,7 @@ export function displayThread(row: ThreadRow): DisplayThread {
     starred: row.starred,
     hasAttachment: row.hasAttachment,
     returned: row.returned,
+    hasDraft: row.hasDraft,
     labelIds: row.labelIds,
     lastMsgAt: row.lastMsgAt
   }

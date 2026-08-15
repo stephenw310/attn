@@ -37,7 +37,9 @@ function emptyProvider(): MailProvider {
     listThreadIds: vi.fn(async () => ({ threadIds: [] })),
     getThread: vi.fn(async (id) => ({ id, messages: [] })),
     getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '101' }))
+    listHistory: vi.fn(async () => ({ history: [], historyId: '101' })),
+    listDrafts: vi.fn(async () => ({ drafts: [] })),
+    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } }))
   }
 }
 
@@ -75,6 +77,7 @@ describe('windowed backfill checkpoints', () => {
     expect(callbacks.onProgress.mock.calls.map(([progress]) => progress)).toEqual([
       { stage: 'metadata', threadsDone: 0, mailChanged: false },
       { stage: 'bodies', threadsDone: 0, mailChanged: false },
+      { stage: 'drafts', threadsDone: 0, mailChanged: false },
       { stage: 'sent', threadsDone: 0, mailChanged: false },
       { stage: 'reconcile', threadsDone: 0, mailChanged: false }
     ])
@@ -100,6 +103,7 @@ describe('windowed backfill checkpoints', () => {
       false,
       true,
       false,
+      false,
       true,
       false
     ])
@@ -115,6 +119,23 @@ describe('windowed backfill checkpoints', () => {
 
     expect(provider.listThreadIds).toHaveBeenCalledOnce()
     expect(provider.getThread).not.toHaveBeenCalled()
+    expect(result).not.toBeNull()
+  })
+
+  it('resumes the draft-id pager before continuing to sent metadata', async () => {
+    const provider = emptyProvider()
+    const result = await runInboxBackfill(
+      fakeDb({ backfill_cursor: 'drafts:page-2', last_history_id: '88' }),
+      provider,
+      callbacks
+    )
+
+    expect(provider.listDrafts).toHaveBeenCalledWith('page-2')
+    expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
+      q: 'newer_than:12m',
+      labelIds: ['SENT'],
+      pageToken: undefined
+    })
     expect(result).not.toBeNull()
   })
 
@@ -188,6 +209,11 @@ describe('backfill cursor routing', () => {
     expect(planBackfillStart('bodies:page-2')).toEqual({
       kind: 'run',
       cursor: { phase: 'bodies', pageToken: 'page-2' },
+      initialize: false
+    })
+    expect(planBackfillStart('drafts:page-2')).toEqual({
+      kind: 'run',
+      cursor: { phase: 'drafts', pageToken: 'page-2' },
       initialize: false
     })
     expect(planBackfillStart('sent:page-3')).toEqual({

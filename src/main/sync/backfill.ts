@@ -1,13 +1,14 @@
 // Resumable staged backfill: 12 months of INBOX metadata, 90 days of full
-// INBOX bodies, then 12 months of SENT metadata for local autocomplete.
+// INBOX bodies, all Gmail drafts, then 12 months of SENT metadata for local autocomplete.
 // Each completed page checkpoints the next phase/token.
 
 import type { SyncStage } from '../../shared/mail'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
+import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { hydrateMissingThreadBodies } from './bodies'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
-import type { MailProvider, ThreadIdPage } from './provider'
+import type { DraftPage, MailProvider, ThreadIdPage } from './provider'
 
 export interface BackfillCallbacks {
   onProgress: (progress: BackfillProgress) => void
@@ -121,7 +122,7 @@ export async function runInboxBackfill(
         labelIds: ['INBOX'],
         phase: 'bodies',
         initialPageToken: cursor.pageToken,
-        nextPhase: 'sent',
+        nextPhase: 'drafts',
         onThread: async (threadId) => {
           const thread = await provider.getThread(threadId, { format: 'full' })
           persistThread(db, accountId, thread)
@@ -130,6 +131,21 @@ export async function runInboxBackfill(
         onPage: (count) => {
           threadsDone += count
           callbacks.onProgress({ stage: 'bodies', threadsDone, mailChanged: true })
+        }
+      })
+      cursor = { phase: 'drafts' }
+    }
+
+    if (cursor.phase === 'drafts') {
+      callbacks.onProgress({ stage: 'drafts', threadsDone, mailChanged: false })
+      await runDraftPhase({
+        db,
+        provider,
+        accountId,
+        initialPageToken: cursor.pageToken,
+        onPage: (count) => {
+          threadsDone += count
+          callbacks.onProgress({ stage: 'drafts', threadsDone, mailChanged: count > 0 })
         }
       })
       cursor = { phase: 'sent' }
@@ -184,7 +200,7 @@ interface ThreadPhaseOptions {
   accountId: string
   query: string
   labelIds: readonly string[]
-  phase: Exclude<BackfillPhase, 'reconcile'>
+  phase: Exclude<BackfillPhase, 'drafts' | 'reconcile'>
   initialPageToken?: string
   nextPhase: BackfillPhase
   onThread: (threadId: string) => Promise<void>
@@ -232,13 +248,60 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
   }
 }
 
+interface DraftPhaseOptions {
+  db: Db
+  provider: MailProvider
+  accountId: string
+  initialPageToken?: string
+  onPage: (count: number) => void
+}
+
+async function runDraftPhase(options: DraftPhaseOptions): Promise<void> {
+  let pageToken = options.initialPageToken
+  let resetExpiredCursor = false
+  for (;;) {
+    let page: DraftPage
+    try {
+      page = await options.provider.listDrafts(pageToken)
+    } catch (error) {
+      if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
+      pageToken = undefined
+      resetExpiredCursor = true
+      checkpoint(options.db, options.accountId, 'drafts')
+      continue
+    }
+
+    let completed = 0
+    await mapConcurrent(page.drafts, 3, async (summary) => {
+      try {
+        await reconcileRemoteDraft(
+          options.db,
+          options.accountId,
+          await options.provider.getDraft(summary.id),
+          options.provider
+        )
+      } catch (error) {
+        if (error instanceof GmailApiError && error.status === 404) return
+        throw error
+      }
+      completed++
+    })
+    if (completed > 0) options.onPage(completed)
+    pageToken = page.nextPageToken
+    checkpoint(options.db, options.accountId, pageToken ? `drafts:${pageToken}` : 'sent')
+    if (!pageToken) return
+  }
+}
+
 function parseCursor(raw: string | null | undefined): ParsedCursor {
   if (!raw || raw === 'metadata') return { phase: 'metadata' }
   if (raw === 'bodies') return { phase: 'bodies' }
+  if (raw === 'drafts') return { phase: 'drafts' }
   if (raw === 'sent') return { phase: 'sent' }
   if (raw === 'reconcile') return { phase: 'reconcile' }
   if (raw.startsWith('metadata:')) return { phase: 'metadata', pageToken: raw.slice('metadata:'.length) }
   if (raw.startsWith('bodies:')) return { phase: 'bodies', pageToken: raw.slice('bodies:'.length) }
+  if (raw.startsWith('drafts:')) return { phase: 'drafts', pageToken: raw.slice('drafts:'.length) }
   if (raw.startsWith('sent:')) return { phase: 'sent', pageToken: raw.slice('sent:'.length) }
   throw new Error(`Invalid backfill cursor: ${raw}`)
 }

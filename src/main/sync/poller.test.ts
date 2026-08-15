@@ -31,7 +31,9 @@ function providerFor(pages: HistoryPage[]): MailProvider {
     listThreadIds: vi.fn(async () => ({ threadIds: [] })),
     getThread: vi.fn(async (id) => ({ id, messages: [] })),
     getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => pages[page++])
+    listHistory: vi.fn(async () => pages[page++]),
+    listDrafts: vi.fn(async () => ({ drafts: [] })),
+    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } }))
   }
 }
 
@@ -154,6 +156,34 @@ describe('history poller lifecycle', () => {
     expect(onStarted).toHaveBeenCalledOnce()
     await vi.waitFor(() => expect(options.onCycleComplete).toHaveBeenCalledOnce())
     expect(options.onCycleComplete).toHaveBeenCalledWith(false)
+    poller.stop()
+  })
+
+  it('sweeps drafts before completing a cycle and reports inbound changes', async () => {
+    const syncDrafts = vi.fn(async () => true)
+    const options = pollerOptions({ syncDrafts })
+    const poller = new HistoryPoller(options)
+    poller.start()
+
+    await poller.runNow()
+
+    expect(syncDrafts).toHaveBeenCalledOnce()
+    expect(options.onCycleComplete).toHaveBeenCalledWith(true)
+    poller.stop()
+  })
+
+  it('keeps a draft-list failure out of the mail-poll error path', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const options = pollerOptions({ syncDrafts: vi.fn(async () => Promise.reject(new Error('drafts down'))) })
+    const poller = new HistoryPoller(options)
+    poller.start()
+
+    await poller.runNow()
+
+    expect(options.onError).not.toHaveBeenCalled()
+    expect(options.onCycleComplete).toHaveBeenCalledWith(false)
+    expect(warning).toHaveBeenCalledWith('[draft] inbound sync failed: drafts down')
+    warning.mockRestore()
     poller.stop()
   })
 

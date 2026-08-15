@@ -20,6 +20,8 @@ function provider(getThread: MailProvider['getThread']): MailProvider {
     listThreadIds: vi.fn(),
     getAttachmentData: vi.fn(),
     listHistory: vi.fn(),
+    listDrafts: vi.fn(),
+    getDraft: vi.fn(),
     modifyThread: vi.fn(),
     trashThread: vi.fn(),
     untrashThread: vi.fn()
