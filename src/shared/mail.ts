@@ -41,6 +41,8 @@ export interface MessageAttachment {
   mimeType: string
   sizeBytes: number
   contentId?: string
+  /** MIME body resource referenced by the message HTML, not a user-visible file attachment. */
+  inline?: boolean
 }
 
 export interface ConversationMsg {
@@ -81,6 +83,10 @@ export interface InlineImageRequest {
 }
 
 export type InlineImageResult = { dataUrl: string } | { error: string }
+
+export interface InlineImageRepairRequest {
+  threadId: string
+}
 
 export type SyncStage = 'metadata' | 'bodies' | 'sent' | 'reconcile'
 

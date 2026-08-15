@@ -7,6 +7,7 @@ import type {
   Conversation,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
+  InlineImageRepairRequest,
   InlineImageRequest,
   InlineImageResult,
   MailLabel,
@@ -40,6 +41,8 @@ const api = {
       invoke(IPC_CHANNELS.mailDownloadAttachment, request),
     getInlineImage: (request: InlineImageRequest): Promise<InlineImageResult> =>
       invoke(IPC_CHANNELS.mailGetInlineImage, request),
+    repairInlineImages: (request: InlineImageRepairRequest): Promise<boolean> =>
+      invoke(IPC_CHANNELS.mailRepairInlineImages, request),
     triage: (action: TriageAction): Promise<TriageResult> => invoke(IPC_CHANNELS.mailTriage, action),
     snooze: (threadIds: string[], dueAt: number): Promise<TriageResult> =>
       invoke(IPC_CHANNELS.mailSnooze, { threadIds, dueAt }),

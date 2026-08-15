@@ -5,6 +5,7 @@ import type {
   Conversation,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
+  InlineImageRepairRequest,
   InlineImageRequest,
   InlineImageResult,
   MailLabel,
@@ -28,6 +29,7 @@ export const IPC_CHANNELS = {
   mailGetConversation: 'mail:getConversation',
   mailDownloadAttachment: 'mail:downloadAttachment',
   mailGetInlineImage: 'mail:getInlineImage',
+  mailRepairInlineImages: 'mail:repairInlineImages',
   mailTriage: 'mail:triage',
   mailSnooze: 'mail:snooze',
   mailMarkReadOnOpen: 'mail:markReadOnOpen',
@@ -72,6 +74,10 @@ export interface InvokeChannels {
     result: DownloadAttachmentResult
   }
   [IPC_CHANNELS.mailGetInlineImage]: { args: [request: InlineImageRequest]; result: InlineImageResult }
+  [IPC_CHANNELS.mailRepairInlineImages]: {
+    args: [request: InlineImageRepairRequest]
+    result: boolean
+  }
   [IPC_CHANNELS.mailTriage]: { args: [action: TriageAction]; result: TriageResult }
   [IPC_CHANNELS.mailSnooze]: {
     args: [input: { threadIds: string[]; dueAt: number }]

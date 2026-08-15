@@ -180,7 +180,6 @@
           "attachments": [
             {
               "attachmentId": "inline:cid-image",
-              "filename": "weekly.gif",
               "mimeType": "image/gif",
               "sizeBytes": 35,
               "contentId": "weekly-image@attn.test",

@@ -107,7 +107,7 @@ export function persistThread(
       const at = Number(msg.internalDate ?? 0)
       const unread = msg.labelIds?.includes('UNREAD') ? 1 : 0
       const attachments = collectAttachments(msg.payload)
-      const attach = attachments.length > 0 ? 1 : 0
+      const attach = attachments.some((attachment) => !attachment.inline) ? 1 : 0
       const recipients = {
         to: parseAddressList(header(msg, 'To')),
         cc: parseAddressList(header(msg, 'Cc')),

@@ -24,7 +24,9 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   })
 
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
+  const weeklyThread = page.getByTestId('thread-row').filter({ hasText: 'This week in focus' })
+  await expect(weeklyThread.locator('[title="Has attachment"]')).toHaveCount(0)
+  await weeklyThread.click()
 
   const iframe = page.getByTestId('html-body-frame')
   await expect(iframe).toBeVisible()
@@ -57,6 +59,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(iframe).toHaveAttribute('data-load-count', '1')
   await expect(body.locator('#malformed-cid-image')).not.toHaveAttribute('src')
   await expect(body.locator('#cid-image')).toBeVisible()
+  await expect(page.getByTestId('attachment-chip')).toHaveCount(0)
   // The sender ships its own copies of our marker attributes. Both must be stripped:
   // a surviving trim marker would move the fold to wherever the sender wants, and a
   // surviving cid marker would aim the inline-image patch at the sender's element.

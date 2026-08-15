@@ -32,7 +32,7 @@ interface SeedMessage {
   bodyHtml?: string
   attachments?: {
     attachmentId: string
-    filename: string
+    filename?: string
     mimeType?: string
     sizeBytes?: number
     contentId?: string
