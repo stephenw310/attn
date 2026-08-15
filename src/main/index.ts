@@ -67,6 +67,10 @@ function broadcastMailChanged(): void {
   mailNotifier?.updateBadge()
 }
 
+function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
+  broadcast(IPC_CHANNELS.mailBodyHydrationFailed, { accountId, threadId })
+}
+
 function focusInboxThread(threadId: string): void {
   pendingFocus = { threadId, at: Date.now() }
   const win = showMainWindow()
@@ -256,6 +260,7 @@ function initialize(): void {
     scheduler: () => snoozeScheduler,
     syncController: () => syncController,
     broadcastMailChanged,
+    broadcastBodyHydrationFailed,
     pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
       pendingFocus = null

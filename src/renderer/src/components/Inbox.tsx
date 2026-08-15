@@ -113,6 +113,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex,
     threads,
     readerOpen,
+    online: networkOnline && sync.phase !== 'offline',
     account: activeAccount,
     mailRevision
   })
@@ -331,6 +332,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             view={view}
             conversation={conversation}
             account={activeAccount}
+            online={networkOnline && sync.phase !== 'offline'}
             scrollRef={conversationScrollRef}
             onClose={closeReader}
             onToast={showToast}

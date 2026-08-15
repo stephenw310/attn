@@ -6,6 +6,7 @@ interface UseConversationOptions {
   selectedIndex: number
   threads: DisplayThread[]
   readerOpen: boolean
+  online: boolean
   account: string | null
   mailRevision: number
 }
@@ -16,7 +17,7 @@ interface ConversationState {
 }
 
 export function useConversation(options: UseConversationOptions): ConversationState {
-  const { selected, selectedIndex, threads, readerOpen, account, mailRevision } = options
+  const { selected, selectedIndex, threads, readerOpen, online, account, mailRevision } = options
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const cache = useRef(new Map<string, DisplayConversation>())
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -24,6 +25,18 @@ export function useConversation(options: UseConversationOptions): ConversationSt
   const accountRef = useRef(account)
   const revisionRef = useRef(mailRevision)
   const selectedId = selected?.id
+
+  useEffect(() => {
+    if (!window.attn) return
+    return window.attn.mail.onBodyHydrationFailed((failedAccount, threadId) => {
+      if (accountRef.current !== failedAccount) return
+      const cached = cache.current.get(threadId)
+      if (cached) cache.current.set(threadId, { ...cached, bodyHydrationFailed: true })
+      setConversation((current) =>
+        current?.threadId === threadId ? { ...current, bodyHydrationFailed: true } : current
+      )
+    })
+  }, [])
 
   useEffect(() => {
     if (accountRef.current === account) return
@@ -46,14 +59,19 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     setConversation((current) => (current?.threadId === selectedId ? current : null))
     const cached = cache.current.get(selectedId)
     if (cached) {
-      setConversation(cached)
-      return
+      const shouldHydrate =
+        readerOpen && online && cached.messages.some((message) => message.bodyState !== 'complete')
+      const next =
+        shouldHydrate && cached.bodyHydrationFailed ? { ...cached, bodyHydrationFailed: false } : cached
+      if (next !== cached) cache.current.set(selectedId, next)
+      setConversation(next)
+      if (!shouldHydrate) return
     }
     if (!window.attn) return
     let cancelled = false
     const requestedRevision = mailRevision
     window.attn.mail
-      .getConversation(selectedId)
+      .getConversation(selectedId, readerOpen && online)
       .then((result) => {
         if (cancelled || revisionRef.current !== requestedRevision || !result) return
         const display = displayConversation(result)
@@ -64,7 +82,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     return () => {
       cancelled = true
     }
-  }, [mailRevision, selectedId])
+  }, [mailRevision, online, readerOpen, selectedId])
 
   useEffect(() => {
     if (!window.attn) return
@@ -74,7 +92,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
       const thread = threads[index]
       if (!thread || cache.current.has(thread.id)) continue
       window.attn.mail
-        .getConversation(thread.id)
+        .getConversation(thread.id, false)
         .then((result) => {
           // The revision alone cannot catch a sign-out: it resets to 0, so a
           // preload issued at revision 0 would still look current afterwards.
