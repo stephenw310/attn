@@ -191,10 +191,18 @@ test.describe('@perf 2,000-thread inbox', () => {
 
   test('opens and types in the composer within CI-safe ceilings', async ({ page }, testInfo) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(2_000)
-    const openMs = await measureComposerOpen(page)
-    await expect(page.getByTestId('composer')).toBeVisible()
-    await reportMetric(testInfo, 'composer-open', [openMs], openMs)
-    expect(openMs, 'c keydown to composer mounted').toBeLessThan(COMPOSER_OPEN_CEILING_MS)
+    const openSamples: number[] = []
+    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
+      openSamples.push(await measureComposerOpen(page))
+      await expect(page.getByTestId('composer')).toBeVisible()
+      if (iteration < SAMPLE_COUNT - 1) {
+        await page.keyboard.press('Escape')
+        await expect(page.getByTestId('composer')).toHaveCount(0)
+      }
+    }
+    const openMedianMs = median(openSamples)
+    await reportMetric(testInfo, 'composer-open', openSamples, openMedianMs)
+    expect(openMedianMs, 'median c keydown to composer mounted').toBeLessThan(COMPOSER_OPEN_CEILING_MS)
 
     await page.getByTestId('composer-editor').click()
     const samples: number[] = []
