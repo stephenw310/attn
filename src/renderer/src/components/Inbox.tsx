@@ -198,7 +198,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   )
 
   const openSelected = useCallback(() => {
-    if (threads[selectedIndex]) setReaderOpen(true)
+    const thread = threads[selectedIndex]
+    if (!thread) return
+    selectedThreadIdRef.current = thread.id
+    setReaderOpen(true)
   }, [selectedIndex, threads])
   const closeReader = useCallback(() => setReaderOpen(false), [])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
@@ -209,10 +212,19 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const openLabel = useCallback(() => {
     if (selected) setLabelTargetId(selected.id)
   }, [selected])
-  const openThread = useCallback((index: number) => {
-    setSelectedIndex(index)
-    setReaderOpen(true)
-  }, [])
+  const openThread = useCallback(
+    (index: number) => {
+      const thread = threads[index]
+      if (!thread) return
+      // Opening unread mail can immediately broadcast a mark-read refresh. Pin
+      // the identity before that refresh starts; the effect that mirrors index
+      // changes is deliberately too late for this transition.
+      selectedThreadIdRef.current = thread.id
+      setSelectedIndex(index)
+      setReaderOpen(true)
+    },
+    [threads]
+  )
   const openComposer = useCallback(() => {
     if (!window.attn || composerDraft || composerOpeningRef.current) return
     composerOpeningRef.current = true
