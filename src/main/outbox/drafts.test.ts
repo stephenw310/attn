@@ -1,0 +1,53 @@
+import { describe, expect, it, vi } from 'vitest'
+import { emptyDraftInput } from '../../shared/drafts'
+import type { Db } from '../db'
+import { publicDraftAttachment, type StoredDraftAttachment } from './draftAttachments'
+import { canonicalizeRendererDraft } from './drafts'
+
+const stored: StoredDraftAttachment = {
+  id: 'owned-attachment',
+  filename: 'image.png',
+  mimeType: 'image/png',
+  sizeBytes: 3,
+  spoolPath: '/owned/outbox/draft-1/image.png',
+  contentId: 'image@attn.local',
+  inline: true
+}
+
+describe('draft attachment trust boundary', () => {
+  it('never exposes storage locators in renderer-facing drafts', () => {
+    expect(publicDraftAttachment(stored)).toEqual({
+      id: 'owned-attachment',
+      filename: 'image.png',
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      contentId: 'image@attn.local',
+      inline: true
+    })
+    expect(publicDraftAttachment(stored)).not.toHaveProperty('spoolPath')
+  })
+
+  it('replaces renderer attachment objects with the main-owned stored set', () => {
+    const db = {
+      prepare: vi.fn(() => ({ get: vi.fn(() => ({ attachments_json: JSON.stringify([stored]) })) }))
+    } as unknown as Db
+    const malicious = {
+      ...emptyDraftInput(),
+      id: 'draft-1',
+      attachments: [
+        {
+          id: 'fake',
+          filename: 'secret',
+          mimeType: 'image/png',
+          sizeBytes: 100,
+          inline: true,
+          contentId: 'secret',
+          spoolPath: '/private/secret'
+        }
+      ]
+    }
+
+    const canonical = canonicalizeRendererDraft(db, 'account', malicious)
+    expect(canonical.attachments).toEqual([stored])
+  })
+})

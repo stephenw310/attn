@@ -1,7 +1,16 @@
+import { randomUUID } from 'node:crypto'
+import { readFile, rm } from 'node:fs/promises'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
 import { isValidEmail } from '../shared/address'
 import type { AuthStatus } from '../shared/auth'
-import type { DraftSaveInput } from '../shared/drafts'
+import {
+  type DraftAttachment,
+  type DraftInlineImageInput,
+  type DraftKind,
+  type DraftSaveInput,
+  emptyDraftInput
+} from '../shared/drafts'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   DownloadAttachmentRequest,
@@ -27,15 +36,22 @@ import type { GmailClient } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import type { PendingFocus } from './notify'
 import { takePendingFocus } from './notify'
+import { parseStoredDraftAttachments, type StoredDraftAttachment } from './outbox/draftAttachments'
 import {
+  canonicalizeRendererDraft,
   closeDraft,
   discardDraft,
   getDraft,
+  listDrafts,
+  reopenDraft,
+  reopenThreadDraft,
   requestDraftMirror,
   saveDraft,
   takeRecoveredDraft
 } from './outbox/drafts'
+import { addInlineImage } from './outbox/inlineImages'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
+import { planReply } from './outbox/replyPlan'
 import type { SnoozeScheduler } from './scheduler'
 import { hydrateMissingThreadBodies } from './sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from './sync/bodyHydration'
@@ -79,6 +95,7 @@ export interface IpcContext {
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
   waitForConversation: (threadId: string) => Promise<void>
+  draftInlineImageDelay: () => number
   consumeTestDraftSaveFailure: () => boolean
   testUserData: boolean
 }
@@ -143,20 +160,69 @@ function isDraftSaveInput(value: unknown): value is DraftSaveInput {
         typeof (recipient as { email?: unknown }).email === 'string' &&
         isValidEmail((recipient as { email: string }).email)
     )
+  const attachmentsValid = (attachments: unknown): boolean =>
+    Array.isArray(attachments) &&
+    attachments.every((attachment) => {
+      if (!attachment || typeof attachment !== 'object') return false
+      const candidate = attachment as Partial<DraftAttachment>
+      return (
+        typeof candidate.id === 'string' &&
+        candidate.id.length > 0 &&
+        candidate.id.length <= 200 &&
+        typeof candidate.filename === 'string' &&
+        candidate.filename.length <= 500 &&
+        typeof candidate.mimeType === 'string' &&
+        candidate.mimeType.length <= 100 &&
+        typeof candidate.sizeBytes === 'number' &&
+        Number.isSafeInteger(candidate.sizeBytes) &&
+        candidate.sizeBytes >= 0 &&
+        (candidate.contentId === undefined ||
+          (typeof candidate.contentId === 'string' && candidate.contentId.length <= 500)) &&
+        (candidate.inline === undefined || typeof candidate.inline === 'boolean')
+      )
+    })
   return (
     (draft.id === null || typeof draft.id === 'string') &&
+    (draft.kind === 'new' ||
+      draft.kind === 'reply' ||
+      draft.kind === 'replyAll' ||
+      draft.kind === 'forward') &&
     recipientsValid(draft.to) &&
     recipientsValid(draft.cc) &&
     recipientsValid(draft.bcc) &&
     typeof draft.subject === 'string' &&
     typeof draft.bodyHtml === 'string' &&
     typeof draft.bodyText === 'string' &&
-    Array.isArray(draft.attachments) &&
+    attachmentsValid(draft.attachments) &&
     (draft.threadId === null || typeof draft.threadId === 'string') &&
+    (draft.sourceMessageId === null || typeof draft.sourceMessageId === 'string') &&
     (draft.inReplyTo === null || typeof draft.inReplyTo === 'string') &&
     Array.isArray(draft.references) &&
-    draft.references.every((reference) => typeof reference === 'string')
+    draft.references.every((reference) => typeof reference === 'string') &&
+    typeof draft.quoteHtml === 'string' &&
+    typeof draft.quoteText === 'string'
   )
+}
+
+function isDraftInlineImageInput(value: unknown): value is DraftInlineImageInput {
+  if (!value || typeof value !== 'object') return false
+  const image = value as Partial<DraftInlineImageInput>
+  return (
+    typeof image.filename === 'string' &&
+    image.filename.length <= 500 &&
+    typeof image.mimeType === 'string' &&
+    /^image\/(?:png|jpeg|gif|webp)$/i.test(image.mimeType) &&
+    typeof image.dataBase64 === 'string' &&
+    image.dataBase64.length <= 14 * 1024 * 1024
+  )
+}
+
+function cleanDraftSpool(id: string): void {
+  const spoolRoot = resolve(app.getPath('userData'), 'outbox')
+  const directory = resolve(spoolRoot, id)
+  const relativePath = relative(spoolRoot, directory)
+  if (relativePath.startsWith('..') || isAbsolute(relativePath)) return
+  void rm(directory, { recursive: true, force: true }).catch(() => {})
 }
 
 async function resolveAttachmentData(
@@ -203,21 +269,153 @@ export function registerIpc(context: IpcContext): () => void {
   handle(IPC_CHANNELS.draftSave, (_event, draft) => {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')
     if (context.consumeTestDraftSaveFailure()) throw new Error('injected draft save failure')
-    const id = saveDraft(context.db, requireAccount(context), draft)
+    const account = requireAccount(context)
+    const id = saveDraft(context.db, account, canonicalizeRendererDraft(context.db, account, draft))
     return { id }
   })
   handle(IPC_CHANNELS.draftGet, (_event, id) => {
     if (typeof id !== 'string') return null
     return getDraft(context.db, requireAccount(context), id)
   })
+  handle(IPC_CHANNELS.draftList, () => {
+    const account = context.currentAccountId()
+    return account ? listDrafts(context.db, account) : []
+  })
+  handle(IPC_CHANNELS.draftReopen, (_event, id) => {
+    if (typeof id !== 'string' || id.length === 0) return null
+    return reopenDraft(context.db, requireAccount(context), id)
+  })
+  handle(IPC_CHANNELS.draftCreateReply, async (_event, threadId, kind) => {
+    if (
+      typeof threadId !== 'string' ||
+      threadId.length === 0 ||
+      (kind !== 'reply' && kind !== 'replyAll' && kind !== 'forward')
+    ) {
+      return null
+    }
+    const account = requireAccount(context)
+    const existing = reopenThreadDraft(context.db, account, threadId, kind as Exclude<DraftKind, 'new'>)
+    if (existing) return existing
+    await context.waitForConversation(threadId)
+    let conversation = getConversation(context.db, account, threadId, 'unavailable')
+    if (!conversation) return null
+    if (conversation.messages.some((message) => message.bodyState !== 'complete')) {
+      const provider = context.makeProvider()
+      if (provider) {
+        await bodyHydrator.request(account, threadId, provider)
+        conversation = getConversation(context.db, account, threadId, 'unavailable')
+      }
+    }
+    if (!conversation || conversation.messages.some((message) => message.bodyState !== 'complete'))
+      return null
+    const plan = planReply(kind as Exclude<DraftKind, 'new'>, conversation, account)
+    const source = conversation.messages.find((message) => message.id === plan.sourceMessageId)
+    const quotedAttachments: StoredDraftAttachment[] = (source?.attachments ?? [])
+      .filter((attachment) => attachment.inline && attachment.contentId)
+      .map((attachment) => {
+        const inlineData = getInlineAttachmentData(
+          context.db,
+          account,
+          plan.sourceMessageId,
+          attachment.attachmentId
+        )
+        return {
+          id: randomUUID(),
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          spoolPath: '',
+          contentId: attachment.contentId,
+          inline: true,
+          remoteMessageId: plan.sourceMessageId,
+          remoteAttachmentId: attachment.attachmentId,
+          ...(inlineData ? { remoteInlineData: inlineData } : {})
+        }
+      })
+    const input: DraftSaveInput = {
+      ...emptyDraftInput(),
+      kind,
+      to: plan.to,
+      cc: plan.cc,
+      subject: plan.subject,
+      threadId: plan.threadId,
+      sourceMessageId: plan.sourceMessageId,
+      inReplyTo: plan.inReplyTo,
+      references: plan.references,
+      attachments: quotedAttachments,
+      quoteHtml: plan.quoteHtml,
+      quoteText: plan.quoteText
+    }
+    const id = saveDraft(context.db, account, input)
+    context.broadcastMailChanged()
+    return getDraft(context.db, account, id)
+  })
+  handle(IPC_CHANNELS.draftAddInlineImage, async (_event, id, image) => {
+    if (typeof id !== 'string' || id.length === 0 || !isDraftInlineImageInput(image)) {
+      throw new Error('invalid inline image')
+    }
+    return addInlineImage(context.db, app.getPath('userData'), requireAccount(context), id, image)
+  })
+  handle(IPC_CHANNELS.draftGetInlineImage, async (_event, id, contentId) => {
+    if (typeof id !== 'string' || typeof contentId !== 'string' || !contentId) {
+      return { error: 'Invalid inline image' }
+    }
+    const account = requireAccount(context)
+    const delay = context.testUserData ? context.draftInlineImageDelay() : 0
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
+    const row = context.db
+      .prepare(
+        `SELECT attachments_json FROM outbox
+         WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')`
+      )
+      .get(account, id) as { attachments_json: string } | undefined
+    const attachment = row
+      ? parseStoredDraftAttachments(row.attachments_json).find(
+          (candidate) => candidate.contentId?.toLowerCase() === contentId.toLowerCase()
+        )
+      : undefined
+    if (!attachment?.mimeType.startsWith('image/')) return { error: 'Inline image unavailable' }
+    try {
+      let data: Buffer
+      if (attachment.spoolPath) {
+        const spoolRoot = resolve(app.getPath('userData'), 'outbox', id)
+        const candidate = resolve(attachment.spoolPath)
+        const relativePath = relative(spoolRoot, candidate)
+        if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+          return { error: 'Inline image unavailable' }
+        }
+        data = await readFile(candidate)
+      } else if (attachment.remoteInlineData) {
+        data = Buffer.from(attachment.remoteInlineData, 'base64url')
+      } else if (attachment.remoteMessageId && attachment.remoteAttachmentId) {
+        const client = context.makeClient()
+        if (!client) return { error: 'Inline image requires sign in' }
+        const result = await client.get<{ data?: string }>(
+          `/messages/${encodeURIComponent(attachment.remoteMessageId)}/attachments/${encodeURIComponent(attachment.remoteAttachmentId)}`
+        )
+        if (!result.data) return { error: 'Inline image unavailable' }
+        data = Buffer.from(result.data, 'base64url')
+      } else return { error: 'Inline image unavailable' }
+      if (data.byteLength > 10 * 1024 * 1024) return { error: 'Inline image was too large' }
+      return { dataUrl: `data:${attachment.mimeType};base64,${data.toString('base64')}` }
+    } catch {
+      return { error: 'Inline image unavailable' }
+    }
+  })
   handle(IPC_CHANNELS.draftClose, (_event, id) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
-    closeDraft(context.db, requireAccount(context), id)
-    return undefined
+    const result = closeDraft(context.db, requireAccount(context), id)
+    context.broadcastMailChanged()
+    if (result === 'discarded') {
+      cleanDraftSpool(id)
+      void context.draftMirrorExecutor()?.trigger()
+    }
+    return result
   })
   handle(IPC_CHANNELS.draftDiscard, (_event, id) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
     discardDraft(context.db, requireAccount(context), id)
+    cleanDraftSpool(id)
     context.broadcastMailChanged()
     void context.draftMirrorExecutor()?.trigger()
     return undefined

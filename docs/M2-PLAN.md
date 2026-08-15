@@ -372,7 +372,11 @@ Schema (bump `CURRENT_SCHEMA_VERSION` to 10):
 ```sql
 ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';  -- new|reply|replyAll|forward
 ALTER TABLE outbox ADD COLUMN source_message_id TEXT;
-CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (account_id, thread_id, kind)
+CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (
+  account_id,
+  thread_id,
+  CASE WHEN kind IN ('reply', 'replyAll') THEN 'reply' ELSE kind END
+)
   WHERE state IN ('composing', 'drafted') AND thread_id IS NOT NULL;
 ```
 
@@ -529,6 +533,28 @@ Touch points, all mechanical but crossing the shared type:
 
 A draft edited in Gmail appears correctly in Attn and vice versa, with no formatting loss in either direction; verify green.
 
+### Local dogfood schema upgrade for the T14A–T14D implementation
+
+This implementation batches the four revision tasks into schema revision 10. For an additive manual upgrade
+of a stopped revision-9 dogfood profile, use the `AGENTS.md` procedure with this exact task-specific DDL and
+set `user_version` in the same transaction:
+
+```sql
+ALTER TABLE outbox ADD COLUMN gmail_message_id TEXT;
+ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';
+ALTER TABLE outbox ADD COLUMN source_message_id TEXT;
+ALTER TABLE outbox ADD COLUMN quote_html TEXT NOT NULL DEFAULT '';
+ALTER TABLE outbox ADD COLUMN quote_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE outbox ADD COLUMN remote_updated_at INTEGER;
+ALTER TABLE outbox ADD COLUMN remote_fingerprint TEXT;
+CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (
+  account_id,
+  thread_id,
+  CASE WHEN kind IN ('reply', 'replyAll') THEN 'reply' ELSE kind END
+) WHERE state IN ('composing', 'drafted') AND thread_id IS NOT NULL;
+PRAGMA user_version = 10;
+```
+
 ---
 
 ## T15 — MIME builder and reply/reply-all/forward semantics
@@ -588,12 +614,9 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 
 ### Implementation guide
 
-**Schema evolution from T14 revision 9** (update the current snapshot and bump to revision 10):
+**Schema evolution from the T14A–T14D revision-10 snapshot** (update the current snapshot and bump to revision 11):
 
 ```sql
-ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'new';
-ALTER TABLE outbox ADD COLUMN source_message_id TEXT;
-ALTER TABLE outbox ADD COLUMN quote_html TEXT;
 ALTER TABLE outbox ADD COLUMN rfc_message_id TEXT;
 ALTER TABLE outbox ADD COLUMN send_at INTEGER;
 ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
@@ -601,9 +624,9 @@ ALTER TABLE outbox ADD COLUMN last_error TEXT;
 CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
 ```
 
-T16 owns the final revision-10 names and exact DDL if implementation discoveries change this list. The PR
+T16 owns the final revision-11 names and exact DDL if implementation discoveries change this list. The PR
 must update this block before merge, then use the `AGENTS.md` manual procedure for any preserved dogfood
-profile: all `ALTER` statements, index creation, and `PRAGMA user_version = 10` happen in one transaction.
+profile: all `ALTER` statements, index creation, and `PRAGMA user_version = 11` happen in one transaction.
 
 - **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` (thin, e2e-covered).
 - Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.

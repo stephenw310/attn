@@ -8,6 +8,7 @@ import { type ComposerDraftController, useComposerDraft } from './useComposerDra
 
 const draft: Draft = {
   id: 'local-draft',
+  kind: 'new',
   to: [],
   cc: [],
   bcc: [],
@@ -16,8 +17,11 @@ const draft: Draft = {
   bodyText: '',
   attachments: [],
   threadId: null,
+  sourceMessageId: null,
   inReplyTo: null,
   references: [],
+  quoteHtml: '',
+  quoteText: '',
   createdAt: 1,
   updatedAt: 1
 }

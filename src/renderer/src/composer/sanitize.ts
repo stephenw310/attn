@@ -1,18 +1,161 @@
 import createDOMPurify, { type DOMPurify } from 'dompurify'
 
-const ALLOWED_TAGS = ['p', 'div', 'br', 'b', 'strong', 'i', 'em', 'u', 'a', 'ul', 'ol', 'li', 'blockquote']
+const ALLOWED_TAGS = [
+  'p',
+  'div',
+  'br',
+  'b',
+  'strong',
+  'i',
+  'em',
+  'u',
+  's',
+  'strike',
+  'a',
+  'ul',
+  'ol',
+  'li',
+  'blockquote',
+  'span',
+  'img',
+  'table',
+  'thead',
+  'tbody',
+  'tfoot',
+  'tr',
+  'th',
+  'td'
+]
+
+export const COMPOSER_STYLE_PROPERTIES = new Set([
+  'background-color',
+  'border',
+  'border-bottom',
+  'border-collapse',
+  'border-color',
+  'border-left',
+  'border-right',
+  'border-spacing',
+  'border-style',
+  'border-top',
+  'border-width',
+  'color',
+  'font-family',
+  'font-size',
+  'font-style',
+  'font-weight',
+  'height',
+  'line-height',
+  'margin',
+  'margin-bottom',
+  'margin-left',
+  'margin-right',
+  'margin-top',
+  'padding',
+  'padding-bottom',
+  'padding-left',
+  'padding-right',
+  'padding-top',
+  'text-align',
+  'text-decoration',
+  'vertical-align',
+  'white-space',
+  'width'
+])
+
+export function sanitizeComposerStyle(style: string): string {
+  return style
+    .split(';')
+    .map((declaration) => declaration.trim())
+    .filter((declaration) => {
+      const separator = declaration.indexOf(':')
+      if (separator <= 0) return false
+      const property = declaration.slice(0, separator).trim().toLowerCase()
+      const value = declaration.slice(separator + 1)
+      return (
+        COMPOSER_STYLE_PROPERTIES.has(property) &&
+        !/(?:url\s*\(|expression\s*\(|javascript:|@import|behavior\s*:)/i.test(value)
+      )
+    })
+    .join('; ')
+}
 
 // Keep outgoing mail isolated from MessageBody's singleton: that sanitizer has
 // an inbound-mail hook which adds browser-only target/rel attributes to links.
 let outgoingPurifier: DOMPurify | null = null
+let importPurifier: DOMPurify | null = null
+const hooked = new WeakSet<DOMPurify>()
+const outgoingDataHooked = new WeakSet<DOMPurify>()
+const COMPOSER_DATA_ATTRIBUTES = new Set(['data-attn-cid', 'data-attn-opaque'])
+
+function installStyleHook(purifier: DOMPurify): void {
+  if (hooked.has(purifier)) return
+  hooked.add(purifier)
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    const element = node as Element
+    if (typeof element.getAttribute !== 'function') return
+    const style = element.getAttribute('style')
+    if (!style) return
+    const clean = sanitizeComposerStyle(style)
+    if (clean) element.setAttribute('style', clean)
+    else element.removeAttribute('style')
+  })
+}
+
+const SAFE_URI = /^(?:(?:https?|mailto|cid):|data:image\/(?:png|jpeg|gif|webp);base64,)/i
+
+function purifier(): DOMPurify {
+  outgoingPurifier ??= createDOMPurify(window)
+  installStyleHook(outgoingPurifier)
+  if (!outgoingDataHooked.has(outgoingPurifier)) {
+    outgoingDataHooked.add(outgoingPurifier)
+    outgoingPurifier.addHook('afterSanitizeAttributes', (node) => {
+      const element = node as Element
+      if (typeof element.getAttributeNames !== 'function') return
+      for (const attribute of element.getAttributeNames()) {
+        if (attribute.startsWith('data-') && !COMPOSER_DATA_ATTRIBUTES.has(attribute)) {
+          element.removeAttribute(attribute)
+        }
+      }
+    })
+  }
+  return outgoingPurifier
+}
 
 export function sanitizeOutgoingHtml(html: string): string {
-  outgoingPurifier ??= createDOMPurify(window)
-  return outgoingPurifier.sanitize(html, {
+  return purifier().sanitize(html, {
     ALLOWED_TAGS,
-    ALLOWED_ATTR: ['href'],
+    ALLOWED_ATTR: [
+      'href',
+      'src',
+      'alt',
+      'title',
+      'width',
+      'height',
+      'colspan',
+      'rowspan',
+      'style',
+      'data-attn-cid',
+      'data-attn-opaque'
+    ],
     ALLOW_ARIA_ATTR: false,
-    ALLOW_DATA_ATTR: false,
-    ALLOWED_URI_REGEXP: /^(?:https?:|mailto:)/i
+    // The composer owns two namespaced data attributes: one maps a rendered
+    // data URL back to cid: during serialization and one carries a sanitized
+    // opaque-region token. DOMPurify otherwise strips both even when listed in
+    // ALLOWED_ATTR, which would silently lose inline images or preserved HTML.
+    ALLOW_DATA_ATTR: true,
+    ALLOWED_URI_REGEXP: SAFE_URI
+  })
+}
+
+/** Broad safe import pass; unsupported-but-safe elements are made opaque afterwards. */
+export function sanitizeDraftHtmlForImport(html: string): string {
+  importPurifier ??= createDOMPurify(window)
+  installStyleHook(importPurifier)
+  return importPurifier.sanitize(html, {
+    FORBID_TAGS: ['script', 'style', 'form', 'input', 'button', 'select', 'textarea', 'iframe', 'object'],
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
+    ALLOWED_URI_REGEXP: SAFE_URI,
+    ALLOW_ARIA_ATTR: false
   })
 }

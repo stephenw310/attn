@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 9
+export const CURRENT_SCHEMA_VERSION = 10
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -120,7 +120,9 @@ CREATE TABLE outbox (
   id                TEXT PRIMARY KEY,
   account_id        TEXT NOT NULL,
   gmail_draft_id    TEXT,
+  gmail_message_id  TEXT,
   state             TEXT NOT NULL DEFAULT 'composing',
+  kind              TEXT NOT NULL DEFAULT 'new',
   to_json           TEXT NOT NULL DEFAULT '[]',
   cc_json           TEXT NOT NULL DEFAULT '[]',
   bcc_json          TEXT NOT NULL DEFAULT '[]',
@@ -129,12 +131,22 @@ CREATE TABLE outbox (
   body_text         TEXT NOT NULL DEFAULT '',
   attachments_json  TEXT NOT NULL DEFAULT '[]',
   thread_id         TEXT,
+  source_message_id TEXT,
   in_reply_to       TEXT,
   references_json   TEXT NOT NULL DEFAULT '[]',
+  quote_html        TEXT NOT NULL DEFAULT '',
+  quote_text        TEXT NOT NULL DEFAULT '',
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL,
   local_revision    INTEGER NOT NULL DEFAULT 0,
-  mirror_revision   INTEGER NOT NULL DEFAULT 0
+  mirror_revision   INTEGER NOT NULL DEFAULT 0,
+  remote_updated_at INTEGER,
+  remote_fingerprint TEXT
 );
 CREATE INDEX idx_outbox_composing ON outbox (account_id, state, updated_at DESC);
+CREATE UNIQUE INDEX idx_outbox_thread_kind ON outbox (
+  account_id,
+  thread_id,
+  CASE WHEN kind IN ('reply', 'replyAll') THEN 'reply' ELSE kind END
+) WHERE state IN ('composing', 'drafted') AND thread_id IS NOT NULL;
 `

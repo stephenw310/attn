@@ -104,7 +104,16 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     getSnoozeScheduler: () => ({ wakeThread }) as unknown as SnoozeScheduler
   })
 
-  return { controller, session, states, backfills, trigger, broadcastMailChanged, provider }
+  return {
+    controller,
+    session,
+    states,
+    backfills,
+    trigger,
+    mirrorTrigger,
+    broadcastMailChanged,
+    provider
+  }
 }
 
 beforeEach(() => {
@@ -276,6 +285,16 @@ describe('backfill to poller handoff', () => {
     controller.retry()
 
     expect(mocks.FakePoller.instances[0].options.isForeground()).toBe(false)
+  })
+
+  it('wakes the draft mirror after an inbound sweep can make local work pending', () => {
+    const { controller, mirrorTrigger } = harness({ backfillCursor: 'done' })
+    controller.retry()
+    mirrorTrigger.mockClear()
+
+    mocks.FakePoller.instances[0].options.kickExecutor?.()
+
+    expect(mirrorTrigger).toHaveBeenCalledOnce()
   })
 })
 

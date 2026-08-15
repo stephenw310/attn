@@ -55,6 +55,14 @@ function ReminderChips({ thread }: { thread: DisplayThread }): React.JSX.Element
           Returned
         </span>
       )}
+      {thread.hasDraft && (
+        <span
+          data-testid="chip-draft"
+          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
+        >
+          Draft
+        </span>
+      )}
       {thread.dueAt !== undefined && (
         <span
           data-testid="chip-snooze-due"

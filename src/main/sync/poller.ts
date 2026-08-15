@@ -148,6 +148,7 @@ export interface HistoryPollerOptions {
   onError: (error: unknown) => void
   wakeThread?: (threadId: string) => void
   kickExecutor?: () => void
+  syncDrafts?: () => Promise<boolean | undefined>
   runCycle?: typeof runHistoryCycle
   time?: SchedulerTime
 }
@@ -220,8 +221,18 @@ export class HistoryPoller {
           this.recoveryPending = false
         }
       }
+      let draftsChanged = false
+      if (!this.stopped && this.options.syncDrafts) {
+        try {
+          draftsChanged = (await this.options.syncDrafts()) === true
+        } catch (error) {
+          console.warn(
+            `[draft] inbound sync failed: ${error instanceof Error ? error.message : String(error)}`
+          )
+        }
+      }
       if (this.stopped) return
-      this.options.onCycleComplete(plan === null || plan.refetchThreadIds.length > 0)
+      this.options.onCycleComplete(draftsChanged || plan === null || plan.refetchThreadIds.length > 0)
       this.options.kickExecutor?.()
       if (plan && plan.newMail.length > 0) historyEvents.emit('newMail', plan.newMail)
     } catch (error) {

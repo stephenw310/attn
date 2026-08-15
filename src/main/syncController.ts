@@ -3,6 +3,7 @@ import { pendingActionCount } from './actions'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
 import type { GmailMailProvider } from './gmail/provider'
+import { syncRemoteDrafts } from './outbox/draftSync'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
@@ -248,10 +249,12 @@ export class SyncController {
         this.publishFailure(error, '[sync] history poll failed')
       },
       wakeThread: (threadId) => this.context.getSnoozeScheduler()?.wakeThread(threadId),
+      syncDrafts: () => syncRemoteDrafts(this.context.db, accountId, provider),
       kickExecutor: () => {
         if (pendingActionCount(this.context.db, accountId) > 0) {
           void this.context.getActionExecutor()?.trigger()
         }
+        void this.context.getDraftMirrorExecutor()?.trigger()
       }
     })
     this.poller.start()

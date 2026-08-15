@@ -1,7 +1,13 @@
 import type { TriageAction, TriageResult } from './actions'
 import type { AuthStatus } from './auth'
 import type { ContactSearchResult } from './contacts'
-import type { Draft, DraftSaveInput } from './drafts'
+import type {
+  Draft,
+  DraftInlineImageInput,
+  DraftInlineImageResult,
+  DraftKind,
+  DraftSaveInput
+} from './drafts'
 import type {
   Conversation,
   DownloadAttachmentRequest,
@@ -22,6 +28,11 @@ export const IPC_CHANNELS = {
   contactsSearch: 'contacts:search',
   draftSave: 'draft:save',
   draftGet: 'draft:get',
+  draftList: 'draft:list',
+  draftReopen: 'draft:reopen',
+  draftCreateReply: 'draft:createReply',
+  draftAddInlineImage: 'draft:addInlineImage',
+  draftGetInlineImage: 'draft:getInlineImage',
   draftClose: 'draft:close',
   draftDiscard: 'draft:discard',
   draftMirror: 'draft:mirror',
@@ -59,9 +70,11 @@ export const TEST_CHANNELS = {
   reloadSeed: 'attn:test:reloadSeed',
   deleteThread: 'attn:test:deleteThread',
   delayConversation: 'attn:test:delayConversation',
+  delayDraftInlineImage: 'attn:test:delayDraftInlineImage',
   updateMessageBody: 'attn:test:updateMessageBody',
   failNextDraftSave: 'attn:test:failNextDraftSave',
-  markDraftMirrored: 'attn:test:markDraftMirrored'
+  markDraftMirrored: 'attn:test:markDraftMirrored',
+  remoteDraft: 'attn:test:remoteDraft'
 } as const
 
 export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]
@@ -73,7 +86,21 @@ export interface InvokeChannels {
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: { args: [draft: DraftSaveInput]; result: { id: string } }
   [IPC_CHANNELS.draftGet]: { args: [id: string]; result: Draft | null }
-  [IPC_CHANNELS.draftClose]: { args: [id: string]; result: undefined }
+  [IPC_CHANNELS.draftList]: { args: []; result: Draft[] }
+  [IPC_CHANNELS.draftReopen]: { args: [id: string]; result: Draft | null }
+  [IPC_CHANNELS.draftCreateReply]: {
+    args: [threadId: string, kind: Exclude<DraftKind, 'new'>]
+    result: Draft | null
+  }
+  [IPC_CHANNELS.draftAddInlineImage]: {
+    args: [id: string, image: DraftInlineImageInput]
+    result: DraftInlineImageResult
+  }
+  [IPC_CHANNELS.draftGetInlineImage]: {
+    args: [id: string, contentId: string]
+    result: InlineImageResult
+  }
+  [IPC_CHANNELS.draftClose]: { args: [id: string]; result: 'saved' | 'discarded' }
   [IPC_CHANNELS.draftDiscard]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftMirror]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftTakeRecovered]: { args: []; result: Draft | null }

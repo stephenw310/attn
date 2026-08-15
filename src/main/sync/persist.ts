@@ -5,6 +5,7 @@ import {
   extractBodyHtml,
   extractBodyText,
   extractThreadingHeaders,
+  type GmailMessage,
   type GmailThread,
   header,
   parseAddress,
@@ -40,6 +41,10 @@ export interface PersistThreadOptions {
   metadataOnly?: boolean
 }
 
+export function nonDraftMessages(messages: readonly GmailMessage[]): GmailMessage[] {
+  return messages.filter((message) => !message.labelIds?.includes('DRAFT'))
+}
+
 /** Persist an authoritative Gmail thread snapshot through the production write path. */
 export function persistThread(
   db: Db,
@@ -47,7 +52,10 @@ export function persistThread(
   thread: GmailThread,
   options: PersistThreadOptions = {}
 ): void {
-  const messages = thread.messages ?? []
+  // Draft messages are represented by outbox rows. Persisting them here would
+  // render unsent text as an ordinary conversation message once a threaded
+  // Gmail draft appears in a thread snapshot.
+  const messages = nonDraftMessages(thread.messages ?? [])
   if (messages.length === 0) return
 
   const upsertMsg = db.prepare(

@@ -47,6 +47,19 @@
           "subject": "Q3 roadmap review",
           "snippet": "I added the launch milestones.",
           "bodyText": "I added the launch milestones and owner notes.\n\n-- \nMaya Lin\n\nOn Friday, Priya wrote:\n> Please include owners for each milestone."
+        },
+        {
+          "id": "m-roadmap-draft",
+          "labelIds": ["DRAFT"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "11:05",
+          "from": "seed@attn.test",
+          "to": "Maya Lin <maya+roadmap@example.com>",
+          "messageId": "<roadmap-unsent-draft@attn.test>",
+          "references": ["<roadmap-root@example.com>", "<roadmap-reply@example.com>"],
+          "subject": "Re: Q3 roadmap review",
+          "snippet": "This unsent Gmail draft must never render as a message.",
+          "bodyText": "This unsent Gmail draft must never render as a message."
         }
       ]
     },

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
 import { refreshedSelectionIndex } from '../selection'
 
@@ -8,6 +9,8 @@ interface MailDataState {
   realThreads: ThreadRow[] | null
   setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
   realSnoozedThreads: SnoozedThreadRow[] | null
+  realDrafts: Draft[]
+  refreshDrafts: () => Promise<void>
   realUnreadTotal: number | null
   labels: MailLabel[]
   pendingCount: number
@@ -18,14 +21,16 @@ interface MailDataState {
 
 export function useMailData(
   activeAccount: string | null,
-  activeViewRef: React.RefObject<'inbox' | 'snoozed'>,
+  activeViewRef: React.RefObject<'inbox' | 'snoozed' | 'drafts'>,
   selectedThreadIdRef: React.RefObject<string | null>,
+  selectedDraftIdRef: React.RefObject<string | null>,
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
 ): MailDataState {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine)
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [realSnoozedThreads, setRealSnoozedThreads] = useState<SnoozedThreadRow[] | null>(null)
+  const [realDrafts, setRealDrafts] = useState<Draft[]>([])
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [pendingCount, setPendingCount] = useState(0)
@@ -59,6 +64,7 @@ export function useMailData(
   useEffect(() => {
     setRealThreads(null)
     setRealSnoozedThreads(null)
+    setRealDrafts([])
     setRealUnreadTotal(null)
     setLabels([])
     setPendingCount(0)
@@ -88,18 +94,27 @@ export function useMailData(
       void Promise.all([
         bridge.mail.listThreads(),
         bridge.mail.listSnoozed(),
+        bridge.draft.list(),
         bridge.mail.listLabels(),
         bridge.mail.getUnreadCount(),
         bridge.mail.getPendingActionCount()
       ])
-        .then(([threads, snoozed, nextLabels, unread, pending]) => {
+        .then(([threads, snoozed, drafts, nextLabels, unread, pending]) => {
           if (cancelled) return
-          const visible = activeViewRef.current === 'inbox' ? threads : snoozed
+          const visible =
+            activeViewRef.current === 'inbox'
+              ? threads
+              : activeViewRef.current === 'snoozed'
+                ? snoozed
+                : drafts
+          const selectedId =
+            activeViewRef.current === 'drafts' ? selectedDraftIdRef.current : selectedThreadIdRef.current
           setSelectedIndex((current) =>
-            refreshedSelectionIndex(visible, preserveSelection ? selectedThreadIdRef.current : null, current)
+            refreshedSelectionIndex(visible, preserveSelection ? selectedId : null, current)
           )
           setRealThreads(threads)
           setRealSnoozedThreads(snoozed)
+          setRealDrafts(drafts)
           setLabels(nextLabels)
           setRealUnreadTotal(unread)
           setPendingCount(pending)
@@ -116,7 +131,13 @@ export function useMailData(
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
     }
-  }, [activeAccount, activeViewRef, selectedThreadIdRef, setSelectedIndex])
+  }, [activeAccount, activeViewRef, selectedDraftIdRef, selectedThreadIdRef, setSelectedIndex])
+
+  const refreshDrafts = async (): Promise<void> => {
+    if (!window.attn || !activeAccount) return
+    const drafts = await window.attn.draft.list()
+    setRealDrafts(drafts)
+  }
 
   return {
     sync,
@@ -124,6 +145,8 @@ export function useMailData(
     realThreads,
     setRealThreads,
     realSnoozedThreads,
+    realDrafts,
+    refreshDrafts,
     realUnreadTotal,
     labels,
     pendingCount,

@@ -1,8 +1,11 @@
+// @vitest-environment jsdom
+
 import { createHeadlessEditor } from '@lexical/headless'
 import { $createListItemNode, $createListNode, ListItemNode, ListNode } from '@lexical/list'
 import { $createQuoteNode, QuoteNode } from '@lexical/rich-text'
-import { $createParagraphNode, $createTextNode, $getRoot } from 'lexical'
+import { $createParagraphNode, $createTextNode, $getRoot, type SerializedEditorState } from 'lexical'
 import { describe, expect, it } from 'vitest'
+import { prepareHtmlForEditor } from './preserve'
 import { editorStateToPlainText } from './serialize'
 
 describe('plain-text alternative', () => {
@@ -48,5 +51,53 @@ describe('plain-text alternative', () => {
     expect(editorStateToPlainText(editor.getEditorState().toJSON())).toBe(
       '1. Parent\n  - Child\n  - Child 2\n2. Second'
     )
+  })
+
+  it('includes preserved opaque-region text in the plain-text alternative', () => {
+    const prepared = prepareHtmlForEditor(
+      '<section data-layout="card"><mark>Preserved words</mark></section>'
+    )
+    const encoded = /data-attn-opaque="([A-Za-z0-9_-]+)"/.exec(prepared.html)?.[1]
+    expect(encoded).toBeTruthy()
+    expect(
+      editorStateToPlainText({
+        root: {
+          children: [
+            {
+              type: 'opaque-html',
+              version: 1,
+              html: encoded,
+              inline: false
+            }
+          ],
+          direction: null,
+          format: '',
+          indent: 0,
+          type: 'root',
+          version: 1
+        }
+      } as unknown as SerializedEditorState)
+    ).toBe('Preserved words')
+  })
+
+  it('includes the registered styled text replacement in the plain-text alternative', () => {
+    expect(
+      editorStateToPlainText({
+        root: {
+          children: [
+            {
+              type: 'paragraph',
+              version: 1,
+              children: [{ type: 'styled-text', version: 1, text: 'Styled body' }]
+            }
+          ],
+          direction: null,
+          format: '',
+          indent: 0,
+          type: 'root',
+          version: 1
+        }
+      } as unknown as SerializedEditorState)
+    ).toBe('Styled body')
   })
 })

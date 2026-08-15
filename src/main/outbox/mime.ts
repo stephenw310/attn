@@ -18,6 +18,7 @@ export interface MimeAttachment {
   mimeType: string
   content: Uint8Array
   contentId?: string
+  inline?: boolean
 }
 
 export interface MimeDraft {
@@ -143,7 +144,7 @@ function addressHeader(name: string, addresses: readonly MailAddress[]): string[
   return addresses.length > 0 ? foldHeader(name, addresses.map(formatAddress).join(', ')) : []
 }
 
-function deterministicBoundary(kind: 'alternative' | 'mixed', rfcMessageId: string): string {
+function deterministicBoundary(kind: 'alternative' | 'mixed' | 'related', rfcMessageId: string): string {
   const digest = createHash('sha256').update(`${kind}\0${rfcMessageId}`).digest('hex').slice(0, 24)
   return `attn-${kind}-${digest}`
 }
@@ -249,7 +250,11 @@ function attachmentPart(attachment: MimeAttachment): string[] {
       filenameParameters('name', filename)
     ),
     'Content-Transfer-Encoding: base64',
-    ...parameterizedHeader('Content-Disposition', 'attachment', filenameParameters('filename', filename)),
+    ...parameterizedHeader(
+      'Content-Disposition',
+      attachment.inline ? 'inline' : 'attachment',
+      filenameParameters('filename', filename)
+    ),
     ...(contentId ? [`Content-ID: <${contentId}>`] : []),
     '',
     base64Lines(attachment.content)
@@ -285,7 +290,10 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
 
   const alternativeBoundary = deterministicBoundary('alternative', messageId)
   const mixedBoundary = deterministicBoundary('mixed', messageId)
+  const relatedBoundary = deterministicBoundary('related', messageId)
   const attachments = draft.attachments ?? []
+  const inlineAttachments = attachments.filter((attachment) => attachment.inline)
+  const regularAttachments = attachments.filter((attachment) => !attachment.inline)
   const text = combinedBody(draft.bodyText, draft.quoteText, '\n\n')
   const authoredHtml = draft.bodyHtml.trim() ? draft.bodyHtml : plainTextHtml(draft.bodyText)
   const html = combinedBody(authoredHtml, draft.quoteHtml, '\n')
@@ -304,7 +312,7 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
     'MIME-Version: 1.0'
   ]
 
-  if (attachments.length === 0) {
+  if (inlineAttachments.length === 0 && regularAttachments.length === 0) {
     return [
       ...headers,
       `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
@@ -314,13 +322,32 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
     ].join(CRLF)
   }
 
-  const mixedParts: string[] = [
-    `--${mixedBoundary}`,
+  const alternativeEntity = [
     `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
     '',
     ...alternativeParts(alternativeBoundary, text, html)
   ]
-  for (const attachment of attachments) {
+  const bodyEntity =
+    inlineAttachments.length === 0
+      ? alternativeEntity
+      : [
+          `Content-Type: multipart/related; boundary="${relatedBoundary}"`,
+          '',
+          `--${relatedBoundary}`,
+          ...alternativeEntity,
+          ...inlineAttachments.flatMap((attachment) => [
+            `--${relatedBoundary}`,
+            ...attachmentPart(attachment)
+          ]),
+          `--${relatedBoundary}--`
+        ]
+
+  if (regularAttachments.length === 0) {
+    return [...headers, ...bodyEntity, ''].join(CRLF)
+  }
+
+  const mixedParts: string[] = [`--${mixedBoundary}`, ...bodyEntity]
+  for (const attachment of regularAttachments) {
     mixedParts.push(`--${mixedBoundary}`, ...attachmentPart(attachment))
   }
   mixedParts.push(`--${mixedBoundary}--`)

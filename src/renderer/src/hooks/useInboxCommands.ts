@@ -1,5 +1,6 @@
 import { useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
+import type { DraftKind } from '../../../shared/drafts'
 import { createCommand, registerCommands } from '../commands'
 
 interface Options {
@@ -8,7 +9,7 @@ interface Options {
   selectedCount: number
   selectedIndex: number
   readerOpen: boolean
-  view: 'inbox' | 'snoozed'
+  view: 'inbox' | 'snoozed' | 'drafts'
   starOn: boolean
   markUnreadOn: boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
@@ -18,11 +19,12 @@ interface Options {
   extendSelection: (index: number) => void
   openSelected: () => void
   closeReader: () => void
-  switchView: (view: 'inbox' | 'snoozed') => void
+  switchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
   openLabel: () => void
   openComposer: () => void
+  openReply: (kind: Exclude<DraftKind, 'new'>) => void
   showToast: (message: string) => void
 }
 
@@ -48,6 +50,7 @@ export function useInboxCommands(options: Options): void {
     openSnooze,
     openLabel,
     openComposer,
+    openReply,
     showToast
   } = options
   useLayoutEffect(
@@ -72,7 +75,15 @@ export function useInboxCommands(options: Options): void {
           : [createCommand('conversation.open', openSelected)]),
         createCommand('view.inbox', () => switchView('inbox')),
         createCommand('view.snoozed', () => switchView('snoozed')),
+        createCommand('view.drafts', () => switchView('drafts')),
         createCommand('composer.new', openComposer),
+        ...(readerOpen
+          ? [
+              createCommand('composer.reply', () => openReply('reply')),
+              createCommand('composer.replyAll', () => openReply('replyAll')),
+              createCommand('composer.forward', () => openReply('forward'))
+            ]
+          : []),
         createCommand(
           'triage.archive',
           () => selected && triage({ kind: 'archive', threadIds: [selected.id] })
@@ -120,6 +131,7 @@ export function useInboxCommands(options: Options): void {
       markUnreadOn,
       openLabel,
       openComposer,
+      openReply,
       openSelected,
       openSnooze,
       preserveSelectionOnRefreshRef,

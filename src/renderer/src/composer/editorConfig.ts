@@ -2,10 +2,31 @@ import { LinkNode } from '@lexical/link'
 import { ListItemNode, ListNode } from '@lexical/list'
 import type { InitialConfigType } from '@lexical/react/LexicalComposer'
 import { QuoteNode } from '@lexical/rich-text'
+import { TableCellNode, TableNode, TableRowNode } from '@lexical/table'
+import { TextNode } from 'lexical'
+import { ImageNode } from './nodes/ImageNode'
+import { OpaqueHtmlNode } from './nodes/OpaqueHtmlNode'
+import { StyledTextNode } from './nodes/StyledTextNode'
 
 export const editorConfig: InitialConfigType = {
   namespace: 'attn-composer',
-  nodes: [LinkNode, ListNode, ListItemNode, QuoteNode],
+  nodes: [
+    LinkNode,
+    ListNode,
+    ListItemNode,
+    QuoteNode,
+    TableNode,
+    TableRowNode,
+    TableCellNode,
+    ImageNode,
+    OpaqueHtmlNode,
+    StyledTextNode,
+    {
+      replace: TextNode,
+      with: (node: TextNode) => new StyledTextNode(node.getTextContent()),
+      withKlass: StyledTextNode
+    }
+  ],
   theme: {
     link: 'app-composer-link',
     list: {
@@ -19,8 +40,13 @@ export const editorConfig: InitialConfigType = {
     text: {
       bold: 'app-composer-bold',
       italic: 'app-composer-italic',
+      strikethrough: 'app-composer-strikethrough',
       underline: 'app-composer-underline'
-    }
+    },
+    table: 'app-composer-table',
+    tableCell: 'app-composer-table-cell',
+    tableCellHeader: 'app-composer-table-cell-header',
+    tableRow: 'app-composer-table-row'
   },
   onError(error) {
     throw error
