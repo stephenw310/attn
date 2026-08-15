@@ -122,11 +122,16 @@ export interface ParsedAttachment {
   mimeType: string
   sizeBytes: number
   contentId?: string
+  inline?: boolean
   /** Present only when Gmail delivered a small attachment inline with the message payload. */
   inlineData?: string
 }
 
-/** User-visible attachments have a filename and either remote or inline body data. */
+function partHeader(part: GmailPart, name: string): string {
+  return part.headers?.find((candidate) => candidate.name.toLowerCase() === name)?.value.trim() ?? ''
+}
+
+/** Collect both user-visible attachments and CID-backed inline MIME resources. */
 export function collectAttachments(payload: GmailPart | undefined): ParsedAttachment[] {
   const attachments: ParsedAttachment[] = []
   const walk = (part: GmailPart, path: string): void => {
@@ -135,20 +140,23 @@ export function collectAttachments(payload: GmailPart | undefined): ParsedAttach
     const attachmentId =
       part.body?.attachmentId ??
       (inlineData !== undefined ? `inline:${part.partId?.trim() || path}` : undefined)
-    if (filename && attachmentId) {
-      const contentId = part.headers
-        ?.find((candidate) => candidate.name.toLowerCase() === 'content-id')
-        ?.value.trim()
-        .replace(/^<|>$/g, '')
+    const contentId = partHeader(part, 'content-id').replace(/^<|>$/g, '')
+    const disposition = partHeader(part, 'content-disposition').split(';', 1)[0].toLowerCase()
+    const mimeType = part.mimeType ?? 'application/octet-stream'
+    const inline = Boolean(
+      contentId && mimeType.toLowerCase().startsWith('image/') && disposition !== 'attachment'
+    )
+    if (attachmentId && (filename || inline)) {
       attachments.push({
         attachmentId,
-        filename,
-        mimeType: part.mimeType ?? 'application/octet-stream',
+        filename: filename || contentId || `inline-image-${part.partId?.trim() || path}`,
+        mimeType,
         sizeBytes: Math.max(
           0,
           part.body?.size ?? (inlineData === undefined ? 0 : Buffer.from(inlineData, 'base64url').byteLength)
         ),
         ...(contentId ? { contentId } : {}),
+        ...(inline ? { inline: true } : {}),
         ...(part.body?.attachmentId ? {} : { inlineData })
       })
     }
@@ -246,7 +254,7 @@ export function decodeBase64Url(data: string): string {
 }
 
 export function hasAttachment(payload: GmailPart | undefined): boolean {
-  return collectAttachments(payload).length > 0
+  return collectAttachments(payload).some((attachment) => !attachment.inline)
 }
 
 function decodeBody(data: string): string {

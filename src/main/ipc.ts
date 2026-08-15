@@ -4,6 +4,7 @@ import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared
 import type {
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
+  InlineImageRepairRequest,
   InlineImageRequest,
   InlineImageResult
 } from '../shared/mail'
@@ -21,9 +22,12 @@ import {
   searchContacts
 } from './db/queries'
 import type { GmailClient } from './gmail/client'
+import type { GmailMailProvider } from './gmail/provider'
 import type { PendingFocus } from './notify'
 import { takePendingFocus } from './notify'
 import type { SnoozeScheduler } from './scheduler'
+import { hydrateMissingThreadBodies } from './sync/bodies'
+import { persistThread } from './sync/persist'
 import type { SyncController } from './syncController'
 
 /**
@@ -51,6 +55,7 @@ export interface IpcContext {
   signIn: () => Promise<AuthStatus>
   signOut: () => AuthStatus
   makeClient: () => GmailClient | null
+  makeProvider: () => GmailMailProvider | null
   isSeeded: () => boolean
   executor: () => ActionExecutor | null
   scheduler: () => SnoozeScheduler | null
@@ -91,6 +96,12 @@ function isInlineImageRequest(value: unknown): value is InlineImageRequest {
   )
 }
 
+function isInlineImageRepairRequest(value: unknown): value is InlineImageRepairRequest {
+  if (!value || typeof value !== 'object') return false
+  const threadId = (value as Partial<InlineImageRepairRequest>).threadId
+  return typeof threadId === 'string' && threadId.length > 0 && threadId.length <= 256
+}
+
 function isSnoozeRequest(value: unknown): value is SnoozeRequest {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<SnoozeRequest>
@@ -122,6 +133,7 @@ async function resolveAttachmentData(
 }
 
 export function registerIpc(context: IpcContext): void {
+  const attemptedInlineImageRepairs = new Set<string>()
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
   handle(IPC_CHANNELS.authSignOut, () => context.signOut())
@@ -198,6 +210,29 @@ export function registerIpc(context: IpcContext): void {
         `[attachment] inline image failed: ${error instanceof Error ? error.message : String(error)}`
       )
       return { error: 'Could not load inline image' } satisfies InlineImageResult
+    }
+  })
+  handle(IPC_CHANNELS.mailRepairInlineImages, async (_event, request) => {
+    if (!isInlineImageRepairRequest(request)) return false
+    const accountId = context.currentAccountId()
+    const provider = context.makeProvider()
+    if (!accountId || !provider) return false
+    const repairKey = `${accountId}\0${request.threadId}`
+    if (attemptedInlineImageRepairs.has(repairKey)) return false
+    attemptedInlineImageRepairs.add(repairKey)
+    try {
+      const thread = await provider.getThread(request.threadId, { format: 'full' })
+      if (context.currentAccountId() !== accountId) return false
+      persistThread(context.db, accountId, thread)
+      await hydrateMissingThreadBodies(context.db, provider, accountId, thread)
+      if (context.currentAccountId() === accountId) context.broadcastMailChanged()
+      return true
+    } catch (error) {
+      attemptedInlineImageRepairs.delete(repairKey)
+      console.error(
+        `[attachment] inline image repair failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+      return false
     }
   })
   handle(IPC_CHANNELS.mailTriage, (_event, action) => {

@@ -80,6 +80,7 @@ function formatBytes(bytes: number): string {
 }
 
 interface MessageCardProps {
+  threadId: string
   message: DisplayMessage
   account: string | null
   onToast: (message: string) => void
@@ -91,6 +92,7 @@ interface MessageCardProps {
 
 export function MessageCard(props: MessageCardProps): React.JSX.Element {
   const {
+    threadId,
     message,
     account,
     onToast,
@@ -100,6 +102,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     onToggleTrim
   } = props
   const htmlSurface = message.html !== null
+  const visibleAttachments = message.attachments.filter((attachment) => !attachment.inline)
 
   const download = useCallback(
     (attachment: MessageAttachment) => {
@@ -144,7 +147,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
             {message.text || 'HTML message'}
           </span>
           <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
-            {message.attachments.length > 0 && <span title="Has attachment">📎</span>}
+            {visibleAttachments.length > 0 && <span title="Has attachment">📎</span>}
             {message.at}
             <span aria-hidden>▾</span>
           </span>
@@ -207,15 +210,16 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         <MessageBody
           bodyText={message.text}
           bodyHtml={message.html}
+          threadId={threadId}
           messageId={message.id}
           attachments={message.attachments}
           expanded={trimExpanded}
           onToggleTrim={onToggleTrim}
         />
-        {message.attachments.length > 0 && (
+        {visibleAttachments.length > 0 && (
           <div data-testid="message-accessories" className={htmlSurface ? 'bg-white px-3 pb-3' : ''}>
             <div className="mt-3 flex flex-wrap gap-2">
-              {message.attachments.map((attachment) => (
+              {visibleAttachments.map((attachment) => (
                 <button
                   key={attachment.attachmentId}
                   type="button"

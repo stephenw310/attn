@@ -12,6 +12,7 @@ import { findTrimIndex } from './mailTrim'
 interface MessageBodyProps {
   bodyText: string
   bodyHtml: string | null
+  threadId: string
   messageId: string
   attachments: MessageAttachment[]
   expanded?: boolean
@@ -216,6 +217,7 @@ function TrimToggle({
 export function MessageBody({
   bodyText,
   bodyHtml,
+  threadId,
   messageId,
   attachments,
   expanded = false,
@@ -226,9 +228,7 @@ export function MessageBody({
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
-  const attachmentsRef = useRef(attachments)
   const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
-  attachmentsRef.current = attachments
   const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES)), [bodyHtml])
 
   const applyInlineImages = useCallback(() => {
@@ -247,7 +247,7 @@ export function MessageBody({
     inlineImagesRef.current = EMPTY_IMAGES
     if (bodyHtml === null || !attn) return
     const references = cidReferences(bodyHtml)
-    const cidAttachments = attachmentsRef.current
+    const cidAttachments = attachments
       .filter((attachment) => attachment.mimeType.startsWith('image/'))
       .map((attachment) => {
         const filename = attachment.filename.toLowerCase()
@@ -257,6 +257,10 @@ export function MessageBody({
         return { attachment, contentIds }
       })
       .filter(({ contentIds }) => contentIds.length > 0)
+    const matchedReferences = new Set(cidAttachments.flatMap(({ contentIds }) => contentIds))
+    if (references.some((reference) => !matchedReferences.has(reference))) {
+      void attn.mail.repairInlineImages({ threadId }).catch(() => {})
+    }
     let cancelled = false
     const addInlineImages = (entries: ReadonlyArray<readonly [string, string]>): void => {
       if (cancelled || entries.length === 0) return
@@ -278,7 +282,7 @@ export function MessageBody({
     return () => {
       cancelled = true
     }
-  }, [applyInlineImages, bodyHtml, messageId])
+  }, [applyInlineImages, attachments, bodyHtml, messageId, threadId])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
   const measurement = measuredFrame?.srcDoc === srcDoc ? measuredFrame : null

@@ -245,6 +245,7 @@ function initialize(): void {
     signIn,
     signOut,
     makeClient: makeCurrentClient,
+    makeProvider: makeCurrentProvider,
     isSeeded,
     executor: () => actionExecutor,
     scheduler: () => snoozeScheduler,

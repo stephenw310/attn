@@ -43,6 +43,15 @@ describe('Gmail message parsing', () => {
           filename: 'notes.txt',
           body: { data: inlineData }
         },
+        {
+          mimeType: 'image/jpeg',
+          filename: 'photo.jpg',
+          headers: [
+            { name: 'Content-ID', value: '<attached-photo@example.test>' },
+            { name: 'Content-Disposition', value: 'attachment; filename="photo.jpg"' }
+          ],
+          body: { attachmentId: 'att-photo', size: 1_024 }
+        },
         { mimeType: 'text/plain', filename: '', body: { attachmentId: 'external-body' } }
       ]
     }
@@ -61,8 +70,44 @@ describe('Gmail message parsing', () => {
         mimeType: 'text/plain',
         sizeBytes: 16,
         inlineData
+      },
+      {
+        attachmentId: 'att-photo',
+        filename: 'photo.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 1_024,
+        contentId: 'attached-photo@example.test'
       }
     ])
+  })
+
+  it('keeps filename-less CID images without advertising them as attachments', () => {
+    const payload = {
+      parts: [
+        {
+          partId: '2.1',
+          mimeType: 'image/png',
+          filename: '',
+          headers: [
+            { name: 'Content-ID', value: '<MarcusLogo_2021>' },
+            { name: 'Content-Disposition', value: 'inline' }
+          ],
+          body: { attachmentId: 'logo-data', size: 4_096 }
+        }
+      ]
+    }
+
+    expect(collectAttachments(payload)).toEqual([
+      {
+        attachmentId: 'logo-data',
+        filename: 'MarcusLogo_2021',
+        mimeType: 'image/png',
+        sizeBytes: 4_096,
+        contentId: 'MarcusLogo_2021',
+        inline: true
+      }
+    ])
+    expect(hasAttachment(payload)).toBe(false)
   })
 
   it('splits address lists only on top-level commas', () => {

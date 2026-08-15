@@ -48,6 +48,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       {conversation.messages.map((message) => (
         <MessageCard
           key={message.id}
+          threadId={conversation.threadId}
           message={message}
           account={account}
           onToast={onToast}
