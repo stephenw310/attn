@@ -15,7 +15,8 @@ export async function hydrateMissingThreadBodies(
   db: Db,
   provider: MailProvider,
   accountId: string,
-  thread: GmailThread
+  thread: GmailThread,
+  shouldContinue: () => boolean = () => true
 ): Promise<void> {
   const readBody = db.prepare('SELECT body_text, body_html FROM messages WHERE account_id = ? AND id = ?')
   const writeBody = db.prepare(
@@ -23,6 +24,7 @@ export async function hydrateMissingThreadBodies(
   )
 
   for (const message of thread.messages ?? []) {
+    if (!shouldContinue()) return
     const row = readBody.get(accountId, message.id) as
       | { body_text: string | null; body_html: string | null }
       | undefined
@@ -38,9 +40,11 @@ export async function hydrateMissingThreadBodies(
     const fetchedHtml: string[] = []
 
     for (const part of parts) {
+      if (!shouldContinue()) return
       if (part.mimeType === 'text/plain' && plainComplete) continue
       if (part.mimeType === 'text/html' && htmlComplete) continue
       const data = await provider.getAttachmentData(message.id, part.attachmentId)
+      if (!shouldContinue()) return
       if (!data) continue
       const raw = decodeBase64Url(data)
       if (!raw) continue
@@ -58,6 +62,7 @@ export async function hydrateMissingThreadBodies(
       fetchedHtml
     })
     if (bodyText === row.body_text && bodyHtml === row.body_html) continue
+    if (!shouldContinue()) return
     writeBody.run(bodyText, bodyHtml, accountId, message.id)
   }
 }

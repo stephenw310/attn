@@ -45,7 +45,7 @@ export interface MessageAttachment {
   inline?: boolean
 }
 
-export type MessageBodyState = 'complete' | 'loading' | 'signed-out'
+export type MessageBodyState = 'complete' | 'loading' | 'signed-out' | 'unavailable'
 
 export interface ConversationMsg {
   id: string

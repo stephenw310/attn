@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useState } from 'react'
+import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
 import type { DisplayConversation, DisplayThread } from '../mailDisplay'
 import { Kbd } from './Kbd'
@@ -53,17 +54,11 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           message={message}
           account={account}
           onToast={onToast}
-          bodyHydrationMessage={
-            message.bodyState === 'complete'
-              ? undefined
-              : !online
-                ? "Full message loads when you're back online"
-                : message.bodyState === 'signed-out'
-                  ? 'Full message loads when signed in'
-                  : conversation.bodyHydrationFailed
-                    ? undefined
-                    : 'Loading full message…'
-          }
+          bodyHydrationMessage={bodyHydrationStatusMessage(
+            message.bodyState,
+            online,
+            conversation.bodyHydrationFailed
+          )}
           collapsed={!expandedMessageIds.has(message.id)}
           onToggleCollapsed={() => toggleMessage(message.id)}
           trimExpanded={expandedTrimIds.has(message.id)}

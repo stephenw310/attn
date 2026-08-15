@@ -176,16 +176,18 @@ async function resolveAttachmentData(
   return typeof data === 'string' ? { kind: 'available', data } : { kind: 'unavailable' }
 }
 
-export function registerIpc(context: IpcContext): void {
+export function registerIpc(context: IpcContext): () => void {
   const attemptedInlineImageRepairs = new Set<string>()
   const bodyHydrator = new OnDemandBodyHydrator(
     context.db,
     context.currentAccountId,
     context.broadcastMailChanged,
     (accountId, threadId, error) => {
-      console.warn(
-        `[mail] body hydration failed for ${threadId}: ${error instanceof Error ? error.message : String(error)}`
-      )
+      if (error !== undefined) {
+        console.warn(
+          `[mail] body hydration failed for ${threadId}: ${error instanceof Error ? error.message : String(error)}`
+        )
+      }
       context.broadcastBodyHydrationFailed(accountId, threadId)
     }
   )
@@ -261,16 +263,23 @@ export function registerIpc(context: IpcContext): void {
     await context.waitForConversation(threadId)
     const account = context.currentAccountId()
     if (!account) return null
-    const provider = context.makeProvider()
-    const conversation = getConversation(context.db, account, threadId, provider !== null)
+    const attemptState = bodyHydrator.state(account, threadId)
+    const conversation = getConversation(
+      context.db,
+      account,
+      threadId,
+      attemptState === 'idle' ? 'signed-out' : attemptState
+    )
     if (
-      conversation?.messages.some((message) => message.bodyState !== 'complete') &&
-      provider &&
-      allowHydration === true
+      !conversation?.messages.some((message) => message.bodyState !== 'complete') ||
+      allowHydration !== true
     ) {
-      setImmediate(() => void bodyHydrator.request(account, threadId, provider))
+      return conversation
     }
-    return conversation
+    const provider = context.makeProvider()
+    if (!provider) return conversation
+    setImmediate(() => void bodyHydrator.request(account, threadId, provider))
+    return getConversation(context.db, account, threadId, 'loading')
   })
   handle(IPC_CHANNELS.mailDownloadAttachment, async (_event, request) => {
     if (!isDownloadAttachmentRequest(request)) return { error: 'Invalid attachment' }
@@ -382,6 +391,7 @@ export function registerIpc(context: IpcContext): void {
     const account = context.currentAccountId()
     return account ? pendingActionCount(context.db, account) : 0
   })
+  return () => bodyHydrator.stop()
 }
 
 function requireAccount(context: IpcContext): string {

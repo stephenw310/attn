@@ -218,11 +218,14 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           expanded={trimExpanded}
           onToggleTrim={onToggleTrim}
         />
-        {bodyHydrationMessage && (
-          <p data-testid="body-hydration-status" className="mt-3 text-xs text-ink-faint" aria-live="polite">
-            {bodyHydrationMessage}
-          </p>
-        )}
+        <p
+          data-testid="body-hydration-status"
+          className={bodyHydrationMessage ? 'mt-3 text-xs text-ink-faint' : 'sr-only'}
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {bodyHydrationMessage ?? ''}
+        </p>
         {visibleAttachments.length > 0 && (
           <div data-testid="message-accessories" className={htmlSurface ? 'bg-white px-3 pb-3' : ''}>
             <div className="mt-3 flex flex-wrap gap-2">

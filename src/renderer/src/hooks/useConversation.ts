@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { hydrationAttemptDecision } from '../bodyHydrationStatus'
 import { type DisplayConversation, type DisplayThread, displayConversation } from '../mailDisplay'
 
 interface UseConversationOptions {
@@ -22,6 +23,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
   const cache = useRef(new Map<string, DisplayConversation>())
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const autoReadThreadRef = useRef<string | null>(null)
+  const hydrationTargetRef = useRef<string | null>(null)
   const accountRef = useRef(account)
   const revisionRef = useRef(mailRevision)
   const selectedId = selected?.id
@@ -41,6 +43,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
   useEffect(() => {
     if (accountRef.current === account) return
     accountRef.current = account
+    hydrationTargetRef.current = null
     cache.current.clear()
     setConversation(null)
   }, [account])
@@ -53,14 +56,23 @@ export function useConversation(options: UseConversationOptions): ConversationSt
 
   useEffect(() => {
     if (!selectedId) {
+      hydrationTargetRef.current = null
       setConversation(null)
       return
     }
     setConversation((current) => (current?.threadId === selectedId ? current : null))
+    const hydrationDecision = hydrationAttemptDecision(hydrationTargetRef.current, {
+      account,
+      threadId: selectedId,
+      readerOpen,
+      online
+    })
+    hydrationTargetRef.current = hydrationDecision.nextTarget
+    const { allowHydration } = hydrationDecision
     const cached = cache.current.get(selectedId)
     if (cached) {
       const shouldHydrate =
-        readerOpen && online && cached.messages.some((message) => message.bodyState !== 'complete')
+        allowHydration && cached.messages.some((message) => message.bodyState !== 'complete')
       const next =
         shouldHydrate && cached.bodyHydrationFailed ? { ...cached, bodyHydrationFailed: false } : cached
       if (next !== cached) cache.current.set(selectedId, next)
@@ -71,7 +83,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     let cancelled = false
     const requestedRevision = mailRevision
     window.attn.mail
-      .getConversation(selectedId, readerOpen && online)
+      .getConversation(selectedId, allowHydration)
       .then((result) => {
         if (cancelled || revisionRef.current !== requestedRevision || !result) return
         const display = displayConversation(result)
@@ -82,7 +94,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     return () => {
       cancelled = true
     }
-  }, [mailRevision, online, readerOpen, selectedId])
+  }, [account, mailRevision, online, readerOpen, selectedId])
 
   useEffect(() => {
     if (!window.attn) return

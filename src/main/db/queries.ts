@@ -15,6 +15,7 @@ import type {
   ConversationMsg,
   MailLabel,
   MessageAttachment,
+  MessageBodyState,
   MessageRecipients,
   SnoozedThreadRow,
   ThreadRow
@@ -162,7 +163,7 @@ export function getConversation(
   db: Db,
   accountId: string,
   threadId: string,
-  bodyHydrationAvailable = false
+  missingBodyState: Exclude<MessageBodyState, 'complete'>
 ): Conversation | null {
   const thread = db
     .prepare('SELECT subject FROM threads WHERE account_id = ? AND id = ?')
@@ -204,9 +205,7 @@ export function getConversation(
     bodyText: r.body_text || r.snippet || '',
     bodyHtml: r.body_html,
     bodyState: needsBodyHydration({ bodyText: r.body_text, bodyHtml: r.body_html })
-      ? bodyHydrationAvailable
-        ? 'loading'
-        : 'signed-out'
+      ? missingBodyState
       : 'complete'
   }))
 

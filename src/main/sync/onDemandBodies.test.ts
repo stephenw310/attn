@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import type { GmailThread } from '../gmail/parse'
-import { OnDemandBodyHydrator } from './onDemandBodies'
+import { systemTime } from '../time'
+import { BODY_HYDRATION_TIMEOUT_MS, type HydrationEffects, OnDemandBodyHydrator } from './onDemandBodies'
 import type { MailProvider } from './provider'
 
 const thread: GmailThread = { id: 'thread-1', messages: [] }
@@ -28,47 +29,128 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve }
 }
 
+function effects(missingMessageIds: HydrationEffects['missingMessageIds']): HydrationEffects {
+  return {
+    persist: vi.fn(),
+    hydrateMissing: vi.fn(async () => {}),
+    missingMessageIds
+  }
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('OnDemandBodyHydrator', () => {
-  it('coalesces concurrent requests for the same account and thread', async () => {
+  it('coalesces concurrent requests and broadcasts only when a body becomes complete', async () => {
     const fetched = deferred<GmailThread>()
     const getThread = vi.fn(() => fetched.promise)
-    const persist = vi.fn()
-    const hydrateMissing = vi.fn(async () => {})
+    const missingMessageIds = vi
+      .fn<HydrationEffects['missingMessageIds']>()
+      .mockReturnValueOnce(new Set(['message-1']))
+      .mockReturnValueOnce(new Set())
+    const hydrationEffects = effects(missingMessageIds)
     const onChanged = vi.fn()
-    const hydrator = new OnDemandBodyHydrator({} as Db, () => 'account@example.com', onChanged, vi.fn(), {
-      persist,
-      hydrateMissing
-    })
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => 'account@example.com',
+      onChanged,
+      vi.fn(),
+      systemTime,
+      hydrationEffects
+    )
     const mail = provider(getThread)
 
     const first = hydrator.request('account@example.com', 'thread-1', mail)
     const second = hydrator.request('account@example.com', 'thread-1', mail)
     expect(second).toBe(first)
+    expect(hydrator.state('account@example.com', 'thread-1')).toBe('loading')
     expect(getThread).toHaveBeenCalledTimes(1)
 
     fetched.resolve(thread)
     await first
     expect(getThread).toHaveBeenCalledWith('thread-1', { format: 'full' })
-    expect(persist).toHaveBeenCalledWith(expect.anything(), 'account@example.com', thread)
-    expect(hydrateMissing).toHaveBeenCalledWith(expect.anything(), mail, 'account@example.com', thread)
+    expect(hydrationEffects.persist).toHaveBeenCalledWith(expect.anything(), 'account@example.com', thread)
+    expect(hydrationEffects.hydrateMissing).toHaveBeenCalledWith(
+      expect.anything(),
+      mail,
+      'account@example.com',
+      thread,
+      expect.any(Function)
+    )
     expect(onChanged).toHaveBeenCalledOnce()
+    expect(hydrator.state('account@example.com', 'thread-1')).toBe('idle')
   })
 
-  it('settles failures silently and allows the next request to retry', async () => {
+  it('marks a successful bodyless fetch unavailable without broadcasting a mail refresh', async () => {
+    const onUnavailable = vi.fn()
+    const onChanged = vi.fn()
+    const hydrationEffects = effects(vi.fn(() => new Set(['message-1'])))
+    const mail = provider(vi.fn(async () => thread))
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => 'account@example.com',
+      onChanged,
+      onUnavailable,
+      systemTime,
+      hydrationEffects
+    )
+
+    await hydrator.request('account@example.com', 'thread-1', mail)
+
+    expect(onChanged).not.toHaveBeenCalled()
+    expect(onUnavailable).toHaveBeenCalledWith('account@example.com', 'thread-1', undefined)
+    expect(hydrator.state('account@example.com', 'thread-1')).toBe('unavailable')
+  })
+
+  it('broadcasts a partial body change and leaves the unresolved message unavailable', async () => {
+    const missingMessageIds = vi
+      .fn<HydrationEffects['missingMessageIds']>()
+      .mockReturnValueOnce(new Set(['message-1', 'message-2']))
+      .mockReturnValueOnce(new Set(['message-2']))
+    const onChanged = vi.fn()
+    const onUnavailable = vi.fn()
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => 'account@example.com',
+      onChanged,
+      onUnavailable,
+      systemTime,
+      effects(missingMessageIds)
+    )
+
+    await hydrator.request('account@example.com', 'thread-1', provider(vi.fn(async () => thread)))
+
+    expect(onChanged).toHaveBeenCalledOnce()
+    expect(onUnavailable).toHaveBeenCalledWith('account@example.com', 'thread-1', undefined)
+    expect(hydrator.state('account@example.com', 'thread-1')).toBe('unavailable')
+  })
+
+  it('settles failures quietly and allows the next explicit request to retry', async () => {
     const getThread = vi
       .fn<MailProvider['getThread']>()
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce(thread)
-    const onFailed = vi.fn()
+    const missingMessageIds = vi
+      .fn<HydrationEffects['missingMessageIds']>()
+      .mockReturnValueOnce(new Set(['message-1']))
+      .mockReturnValueOnce(new Set(['message-1']))
+      .mockReturnValueOnce(new Set(['message-1']))
+      .mockReturnValueOnce(new Set())
+    const onUnavailable = vi.fn()
     const onChanged = vi.fn()
-    const hydrator = new OnDemandBodyHydrator({} as Db, () => 'account@example.com', onChanged, onFailed, {
-      persist: vi.fn(),
-      hydrateMissing: vi.fn(async () => {})
-    })
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => 'account@example.com',
+      onChanged,
+      onUnavailable,
+      systemTime,
+      effects(missingMessageIds)
+    )
     const mail = provider(getThread)
 
     await hydrator.request('account@example.com', 'thread-1', mail)
-    expect(onFailed).toHaveBeenCalledWith('account@example.com', 'thread-1', expect.any(Error))
+    expect(onUnavailable).toHaveBeenCalledWith('account@example.com', 'thread-1', expect.any(Error))
     expect(onChanged).not.toHaveBeenCalled()
 
     await hydrator.request('account@example.com', 'thread-1', mail)
@@ -79,14 +161,17 @@ describe('OnDemandBodyHydrator', () => {
   it('does not persist a response after the active account changes', async () => {
     const fetched = deferred<GmailThread>()
     let account: string | null = 'account@example.com'
-    const persist = vi.fn()
-    const hydrateMissing = vi.fn(async () => {})
+    const hydrationEffects = effects(vi.fn(() => new Set(['message-1'])))
     const onChanged = vi.fn()
-    const onFailed = vi.fn()
-    const hydrator = new OnDemandBodyHydrator({} as Db, () => account, onChanged, onFailed, {
-      persist,
-      hydrateMissing
-    })
+    const onUnavailable = vi.fn()
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => account,
+      onChanged,
+      onUnavailable,
+      systemTime,
+      hydrationEffects
+    )
     const attempt = hydrator.request(
       'account@example.com',
       'thread-1',
@@ -97,9 +182,63 @@ describe('OnDemandBodyHydrator', () => {
     fetched.resolve(thread)
     await attempt
 
-    expect(persist).not.toHaveBeenCalled()
-    expect(hydrateMissing).not.toHaveBeenCalled()
+    expect(hydrationEffects.persist).not.toHaveBeenCalled()
+    expect(hydrationEffects.hydrateMissing).not.toHaveBeenCalled()
     expect(onChanged).not.toHaveBeenCalled()
-    expect(onFailed).not.toHaveBeenCalled()
+    expect(onUnavailable).not.toHaveBeenCalled()
+  })
+
+  it('cancels an active attempt before shutdown can close the database', async () => {
+    const fetched = deferred<GmailThread>()
+    const hydrationEffects = effects(vi.fn(() => new Set(['message-1'])))
+    const onChanged = vi.fn()
+    const onUnavailable = vi.fn()
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => 'account@example.com',
+      onChanged,
+      onUnavailable,
+      systemTime,
+      hydrationEffects
+    )
+    const attempt = hydrator.request(
+      'account@example.com',
+      'thread-1',
+      provider(vi.fn(() => fetched.promise))
+    )
+
+    hydrator.stop()
+    await attempt
+    fetched.resolve(thread)
+    await Promise.resolve()
+
+    expect(hydrationEffects.persist).not.toHaveBeenCalled()
+    expect(onChanged).not.toHaveBeenCalled()
+    expect(onUnavailable).not.toHaveBeenCalled()
+  })
+
+  it('times out a hung fetch and releases the thread for a later retry', async () => {
+    vi.useFakeTimers()
+    const getThread = vi.fn<MailProvider['getThread']>(() => new Promise(() => {}))
+    const onUnavailable = vi.fn()
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => 'account@example.com',
+      vi.fn(),
+      onUnavailable,
+      systemTime,
+      effects(vi.fn(() => new Set(['message-1'])))
+    )
+    const mail = provider(getThread)
+
+    const attempt = hydrator.request('account@example.com', 'thread-1', mail)
+    await vi.advanceTimersByTimeAsync(BODY_HYDRATION_TIMEOUT_MS)
+    await attempt
+
+    expect(onUnavailable).toHaveBeenCalledWith('account@example.com', 'thread-1', expect.any(Error))
+    expect(hydrator.state('account@example.com', 'thread-1')).toBe('unavailable')
+    void hydrator.request('account@example.com', 'thread-1', mail)
+    expect(getThread).toHaveBeenCalledTimes(2)
+    hydrator.stop()
   })
 })

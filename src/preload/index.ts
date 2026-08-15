@@ -36,7 +36,7 @@ const api = {
     listSnoozed: (): Promise<SnoozedThreadRow[]> => invoke(IPC_CHANNELS.mailListSnoozed),
     listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
     getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),
-    getConversation: (threadId: string, allowHydration = true): Promise<Conversation | null> =>
+    getConversation: (threadId: string, allowHydration: boolean): Promise<Conversation | null> =>
       invoke(IPC_CHANNELS.mailGetConversation, threadId, allowHydration),
     downloadAttachment: (request: DownloadAttachmentRequest): Promise<DownloadAttachmentResult> =>
       invoke(IPC_CHANNELS.mailDownloadAttachment, request),

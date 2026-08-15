@@ -57,6 +57,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     deferRefreshUntilRef
   } = useMailData(activeAccount, activeViewRef, selectedThreadIdRef, setSelectedIndex)
   const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
+  const online = networkOnline && sync.phase !== 'offline'
   const threads: DisplayThread[] = useMemo(
     () =>
       view === 'inbox'
@@ -113,7 +114,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex,
     threads,
     readerOpen,
-    online: networkOnline && sync.phase !== 'offline',
+    online,
     account: activeAccount,
     mailRevision
   })
@@ -332,7 +333,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             view={view}
             conversation={conversation}
             account={activeAccount}
-            online={networkOnline && sync.phase !== 'offline'}
+            online={online}
             scrollRef={conversationScrollRef}
             onClose={closeReader}
             onToast={showToast}
