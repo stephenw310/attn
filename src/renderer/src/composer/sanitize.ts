@@ -86,7 +86,8 @@ let outgoingPurifier: DOMPurify | null = null
 let importPurifier: DOMPurify | null = null
 const hooked = new WeakSet<DOMPurify>()
 const outgoingDataHooked = new WeakSet<DOMPurify>()
-const COMPOSER_DATA_ATTRIBUTES = new Set(['data-attn-cid', 'data-attn-opaque'])
+const importAttributesHooked = new WeakSet<DOMPurify>()
+const COMPOSER_DATA_ATTRIBUTES = new Set(['data-attn-cid', 'data-attn-opaque', 'data-surl'])
 
 function installStyleHook(purifier: DOMPurify): void {
   if (hooked.has(purifier)) return
@@ -136,13 +137,15 @@ export function sanitizeOutgoingHtml(html: string): string {
       'rowspan',
       'style',
       'data-attn-cid',
-      'data-attn-opaque'
+      'data-attn-opaque',
+      'data-surl'
     ],
     ALLOW_ARIA_ATTR: false,
     // The composer owns two namespaced data attributes: one maps a rendered
     // data URL back to cid: during serialization and one carries a sanitized
-    // opaque-region token. DOMPurify otherwise strips both even when listed in
-    // ALLOWED_ATTR, which would silently lose inline images or preserved HTML.
+    // opaque-region token. It also preserves Gmail's data-surl CID locator.
+    // DOMPurify otherwise strips them even when listed in ALLOWED_ATTR, which
+    // would silently lose inline images or preserved HTML.
     ALLOW_DATA_ATTR: true,
     ALLOWED_URI_REGEXP: SAFE_URI
   })
@@ -152,7 +155,24 @@ export function sanitizeOutgoingHtml(html: string): string {
 export function sanitizeDraftHtmlForImport(html: string): string {
   importPurifier ??= createDOMPurify(window)
   installStyleHook(importPurifier)
+  if (!importAttributesHooked.has(importPurifier)) {
+    importAttributesHooked.add(importPurifier)
+    importPurifier.addHook('uponSanitizeAttribute', (_node, data) => {
+      const name = data.attrName.toLowerCase()
+      if (name === 'dir' && /^(?:ltr|rtl|auto)$/i.test(data.attrValue)) data.forceKeepAttr = true
+      if (name === 'target' && data.attrValue === '_blank') data.forceKeepAttr = true
+    })
+    importPurifier.addHook('afterSanitizeAttributes', (node) => {
+      const element = node as Element
+      if (typeof element.getAttribute !== 'function') return
+      const direction = element.getAttribute('dir')
+      if (direction && !/^(?:ltr|rtl|auto)$/i.test(direction)) element.removeAttribute('dir')
+      const target = element.getAttribute('target')
+      if (target && target !== '_blank' && target !== '_self') element.removeAttribute('target')
+    })
+  }
   return importPurifier.sanitize(html, {
+    ADD_ATTR: ['dir', 'target'],
     FORBID_TAGS: ['script', 'style', 'form', 'input', 'button', 'select', 'textarea', 'iframe', 'object'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
     ALLOWED_URI_REGEXP: SAFE_URI,

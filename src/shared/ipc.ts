@@ -84,7 +84,10 @@ export interface InvokeChannels {
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
-  [IPC_CHANNELS.draftSave]: { args: [draft: DraftSaveInput]; result: { id: string } }
+  [IPC_CHANNELS.draftSave]: {
+    args: [draft: DraftSaveInput]
+    result: { id: string; draft: Draft | null }
+  }
   [IPC_CHANNELS.draftGet]: { args: [id: string]; result: Draft | null }
   [IPC_CHANNELS.draftList]: { args: []; result: Draft[] }
   [IPC_CHANNELS.draftReopen]: { args: [id: string]; result: Draft | null }

@@ -270,8 +270,13 @@ export function registerIpc(context: IpcContext): () => void {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')
     if (context.consumeTestDraftSaveFailure()) throw new Error('injected draft save failure')
     const account = requireAccount(context)
-    const id = saveDraft(context.db, account, canonicalizeRendererDraft(context.db, account, draft))
-    return { id }
+    const canonical = canonicalizeRendererDraft(context.db, account, draft)
+    const now = Date.now()
+    const id = saveDraft(context.db, account, canonical, now)
+    return {
+      id,
+      draft: canonical.id === null ? { ...canonical, id, createdAt: now, updatedAt: now } : null
+    }
   })
   handle(IPC_CHANNELS.draftGet, (_event, id) => {
     if (typeof id !== 'string') return null

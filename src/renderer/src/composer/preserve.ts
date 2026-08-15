@@ -31,7 +31,7 @@ const REPRESENTABLE_TAGS = new Set([
 const GLOBAL_ATTRIBUTES = new Set(['style', 'title', 'dir'])
 const TAG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
   a: new Set(['href']),
-  img: new Set(['src', 'alt', 'width', 'height', 'data-attn-cid']),
+  img: new Set(['src', 'alt', 'width', 'height', 'data-attn-cid', 'data-surl']),
   ol: new Set(['start']),
   td: new Set(['colspan', 'rowspan']),
   th: new Set(['colspan', 'rowspan'])
@@ -262,6 +262,7 @@ function sanitizedDomMatchesSource(source: string, sanitized: string): boolean {
 
 /** Replace only top-most unsupported regions so nested source survives as one exact unit. */
 export function prepareHtmlForEditor(html: string): { html: string; issues: string[] } {
+  if (!html.trim()) return { html: '', issues: [] }
   const { regions, issues } = opaqueSourceRegions(html)
   let marked = html
   for (const region of regions.sort((left, right) => right.start - left.start)) {

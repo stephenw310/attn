@@ -256,8 +256,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     composerOpeningRef.current = true
     void window.attn.draft
       .save(emptyDraftInput())
-      .then(({ id }) => window.attn?.draft.get(id) ?? null)
-      .then((draft) => {
+      .then(({ draft }) => {
         if (draft) setComposerDraft(draft)
       })
       .catch(() => {})

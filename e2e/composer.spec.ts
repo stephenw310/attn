@@ -64,7 +64,17 @@ async function pasteHtml(composer: ComposerPage, html: string): Promise<void> {
   }, html)
 }
 
-function remoteDraft(id: string, subject: string, html: string, bcc = '', inlineImage = false): object {
+function remoteDraft(
+  id: string,
+  subject: string,
+  html: string,
+  bcc = '',
+  inlineImage = false,
+  inlineImageBase64?: string
+): object {
+  const inlineImageData = inlineImageBase64
+    ? Buffer.from(inlineImageBase64, 'base64')
+    : Buffer.from([137, 80, 78, 71])
   return {
     id,
     message: {
@@ -93,8 +103,8 @@ function remoteDraft(id: string, subject: string, html: string, bcc = '', inline
                     { name: 'Content-Disposition', value: 'inline' }
                   ],
                   body: {
-                    data: Buffer.from([137, 80, 78, 71]).toString('base64url'),
-                    size: 4
+                    data: inlineImageData.toString('base64url'),
+                    size: inlineImageData.byteLength
                   }
                 }
               ]
@@ -103,6 +113,23 @@ function remoteDraft(id: string, subject: string, html: string, bcc = '', inline
       }
     }
   }
+}
+
+async function visiblePngBase64(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 180
+    canvas.height = 72
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('canvas unavailable')
+    context.fillStyle = '#ffb020'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#15171b'
+    context.font = 'bold 18px sans-serif'
+    context.fillText('Gmail image', 31, 42)
+    const dataUrl = canvas.toDataURL('image/png')
+    return dataUrl.slice(dataUrl.indexOf(',') + 1)
+  })
 }
 
 function remotePlainDraft(id: string, subject: string, text: string): object {
@@ -434,6 +461,70 @@ test('spools data images pasted through HTML and saves them as CID parts', async
   expect(saved?.attachments).toHaveLength(1)
 })
 
+test('hydrates Gmail CID images and renders its preserved signature naturally', async ({
+  app,
+  page
+}, testInfo) => {
+  const gmailHtml =
+    '<div dir="ltr"><div>Draft from Gmail</div><div><img data-surl="cid:remote-inline" src="cid:remote-inline" alt="Gmail inline image" width="180"></div><div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><div>Best,</div><div>Chao Wu</div><div><a href="https://chaowu.xyz" target="_blank">https://chaowu.xyz</a></div></div></div>'
+  const inlineImageBase64 = await visiblePngBase64(page)
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-signature',
+        'Gmail image and signature',
+        gmailHtml,
+        '',
+        true,
+        inlineImageBase64
+      )
+    }
+  )
+  if (error) throw new Error(error)
+
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Gmail image and signature' }).click()
+  const composer = new ComposerPage(page)
+  await expect(composer.editor.locator('img[alt="Gmail inline image"]')).toHaveAttribute(
+    'src',
+    /^data:image\/png;base64,/
+  )
+  const preservedFrame = composer.editor.locator('iframe[title="Preserved draft content"]')
+  await expect(preservedFrame).toHaveCount(1)
+  const signature = page.frameLocator('iframe[title="Preserved draft content"]')
+  await expect(signature.getByText('Best,')).toBeVisible()
+  await expect(signature.getByText('Chao Wu')).toBeVisible()
+  await expect(page.getByText('Preserved content', { exact: true })).toHaveCount(0)
+  await expect
+    .poll(async () =>
+      Number.parseFloat(await preservedFrame.evaluate((frame) => getComputedStyle(frame).height))
+    )
+    .toBeLessThan(160)
+
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'gmail-draft.png')
+  await page.screenshot({ path })
+  await testInfo.attach('gmail-draft', { path, contentType: 'image/png' })
+
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await composer.typeBody(' Added in Attn.')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  const savedHtml = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (candidate) => candidate.subject === 'Gmail image and signature'
+    )
+    return draft?.bodyHtml ?? ''
+  })
+  expect(savedHtml).toContain('data-surl="cid:remote-inline"')
+  expect(savedHtml).toContain('<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr">')
+})
+
 test('opens and edits a remote plain-text-only draft without losing its body', async ({ app, page }) => {
   const error = await app.evaluate(
     ({ ipcMain }, args) =>
@@ -478,7 +569,7 @@ test('does not overwrite typing when CID image hydration finishes late', async (
       remote: remoteDraft(
         'gmail-slow-image',
         'Slow inline image',
-        '<p>Original body</p><p><img src="cid:remote-inline"></p>',
+        '<p>Original body</p><p><img data-surl="cid:remote-inline" src="cid:remote-inline"></p>',
         '',
         true
       )

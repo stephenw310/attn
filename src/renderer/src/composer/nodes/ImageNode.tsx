@@ -16,6 +16,7 @@ export type SerializedImageNode = Spread<
     height: number | null
     src: string
     style: string
+    dataSurl: string
     width: number | null
   },
   SerializedLexicalNode
@@ -28,6 +29,7 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
   __width: number | null
   __height: number | null
   __style: string
+  __dataSurl: string
 
   static getType(): string {
     return 'composer-image'
@@ -41,6 +43,7 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
       node.__width,
       node.__height,
       node.__style,
+      node.__dataSurl,
       node.__key
     )
   }
@@ -52,7 +55,8 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
       serialized.altText,
       serialized.width,
       serialized.height,
-      serialized.style
+      serialized.style,
+      serialized.dataSurl ?? ''
     )
   }
 
@@ -72,7 +76,8 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
               image.getAttribute('alt') ?? '',
               image.hasAttribute('width') ? Number(image.getAttribute('width')) || null : null,
               image.hasAttribute('height') ? Number(image.getAttribute('height')) || null : null,
-              image.getAttribute('style') ?? ''
+              image.getAttribute('style') ?? '',
+              image.getAttribute('data-surl') ?? ''
             )
           }
         },
@@ -88,6 +93,7 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
     width: number | null = null,
     height: number | null = null,
     style = '',
+    dataSurl = '',
     key?: NodeKey
   ) {
     super(key)
@@ -97,6 +103,7 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
     this.__width = width
     this.__height = height
     this.__style = style
+    this.__dataSurl = dataSurl
   }
 
   createDOM(_config: EditorConfig): HTMLElement {
@@ -120,6 +127,7 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
     if (this.__width) image.setAttribute('width', String(this.__width))
     if (this.__height) image.setAttribute('height', String(this.__height))
     if (this.__style) image.setAttribute('style', this.__style)
+    if (this.__dataSurl) image.setAttribute('data-surl', this.__dataSurl)
     return { element: image }
   }
 
@@ -133,7 +141,8 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
       altText: this.__altText,
       width: this.__width,
       height: this.__height,
-      style: this.__style
+      style: this.__style,
+      dataSurl: this.__dataSurl
     }
   }
 

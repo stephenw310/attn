@@ -88,7 +88,8 @@ const api = {
     search: (query: string): Promise<ContactSearchResult[]> => invoke(IPC_CHANNELS.contactsSearch, query)
   },
   draft: {
-    save: (draft: DraftSaveInput): Promise<{ id: string }> => invoke(IPC_CHANNELS.draftSave, draft),
+    save: (draft: DraftSaveInput): Promise<{ id: string; draft: Draft | null }> =>
+      invoke(IPC_CHANNELS.draftSave, draft),
     get: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftGet, id),
     list: (): Promise<Draft[]> => invoke(IPC_CHANNELS.draftList),
     reopen: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftReopen, id),

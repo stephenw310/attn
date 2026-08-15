@@ -26,6 +26,7 @@ import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
+import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
@@ -541,79 +542,81 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           </div>
         )}
 
-        <LexicalComposer initialConfig={editorConfig}>
-          <div className="relative min-h-48 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-            <RichTextPlugin
-              contentEditable={
-                <ContentEditable
-                  className="min-h-full px-5 py-5 text-[15px] leading-7 text-ink outline-none"
-                  data-testid="composer-editor"
-                  aria-label="Message body"
-                />
-              }
-              placeholder={
-                <div className="pointer-events-none absolute left-5 top-5 text-[15px] leading-7 text-ink-faint">
-                  Write a message…
-                </div>
-              }
-              ErrorBoundary={LexicalErrorBoundary}
-            />
-            <HistoryPlugin />
-            <ListPlugin />
-            <TablePlugin />
-            <LinkPlugin validateUrl={(url) => /^(?:https?:|mailto:)/i.test(url)} />
-            <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
-            <OnChangePlugin
-              ignoreSelectionChange
-              onChange={(editorState, editor, tags) => captureEditor(editorState, editor, tags)}
-            />
-            <ComposerCommandPlugin
-              onClose={closeAndSave}
-              onDiscard={discard}
-              onUnavailableSend={unavailableSend}
-            />
-            <PasteContentPlugin
-              draftId={draft.id}
-              onAttachment={addAttachment}
-              onError={onToast}
-              onPreservedContent={notePreservedContent}
-            />
-            <CollapsedQuote draftId={draft.id} html={draft.quoteHtml} />
-          </div>
-          <footer className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4">
-            <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
-              <EditorToolbar />
-              {attachments.length > 0 && (
-                <div
-                  className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
-                  data-testid="composer-attachments"
+        <DraftContentIdContext.Provider value={draft.id}>
+          <LexicalComposer initialConfig={editorConfig}>
+            <div className="relative min-h-48 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+              <RichTextPlugin
+                contentEditable={
+                  <ContentEditable
+                    className="min-h-full px-5 py-5 text-[15px] leading-7 text-ink outline-none"
+                    data-testid="composer-editor"
+                    aria-label="Message body"
+                  />
+                }
+                placeholder={
+                  <div className="pointer-events-none absolute left-5 top-5 text-[15px] leading-7 text-ink-faint">
+                    Write a message…
+                  </div>
+                }
+                ErrorBoundary={LexicalErrorBoundary}
+              />
+              <HistoryPlugin />
+              <ListPlugin />
+              <TablePlugin />
+              <LinkPlugin validateUrl={(url) => /^(?:https?:|mailto:)/i.test(url)} />
+              <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
+              <OnChangePlugin
+                ignoreSelectionChange
+                onChange={(editorState, editor, tags) => captureEditor(editorState, editor, tags)}
+              />
+              <ComposerCommandPlugin
+                onClose={closeAndSave}
+                onDiscard={discard}
+                onUnavailableSend={unavailableSend}
+              />
+              <PasteContentPlugin
+                draftId={draft.id}
+                onAttachment={addAttachment}
+                onError={onToast}
+                onPreservedContent={notePreservedContent}
+              />
+              <CollapsedQuote draftId={draft.id} html={draft.quoteHtml} />
+            </div>
+            <footer className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4">
+              <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+                <EditorToolbar />
+                {attachments.length > 0 && (
+                  <div
+                    className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
+                    data-testid="composer-attachments"
+                  >
+                    {attachments.length} attachment{attachments.length === 1 ? '' : 's'}
+                  </div>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger"
+                  data-testid="composer-discard"
+                  aria-label="Discard draft"
+                  title="Discard draft"
+                  onClick={discard}
                 >
-                  {attachments.length} attachment{attachments.length === 1 ? '' : 's'}
-                </div>
-              )}
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              <button
-                type="button"
-                className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger"
-                data-testid="composer-discard"
-                aria-label="Discard draft"
-                title="Discard draft"
-                onClick={discard}
-              >
-                <TrashIcon />
-              </button>
-              <button
-                type="button"
-                className="rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent"
-                title="Sending is implemented in T16"
-                onClick={unavailableSend}
-              >
-                Send <span className="ml-1 opacity-65">⌘↵</span>
-              </button>
-            </div>
-          </footer>
-        </LexicalComposer>
+                  <TrashIcon />
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent"
+                  title="Sending is implemented in T16"
+                  onClick={unavailableSend}
+                >
+                  Send <span className="ml-1 opacity-65">⌘↵</span>
+                </button>
+              </div>
+            </footer>
+          </LexicalComposer>
+        </DraftContentIdContext.Provider>
       </div>
     </section>
   )

@@ -14,6 +14,30 @@ describe('composer HTML fidelity', () => {
     expect(prepared.html).toContain('color: #c00')
   })
 
+  it('keeps Gmail CID image metadata on the editable image path', () => {
+    const html = '<img data-surl="cid:ii_gmail" src="cid:ii_gmail" alt="Signature image" width="320">'
+    const prepared = prepareHtmlForEditor(html)
+
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).toContain('data-surl="cid:ii_gmail"')
+    expect(prepared.html).not.toContain('data-attn-opaque')
+    expect(sanitizeOutgoingHtml(prepared.html)).toContain('data-surl="cid:ii_gmail"')
+  })
+
+  it('round-trips a Gmail signature wrapper outside edited content', () => {
+    const html =
+      '<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><div>Best,</div><a href="https://chaowu.xyz" target="_blank">Chao Wu</a></div>'
+    const prepared = prepareHtmlForEditor(html)
+
+    expect(prepared.issues).toContain('div[class]')
+    expect(restoreOpaqueHtml(sanitizeOutgoingHtml(prepared.html))).toBe(html)
+  })
+
+  it('returns empty drafts without invoking the HTML preservation pipeline', () => {
+    expect(prepareHtmlForEditor('')).toEqual({ html: '', issues: [] })
+    expect(prepareHtmlForEditor('   ')).toEqual({ html: '', issues: [] })
+  })
+
   it('turns unknown safe regions opaque and restores their original bytes', () => {
     const html = '<section data-layout="card"><p>Keep <mark>this</mark></p></section>'
     const prepared = prepareHtmlForEditor(html)
@@ -31,10 +55,13 @@ describe('composer HTML fidelity', () => {
   })
 
   it('sanitizes an unsafe opaque region instead of restoring dangerous source', () => {
-    const html = '<section data-layout="card" onclick="steal()"><mark>Safe text</mark></section>'
+    const html =
+      '<section data-layout="card" dir="sideways" onclick="steal()"><a href="https://attn.test" target="_top">Safe text</a></section>'
     const restored = restoreOpaqueHtml(sanitizeOutgoingHtml(prepareHtmlForEditor(html).html))
 
     expect(restored).toContain('<section data-layout="card">')
     expect(restored).not.toContain('onclick')
+    expect(restored).not.toContain('dir="sideways"')
+    expect(restored).not.toContain('target="_top"')
   })
 })
