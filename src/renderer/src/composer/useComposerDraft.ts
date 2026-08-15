@@ -23,7 +23,7 @@ export interface ComposerDraftController {
   saveNow: () => Promise<void>
 }
 
-export function useComposerDraft(draft: Draft): ComposerDraftController {
+export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): ComposerDraftController {
   const draftRef = useRef<DraftSaveInput>(toSaveInput(draft))
   const editorRef = useRef<{ state: EditorState; editor: LexicalEditor } | null>(null)
   const localRevisionRef = useRef(0)
@@ -33,8 +33,10 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
   const mirrorTimerRef = useRef<number | null>(null)
   const commitPromiseRef = useRef<Promise<void> | null>(null)
   const commitRef = useRef<() => Promise<void>>(async () => {})
+  const prepareSnapshotRef = useRef(prepareSnapshot)
   const mountedRef = useRef(true)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'unsaved' | 'saving' | 'error'>('saved')
+  prepareSnapshotRef.current = prepareSnapshot
 
   const clearTimers = useCallback(() => {
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current)
@@ -65,6 +67,10 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
     if (commitPromiseRef.current) {
       return commitPromiseRef.current.then(() => commitRef.current())
     }
+    // Recipient text deliberately remains editable until a checkpoint. Promote
+    // complete valid addresses before cloning the durable snapshot; invalid
+    // partial text must not block the rest of the message from autosaving.
+    prepareSnapshotRef.current()
     if (savedRevisionRef.current >= localRevisionRef.current || !window.attn) {
       return Promise.resolve()
     }

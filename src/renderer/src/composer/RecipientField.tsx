@@ -9,6 +9,7 @@ interface RecipientFieldProps {
   recipients: MailAddress[]
   autoFocus?: boolean
   onChange: (recipients: MailAddress[]) => void
+  onPendingChange: () => void
 }
 
 function fromContact(contact: ContactSearchResult): MailAddress | null {
@@ -17,11 +18,11 @@ function fromContact(contact: ContactSearchResult): MailAddress | null {
 }
 
 export interface RecipientFieldHandle {
-  commitPending: () => boolean
+  commitPending: (reportInvalid?: boolean) => boolean
 }
 
 export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldProps>(function RecipientField(
-  { field, label, recipients, autoFocus = false, onChange },
+  { field, label, recipients, autoFocus = false, onChange, onPendingChange },
   ref
 ): React.JSX.Element {
   const [query, setQuery] = useState('')
@@ -53,16 +54,19 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
     [onChange, recipients]
   )
 
-  const commit = useCallback((): boolean => {
-    if (query.trim().length === 0) return true
-    const parsed = parseRecipientInput(query)
-    if (parsed.invalid.length > 0 || parsed.recipients.length === 0) {
-      setInvalid(query.trim())
-      return false
-    }
-    add(parsed.recipients)
-    return true
-  }, [add, query])
+  const commit = useCallback(
+    (reportInvalid = true): boolean => {
+      if (query.trim().length === 0) return true
+      const parsed = parseRecipientInput(query)
+      if (parsed.invalid.length > 0 || parsed.recipients.length === 0) {
+        if (reportInvalid) setInvalid(query.trim())
+        return false
+      }
+      add(parsed.recipients)
+      return true
+    },
+    [add, query]
+  )
 
   useImperativeHandle(ref, () => ({ commitPending: commit }), [commit])
 
@@ -102,6 +106,7 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
             setQuery(event.target.value)
             setHighlighted(0)
             setInvalid(null)
+            onPendingChange()
           }}
           onKeyDown={(event) => {
             if (event.key === 'ArrowDown' && suggestions.length > 0) {

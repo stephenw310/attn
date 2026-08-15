@@ -43,7 +43,7 @@ it('does not re-arm a failed autosave after the composer unmounts', async () => 
   const root = createRoot(container)
   let controller: ComposerDraftController | undefined
   function Harness(): null {
-    controller = useComposerDraft(draft)
+    controller = useComposerDraft(draft, () => {})
     return null
   }
 

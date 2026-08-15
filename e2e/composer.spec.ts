@@ -223,6 +223,22 @@ test('recovers a mirrored draft after relaunch without making initial content un
   await expect(composer.editor).toContainText('This draft survives a renderer and main-process restart.')
 })
 
+test('checkpoints a complete recipient while its field remains focused', async ({ boot, page }) => {
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  const input = composer.recipientField().locator('input')
+
+  await input.fill('focused@example.com')
+  await expect.poll(() => input.evaluate((field) => document.activeElement === field)).toBe(true)
+  await composer.expectSaved()
+  await composer.expectRecipients(['focused@example.com'])
+
+  ;({ page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await composer.expectRecipients(['focused@example.com'])
+})
+
 test('checkpoints continuously typed content without waiting for an idle gap', async ({ boot, page }) => {
   let composer = new ComposerPage(page)
   await composer.openNew()

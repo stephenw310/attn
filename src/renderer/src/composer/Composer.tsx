@@ -115,14 +115,22 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
   const toFieldRef = useRef<RecipientFieldHandle | null>(null)
   const ccFieldRef = useRef<RecipientFieldHandle | null>(null)
   const bccFieldRef = useRef<RecipientFieldHandle | null>(null)
-  const { captureEditor, localRevision, savedRevision, saveNow, saveStatus, updateFields } =
-    useComposerDraft(draft)
 
-  const commitPendingRecipients = useCallback(
-    () =>
-      [toFieldRef, ccFieldRef, bccFieldRef].every((fieldRef) => fieldRef.current?.commitPending() ?? true),
-    []
+  const commitPendingRecipients = useCallback((reportInvalid = true) => {
+    let valid = true
+    for (const fieldRef of [toFieldRef, ccFieldRef, bccFieldRef]) {
+      if (!(fieldRef.current?.commitPending(reportInvalid) ?? true)) valid = false
+    }
+    return valid
+  }, [])
+  const prepareSnapshot = useCallback(() => {
+    commitPendingRecipients(false)
+  }, [commitPendingRecipients])
+  const { captureEditor, localRevision, savedRevision, saveNow, saveStatus, updateFields } = useComposerDraft(
+    draft,
+    prepareSnapshot
   )
+  const notePendingRecipientChange = useCallback(() => updateFields({}), [updateFields])
 
   const closeAndSave = useCallback(() => {
     if (closing || !window.attn) return
@@ -237,6 +245,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
             label="To"
             recipients={to}
             autoFocus
+            onPendingChange={notePendingRecipientChange}
             onChange={(recipients) => {
               setTo(recipients)
               updateFields({ to: recipients })
@@ -273,6 +282,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
               field="cc"
               label="Cc"
               recipients={cc}
+              onPendingChange={notePendingRecipientChange}
               onChange={(recipients) => {
                 setCc(recipients)
                 updateFields({ cc: recipients })
@@ -283,6 +293,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
               field="bcc"
               label="Bcc"
               recipients={bcc}
+              onPendingChange={notePendingRecipientChange}
               onChange={(recipients) => {
                 setBcc(recipients)
                 updateFields({ bcc: recipients })
