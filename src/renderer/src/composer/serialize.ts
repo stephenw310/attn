@@ -20,8 +20,29 @@ function inlineText(node: SerializedLexicalNode): string {
   return childrenOf(node).map(inlineText).join('')
 }
 
-function blockText(node: SerializedLexicalNode): string {
+function listText(node: SerializedLexicalNode, depth = 0): string {
   const element = node as SerializedElement
+  const ordered = element.listType === 'number'
+  const start = element.start ?? 1
+  const lines: string[] = []
+  for (const [index, item] of childrenOf(node).entries()) {
+    const children = childrenOf(item)
+    const content = children
+      .filter((child) => child.type !== 'list')
+      .map(inlineText)
+      .join('')
+    if (content || !children.some((child) => child.type === 'list')) {
+      const marker = ordered ? `${start + index}.` : '-'
+      lines.push(`${'  '.repeat(depth)}${marker} ${content}`.trimEnd())
+    }
+    for (const nested of children.filter((child) => child.type === 'list')) {
+      lines.push(listText(nested, depth + 1))
+    }
+  }
+  return lines.join('\n')
+}
+
+function blockText(node: SerializedLexicalNode): string {
   if (node.type === 'quote') {
     return inlineText(node)
       .split('\n')
@@ -29,11 +50,7 @@ function blockText(node: SerializedLexicalNode): string {
       .join('\n')
   }
   if (node.type === 'list') {
-    const ordered = element.listType === 'number'
-    const start = element.start ?? 1
-    return childrenOf(node)
-      .map((item, index) => `${ordered ? `${start + index}.` : '-'} ${inlineText(item)}`.trimEnd())
-      .join('\n')
+    return listText(node)
   }
   return inlineText(node)
 }

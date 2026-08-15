@@ -62,7 +62,7 @@ export function takeRecoveredDraft(db: Db, accountId: string): Draft | null {
               attachments_json, thread_id, in_reply_to, references_json, created_at, updated_at,
               local_revision
        FROM outbox
-       WHERE account_id = ? AND state = 'composing' AND local_revision > mirror_revision
+       WHERE account_id = ? AND state = 'composing'
        ORDER BY updated_at DESC LIMIT 1`
     )
     .get(accountId) as DraftRow | undefined
@@ -89,20 +89,46 @@ export function saveDraft(db: Db, accountId: string, input: DraftSaveInput, now 
     const live = db
       .prepare(
         `SELECT id FROM outbox
-         WHERE account_id = ? AND state = 'composing'
+         WHERE account_id = ? AND state IN ('composing', 'drafted')
          ORDER BY updated_at DESC LIMIT 1`
       )
       .get(accountId) as { id: string } | undefined
-    if (live) return live.id
+    if (live) {
+      db.prepare("UPDATE outbox SET state = 'composing', updated_at = ? WHERE account_id = ? AND id = ?").run(
+        now,
+        accountId,
+        live.id
+      )
+      return live.id
+    }
   }
   const id = input.id ?? randomUUID()
 
   db.transaction(() => {
     if (input.id === null) {
       db.prepare(
-        `INSERT INTO outbox (id, account_id, state, created_at, updated_at)
-         VALUES (?, ?, 'composing', ?, ?)`
-      ).run(id, accountId, now, now)
+        `INSERT INTO outbox (
+           id, account_id, state, to_json, cc_json, bcc_json, subject, body_html, body_text,
+           attachments_json, thread_id, in_reply_to, references_json, created_at, updated_at,
+           local_revision
+         ) VALUES (?, ?, 'composing', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id,
+        accountId,
+        JSON.stringify(input.to),
+        JSON.stringify(input.cc),
+        JSON.stringify(input.bcc),
+        input.subject,
+        input.bodyHtml,
+        input.bodyText,
+        JSON.stringify(input.attachments),
+        input.threadId,
+        input.inReplyTo,
+        JSON.stringify(input.references),
+        now,
+        now,
+        isEmptyDraft(input) ? 0 : 1
+      )
       return
     }
 
@@ -139,7 +165,7 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
     .prepare(
       `SELECT to_json, cc_json, bcc_json, subject, body_text, attachments_json
        FROM outbox
-       WHERE account_id = ? AND id = ? AND state = 'composing'
+       WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')
          AND local_revision > mirror_revision`
     )
     .get(accountId, draftId) as
@@ -164,6 +190,15 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
     return false
   }
   return true
+}
+
+export function closeDraft(db: Db, accountId: string, id: string): void {
+  const result = db
+    .prepare(
+      "UPDATE outbox SET state = 'drafted', updated_at = ? WHERE account_id = ? AND id = ? AND state = 'composing'"
+    )
+    .run(Date.now(), accountId, id)
+  if (result.changes === 0) throw new Error('draft is unavailable')
 }
 
 export function discardDraft(db: Db, accountId: string, id: string): void {

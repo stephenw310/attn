@@ -75,6 +75,7 @@ const api = {
   draft: {
     save: (draft: DraftSaveInput): Promise<{ id: string }> => invoke(IPC_CHANNELS.draftSave, draft),
     get: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftGet, id),
+    close: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftClose, id),
     discard: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftDiscard, id),
     mirror: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftMirror, id),
     takeRecovered: (): Promise<Draft | null> => invoke(IPC_CHANNELS.draftTakeRecovered)

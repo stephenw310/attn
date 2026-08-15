@@ -25,7 +25,14 @@ import {
 import type { GmailClient } from './gmail/client'
 import type { PendingFocus } from './notify'
 import { takePendingFocus } from './notify'
-import { discardDraft, getDraft, requestDraftMirror, saveDraft, takeRecoveredDraft } from './outbox/drafts'
+import {
+  closeDraft,
+  discardDraft,
+  getDraft,
+  requestDraftMirror,
+  saveDraft,
+  takeRecoveredDraft
+} from './outbox/drafts'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import type { SyncController } from './syncController'
@@ -174,6 +181,11 @@ export function registerIpc(context: IpcContext): void {
   handle(IPC_CHANNELS.draftGet, (_event, id) => {
     if (typeof id !== 'string') return null
     return getDraft(context.db, requireAccount(context), id)
+  })
+  handle(IPC_CHANNELS.draftClose, (_event, id) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    closeDraft(context.db, requireAccount(context), id)
+    return undefined
   })
   handle(IPC_CHANNELS.draftDiscard, (_event, id) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')

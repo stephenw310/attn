@@ -26,4 +26,27 @@ describe('plain-text alternative', () => {
       'Hello\n1. First\n2. Second\n> Earlier\n> message'
     )
   })
+
+  it('preserves nested list markers and indentation', () => {
+    const editor = createHeadlessEditor({ nodes: [ListNode, ListItemNode] })
+    editor.update(
+      () => {
+        const parent = $createListItemNode().append($createTextNode('Parent'))
+        parent.append(
+          $createListNode('bullet').append(
+            $createListItemNode().append($createTextNode('Child')),
+            $createListItemNode().append($createTextNode('Child 2'))
+          )
+        )
+        $getRoot().append(
+          $createListNode('number').append(parent, $createListItemNode().append($createTextNode('Second')))
+        )
+      },
+      { discrete: true }
+    )
+
+    expect(editorStateToPlainText(editor.getEditorState().toJSON())).toBe(
+      '1. Parent\n  - Child\n  - Child 2\n2. Second'
+    )
+  })
 })

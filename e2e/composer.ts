@@ -15,6 +15,8 @@ export type RecipientField = 'to' | 'cc' | 'bcc'
  * the wrong reason, which is exactly the failure an undo-send spec cannot catch.
  */
 export class ComposerPage {
+  private lastSavedRevision = 0
+
   constructor(private readonly page: Page) {}
 
   get root(): Locator {
@@ -87,9 +89,29 @@ export class ComposerPage {
   }
 
   async expectSaved(): Promise<void> {
+    await expect
+      .poll(async () => {
+        const revisions = await this.readSaveRevisions()
+        return revisions.local > this.lastSavedRevision && revisions.saved === revisions.local
+      })
+      .toBe(true)
+    this.lastSavedRevision = (await this.readSaveRevisions()).saved
+  }
+
+  private async readSaveRevisions(): Promise<{ local: number; saved: number }> {
     const status = this.page.getByTestId('composer-save-status')
-    await expect(status).not.toHaveAttribute('data-save-status', 'saved')
-    await expect(status).toHaveAttribute('data-save-status', 'saved')
+    const [local, saved] = await Promise.all([
+      status.getAttribute('data-local-revision'),
+      status.getAttribute('data-saved-revision')
+    ])
+    if (local === null || saved === null) {
+      throw new Error(`missing composer revisions: local=${local}, saved=${saved}`)
+    }
+    const parsed = { local: Number(local), saved: Number(saved) }
+    if (!Number.isInteger(parsed.local) || !Number.isInteger(parsed.saved)) {
+      throw new Error(`invalid composer revisions: local=${local}, saved=${saved}`)
+    }
+    return parsed
   }
 
   private async readPending(): Promise<number> {

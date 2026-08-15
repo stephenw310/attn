@@ -5,6 +5,8 @@ import type { MailActionProvider } from '../sync/provider'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { drainDraftMirrors } from './mirror'
 
+type MirrorDrain = typeof drainDraftMirrors
+
 export class DraftMirrorExecutor {
   private drainPromise: Promise<void> | null = null
   private stopping = false
@@ -15,7 +17,8 @@ export class DraftMirrorExecutor {
     private readonly db: Db,
     private readonly accountId: () => string | null,
     private readonly provider: () => MailActionProvider | null,
-    private readonly time: SchedulerTime = systemTime
+    private readonly time: SchedulerTime = systemTime,
+    private readonly drainDrafts: MirrorDrain = drainDraftMirrors
   ) {}
 
   trigger(): Promise<void> {
@@ -27,17 +30,20 @@ export class DraftMirrorExecutor {
     return this.drainPromise
   }
 
-  stop(): void {
+  stop(): Promise<void> {
     this.stopping = true
     if (this.timer) this.time.timers.clearTimeout(this.timer)
     this.timer = null
+    return this.drainPromise ?? Promise.resolve()
   }
 
   private async drain(): Promise<void> {
     const accountId = this.accountId()
     if (!accountId) return
     try {
-      await drainDraftMirrors(this.db, accountId, this.provider())
+      // Finish the current remote checkpoint so its returned Gmail id reaches
+      // SQLite, then decline the next row once shutdown has started.
+      await this.drainDrafts(this.db, accountId, this.provider(), () => !this.stopping)
       this.attempts = 0
     } catch (error) {
       if (this.stopping) return

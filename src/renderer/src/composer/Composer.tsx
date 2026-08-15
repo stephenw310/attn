@@ -16,16 +16,17 @@ import {
   $getRoot,
   $getSelection,
   $isRangeSelection,
-  FORMAT_TEXT_COMMAND
+  FORMAT_TEXT_COMMAND,
+  HISTORY_MERGE_TAG
 } from 'lexical'
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
-import { RecipientField } from './RecipientField'
+import { RecipientField, type RecipientFieldHandle } from './RecipientField'
 import { useComposerDraft } from './useComposerDraft'
 
 interface ComposerProps {
@@ -62,7 +63,7 @@ function InitialHtmlPlugin({ html }: { html: string }): null {
         root.clear()
         root.append(...(nodes.length > 0 ? nodes : [$createParagraphNode()]))
       },
-      { tag: 'draft-initial' }
+      { tag: HISTORY_MERGE_TAG }
     )
   }, [editor, html])
   return null
@@ -70,10 +71,11 @@ function InitialHtmlPlugin({ html }: { html: string }): null {
 
 interface CommandPluginProps {
   onClose: () => void
+  onDiscard: () => void
   onUnavailableSend: () => void
 }
 
-function ComposerCommandPlugin({ onClose, onUnavailableSend }: CommandPluginProps): null {
+function ComposerCommandPlugin({ onClose, onDiscard, onUnavailableSend }: CommandPluginProps): null {
   const [editor] = useLexicalComposerContext()
   const quote = useCallback(() => {
     editor.update(() => {
@@ -85,6 +87,7 @@ function ComposerCommandPlugin({ onClose, onUnavailableSend }: CommandPluginProp
     () =>
       registerCommands([
         createCommand('composer.close', onClose),
+        createCommand('composer.discard', onDiscard),
         createCommand('composer.send', onUnavailableSend),
         createCommand('composer.bold', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')),
         createCommand('composer.italic', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')),
@@ -97,7 +100,7 @@ function ComposerCommandPlugin({ onClose, onUnavailableSend }: CommandPluginProp
         ),
         createCommand('composer.quote', quote)
       ]),
-    [editor, onClose, onUnavailableSend, quote]
+    [editor, onClose, onDiscard, onUnavailableSend, quote]
   )
   return null
 }
@@ -109,13 +112,27 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
   const [subject, setSubject] = useState(draft.subject)
   const [showCopies, setShowCopies] = useState(draft.cc.length > 0 || draft.bcc.length > 0)
   const [closing, setClosing] = useState(false)
-  const controller = useComposerDraft(draft)
+  const toFieldRef = useRef<RecipientFieldHandle | null>(null)
+  const ccFieldRef = useRef<RecipientFieldHandle | null>(null)
+  const bccFieldRef = useRef<RecipientFieldHandle | null>(null)
+  const { captureEditor, localRevision, savedRevision, saveNow, saveStatus, updateFields } =
+    useComposerDraft(draft)
+
+  const commitPendingRecipients = useCallback(
+    () =>
+      [toFieldRef, ccFieldRef, bccFieldRef].every((fieldRef) => fieldRef.current?.commitPending() ?? true),
+    []
+  )
 
   const closeAndSave = useCallback(() => {
-    if (closing) return
+    if (closing || !window.attn) return
+    if (!commitPendingRecipients()) {
+      onToast('Enter a valid recipient before closing')
+      return
+    }
     setClosing(true)
-    void controller
-      .saveNow()
+    void saveNow()
+      .then(() => window.attn.draft.close(draft.id))
       .then(() => {
         onClose()
         onToast('Draft saved')
@@ -124,7 +141,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
         setClosing(false)
         onToast('Draft could not be saved — retrying')
       })
-  }, [closing, controller, onClose, onToast])
+  }, [closing, commitPendingRecipients, draft.id, onClose, onToast, saveNow])
 
   const unavailableSend = useCallback(() => {
     onToast('Send is not available yet')
@@ -145,7 +162,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const discard = (): void => {
+  const discard = useCallback((): void => {
     if (closing || !window.attn) return
     setClosing(true)
     void window.attn.draft
@@ -154,12 +171,16 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
         onClose()
         onToast('Draft discarded')
       })
-      .catch(() => setClosing(false))
-  }
+      .catch(() => {
+        setClosing(false)
+        onToast('Draft could not be discarded')
+      })
+  }, [closing, draft.id, onClose, onToast])
 
   return (
     <section
       className="flex min-h-0 flex-1 flex-col bg-raised/35"
+      data-draft-id={draft.id}
       data-testid="composer"
       aria-label="New message"
       onKeyDownCapture={(event) => {
@@ -188,13 +209,15 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           <span
             className="text-[11px] text-ink-faint"
             data-testid="composer-save-status"
-            data-save-status={controller.saveStatus}
+            data-local-revision={localRevision}
+            data-saved-revision={savedRevision}
+            data-save-status={saveStatus}
           >
-            {controller.saveStatus === 'saving'
+            {saveStatus === 'saving'
               ? 'Saving…'
-              : controller.saveStatus === 'unsaved'
+              : saveStatus === 'unsaved'
                 ? 'Unsaved changes'
-                : controller.saveStatus === 'error'
+                : saveStatus === 'error'
                   ? 'Save failed — retrying'
                   : 'Saved locally'}
           </span>
@@ -209,13 +232,14 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
       <div className="mx-auto flex min-h-0 w-full max-w-[900px] flex-1 flex-col border-x border-edge bg-raised">
         <div className="relative">
           <RecipientField
+            ref={toFieldRef}
             field="to"
             label="To"
             recipients={to}
             autoFocus
             onChange={(recipients) => {
               setTo(recipients)
-              controller.updateFields({ to: recipients })
+              updateFields({ to: recipients })
             }}
           />
           {!showCopies && (
@@ -245,21 +269,23 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
         {showCopies && (
           <>
             <RecipientField
+              ref={ccFieldRef}
               field="cc"
               label="Cc"
               recipients={cc}
               onChange={(recipients) => {
                 setCc(recipients)
-                controller.updateFields({ cc: recipients })
+                updateFields({ cc: recipients })
               }}
             />
             <RecipientField
+              ref={bccFieldRef}
               field="bcc"
               label="Bcc"
               recipients={bcc}
               onChange={(recipients) => {
                 setBcc(recipients)
-                controller.updateFields({ bcc: recipients })
+                updateFields({ bcc: recipients })
               }}
             />
           </>
@@ -272,7 +298,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           value={subject}
           onChange={(event) => {
             setSubject(event.target.value)
-            controller.updateFields({ subject: event.target.value })
+            updateFields({ subject: event.target.value })
           }}
         />
 
@@ -299,9 +325,13 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
             <InitialHtmlPlugin html={draft.bodyHtml} />
             <OnChangePlugin
               ignoreSelectionChange
-              onChange={(editorState, editor, tags) => controller.captureEditor(editorState, editor, tags)}
+              onChange={(editorState, editor, tags) => captureEditor(editorState, editor, tags)}
             />
-            <ComposerCommandPlugin onClose={closeAndSave} onUnavailableSend={unavailableSend} />
+            <ComposerCommandPlugin
+              onClose={closeAndSave}
+              onDiscard={discard}
+              onUnavailableSend={unavailableSend}
+            />
           </div>
           <footer className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4">
             <div className="flex min-w-0 items-center gap-2 overflow-x-auto">

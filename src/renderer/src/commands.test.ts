@@ -57,6 +57,7 @@ describe('command catalog', () => {
       'view.snoozed',
       'composer.new',
       'composer.close',
+      'composer.discard',
       'composer.send',
       'composer.bold',
       'composer.italic',

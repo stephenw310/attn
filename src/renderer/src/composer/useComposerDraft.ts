@@ -15,6 +15,8 @@ function toSaveInput(draft: Draft): DraftSaveInput {
 }
 
 export interface ComposerDraftController {
+  localRevision: number
+  savedRevision: number
   saveStatus: 'saved' | 'unsaved' | 'saving' | 'error'
   updateFields: (patch: Partial<MutableDraftFields>) => void
   captureEditor: (editorState: EditorState, editor: LexicalEditor, tags: Set<string>) => void
@@ -31,6 +33,7 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
   const mirrorTimerRef = useRef<number | null>(null)
   const commitPromiseRef = useRef<Promise<void> | null>(null)
   const commitRef = useRef<() => Promise<void>>(async () => {})
+  const mountedRef = useRef(true)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'unsaved' | 'saving' | 'error'>('saved')
 
   const clearTimers = useCallback(() => {
@@ -41,6 +44,7 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
   }, [])
 
   const armSaveTimers = useCallback((resetIdle: boolean) => {
+    if (!mountedRef.current) return
     if (resetIdle && idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current)
     if (idleTimerRef.current === null || resetIdle) {
       idleTimerRef.current = window.setTimeout(() => {
@@ -57,6 +61,7 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
   }, [])
 
   const commit = useCallback((): Promise<void> => {
+    if (!mountedRef.current) return Promise.resolve()
     if (commitPromiseRef.current) {
       return commitPromiseRef.current.then(() => commitRef.current())
     }
@@ -75,13 +80,17 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
       .save(snapshot)
       .then(() => {
         savedRevisionRef.current = Math.max(savedRevisionRef.current, revision)
-        setSaveStatus(savedRevisionRef.current >= localRevisionRef.current ? 'saved' : 'unsaved')
+        if (mountedRef.current) {
+          setSaveStatus(savedRevisionRef.current >= localRevisionRef.current ? 'saved' : 'unsaved')
+        }
       })
       .catch((error: unknown) => {
         // Keep the same revision dirty and restore both checkpoints. The caller
         // still receives the rejection, while background autosave retries it.
-        setSaveStatus('error')
-        armSaveTimers(false)
+        if (mountedRef.current) {
+          setSaveStatus('error')
+          armSaveTimers(false)
+        }
         throw error
       })
       .finally(() => {
@@ -93,6 +102,7 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
   commitRef.current = commit
 
   const markDirty = useCallback(() => {
+    if (!mountedRef.current) return
     localRevisionRef.current++
     setSaveStatus('unsaved')
     armSaveTimers(true)
@@ -101,7 +111,7 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
       mirrorTimerRef.current = null
       void commitRef
         .current()
-        .then(() => window.attn?.draft.mirror(draft.id))
+        .then(() => (mountedRef.current ? window.attn?.draft.mirror(draft.id) : undefined))
         .catch(() => {})
     }, MIRROR_IDLE_MS)
   }, [armSaveTimers, draft.id])
@@ -115,27 +125,35 @@ export function useComposerDraft(draft: Draft): ComposerDraftController {
   )
 
   const captureEditor = useCallback(
-    (state: EditorState, editor: LexicalEditor, tags: Set<string>) => {
+    (state: EditorState, editor: LexicalEditor, _tags: Set<string>) => {
       editorRef.current = { state, editor }
-      if (!tags.has('draft-initial')) markDirty()
+      markDirty()
     },
     [markDirty]
   )
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
       clearTimers()
       if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
-    },
-    [clearTimers]
-  )
+    }
+  }, [clearTimers])
 
   const saveNow = useCallback(async () => {
     if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
     mirrorTimerRef.current = null
     await commit()
-    await window.attn?.draft.mirror(draft.id)
+    if (mountedRef.current) await window.attn?.draft.mirror(draft.id)
   }, [commit, draft.id])
 
-  return { saveStatus, updateFields, captureEditor, saveNow }
+  return {
+    localRevision: localRevisionRef.current,
+    savedRevision: savedRevisionRef.current,
+    saveStatus,
+    updateFields,
+    captureEditor,
+    saveNow
+  }
 }

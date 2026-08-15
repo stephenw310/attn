@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { isValidEmail, type MailAddress, parseRecipientInput } from '../../../shared/address'
 import type { ContactSearchResult } from '../../../shared/contacts'
 import { useAutocomplete } from './useAutocomplete'
@@ -12,17 +12,18 @@ interface RecipientFieldProps {
 }
 
 function fromContact(contact: ContactSearchResult): MailAddress | null {
-  const parsed = parseRecipientInput(`${contact.name} <${contact.email}>`)
-  return parsed.invalid.length === 0 ? (parsed.recipients[0] ?? null) : null
+  const email = contact.email.trim()
+  return isValidEmail(email) ? { name: contact.name.trim(), email } : null
 }
 
-export function RecipientField({
-  field,
-  label,
-  recipients,
-  autoFocus = false,
-  onChange
-}: RecipientFieldProps): React.JSX.Element {
+export interface RecipientFieldHandle {
+  commitPending: () => boolean
+}
+
+export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldProps>(function RecipientField(
+  { field, label, recipients, autoFocus = false, onChange },
+  ref
+): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [invalid, setInvalid] = useState<string | null>(null)
   const [highlighted, setHighlighted] = useState(0)
@@ -36,20 +37,23 @@ export function RecipientField({
     if (autoFocus) inputRef.current?.focus()
   }, [autoFocus])
 
-  const add = (next: readonly MailAddress[]): void => {
-    const invalidRecipient = next.find((recipient) => !isValidEmail(recipient.email))
-    if (invalidRecipient) {
-      setInvalid(invalidRecipient.email)
-      return
-    }
-    const seen = new Set(recipients.map((recipient) => recipient.email.toLowerCase()))
-    const unique = next.filter((recipient) => !seen.has(recipient.email.toLowerCase()))
-    if (unique.length > 0) onChange([...recipients, ...unique])
-    setQuery('')
-    setInvalid(null)
-  }
+  const add = useCallback(
+    (next: readonly MailAddress[]): void => {
+      const invalidRecipient = next.find((recipient) => !isValidEmail(recipient.email))
+      if (invalidRecipient) {
+        setInvalid(invalidRecipient.email)
+        return
+      }
+      const seen = new Set(recipients.map((recipient) => recipient.email.toLowerCase()))
+      const unique = next.filter((recipient) => !seen.has(recipient.email.toLowerCase()))
+      if (unique.length > 0) onChange([...recipients, ...unique])
+      setQuery('')
+      setInvalid(null)
+    },
+    [onChange, recipients]
+  )
 
-  const commit = (): boolean => {
+  const commit = useCallback((): boolean => {
     if (query.trim().length === 0) return true
     const parsed = parseRecipientInput(query)
     if (parsed.invalid.length > 0 || parsed.recipients.length === 0) {
@@ -58,7 +62,9 @@ export function RecipientField({
     }
     add(parsed.recipients)
     return true
-  }
+  }, [add, query])
+
+  useImperativeHandle(ref, () => ({ commitPending: commit }), [commit])
 
   return (
     <div
@@ -149,4 +155,4 @@ export function RecipientField({
       )}
     </div>
   )
-}
+})

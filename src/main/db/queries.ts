@@ -212,6 +212,20 @@ interface ContactRow {
 }
 
 const CONTACT_COLUMNS = 'email, name, sent_to_count, received_count, last_interacted_at'
+const VALID_CONTACT_EMAIL_SQL = `
+  email = trim(email)
+  AND instr(email, ' ') = 0
+  AND instr(email, char(9)) = 0
+  AND instr(email, char(10)) = 0
+  AND instr(email, char(11)) = 0
+  AND instr(email, char(12)) = 0
+  AND instr(email, char(13)) = 0
+  AND instr(email, '<') = 0
+  AND instr(email, '>') = 0
+  AND instr(email, '@') > 1
+  AND instr(substr(email, instr(email, '@') + 1), '@') = 0
+  AND instr(substr(email, instr(email, '@') + 1), '.') > 1
+  AND substr(email, -1) <> '.'`
 
 /**
  * Half-open upper bound for a prefix range scan: the needle with its final code
@@ -301,6 +315,7 @@ function contactPrefixMatches(db: Db, accountId: string, needle: string): Contac
               CASE WHEN name_folded >= @lo AND name_folded < @hi THEN 1 ELSE 0 END AS name_prefix
        FROM contacts
        WHERE account_id = @account_id
+         AND ${VALID_CONTACT_EMAIL_SQL}
          AND ((email >= @lo AND email < @hi) OR (name_folded >= @lo AND name_folded < @hi))`
     )
     .all({ account_id: accountId, lo: needle, hi: prefixUpperBound(needle) }) as ContactRow[]
@@ -321,6 +336,7 @@ function contactInfixMatches(db: Db, accountId: string, needle: string): Contact
                    THEN 1 ELSE 0 END AS name_prefix
        FROM contacts
        WHERE account_id = @account_id
+         AND ${VALID_CONTACT_EMAIL_SQL}
          AND (email LIKE @infix ESCAPE '\\'
               OR COALESCE(name_folded, '') LIKE @infix ESCAPE '\\')
        ORDER BY last_interacted_at DESC

@@ -72,7 +72,7 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(page.getByTestId('toast')).toContainText('Draft saved')
   await composer.expectPending(0)
 
-  // `c` reopens the single live composing row rather than creating another.
+  // `c` reactivates the single cleanly closed row rather than creating another.
   await composer.openNew()
   await composer.expectRecipients(['maya@example.com'])
   await expect(composer.subject).toHaveValue('A calmer inbox')
@@ -100,6 +100,74 @@ test('adds links from the toolbar and the registered composer shortcut', async (
   await expect(composer.root).toBeVisible()
 })
 
+test('preserves comma names and pending recipients while keeping cleanly closed drafts closed', async ({
+  boot,
+  page
+}) => {
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  let input = composer.recipientField().locator('input')
+
+  await input.fill('doe')
+  await expect(page.getByTestId('autocomplete-option').first()).toContainText('Doe, John')
+  await input.press('Tab')
+  await composer.expectRecipients(['john.doe@example.com'])
+
+  // Escape must commit valid text that has not yet become a chip.
+  await input.fill('pending@example.com')
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await composer.openNew()
+  await composer.expectRecipients(['john.doe@example.com', 'pending@example.com'])
+
+  // Invalid pending text keeps the composer open instead of being silently lost.
+  input = composer.recipientField().locator('input')
+  await input.fill('not-an-address')
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toBeVisible()
+  await expect(input).toHaveAttribute('aria-invalid', 'true')
+  await input.fill('')
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+
+  // A deliberate save-and-close is discoverable with C, but is not crash recovery.
+  ;({ page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await expect(composer.root).toHaveCount(0)
+  await composer.openNew()
+  await composer.expectRecipients(['john.doe@example.com', 'pending@example.com'])
+})
+
+test('persists content supplied while creating an id-less draft', async ({ page }) => {
+  await page.getByTestId('thread-list').waitFor({ state: 'attached' })
+  const draft = await page.evaluate(async () => {
+    const { id } = await window.attn.draft.save({
+      id: null,
+      to: [{ name: 'Prefilled', email: 'prefilled@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 'Prefilled subject',
+      bodyHtml: '<p>Prefilled body</p>',
+      bodyText: 'Prefilled body',
+      attachments: [],
+      threadId: 'future-reply-thread',
+      inReplyTo: '<parent@example.com>',
+      references: ['<root@example.com>']
+    })
+    return window.attn.draft.get(id)
+  })
+
+  expect(draft).toMatchObject({
+    to: [{ name: 'Prefilled', email: 'prefilled@example.com' }],
+    subject: 'Prefilled subject',
+    bodyHtml: '<p>Prefilled body</p>',
+    bodyText: 'Prefilled body',
+    threadId: 'future-reply-thread',
+    inReplyTo: '<parent@example.com>',
+    references: ['<root@example.com>']
+  })
+})
+
 test('restores the same full-window reader after composing', async ({ page }) => {
   await page.getByTestId('thread-row').nth(2).click()
   const conversation = page.getByTestId('conversation-view')
@@ -123,7 +191,11 @@ test('restores the same full-window reader after composing', async ({ page }) =>
   expect(await selectedIndex(page)).toBe(before)
 })
 
-test('recovers an idle-autosaved draft after a relaunch', async ({ boot, page }) => {
+test('recovers a mirrored draft after relaunch without making initial content undoable', async ({
+  app,
+  boot,
+  page
+}) => {
   let composer = new ComposerPage(page)
   await composer.openNew()
   await composer.addRecipient('priya@example.com')
@@ -133,12 +205,21 @@ test('recovers an idle-autosaved draft after a relaunch', async ({ boot, page })
 
   // Let the trailing one-second checkpoint finish before simulating the crash.
   await composer.expectSaved()
+  const draftId = await composer.root.getAttribute('data-draft-id')
+  if (!draftId) throw new Error('composer did not expose its draft id')
+  await app.evaluate(({ ipcMain }, { channel, id }) => ipcMain.emit(channel, {}, id), {
+    channel: TEST_CHANNELS.markDraftMirrored,
+    id: draftId
+  })
   ;({ page } = await boot.relaunch())
   composer = new ComposerPage(page)
 
   await expect(composer.root).toBeVisible()
   await composer.expectRecipients(['priya@example.com'])
   await expect(composer.subject).toHaveValue('Relaunch recovery')
+  await expect(composer.editor).toContainText('This draft survives a renderer and main-process restart.')
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+z')
   await expect(composer.editor).toContainText('This draft survives a renderer and main-process restart.')
 })
 

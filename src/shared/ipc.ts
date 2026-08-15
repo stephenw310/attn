@@ -21,6 +21,7 @@ export const IPC_CHANNELS = {
   contactsSearch: 'contacts:search',
   draftSave: 'draft:save',
   draftGet: 'draft:get',
+  draftClose: 'draft:close',
   draftDiscard: 'draft:discard',
   draftMirror: 'draft:mirror',
   draftTakeRecovered: 'draft:takeRecovered',
@@ -56,7 +57,8 @@ export const TEST_CHANNELS = {
   deleteThread: 'attn:test:deleteThread',
   delayConversation: 'attn:test:delayConversation',
   updateMessageBody: 'attn:test:updateMessageBody',
-  failNextDraftSave: 'attn:test:failNextDraftSave'
+  failNextDraftSave: 'attn:test:failNextDraftSave',
+  markDraftMirrored: 'attn:test:markDraftMirrored'
 } as const
 
 export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]
@@ -68,6 +70,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: { args: [draft: DraftSaveInput]; result: { id: string } }
   [IPC_CHANNELS.draftGet]: { args: [id: string]; result: Draft | null }
+  [IPC_CHANNELS.draftClose]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftDiscard]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftMirror]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftTakeRecovered]: { args: []; result: Draft | null }

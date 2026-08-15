@@ -6,7 +6,7 @@ import { encodeDraftMessage } from './draftMime'
 
 interface DraftMirrorRow {
   id: string
-  state: 'composing' | 'discarding'
+  state: 'composing' | 'drafted' | 'discarding'
   gmail_draft_id: string | null
   to_json: string
   cc_json: string
@@ -30,7 +30,7 @@ function nextPending(db: Db, accountId: string): DraftMirrorRow | undefined {
        FROM outbox
        WHERE account_id = ? AND (
          state = 'discarding' OR
-         (state = 'composing' AND local_revision > mirror_revision AND NOT (
+         (state IN ('composing', 'drafted') AND local_revision > mirror_revision AND NOT (
            to_json = '[]' AND cc_json = '[]' AND bcc_json = '[]' AND subject = '' AND
            body_text = '' AND attachments_json = '[]'
          ))
@@ -93,12 +93,12 @@ async function mirrorComposing(
     const current = db
       .prepare('SELECT state FROM outbox WHERE account_id = ? AND id = ?')
       .get(accountId, row.id) as { state: string } | undefined
-    return current?.state === 'composing'
+    return current?.state === 'composing' || current?.state === 'drafted'
   })
   if (!gmailDraftId) return false
   db.prepare(
     `UPDATE outbox SET gmail_draft_id = ?,
-       mirror_revision = CASE WHEN state = 'composing' THEN ? ELSE mirror_revision END
+       mirror_revision = CASE WHEN state IN ('composing', 'drafted') THEN ? ELSE mirror_revision END
      WHERE account_id = ? AND id = ?`
   ).run(gmailDraftId, row.local_revision, accountId, row.id)
   return true
@@ -124,9 +124,10 @@ async function deleteDiscarded(
 export async function drainDraftMirrors(
   db: Db,
   accountId: string,
-  provider: MailActionProvider | null
+  provider: MailActionProvider | null,
+  shouldContinue: () => boolean = () => true
 ): Promise<void> {
-  for (;;) {
+  while (shouldContinue()) {
     const row = nextPending(db, accountId)
     if (!row) return
     const progressed =
