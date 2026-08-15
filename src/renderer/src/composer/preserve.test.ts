@@ -24,13 +24,16 @@ describe('composer HTML fidelity', () => {
     expect(sanitizeOutgoingHtml(prepared.html)).toContain('data-surl="cid:ii_gmail"')
   })
 
-  it('round-trips a Gmail signature wrapper outside edited content', () => {
+  it('keeps a Gmail signature wrapper on the editable path', () => {
     const html =
       '<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><div>Best,</div><a href="https://chaowu.xyz" target="_blank">Chao Wu</a></div>'
     const prepared = prepareHtmlForEditor(html)
 
-    expect(prepared.issues).toContain('div[class]')
-    expect(restoreOpaqueHtml(sanitizeOutgoingHtml(prepared.html))).toBe(html)
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).not.toContain('data-attn-opaque')
+    expect(prepared.html).toContain('class="gmail_signature"')
+    expect(sanitizeOutgoingHtml(prepared.html)).toContain('data-smartmail="gmail_signature"')
+    expect(sanitizeOutgoingHtml(prepared.html)).toContain('target="_blank"')
   })
 
   it('returns empty drafts without invoking the HTML preservation pipeline', () => {

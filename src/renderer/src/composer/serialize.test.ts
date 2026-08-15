@@ -100,4 +100,47 @@ describe('plain-text alternative', () => {
       } as unknown as SerializedEditorState)
     ).toBe('Styled body')
   })
+
+  it('keeps editable Gmail signature rows separated in the plain-text alternative', () => {
+    expect(
+      editorStateToPlainText({
+        root: {
+          children: [
+            {
+              type: 'gmail-signature',
+              version: 1,
+              children: [
+                {
+                  type: 'paragraph',
+                  version: 1,
+                  children: [{ type: 'styled-text', version: 1, text: 'Best,' }]
+                },
+                {
+                  type: 'paragraph',
+                  version: 1,
+                  children: [{ type: 'styled-text', version: 1, text: 'Chao Wu' }]
+                },
+                {
+                  type: 'paragraph',
+                  version: 1,
+                  children: [
+                    {
+                      type: 'link',
+                      version: 1,
+                      children: [{ type: 'styled-text', version: 1, text: 'https://chaowu.xyz' }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          direction: null,
+          format: '',
+          indent: 0,
+          type: 'root',
+          version: 1
+        }
+      } as unknown as SerializedEditorState)
+    ).toBe('Best,\nChao Wu\nhttps://chaowu.xyz')
+  })
 })

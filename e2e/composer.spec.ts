@@ -461,7 +461,7 @@ test('spools data images pasted through HTML and saves them as CID parts', async
   expect(saved?.attachments).toHaveLength(1)
 })
 
-test('hydrates Gmail CID images and renders its preserved signature naturally', async ({
+test('hydrates Gmail CID images and imports its signature as editable composer content', async ({
   app,
   page
 }, testInfo) => {
@@ -492,17 +492,19 @@ test('hydrates Gmail CID images and renders its preserved signature naturally', 
     'src',
     /^data:image\/png;base64,/
   )
-  const preservedFrame = composer.editor.locator('iframe[title="Preserved draft content"]')
-  await expect(preservedFrame).toHaveCount(1)
-  const signature = page.frameLocator('iframe[title="Preserved draft content"]')
+  const signature = composer.editor.getByTestId('composer-gmail-signature')
+  await expect(signature).toHaveCount(1)
   await expect(signature.getByText('Best,')).toBeVisible()
   await expect(signature.getByText('Chao Wu')).toBeVisible()
-  await expect(page.getByText('Preserved content', { exact: true })).toHaveCount(0)
-  await expect
-    .poll(async () =>
-      Number.parseFloat(await preservedFrame.evaluate((frame) => getComputedStyle(frame).height))
-    )
-    .toBeLessThan(160)
+  await expect(signature).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+
+  await signature.getByText('Chao Wu', { exact: true }).click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' — edited')
+  await expect(signature.getByText('Chao Wu — edited', { exact: true })).toBeVisible()
+  await composer.expectSaved()
 
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
@@ -510,10 +512,6 @@ test('hydrates Gmail CID images and renders its preserved signature naturally', 
   await page.screenshot({ path })
   await testInfo.attach('gmail-draft', { path, contentType: 'image/png' })
 
-  await composer.editor.click()
-  await page.keyboard.press('ControlOrMeta+End')
-  await composer.typeBody(' Added in Attn.')
-  await composer.expectSaved()
   await page.keyboard.press('Escape')
   const savedHtml = await page.evaluate(async () => {
     const draft = (await window.attn.draft.list()).find(
@@ -523,6 +521,7 @@ test('hydrates Gmail CID images and renders its preserved signature naturally', 
   })
   expect(savedHtml).toContain('data-surl="cid:remote-inline"')
   expect(savedHtml).toContain('<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr">')
+  expect(savedHtml).toContain('Chao Wu — edited')
 })
 
 test('opens and edits a remote plain-text-only draft without losing its body', async ({ app, page }) => {

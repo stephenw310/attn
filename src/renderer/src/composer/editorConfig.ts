@@ -4,6 +4,7 @@ import type { InitialConfigType } from '@lexical/react/LexicalComposer'
 import { QuoteNode } from '@lexical/rich-text'
 import { TableCellNode, TableNode, TableRowNode } from '@lexical/table'
 import { TextNode } from 'lexical'
+import { GmailSignatureNode } from './nodes/GmailSignatureNode'
 import { ImageNode } from './nodes/ImageNode'
 import { OpaqueHtmlNode } from './nodes/OpaqueHtmlNode'
 import { StyledTextNode } from './nodes/StyledTextNode'
@@ -19,6 +20,7 @@ export const editorConfig: InitialConfigType = {
     TableRowNode,
     TableCellNode,
     ImageNode,
+    GmailSignatureNode,
     OpaqueHtmlNode,
     StyledTextNode,
     {

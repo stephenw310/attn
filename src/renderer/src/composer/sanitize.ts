@@ -87,7 +87,7 @@ let importPurifier: DOMPurify | null = null
 const hooked = new WeakSet<DOMPurify>()
 const outgoingDataHooked = new WeakSet<DOMPurify>()
 const importAttributesHooked = new WeakSet<DOMPurify>()
-const COMPOSER_DATA_ATTRIBUTES = new Set(['data-attn-cid', 'data-attn-opaque', 'data-surl'])
+const COMPOSER_DATA_ATTRIBUTES = new Set(['data-attn-cid', 'data-attn-opaque', 'data-smartmail', 'data-surl'])
 
 function installStyleHook(purifier: DOMPurify): void {
   if (hooked.has(purifier)) return
@@ -110,6 +110,13 @@ function purifier(): DOMPurify {
   installStyleHook(outgoingPurifier)
   if (!outgoingDataHooked.has(outgoingPurifier)) {
     outgoingDataHooked.add(outgoingPurifier)
+    outgoingPurifier.addHook('uponSanitizeAttribute', (_node, data) => {
+      const name = data.attrName.toLowerCase()
+      if (name === 'dir' && /^(?:ltr|rtl)$/i.test(data.attrValue)) data.forceKeepAttr = true
+      if (name === 'target' && (data.attrValue === '_blank' || data.attrValue === '_self')) {
+        data.forceKeepAttr = true
+      }
+    })
     outgoingPurifier.addHook('afterSanitizeAttributes', (node) => {
       const element = node as Element
       if (typeof element.getAttributeNames !== 'function') return
@@ -117,6 +124,23 @@ function purifier(): DOMPurify {
         if (attribute.startsWith('data-') && !COMPOSER_DATA_ATTRIBUTES.has(attribute)) {
           element.removeAttribute(attribute)
         }
+      }
+      const isGmailSignature =
+        element.tagName.toLowerCase() === 'div' &&
+        element.getAttribute('class') === 'gmail_signature' &&
+        element.getAttribute('data-smartmail') === 'gmail_signature'
+      if (!isGmailSignature) {
+        element.removeAttribute('class')
+        element.removeAttribute('data-smartmail')
+      }
+      const direction = element.getAttribute('dir')
+      if (direction && !/^(?:ltr|rtl)$/i.test(direction)) element.removeAttribute('dir')
+      const target = element.getAttribute('target')
+      if (element.tagName.toLowerCase() !== 'a') {
+        element.removeAttribute('rel')
+        element.removeAttribute('target')
+      } else if (target && target !== '_blank' && target !== '_self') {
+        element.removeAttribute('target')
       }
     })
   }
@@ -131,6 +155,10 @@ export function sanitizeOutgoingHtml(html: string): string {
       'src',
       'alt',
       'title',
+      'class',
+      'dir',
+      'rel',
+      'target',
       'width',
       'height',
       'colspan',
@@ -138,12 +166,14 @@ export function sanitizeOutgoingHtml(html: string): string {
       'style',
       'data-attn-cid',
       'data-attn-opaque',
+      'data-smartmail',
       'data-surl'
     ],
     ALLOW_ARIA_ATTR: false,
     // The composer owns two namespaced data attributes: one maps a rendered
     // data URL back to cid: during serialization and one carries a sanitized
-    // opaque-region token. It also preserves Gmail's data-surl CID locator.
+    // opaque-region token. It also preserves Gmail's data-surl CID locator
+    // and the constrained marker on its editable signature wrapper.
     // DOMPurify otherwise strips them even when listed in ALLOWED_ATTR, which
     // would silently lose inline images or preserved HTML.
     ALLOW_DATA_ATTR: true,

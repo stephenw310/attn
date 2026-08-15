@@ -48,6 +48,9 @@ function listText(node: SerializedLexicalNode, depth = 0): string {
 }
 
 function blockText(node: SerializedLexicalNode): string {
+  if (node.type === 'gmail-signature') {
+    return childrenOf(node).map(blockText).join('\n')
+  }
   if (node.type === 'quote') {
     return inlineText(node)
       .split('\n')

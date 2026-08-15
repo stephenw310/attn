@@ -30,11 +30,21 @@ const REPRESENTABLE_TAGS = new Set([
 
 const GLOBAL_ATTRIBUTES = new Set(['style', 'title', 'dir'])
 const TAG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
-  a: new Set(['href']),
+  a: new Set(['href', 'rel', 'target']),
   img: new Set(['src', 'alt', 'width', 'height', 'data-attn-cid', 'data-surl']),
   ol: new Set(['start']),
   td: new Set(['colspan', 'rowspan']),
   th: new Set(['colspan', 'rowspan'])
+}
+
+const GMAIL_SIGNATURE_ATTRIBUTES = new Set(['class', 'data-smartmail'])
+
+function isGmailSignatureAttributes(attributes: ReadonlyMap<string, string>): boolean {
+  const className = attributes.get('class')
+  const smartmail = attributes.get('data-smartmail')
+  if (className !== undefined && className.trim() !== 'gmail_signature') return false
+  if (smartmail !== undefined && smartmail !== 'gmail_signature') return false
+  return className === 'gmail_signature' || smartmail === 'gmail_signature'
 }
 
 const BLOCK_TAGS = new Set([
@@ -131,9 +141,19 @@ function materializeInheritedTextStyles(document: Document): void {
 function unsupportedReason(element: Element): string | null {
   const tag = element.tagName.toLowerCase()
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
+  const attributes = new Map(
+    element.getAttributeNames().map((name) => [name, element.getAttribute(name) ?? ''])
+  )
+  const gmailSignature = tag === 'div' && isGmailSignatureAttributes(attributes)
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.getAttributeNames()) {
-    if (!GLOBAL_ATTRIBUTES.has(attribute) && !tagAttributes.has(attribute)) return `${tag}[${attribute}]`
+    if (
+      !GLOBAL_ATTRIBUTES.has(attribute) &&
+      !tagAttributes.has(attribute) &&
+      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute))
+    ) {
+      return `${tag}[${attribute}]`
+    }
   }
   const style = element.getAttribute('style')
   if (style) {
@@ -150,9 +170,15 @@ function unsupportedReason(element: Element): string | null {
 function sourceUnsupportedReason(element: DefaultTreeAdapterTypes.Element): string | null {
   const tag = element.tagName.toLowerCase()
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
+  const attributes = new Map(element.attrs.map((attribute) => [attribute.name, attribute.value]))
+  const gmailSignature = tag === 'div' && isGmailSignatureAttributes(attributes)
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.attrs) {
-    if (!GLOBAL_ATTRIBUTES.has(attribute.name) && !tagAttributes.has(attribute.name)) {
+    if (
+      !GLOBAL_ATTRIBUTES.has(attribute.name) &&
+      !tagAttributes.has(attribute.name) &&
+      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute.name))
+    ) {
       return `${tag}[${attribute.name}]`
     }
     if (attribute.name !== 'style') continue
