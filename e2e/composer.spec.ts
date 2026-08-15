@@ -296,7 +296,9 @@ test('opens reply, reply-all, and forward drafts from the reader and reuses the 
   await expect(page.getByTestId('composer-quote-toggle')).toBeVisible()
   const replyId = await composer.root.getAttribute('data-draft-id')
   await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(
     page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).getByTestId('chip-draft')
   ).toBeVisible()
