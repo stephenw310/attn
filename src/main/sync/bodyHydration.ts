@@ -1,4 +1,7 @@
+import type { Conversation, MessageBodyState } from '../../shared/mail'
 import type { Db } from '../db'
+
+type MissingBodyState = Exclude<MessageBodyState, 'complete'>
 
 export interface StoredMessageBody {
   bodyText: string | null | undefined
@@ -8,6 +11,25 @@ export interface StoredMessageBody {
 /** Metadata-only rows have neither a stored plain-text body nor stored HTML. */
 export function needsBodyHydration(body: StoredMessageBody): boolean {
   return !body.bodyText?.trim() && !body.bodyHtml?.trim()
+}
+
+/** Seeded accounts deliberately have no provider; real signed-in accounts can attempt hydration. */
+export function idleMissingBodyState(seeded: boolean): MissingBodyState {
+  return seeded ? 'signed-out' : 'loading'
+}
+
+/** Relabel metadata-only messages without repeating the conversation query and JSON parsing. */
+export function relabelMissingBodyState(
+  conversation: Conversation,
+  bodyState: MissingBodyState
+): Conversation {
+  let changed = false
+  const messages = conversation.messages.map((message) => {
+    if (message.bodyState === 'complete' || message.bodyState === bodyState) return message
+    changed = true
+    return { ...message, bodyState }
+  })
+  return changed ? { ...conversation, messages } : conversation
 }
 
 /** Snapshot the metadata-only messages in a thread before and after an on-demand fetch. */

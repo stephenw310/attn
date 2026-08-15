@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import type { GmailThread } from '../gmail/parse'
 import { systemTime } from '../time'
-import { BODY_HYDRATION_TIMEOUT_MS, type HydrationEffects, OnDemandBodyHydrator } from './onDemandBodies'
+import {
+  BODY_HYDRATION_TIMEOUT_MS,
+  type HydrationEffects,
+  MAX_RETAINED_BODY_HYDRATION_STATES,
+  OnDemandBodyHydrator
+} from './onDemandBodies'
 import type { MailProvider } from './provider'
 
 const thread: GmailThread = { id: 'thread-1', messages: [] }
@@ -101,6 +106,28 @@ describe('OnDemandBodyHydrator', () => {
     expect(onChanged).not.toHaveBeenCalled()
     expect(onUnavailable).toHaveBeenCalledWith('account@example.com', 'thread-1', undefined)
     expect(hydrator.state('account@example.com', 'thread-1')).toBe('unavailable')
+  })
+
+  it('bounds retained unavailable states while preserving the most recent attempts', async () => {
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => 'account@example.com',
+      vi.fn(),
+      vi.fn(),
+      systemTime,
+      effects(vi.fn(() => new Set(['message-1'])))
+    )
+    const mail = provider(vi.fn(async (id: string) => ({ id, messages: [] })))
+
+    for (let index = 0; index <= MAX_RETAINED_BODY_HYDRATION_STATES; index++) {
+      await hydrator.request('account@example.com', `thread-${index}`, mail)
+    }
+
+    expect(hydrator.state('account@example.com', 'thread-0')).toBe('idle')
+    expect(hydrator.state('account@example.com', `thread-${MAX_RETAINED_BODY_HYDRATION_STATES}`)).toBe(
+      'unavailable'
+    )
+    hydrator.stop()
   })
 
   it('broadcasts a partial body change and leaves the unresolved message unavailable', async () => {

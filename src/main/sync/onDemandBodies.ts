@@ -7,6 +7,7 @@ import { persistThread } from './persist'
 import type { MailProvider } from './provider'
 
 export const BODY_HYDRATION_TIMEOUT_MS = 30_000
+export const MAX_RETAINED_BODY_HYDRATION_STATES = 256
 
 export type BodyHydrationAttemptState = 'idle' | 'loading' | 'unavailable'
 
@@ -63,7 +64,7 @@ export class OnDemandBodyHydrator {
 
     const attemptState: ActiveAttempt = { writable: true, cancel: () => {} }
     this.attempts.set(key, attemptState)
-    this.states.set(key, 'loading')
+    this.setState(key, 'loading')
     const attempt = this.run(key, attemptState, accountId, threadId, provider).finally(() => {
       if (this.inFlight.get(key) === attempt) this.inFlight.delete(key)
       if (this.attempts.get(key) === attemptState) this.attempts.delete(key)
@@ -102,7 +103,7 @@ export class OnDemandBodyHydrator {
     const missingAfter = this.effects.missingMessageIds(this.db, accountId, threadId)
     const bodyChanged = [...missingBefore].some((messageId) => !missingAfter.has(messageId))
     if (missingAfter.size === 0) this.states.delete(key)
-    else this.states.set(key, 'unavailable')
+    else this.setState(key, 'unavailable')
     if (bodyChanged) this.onChanged()
     if (missingAfter.size > 0) {
       this.onUnavailable(accountId, threadId, failure instanceof HydrationStoppedError ? undefined : failure)
@@ -152,6 +153,21 @@ export class OnDemandBodyHydrator {
 
   private canWrite(attempt: ActiveAttempt, accountId: string): boolean {
     return !this.stopped && attempt.writable && this.currentAccountId() === accountId
+  }
+
+  private setState(key: string, state: Exclude<BodyHydrationAttemptState, 'idle'>): void {
+    this.states.delete(key)
+    this.states.set(key, state)
+    if (state !== 'unavailable') return
+
+    let unavailableCount = [...this.states.values()].filter((value) => value === 'unavailable').length
+    if (unavailableCount <= MAX_RETAINED_BODY_HYDRATION_STATES) return
+    for (const [candidate, candidateState] of this.states) {
+      if (candidateState !== 'unavailable') continue
+      this.states.delete(candidate)
+      unavailableCount--
+      if (unavailableCount <= MAX_RETAINED_BODY_HYDRATION_STATES) return
+    }
   }
 
   private key(accountId: string, threadId: string): string {

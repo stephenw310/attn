@@ -38,6 +38,7 @@ import {
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import { hydrateMissingThreadBodies } from './sync/bodies'
+import { idleMissingBodyState, relabelMissingBodyState } from './sync/bodyHydration'
 import { OnDemandBodyHydrator } from './sync/onDemandBodies'
 import { persistThread } from './sync/persist'
 import type { SyncController } from './syncController'
@@ -268,7 +269,7 @@ export function registerIpc(context: IpcContext): () => void {
       context.db,
       account,
       threadId,
-      attemptState === 'idle' ? 'signed-out' : attemptState
+      attemptState === 'idle' ? idleMissingBodyState(context.isSeeded()) : attemptState
     )
     if (
       !conversation?.messages.some((message) => message.bodyState !== 'complete') ||
@@ -276,10 +277,11 @@ export function registerIpc(context: IpcContext): () => void {
     ) {
       return conversation
     }
+    if (context.isSeeded()) return conversation
     const provider = context.makeProvider()
-    if (!provider) return conversation
+    if (!provider) return relabelMissingBodyState(conversation, 'signed-out')
     setImmediate(() => void bodyHydrator.request(account, threadId, provider))
-    return getConversation(context.db, account, threadId, 'loading')
+    return relabelMissingBodyState(conversation, 'loading')
   })
   handle(IPC_CHANNELS.mailDownloadAttachment, async (_event, request) => {
     if (!isDownloadAttachmentRequest(request)) return { error: 'Invalid attachment' }
