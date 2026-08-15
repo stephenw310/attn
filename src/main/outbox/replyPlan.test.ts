@@ -17,6 +17,7 @@ function message(overrides: Partial<ConversationMsg> = {}): ConversationMsg {
     attachments: [],
     bodyText: 'First line\n\nSecond line',
     bodyHtml: '<p>First <strong>line</strong></p><p>Second line</p>',
+    bodyState: 'complete',
     ...overrides
   }
 }

@@ -53,6 +53,7 @@ let draftMirrorExecutor: DraftMirrorExecutor | null = null
 let snoozeScheduler: SnoozeScheduler | null = null
 let mailNotifier: MailNotifier | null = null
 let syncController: SyncController | null = null
+let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
 let testDraftSaveFailures = 0
@@ -65,6 +66,10 @@ function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastCha
 function broadcastMailChanged(): void {
   broadcast(IPC_CHANNELS.mailChanged, undefined)
   mailNotifier?.updateBadge()
+}
+
+function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
+  broadcast(IPC_CHANNELS.mailBodyHydrationFailed, { accountId, threadId })
 }
 
 function focusInboxThread(threadId: string): void {
@@ -242,7 +247,7 @@ function initialize(): void {
     getDraftMirrorExecutor: () => draftMirrorExecutor,
     getSnoozeScheduler: () => snoozeScheduler
   })
-  registerIpc({
+  stopIpc = registerIpc({
     db: activeDb,
     currentAccountId,
     authStatus,
@@ -256,6 +261,7 @@ function initialize(): void {
     scheduler: () => snoozeScheduler,
     syncController: () => syncController,
     broadcastMailChanged,
+    broadcastBodyHydrationFailed,
     pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
       pendingFocus = null
@@ -341,6 +347,8 @@ function teardown(): void {
   // Invoke handlers close over process-owned resources, so remove them before
   // stopping those resources. Iterating the channel map keeps this exhaustive.
   for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel)
+  stopIpc?.()
+  stopIpc = null
   syncController?.stop()
   syncController = null
   powerMonitor.removeListener('resume', refreshSnoozesAfterResume)

@@ -36,8 +36,8 @@ const api = {
     listSnoozed: (): Promise<SnoozedThreadRow[]> => invoke(IPC_CHANNELS.mailListSnoozed),
     listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
     getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),
-    getConversation: (threadId: string): Promise<Conversation | null> =>
-      invoke(IPC_CHANNELS.mailGetConversation, threadId),
+    getConversation: (threadId: string, allowHydration: boolean): Promise<Conversation | null> =>
+      invoke(IPC_CHANNELS.mailGetConversation, threadId, allowHydration),
     downloadAttachment: (request: DownloadAttachmentRequest): Promise<DownloadAttachmentResult> =>
       invoke(IPC_CHANNELS.mailDownloadAttachment, request),
     getInlineImage: (request: InlineImageRequest): Promise<InlineImageResult> =>
@@ -54,6 +54,12 @@ const api = {
       const listener = (): void => cb()
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
+    },
+    onBodyHydrationFailed: (cb: (accountId: string, threadId: string) => void): (() => void) => {
+      const listener = (_event: unknown, payload: { accountId: string; threadId: string }): void =>
+        cb(payload.accountId, payload.threadId)
+      ipcRenderer.on(IPC_CHANNELS.mailBodyHydrationFailed, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.mailBodyHydrationFailed, listener)
     },
     onFocusThread: (cb: (threadId: string) => void): (() => void) => {
       let active = true

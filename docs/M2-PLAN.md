@@ -674,14 +674,17 @@ A permanently failed triage action leaves the UI matching the server with one ex
 
 ## T19 — On-demand body hydration for metadata-only threads
 
+**Status: implemented; signed-in Gmail smoke remains PR evidence.**
+
 **Depends on:** nothing · **Spec:** F2 ("older content is fetched on demand"), M1 deviation row
 
 Opening a 90-day-to-12-month-old thread today renders snippets only, forever. Close the gap:
 
 - `mail:getConversation` returns what the store has, immediately (never block the open — F3's <50ms). When any returned message lacks both `body_text`-beyond-snippet and `body_html`, and a provider exists, kick a background hydrate: `getThread(full)` → `persistThread` → `hydrateMissingThreadBodies` → `mail:changed`. The renderer's existing refresh path repaints the open conversation; add a quiet "Loading full message…" placeholder on body-less cards so the beat is legible.
-- Debounce per thread (one in-flight hydrate; failures fall back silently to snippet view and retry on next open). Seeded/offline: no provider → placeholder text becomes "Full message loads when signed in" (mirrors the attachment toast language).
+- Debounce per thread (one in-flight hydrate and at most one attempt per reader visit or reconnect; failures and bodyless messages fall back silently to snippet view and retry on the next intended trigger). Bound each attempt to 30 seconds and cancel its write lease during shutdown so a late response cannot reach closed SQLite. Seeded/no-provider state uses "Full message loads when signed in" (mirrors the attachment toast language); signed-in offline state keeps the snippet readable with "Full message loads when you're back online", skips the request, and retries when connectivity returns.
 - SENT metadata threads from T13 get bodies the same way when opened.
 - Testing — unit: the "needs hydration" predicate; e2e: seeded metadata-only fixture thread opens instantly with placeholder, then (with a stub provider seam? no — seeded has no provider) asserts the offline placeholder; the online path is a documented manual smoke. Perf: conversation-open budget unaffected (hydrate is post-paint).
+- Manual signed-in smoke: open a 90-day-to-12-month-old thread that has never been opened in Attn and confirm the cached snippet plus quiet loading state paints immediately, then the full body replaces it without changing selection. Relaunch offline and confirm that hydrated body remains readable. Open a second metadata-only thread offline, restore connectivity while leaving it open, and confirm hydration retries without an error toast.
 
 ### Done when
 

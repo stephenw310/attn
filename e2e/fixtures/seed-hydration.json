@@ -1,0 +1,22 @@
+{
+  "account": "seed@attn.test",
+  "labels": [],
+  "threads": [
+    {
+      "id": "t-metadata-only",
+      "historyId": "2000",
+      "messages": [
+        {
+          "id": "m-metadata-only",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 120,
+          "receivedAt": "09:15",
+          "from": "Archive Correspondent <archive@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Notes from last quarter",
+          "snippet": "The cached preview remains available immediately."
+        }
+      ]
+    }
+  ]
+}

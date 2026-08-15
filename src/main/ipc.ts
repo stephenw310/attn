@@ -38,6 +38,8 @@ import {
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import { hydrateMissingThreadBodies } from './sync/bodies'
+import { idleMissingBodyState, relabelMissingBodyState } from './sync/bodyHydration'
+import { OnDemandBodyHydrator } from './sync/onDemandBodies'
 import { persistThread } from './sync/persist'
 import type { SyncController } from './syncController'
 
@@ -73,6 +75,7 @@ export interface IpcContext {
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
   broadcastMailChanged: () => void
+  broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
   waitForConversation: (threadId: string) => Promise<void>
@@ -174,8 +177,21 @@ async function resolveAttachmentData(
   return typeof data === 'string' ? { kind: 'available', data } : { kind: 'unavailable' }
 }
 
-export function registerIpc(context: IpcContext): void {
+export function registerIpc(context: IpcContext): () => void {
   const attemptedInlineImageRepairs = new Set<string>()
+  const bodyHydrator = new OnDemandBodyHydrator(
+    context.db,
+    context.currentAccountId,
+    context.broadcastMailChanged,
+    (accountId, threadId, error) => {
+      if (error !== undefined) {
+        console.warn(
+          `[mail] body hydration failed for ${threadId}: ${error instanceof Error ? error.message : String(error)}`
+        )
+      }
+      context.broadcastBodyHydrationFailed(accountId, threadId)
+    }
+  )
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
   handle(IPC_CHANNELS.authSignOut, () => context.signOut())
@@ -243,11 +259,29 @@ export function registerIpc(context: IpcContext): void {
     const account = context.currentAccountId()
     return account ? countInboxUnread(context.db, account) : 0
   })
-  handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId) => {
+  handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration) => {
     if (typeof threadId !== 'string') return null
     await context.waitForConversation(threadId)
     const account = context.currentAccountId()
-    return account ? getConversation(context.db, account, threadId) : null
+    if (!account) return null
+    const attemptState = bodyHydrator.state(account, threadId)
+    const conversation = getConversation(
+      context.db,
+      account,
+      threadId,
+      attemptState === 'idle' ? idleMissingBodyState(context.isSeeded()) : attemptState
+    )
+    if (
+      !conversation?.messages.some((message) => message.bodyState !== 'complete') ||
+      allowHydration !== true
+    ) {
+      return conversation
+    }
+    if (context.isSeeded()) return conversation
+    const provider = context.makeProvider()
+    if (!provider) return relabelMissingBodyState(conversation, 'signed-out')
+    setImmediate(() => void bodyHydrator.request(account, threadId, provider))
+    return relabelMissingBodyState(conversation, 'loading')
   })
   handle(IPC_CHANNELS.mailDownloadAttachment, async (_event, request) => {
     if (!isDownloadAttachmentRequest(request)) return { error: 'Invalid attachment' }
@@ -359,6 +393,7 @@ export function registerIpc(context: IpcContext): void {
     const account = context.currentAccountId()
     return account ? pendingActionCount(context.db, account) : 0
   })
+  return () => bodyHydrator.stop()
 }
 
 function requireAccount(context: IpcContext): string {

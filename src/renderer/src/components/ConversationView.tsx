@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useState } from 'react'
+import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
 import type { DisplayConversation, DisplayThread } from '../mailDisplay'
 import { Kbd } from './Kbd'
@@ -7,11 +8,12 @@ import { MessageCard } from './MessageCard'
 interface ConversationMessagesProps {
   conversation: DisplayConversation
   account: string | null
+  online: boolean
   onToast: (message: string) => void
 }
 
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
-  const { conversation, account, onToast } = props
+  const { conversation, account, online, onToast } = props
   const newestIndex = conversation.messages.length - 1
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
     const newestMessage = conversation.messages[newestIndex]
@@ -52,6 +54,11 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           message={message}
           account={account}
           onToast={onToast}
+          bodyHydrationMessage={bodyHydrationStatusMessage(
+            message.bodyState,
+            online,
+            conversation.bodyHydrationFailed
+          )}
           collapsed={!expandedMessageIds.has(message.id)}
           onToggleCollapsed={() => toggleMessage(message.id)}
           trimExpanded={expandedTrimIds.has(message.id)}
@@ -69,14 +76,25 @@ interface ConversationViewProps {
   view: 'inbox' | 'snoozed'
   conversation: DisplayConversation | null
   account: string | null
+  online: boolean
   scrollRef: React.RefObject<HTMLDivElement | null>
   onClose: () => void
   onToast: (message: string) => void
 }
 
 export function ConversationView(props: ConversationViewProps): React.JSX.Element {
-  const { selected, selectedIndex, threadCount, view, conversation, account, scrollRef, onClose, onToast } =
-    props
+  const {
+    selected,
+    selectedIndex,
+    threadCount,
+    view,
+    conversation,
+    account,
+    online,
+    scrollRef,
+    onClose,
+    onToast
+  } = props
   return (
     <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">
       <div className="flex items-center gap-4 border-b border-edge px-6 pt-3 pb-3">
@@ -117,6 +135,7 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
               key={conversation.threadId}
               conversation={conversation}
               account={account}
+              online={online}
               onToast={onToast}
             />
           </div>

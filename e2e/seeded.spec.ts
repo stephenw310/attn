@@ -43,7 +43,7 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
 })
 
 test('exposes threading headers and idempotent contact ranking over IPC', async ({ app, page }) => {
-  const replyConversation = await page.evaluate(() => window.attn.mail.getConversation('t-roadmap'))
+  const replyConversation = await page.evaluate(() => window.attn.mail.getConversation('t-roadmap', false))
   expect(replyConversation?.messages).toHaveLength(2)
   expect(replyConversation?.messages[1]).toMatchObject({
     rfcMessageId: '<roadmap-reply@example.com>',
@@ -53,7 +53,7 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
     }
   })
 
-  const conversation = await page.evaluate(() => window.attn.mail.getConversation('t-sent-history'))
+  const conversation = await page.evaluate(() => window.attn.mail.getConversation('t-sent-history', false))
   expect(conversation?.messages).toHaveLength(1)
   expect(conversation?.messages[0]).toMatchObject({
     rfcMessageId: '<sent-history@attn.test>',

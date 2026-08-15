@@ -645,7 +645,7 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 | Out-of-line attachment download requires a live signed-in connection; inline-delivered bytes are cached locally, while uncached seeded/offline downloads show an explanatory toast | T11 | M2+ if general offline attachment caching proves needed |
 | Windows numeric badge overlay is a static dot | T9 | M4 packaging polish |
 | Notifications cover all INBOX mail (no split filtering) | T9 | M3 (F11 splits) |
-| Opening a 90-day-to-12-month-old metadata-only thread does not fetch and cache its bodies; the 90-day body staging itself is implemented | T7 | M2 hardening before daily-drivable sign-off; reuse for M3 bodies/FTS5 work |
+| Opening a 90-day-to-12-month-old metadata-only thread does not fetch and cache its bodies; the 90-day body staging itself is implemented | T7 | **Resolved by M2-PLAN T19:** cached snippets open immediately, full bodies hydrate in the background and persist, and offline/no-provider states stay readable with quiet status copy |
 | List virtualization deferred | — | M2 hardening if T10/10k data misses the F3 budget; required before daily-drivable sign-off |
 | Inbox and Snoozed list queries cap at 300 rows — an inbox beyond that renders its newest 300 threads (perf seam lifts the cap only under e2e) | T3 | M3 mailbox/query rework, together with the virtualization decision |
 | SPEC §5 conversation keys `N`/`P` (message navigation) and `O` (expand/collapse) are unbound; older-message expand/collapse is pointer-only | T12A | M3 palette milestone — the registry-completeness assertion will force the decision |

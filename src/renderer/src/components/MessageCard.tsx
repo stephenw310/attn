@@ -88,6 +88,7 @@ interface MessageCardProps {
   onToggleCollapsed?: () => void
   trimExpanded?: boolean
   onToggleTrim: () => void
+  bodyHydrationMessage?: string
 }
 
 export function MessageCard(props: MessageCardProps): React.JSX.Element {
@@ -99,7 +100,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     collapsed = false,
     onToggleCollapsed,
     trimExpanded = false,
-    onToggleTrim
+    onToggleTrim,
+    bodyHydrationMessage
   } = props
   const htmlSurface = message.html !== null
   const visibleAttachments = message.attachments.filter((attachment) => !attachment.inline)
@@ -216,6 +218,14 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           expanded={trimExpanded}
           onToggleTrim={onToggleTrim}
         />
+        <p
+          data-testid="body-hydration-status"
+          className={bodyHydrationMessage ? 'mt-3 text-xs text-ink-faint' : 'sr-only'}
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {bodyHydrationMessage ?? ''}
+        </p>
         {visibleAttachments.length > 0 && (
           <div data-testid="message-accessories" className={htmlSurface ? 'bg-white px-3 pb-3' : ''}>
             <div className="mt-3 flex flex-wrap gap-2">

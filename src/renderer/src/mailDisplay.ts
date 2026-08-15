@@ -1,6 +1,7 @@
 import type {
   Conversation,
   MessageAttachment,
+  MessageBodyState,
   MessageRecipients,
   SnoozedThreadRow,
   ThreadRow
@@ -33,12 +34,14 @@ export interface DisplayMessage {
   attachments: MessageAttachment[]
   text: string
   html: string | null
+  bodyState: MessageBodyState
 }
 
 export interface DisplayConversation {
   threadId: string
   subject: string
   messages: DisplayMessage[]
+  bodyHydrationFailed: boolean
 }
 
 function formatTime(ms: number): string {
@@ -91,6 +94,7 @@ export function displayConversation(conversation: Conversation): DisplayConversa
   return {
     threadId: conversation.threadId,
     subject: conversation.subject,
+    bodyHydrationFailed: false,
     messages: conversation.messages.map((message) => ({
       id: message.id,
       fromName: message.fromName,
@@ -100,7 +104,8 @@ export function displayConversation(conversation: Conversation): DisplayConversa
       recipients: message.recipients,
       attachments: message.attachments,
       text: message.bodyText,
-      html: message.bodyHtml
+      html: message.bodyHtml,
+      bodyState: message.bodyState
     }))
   }
 }

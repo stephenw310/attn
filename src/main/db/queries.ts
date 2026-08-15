@@ -15,10 +15,12 @@ import type {
   ConversationMsg,
   MailLabel,
   MessageAttachment,
+  MessageBodyState,
   MessageRecipients,
   SnoozedThreadRow,
   ThreadRow
 } from '../../shared/mail'
+import { needsBodyHydration } from '../sync/bodyHydration'
 import type { Db } from './index'
 
 interface StoredAttachment extends MessageAttachment {
@@ -157,7 +159,12 @@ export function countInboxUnread(db: Db, accountId: string): number {
   return row.count
 }
 
-export function getConversation(db: Db, accountId: string, threadId: string): Conversation | null {
+export function getConversation(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  missingBodyState: Exclude<MessageBodyState, 'complete'>
+): Conversation | null {
   const thread = db
     .prepare('SELECT subject FROM threads WHERE account_id = ? AND id = ?')
     .get(accountId, threadId) as { subject: string | null } | undefined
@@ -196,7 +203,10 @@ export function getConversation(db: Db, accountId: string, threadId: string): Co
       ({ inlineData: _inlineData, ...attachment }) => attachment
     ),
     bodyText: r.body_text || r.snippet || '',
-    bodyHtml: r.body_html
+    bodyHtml: r.body_html,
+    bodyState: needsBodyHydration({ bodyText: r.body_text, bodyHtml: r.body_html })
+      ? missingBodyState
+      : 'complete'
   }))
 
   return { threadId, subject: thread.subject ?? '(no subject)', messages }

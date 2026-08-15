@@ -45,6 +45,8 @@ export interface MessageAttachment {
   inline?: boolean
 }
 
+export type MessageBodyState = 'complete' | 'loading' | 'signed-out' | 'unavailable'
+
 export interface ConversationMsg {
   id: string
   /** RFC Message-ID header, including angle brackets. */
@@ -60,6 +62,8 @@ export interface ConversationMsg {
   bodyText: string
   /** Raw cached mail HTML. Untrusted until sanitized by the renderer. */
   bodyHtml: string | null
+  /** Whether the displayed body is complete or only a snippet awaiting hydration. */
+  bodyState: MessageBodyState
 }
 
 export interface Conversation {

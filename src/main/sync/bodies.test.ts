@@ -34,6 +34,14 @@ function provider(): MailProvider {
   }
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 function bodyDb(
   row: { body_text: string | null; body_html: string | null },
   write: ReturnType<typeof vi.fn>
@@ -72,5 +80,26 @@ describe('external body hydration', () => {
     )
     expect(mail.getAttachmentData).toHaveBeenCalledWith('m1', 'body-1')
     expect(write).toHaveBeenCalledWith('fetched body', null, 'test@example.com', 'm1')
+  })
+
+  it('does not write an out-of-line body after its lifecycle guard closes', async () => {
+    const fetched = deferred<string>()
+    const mail = provider()
+    vi.mocked(mail.getAttachmentData).mockReturnValue(fetched.promise)
+    const write = vi.fn()
+    let active = true
+    const attempt = hydrateMissingThreadBodies(
+      bodyDb({ body_text: null, body_html: null }, write),
+      mail,
+      'test@example.com',
+      externalThread(),
+      () => active
+    )
+
+    active = false
+    fetched.resolve(Buffer.from('late body').toString('base64url'))
+    await attempt
+
+    expect(write).not.toHaveBeenCalled()
   })
 })
