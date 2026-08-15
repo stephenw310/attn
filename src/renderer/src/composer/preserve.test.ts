@@ -39,6 +39,16 @@ describe('composer HTML fidelity', () => {
     expect(sanitizeOutgoingHtml(prepared.html)).toContain('target="_blank"')
   })
 
+  it('agrees with outgoing sanitization when either Gmail signature marker is present', () => {
+    for (const marker of ['class="gmail_signature"', 'data-smartmail="gmail_signature"']) {
+      const prepared = prepareHtmlForEditor(`<div ${marker}><div>Best,</div></div>`)
+
+      expect(prepared.issues).toEqual([])
+      expect(prepared.html).not.toContain('data-attn-opaque')
+      expect(sanitizeOutgoingHtml(prepared.html)).toContain(marker)
+    }
+  })
+
   it('returns empty drafts without invoking the HTML preservation pipeline', () => {
     expect(prepareHtmlForEditor('')).toEqual({ html: '', issues: [] })
     expect(prepareHtmlForEditor('   ')).toEqual({ html: '', issues: [] })

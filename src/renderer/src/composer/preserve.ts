@@ -1,5 +1,5 @@
 import { type DefaultTreeAdapterTypes, parseFragment } from 'parse5'
-import { COMPOSER_STYLE_PROPERTIES, sanitizeDraftHtmlForImport } from './sanitize'
+import { COMPOSER_STYLE_PROPERTIES, isGmailSignatureAttributes, sanitizeDraftHtmlForImport } from './sanitize'
 
 const REPRESENTABLE_TAGS = new Set([
   'p',
@@ -38,14 +38,6 @@ const TAG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
 }
 
 const GMAIL_SIGNATURE_ATTRIBUTES = new Set(['class', 'data-smartmail'])
-
-function isGmailSignatureAttributes(attributes: ReadonlyMap<string, string>): boolean {
-  const className = attributes.get('class')
-  const smartmail = attributes.get('data-smartmail')
-  if (className !== undefined && className.trim() !== 'gmail_signature') return false
-  if (smartmail !== undefined && smartmail !== 'gmail_signature') return false
-  return className === 'gmail_signature' || smartmail === 'gmail_signature'
-}
 
 const BLOCK_TAGS = new Set([
   'address',
@@ -144,7 +136,8 @@ function unsupportedReason(element: Element): string | null {
   const attributes = new Map(
     element.getAttributeNames().map((name) => [name, element.getAttribute(name) ?? ''])
   )
-  const gmailSignature = tag === 'div' && isGmailSignatureAttributes(attributes)
+  const gmailSignature =
+    tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.getAttributeNames()) {
     if (
@@ -171,7 +164,8 @@ function sourceUnsupportedReason(element: DefaultTreeAdapterTypes.Element): stri
   const tag = element.tagName.toLowerCase()
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
   const attributes = new Map(element.attrs.map((attribute) => [attribute.name, attribute.value]))
-  const gmailSignature = tag === 'div' && isGmailSignatureAttributes(attributes)
+  const gmailSignature =
+    tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.attrs) {
     if (

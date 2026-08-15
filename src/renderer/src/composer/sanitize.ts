@@ -89,6 +89,17 @@ const outgoingDataHooked = new WeakSet<DOMPurify>()
 const importAttributesHooked = new WeakSet<DOMPurify>()
 const COMPOSER_DATA_ATTRIBUTES = new Set(['data-attn-cid', 'data-attn-opaque', 'data-smartmail', 'data-surl'])
 
+export function isGmailSignatureAttributes(
+  className: string | null | undefined,
+  smartmail: string | null | undefined
+): boolean {
+  if (className !== null && className !== undefined && className.trim() !== 'gmail_signature') {
+    return false
+  }
+  if (smartmail !== null && smartmail !== undefined && smartmail !== 'gmail_signature') return false
+  return className?.trim() === 'gmail_signature' || smartmail === 'gmail_signature'
+}
+
 function installStyleHook(purifier: DOMPurify): void {
   if (hooked.has(purifier)) return
   hooked.add(purifier)
@@ -128,8 +139,7 @@ function purifier(): DOMPurify {
       }
       const isGmailSignature =
         element.tagName.toLowerCase() === 'div' &&
-        element.getAttribute('class') === 'gmail_signature' &&
-        element.getAttribute('data-smartmail') === 'gmail_signature'
+        isGmailSignatureAttributes(element.getAttribute('class'), element.getAttribute('data-smartmail'))
       if (!isGmailSignature) {
         element.removeAttribute('class')
         element.removeAttribute('data-smartmail')

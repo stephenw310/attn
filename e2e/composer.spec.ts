@@ -593,6 +593,36 @@ test('hydrates Gmail CID images and imports its signature as editable composer c
   expect(savedHtml).toContain('Chao Wu — edited')
 })
 
+test('hydrates bracketed percent-encoded CID images inside preserved HTML', async ({ app, page }) => {
+  const inlineImageBase64 = await visiblePngBase64(page)
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-opaque-cid',
+        'Opaque CID image',
+        '<section data-layout="card"><img src="cid:%3Cremote-inline%3E" alt="Opaque Gmail inline image"></section>',
+        '',
+        true,
+        inlineImageBase64
+      )
+    }
+  )
+  if (error) throw new Error(error)
+
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Opaque CID image' }).click()
+  const composer = new ComposerPage(page)
+  await expect(page.getByTestId('composer-preserved-banner')).toBeVisible()
+  await expect(
+    composer.editor
+      .frameLocator('iframe[title="Preserved draft content"]')
+      .locator('img[alt="Opaque Gmail inline image"]')
+  ).toHaveAttribute('src', /^data:image\/png;base64,/)
+})
+
 test('opens and edits a remote plain-text-only draft without losing its body', async ({ app, page }) => {
   const error = await app.evaluate(
     ({ ipcMain }, args) =>

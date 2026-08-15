@@ -62,8 +62,9 @@ function OpaqueHtmlPreview({ encoded, inline }: { encoded: string; inline: boole
     let cancelled = false
     void Promise.all(
       contentIds.map(async (contentId) => {
-        const result = await window.attn?.draft.getInlineImage(draftId, contentId)
-        return [normalizeContentId(contentId), result && 'dataUrl' in result ? result.dataUrl : null] as const
+        const normalizedContentId = normalizeContentId(contentId)
+        const result = await window.attn?.draft.getInlineImage(draftId, normalizedContentId)
+        return [normalizedContentId, result && 'dataUrl' in result ? result.dataUrl : null] as const
       })
     ).then((entries) => {
       if (cancelled) return

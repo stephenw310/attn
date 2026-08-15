@@ -16,6 +16,12 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
       gmailSignature: sanitizeOutgoingHtml(
         '<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><a href="https://attn.test" target="_blank">Safe</a></div>'
       ),
+      gmailSignatureClassOnly: sanitizeOutgoingHtml(
+        '<div class="gmail_signature"><span>Class marker</span></div>'
+      ),
+      gmailSignatureDataOnly: sanitizeOutgoingHtml(
+        '<div data-smartmail="gmail_signature"><span>Data marker</span></div>'
+      ),
       fakeSignature: sanitizeOutgoingHtml(
         '<div class="not-gmail" data-smartmail="not-gmail" dir="sideways">Fake</div>'
       )
@@ -30,6 +36,12 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
       '<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr">'
     )
     expect(sanitized.gmailSignature).toContain('target="_blank"')
+    expect(sanitized.gmailSignatureClassOnly).toBe(
+      '<div class="gmail_signature"><span>Class marker</span></div>'
+    )
+    expect(sanitized.gmailSignatureDataOnly).toBe(
+      '<div data-smartmail="gmail_signature"><span>Data marker</span></div>'
+    )
     expect(sanitized.fakeSignature).toBe('<div>Fake</div>')
     expect(Object.values(sanitized).join('')).not.toMatch(/<script|onclick|data-secret|javascript:/)
   })
