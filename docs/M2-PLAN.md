@@ -418,21 +418,45 @@ Reply, reply-all and forward open prefilled and their drafts mirror into Gmail t
 
 **Depends on:** T14A · **Unblocks:** T14D · **Spec:** F6 (rich text, zero formatting loss), §9 #16
 
-**Revision task, and the largest in this group.** It reverses a settled decision; read §9 #16 before starting.
+**Revision task.** It reverses a settled policy; read §9 #16 before starting. The *policy* change is the significant part — the implementation is smaller than it first appears (see Cost below).
 
 ### Why
 
-The shipped editor registers four nodes (`composer/editorConfig.ts`) and the outgoing sanitizer allows 13 tags with **`ALLOWED_ATTR: ['href']`** (`composer/sanitize.ts`). Only `href` survives, so inline images, tables, headings, colour and alignment are all destroyed. Two consequences were rejected in dogfood: you cannot paste an image into a message, and opening a Gmail-authored draft silently flattens it, then the next autosave overwrites the rich original.
+Two consequences were rejected in dogfood: you cannot paste an image into a message, and opening a Gmail-authored draft would silently flatten it, after which the next autosave overwrites the rich original.
+
+**Content is dropped by two gates, both of them ours.** Neither is a Lexical limitation:
+
+1. **The node registry.** `editorConfig.ts:8` registers four nodes (`LinkNode, ListNode, ListItemNode, QuoteNode`). Lexical only converts HTML elements that a registered node's `importDOM()` claims, so `<table>` and `<img>` are not dropped because Lexical cannot represent them — nothing ever told Lexical they exist.
+2. **The outgoing sanitizer.** `composer/sanitize.ts` allows 13 tags with `ALLOWED_ATTR: ['href']`, applied by `serialize.ts` after `$generateHtmlFromNodes`. Anything surviving gate 1 still dies here.
+
+**Both gates must widen together.** Register a node without allowing its tag and content dies on serialize; allow a tag without registering a node and it dies on import. Doing one half produces a silent drop that reads like a bug.
+
+That this is a choice rather than a constraint is already demonstrated in-repo: `replyPlan.test.ts:132-133` asserts that quoted history retains `<img src="x">` and `<p style="color:red">`, because the quote path runs the far wider `sanitizeQuotedMailHtml`. Attn already preserves images on one path and strips them on another; only the allowlist differs. Note the quote path is currently built but unwired — `quoteHtml` appears only in `replyPlan.ts` and its tests, there is no `quote_html` column, and `r`/`a`/`f` land in T14B — so no rich foreign HTML has reached the editor yet, which is why none of this has visibly broken.
 
 ### Design (decided)
 
 Two mechanisms, and **both** are required. Widening alone does not guarantee zero loss, because Lexical drops any node its schema does not know; the preservation layer is what turns the promise into an invariant.
 
-1. **Widen the editor** to cover what Gmail's composer emits: inline images, tables, headings, text colour and alignment. The sanitizer's allowlist widens deliberately alongside it — `img` with `src`, table elements, `h1`–`h6`, and a bounded `style` subset — and `ALLOWED_URI_REGEXP` gains `cid:`. Outgoing content stays untrusted (global rule 3); this is a wider allowlist, not a permissive one.
+1. **Widen the editor to Gmail's authoring surface**, in both gates: inline images, tables, font family and size, text and background colour, alignment, and strikethrough. The sanitizer's allowlist widens alongside — `img` with `src`, table elements, `span`, a bounded `style` subset, and strikethrough tags — and `ALLOWED_URI_REGEXP` gains `cid:`. Outgoing content stays untrusted (global rule 3); this is a wider allowlist, not a permissive one.
+   - **Headings are deliberately excluded from the parity set.** Gmail's composer has no heading levels; its Small/Normal/Large/Huge control emits `<span style="font-size:…">`. Supporting `h1`–`h6` would be a superset rather than parity, and is left as an optional follow-up so this task stays scoped to closing the gap.
 2. **Preserve what remains.** Any element the widened schema still cannot represent becomes an opaque region: a Lexical `DecoratorNode` holding the original HTML verbatim, rendered through the same scriptless path as incoming mail, not editable inline, and serialized back byte-for-byte on save and send. Editing continues around it.
 
 - **Fidelity check on open.** Walk incoming HTML against the allowlist before rendering, so the app knows exactly what it cannot represent rather than discovering it after the fact. Drafts with no unrepresentable content — the large majority — open with no banner and no difference.
 - **Inline images** spool to disk like attachments (`DraftAttachment.spoolPath` already exists), are referenced by `cid:`, and reach the editor as data URLs over the typed bridge, reusing the `mail:getInlineImage` pattern and its 10 MB cap.
+
+### Cost
+
+Widening is closer to configuration than to engineering; two pieces are genuine work:
+
+| Piece | Cost |
+|---|---|
+| Tables | Install `@lexical/table` (an official package on the same 0.49.0 line, simply not in `package.json` today) and register `TableNode`, `TableRowNode`, `TableCellNode` |
+| Colour, font size, alignment, strikethrough | Largely present already: Lexical has native text-format flags, and `@lexical/selection` (already installed) provides `$patchStyleText` for inline styles |
+| Sanitizer widening | Config |
+| **Inline images** | Real work: a custom `ImageNode` (`DecoratorNode` is Lexical's designed extension point; the Lexical playground ships a reference implementation), spool/`cid:` plumbing, and `multipart/related` in the MIME builder |
+| **Preservation layer** | Real work: a `DecoratorNode` holding verbatim HTML |
+
+Schedule it as two custom nodes plus configuration, not as a rebuild of the composer.
 
 ### Implementation guide
 
