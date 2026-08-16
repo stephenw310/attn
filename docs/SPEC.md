@@ -244,6 +244,8 @@ the visible Back control saves and closes the draft. `C` starts new mail; `R`/`A
 reply-all, or forward with quoted history attached but collapsed. While composing, the global mail shortcut
 footer is absent and the composer owns its action footer, so editing controls can never overlap global hints.
 
+- **From identity:** the active signed-in account is always shown in a read-only From field. Sender aliases
+  and account switching are not implied or supported in v1.
 - **Recipient autocomplete** ranked by interaction frequency + recency, built locally from synced sent mail. First suggestion accepted with `Tab`/`Enter`.
 - **Rich text (widened 2026-08-15, §9 #16):** bold/italic/underline/strikethrough, bulleted & numbered lists, links, blockquote, **inline images, tables, font family and size, text and background colour, and alignment** — Gmail's own authoring surface. Pasting an image into the body is supported and travels as a `cid:` inline part. Heading levels are deliberately out: Gmail's composer has none, so they would be a superset rather than parity.
 - **Zero formatting loss is an invariant, not an aspiration.** Content Attn's editor cannot represent is preserved byte-for-byte rather than dropped: it renders in place, is not editable inline, and round-trips unchanged through save, Gmail Drafts sync, and send. No draft ever loses formatting by being opened in Attn.

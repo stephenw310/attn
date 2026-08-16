@@ -535,8 +535,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         />
       )}
 
-      {composerDraft && (
+      {composerDraft && activeAccount && (
         <Composer
+          account={activeAccount}
           draft={composerDraft}
           initialError={composerError}
           onClose={() => {

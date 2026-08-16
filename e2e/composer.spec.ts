@@ -354,6 +354,7 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(composer.root).toBeVisible()
   await expect(page.getByTestId('thread-list')).toBeHidden()
   await expect(page.getByTestId('footer-shortcuts')).toHaveCount(0)
+  await composer.expectFrom('seed@attn.test')
   const showCopies = page.getByTestId('composer-show-copies')
   await expect(showCopies).toBeVisible()
   await expect(showCopies).toHaveAttribute('aria-expanded', 'false')

@@ -37,6 +37,7 @@ import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
 interface ComposerProps {
+  account: string
   draft: Draft
   initialError?: string | null
   onClose: () => void
@@ -311,7 +312,13 @@ function ComposerCommandPlugin({ onClose, onDiscard, onSend }: CommandPluginProp
   return null
 }
 
-export function Composer({ draft, initialError = null, onClose, onToast }: ComposerProps): React.JSX.Element {
+export function Composer({
+  account,
+  draft,
+  initialError = null,
+  onClose,
+  onToast
+}: ComposerProps): React.JSX.Element {
   const [to, setTo] = useState<MailAddress[]>(draft.to)
   const [cc, setCc] = useState<MailAddress[]>(draft.cc)
   const [bcc, setBcc] = useState<MailAddress[]>(draft.bcc)
@@ -482,6 +489,14 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
       </header>
 
       <div className="mx-auto flex min-h-0 w-full max-w-[900px] flex-1 flex-col border-x border-edge bg-raised">
+        <div
+          className="flex min-h-10 shrink-0 items-center border-b border-edge px-4"
+          data-testid="composer-from"
+          data-email={account}
+        >
+          <span className="w-10 shrink-0 text-sm font-medium text-ink-faint">From</span>
+          <span className="min-w-0 truncate text-sm text-ink">{account}</span>
+        </div>
         <div className="relative">
           <RecipientField
             ref={toFieldRef}
