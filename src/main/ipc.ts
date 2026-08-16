@@ -402,7 +402,6 @@ export function registerIpc(context: IpcContext): () => void {
       typeof id !== 'string' ||
       id.length === 0 ||
       !Array.isArray(paths) ||
-      paths.length > 100 ||
       !paths.every((path) => typeof path === 'string' && path.length > 0)
     ) {
       throw new Error('invalid attachments')

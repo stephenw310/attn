@@ -427,7 +427,7 @@ function effectSender(
   options: {
     time?: ManualTime
     notify?: (change: OutboxChanged) => void
-    beforeRemote?: () => Promise<void>
+    beforeRemote?: (signal?: AbortSignal) => Promise<void>
     clean?: (id: string) => void
     spoolRoot?: string | null
     progress?: (progress: OutboxProgress | null) => void
@@ -735,13 +735,17 @@ describe('OutboxSender effect layer', () => {
 
     await effectSender(store, effectProvider({ createDraft, getAttachmentData })).trigger()
 
-    expect(getAttachmentData).toHaveBeenCalledWith('stale-message', 'stale-locator')
+    expect(getAttachmentData).toHaveBeenCalledWith(
+      'stale-message',
+      'stale-locator',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
     expect(createDraft).not.toHaveBeenCalled()
     expect(store.row()).toMatchObject({
       state: 'queued',
       attempts: 1,
       send_at: NOW + 5_000,
-      last_error: 'remote attachment unavailable: report.pdf'
+      last_error: 'An attachment is temporarily unavailable — Attn will retry'
     })
   })
 
@@ -823,6 +827,51 @@ describe('OutboxSender effect layer', () => {
     await Promise.all([running, stopping])
 
     expect(observedSignal?.aborted).toBe(true)
-    expect(store.row()).toMatchObject({ state: 'sending', attempts: 1, verify_attempts: 0 })
+    expect(store.row()).toMatchObject({ state: 'sending', attempts: 0, verify_attempts: 0, last_error: null })
+  })
+
+  it('applies the shutdown grace period while waiting for an active mirror checkpoint', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const time = new ManualTime()
+    let observedSignal: AbortSignal | undefined
+    const beforeRemote = vi.fn(
+      async (signal?: AbortSignal) =>
+        new Promise<void>((_resolve, reject) => {
+          observedSignal = signal
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+    )
+    const sender = effectSender(store, effectProvider(), { time, beforeRemote })
+    const running = sender.trigger()
+    await vi.waitFor(() => expect(beforeRemote).toHaveBeenCalledOnce())
+
+    const stopping = sender.stop()
+    expect(time.nextDelay()).toBe(5_000)
+    time.advance(5_000)
+    await Promise.all([running, stopping])
+
+    expect(observedSignal?.aborted).toBe(true)
+    expect(store.row()).toMatchObject({ state: 'queued', attempts: 0, last_error: null })
+  })
+
+  it('stores and broadcasts a stable user-facing error instead of Gmail response text', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const notify = vi.fn()
+    const createDraft = vi.fn(async () => {
+      throw new GmailApiError(400, 'gmail /drafts failed (400): {"error":{"private":"details"}}')
+    })
+    const sender = effectSender(store, effectProvider({ createDraft }), { notify })
+
+    await sender.trigger()
+
+    expect(store.row()).toMatchObject({
+      state: 'failed',
+      last_error: 'Gmail rejected this message — check its recipients and attachments'
+    })
+    expect(notify).toHaveBeenLastCalledWith({
+      kind: 'failed',
+      id: 'outbox-1',
+      error: 'Gmail rejected this message — check its recipients and attachments'
+    })
   })
 })

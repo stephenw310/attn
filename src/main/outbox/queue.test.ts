@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { emptyDraftInput } from '../../shared/drafts'
 import type { Db } from '../db'
-import { queueSend, undoQueuedSend, undoSendDelayMs } from './queue'
+import { openDatabase } from '../db'
+import { saveDraft } from './drafts'
+import { queueSend, reopenPendingOutbox, undoQueuedSend, undoSendDelayMs } from './queue'
 
 function settingsDb(value: string | undefined): Db {
   return {
@@ -104,6 +107,63 @@ describe('queued send undo races', () => {
     } as unknown as Db
 
     expect(undoQueuedSend(db, 'me@example.com', 'draft-1')).toEqual({
+      draft: null,
+      error: 'Sending in progress'
+    })
+  })
+})
+
+describe('failed outbox reopen', () => {
+  it('clears stale failure state and mints a fresh Message-ID on resend', () => {
+    const db = openDatabase(':memory:')
+    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+      'me@example.com',
+      'me@example.com',
+      1
+    )
+    const id = saveDraft(
+      db,
+      'me@example.com',
+      {
+        ...emptyDraftInput(),
+        to: [{ name: '', email: 'to@example.com' }],
+        subject: 'Retry safely'
+      },
+      10
+    )
+    db.prepare(
+      "UPDATE outbox SET state = 'needs-review', rfc_message_id = ?, last_error = ? WHERE id = ?"
+    ).run('<old@example.com>', 'stale failure', id)
+
+    expect(reopenPendingOutbox(db, 'me@example.com', id, 20)).toMatchObject({
+      draft: { id },
+      error: "We couldn't confirm this was sent — check your Sent mail before resending"
+    })
+    expect(db.prepare('SELECT rfc_message_id, last_error FROM outbox WHERE id = ?').get(id)).toEqual({
+      rfc_message_id: null,
+      last_error: null
+    })
+
+    queueSend(db, 'me@example.com', id, 30)
+    const queued = db.prepare('SELECT rfc_message_id FROM outbox WHERE id = ?').get(id) as {
+      rfc_message_id: string
+    }
+    expect(queued.rfc_message_id).toMatch(/^<[0-9a-f-]+@example\.com>$/)
+    expect(queued.rfc_message_id).not.toBe('<old@example.com>')
+    db.close()
+  })
+
+  it('reports the winning state when another transition wins the reopen race', () => {
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: vi.fn(() =>
+          sql.includes('last_error') ? { state: 'failed', last_error: 'failed' } : { state: 'sending' }
+        ),
+        run: vi.fn(() => ({ changes: 0 }))
+      }))
+    } as unknown as Db
+
+    expect(reopenPendingOutbox(db, 'me@example.com', 'draft-1')).toEqual({
       draft: null,
       error: 'Sending in progress'
     })

@@ -1,5 +1,8 @@
 import type { Draft } from './drafts'
 
+export const NEEDS_REVIEW_EXPLANATION =
+  "We couldn't confirm this was sent — check your Sent mail before resending"
+
 export type OutboxState =
   | 'composing'
   | 'drafted'

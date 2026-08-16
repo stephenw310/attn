@@ -8,6 +8,7 @@ import type {
   QueueSendResult,
   ReopenOutboxResult
 } from '../../shared/outbox'
+import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
 import type { Db } from '../db'
 import { readSetting } from '../settings'
 import { getDraft } from './drafts'
@@ -180,13 +181,19 @@ export function reopenPendingOutbox(
     return { draft: null, error: row?.state === 'sending' ? 'Sending in progress' : 'Message is unavailable' }
   }
   const explanation =
-    row.state === 'needs-review'
-      ? "We couldn't confirm this was sent — check your Sent mail before resending"
-      : row.last_error || 'Message could not be sent'
-  db.prepare(
-    `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, verify_attempts = 0,
-     updated_at = ?
+    row.state === 'needs-review' ? NEEDS_REVIEW_EXPLANATION : row.last_error || 'Message could not be sent'
+  const reopened = db
+    .prepare(
+      `UPDATE outbox SET state = 'composing', rfc_message_id = NULL, send_at = NULL, attempts = 0,
+     verify_attempts = 0, last_error = NULL, updated_at = ?
      WHERE account_id = ? AND id = ? AND state IN ('failed', 'needs-review')`
-  ).run(now, accountId, id)
+    )
+    .run(now, accountId, id)
+  if (reopened.changes === 0) {
+    const current = db
+      .prepare('SELECT state FROM outbox WHERE account_id = ? AND id = ?')
+      .get(accountId, id) as { state: OutboxState } | undefined
+    return { draft: null, error: unavailableUndoMessage(current?.state) }
+  }
   return { draft: getDraft(db, accountId, id), error: explanation }
 }

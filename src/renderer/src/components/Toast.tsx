@@ -9,32 +9,33 @@ export function Toast({
   progress?: OutboxProgress | null
 }): React.JSX.Element | null {
   if (!toast && !progress) return null
-  const ratio = progress
-    ? progress.totalBytes > 0
-      ? progress.completedBytes / progress.totalBytes
-      : progress.completedAttachments / Math.max(1, progress.totalAttachments)
+  const visibleProgress = toast ? null : progress
+  const ratio = visibleProgress
+    ? visibleProgress.totalBytes > 0
+      ? visibleProgress.completedBytes / visibleProgress.totalBytes
+      : visibleProgress.completedAttachments / Math.max(1, visibleProgress.totalAttachments)
     : 0
   return (
     <div
-      key={progress ? `progress-${progress.id}` : toast?.id}
+      key={toast?.id ?? `progress-${visibleProgress?.id}`}
       data-testid="toast"
       data-toast-id={toast?.id}
       className="pointer-events-none fixed bottom-14 left-1/2 z-50 -translate-x-1/2"
     >
       <div
-        className={`${progress ? '' : 'app-confirmation-toast'} min-w-64 overflow-hidden rounded-xl border border-white/70 bg-ink text-ground shadow-[0_12px_40px_rgba(0,0,0,0.65)]`}
+        className={`${visibleProgress ? '' : 'app-confirmation-toast'} min-w-64 overflow-hidden rounded-xl border border-white/70 bg-ink text-ground shadow-[0_12px_40px_rgba(0,0,0,0.65)]`}
       >
         <div className="px-5 py-3 text-sm font-semibold">
-          {progress
-            ? `Sending attachments… ${progress.completedAttachments} of ${progress.totalAttachments}`
+          {visibleProgress
+            ? `Sending attachments… ${visibleProgress.completedAttachments} of ${visibleProgress.totalAttachments}`
             : toast?.message}
         </div>
-        {progress && (
+        {visibleProgress && (
           <div
             className="h-1 bg-ground/20"
             data-testid="outbox-progress"
-            data-completed-attachments={progress.completedAttachments}
-            data-total-attachments={progress.totalAttachments}
+            data-completed-attachments={visibleProgress.completedAttachments}
+            data-total-attachments={visibleProgress.totalAttachments}
             role="progressbar"
             aria-label="Attachment upload progress"
             aria-valuemin={0}

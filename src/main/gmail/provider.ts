@@ -46,11 +46,16 @@ export class GmailMailProvider implements MailProvider {
     await this.client.post(`/threads/${encodeURIComponent(threadId)}/untrash`, {})
   }
 
-  async saveDraft(draft: { id: string | null; raw: string; threadId?: string | null }): Promise<string> {
+  async saveDraft(
+    draft: { id: string | null; raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string> {
     const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
     const result = draft.id
-      ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body)
-      : await this.client.post<{ id: string }>('/drafts', body)
+      ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, {
+          signal: options?.signal
+        })
+      : await this.client.post<{ id: string }>('/drafts', body, { signal: options?.signal })
     return result.id
   }
 
@@ -91,8 +96,8 @@ export class GmailMailProvider implements MailProvider {
     return result.id
   }
 
-  async deleteDraft(id: string): Promise<void> {
-    await this.client.delete(`/drafts/${encodeURIComponent(id)}`)
+  async deleteDraft(id: string, options?: ProviderRequestOptions): Promise<void> {
+    await this.client.delete(`/drafts/${encodeURIComponent(id)}`, { signal: options?.signal })
   }
 
   async listDrafts(pageToken?: string, options?: ProviderRequestOptions): Promise<DraftPage> {
@@ -126,7 +131,11 @@ export class GmailMailProvider implements MailProvider {
   }
 
   async findByRfcId(rfcMessageId: string, options?: ProviderRequestOptions): Promise<RfcMessageMatch | null> {
-    const messageId = rfcMessageId.trim().replace(/[\r\n]/g, '')
+    const storedMessageId = rfcMessageId.trim().replace(/[\r\n]/g, '')
+    const messageId =
+      storedMessageId.startsWith('<') && storedMessageId.endsWith('>')
+        ? storedMessageId.slice(1, -1)
+        : storedMessageId
     if (!messageId) return null
     const query = `rfc822msgid:${messageId}`
     const drafts = await this.client.get<{
@@ -136,13 +145,21 @@ export class GmailMailProvider implements MailProvider {
       messages?: { id: string; threadId?: string }[]
     }>('/messages', { q: query, maxResults: '10', includeSpamTrash: 'true' }, options)
     const draftCandidates = new Map((drafts.messages ?? []).map((message) => [message.id, message]))
+    const searchedDraftMessageIds = new Set<string>()
     const findDraftCandidate = async (): Promise<RfcMessageMatch | null> => {
-      if (draftCandidates.size === 0) return null
+      const pendingIds = new Set(
+        [...draftCandidates.keys()].filter((messageId) => !searchedDraftMessageIds.has(messageId))
+      )
+      if (pendingIds.size === 0) return null
+      for (const messageId of pendingIds) searchedDraftMessageIds.add(messageId)
       let pageToken: string | undefined
       do {
         const page = await this.listDrafts(pageToken, options)
         for (const draft of page.drafts) {
-          const message = draft.messageId ? draftCandidates.get(draft.messageId) : undefined
+          const message =
+            draft.messageId && pendingIds.has(draft.messageId)
+              ? draftCandidates.get(draft.messageId)
+              : undefined
           if (message) {
             return {
               kind: 'draft',
@@ -222,11 +239,17 @@ export class GmailMailProvider implements MailProvider {
     )
   }
 
-  async getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined> {
+  async getAttachmentData(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined> {
     try {
       return (
         await this.client.get<{ data?: string }>(
-          `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
+          `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+          undefined,
+          options
         )
       ).data
     } catch (error) {

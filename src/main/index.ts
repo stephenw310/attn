@@ -243,7 +243,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   return win
 }
 
-function initialize(): void {
+async function initialize(): Promise<void> {
   const dbPath = join(app.getPath('userData'), 'attn.db')
   db = openDatabase(dbPath)
   console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
@@ -256,7 +256,7 @@ function initialize(): void {
     console.log(`[sync] sent stage skipped for seeded account ${seedAccountId}`)
   }
   const activeDb = db
-  reconcileOutboxSpool(activeDb, app.getPath('userData'))
+  await reconcileOutboxSpool(activeDb, app.getPath('userData'))
   syncController = new SyncController({
     db: activeDb,
     currentAccountId,
@@ -322,7 +322,7 @@ function initialize(): void {
     currentAccountId,
     makeCurrentProvider,
     broadcastOutboxChanged,
-    () => draftMirrorExecutor?.waitForIdle() ?? Promise.resolve(),
+    (signal) => draftMirrorExecutor?.waitForIdle(signal) ?? Promise.resolve(),
     undefined,
     join(app.getPath('userData'), 'outbox'),
     (id) => cleanOutboxSpool(app.getPath('userData'), id),
@@ -545,10 +545,10 @@ else {
     })
   })
   app.on('second-instance', () => showMainWindow())
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     if (process.platform === 'darwin') app.dock?.setIcon(appIcon)
     try {
-      initialize()
+      await initialize()
     } catch (error) {
       console.error(`[boot] failed: ${error instanceof Error ? error.message : String(error)}`)
       void teardown().finally(() => app.exit(1))

@@ -151,7 +151,6 @@ export function useMailData(
     })
     const offOutbox = bridge.outbox.onChanged((change) => {
       if (change.kind === 'failed') setOutboxFailure(change)
-      mailChangedPending = true
       refresh()
     })
     const offProgress = bridge.outbox.onProgress(setOutboxProgress)

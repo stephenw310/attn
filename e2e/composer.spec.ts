@@ -311,10 +311,22 @@ test('renders coarse attachment upload progress in the global toast', async ({ a
 
   await expect(page.getByTestId('toast')).toContainText('Sending attachments… 1 of 2')
   await expect(page.getByTestId('outbox-progress')).toHaveAttribute('data-completed-attachments', '1')
+  await app.evaluate(
+    ({ BrowserWindow }, payload) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(payload.channel, payload.change)
+      }
+    },
+    {
+      channel: IPC_CHANNELS.outboxChanged,
+      change: { kind: 'failed', id: 'sending-attachment', error: 'Attachment send failed' }
+    }
+  )
+  await expect(page.getByTestId('toast')).toHaveText('Attachment send failed')
+  await expect(page.getByTestId('outbox-progress')).toHaveCount(0)
   await app.evaluate(({ BrowserWindow }, channel) => {
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channel, null)
   }, IPC_CHANNELS.outboxProgress)
-  await expect(page.getByTestId('toast')).toHaveCount(0)
 })
 
 test('discovers a provider-gated send through the pending readout and Go to Outbox command', async ({

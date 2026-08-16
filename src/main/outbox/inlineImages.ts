@@ -63,21 +63,38 @@ export async function addInlineImage(
     contentId,
     inline: true
   }
-  attachments.push(attachment)
   try {
-    const changed = db
-      .prepare(
-        `UPDATE outbox SET attachments_json = ?, updated_at = ?, local_revision = local_revision + 1
-         WHERE account_id = ? AND id = ? AND state = 'composing'`
-      )
-      .run(JSON.stringify(attachments), now, accountId, draftId).changes
-    if (changed === 0) throw new Error('draft is unavailable')
+    let snapshot: { attachments_json: string } | undefined = row
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        snapshot = db
+          .prepare(
+            `SELECT attachments_json FROM outbox
+             WHERE account_id = ? AND id = ? AND state = 'composing'`
+          )
+          .get(accountId, draftId) as { attachments_json: string } | undefined
+      }
+      if (!snapshot) throw new Error('draft is unavailable')
+      const current = parseStoredDraftAttachments(snapshot.attachments_json)
+      const currentBytes = current.reduce((total, item) => total + item.sizeBytes, 0)
+      validateAttachmentCap(currentBytes, [content.byteLength])
+      const next = [...current, attachment]
+      const changed = db
+        .prepare(
+          `UPDATE outbox SET attachments_json = ?, updated_at = ?, local_revision = local_revision + 1
+           WHERE account_id = ? AND id = ? AND state = 'composing' AND attachments_json = ?`
+        )
+        .run(JSON.stringify(next), now, accountId, draftId, snapshot.attachments_json).changes
+      if (changed > 0) {
+        return {
+          attachment: publicDraftAttachment(attachment),
+          dataUrl: `data:${attachment.mimeType};base64,${content.toString('base64')}`
+        }
+      }
+    }
+    throw new Error('Attachments changed — try pasting again')
   } catch (error) {
     await rm(spoolPath, { force: true }).catch(() => {})
     throw error
-  }
-  return {
-    attachment: publicDraftAttachment(attachment),
-    dataUrl: `data:${attachment.mimeType};base64,${content.toString('base64')}`
   }
 }

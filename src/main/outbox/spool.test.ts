@@ -9,6 +9,7 @@ import { parseStoredDraftAttachments } from './draftAttachments'
 import { saveDraft } from './drafts'
 import {
   MAX_DRAFT_ATTACHMENT_BYTES,
+  MAX_DRAFT_ATTACHMENT_PATHS,
   reconcileOutboxSpool,
   removeDraftAttachment,
   spoolDraftAttachments,
@@ -51,6 +52,24 @@ describe('attachment cap math', () => {
 })
 
 describe('attachment spool ownership', () => {
+  it('enforces the path-count cap for picker and drop callers in the shared spool boundary', async () => {
+    const { root, db, draftId } = await testStore()
+    const source = join(root, 'one.txt')
+    await writeFile(source, 'one')
+
+    await expect(
+      spoolDraftAttachments(
+        db,
+        root,
+        'me@example.com',
+        draftId,
+        Array.from({ length: MAX_DRAFT_ATTACHMENT_PATHS + 1 }, () => source)
+      )
+    ).rejects.toThrow('Attach no more than 100 files at once')
+    expect(existsSync(join(root, 'outbox', draftId))).toBe(false)
+    db.close()
+  })
+
   it('does not revise a draft when the file picker is cancelled', async () => {
     const { root, db, draftId } = await testStore()
     const before = db.prepare('SELECT local_revision FROM outbox WHERE id = ?').get(draftId) as {
@@ -151,7 +170,7 @@ describe('attachment spool ownership', () => {
     await writeFile(join(damaged, 'preserve.bin'), 'preserve')
     db.prepare("UPDATE outbox SET attachments_json = '{' WHERE id = ?").run(damagedDraftId)
 
-    reconcileOutboxSpool(db, root)
+    await reconcileOutboxSpool(db, root)
 
     expect(existsSync(stored.spoolPath)).toBe(true)
     expect(existsSync(orphanedFile)).toBe(false)

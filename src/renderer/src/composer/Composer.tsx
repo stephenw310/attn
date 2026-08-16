@@ -399,7 +399,11 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
   )
   const attach = useCallback(
     (request: () => Promise<{ attachments: Draft['attachments']; changed: boolean }>) => {
-      if (closing || attachmentMutationRef.current) return
+      if (closing) return
+      if (attachmentMutationRef.current) {
+        onToast('Wait for the current attachment change to finish')
+        return
+      }
       attachmentMutationRef.current = true
       setAttaching(true)
       void request()
@@ -429,7 +433,11 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
   )
   const removeAttachment = useCallback(
     (attachmentId: string) => {
-      if (!window.attn || closing || attachmentMutationRef.current) return
+      if (!window.attn || closing) return
+      if (attachmentMutationRef.current) {
+        onToast('Wait for the current attachment change to finish')
+        return
+      }
       attachmentMutationRef.current = true
       setAttaching(true)
       void window.attn.draft

@@ -170,8 +170,8 @@ export class GmailClient {
     }
   }
 
-  async delete(path: string): Promise<void> {
-    await this.request('DELETE', path, {})
+  async delete(path: string, options: Pick<RequestOptions, 'signal'> = {}): Promise<void> {
+    await this.request('DELETE', path, options)
   }
 
   private async request<T>(

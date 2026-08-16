@@ -100,15 +100,22 @@ export interface MailActionProvider {
   trashThread(threadId: string): Promise<void>
   untrashThread(threadId: string): Promise<void>
   /** Optional for test providers predating M2; production providers implement it. */
-  saveDraft?(draft: { id: string | null; raw: string; threadId?: string | null }): Promise<string>
+  saveDraft?(
+    draft: { id: string | null; raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string>
   /** A single, non-retried remote create for the exactly-once outbox protocol. */
   createDraft?(
     draft: { raw: string; threadId?: string | null },
     options?: ProviderRequestOptions
   ): Promise<string>
   updateDraft?(draft: ProviderDraftUpdate, options?: ProviderRequestOptions): Promise<string>
-  deleteDraft?(id: string): Promise<void>
-  getAttachmentData?(messageId: string, attachmentId: string): Promise<string | undefined>
+  deleteDraft?(id: string, options?: ProviderRequestOptions): Promise<void>
+  getAttachmentData?(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined>
 }
 
 export interface MailProvider extends MailActionProvider {
@@ -116,7 +123,11 @@ export interface MailProvider extends MailActionProvider {
   listLabels(): Promise<ProviderLabel[]>
   listThreadIds(options?: ListThreadIdsOptions): Promise<ThreadIdPage>
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
-  getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined>
+  getAttachmentData(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined>
   listHistory(startHistoryId: string, pageToken?: string): Promise<HistoryPage>
   listDrafts(pageToken?: string, options?: ProviderRequestOptions): Promise<DraftPage>
   getDraft(id: string, options?: ProviderRequestOptions): Promise<ProviderDraft>

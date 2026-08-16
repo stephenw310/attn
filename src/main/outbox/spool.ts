@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { constants, type Dirent, readdirSync, rmSync, type Stats } from 'node:fs'
-import { copyFile, mkdir, rm, rmdir, stat } from 'node:fs/promises'
+import { constants, type Dirent, type Stats } from 'node:fs'
+import { copyFile, mkdir, readdir, rm, rmdir, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import type { DraftAttachmentMutationResult } from '../../shared/drafts'
 import type { Db } from '../db'
@@ -12,6 +12,7 @@ import {
 } from './draftAttachments'
 
 export const MAX_DRAFT_ATTACHMENT_BYTES = 25 * 1024 * 1024
+export const MAX_DRAFT_ATTACHMENT_PATHS = 100
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   '.csv': 'text/csv',
@@ -99,6 +100,9 @@ export async function spoolDraftAttachments(
   paths: readonly string[],
   now?: number
 ): Promise<DraftAttachmentMutationResult> {
+  if (paths.length > MAX_DRAFT_ATTACHMENT_PATHS) {
+    throw new Error(`Attach no more than ${MAX_DRAFT_ATTACHMENT_PATHS} files at once`)
+  }
   const row = db
     .prepare(
       `SELECT attachments_json FROM outbox
@@ -208,11 +212,11 @@ export function cleanOutboxSpool(userDataPath: string, id: string): void {
 }
 
 /** Catch cleanup interrupted between the durable sent/discard transition and filesystem removal. */
-export function reconcileOutboxSpool(db: Db, userDataPath: string): void {
+export async function reconcileOutboxSpool(db: Db, userDataPath: string): Promise<void> {
   const root = resolve(userDataPath, 'outbox')
   let entries: Dirent[]
   try {
-    entries = readdirSync(root, { withFileTypes: true })
+    entries = await readdir(root, { withFileTypes: true })
   } catch {
     return
   }
@@ -248,25 +252,21 @@ export function reconcileOutboxSpool(db: Db, userDataPath: string): void {
     const directory = resolve(root, entry.name)
     if (!isPathInside(root, directory)) continue
     if (!retained.has(entry.name)) {
-      try {
-        rmSync(directory, { recursive: true, force: true })
-      } catch {}
+      await rm(directory, { recursive: true, force: true }).catch(() => {})
       continue
     }
     const retainedPaths = retained.get(entry.name)
     if (retainedPaths === null || retainedPaths === undefined) continue
     let children: Dirent[]
     try {
-      children = readdirSync(directory, { withFileTypes: true })
+      children = await readdir(directory, { withFileTypes: true })
     } catch {
       continue
     }
     for (const child of children) {
       const candidate = resolve(directory, child.name)
       if (child.isFile() && retainedPaths.has(candidate)) continue
-      try {
-        rmSync(candidate, { recursive: true, force: true })
-      } catch {}
+      await rm(candidate, { recursive: true, force: true }).catch(() => {})
     }
   }
 }

@@ -1,6 +1,7 @@
 import type { MailAddress } from '../../shared/address'
 import type { DraftKind } from '../../shared/drafts'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
+import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
@@ -19,7 +20,6 @@ const SECONDARY_CHECKS = 6
 const OFFLINE_RECHECK_MS = 30_000
 const STOP_TIMEOUT_MS = 5_000
 export const SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
-const NEEDS_REVIEW_EXPLANATION = "We couldn't confirm this was sent — check your Sent mail before resending"
 
 interface SendRow {
   id: string
@@ -62,6 +62,29 @@ function permanentSendError(error: unknown): boolean {
     error.status !== 404 &&
     !error.retryable
   )
+}
+
+export function userFacingSendError(error: unknown): string {
+  if (error instanceof DraftAttachmentSourceError) {
+    return error.retryable
+      ? 'An attachment is temporarily unavailable — Attn will retry'
+      : 'An attachment could not be read — reopen the message and attach it again'
+  }
+  if (error instanceof GmailApiError) {
+    if (error.status === 401) return 'Gmail authorization expired — sign in again and retry'
+    if (error.status === 413) return 'The message is too large for Gmail'
+    if (error.status === 400) return 'Gmail rejected this message — check its recipients and attachments'
+    if (error.status === 403 && !error.retryable) return 'Gmail did not allow this message to be sent'
+    return 'Gmail could not send this message'
+  }
+  if (isOfflineFailure(error)) return 'No network connection — Attn will retry'
+  if (
+    error instanceof Error &&
+    ['Each attachment must be 25 MB or less', 'Attachments must total 25 MB or less'].includes(error.message)
+  ) {
+    return error.message
+  }
+  return 'Message could not be sent'
 }
 
 class OutboxNoRemoteMutationError extends Error {
@@ -174,7 +197,7 @@ export class OutboxSender {
     private readonly accountId: () => string | null,
     private readonly provider: () => MailProvider | null,
     private readonly notify: (change: OutboxChanged) => void,
-    private readonly beforeRemote: () => Promise<void> = () => Promise.resolve(),
+    private readonly beforeRemote: (signal?: AbortSignal) => Promise<void> = () => Promise.resolve(),
     private readonly time: SchedulerTime = systemTime,
     private readonly spoolRoot: string | null = null,
     private readonly cleanSpool: (id: string) => void = () => {},
@@ -301,15 +324,20 @@ export class OutboxSender {
         // A mirror create may already own this row. Let it persist its Gmail id
         // while the row is still safely queued, then claim `sending` immediately
         // before the send-side protocol starts.
+        const checkpointController = new AbortController()
+        this.remoteAbortController = checkpointController
         try {
-          await this.beforeRemote()
+          await this.beforeRemote(checkpointController.signal)
         } catch (error) {
+          if (this.stopping && checkpointController.signal.aborted) return
           console.warn(`[outbox] draft checkpoint wait failed: ${errorMessage(error)}`)
           this.timer = this.time.timers.setTimeout(() => {
             this.timer = null
             void this.trigger()
           }, retryDelayMs(row.attempts))
           return
+        } finally {
+          if (this.remoteAbortController === checkpointController) this.remoteAbortController = null
         }
         checkpointWaited = true
         if (this.stopping || this.accountId() !== accountId) return
@@ -358,7 +386,7 @@ export class OutboxSender {
     const controller = new AbortController()
     this.remoteAbortController = controller
     try {
-      if (!checkpointWaited) await this.beforeRemote()
+      if (!checkpointWaited) await this.beforeRemote(controller.signal)
       if (this.stopping || this.accountId() !== initial.account_id) return true
       const row = this.reloadSending(initial.account_id, initial.id)
       if (!row) return false
@@ -390,6 +418,7 @@ export class OutboxSender {
       await this.send(row, provider, controller.signal)
       return false
     } catch (error) {
+      if (this.stopping && controller.signal.aborted) return true
       return this.handleError(initial, error)
     } finally {
       if (this.remoteAbortController === controller) this.remoteAbortController = null
@@ -465,7 +494,8 @@ export class OutboxSender {
 
   private async prepareSend(
     row: SendRow,
-    provider: MailProvider
+    provider: MailProvider,
+    signal?: AbortSignal
   ): Promise<{ raw: string; updateMime?: ProviderMimeUpload }> {
     const storedAttachments = parseStoredDraftAttachments(row.attachments_json)
     const draft = {
@@ -492,7 +522,13 @@ export class OutboxSender {
       0,
       storedAttachments.map((attachment) => attachment.sizeBytes)
     )
-    const attachments = await prepareDraftMimeAttachments(row.id, storedAttachments, provider, this.spoolRoot)
+    const attachments = await prepareDraftMimeAttachments(
+      row.id,
+      storedAttachments,
+      provider,
+      this.spoolRoot,
+      signal
+    )
     validateAttachmentCap(
       0,
       attachments.map((attachment) => attachment.sizeBytes)
@@ -534,7 +570,7 @@ export class OutboxSender {
     }
     let prepared: { raw: string; updateMime?: ProviderMimeUpload }
     try {
-      prepared = await this.prepareSend(row, provider)
+      prepared = await this.prepareSend(row, provider, signal)
     } catch (error) {
       throw new OutboxNoRemoteMutationError(error)
     }
@@ -609,6 +645,7 @@ export class OutboxSender {
     if (!current) return false
     const noRemoteMutation = error instanceof OutboxNoRemoteMutationError
     const cause = noRemoteMutation ? error.reason : error
+    const displayError = userFacingSendError(cause)
     const permanent = noRemoteMutation ? !isRetryableOutboxPreflightError(cause) : permanentSendError(cause)
     const retryAt = this.time.now() + retryDelayMs(current.attempts)
     const plan = planTransition(
@@ -638,13 +675,13 @@ export class OutboxSender {
         plan.next.sendAt,
         plan.next.attempts,
         plan.next.verifyAttempts,
-        errorMessage(cause),
+        displayError,
         current.account_id,
         current.id
       )
     if (persisted.changes === 0) return false
     if (permanent) {
-      this.notify({ kind: 'failed', id: current.id, error: errorMessage(cause) })
+      this.notify({ kind: 'failed', id: current.id, error: displayError })
       return false
     }
     this.notify({ kind: 'changed' })
