@@ -1,6 +1,7 @@
 import type { RevertedAction, RevertedActionKind } from '../../shared/actionRevert'
 import type { Db } from '../db'
 import type { GmailThread } from '../gmail/parse'
+import { applyThreadDelta } from '../store/mutate'
 import { restoreSnoozeReminder, type SnoozeReminderSnapshot } from '../store/reminders'
 import { nonDraftMessages, persistThread } from '../sync/persist'
 import type { GetThreadOptions, MailActionProvider } from '../sync/provider'
@@ -16,7 +17,7 @@ import {
   storeActionError
 } from './execute'
 import { decodeLabelDelta } from './queuePayload'
-import { queueRowRef, revertedAction, unavailableAction } from './revert'
+import { queueRowRef, revertedAction, syntheticIntent, unavailableAction } from './revert'
 
 export interface ActionRecoveryProvider extends MailActionProvider {
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
@@ -251,20 +252,36 @@ export class ActionExecutor {
       return { kind: 'continue' }
     }
 
-    // Local persistence failures are not Gmail retry failures. Let them surface
-    // without installing a 60-second network retry loop or deleting the row.
-    this.db.transaction(() => {
-      this.db.prepare('DELETE FROM action_queue WHERE account_id = ? AND id = ?').run(accountId, row.id)
-      if (reminderBefore !== undefined) {
-        restoreSnoozeReminder(this.db, accountId, row.thread_id, reminderBefore)
-      }
-      persistThread(this.db, accountId, snapshot)
-    })()
+    // Local persistence failures are not Gmail retry failures: no 60-second
+    // network retry ladder and no row deletion. They also must not reject
+    // drain() — every caller floats that promise — so the row simply stays
+    // 'recovering' for the next drain and the fault is logged.
+    try {
+      this.db.transaction(() => {
+        this.db.prepare('DELETE FROM action_queue WHERE account_id = ? AND id = ?').run(accountId, row.id)
+        if (reminderBefore !== undefined) {
+          restoreSnoozeReminder(this.db, accountId, row.thread_id, reminderBefore)
+        }
+        persistThread(this.db, accountId, snapshot)
+        // An automatic snooze return Gmail rejected is kept visible locally, but
+        // only as this one repair. A standing override would fight every later
+        // snapshot of the thread.
+        if (actionKind === 'snoozeReturn') {
+          applyThreadDelta(this.db, accountId, { threadId: row.thread_id, add: ['INBOX'], remove: [] })
+        }
+      })()
+    } catch (error) {
+      console.error(
+        `[actions] recovery persistence failed for thread ${row.thread_id}:`,
+        error instanceof Error ? error.message : error
+      )
+      return { kind: 'stop' }
+    }
     invalidateRevertedUndo(accountId, [queueRowRef(row.id, row.thread_id)])
     const returnedToInbox = this.threadHasInboxLabel(accountId, row.thread_id)
     reverted.push(
       revertedAction(
-        intent ?? this.fallbackIntent(row),
+        intent ?? syntheticIntent(row.kind, row.thread_id),
         row.subject ?? '',
         returnedToInbox,
         actionKind === 'snoozeReturn' ? 'keptLocal' : 'restored',
@@ -301,12 +318,6 @@ export class ActionExecutor {
         )
         .get(accountId, threadId)
     )
-  }
-
-  private fallbackIntent(row: QueueRow): QueueIntent {
-    return row.kind === 'modifyLabels'
-      ? { kind: row.kind, threadId: row.thread_id, add: [], remove: [] }
-      : { kind: row.kind, threadId: row.thread_id }
   }
 
   private finishUnrecoverable(

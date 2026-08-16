@@ -4,12 +4,16 @@ export interface ActionRevertTransport {
   peek: (accountId: string) => Promise<ActionRevertNotice | null>
   acknowledge: (accountId: string, noticeId: number) => Promise<boolean>
   onAvailable: (callback: () => void) => () => void
+  /** Whether this window is on screen — a hidden window displays nothing. */
+  isVisible: () => boolean
+  onVisibilityChange: (callback: () => void) => () => void
 }
 
 /**
  * Delivers buffered notices at least once. A notice is acknowledged only after
- * the active subscriber receives it, so StrictMode cleanup and account changes
- * cannot consume a batch that no renderer displayed.
+ * the active subscriber has *displayed* it, so StrictMode cleanup, account
+ * changes, and a hidden window (background launch, or close-to-tray) cannot
+ * consume a batch the user never saw.
  */
 export function subscribeToActionReverts(
   accountId: string,
@@ -21,12 +25,15 @@ export function subscribeToActionReverts(
   let requested = true
 
   const drain = async (): Promise<void> => {
-    if (draining || !active) return
+    // A background window still mounts a renderer and would otherwise run the
+    // toast out inside an invisible window, acknowledging it unseen.
+    if (draining || !active || !transport.isVisible()) return
     draining = true
     try {
       do {
         requested = false
         for (;;) {
+          if (!transport.isVisible()) break
           const notice = await transport.peek(accountId)
           if (!active || !notice) break
           await callback(notice.actions)
@@ -47,10 +54,16 @@ export function subscribeToActionReverts(
     requested = true
     void drain()
   })
+  // Anything buffered while the window was hidden is delivered when it appears.
+  const offVisibility = transport.onVisibilityChange(() => {
+    requested = true
+    void drain()
+  })
   void drain()
 
   return () => {
     active = false
     offAvailable()
+    offVisibility()
   }
 }

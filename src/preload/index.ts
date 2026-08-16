@@ -75,6 +75,11 @@ const api = {
           onAvailable: (listener) => {
             ipcRenderer.on(IPC_CHANNELS.mailActionsReverted, listener)
             return () => ipcRenderer.removeListener(IPC_CHANNELS.mailActionsReverted, listener)
+          },
+          isVisible: () => document.visibilityState === 'visible',
+          onVisibilityChange: (listener) => {
+            document.addEventListener('visibilitychange', listener)
+            return () => document.removeEventListener('visibilitychange', listener)
           }
         },
         (actions) => {

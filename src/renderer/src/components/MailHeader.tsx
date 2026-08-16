@@ -9,13 +9,13 @@ const QUEUE_METER_STEPS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven'
 function QueueReadout({
   unread,
   pending,
-  authPaused,
+  pausedActions,
   onReconnect,
   onOpenOutbox
 }: {
   unread: number | null
   pending: number
-  authPaused: boolean
+  pausedActions: number
   onReconnect: () => void
   onOpenOutbox?: () => void
 }): React.JSX.Element {
@@ -39,28 +39,30 @@ function QueueReadout({
       ) : (
         <span className="font-medium">at zero</span>
       )}
-      {pending > 0 &&
-        (authPaused ? (
-          <button
-            type="button"
-            data-testid="action-reconnect"
-            onClick={onReconnect}
-            title="Google authorization expired; reconnect to retry pending changes"
-            className="cursor-pointer font-medium text-accent hover:underline"
-          >
-            <span data-testid="pending-count">· {pending} paused</span> · Reconnect Google
-          </button>
-        ) : (
-          <button
-            type="button"
-            data-testid="pending-count"
-            disabled={!onOpenOutbox}
-            className="cursor-pointer rounded px-1 py-0.5 hover:bg-active hover:text-ink-dim disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit"
-            onClick={onOpenOutbox}
-          >
-            · {pending} pending
-          </button>
-        ))}
+      {pending > 0 && (
+        <button
+          type="button"
+          data-testid="pending-count"
+          disabled={!onOpenOutbox}
+          className="cursor-pointer rounded px-1 py-0.5 hover:bg-active hover:text-ink-dim disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit"
+          onClick={onOpenOutbox}
+        >
+          · {pending} pending
+        </button>
+      )}
+      {/* Only triage actions can be auth-paused; outbox sends are counted by
+          `pending` but never paused, so the two readouts stay separate. */}
+      {pausedActions > 0 && (
+        <button
+          type="button"
+          data-testid="action-reconnect"
+          onClick={onReconnect}
+          title="Google authorization expired; reconnect to retry paused changes"
+          className="cursor-pointer font-medium text-accent hover:underline"
+        >
+          <span data-testid="paused-count">· {pausedActions} paused</span> · Reconnect Google
+        </button>
+      )}
     </div>
   )
 }
@@ -163,7 +165,7 @@ interface MailHeaderProps {
   view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   unreadCount: number | null
   pendingCount: number
-  actionsAuthPaused: boolean
+  pausedActionCount: number
   selectionCount: number
   composerOpen: boolean
   status: AuthStatus
@@ -178,7 +180,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     view,
     unreadCount,
     pendingCount,
-    actionsAuthPaused,
+    pausedActionCount,
     selectionCount,
     composerOpen,
     status,
@@ -239,7 +241,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         <QueueReadout
           unread={unreadCount}
           pending={pendingCount}
-          authPaused={actionsAuthPaused}
+          pausedActions={pausedActionCount}
           onReconnect={onReconnectActions}
           onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
         />

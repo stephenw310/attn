@@ -10,6 +10,9 @@ export interface TriageResult {
 }
 
 export interface ActionQueueStatus {
+  /** Rows in the triage action queue only — the header's count also spans the outbox. */
   pending: number
+  /** Rows held back by a stored auth failure, awaiting same-account reconnection. */
+  paused: number
   authPaused: boolean
 }

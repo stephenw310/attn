@@ -12,6 +12,11 @@ function action(threadId: string): RevertedAction {
   }
 }
 
+const alwaysVisible = {
+  isVisible: () => true,
+  onVisibilityChange: () => () => {}
+}
+
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((next) => {
@@ -33,7 +38,8 @@ describe('action revert delivery', () => {
     const transport: ActionRevertTransport = {
       peek,
       acknowledge,
-      onAvailable: () => () => {}
+      onAvailable: () => () => {},
+      ...alwaysVisible
     }
     const first = vi.fn()
     const second = vi.fn()
@@ -55,7 +61,8 @@ describe('action revert delivery', () => {
     const transport: ActionRevertTransport = {
       peek: vi.fn().mockResolvedValueOnce(notice).mockResolvedValue(null),
       acknowledge: vi.fn(async () => true),
-      onAvailable: () => () => {}
+      onAvailable: () => () => {},
+      ...alwaysVisible
     }
 
     const dispose = subscribeToActionReverts('b@example.com', transport, vi.fn())
@@ -71,7 +78,8 @@ describe('action revert delivery', () => {
     const transport: ActionRevertTransport = {
       peek: vi.fn(async () => notice),
       acknowledge: vi.fn(async () => false),
-      onAvailable: () => () => {}
+      onAvailable: () => () => {},
+      ...alwaysVisible
     }
 
     const dispose = subscribeToActionReverts('a@example.com', transport, vi.fn())
@@ -99,7 +107,8 @@ describe('action revert delivery', () => {
     const transport: ActionRevertTransport = {
       peek: vi.fn(async () => notices[0] ?? null),
       acknowledge,
-      onAvailable: () => () => {}
+      onAvailable: () => () => {},
+      ...alwaysVisible
     }
 
     const dispose = subscribeToActionReverts('a@example.com', transport, callback)
@@ -110,6 +119,42 @@ describe('action revert delivery', () => {
     await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(2))
     await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledTimes(2))
     expect(callback.mock.calls.map(([actions]) => actions[0]?.threadId)).toEqual(['one', 'two'])
+    dispose()
+  })
+
+  it('leaves a notice buffered while the window is hidden and delivers it on show', async () => {
+    const notice: ActionRevertNotice = { id: 1, actions: [action('roadmap')] }
+    const buffered: ActionRevertNotice[] = [notice]
+    const acknowledge = vi.fn(async (_accountId: string, noticeId: number) => {
+      if (buffered[0]?.id !== noticeId) return false
+      buffered.shift()
+      return true
+    })
+    let visible = false
+    let onShown = (): void => {}
+    const transport: ActionRevertTransport = {
+      peek: vi.fn(async () => buffered[0] ?? null),
+      acknowledge,
+      onAvailable: () => () => {},
+      isVisible: () => visible,
+      onVisibilityChange: (listener) => {
+        onShown = listener
+        return () => {}
+      }
+    }
+    const callback = vi.fn()
+
+    // A background launch mounts a renderer inside an invisible window; a toast
+    // shown there would be acknowledged without anyone seeing it.
+    const dispose = subscribeToActionReverts('a@example.com', transport, callback)
+    await Promise.resolve()
+    expect(callback).not.toHaveBeenCalled()
+    expect(acknowledge).not.toHaveBeenCalled()
+
+    visible = true
+    onShown()
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledWith(notice.actions))
+    await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledWith('a@example.com', 1))
     dispose()
   })
 })

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AuthStatus } from '../../../shared/auth'
+import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { MailLabel } from '../../../shared/mail'
 import { actionReconnectMessage } from '../actionReconnect'
@@ -73,7 +73,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realUnreadTotal,
     labels,
     pendingCount,
-    actionsAuthPaused,
+    pausedActionCount,
     mailRevision,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
@@ -192,6 +192,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         void showToast(actionReconnectMessage(activeAccount ?? '', result))
       })
       .catch((reason: unknown) => {
+        // A canceled or superseded sign-in is not a failure worth a toast.
+        if (isSignInCanceled(reason)) return
         void showToast(reason instanceof Error ? reason.message : 'Could not reconnect Google')
       })
   }, [activeAccount, onStatus, showToast])
@@ -466,7 +468,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         view={view}
         unreadCount={realUnreadTotal}
         pendingCount={pendingCount}
-        actionsAuthPaused={actionsAuthPaused}
+        pausedActionCount={pausedActionCount}
         selectionCount={view === 'inbox' || view === 'snoozed' ? selectedIds.size : 0}
         composerOpen={composerDraft !== null}
         status={status}

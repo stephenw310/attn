@@ -67,6 +67,10 @@ let testConversationDelay: { threadId: string; delayMs: number } | null = null
 let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
 let testActionProvider: ActionRecoveryProvider | null = null
+// Installed only by registerTestIpc(): the seeded e2e store has no OAuth config,
+// so a reconnect click resumes the seeded account instead of running the real
+// flow. Production sign-in stays free of test branching.
+let testSeededResume: (() => number) | null = null
 let signInInFlight = false
 const actionRevertNotices = new ActionRevertNotices()
 
@@ -161,8 +165,7 @@ async function waitForConversation(threadId: string): Promise<void> {
 async function signIn(): Promise<AuthSignInResult> {
   const config = loadOAuthConfig(oauthSearchDirs())
   if (!config) {
-    const resumedActions =
-      testUserData && seedAccountId ? (actionExecutor?.resumeAuthFailures(seedAccountId) ?? 0) : 0
+    const resumedActions = testSeededResume?.() ?? 0
     if (resumedActions > 0) syncController?.onSignIn()
     return { status: authStatus(), resumedActions }
   }
@@ -359,6 +362,7 @@ function initialize(): void {
 
 function registerTestIpc(): void {
   if (!testUserData) return
+  testSeededResume = () => (seedAccountId ? (actionExecutor?.resumeAuthFailures(seedAccountId) ?? 0) : 0)
   ipcMain.on(TEST_CHANNELS.focusThread, (_event, threadId: unknown) => {
     if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
   })
@@ -548,6 +552,7 @@ function teardown(): void {
   testDraftSaveFailures = 0
   testDraftInlineImageDelayMs = 0
   testActionProvider = null
+  testSeededResume = null
   actionRevertNotices.clear()
   db?.close()
   db = null

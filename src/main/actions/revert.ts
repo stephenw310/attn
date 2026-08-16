@@ -7,6 +7,9 @@ export interface QueuedActionRef {
 }
 
 export interface UndoEntryWithRefs {
+  label: string
+  /** Rebuilds the label for a shrunken entry, so the undo toast counts truthfully. */
+  labelFor: (threadCount: number) => string
   undo: readonly { threadIds: readonly string[] }[]
   refs: readonly QueuedActionRef[]
 }
@@ -34,9 +37,11 @@ export function dropRevertedUndoEntries<T extends UndoEntryWithRefs>(
       (action) => !action.threadIds.some((threadId) => affectedThreads.has(threadId))
     )
     if (undo.length === 0) return []
+    // One undo action per thread, so the survivor count is the new entry size.
     return [
       {
         ...entry,
+        label: entry.labelFor(undo.length),
         undo,
         refs: entry.refs.filter((ref) => !revertedIds.has(ref.queueId))
       } as T
@@ -60,17 +65,20 @@ export function revertedAction(
   }
 }
 
+/** A stand-in intent for a queue row whose payload is unusable or undecodable. */
+export function syntheticIntent(queueKind: QueueIntent['kind'], threadId: string): QueueIntent {
+  return queueKind === 'modifyLabels'
+    ? { kind: queueKind, threadId, add: [], remove: [] }
+    : { kind: queueKind, threadId }
+}
+
 export function unavailableAction(
   queueKind: QueueIntent['kind'],
   threadId: string,
   subject: string,
   actionKind?: RevertedActionKind
 ): RevertedAction {
-  const intent: QueueIntent =
-    queueKind === 'modifyLabels'
-      ? { kind: queueKind, threadId, add: [], remove: [] }
-      : { kind: queueKind, threadId }
-  return revertedAction(intent, subject, false, 'unavailable', actionKind)
+  return revertedAction(syntheticIntent(queueKind, threadId), subject, false, 'unavailable', actionKind)
 }
 
 function revertedActionKind(intent: QueueIntent): RevertedActionKind {

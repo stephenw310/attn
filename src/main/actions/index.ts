@@ -1,5 +1,6 @@
 import type { RevertedActionKind } from '../../shared/actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from '../../shared/actions'
+import { stringArray } from '../../shared/guards'
 import type { Db } from '../db'
 import { applyThreadDelta } from '../store/mutate'
 import { type SnoozeReminderSnapshot, snoozeReminderSnapshot } from '../store/reminders'
@@ -12,6 +13,7 @@ type UndoAction = TriageAction | { kind: 'snoozeAt'; threadIds: string[]; dueAt:
 interface TriageUndoEntry {
   kind: 'triage'
   label: string
+  labelFor: (threadCount: number) => string
   undo: UndoAction[]
   refs: QueuedActionRef[]
 }
@@ -181,11 +183,13 @@ export function snoozeThreads(db: Db, accountId: string, threadIds: string[], du
   })
   const refs = db.transaction(() => applySnooze(db, accountId, threadIds, dueAt))()
 
-  const label = threadIds.length === 1 ? 'Snoozed' : `${threadIds.length} snoozed`
+  const labelFor = (count: number): string => (count === 1 ? 'Snoozed' : `${count} snoozed`)
+  const label = labelFor(threadIds.length)
   const undoStack = undoStackFor(accountId)
   undoStack.push({
     kind: 'triage',
     label,
+    labelFor,
     undo,
     refs
   })
@@ -203,7 +207,13 @@ export function performTriage(
   const { undo, refs } = apply(db, accountId, action)
   if (recordUndo) {
     const undoStack = undoStackFor(accountId)
-    undoStack.push({ kind: 'triage', label, undo, refs })
+    undoStack.push({
+      kind: 'triage',
+      label,
+      labelFor: (count) => actionLabel(action, count),
+      undo,
+      refs
+    })
     if (undoStack.length > 50) undoStack.shift()
   }
   return { label }
@@ -294,10 +304,6 @@ export function isTriageAction(value: unknown): value is TriageAction {
   }
 }
 
-function stringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
-}
-
 export function pendingActionCount(db: Db, accountId: string): number {
   const row = db
     .prepare(
@@ -309,15 +315,20 @@ export function pendingActionCount(db: Db, accountId: string): number {
 }
 
 export function actionQueueStatus(db: Db, accountId: string): ActionQueueStatus {
-  const rows = db
+  // Only a failed row carries last_error, so this scan stays tiny even when the
+  // queue is deep — the common case matches no rows at all.
+  const failed = db
     .prepare(
       `SELECT last_error FROM action_queue
-       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering', 'failed')`
+       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering', 'failed')
+         AND last_error IS NOT NULL`
     )
     .all(accountId) as { last_error: string | null }[]
+  const paused = failed.filter((row) => isStoredAuthActionError(row.last_error)).length
   return {
-    pending: rows.length,
-    authPaused: rows.some((row) => isStoredAuthActionError(row.last_error))
+    pending: pendingActionCount(db, accountId),
+    paused,
+    authPaused: paused > 0
   }
 }
 

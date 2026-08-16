@@ -88,18 +88,6 @@ function fakeDb(rows: FakeRow[], options: FakeDbOptions = {}): Db {
             row.last_error = String(args[1])
             changes = 1
           }
-        } else if (sql.includes("SET state = 'recovering' WHERE account_id")) {
-          const row = rows.find((item) => item.account_id === args[0] && item.id === args[1])
-          if (row) {
-            row.state = 'recovering'
-            changes = 1
-          }
-        } else if (sql.includes("SET state = 'pending' WHERE account_id")) {
-          const row = rows.find((item) => item.account_id === args[0] && item.id === args[1])
-          if (row) {
-            row.state = 'pending'
-            changes = 1
-          }
         } else if (sql.startsWith('DELETE FROM thread_labels')) {
           const threadId = String(args[1])
           if (sql.includes('label_id = ?')) labels.get(threadId)?.delete(String(args[2]))
@@ -587,7 +575,10 @@ describe('action executor', () => {
         () => actionProvider
       )
 
-      await expect(executor.trigger()).rejects.toThrow('SQLITE_FULL')
+      // Contained, not rethrown: drain()'s promise is floated by every caller
+      // (ipc, syncController, index), so an escaping SQLite fault would become
+      // an unhandled rejection in the main process.
+      await expect(executor.trigger()).resolves.toBeUndefined()
       expect(failed.state).toBe('recovering')
       expect(actionProvider.getThread).toHaveBeenCalledOnce()
       expect(vi.getTimerCount()).toBe(0)

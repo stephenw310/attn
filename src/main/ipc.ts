@@ -674,7 +674,7 @@ export function registerIpc(context: IpcContext): () => void {
   })
   handle(IPC_CHANNELS.mailGetActionQueueStatus, () => {
     const account = context.currentAccountId()
-    return account ? actionQueueStatus(context.db, account) : { pending: 0, authPaused: false }
+    return account ? actionQueueStatus(context.db, account) : { pending: 0, paused: 0, authPaused: false }
   })
   return () => bodyHydrator.stop()
 }

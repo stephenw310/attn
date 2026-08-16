@@ -43,12 +43,17 @@ export function restoreSnoozeReminder(
   ).run(accountId, threadId, snapshot.dueAt, snapshot.state)
 }
 
-/** Local-only snooze state is authoritative over a fresh Gmail label snapshot. */
+/**
+ * A *pending* snooze hides its thread until the reminder fires, and Gmail has no
+ * concept of that (SPEC §9 #6), so local state wins over a fresh label snapshot.
+ *
+ * Only 'pending' qualifies. 'returned' is a display flag for the inbox badge and
+ * is deliberately left set until the user handles the thread in Attn — treating
+ * it as a label authority would re-add INBOX on every sync forever, overriding
+ * an archive the user performed in Gmail and inverting SPEC F2's conflict rule.
+ * A snooze return that Gmail rejects is repaired once, by the executor.
+ */
 export function replaySnoozeReminderDelta(db: Db, accountId: string, threadId: string): void {
-  const snapshot = snoozeReminderSnapshot(db, accountId, threadId)
-  if (snapshot?.state === 'pending') {
-    applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
-  } else if (snapshot?.state === 'returned') {
-    applyThreadDelta(db, accountId, { threadId, add: ['INBOX'], remove: [] })
-  }
+  if (snoozeReminderSnapshot(db, accountId, threadId)?.state !== 'pending') return
+  applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
 }

@@ -36,8 +36,12 @@ export function planAction(action: TriageAction): ThreadActionPlan {
   }
 }
 
-export function actionLabel(action: TriageAction): string {
-  const count = action.threadIds.length
+/**
+ * `count` defaults to the action's own thread count, and is overridden when an
+ * undo entry has shrunk — a rejected action drops its thread from the inverse,
+ * so the label must not keep advertising the original size.
+ */
+export function actionLabel(action: TriageAction, count = action.threadIds.length): string {
   const plural = (one: string, many: string): string => (count === 1 ? one : `${count} ${many}`)
   switch (action.kind) {
     case 'archive':

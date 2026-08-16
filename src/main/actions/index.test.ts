@@ -19,7 +19,9 @@ afterEach(() => {
 function queueDb(lastErrors: Array<string | null>): Db {
   return {
     prepare: () => ({
-      all: () => lastErrors.map((last_error) => ({ last_error })),
+      // Mirrors the query's `last_error IS NOT NULL` filter: only failed rows
+      // are ever materialized.
+      all: () => lastErrors.filter((last_error) => last_error !== null).map((last_error) => ({ last_error })),
       get: () => ({ count: lastErrors.length })
     })
   } as unknown as Db
@@ -33,7 +35,14 @@ describe('action queue status', () => {
 
   it('surfaces typed auth pauses separately from ordinary pending work', () => {
     const db = queueDb([null, storeActionError(new Error('revoked'), 'auth')])
-    expect(actionQueueStatus(db, 'a@example.com')).toEqual({ pending: 2, authPaused: true })
+    // `paused` counts only the auth-held rows, so the header can name them
+    // without implying the rest of the queue is stuck too.
+    expect(actionQueueStatus(db, 'a@example.com')).toEqual({ pending: 2, paused: 1, authPaused: true })
+  })
+
+  it('does not count a non-auth failure as paused', () => {
+    const db = queueDb([storeActionError(new Error('bad request'), 'permanent')])
+    expect(actionQueueStatus(db, 'a@example.com')).toEqual({ pending: 1, paused: 0, authPaused: false })
   })
 })
 

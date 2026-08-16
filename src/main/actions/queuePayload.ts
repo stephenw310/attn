@@ -1,4 +1,5 @@
 import type { RevertedActionKind } from '../../shared/actionRevert'
+import { stringArray } from '../../shared/guards'
 import type { SnoozeReminderSnapshot } from '../store/reminders'
 
 export interface LabelDeltaPayload {
@@ -47,10 +48,6 @@ const actionKinds = new Set<RevertedActionKind>([
   'markUnread',
   'labels'
 ])
-
-function stringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
-}
 
 function validReminder(value: unknown): value is SnoozeReminderSnapshot | null {
   if (value === null) return true

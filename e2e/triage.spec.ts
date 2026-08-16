@@ -52,7 +52,10 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
   await page.keyboard.press('e')
 
   await expect(page.getByTestId('action-reconnect')).toContainText('1 paused · Reconnect Google')
-  await expect(page.getByTestId('pending-count')).toContainText('1 paused')
+  await expect(page.getByTestId('paused-count')).toContainText('1 paused')
+  // The outbox readout keeps its own count and stays clickable while actions
+  // are paused — only triage actions can be held back by an auth failure.
+  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
 
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
@@ -62,6 +65,7 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
 
   await page.getByTestId('action-reconnect').click()
   await expect(page.getByTestId('action-reconnect')).toHaveCount(0)
+  await expect(page.getByTestId('paused-count')).toHaveCount(0)
   await expect(page.getByTestId('pending-count')).toHaveCount(0)
   await expect(page.getByTestId('toast')).toHaveText('Google reconnected — 1 pending change is retrying.')
 })
