@@ -1,10 +1,10 @@
 # M2 Implementation Plan — Mail Out (Composer, Drafts, Send, Undo Send, Exactly-Once Outbox)
 
-**Audience:** the engineer(s) building M2. Written to the same contract as [M1-PLAN.md](M1-PLAN.md): every task is one PR, nothing is done until `npm run verify` is green, and "spec F6" means a section of [SPEC.md](SPEC.md) (v0.14) — read it before starting the task.
+**Audience:** the engineer(s) building M2. Written to the same contract as [M1-PLAN.md](M1-PLAN.md): every task is one PR, nothing is done until `npm run verify` is green, and "spec F6" means a section of [SPEC.md](SPEC.md) (v0.15) — read it before starting the task.
 **Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through draft PR #38.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39) and T14 (#38, full-window) are shipped. Dogfood of the shipped composer produced four revision tasks, T14A–T14D, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, and two-way Gmail Drafts sync. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A is a planned contact-index follow-up. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
+**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39) and T14 (#38, full-window) are shipped. Dogfood of the shipped composer produced four revision tasks, T14A–T14D, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, and two-way Gmail Drafts sync; all four shipped in #43, with draft-mirror reconciliation fixed in #44. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A is the planned lifetime header sweep (upgraded from Sent-only to the whole account, SPEC §9 #17), and T21 adds the poller's label-catalog refresh found during that review. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
@@ -18,7 +18,7 @@ graph LR
   R2[R2 main-process seams + typed IPC]
   R3[R3 test scaffolding]
   T13[T13 sent metadata + threading headers + contacts]
-  T13A[T13A lifetime contact index]
+  T13A[T13A lifetime header sweep]
   T14[T14 composer shell + crash-safe drafts]
   T15[T15 MIME builder + reply semantics]
   T16[T16 outbox: send + undo send, exactly-once]
@@ -44,7 +44,7 @@ graph LR
   T13A --> T20
 ```
 
-Parallelization: T15 is pure modules and can run beside T14. T13A, T18, and T19 are independent of the composer chain and fit whenever someone is free; T13A must land before T20 sign-off but does not expand PR #38.
+Parallelization: T15 is pure modules and can run beside T14. T13A, T18, T19, and T21 are independent of the composer chain and fit whenever someone is free; T13A must land before T20 sign-off but does not expand PR #38.
 
 ---
 
@@ -223,41 +223,64 @@ Verify green; fresh backfill demonstrated end to end; autocomplete data queryabl
 
 ---
 
-## T13A — Lifetime contact index and saved-contact decision
+## T13A — Lifetime header sweep and saved-contact decision
 
-**Status: planned follow-up.** · **Depends on:** T13 · **Blocks:** T20 sign-off · **Parallel with:** T14, T15, T18, T19 · **Spec:** F2 lifetime contact index, F6 autocomplete
+**Status: planned follow-up — scope upgraded by SPEC §9 #17.** · **Depends on:** T13 · **Blocks:** T20 sign-off · **Parallel with:** the T14 revisions and the outbox chain · **Spec:** F2 backfill stage 7 + lifetime header sweep, F6 autocomplete
 
-### Why this is separate
+### Why this is upgraded from Sent-only
 
-The recent 12-month Sent stage is the right fast bootstrap for mail, but it is not a complete contact
-history. Someone the user last emailed years ago should still be available to autocomplete without forcing
-Attn to clone years of message bodies or make those messages browsable. This work has different quota,
-progress, and OAuth questions from T14, so it does not belong in the composer PR.
+v0.14 scoped this task to lifetime **Sent** headers because contacts were the only consumer. SPEC §9 #17
+retargets the local store at lifetime headers for the **whole account**, and this task is where that sweep's
+machinery gets built: pointing the same resumable walk at an unfiltered listing instead of `SENT` is the same
+engineering with a longer runtime, and building the Sent-only version first would mean measuring quota and
+tuning the throttle twice. Contacts remain this task's product deliverable; the fully populated header store
+it leaves behind is what M3's search and system mailboxes stand on. It also shrinks the accepted-risk row
+about replies lacking `References`: once old threads have header rows, reply threading headers exist for
+them too.
 
 ### Design and implementation
 
-- Keep T13's recent Sent bootstrap unchanged so autocomplete becomes useful quickly.
-- Add a resumable, low-priority lifetime **Sent message-header** pass with its own cursor and aggregate
-  progress. Fetch only the fields needed to derive recipient address/display name, message identity, and
-  timestamp; do not fetch bodies or attachments and do not create old synthetic rows in the Sent mailbox.
-- Reuse `contact_messages` idempotency and the rebuildable `contacts` projection. Lifetime contributions
-  merge with the recent bootstrap without double-counting; ranking continues to favor frequency and recency.
-- Foreground sends, action replay, history polling, body hydration, and the interactive mail backfill all
-  outrank this pass. The footer reports **Live · indexing contacts**, processed/estimated totals, and quota
-  waits; quitting or losing connectivity resumes from the last durable page.
-- Make an explicit product/OAuth decision about importing saved Google Contacts through the People API.
-  That is a different address source and additional consent scope, so do not silently bundle it into the
-  Sent-derived index. If approved, implement it as another task and merge the two sources at query time.
-- Document the exact additive DDL and schema version for the cursor/progress state under the `AGENTS.md`
-  local-upgrade procedure.
+- Keep T13's recent-window bootstrap unchanged so autocomplete becomes useful quickly.
+- After the staged backfill reports done, run a resumable, low-priority **lifetime header sweep**: walk
+  `threads.list` with **no query and no label filter** (newest first, as Gmail returns), and for each id not
+  already in `threads`, fetch `threads.get(format: metadata)` through `persistThread(metadataOnly)`. No
+  bodies, no attachments, no date bound — an unbounded walk with skip-if-present is deliberately chosen over
+  `older_than:` complements, whose fuzzy boundaries can leave silent seam gaps (F2). Skipping is safe
+  because the history checkpoint predates the first backfill page, so the poller keeps every stored thread
+  current. Skip-if-present lives in the sweep, not in `persistThread` — the idempotent write path stays
+  authoritative for threads that are fetched.
+- The sweep persists its own cursor in `sync_state` (same `phase:pageToken` grammar and `'done'` sentinel
+  as `backfill_cursor`) and resumes on every launch until done. Foreground sends, action replay, history
+  polling, body hydration, and the interactive backfill all outrank it: self-throttle well below Gmail's
+  ~250 units/user/sec so interactive calls never queue behind it, and set the duty-cycle constants from the
+  real-mailbox measurement below, not guesses.
+- **Contacts derive from the same stream** through the existing `contact_messages`/`contacts` projection,
+  idempotent with T13's bootstrap contributions. Two hygiene rules land here: messages labeled `SPAM` or
+  `TRASH` never contribute contact rows (the poller already trickles spam threads in; a deliberate sweep
+  must not bulk-import spammers), and legacy Hangouts `CHAT` rows are skipped defensively.
+- Progress reports against `getProfile`'s `threadsTotal`/`messagesTotal` — the "estimated total/ETA when
+  Gmail supplies one" that F2's footer language promises. Footer state: **Live · indexing older mail** with
+  processed/estimated counts and an explicit quota-wait state; quitting or losing connectivity resumes from
+  the last durable page.
+- Optional, decide at implementation: a listing-only `q=has:attachment` walk (ids only, ~1% of sweep cost)
+  can set the thread-level attachment flag lifetime-wide; header-only threads otherwise gain attachment
+  metadata on first hydration (F2).
+- The saved-Google-Contacts (People API) decision is unchanged from v0.14: different address source,
+  additional consent scope, separate opt-in task if ever approved — never silently bundled.
+- **Schema:** add a nullable `sweep_cursor TEXT` column to `sync_state`; bump `CURRENT_SCHEMA_VERSION`.
+  Local dogfood upgrade DDL (AGENTS.md procedure): `ALTER TABLE sync_state ADD COLUMN sweep_cursor TEXT;`
+  with `PRAGMA user_version` bumped in the same transaction.
 
 ### Testing and done condition
 
-Unit-test cursor routing, priority/yield behavior, idempotent overlap with T13, and ranking across recent and
-old contributions. E2e a partially completed pass across relaunch/offline recovery and assert that no old
-mail row or body appears. Manual evidence records time/quota on a real long-lived mailbox while interaction
-budgets stay green. Done means an address last emailed outside the mail window is discoverable locally,
-progress never masquerades as a blocked inbox sync, and the saved-Google-Contacts decision is recorded.
+Unit-test cursor routing and resume, skip-if-present against seeded stores, priority/yield and throttle
+behavior on the injectable `SchedulerTime`, contact idempotency across the T13 overlap, and the SPAM/TRASH
+contact exclusion. E2e a partially completed sweep across relaunch/offline recovery and assert that no body
+bytes are fetched and unread counts do not change. Manual evidence records wall-clock/quota on a real
+long-lived mailbox with interaction budgets green — the throttle constants get set from that measurement.
+Done means an address last emailed outside the mail window autocompletes locally, a thread archived years
+ago has a local header row, progress never masquerades as a blocked inbox sync, and the People-API decision
+stays recorded.
 
 ---
 
@@ -278,7 +301,7 @@ progress never masquerades as a blocked inbox sync, and the saved-Google-Contact
   between formatting controls and wrapped global shortcut hints.
 - **The local `outbox` row is the draft's source of truth from the moment the composer opens** (state `composing`). T14 adds the draft fields to the current schema snapshot; T16 completes the same table and bumps the schema version again. Create the row on open, before any typing, so there is always something to recover into.
 - **Autosave needs a bounded checkpoint, not just an idle debounce** (review finding, P1). A trailing 1s-idle debounce does *not* bound loss to one second: every keystroke resets the timer, so someone typing continuously for three minutes has written nothing to disk, and a force-quit loses the whole draft — the exact scenario F6's crash-safety criterion is about. Pair the 1s idle trigger with a **hard max-wait (5s) while dirty**, so continuous typing still checkpoints on a fixed interval. Note the test trap the same finding names: a relaunch test that pauses before quitting silently passes, because the pause fires the idle save. The regression test must type *continuously* and relaunch with no idle gap.
-- **Gmail Drafts mirror is best-effort and asynchronous:** debounced (~3s idle) `drafts.create`/`drafts.update` through the provider, storing `gmail_draft_id`. A dedicated mirror executor derives durable work directly from `outbox.local_revision > mirror_revision`; it runs independently from `action_queue`, so mirror backoff can never block a user mail action. A Gmail-side 404 clears the stale id and recreates the remote draft. Normal app shutdown stops before starting another mirror row but waits for the active checkpoint to persist its returned Gmail id before SQLite closes. Discard immediately scrubs local content, retains only a `discarding` tombstone when a remote id exists, and retries `drafts.delete` until that remote copy is gone (404 is success).
+- **Gmail Drafts mirror is best-effort and asynchronous:** debounced (~3s idle) `drafts.create`/`drafts.update` through the provider, storing `gmail_draft_id`. A dedicated mirror executor derives durable work directly from `outbox.local_revision > mirror_revision`; it runs independently from `action_queue`, so mirror backoff can never block a user mail action. A Gmail-side 404 clears the stale id and recreates the remote draft. Mirror mutations are single-attempt and abortable: normal shutdown stops before another row, gives the active checkpoint five seconds to persist any returned Gmail id, then cancels its request while SQLite is still open. Discard immediately scrubs local content, retains only a `discarding` tombstone when a remote id exists, and retries `drafts.delete` until that remote copy is gone (404 is success).
 - **Editor: Lexical** (owner decision, 2026-08-13 — `npm i lexical @lexical/react @lexical/rich-text @lexical/list @lexical/link @lexical/html`). Rejected alternative: raw `contenteditable` + `document.execCommand`. The deciding argument is **M4, not M2** — F8 snippets must expand as a *single* undoable step with `{cursor}` placement, and F17 streams an AI draft into a live editable box. Both are programmatic edits that need correct undo grouping and selection preservation, which a document model provides and `execCommand` (also deprecated) does not. Paste normalization from other mail clients is the second reason. The usual headline reason — cross-browser normalization — is explicitly *not* why we're adopting it: Electron pins one Chromium (D3).
   - **Constrain the schema to F6's surface and nothing more:** bold/italic/underline, ordered/unordered lists, links, blockquote. A narrow schema is the point — it makes output predictable and rejects pasted junk by construction. Do not enable tables, images, code blocks, or collaborative extensions "because they're available".
   - **Serialization:** `@lexical/html` `$generateHtmlFromNodes` on autosave and on send, then **still** through DOMPurify with the minimal allowlist (`p/div/br/b/strong/i/em/u/a[href]/ul/ol/li/blockquote`). The schema makes the sanitizer's job easy; it does not replace it (global rule 3 — outgoing content is untrusted too).
@@ -627,7 +650,7 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 - **Retry accounting:** `attempts` drives transport backoff; `verify_attempts` counts only successful negative secondary searches. A quota/offline retry can therefore never consume the bounded ~60-second verification window. Intermediate negative checks keep `last_error` clear until the row actually enters `needs-review`.
 - **Shutdown:** outbox mutations are single-attempt requests owned by the durable scheduler, not the Gmail client's long transient retry ladder. Shutdown gives the active request five seconds to quiesce, then aborts it while SQLite is still open so recovery state is persisted before teardown.
 - **Retention:** confirmed sent rows retain their audit/recovery data for seven days, then are pruned on startup or the next confirmed send. Attachment spool bytes are removed immediately on confirmation.
-- **Offline and discovery:** rows sit in `queued` past their window while no provider exists; the top-bar pending readout includes `queued`/`sending` outbox rows and is clickable. It and a registered **Go to Outbox** command open an on-demand local view of `queued`, `sending`, `failed`, and `needs-review` items—no permanent sidebar. Actionable rows reopen in the composer with all local content intact. Toast on queue: **"Sent — Undo (Z)"** with the toast persisting for the window's duration rather than the standard 4s.
+- **Offline and discovery:** rows sit in `queued` past their window while no provider exists; the top-bar pending readout includes `queued`/`sending` outbox rows and is clickable. It and a registered **Go to Outbox** command open an on-demand local view of `queued`, `sending`, `failed`, and `needs-review` items—no permanent sidebar. Actionable rows reopen in the composer with all local content intact. Toast on queue: **"Sent — Undo (Z)"** with the toast and its progress-bar countdown both bound to the durable `send_at` deadline rather than the standard 4s.
 - **Failures:** permanent 4xx (bad recipient, size) → `failed` + toast; the complete message remains actionable in Outbox and reopens with its error banner when selected. Retryable errors follow the executor's backoff ladder with the verification-first rule above.
 
 ### Implementation guide
@@ -836,6 +859,40 @@ Done when list, reader, composer, picker, mailbox, and active-chord contexts sho
 footer never wraps or obscures content at the minimum supported window size; every displayed hint resolves
 to a registered command; dynamic split reordering immediately changes the digit guide; and keyboard/e2e
 coverage proves completion, cancellation, timeout, and view-change reset behavior.
+
+---
+
+## T21 — Label-catalog refresh in the poller
+
+**Status: new (found during the SPEC §9 #17 sync review).** · **Depends on:** nothing · **Parallel with:** everything · **Spec:** F2 incremental
+
+### Why
+
+`labels.list` runs once, at backfill start, and never again — and `history.list` reports label
+*applications* to messages, never label create/rename/delete. A label created or renamed in Gmail web after
+install therefore never reaches the local catalog: the label picker offers a stale list, and a thread can
+carry a label id with no local name. M3's mailbox navigation would harden that staleness into visible UI.
+
+### Implementation guide
+
+- Add an optional `syncLabels` effect to `HistoryPollerOptions`, invoked in `runNow` after the history cycle
+  and before `onCycleComplete` — copy T14D's shipped `syncDrafts` seam exactly, including its
+  changed-boolean return feeding `onCycleComplete`. It calls `listLabels()` (1 quota unit per cycle) and
+  funnels through the shared `upsertLabels`, extended to replace semantics: delete local label rows absent
+  from an authoritative listing. Labels are catalog data, not user mail state — no tombstone subtlety, and
+  `thread_labels` rows are left alone (membership reconciliation owns those). Seeding already passes an
+  authoritative list, so replace semantics hold there too.
+- Wrap the effect in its own try/catch: a `labels.list` failure leaves the mail poll green and the footer
+  calm, matching the outbound mirror's best-effort posture.
+- Broadcast `mail:changed` only when the catalog actually changed, so the picker refreshes without
+  gratuitous repaints.
+
+### Testing and done condition
+
+Unit: the poller invokes the effect once per cycle, a throwing effect does not fail the cycle, and
+`upsertLabels` covers add/rename/delete. E2e (seeded): change a label through the seed-reload seam (extend
+it to labels if needed) and assert the picker shows the new name after a poll tick. Done when a label
+created or renamed in Gmail web appears in Attn within one poll interval, verify green.
 
 ---
 

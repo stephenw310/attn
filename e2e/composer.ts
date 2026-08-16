@@ -27,6 +27,10 @@ export class ComposerPage {
     return this.page.getByTestId('composer-subject')
   }
 
+  get from(): Locator {
+    return this.page.getByTestId('composer-from')
+  }
+
   get editor(): Locator {
     return this.page.getByTestId('composer-editor')
   }
@@ -77,6 +81,11 @@ export class ComposerPage {
         this.chips(field).evaluateAll((chips) => chips.map((chip) => chip.getAttribute('data-email')))
       )
       .toEqual(emails)
+  }
+
+  async expectFrom(email: string): Promise<void> {
+    await expect(this.from).toHaveAttribute('data-email', email)
+    await expect(this.from).toContainText(email)
   }
 
   async typeBody(text: string): Promise<void> {

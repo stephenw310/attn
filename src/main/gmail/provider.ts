@@ -51,11 +51,10 @@ export class GmailMailProvider implements MailProvider {
     options?: ProviderRequestOptions
   ): Promise<string> {
     const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
+    const requestOptions = { retryTransient: false, signal: options?.signal }
     const result = draft.id
-      ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, {
-          signal: options?.signal
-        })
-      : await this.client.post<{ id: string }>('/drafts', body, { signal: options?.signal })
+      ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, requestOptions)
+      : await this.client.post<{ id: string }>('/drafts', body, requestOptions)
     return result.id
   }
 
@@ -97,7 +96,10 @@ export class GmailMailProvider implements MailProvider {
   }
 
   async deleteDraft(id: string, options?: ProviderRequestOptions): Promise<void> {
-    await this.client.delete(`/drafts/${encodeURIComponent(id)}`, { signal: options?.signal })
+    await this.client.delete(`/drafts/${encodeURIComponent(id)}`, {
+      retryTransient: false,
+      signal: options?.signal
+    })
   }
 
   async listDrafts(pageToken?: string, options?: ProviderRequestOptions): Promise<DraftPage> {
@@ -249,7 +251,7 @@ export class GmailMailProvider implements MailProvider {
         await this.client.get<{ data?: string }>(
           `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
           undefined,
-          options
+          { signal: options?.signal }
         )
       ).data
     } catch (error) {

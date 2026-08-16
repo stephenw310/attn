@@ -85,15 +85,17 @@ export async function saveDraftCheckpoint(
   threadId: string | null = null,
   signal?: AbortSignal
 ): Promise<string | null> {
-  if (!provider.saveDraft) return null
+  const saveDraft = provider.saveDraft?.bind(provider)
+  if (!saveDraft) return null
   const request = threadId ? { id, raw, threadId } : { id, raw }
+  const save = (next: typeof request): Promise<string> =>
+    signal ? saveDraft(next, { signal }) : saveDraft(next)
   try {
-    return await (signal ? provider.saveDraft(request, { signal }) : provider.saveDraft(request))
+    return await save(request)
   } catch (error) {
     if (!(id && error instanceof GmailApiError && error.status === 404)) throw error
     if (!onRemoteMissing()) return null
-    const replacement = threadId ? { id: null, raw, threadId } : { id: null, raw }
-    return signal ? provider.saveDraft(replacement, { signal }) : provider.saveDraft(replacement)
+    return save(threadId ? { id: null, raw, threadId } : { id: null, raw })
   }
 }
 

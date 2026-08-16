@@ -707,11 +707,27 @@ describe('OutboxSender effect layer', () => {
     ).trigger()
     expect(quotaStore.row()).toMatchObject({ state: 'queued', attempts: 1, verify_attempts: 0 })
 
-    const invalidStore = new FakeOutboxDb(fakeRow({ to_json: '[]' }))
+    const invalidStore = new FakeOutboxDb(fakeRow())
     const notify = vi.fn()
-    await effectSender(invalidStore, effectProvider(), { notify }).trigger()
-    expect(invalidStore.row().state).toBe('failed')
-    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed' }))
+    await effectSender(
+      invalidStore,
+      effectProvider({
+        createDraft: vi.fn(async () => {
+          throw new GmailApiError(400, 'gmail /drafts failed (400): provider diagnostic blob')
+        })
+      }),
+      { notify }
+    ).trigger()
+    expect(invalidStore.row()).toMatchObject({
+      state: 'failed',
+      last_error: 'Gmail rejected this message — check its recipients and attachments'
+    })
+    expect(invalidStore.row()?.last_error).not.toContain('provider diagnostic blob')
+    expect(notify).toHaveBeenCalledWith({
+      kind: 'failed',
+      id: 'outbox-1',
+      error: 'Gmail rejected this message — check its recipients and attachments'
+    })
   })
 
   it('retries a stale remote attachment locator so draft sync can refresh it', async () => {

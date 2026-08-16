@@ -37,6 +37,15 @@ describe('draft mirror recovery', () => {
     expect(saveDraft).toHaveBeenCalledOnce()
   })
 
+  it('propagates cancellation to the active Gmail checkpoint', async () => {
+    const saveDraft = vi.fn(async () => 'draft-id')
+    const controller = new AbortController()
+
+    await saveDraftCheckpoint({ saveDraft }, null, 'raw', () => true, null, controller.signal)
+
+    expect(saveDraft).toHaveBeenCalledWith({ id: null, raw: 'raw' }, { signal: controller.signal })
+  })
+
   it('treats an already-deleted Gmail draft as a successful discard', async () => {
     const provider = {
       deleteDraft: vi.fn().mockRejectedValue(new GmailApiError(404, 'gone'))
@@ -123,6 +132,28 @@ describe('draft mirror attachments', () => {
     })()
     expect(String(streamError)).toContain('local attachment unavailable: notes.pdf')
     expect(String(streamError)).not.toContain(root)
+  })
+
+  it('propagates shutdown cancellation while hydrating a remote attachment', async () => {
+    const getAttachmentData = vi.fn(async () => Buffer.from('remote data').toString('base64url'))
+    const controller = new AbortController()
+    const remote = {
+      ...attachment(''),
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    await loadDraftMimeAttachments(
+      'draft-1',
+      [remote],
+      { getAttachmentData } as unknown as MailActionProvider,
+      null,
+      controller.signal
+    )
+
+    expect(getAttachmentData).toHaveBeenCalledWith('message-1', 'attachment-1', {
+      signal: controller.signal
+    })
   })
 
   it('keeps local file bytes out of autosave while retaining inline and remote MIME parts', () => {

@@ -67,7 +67,7 @@ export class DraftMirrorExecutor {
     ])
     if (timeout) this.time.timers.clearTimeout(timeout)
     if (!timedOut) return
-    this.remoteAbortController?.abort(new Error('draft checkpoint shutdown'))
+    this.remoteAbortController?.abort(new Error('draft mirror shutdown'))
     await drain
   }
 
@@ -82,8 +82,8 @@ export class DraftMirrorExecutor {
     const controller = new AbortController()
     this.remoteAbortController = controller
     try {
-      // Finish the current remote checkpoint so its returned Gmail id reaches
-      // SQLite, then decline the next row once shutdown has started.
+      // Give the current checkpoint a bounded chance to persist its returned
+      // Gmail id, then decline the next row once shutdown has started.
       await this.drainDrafts(
         this.db,
         accountId,

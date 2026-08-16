@@ -27,6 +27,7 @@ import type { Draft } from '../../../shared/drafts'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
 import { formatBytes } from '../formatBytes'
+import type { ShowToast } from '../hooks/useToast'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
@@ -37,10 +38,11 @@ import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
 interface ComposerProps {
+  account: string
   draft: Draft
   initialError?: string | null
   onClose: () => void
-  onToast: (message: string, durationMs?: number) => void
+  onToast: ShowToast
 }
 
 function TrashIcon(): React.JSX.Element {
@@ -345,7 +347,13 @@ function ComposerCommandPlugin({ onAttach, onClose, onDiscard, onSend }: Command
   return null
 }
 
-export function Composer({ draft, initialError = null, onClose, onToast }: ComposerProps): React.JSX.Element {
+export function Composer({
+  account,
+  draft,
+  initialError = null,
+  onClose,
+  onToast
+}: ComposerProps): React.JSX.Element {
   const [to, setTo] = useState<MailAddress[]>(draft.to)
   const [cc, setCc] = useState<MailAddress[]>(draft.cc)
   const [bcc, setBcc] = useState<MailAddress[]>(draft.bcc)
@@ -489,7 +497,7 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
       .then(() => window.attn.outbox.send(draft.id))
       .then((result) => {
         onClose()
-        onToast('Sent — Undo (Z)', Math.max(1_000, result.sendAt - Date.now()))
+        onToast('Sent — Undo (Z)', { expiresAt: result.sendAt, countdown: true })
       })
       .catch((error: unknown) => {
         setClosing(false)
@@ -608,6 +616,14 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
       </header>
 
       <div className="mx-auto flex min-h-0 w-full max-w-[900px] flex-1 flex-col border-x border-edge bg-raised">
+        <div
+          className="flex min-h-10 shrink-0 items-center border-b border-edge px-4"
+          data-testid="composer-from"
+          data-email={account}
+        >
+          <span className="w-10 shrink-0 text-sm font-medium text-ink-faint">From</span>
+          <span className="min-w-0 truncate text-sm text-ink">{account}</span>
+        </div>
         <div className="relative">
           <RecipientField
             ref={toFieldRef}

@@ -25,7 +25,11 @@ describe('GmailMailProvider.saveDraft', () => {
     const provider = new GmailMailProvider({ post } as unknown as GmailClient)
 
     await expect(provider.saveDraft({ id: null, raw: 'cmF3' })).resolves.toBe('gmail-draft-1')
-    expect(post).toHaveBeenCalledWith('/drafts', { message: { raw: 'cmF3' } }, { signal: undefined })
+    expect(post).toHaveBeenCalledWith(
+      '/drafts',
+      { message: { raw: 'cmF3' } },
+      { retryTransient: false, signal: undefined }
+    )
   })
 
   it('updates the known Gmail draft id', async () => {
@@ -36,7 +40,7 @@ describe('GmailMailProvider.saveDraft', () => {
     expect(put).toHaveBeenCalledWith(
       '/drafts/gmail-draft-1',
       { message: { raw: 'bmV4dA' } },
-      { signal: undefined }
+      { retryTransient: false, signal: undefined }
     )
   })
 
@@ -48,7 +52,7 @@ describe('GmailMailProvider.saveDraft', () => {
     expect(post).toHaveBeenCalledWith(
       '/drafts',
       { message: { raw: 'cmF3', threadId: 'thread-1' } },
-      { signal: undefined }
+      { retryTransient: false, signal: undefined }
     )
   })
 
@@ -57,7 +61,41 @@ describe('GmailMailProvider.saveDraft', () => {
     const provider = new GmailMailProvider({ delete: deleteRequest } as unknown as GmailClient)
 
     await expect(provider.deleteDraft('gmail/draft 1')).resolves.toBeUndefined()
-    expect(deleteRequest).toHaveBeenCalledWith('/drafts/gmail%2Fdraft%201', { signal: undefined })
+    expect(deleteRequest).toHaveBeenCalledWith('/drafts/gmail%2Fdraft%201', {
+      retryTransient: false,
+      signal: undefined
+    })
+  })
+})
+
+describe('GmailMailProvider.saveDraft', () => {
+  it('propagates shutdown cancellation to a single checkpoint request', async () => {
+    const post = vi.fn(async () => ({ id: 'gmail-draft-1' }))
+    const provider = new GmailMailProvider({ post } as unknown as GmailClient)
+    const controller = new AbortController()
+
+    await provider.saveDraft({ id: null, raw: 'cmF3' }, { signal: controller.signal })
+
+    expect(post).toHaveBeenCalledWith(
+      '/drafts',
+      { message: { raw: 'cmF3' } },
+      { retryTransient: false, signal: controller.signal }
+    )
+  })
+})
+
+describe('GmailMailProvider.getAttachmentData', () => {
+  it('propagates shutdown cancellation to attachment hydration', async () => {
+    const get = vi.fn(async () => ({ data: 'cmVtb3Rl' }))
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+    const controller = new AbortController()
+
+    await expect(
+      provider.getAttachmentData('message/1', 'attachment/1', { signal: controller.signal })
+    ).resolves.toBe('cmVtb3Rl')
+    expect(get).toHaveBeenCalledWith('/messages/message%2F1/attachments/attachment%2F1', undefined, {
+      signal: controller.signal
+    })
   })
 })
 

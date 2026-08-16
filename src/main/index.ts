@@ -464,19 +464,24 @@ function registerTestIpc(): void {
       })
     }
   )
-  ipcMain.on(TEST_CHANNELS.remoteDraft, async (_event, remote: unknown, done?: (error?: string) => void) => {
-    const account = currentAccountId()
-    if (!db || !account || !remote || typeof remote !== 'object') {
-      done?.('invalid remote draft')
-      return
-    }
-    try {
-      await reconcileRemoteDraft(db, account, remote as Parameters<typeof reconcileRemoteDraft>[2])
-      broadcastMailChanged()
-      done?.()
-    } catch (error) {
-      done?.(error instanceof Error ? error.message : String(error))
-    }
+  ipcMain.on(TEST_CHANNELS.remoteDraft, (_event, remote: unknown, done?: (error?: string) => void) => {
+    // Inspector evaluation can interrupt a renderer-initiated SQLite read.
+    // Defer this test-only reconciliation onto the next main-loop turn.
+    setImmediate(() => {
+      const account = currentAccountId()
+      if (!db || !account || !remote || typeof remote !== 'object') {
+        done?.('invalid remote draft')
+        return
+      }
+      void reconcileRemoteDraft(db, account, remote as Parameters<typeof reconcileRemoteDraft>[2])
+        .then(() => {
+          broadcastMailChanged()
+          done?.()
+        })
+        .catch((error: unknown) => {
+          done?.(error instanceof Error ? error.message : String(error))
+        })
+    })
   })
 }
 

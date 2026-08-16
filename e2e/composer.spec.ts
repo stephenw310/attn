@@ -214,7 +214,29 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
   await composer.triggerSend()
 
   await expect(composer.root).toHaveCount(0)
-  await expect(page.getByTestId('toast')).toHaveText('Sent — Undo (Z)')
+  const toast = page.getByTestId('toast')
+  await expect(toast).toHaveText('Sent — Undo (Z)')
+  await expect(page.getByTestId('toast-countdown')).toBeVisible()
+  const timing = await toast.evaluate((element) => {
+    const durationMs = Number(element.getAttribute('data-toast-duration-ms'))
+    const expiresAt = Number(element.getAttribute('data-toast-expires-at'))
+    const shell = element.firstElementChild
+    const countdown = element.querySelector('.app-toast-countdown')
+    const cssTimeMs = (value: string): number =>
+      value.endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1_000
+    return {
+      durationMs,
+      expiresAt,
+      shellDurationMs: shell ? cssTimeMs(getComputedStyle(shell).animationDuration) : 0,
+      countdownDurationMs: countdown ? cssTimeMs(getComputedStyle(countdown).animationDuration) : 0,
+      countdownAnimation: countdown ? getComputedStyle(countdown).animationName : ''
+    }
+  })
+  expect(timing.durationMs).toBeGreaterThan(6_000)
+  expect(timing.expiresAt).toBeGreaterThan(Date.now() + 6_000)
+  expect(Math.abs(timing.shellDurationMs - timing.durationMs)).toBeLessThan(50)
+  expect(Math.abs(timing.countdownDurationMs - timing.durationMs)).toBeLessThan(50)
+  expect(timing.countdownAnimation).toBe('toast-countdown')
   await composer.expectPending(1)
   await page.keyboard.press('z')
 
@@ -443,6 +465,7 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(composer.root).toBeVisible()
   await expect(page.getByTestId('thread-list')).toBeHidden()
   await expect(page.getByTestId('footer-shortcuts')).toHaveCount(0)
+  await composer.expectFrom('seed@attn.test')
   const showCopies = page.getByTestId('composer-show-copies')
   await expect(showCopies).toBeVisible()
   await expect(showCopies).toHaveAttribute('aria-expanded', 'false')
