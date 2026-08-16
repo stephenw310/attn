@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation/composer). **M1 feature work is implemented and audit-clean; only the real-OS notification click-through smoke remains in `docs/M1-PLAN.md`. M2 is underway: R1, R2, R3, and T13 are shipped, T14 is in draft PR #38, and `docs/M2-PLAN.md` guides the remaining composer/outbox work.**
+Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation/composer). **This file records how to work in this repo, never project status: milestone state and task progress live in [docs/SPEC.md](docs/SPEC.md) §8 and the plan docs (`docs/M*-PLAN.md`), which are updated as part of shipping — do not record them here, where they rot.**
 
 This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
 
@@ -56,7 +56,7 @@ Violating these is a correctness bug, not a style preference:
   Treat the bridged value as untrusted attachment content; it is not confined to the main process.
 - **Local-first:** reads and writes hit the local SQLite store and apply optimistically. Never block the UI on the network.
 - **`action_queue` stores only user mail intents keyed by Gmail thread id.** Draft checkpoint/retry/delete work derives from `outbox` revisions and runs through `DraftMirrorExecutor`; never overload `action_queue.thread_id` with an outbox UUID or let best-effort draft backoff block triage.
-- **Normal shutdown quiesces an active Gmail draft checkpoint before SQLite closes.** A remote draft create is not idempotent: `DraftMirrorExecutor.stop()` finishes the current row so its returned id is durable, then declines further rows. Do not turn that wait back into a fire-and-forget teardown.
+- **Normal shutdown quiesces an active Gmail draft checkpoint before SQLite closes.** A remote draft create is not idempotent: mirror mutations are single-attempt, and `DraftMirrorExecutor.stop()` gives the current row five seconds to make its returned id durable before aborting it, awaits the canceled drain, then declines further rows. Do not turn that wait back into a fire-and-forget teardown.
 - **Every row is keyed by `account_id`** — the schema is multi-account-ready even though v1 ships single-account (SPEC D4).
 - **The product has no runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single current schema snapshot and every schema change bumps its version. Throwaway profiles may be deleted and re-synced. When a maintainer needs to preserve a real dogfood database across an additive schema bump, use the manual local-upgrade procedure below; never improvise by deleting the whole profile or its `tokens.bin`.
 - Secrets live in the OS keychain via `safeStorage`; `oauth.config.json` is gitignored and must never be committed or read into a test.
@@ -94,8 +94,9 @@ Every task that bumps the schema must state its exact local-development DDL in t
 AGENTS.md            This file — the working agreement, shared by every agent tool
 .claude/             Claude Code config: CLAUDE.md (imports this file), settings, hooks
 docs/SPEC.md         Product & technical spec — source of truth for behavior
-docs/M1-PLAN.md      Shipped M1 task record + the remaining notification smoke
-docs/M2-PLAN.md      Current milestone: refactors + composer/outbox task guide
+docs/M1-PLAN.md      M1 task guide: triage core
+docs/M2-PLAN.md      M2 task guide: composer, drafts, send, exactly-once outbox
+docs/M3-PLAN.md      M3 task guide: sync restructure + find & focus
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies
 src/main/            Main process: windows, OAuth, SQLite (db/), Gmail (gmail/, sync/)

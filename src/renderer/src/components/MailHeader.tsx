@@ -6,7 +6,15 @@ import { Kbd } from './Kbd'
 const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
 const QUEUE_METER_STEPS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
 
-function QueueReadout({ unread, pending }: { unread: number | null; pending: number }): React.JSX.Element {
+function QueueReadout({
+  unread,
+  pending,
+  onOpenOutbox
+}: {
+  unread: number | null
+  pending: number
+  onOpenOutbox?: () => void
+}): React.JSX.Element {
   const lit = Math.min(unread ?? 0, 10)
   return (
     <div data-testid="queue-readout" className="flex items-center gap-3 text-xs text-ink-faint">
@@ -27,7 +35,17 @@ function QueueReadout({ unread, pending }: { unread: number | null; pending: num
       ) : (
         <span className="font-medium">at zero</span>
       )}
-      {pending > 0 && <span data-testid="pending-count">· {pending} pending</span>}
+      {pending > 0 && (
+        <button
+          type="button"
+          data-testid="pending-count"
+          disabled={!onOpenOutbox}
+          className="cursor-pointer rounded px-1 py-0.5 hover:bg-active hover:text-ink-dim disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit"
+          onClick={onOpenOutbox}
+        >
+          · {pending} pending
+        </button>
+      )}
     </div>
   )
 }
@@ -127,7 +145,7 @@ function AccountMenu({
 }
 
 interface MailHeaderProps {
-  view: 'inbox' | 'snoozed' | 'drafts'
+  view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   unreadCount: number | null
   pendingCount: number
   selectionCount: number
@@ -135,11 +153,21 @@ interface MailHeaderProps {
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
   onSwitchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
+  onOpenOutbox: () => void
 }
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
-  const { view, unreadCount, pendingCount, selectionCount, composerOpen, status, onStatus, onSwitchView } =
-    props
+  const {
+    view,
+    unreadCount,
+    pendingCount,
+    selectionCount,
+    composerOpen,
+    status,
+    onStatus,
+    onSwitchView,
+    onOpenOutbox
+  } = props
   return (
     <header className="app-drag flex items-center gap-6 border-b border-edge px-6 py-3">
       <div className="text-base font-bold tracking-tight">
@@ -189,7 +217,11 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
             {selectionCount} selected
           </span>
         )}
-        <QueueReadout unread={unreadCount} pending={pendingCount} />
+        <QueueReadout
+          unread={unreadCount}
+          pending={pendingCount}
+          onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
+        />
         <AccountMenu status={status} onStatus={onStatus} />
       </div>
     </header>

@@ -1,4 +1,5 @@
-export type CommandContext = 'list' | 'reader' | 'mail' | 'composer' | 'global'
+export type CommandContext = 'list' | 'reader' | 'outbox' | 'navigation' | 'mail' | 'composer' | 'global'
+type ShortcutContext = 'list' | 'reader' | 'outbox'
 
 interface CommandSpec {
   title: string
@@ -8,8 +9,8 @@ interface CommandSpec {
 }
 
 export const COMMAND_SPECS = {
-  'navigate.next': { title: 'Next conversation', shortcut: 'j', context: 'mail' },
-  'navigate.previous': { title: 'Previous conversation', shortcut: 'k', context: 'mail' },
+  'navigate.next': { title: 'Next item', shortcut: 'j', context: 'navigation' },
+  'navigate.previous': { title: 'Previous item', shortcut: 'k', context: 'navigation' },
   'selection.toggle': { title: 'Toggle selection', shortcut: 'x', context: 'mail' },
   'selection.extendNext': {
     title: 'Extend selection to next conversation',
@@ -30,6 +31,9 @@ export const COMMAND_SPECS = {
   'view.inbox': { title: 'Go to Inbox', shortcut: 'g i', context: 'global' },
   'view.snoozed': { title: 'Go to Snoozed', shortcut: 'g h', context: 'global' },
   'view.drafts': { title: 'Go to Drafts', shortcut: 'g d', context: 'global' },
+  'view.outbox': { title: 'Go to Outbox', shortcut: 'g o', context: 'global' },
+  'outbox.open': { title: 'Open Outbox message', shortcut: 'Enter', context: 'outbox' },
+  'outbox.close': { title: 'Back from Outbox', shortcut: 'Escape', context: 'outbox' },
   'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
   'composer.reply': { title: 'Reply', shortcut: 'r', context: 'reader' },
   'composer.replyAll': {
@@ -105,18 +109,18 @@ export function listCommands(): readonly Command[] {
   return commands
 }
 
-function normalizedKey(event: KeyboardEvent, context: 'list' | 'reader'): string {
+function normalizedKey(event: KeyboardEvent, context: ShortcutContext): string {
   // Arrows alias to J/K so navigation and range selection accept either. A bare
   // arrow in the reader scrolls instead — readingScrollDelta claims it before
   // dispatch reaches here — but Shift+Arrow keeps extending the selection in
   // both contexts rather than becoming a dead key while reading.
-  const aliasesArrows = context === 'list' || event.shiftKey
+  const aliasesArrows = context === 'list' || context === 'outbox' || event.shiftKey
   if (aliasesArrows && event.key === 'ArrowDown') return 'j'
   if (aliasesArrows && event.key === 'ArrowUp') return 'k'
   return event.key.toLowerCase()
 }
 
-function matchesShortcut(event: KeyboardEvent, shortcut: string, context: 'list' | 'reader'): boolean {
+function matchesShortcut(event: KeyboardEvent, shortcut: string, context: ShortcutContext): boolean {
   if (shortcut.includes(' ')) return false
   const normalizedShortcut = shortcut.toLowerCase()
   const expectsShift = normalizedShortcut.startsWith('shift+')
@@ -132,8 +136,13 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string, context: 'list'
   return !isLetter || !event.shiftKey
 }
 
-function matchesContext(command: Command, context: 'list' | 'reader'): boolean {
-  return command.context === 'global' || command.context === 'mail' || command.context === context
+function matchesContext(command: Command, context: ShortcutContext): boolean {
+  return (
+    command.context === 'global' ||
+    command.context === 'navigation' ||
+    (command.context === 'mail' && context !== 'outbox') ||
+    command.context === context
+  )
 }
 
 function commandShortcuts(command: Command): readonly string[] {
@@ -143,7 +152,7 @@ function commandShortcuts(command: Command): readonly string[] {
 // Chord shortcuts are written with a space ("g i"): the prefix key opens a short
 // window in which the next key completes the command. Prefixes are derived from
 // the registry so registering a new chord needs no change to keyboard dispatch.
-export function isChordPrefix(key: string, context: 'list' | 'reader'): boolean {
+export function isChordPrefix(key: string, context: ShortcutContext): boolean {
   const prefix = `${key.toLowerCase()} `
   return commands.some(
     (command) =>
@@ -157,7 +166,7 @@ export function chordKey(event: KeyboardEvent): string | null {
   return event.key.toLowerCase()
 }
 
-export function findCommandByShortcut(shortcut: string, context: 'list' | 'reader'): Command | null {
+export function findCommandByShortcut(shortcut: string, context: ShortcutContext): Command | null {
   const normalized = shortcut.toLowerCase()
   return (
     commands.find(
@@ -168,7 +177,7 @@ export function findCommandByShortcut(shortcut: string, context: 'list' | 'reade
   )
 }
 
-export function matchKey(event: KeyboardEvent, context: 'list' | 'reader'): Command | null {
+export function matchKey(event: KeyboardEvent, context: ShortcutContext): Command | null {
   // Tab always belongs to native focus traversal. Shortcut-less commands remain
   // available to the future command palette without entering keyboard dispatch.
   if (event.ctrlKey || event.metaKey || event.altKey || event.key === 'Tab') return null

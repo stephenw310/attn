@@ -78,7 +78,7 @@ interface ConversationViewProps {
   selected: DisplayThread
   selectedIndex: number
   threadCount: number
-  view: 'inbox' | 'snoozed' | 'drafts'
+  view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   conversation: DisplayConversation | null
   account: string | null
   online: boolean
@@ -166,7 +166,14 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
           className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
           onClick={onClose}
         >
-          <span aria-hidden>←</span> {view === 'inbox' ? 'Inbox' : view === 'snoozed' ? 'Snoozed' : 'Drafts'}
+          <span aria-hidden>←</span>{' '}
+          {view === 'inbox'
+            ? 'Inbox'
+            : view === 'snoozed'
+              ? 'Snoozed'
+              : view === 'outbox'
+                ? 'Outbox'
+                : 'Drafts'}
         </button>
         <h1
           data-testid="conversation-subject"

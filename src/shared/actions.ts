@@ -6,4 +6,5 @@ export type TriageAction =
 
 export interface TriageResult {
   label: string
+  reopenDraftId?: string
 }
