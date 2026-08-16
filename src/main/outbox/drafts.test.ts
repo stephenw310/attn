@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import { publicDraftAttachment, type StoredDraftAttachment } from './draftAttachments'
-import { canonicalizeRendererDraft, discardDraft } from './drafts'
+import { canonicalizeRendererDraft, discardDraft, isEmptyDraft, requestDraftMirror } from './drafts'
 
 const stored: StoredDraftAttachment = {
   id: 'owned-attachment',
@@ -67,5 +67,31 @@ describe('draft lifecycle guards', () => {
         'closed-draft'
       )
     ).toBe(false)
+  })
+
+  it('treats HTML and plain-text quote content as meaningful mirror work', () => {
+    expect(isEmptyDraft({ ...emptyDraftInput(), bodyHtml: '<hr>' })).toBe(false)
+    expect(isEmptyDraft({ ...emptyDraftInput(), quoteText: 'Quoted text' })).toBe(false)
+
+    for (const content of [
+      { body_html: '<hr>', quote_html: '', quote_text: '' },
+      { body_html: '', quote_html: '', quote_text: 'Quoted text' }
+    ]) {
+      const db = {
+        prepare: vi.fn(() => ({
+          get: vi.fn(() => ({
+            to_json: '[]',
+            cc_json: '[]',
+            bcc_json: '[]',
+            subject: '',
+            body_text: '',
+            attachments_json: '[]',
+            ...content
+          }))
+        }))
+      } as unknown as Db
+
+      expect(requestDraftMirror(db, 'account', 'draft-1')).toBe(true)
+    }
   })
 })
