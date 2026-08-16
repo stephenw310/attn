@@ -14,6 +14,7 @@ import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { hydrateMissingThreadBodies } from './bodies'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 import type { DraftPage, ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
+import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './windows'
 
 export interface BackfillCallbacks {
   onProgress: (progress: BackfillProgress) => void
@@ -103,7 +104,7 @@ export async function runInboxBackfill(
         db,
         provider,
         accountId,
-        query: 'newer_than:12m',
+        query: INBOX_METADATA_WINDOW,
         labelIds: ['INBOX'],
         phase: 'metadata',
         initialPageToken: cursor.pageToken,
@@ -128,7 +129,7 @@ export async function runInboxBackfill(
         db,
         provider,
         accountId,
-        query: 'newer_than:90d',
+        query: INBOX_BODIES_WINDOW,
         labelIds: ['INBOX'],
         phase: 'bodies',
         initialPageToken: cursor.pageToken,
@@ -170,7 +171,7 @@ export async function runInboxBackfill(
         db,
         provider,
         accountId,
-        query: 'newer_than:12m',
+        query: ALL_MAIL_WINDOW,
         phase: 'all-mail',
         initialPageToken: cursor.pageToken,
         nextPhase: 'spam',

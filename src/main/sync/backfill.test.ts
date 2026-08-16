@@ -3,6 +3,7 @@ import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { planBackfillStart, runInboxBackfill } from './backfill'
 import type { MailProvider, ThreadIdPage } from './provider'
+import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './windows'
 
 interface FakeSyncState {
   backfill_cursor: string | null
@@ -63,18 +64,18 @@ describe('windowed backfill checkpoints', () => {
     const result = await runInboxBackfill(fakeDb(undefined), provider, callbacks)
 
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
-      q: 'newer_than:12m',
+      q: INBOX_METADATA_WINDOW,
       labelIds: ['INBOX'],
       pageToken: undefined
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, {
-      q: 'newer_than:90d',
+      q: INBOX_BODIES_WINDOW,
       labelIds: ['INBOX'],
       pageToken: undefined
     })
     // No label filter: the all-mail stage subsumes the retired SENT stage.
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(3, {
-      q: 'newer_than:12m',
+      q: ALL_MAIL_WINDOW,
       pageToken: undefined
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(4, {
@@ -133,7 +134,7 @@ describe('windowed backfill checkpoints', () => {
   it('skips threads already stored during the overlapping stages', async () => {
     const provider = emptyProvider()
     vi.mocked(provider.listThreadIds).mockImplementation(async (options): Promise<ThreadIdPage> => {
-      if (options?.q === 'newer_than:12m' && !options.labelIds) {
+      if (options?.q === ALL_MAIL_WINDOW && !options.labelIds) {
         return { threadIds: ['known', 'fresh'] }
       }
       return { threadIds: [] }
@@ -172,7 +173,7 @@ describe('windowed backfill checkpoints', () => {
 
     expect(provider.listDrafts).toHaveBeenCalledWith('page-2')
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
-      q: 'newer_than:12m',
+      q: ALL_MAIL_WINDOW,
       pageToken: undefined
     })
     expect(result).not.toBeNull()
@@ -192,12 +193,12 @@ describe('windowed backfill checkpoints', () => {
     )
 
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
-      q: 'newer_than:12m',
+      q: INBOX_METADATA_WINDOW,
       labelIds: ['INBOX'],
       pageToken: 'expired'
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, {
-      q: 'newer_than:12m',
+      q: INBOX_METADATA_WINDOW,
       labelIds: ['INBOX'],
       pageToken: undefined
     })
@@ -217,16 +218,13 @@ describe('windowed backfill checkpoints', () => {
     expect(recovered).toEqual(emptyResult)
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ q: 'newer_than:12m', labelIds: ['INBOX'] })
+      expect.objectContaining({ q: INBOX_METADATA_WINDOW, labelIds: ['INBOX'] })
     )
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ q: 'newer_than:90d', labelIds: ['INBOX'] })
+      expect.objectContaining({ q: INBOX_BODIES_WINDOW, labelIds: ['INBOX'] })
     )
-    expect(provider.listThreadIds).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({ q: 'newer_than:12m' })
-    )
+    expect(provider.listThreadIds).toHaveBeenNthCalledWith(3, expect.objectContaining({ q: ALL_MAIL_WINDOW }))
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(
       4,
       expect.objectContaining({ labelIds: ['SPAM'], includeSpamTrash: true })
