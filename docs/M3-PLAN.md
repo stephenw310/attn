@@ -86,13 +86,13 @@ The same column fixes a second known wrinkle: a Gmail-side reply draft arriving 
 
 - Add `labels_json TEXT` to `messages`, written from `msg.labelIds` in the same loop that builds `labelUnion`. Keep `thread_labels` as the thread-level projection — mailbox list queries stay fast against it — but let per-message queries (conversation rendering, Trash/Spam membership, draft exclusion) read the new column.
 - **Metadata-only refetches must not clobber it.** `persistThread`'s upsert already guards `attachments_json` behind `@metadata_only`; label ids *are* present on metadata-format fetches, so `labels_json` can be written unconditionally — assert that in a test rather than assuming it.
-- Decide and document the thread-level rule that follows: a thread belongs to TRASH/SPAM for view purposes only when **every** message carries that label; mixed threads stay in All Mail. Encode it in one query helper, not per call site.
+- Decide and document the view rules that follow Gmail's own semantics: **Trash and Spam list any thread with at least one message carrying that label** — a single deleted message must be findable in Trash even though its conversation lives on — while **All Mail lists any thread with at least one message outside SPAM/TRASH**. A mixed thread therefore appears in both, and each view renders the mailbox-appropriate message subset: normal reading contexts exclude trashed/spammed messages, the Trash/Spam reader surfaces them. Encode membership in one query helper, not per call site.
 - Update the reader to exclude `DRAFT`-labeled messages from the conversation body, deferring to M2's composer for those.
 - **Schema:** bump `CURRENT_SCHEMA_VERSION`. Local dogfood DDL: `ALTER TABLE messages ADD COLUMN labels_json TEXT;` plus the `PRAGMA user_version` bump in the same `BEGIN IMMEDIATE … COMMIT`. Existing rows read as `NULL` and are repopulated by ordinary refetches; note in the PR that a mixed-label thread stays thread-level-only until its next fetch.
 
 ### Testing and done condition
 
-Unit: the persist path stores per-message labels from both `full` and `metadata` fetches; the all-messages-labeled rule for thread membership; draft exclusion. E2e: a seeded fixture thread with one TRASH message renders fully in the conversation view and does not appear in a Trash-filtered query. Done when a partially-trashed thread is representable and the reader never shows a draft as sent mail.
+Unit: the persist path stores per-message labels from both `full` and `metadata` fetches; the any-message membership rule for Trash/Spam and the outside-SPAM/TRASH rule for All Mail; draft exclusion. E2e: a seeded fixture thread with one TRASH message appears in both the All Mail and Trash membership queries, and normal reading contexts render its conversation without the trashed message. Done when a partially-trashed thread is discoverable in Trash *and* alive in All Mail, and the reader never shows a draft as sent mail.
 
 ---
 
@@ -144,13 +144,13 @@ Unit: cursor routing and resume across every new phase, including the retired `s
 ### Design and implementation
 
 - Generalize to **per-label membership reconciliation**: for each cached system label, page its ids (ids only — ~10 units per page, no per-thread fetch) and apply the same add/remove reducer path, with `replayPendingThreadDeltas` preserving local intent exactly as it does today. One implementation, driven by a list of labels, replaces the hardcoded INBOX call.
-- Add a **tombstone pass**: a thread present locally but absent from every re-listed label set no longer exists server-side (purged Trash/Spam, deleted mail) and gets `deleteThread`. Be conservative — only conclude absence from label sets that were listed to exhaustion in the same run, never from a partial page, or a network truncation will delete real mail.
+- Add a **tombstone pass — and never conclude deletion from system-label absence.** An archived, read, unstarred thread legitimately carries no system label at all, so "absent from every re-listed system label" describes most archived mail; deleting on that signal would destroy valid cached bodies, search results, and contact contributions. Existence has exactly two trustworthy signals: absence from an **unfiltered thread-id listing walked to exhaustion in the same run plus the SPAM and TRASH listings** (the unfiltered walk excludes both), or a per-thread `threads.get` returning 404. Membership reconciliation therefore never deletes; the tombstone pass runs only when a full existence sweep is in hand (expiry recovery, a lifetime re-walk), or it verifies each candidate individually and deletes on 404 alone. Partial pages prove nothing — a network truncation must never delete real mail.
 - **Both the backfill's reconcile stage and expiry recovery call the same helper.** Two callers, one behavior.
 - Reconcile is inherently a full-listing operation, so keep it bounded: ids only, no bodies, and let the M1 offline/retry routing handle interruption. A long lifetime sweep will very likely span a `historyId` expiry — make that interaction explicit and tested rather than discovered.
 
 ### Testing and done condition
 
-Unit: per-label reconcile across add/remove/no-change; the tombstone rule, including the negative case where a truncated listing must **not** delete; pending local deltas replayed on top of server truth. E2e: a seeded store with a thread absent from a re-listed label loses that membership and, when absent everywhere, is removed. Done when a week offline followed by a relaunch converges every cached label to server truth without ghost rows, and no local pending action is lost in the process.
+Unit: per-label reconcile across add/remove/no-change; the tombstone rule, including its two negative cases — an archived thread with **no** system label survives reconcile untouched, and a truncated listing must **not** delete; pending local deltas replayed on top of server truth. E2e: a seeded store with a thread absent from a re-listed label loses that membership, and one absent from an exhausted existence sweep (or 404ing on direct fetch) is removed. Done when a week offline followed by a relaunch converges every cached label to server truth without ghost rows, archived label-less mail survives, and no local pending action is lost in the process.
 
 ---
 
