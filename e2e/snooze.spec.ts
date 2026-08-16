@@ -95,7 +95,7 @@ test('undoes reminder changes and archive without losing the original due time',
   const originalDue = await rows.first().getByTestId('chip-snooze-due').textContent()
 
   await page.keyboard.press('h')
-  await page.getByTestId('snooze-preset-next-week').click()
+  await page.getByTestId('snooze-preset-later-today').click()
   await expect(rows.first().getByTestId('chip-snooze-due')).not.toHaveText(originalDue ?? '')
   await page.keyboard.press('z')
   await expect(rows).toHaveCount(1)
