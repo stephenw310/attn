@@ -20,6 +20,7 @@ import type {
   SyncState,
   ThreadRow
 } from './mail'
+import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
 
 export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',
@@ -37,6 +38,11 @@ export const IPC_CHANNELS = {
   draftDiscard: 'draft:discard',
   draftMirror: 'draft:mirror',
   draftTakeRecovered: 'draft:takeRecovered',
+  outboxSend: 'outbox:send',
+  outboxUndoSend: 'outbox:undoSend',
+  outboxReopen: 'outbox:reopen',
+  outboxListPending: 'outbox:listPending',
+  outboxChanged: 'outbox:changed',
   syncGetState: 'sync:getState',
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
@@ -74,6 +80,8 @@ export const TEST_CHANNELS = {
   updateMessageBody: 'attn:test:updateMessageBody',
   failNextDraftSave: 'attn:test:failNextDraftSave',
   markDraftMirrored: 'attn:test:markDraftMirrored',
+  setUndoSendDelay: 'attn:test:setUndoSendDelay',
+  failOutbox: 'attn:test:failOutbox',
   remoteDraft: 'attn:test:remoteDraft'
 } as const
 
@@ -107,6 +115,10 @@ export interface InvokeChannels {
   [IPC_CHANNELS.draftDiscard]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftMirror]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftTakeRecovered]: { args: []; result: Draft | null }
+  [IPC_CHANNELS.outboxSend]: { args: [draftId: string]; result: QueueSendResult }
+  [IPC_CHANNELS.outboxUndoSend]: { args: [outboxId: string]; result: ReopenOutboxResult }
+  [IPC_CHANNELS.outboxReopen]: { args: [outboxId: string]; result: ReopenOutboxResult }
+  [IPC_CHANNELS.outboxListPending]: { args: []; result: OutboxItem[] }
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: string | null }
@@ -138,6 +150,7 @@ export interface InvokeChannels {
 }
 
 export interface BroadcastChannels {
+  [IPC_CHANNELS.outboxChanged]: OutboxChanged
   [IPC_CHANNELS.mailChanged]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined

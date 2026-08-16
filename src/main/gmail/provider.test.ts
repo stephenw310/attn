@@ -20,7 +20,7 @@ describe('GmailMailProvider.listThreadIds', () => {
 })
 
 describe('GmailMailProvider.saveDraft', () => {
-  it('creates a Gmail draft without exposing a send endpoint', async () => {
+  it('creates a Gmail draft for checkpointing or the outbox sender', async () => {
     const post = vi.fn(async () => ({ id: 'gmail-draft-1' }))
     const provider = new GmailMailProvider({ post } as unknown as GmailClient)
 
@@ -46,12 +46,81 @@ describe('GmailMailProvider.saveDraft', () => {
     })
   })
 
-  it('deletes a mirrored Gmail draft without exposing a send endpoint', async () => {
+  it('deletes a mirrored Gmail draft', async () => {
     const deleteRequest = vi.fn(async () => {})
     const provider = new GmailMailProvider({ delete: deleteRequest } as unknown as GmailClient)
 
     await expect(provider.deleteDraft('gmail/draft 1')).resolves.toBeUndefined()
     expect(deleteRequest).toHaveBeenCalledWith('/drafts/gmail%2Fdraft%201')
+  })
+})
+
+describe('GmailMailProvider outbox operations', () => {
+  it('creates once without the generic transient retry loop, then updates by durable id', async () => {
+    const post = vi.fn(async () => ({ id: 'draft-1' }))
+    const put = vi.fn(async () => ({ id: 'draft-1' }))
+    const provider = new GmailMailProvider({ post, put } as unknown as GmailClient)
+
+    await expect(provider.createDraft({ raw: 'cmF3', threadId: 'thread-1' })).resolves.toBe('draft-1')
+    expect(post).toHaveBeenCalledWith(
+      '/drafts',
+      { message: { raw: 'cmF3', threadId: 'thread-1' } },
+      { retryTransient: false }
+    )
+    await expect(provider.updateDraft({ id: 'draft-1', raw: 'bmV4dA' })).resolves.toBe('draft-1')
+    expect(put).toHaveBeenCalledWith('/drafts/draft-1', { message: { raw: 'bmV4dA' } })
+  })
+
+  it('sends only a known durable Gmail draft id', async () => {
+    const post = vi.fn(async () => ({ id: 'message-1', threadId: 'thread-1' }))
+    const provider = new GmailMailProvider({ post } as unknown as GmailClient)
+
+    await expect(provider.sendDraft('draft/1')).resolves.toEqual({
+      id: 'message-1',
+      threadId: 'thread-1'
+    })
+    expect(post).toHaveBeenCalledWith('/drafts/send', { id: 'draft/1' })
+  })
+
+  it('finds an orphaned draft even when the draft-scoped search omits it', async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [{ id: 'draft-message', threadId: 'thread-1' }] })
+      .mockResolvedValueOnce({
+        drafts: [{ id: 'draft-1', message: { id: 'draft-message', threadId: 'thread-1' } }]
+      })
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+
+    await expect(provider.findByRfcId('<stable@attn.local>')).resolves.toEqual({
+      kind: 'draft',
+      draftId: 'draft-1',
+      messageId: 'draft-message',
+      threadId: 'thread-1'
+    })
+    expect(get).toHaveBeenNthCalledWith(1, '/messages', {
+      q: 'in:drafts rfc822msgid:<stable@attn.local>',
+      maxResults: '10',
+      includeSpamTrash: 'true'
+    })
+  })
+
+  it('finds an accepted non-draft message and returns null on bounded negatives', async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [{ id: 'sent-message', threadId: 'thread-2' }] })
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [] })
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+
+    await expect(provider.findByRfcId('<sent@attn.local>')).resolves.toEqual({
+      kind: 'message',
+      messageId: 'sent-message',
+      threadId: 'thread-2'
+    })
+    await expect(provider.findByRfcId('<missing@attn.local>')).resolves.toBeNull()
   })
 })
 

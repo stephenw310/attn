@@ -185,6 +185,123 @@ test('opens the first-class Drafts view with g d', async ({ page }) => {
   await expect(page.getByTestId('view-title')).toHaveText('Drafts')
 })
 
+test('validates recipients before queueing a send', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.typeBody('This body must stay recoverable when validation fails.')
+
+  await composer.triggerSend()
+
+  await expect(composer.root).toBeVisible()
+  await expect(page.getByTestId('composer-send-error')).toHaveText('Add at least one recipient')
+  await composer.expectPending(0)
+})
+
+test('queues durably and undo send reopens the intact composer', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.addRecipient('undo@example.com')
+  await composer.subject.fill('Undo send keeps this draft')
+  await composer.typeBody('Nothing reaches the provider before the local undo window closes.')
+
+  await composer.triggerSend()
+
+  await expect(composer.root).toHaveCount(0)
+  await expect(page.getByTestId('toast')).toHaveText('Sent — Undo (Z)')
+  await composer.expectPending(1)
+  await page.keyboard.press('z')
+
+  await expect(composer.root).toBeVisible()
+  await composer.expectRecipients(['undo@example.com'])
+  await expect(composer.subject).toHaveValue('Undo send keeps this draft')
+  await expect(composer.editor).toContainText('Nothing reaches the provider')
+  await composer.expectPending(0)
+})
+
+test('discovers a provider-gated send through the pending readout and Go to Outbox command', async ({
+  app,
+  boot,
+  page
+}) => {
+  await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 0), TEST_CHANNELS.setUndoSendDelay)
+  await page.getByTestId('thread-list').waitFor()
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.keyboard.press('j')
+  await expect.poll(() => selectedIndex(page)).toBe(1)
+  await page.keyboard.press('x')
+  await expect(page.getByTestId('selection-count')).toHaveText('1 selected')
+
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.addRecipient('queued@example.com')
+  await composer.subject.fill('Durable provider gate')
+  await composer.typeBody('This queued content survives a relaunch and reopens from Outbox.')
+  await composer.triggerSend()
+  await composer.expectPending(1)
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+
+  await page.getByTestId('pending-count').click()
+  const outbox = page.getByTestId('outbox-list')
+  await expect(outbox).toBeVisible()
+  await expect(page.getByTestId('selection-count')).toHaveCount(0)
+  await expect(page.getByTestId('outbox-row')).toHaveAttribute('data-outbox-state', 'queued')
+  await expect
+    .poll(async () => Number(await page.getByTestId('outbox-row').getAttribute('data-send-at')))
+    .toBeLessThanOrEqual(Date.now())
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await expect.poll(() => selectedIndex(page)).toBe(1)
+  await expect(page.getByTestId('selection-count')).toHaveText('1 selected')
+
+  ;({ page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await composer.expectPending(1)
+  await page.keyboard.press('g')
+  await page.keyboard.press('o')
+  await expect(page.getByTestId('outbox-list')).toBeVisible()
+  await page.getByTestId('outbox-row').click()
+
+  await expect(composer.root).toBeVisible()
+  await composer.expectRecipients(['queued@example.com'])
+  await expect(composer.subject).toHaveValue('Durable provider gate')
+  await expect(composer.editor).toContainText('survives a relaunch')
+  await composer.expectPending(0)
+})
+
+test('reopens a durable failed send even when its live event was missed', async ({ app, boot, page }) => {
+  await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 30), TEST_CHANNELS.setUndoSendDelay)
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.addRecipient('failed@example.com')
+  await composer.subject.fill('Durable send failure')
+  await composer.typeBody('The complete message must reopen after a background failure.')
+  await composer.triggerSend()
+  const id = await page.evaluate(async () => (await window.attn.outbox.listPending())[0]?.id)
+  if (!id) throw new Error('missing queued outbox row')
+  const failure = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) =>
+        ipcMain.emit(args.channel, {}, args.id, args.message, resolve)
+      ),
+    {
+      channel: TEST_CHANNELS.failOutbox,
+      id,
+      message: 'Recipient rejected by provider'
+    }
+  )
+  if (failure) throw new Error(failure)
+
+  ;({ page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await expect(page.getByTestId('composer-send-error')).toHaveText('Recipient rejected by provider')
+  await composer.expectRecipients(['failed@example.com'])
+  await expect(composer.subject).toHaveValue('Durable send failure')
+  await expect(composer.editor).toContainText('complete message must reopen')
+  await composer.expectPending(0)
+})
+
 test('opens the composer, validates chips, autocompletes locally, and saves on Escape', async ({
   page
 }, testInfo) => {
@@ -762,11 +879,18 @@ test('adopts closed remote edits, preserves Bcc, and defers an edit while open',
   const id = await composer.root.getAttribute('data-draft-id')
   if (!id) throw new Error('missing draft id')
   await page.keyboard.press('Escape')
-  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.id, args.gmailId), {
-    channel: TEST_CHANNELS.markDraftMirrored,
-    id,
-    gmailId: 'gmail-remote-1'
-  })
+  const mirrorError = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) =>
+        ipcMain.emit(args.channel, {}, args.id, args.gmailId, resolve)
+      ),
+    {
+      channel: TEST_CHANNELS.markDraftMirrored,
+      id,
+      gmailId: 'gmail-remote-1'
+    }
+  )
+  if (mirrorError) throw new Error(mirrorError)
   const reconcile = async (subject: string, html: string): Promise<void> => {
     const error = await app.evaluate(
       ({ ipcMain }, args) =>

@@ -18,6 +18,7 @@ import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
 import { MailFooter } from './MailFooter'
 import { MailHeader } from './MailHeader'
+import { OutboxList } from './OutboxList'
 import { SnoozePicker } from './SnoozePicker'
 import { ThreadList } from './ThreadList'
 import { Toast } from './Toast'
@@ -27,22 +28,35 @@ interface InboxProps {
   onStatus: (status: AuthStatus) => void
 }
 
+type MailView = 'inbox' | 'snoozed' | 'drafts' | 'outbox'
+
 export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
-  const [view, setView] = useState<'inbox' | 'snoozed' | 'drafts'>('inbox')
+  const [view, setView] = useState<MailView>('inbox')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
+  const [composerError, setComposerError] = useState<string | null>(null)
   const [toast, showToast] = useToast()
   const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const selectedThreadIdRef = useRef<string | null>(null)
   const selectedDraftIdRef = useRef<string | null>(null)
-  const activeViewRef = useRef<'inbox' | 'snoozed' | 'drafts'>('inbox')
+  const activeViewRef = useRef<MailView>('inbox')
+  const outboxReturnRef = useRef<{
+    view: Exclude<MailView, 'outbox'>
+    selectedIndex: number
+    readerOpen: boolean
+  }>({
+    view: 'inbox',
+    selectedIndex: 0,
+    readerOpen: false
+  })
   const earliestExitIndexRef = useRef<number | null>(null)
   const resetAccountRef = useRef<string | null | undefined>(undefined)
   const composerOpeningRef = useRef(false)
+  const autoReopeningOutboxRef = useRef<string | null>(null)
 
   const activeAccount = status.email ?? null
   const {
@@ -52,6 +66,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setRealThreads,
     realSnoozedThreads,
     realDrafts,
+    realOutbox,
     refreshDrafts,
     realUnreadTotal,
     labels,
@@ -62,14 +77,15 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   } = useMailData(activeAccount, activeViewRef, selectedThreadIdRef, selectedDraftIdRef, setSelectedIndex)
   const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
   const online = networkOnline && sync.phase !== 'offline'
+  const backingMailView = view === 'outbox' ? outboxReturnRef.current.view : view
   const threads: DisplayThread[] = useMemo(
     () =>
-      view === 'inbox'
+      backingMailView === 'inbox'
         ? (realThreads ?? []).map(displayThread)
-        : view === 'snoozed'
+        : backingMailView === 'snoozed'
           ? (realSnoozedThreads ?? []).map(displaySnoozedThread)
           : [],
-    [realSnoozedThreads, realThreads, view]
+    [backingMailView, realSnoozedThreads, realThreads]
   )
   const { selectedIds, clearSelection, resetSelection, toggleFocusedSelection, extendSelectionTo } =
     useSelectionState(threads, selectedIndex, setSelectedIndex)
@@ -84,6 +100,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSnoozeOpen(false)
     setLabelTargetId(null)
     setComposerDraft(null)
+    setComposerError(null)
+    autoReopeningOutboxRef.current = null
     setExitingThreadIds(new Set())
     selectedThreadIdRef.current = null
     selectedDraftIdRef.current = null
@@ -105,7 +123,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [activeAccount])
 
   useEffect(() => {
-    const visibleCount = view === 'drafts' ? realDrafts.length : threads.length
+    const visibleCount =
+      view === 'drafts' ? realDrafts.length : view === 'outbox' ? realOutbox.length : threads.length
     setSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(visibleCount - 1, 0))))
     setExitingThreadIds((current) => {
       if (current.size === 0) return current
@@ -114,7 +133,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       return next.size === current.size ? current : next
     })
     if (view !== 'drafts' && threads.length === 0) setReaderOpen(false)
-  }, [realDrafts.length, threads, view])
+  }, [realDrafts.length, realOutbox.length, threads, view])
 
   const selected = threads[selectedIndex]
   const { conversation, scrollRef: conversationScrollRef } = useConversation({
@@ -143,12 +162,17 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [labelTarget, labelTargetId])
 
   useEffect(() => {
-    selectedThreadIdRef.current = selected?.id ?? null
-  }, [selected?.id])
+    if (view === 'inbox' || view === 'snoozed') selectedThreadIdRef.current = selected?.id ?? null
+  }, [selected?.id, view])
 
   useEffect(() => {
-    selectedDraftIdRef.current = view === 'drafts' ? (realDrafts[selectedIndex]?.id ?? null) : null
-  }, [realDrafts, selectedIndex, view])
+    selectedDraftIdRef.current =
+      view === 'drafts'
+        ? (realDrafts[selectedIndex]?.id ?? null)
+        : view === 'outbox'
+          ? (realOutbox[selectedIndex]?.id ?? null)
+          : null
+  }, [realDrafts, realOutbox, selectedIndex, view])
 
   const { retrySync, copySyncError } = useSyncActions(sync, showToast)
 
@@ -161,6 +185,27 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetId(null)
+  }, [])
+
+  const openOutbox = useCallback(() => {
+    if (view === 'outbox') return
+    outboxReturnRef.current = { view, selectedIndex, readerOpen }
+    activeViewRef.current = 'outbox'
+    selectedDraftIdRef.current = null
+    setView('outbox')
+    setSelectedIndex(0)
+    setReaderOpen(false)
+    setSnoozeOpen(false)
+    setLabelTargetId(null)
+  }, [readerOpen, selectedIndex, view])
+
+  const closeOutbox = useCallback(() => {
+    const previous = outboxReturnRef.current
+    activeViewRef.current = previous.view
+    selectedDraftIdRef.current = null
+    setView(previous.view)
+    setSelectedIndex(previous.selectedIndex)
+    setReaderOpen(previous.readerOpen)
   }, [])
 
   useEffect(() => {
@@ -212,7 +257,47 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [labelTarget, triage]
   )
 
+  const openOutboxItem = useCallback(
+    (index: number) => {
+      const item = realOutbox[index]
+      if (!item || !window.attn) return
+      if (item.state === 'sending') {
+        showToast('Sending in progress')
+        return
+      }
+      const request =
+        item.state === 'queued' ? window.attn.outbox.undoSend(item.id) : window.attn.outbox.reopen(item.id)
+      void request
+        .then((result) => {
+          if (!result.draft) {
+            if (result.error) showToast(result.error)
+            return
+          }
+          setComposerError(result.error)
+          setComposerDraft(result.draft)
+        })
+        .catch(() => showToast('Message could not be reopened'))
+    },
+    [realOutbox, showToast]
+  )
+
+  const reopenUndoDraft = useCallback((id: string) => {
+    if (!window.attn) return
+    void window.attn.draft
+      .get(id)
+      .then((draft) => {
+        if (!draft) return
+        setComposerError(null)
+        setComposerDraft(draft)
+      })
+      .catch(() => {})
+  }, [])
+
   const openSelected = useCallback(() => {
+    if (view === 'outbox') {
+      openOutboxItem(selectedIndex)
+      return
+    }
     if (view === 'drafts') {
       const draft = realDrafts[selectedIndex]
       if (!draft || !window.attn) return
@@ -228,7 +313,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (!thread) return
     selectedThreadIdRef.current = thread.id
     setReaderOpen(true)
-  }, [realDrafts, selectedIndex, threads, view])
+  }, [openOutboxItem, realDrafts, selectedIndex, threads, view])
   const closeReader = useCallback(() => setReaderOpen(false), [])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetId(null), [])
@@ -257,7 +342,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     void window.attn.draft
       .save(emptyDraftInput())
       .then(({ draft }) => {
-        if (draft) setComposerDraft(draft)
+        if (draft) {
+          setComposerError(null)
+          setComposerDraft(draft)
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -272,7 +360,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       void window.attn.draft
         .createReply(selected.id, kind)
         .then((draft) => {
-          if (draft) setComposerDraft(draft)
+          if (draft) {
+            setComposerError(null)
+            setComposerDraft(draft)
+          }
         })
         .catch(() => {})
         .finally(() => {
@@ -304,7 +395,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [closeSnooze, selected, triage])
 
   useInboxCommands({
-    threadCount: view === 'drafts' ? realDrafts.length : threads.length,
+    threadCount:
+      view === 'drafts' ? realDrafts.length : view === 'outbox' ? realOutbox.length : threads.length,
     selected,
     selectedCount: selectedIds.size,
     selectedIndex,
@@ -320,17 +412,21 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     openSelected,
     closeReader,
     switchView,
+    openOutbox,
+    closeOutbox,
     triage,
     openSnooze,
     openLabel,
     openComposer,
     openReply,
-    showToast
+    showToast,
+    reopenUndoDraft
   })
 
   useKeyboardDispatch({
     blocked: labelTarget !== undefined || composerDraft !== null,
     readerOpen,
+    outboxOpen: view === 'outbox',
     snoozeOpen,
     onCloseSnooze: closeSnooze,
     conversationScrollRef
@@ -338,17 +434,50 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   useSelectedRowScroll(selectedRowRef, selectedIndex, readerOpen)
 
+  useEffect(() => {
+    const reopening = autoReopeningOutboxRef.current
+    if (
+      reopening &&
+      !realOutbox.some(
+        (item) => item.id === reopening && (item.state === 'failed' || item.state === 'needs-review')
+      )
+    ) {
+      autoReopeningOutboxRef.current = null
+    }
+    if (!window.attn || !activeAccount || composerDraft || autoReopeningOutboxRef.current) return
+    const item = realOutbox.find(
+      (candidate) => candidate.state === 'failed' || candidate.state === 'needs-review'
+    )
+    if (!item) return
+    autoReopeningOutboxRef.current = item.id
+    void window.attn.outbox
+      .reopen(item.id)
+      .then((result) => {
+        if (!result.draft) {
+          autoReopeningOutboxRef.current = null
+          return
+        }
+        setComposerError(result.error ?? item.lastError ?? 'Message could not be sent')
+        setComposerDraft(result.draft)
+        showToast('Message could not be sent')
+      })
+      .catch(() => {
+        autoReopeningOutboxRef.current = null
+      })
+  }, [activeAccount, composerDraft, realOutbox, showToast])
+
   return (
     <div className="flex h-full flex-col">
       <MailHeader
         view={view}
         unreadCount={realUnreadTotal}
         pendingCount={pendingCount}
-        selectionCount={view === 'drafts' ? 0 : selectedIds.size}
+        selectionCount={view === 'inbox' || view === 'snoozed' ? selectedIds.size : 0}
         composerOpen={composerDraft !== null}
         status={status}
         onStatus={onStatus}
         onSwitchView={switchView}
+        onOpenOutbox={openOutbox}
       />
 
       <div className={`min-h-0 flex-1 ${composerDraft ? 'hidden' : 'flex'}`} aria-hidden={!!composerDraft}>
@@ -368,6 +497,18 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                   if (reopened) setComposerDraft(reopened)
                 })
                 .catch(() => {})
+            }}
+          />
+        ) : view === 'outbox' ? (
+          <OutboxList
+            items={realOutbox}
+            selectedIndex={selectedIndex}
+            selectedRowRef={selectedRowRef}
+            onBack={closeOutbox}
+            onOpen={(index) => {
+              setSelectedIndex(index)
+              selectedDraftIdRef.current = realOutbox[index]?.id ?? null
+              openOutboxItem(index)
             }}
           />
         ) : (
@@ -423,8 +564,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       {composerDraft && (
         <Composer
           draft={composerDraft}
+          initialError={composerError}
           onClose={() => {
             setComposerDraft(null)
+            setComposerError(null)
             void refreshDrafts().catch(() => {})
           }}
           onToast={showToast}
@@ -436,6 +579,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       {!composerDraft && (
         <MailFooter
           readerOpen={readerOpen}
+          outboxOpen={view === 'outbox'}
           sync={sync}
           networkOnline={networkOnline}
           onRetry={retrySync}

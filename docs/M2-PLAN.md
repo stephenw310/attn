@@ -629,7 +629,8 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 
 ### Implementation guide
 
-**Schema evolution from the T14A–T14D revision-10 snapshot** (update the current snapshot and bump to revision 11):
+**Schema evolution from the shipped T14A–T14D revision-11 snapshot** (update the current snapshot and bump
+to revision 12):
 
 ```sql
 ALTER TABLE outbox ADD COLUMN rfc_message_id TEXT;
@@ -639,9 +640,19 @@ ALTER TABLE outbox ADD COLUMN last_error TEXT;
 CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
 ```
 
-T16 owns the final revision-11 names and exact DDL if implementation discoveries change this list. The PR
-must update this block before merge, then use the `AGENTS.md` manual procedure for any preserved dogfood
-profile: all `ALTER` statements, index creation, and `PRAGMA user_version = 11` happen in one transaction.
+These are the final revision-12 names and exact additive local-development DDL. For a preserved dogfood
+profile, apply every statement plus the version stamp in one transaction under the `AGENTS.md` procedure:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE outbox ADD COLUMN rfc_message_id TEXT;
+ALTER TABLE outbox ADD COLUMN send_at INTEGER;
+ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE outbox ADD COLUMN last_error TEXT;
+CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
+PRAGMA user_version = 12;
+COMMIT;
+```
 
 - **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` (thin, e2e-covered).
 - Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.

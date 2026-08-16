@@ -19,7 +19,15 @@ import type {
   InlineImageRequest,
   InlineImageResult
 } from '../shared/mail'
-import { isTriageAction, pendingActionCount, performTriage, snoozeThreads, undoLast } from './actions'
+import {
+  dropOutboxSendUndo,
+  isTriageAction,
+  pendingActionCount,
+  performTriage,
+  recordOutboxSendUndo,
+  snoozeThreads,
+  undoLast
+} from './actions'
 import type { ActionExecutor } from './actions/executor'
 import { writeAttachment } from './attachments'
 import type { Db } from './db'
@@ -52,7 +60,15 @@ import {
 } from './outbox/drafts'
 import { addInlineImage, isSupportedInlineImageMimeType } from './outbox/inlineImages'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
+import {
+  listPendingOutbox,
+  pendingOutboxCount,
+  queueSend,
+  reopenPendingOutbox,
+  undoQueuedSend
+} from './outbox/queue'
 import { planReply } from './outbox/replyPlan'
+import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
 import { hydrateMissingThreadBodies } from './sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from './sync/bodyHydration'
@@ -89,9 +105,11 @@ export interface IpcContext {
   isSeeded: () => boolean
   executor: () => ActionExecutor | null
   draftMirrorExecutor: () => DraftMirrorExecutor | null
+  outboxSender: () => OutboxSender | null
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
   broadcastMailChanged: () => void
+  broadcastOutboxChanged: (change: import('../shared/outbox').OutboxChanged) => void
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
@@ -222,7 +240,7 @@ function cleanDraftSpool(id: string): void {
   const spoolRoot = resolve(app.getPath('userData'), 'outbox')
   const directory = resolve(spoolRoot, id)
   const relativePath = relative(spoolRoot, directory)
-  if (relativePath.startsWith('..') || isAbsolute(relativePath)) return
+  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) return
   void rm(directory, { recursive: true, force: true }).catch(() => {})
 }
 
@@ -447,6 +465,38 @@ export function registerIpc(context: IpcContext): () => void {
     return undefined
   })
   handle(IPC_CHANNELS.draftTakeRecovered, () => takeRecoveredDraft(context.db, requireAccount(context)))
+  handle(IPC_CHANNELS.outboxSend, (_event, id) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    const account = requireAccount(context)
+    const result = queueSend(context.db, account, id)
+    recordOutboxSendUndo(account, id)
+    context.broadcastOutboxChanged({ kind: 'changed' })
+    context.outboxSender()?.refresh()
+    return result
+  })
+  handle(IPC_CHANNELS.outboxUndoSend, (_event, id) => {
+    if (typeof id !== 'string' || id.length === 0) return { draft: null, error: 'Invalid message' }
+    const account = requireAccount(context)
+    const result = undoQueuedSend(context.db, account, id)
+    if (result.draft) dropOutboxSendUndo(account, id)
+    context.broadcastOutboxChanged({ kind: 'changed' })
+    context.outboxSender()?.refresh()
+    return result
+  })
+  handle(IPC_CHANNELS.outboxReopen, (_event, id) => {
+    if (typeof id !== 'string' || id.length === 0) return { draft: null, error: 'Invalid message' }
+    const account = requireAccount(context)
+    const result = reopenPendingOutbox(context.db, account, id)
+    if (result.draft) {
+      dropOutboxSendUndo(account, id)
+      context.broadcastOutboxChanged({ kind: 'changed' })
+    }
+    return result
+  })
+  handle(IPC_CHANNELS.outboxListPending, () => {
+    const account = context.currentAccountId()
+    return account ? listPendingOutbox(context.db, account) : []
+  })
   handle(IPC_CHANNELS.syncGetState, () => context.syncController()?.getState() ?? { phase: 'idle' })
   handle(IPC_CHANNELS.syncRetry, () => {
     context.syncController()?.retry()
@@ -603,12 +653,16 @@ export function registerIpc(context: IpcContext): () => void {
       context.scheduler()?.refresh()
       context.broadcastMailChanged()
       void context.executor()?.trigger()
+      if (result.reopenDraftId) {
+        context.outboxSender()?.refresh()
+        context.broadcastOutboxChanged({ kind: 'changed' })
+      }
     }
     return result
   })
   handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
     const account = context.currentAccountId()
-    return account ? pendingActionCount(context.db, account) : 0
+    return account ? pendingActionCount(context.db, account) + pendingOutboxCount(context.db, account) : 0
   })
   return () => bodyHydrator.stop()
 }

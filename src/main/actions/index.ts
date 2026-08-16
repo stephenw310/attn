@@ -5,10 +5,19 @@ import { actionLabel, inverseForThread, planAction } from './plan'
 
 type UndoAction = TriageAction | { kind: 'snoozeAt'; threadIds: string[]; dueAt: number }
 
-interface UndoEntry {
+interface TriageUndoEntry {
+  kind: 'triage'
   label: string
   undo: UndoAction[]
 }
+
+interface OutboxUndoEntry {
+  kind: 'outbox-send'
+  outboxId: string
+}
+
+type UndoEntry = TriageUndoEntry | OutboxUndoEntry
+
 const undoStacks = new Map<string, UndoEntry[]>()
 
 function undoStackFor(accountId: string): UndoEntry[] {
@@ -122,6 +131,7 @@ export function snoozeThreads(db: Db, accountId: string, threadIds: string[], du
   const label = threadIds.length === 1 ? 'Snoozed' : `${threadIds.length} snoozed`
   const undoStack = undoStackFor(accountId)
   undoStack.push({
+    kind: 'triage',
     label,
     undo
   })
@@ -139,7 +149,7 @@ export function performTriage(
   const undo = apply(db, accountId, action)
   if (recordUndo) {
     const undoStack = undoStackFor(accountId)
-    undoStack.push({ label, undo })
+    undoStack.push({ kind: 'triage', label, undo })
     if (undoStack.length > 50) undoStack.shift()
   }
   return { label }
@@ -148,6 +158,15 @@ export function performTriage(
 export function undoLast(db: Db, accountId: string): TriageResult | null {
   const entry = undoStackFor(accountId).pop()
   if (!entry) return null
+  if (entry.kind === 'outbox-send') {
+    const undone = db
+      .prepare(
+        `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, last_error = NULL,
+         updated_at = ? WHERE account_id = ? AND id = ? AND state = 'queued'`
+      )
+      .run(Date.now(), accountId, entry.outboxId).changes
+    return undone ? { label: 'Send undone', reopenDraftId: entry.outboxId } : { label: 'Already sent' }
+  }
   db.transaction(() => {
     for (const action of entry.undo) {
       if (action.kind === 'snoozeAt') applySnooze(db, accountId, action.threadIds, action.dueAt)
@@ -155,6 +174,25 @@ export function undoLast(db: Db, accountId: string): TriageResult | null {
     }
   })()
   return { label: `Undid ${entry.label.toLowerCase()}` }
+}
+
+export function recordOutboxSendUndo(accountId: string, outboxId: string): void {
+  const stack = undoStackFor(accountId)
+  stack.push({ kind: 'outbox-send', outboxId })
+  if (stack.length > 50) stack.shift()
+}
+
+export function dropOutboxSendUndo(accountId: string, outboxId: string): void {
+  const stack = undoStackFor(accountId)
+  let index = -1
+  for (let candidate = stack.length - 1; candidate >= 0; candidate--) {
+    const entry = stack[candidate]
+    if (entry.kind === 'outbox-send' && entry.outboxId === outboxId) {
+      index = candidate
+      break
+    }
+  }
+  if (index >= 0) stack.splice(index, 1)
 }
 
 export function clearUndo(accountId?: string): void {

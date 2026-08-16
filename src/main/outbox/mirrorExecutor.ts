@@ -38,6 +38,11 @@ export class DraftMirrorExecutor {
     return this.drainPromise ?? Promise.resolve()
   }
 
+  /** Let a queued send wait for any checkpoint that already selected its row. */
+  waitForIdle(): Promise<void> {
+    return this.drainPromise ?? Promise.resolve()
+  }
+
   private async drain(): Promise<void> {
     const accountId = this.accountId()
     if (!accountId) return

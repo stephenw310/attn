@@ -61,8 +61,8 @@ export class GmailClient {
     return this.request('GET', path, { params })
   }
 
-  async post<T>(path: string, body: unknown): Promise<T> {
-    return this.request('POST', path, { body })
+  async post<T>(path: string, body: unknown, options?: { retryTransient?: boolean }): Promise<T> {
+    return this.request('POST', path, { body, retryTransient: options?.retryTransient })
   }
 
   async put<T>(path: string, body: unknown): Promise<T> {
@@ -76,7 +76,11 @@ export class GmailClient {
   private async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
-    options: { params?: Record<string, string | string[]>; body?: unknown }
+    options: {
+      params?: Record<string, string | string[]>
+      body?: unknown
+      retryTransient?: boolean
+    }
   ): Promise<T> {
     const url = new URL(BASE + path)
     if (options.params) {
@@ -113,7 +117,11 @@ export class GmailClient {
       // quota windows need long backoff — wait into the next window. A proper
       // token-bucket limiter is deferred M2 hardening (docs/M2-PLAN.md).
       const quotaHit = res.status === 403 && /quota|rate ?limit/i.test(text)
-      if ((res.status === 429 || res.status >= 500 || quotaHit) && attempt < 7) {
+      if (
+        options.retryTransient !== false &&
+        (res.status === 429 || res.status >= 500 || quotaHit) &&
+        attempt < 7
+      ) {
         attempt++
         await sleep(Math.min(65_000, 1000 * 2 ** attempt) + Math.random() * 1000)
         continue

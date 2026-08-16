@@ -109,6 +109,26 @@ export interface ParsedRemoteDraft {
   fingerprint: string
 }
 
+/**
+ * Draft sync must not import a Gmail draft that is already owned by the send
+ * state machine. The RFC id clause also claims the one residual create-before-
+ * persist crash window without manufacturing a second local draft row.
+ */
+function claimNonEditableOutboxDraft(db: Db, accountId: string, remote: ProviderDraft): boolean {
+  const rfcMessageId = header(remote.message, 'Message-ID').trim()
+  return (
+    db
+      .prepare(
+        `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?
+         WHERE account_id = ? AND state NOT IN ('composing', 'drafted') AND (
+           gmail_draft_id = ? OR
+           (? <> '' AND gmail_draft_id IS NULL AND rfc_message_id = ?)
+         )`
+      )
+      .run(remote.id, remote.message.id, accountId, remote.id, rfcMessageId, rfcMessageId).changes > 0
+  )
+}
+
 export function remoteDraftKind(remote: ProviderDraft, localKind?: DraftKind): DraftKind {
   if (localKind) return localKind
   if (header(remote.message, 'In-Reply-To') || header(remote.message, 'References')) return 'reply'
@@ -306,6 +326,7 @@ export async function reconcileRemoteDraft(
   provider: Pick<MailProvider, 'getAttachmentData'> | null = null,
   now = Date.now()
 ): Promise<DraftConflictDecision> {
+  if (claimNonEditableOutboxDraft(db, accountId, value)) return 'local'
   const remote = await parseRemoteDraft(db, accountId, value, provider, now)
   const local = findLocalRow(db, accountId, remote)
   if (!local) {
@@ -349,11 +370,16 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
     (
       db
         .prepare(
-          `SELECT gmail_draft_id, gmail_message_id FROM outbox
-           WHERE account_id = ? AND gmail_draft_id IS NOT NULL AND state IN ('composing', 'drafted')`
+          `SELECT gmail_draft_id, gmail_message_id, state FROM outbox
+           WHERE account_id = ? AND gmail_draft_id IS NOT NULL
+             AND state IN ('composing', 'drafted', 'discarding', 'queued', 'sending', 'failed',
+                           'needs-review')`
         )
-        .all(accountId) as { gmail_draft_id: string; gmail_message_id: string | null }[]
-    ).map((row) => [row.gmail_draft_id, row.gmail_message_id])
+        .all(accountId) as { gmail_draft_id: string; gmail_message_id: string | null; state: string }[]
+    ).map((row) => [
+      row.gmail_draft_id,
+      { gmailMessageId: row.gmail_message_id, editable: row.state === 'composing' || row.state === 'drafted' }
+    ])
   )
   const remoteIds = new Set<string>()
   let pageToken: string | undefined
@@ -362,7 +388,9 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
     const page = await provider.listDrafts(pageToken)
     for (const summary of page.drafts) {
       remoteIds.add(summary.id)
-      if (summary.messageId && knownDrafts.get(summary.id) === summary.messageId) continue
+      const known = knownDrafts.get(summary.id)
+      if (known && !known.editable) continue
+      if (summary.messageId && known?.gmailMessageId === summary.messageId) continue
       const decision = await reconcileRemoteDraft(
         db,
         accountId,

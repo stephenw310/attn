@@ -9,7 +9,7 @@ interface Options {
   selectedCount: number
   selectedIndex: number
   readerOpen: boolean
-  view: 'inbox' | 'snoozed' | 'drafts'
+  view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   starOn: boolean
   markUnreadOn: boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
@@ -20,12 +20,15 @@ interface Options {
   openSelected: () => void
   closeReader: () => void
   switchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
+  openOutbox: () => void
+  closeOutbox: () => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
   openLabel: () => void
   openComposer: () => void
   openReply: (kind: Exclude<DraftKind, 'new'>) => void
   showToast: (message: string) => void
+  reopenUndoDraft: (id: string) => void
 }
 
 export function useInboxCommands(options: Options): void {
@@ -46,12 +49,15 @@ export function useInboxCommands(options: Options): void {
     openSelected,
     closeReader,
     switchView,
+    openOutbox,
+    closeOutbox,
     triage,
     openSnooze,
     openLabel,
     openComposer,
     openReply,
-    showToast
+    showToast,
+    reopenUndoDraft
   } = options
   useLayoutEffect(
     () =>
@@ -70,12 +76,16 @@ export function useInboxCommands(options: Options): void {
         createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
         createCommand('selection.extendPrevious', () => extendSelection(selectedIndex - 1)),
         ...(selectedCount > 0 ? [createCommand('selection.clear', clearSelection)] : []),
+        ...(view === 'outbox' ? [createCommand('outbox.close', closeOutbox)] : []),
         ...(readerOpen
           ? [createCommand('conversation.close', closeReader)]
-          : [createCommand('conversation.open', openSelected)]),
+          : view === 'outbox'
+            ? [createCommand('outbox.open', openSelected)]
+            : [createCommand('conversation.open', openSelected)]),
         createCommand('view.inbox', () => switchView('inbox')),
         createCommand('view.snoozed', () => switchView('snoozed')),
         createCommand('view.drafts', () => switchView('drafts')),
+        createCommand('view.outbox', openOutbox),
         createCommand('composer.new', openComposer),
         ...(readerOpen
           ? [
@@ -116,8 +126,10 @@ export function useInboxCommands(options: Options): void {
           void window.attn.mail
             .undo()
             .then((result) => {
-              if (result) showToast(result.label)
-              else preserveSelectionOnRefreshRef.current = true
+              if (result) {
+                showToast(result.label)
+                if (result.reopenDraftId) reopenUndoDraft(result.reopenDraftId)
+              } else preserveSelectionOnRefreshRef.current = true
             })
             .catch(() => {
               preserveSelectionOnRefreshRef.current = true
@@ -127,15 +139,18 @@ export function useInboxCommands(options: Options): void {
     [
       clearSelection,
       closeReader,
+      closeOutbox,
       extendSelection,
       markUnreadOn,
       openLabel,
       openComposer,
+      openOutbox,
       openReply,
       openSelected,
       openSnooze,
       preserveSelectionOnRefreshRef,
       readerOpen,
+      reopenUndoDraft,
       selected,
       selectedCount,
       selectedIndex,

@@ -7,6 +7,8 @@ import type {
   ProviderDraft,
   ProviderLabel,
   ProviderProfile,
+  ProviderSendResult,
+  RfcMessageMatch,
   ThreadIdPage
 } from '../sync/provider'
 import { GmailApiError, type GmailClient } from './client'
@@ -50,6 +52,18 @@ export class GmailMailProvider implements MailProvider {
     return result.id
   }
 
+  async createDraft(draft: { raw: string; threadId?: string | null }): Promise<string> {
+    const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
+    const result = await this.client.post<{ id: string }>('/drafts', body, { retryTransient: false })
+    return result.id
+  }
+
+  async updateDraft(draft: { id: string; raw: string; threadId?: string | null }): Promise<string> {
+    const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
+    const result = await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body)
+    return result.id
+  }
+
   async deleteDraft(id: string): Promise<void> {
     await this.client.delete(`/drafts/${encodeURIComponent(id)}`)
   }
@@ -71,6 +85,52 @@ export class GmailMailProvider implements MailProvider {
 
   getDraft(id: string): Promise<ProviderDraft> {
     return this.client.get<ProviderDraft>(`/drafts/${encodeURIComponent(id)}`, { format: 'full' })
+  }
+
+  sendDraft(id: string): Promise<ProviderSendResult> {
+    return this.client.post<ProviderSendResult>('/drafts/send', { id })
+  }
+
+  async findByRfcId(rfcMessageId: string): Promise<RfcMessageMatch | null> {
+    const messageId = rfcMessageId.trim().replace(/[\r\n]/g, '')
+    if (!messageId) return null
+    const query = `rfc822msgid:${messageId}`
+    const drafts = await this.client.get<{
+      messages?: { id: string; threadId?: string }[]
+    }>('/messages', { q: `in:drafts ${query}`, maxResults: '10', includeSpamTrash: 'true' })
+    const messages = await this.client.get<{
+      messages?: { id: string; threadId?: string }[]
+    }>('/messages', { q: query, maxResults: '10', includeSpamTrash: 'true' })
+    const candidates = new Map(
+      [...(drafts.messages ?? []), ...(messages.messages ?? [])].map((message) => [message.id, message])
+    )
+    if (candidates.size > 0) {
+      let pageToken: string | undefined
+      do {
+        const page = await this.listDrafts(pageToken)
+        for (const draft of page.drafts) {
+          const message = draft.messageId ? candidates.get(draft.messageId) : undefined
+          if (message) {
+            return {
+              kind: 'draft',
+              draftId: draft.id,
+              messageId: message.id,
+              ...(message.threadId ? { threadId: message.threadId } : {})
+            }
+          }
+        }
+        pageToken = page.nextPageToken
+      } while (pageToken)
+    }
+
+    const message = messages.messages?.[0]
+    return message
+      ? {
+          kind: 'message',
+          messageId: message.id,
+          ...(message.threadId ? { threadId: message.threadId } : {})
+        }
+      : null
   }
 
   getProfile(): Promise<ProviderProfile> {

@@ -37,8 +37,9 @@ import { useComposerDraft } from './useComposerDraft'
 
 interface ComposerProps {
   draft: Draft
+  initialError?: string | null
   onClose: () => void
-  onToast: (message: string) => void
+  onToast: (message: string, durationMs?: number) => void
 }
 
 function TrashIcon(): React.JSX.Element {
@@ -276,10 +277,10 @@ function PasteContentPlugin({
 interface CommandPluginProps {
   onClose: () => void
   onDiscard: () => void
-  onUnavailableSend: () => void
+  onSend: () => void
 }
 
-function ComposerCommandPlugin({ onClose, onDiscard, onUnavailableSend }: CommandPluginProps): null {
+function ComposerCommandPlugin({ onClose, onDiscard, onSend }: CommandPluginProps): null {
   const [editor] = useLexicalComposerContext()
   const quote = useCallback(() => {
     editor.update(() => {
@@ -292,7 +293,7 @@ function ComposerCommandPlugin({ onClose, onDiscard, onUnavailableSend }: Comman
       registerCommands([
         createCommand('composer.close', onClose),
         createCommand('composer.discard', onDiscard),
-        createCommand('composer.send', onUnavailableSend),
+        createCommand('composer.send', onSend),
         createCommand('composer.bold', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')),
         createCommand('composer.italic', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')),
         createCommand('composer.underline', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline')),
@@ -304,12 +305,12 @@ function ComposerCommandPlugin({ onClose, onDiscard, onUnavailableSend }: Comman
         ),
         createCommand('composer.quote', quote)
       ]),
-    [editor, onClose, onDiscard, onUnavailableSend, quote]
+    [editor, onClose, onDiscard, onSend, quote]
   )
   return null
 }
 
-export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.Element {
+export function Composer({ draft, initialError = null, onClose, onToast }: ComposerProps): React.JSX.Element {
   const [to, setTo] = useState<MailAddress[]>(draft.to)
   const [cc, setCc] = useState<MailAddress[]>(draft.cc)
   const [bcc, setBcc] = useState<MailAddress[]>(draft.bcc)
@@ -317,6 +318,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
   const [subject, setSubject] = useState(draft.subject)
   const [showCopies, setShowCopies] = useState(draft.cc.length > 0 || draft.bcc.length > 0)
   const [closing, setClosing] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(initialError)
   const initialHtml = draft.bodyHtml || plainTextForEditor(draft.bodyText)
   const preparedHtml = useMemo(() => prepareHtmlForEditor(initialHtml), [initialHtml])
   const [hasPreservedContent, setHasPreservedContent] = useState(preparedHtml.issues.length > 0)
@@ -370,9 +372,30 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
       })
   }, [closing, commitPendingRecipients, draft.id, onClose, onToast, saveNow])
 
-  const unavailableSend = useCallback(() => {
-    onToast('Send is not available yet')
-  }, [onToast])
+  const send = useCallback(() => {
+    if (closing || !window.attn) return
+    setSendError(null)
+    if (!commitPendingRecipients()) {
+      setSendError('Enter a valid recipient before sending')
+      return
+    }
+    setClosing(true)
+    void saveNow()
+      .then(() => window.attn.outbox.send(draft.id))
+      .then((result) => {
+        onClose()
+        onToast('Sent — Undo (Z)', Math.max(1_000, result.sendAt - Date.now()))
+      })
+      .catch((error: unknown) => {
+        setClosing(false)
+        const message = error instanceof Error ? error.message : String(error)
+        setSendError(
+          message.includes('at least one recipient')
+            ? 'Add at least one recipient'
+            : 'Message could not be queued — your draft is still here'
+        )
+      })
+  }, [closing, commitPendingRecipients, draft.id, onClose, onToast, saveNow])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -533,6 +556,15 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
           }}
         />
 
+        {sendError && (
+          <div
+            data-testid="composer-send-error"
+            className="border-b border-danger/35 bg-danger/10 px-4 py-2 text-xs text-danger"
+          >
+            {sendError}
+          </div>
+        )}
+
         {hasPreservedContent && (
           <div
             data-testid="composer-preserved-banner"
@@ -569,11 +601,7 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
                 ignoreSelectionChange
                 onChange={(editorState, editor, tags) => captureEditor(editorState, editor, tags)}
               />
-              <ComposerCommandPlugin
-                onClose={closeAndSave}
-                onDiscard={discard}
-                onUnavailableSend={unavailableSend}
-              />
+              <ComposerCommandPlugin onClose={closeAndSave} onDiscard={discard} onSend={send} />
               <PasteContentPlugin
                 draftId={draft.id}
                 onAttachment={addAttachment}
@@ -607,9 +635,11 @@ export function Composer({ draft, onClose, onToast }: ComposerProps): React.JSX.
                 </button>
                 <button
                   type="button"
-                  className="rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent"
-                  title="Sending is implemented in T16"
-                  onClick={unavailableSend}
+                  data-testid="composer-send"
+                  disabled={closing}
+                  className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
+                  title="Send message"
+                  onClick={send}
                 >
                   Send <span className="ml-1 opacity-65">⌘↵</span>
                 </button>
