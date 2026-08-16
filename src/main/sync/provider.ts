@@ -3,6 +3,8 @@ import type { GmailMessage, GmailThread } from '../gmail/parse'
 export interface ProviderProfile {
   emailAddress: string
   historyId: string
+  messagesTotal?: number
+  threadsTotal?: number
 }
 
 export interface ProviderLabel {
@@ -14,6 +16,7 @@ export interface ProviderLabel {
 export interface ThreadIdPage {
   threadIds: string[]
   nextPageToken?: string
+  resultSizeEstimate?: number
 }
 
 export interface ProviderDraftSummary {
@@ -45,6 +48,8 @@ export interface ListThreadIdsOptions {
   q?: string
   labelIds?: readonly string[]
   pageToken?: string
+  /** Gmail excludes SPAM/TRASH from listings unless asked, even when labelIds targets them. */
+  includeSpamTrash?: boolean
 }
 
 export interface HistoryMessageEvent {

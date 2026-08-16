@@ -122,6 +122,13 @@ it stopped instead of restarting:
 6. **reconcile** — authoritative per-system-label id re-lists to repair membership drift.
 7. **lifetime** — a low-priority, quota-throttled, resumable header sweep with no date bound (§9 #17).
 
+**Sent mail and contacts have no stage of their own.** Gmail's unfiltered listing already returns SENT, so
+sent mail rides the all-mail and lifetime stages — the reason the dedicated Sent stage is retired rather
+than reordered. The contact index is derived, not fetched: every persisted message contributes its
+recipients (when the message is SENT) or its sender (otherwise) from headers the metadata format already
+carries, so header-only stages build contacts exactly as full fetches do, and messages labeled SPAM or TRASH
+contribute nothing. Autocomplete therefore ramps across stages 1 → 4 → 7 rather than waiting on one pass.
+
 Stages overlap deliberately and **skip threads already stored** instead of carving exact date complements:
 Gmail's `newer_than`/`older_than` operators have coarse, fuzzy boundaries, so complement queries risk silent
 seam gaps, while re-listing already-fetched ids costs ~1% of the fetch budget (per-thread gets dominate).
@@ -131,9 +138,12 @@ the local `has:attachment`/filename search it feeds) arrives when a thread is fi
 than the 90-day window are fetched on demand and cached permanently. UI renders as soon as the first page of
 inbox metadata lands.
 
-*Shipped staging:* M2 currently runs inbox → bodies → drafts → sent → reconcile; the lifetime sweep lands
-with T13A, still in M2. The all-mail and spam-trash stages, per-message label storage, and the generalized
-reconcile open M3 (§9 #10, #17).
+*Shipped staging:* the full bounded pipeline runs as specified — inbox → bodies → drafts → all-mail →
+spam → trash → per-label reconcile (the retired `sent` stage is subsumed by all-mail; old `sent` cursors
+route to it) — then T13A's independent, low-priority lifetime sweep starts. Spam/Trash reconciliation
+verifies each locally-labeled thread missing from the server listing by direct fetch and deletes only on
+404, never on listing absence. Still M3: per-message label storage, the utility-process move, the
+existence-sweep tombstone pass for label-less orphans, and the mailbox/search surfaces (§9 #10, #17).
 
 **Window rationale and completion semantics:** headers are cheap — roughly 1–2 KB and ~10 quota units per
 thread, so a typical account's lifetime header index costs an hour or two of background sweeping and a few
@@ -149,8 +159,9 @@ the remaining window continues in the background or is available on demand.
 **Lifetime header sweep (T13A as revised by §9 #17; supersedes the Sent-only pass of §9 #15):** after
 interactive readiness, a resumable low-priority pass walks lifetime message headers across the whole account
 (no label filter, newest first), skipping threads already stored. It persists its own cursor, reports
-progress against `getProfile`'s `threadsTotal`/`messagesTotal`, and never downloads old bodies or
-attachments. Contact statistics derive from the same header stream — recipients of Sent mail, senders of
+thread progress against the unfiltered listing's `resultSizeEstimate` (and exact exhausted count), reports
+message context from `getProfile().messagesTotal`, and never downloads old bodies or attachments. Contact
+statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
 never contribute to contacts. While the pass runs, sync status reads **Live · indexing older mail** with
 progress and quota-wait detail. Importing a user's saved Google Contacts through the People API remains a

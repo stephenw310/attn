@@ -447,6 +447,22 @@ function effectSender(
 }
 
 describe('OutboxSender effect layer', () => {
+  it('reports active delivery without treating an idle scheduler timer as running', async () => {
+    let release!: () => void
+    const checkpoint = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const sender = effectSender(new FakeOutboxDb(fakeRow()), effectProvider(), {
+      beforeRemote: () => checkpoint
+    })
+
+    const running = sender.trigger()
+    expect(sender.isRunning()).toBe(true)
+    release()
+    await running
+    expect(sender.isRunning()).toBe(false)
+  })
+
   it('claims a due row once, persists its Gmail id, marks it sent, and cleans its spool', async () => {
     const store = new FakeOutboxDb(fakeRow())
     const clean = vi.fn()

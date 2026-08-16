@@ -52,6 +52,11 @@ export class DraftMirrorExecutor {
     return this.drainPromise
   }
 
+  /** True only while a draft checkpoint is active, not while its retry timer is idle. */
+  isRunning(): boolean {
+    return this.drainPromise !== null
+  }
+
   async stop(): Promise<void> {
     this.stopping = true
     if (this.timer) this.time.timers.clearTimeout(this.timer)

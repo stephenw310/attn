@@ -114,6 +114,7 @@ describe('action executor', () => {
       )
 
       await executor.trigger()
+      expect(executor.isRunning()).toBe(false)
       await executor.trigger()
       expect(provider.modifyThread).toHaveBeenCalledOnce()
 
@@ -123,6 +124,7 @@ describe('action executor', () => {
       await Promise.resolve()
       expect(provider.modifyThread).toHaveBeenCalledTimes(2)
       expect(rows).toHaveLength(0)
+      expect(executor.isRunning()).toBe(false)
       executor.stop()
     } finally {
       vi.useRealTimers()
