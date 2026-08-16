@@ -2,6 +2,7 @@ import type { RevertedActionKind } from '../../shared/actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from '../../shared/actions'
 import type { Db } from '../db'
 import { applyThreadDelta } from '../store/mutate'
+import { type SnoozeReminderSnapshot, snoozeReminderSnapshot } from '../store/reminders'
 import { isStoredAuthActionError } from './execute'
 import { actionLabel, inverseForThread, planAction } from './plan'
 import { dropRevertedUndoEntries, type QueuedActionRef, queueIntentRef } from './revert'
@@ -54,6 +55,9 @@ function apply(
   const labelsBefore = new Map(
     action.threadIds.map((threadId) => [threadId, labelsFor(db, accountId, threadId)] as const)
   )
+  const remindersBefore = new Map(
+    action.threadIds.map((threadId) => [threadId, snoozeReminderSnapshot(db, accountId, threadId)] as const)
+  )
   const undo = action.threadIds.map((id): UndoAction => {
     if (action.kind === 'unsnooze' || action.kind === 'archive') {
       const reminder = pendingSnoozeFor(db, accountId, id)
@@ -88,11 +92,12 @@ function apply(
       applyThreadDelta(db, accountId, { threadId, add: plan.add, remove: plan.remove })
       const archiveWasAlreadyApplied = action.kind === 'archive' && !labelsBefore.get(threadId)?.has('INBOX')
       if (!archiveWasAlreadyApplied) {
+        const reminderBefore = recoveryReminderForAction(action, remindersBefore.get(threadId) ?? null)
         const queued = enqueue.run(
           accountId,
           plan.queueKind,
           threadId,
-          JSON.stringify({ add: plan.add, remove: plan.remove, actionKind })
+          JSON.stringify({ add: plan.add, remove: plan.remove, actionKind, reminderBefore })
         )
         const queueId = Number(queued.lastInsertRowid)
         refs.push(
@@ -135,6 +140,7 @@ function applySnooze(
 
   for (const threadId of threadIds) {
     const wasInInbox = labelsFor(db, accountId, threadId).has('INBOX')
+    const reminderBefore = snoozeReminderSnapshot(db, accountId, threadId)
     upsertReminder.run(accountId, threadId, dueAt)
     applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
     // v1 snooze is local-only by decision (SPEC §9 #6): Gmail sees a plain
@@ -144,7 +150,7 @@ function applySnooze(
       const queued = enqueue.run(
         accountId,
         threadId,
-        JSON.stringify({ add: [], remove: ['INBOX'], actionKind })
+        JSON.stringify({ add: [], remove: ['INBOX'], actionKind, reminderBefore })
       )
       refs.push(
         queueIntentRef(
@@ -250,7 +256,13 @@ function stringArray(value: unknown): value is string[] {
 }
 
 export function pendingActionCount(db: Db, accountId: string): number {
-  return actionQueueStatus(db, accountId).pending
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM action_queue
+       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering', 'failed')`
+    )
+    .get(accountId) as { count: number }
+  return row.count
 }
 
 export function actionQueueStatus(db: Db, accountId: string): ActionQueueStatus {
@@ -264,6 +276,17 @@ export function actionQueueStatus(db: Db, accountId: string): ActionQueueStatus 
     pending: rows.length,
     authPaused: rows.some((row) => isStoredAuthActionError(row.last_error))
   }
+}
+
+function recoveryReminderForAction(
+  action: TriageAction,
+  reminder: SnoozeReminderSnapshot | null
+): SnoozeReminderSnapshot | null | undefined {
+  if (action.kind === 'unsnooze') return reminder
+  if (action.kind === 'archive' && (reminder?.state === 'pending' || reminder?.state === 'returned')) {
+    return reminder
+  }
+  return reminder?.state === 'returned' ? reminder : undefined
 }
 
 function noticeKindForAction(action: TriageAction): RevertedActionKind {

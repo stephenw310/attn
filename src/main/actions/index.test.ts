@@ -5,7 +5,10 @@ import { storeActionError } from './execute'
 
 function queueDb(lastErrors: Array<string | null>): Db {
   return {
-    prepare: () => ({ all: () => lastErrors.map((last_error) => ({ last_error })) })
+    prepare: () => ({
+      all: () => lastErrors.map((last_error) => ({ last_error })),
+      get: () => ({ count: lastErrors.length })
+    })
   } as unknown as Db
 }
 

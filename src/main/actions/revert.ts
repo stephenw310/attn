@@ -4,7 +4,6 @@ import type { QueueIntent } from './execute'
 export interface QueuedActionRef {
   queueId: number
   threadId: string
-  signature: string
 }
 
 export interface UndoEntryWithRefs {
@@ -13,17 +12,11 @@ export interface UndoEntryWithRefs {
 }
 
 export function queueIntentRef(intent: QueueIntent, queueId: number): QueuedActionRef {
-  const delta =
-    intent.kind === 'modifyLabels' ? `${normalizedLabels(intent.add)}|${normalizedLabels(intent.remove)}` : ''
-  return { queueId, threadId: intent.threadId, signature: `${intent.kind}|${delta}` }
+  return { queueId, threadId: intent.threadId }
 }
 
 export function queueRowRef(queueId: number, threadId: string): QueuedActionRef {
-  return { queueId, threadId, signature: 'unavailable' }
-}
-
-export function sameQueuedAction(left: QueuedActionRef, right: QueuedActionRef): boolean {
-  return left.queueId === right.queueId
+  return { queueId, threadId }
 }
 
 export function dropRevertedUndoEntries<T extends UndoEntryWithRefs>(
@@ -92,8 +85,4 @@ function revertedActionKind(intent: QueueIntent): RevertedActionKind {
   if (add.has('INBOX')) return 'restoreInbox'
   if (remove.has('INBOX')) return 'archive'
   return 'labels'
-}
-
-function normalizedLabels(labels: readonly string[]): string {
-  return [...new Set(labels)].sort().join(',')
 }

@@ -1,6 +1,31 @@
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
+
+test('repairs local reminder state when Gmail rejects a snooze', async ({ app, page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.threadId), {
+    channel: TEST_CHANNELS.failNextAction,
+    threadId: 't-roadmap'
+  })
+
+  await page.keyboard.press('h')
+  await page.getByTestId('snooze-preset-tomorrow').click()
+
+  await expect(page.getByTestId('toast')).toHaveText(
+    "Couldn't snooze 'Q3 roadmap review' — Gmail's version was restored."
+  )
+  await expect(rows).toHaveCount(8)
+  await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
+
+  await page.keyboard.press('g')
+  await page.keyboard.press('h')
+  await expect(page.getByTestId('view-title')).toHaveText('Snoozed')
+  await expect(rows).toHaveCount(0)
+})
 
 test('snoozes from the picker, navigates to Snoozed, and undoes', async ({ page }) => {
   const rows = page.getByTestId('thread-row')

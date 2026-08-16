@@ -59,6 +59,11 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
   const path = join(dir, 'auth-paused.png')
   await page.screenshot({ path })
   await testInfo.attach('auth-paused', { path, contentType: 'image/png' })
+
+  await page.getByTestId('action-reconnect').click()
+  await expect(page.getByTestId('action-reconnect')).toHaveCount(0)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
+  await expect(page.getByTestId('toast')).toHaveText('Google reconnected — 1 pending change is retrying.')
 })
 
 test('animates a marked-done row before removing it', async ({ page }) => {

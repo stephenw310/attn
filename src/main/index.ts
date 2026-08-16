@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import type { RevertedAction } from '../shared/actionRevert'
-import type { AuthStatus } from '../shared/auth'
+import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
 import { clearUndo } from './actions'
@@ -148,11 +148,17 @@ async function waitForConversation(threadId: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delay.delayMs))
 }
 
-async function signIn(): Promise<AuthStatus> {
+async function signIn(): Promise<AuthSignInResult> {
   const config = loadOAuthConfig(oauthSearchDirs())
-  if (!config) return authStatus()
+  if (!config) {
+    const resumedActions =
+      testUserData && seedAccountId ? (actionExecutor?.resumeAuthFailures(seedAccountId) ?? 0) : 0
+    if (resumedActions > 0) syncController?.onSignIn()
+    return { status: authStatus(), resumedActions }
+  }
   if (signInInFlight) cancelActiveSignIn()
   signInInFlight = true
+  let resumedActions = 0
   try {
     const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
     saveTokens(app.getPath('userData'), tokens)
@@ -160,7 +166,7 @@ async function signIn(): Promise<AuthStatus> {
     mailNotifier?.setAccountId(tokens.email ?? null)
     console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
     snoozeScheduler?.refresh()
-    if (tokens.email) actionExecutor?.resumeAuthFailures(tokens.email)
+    if (tokens.email) resumedActions = actionExecutor?.resumeAuthFailures(tokens.email) ?? 0
     syncController?.onSignIn()
   } catch (error) {
     console.error('[auth] sign-in failed:', error instanceof Error ? error.message : error)
@@ -168,7 +174,7 @@ async function signIn(): Promise<AuthStatus> {
   } finally {
     signInInFlight = false
   }
-  return authStatus()
+  return { status: authStatus(), resumedActions }
 }
 
 function signOut(): AuthStatus {
@@ -178,6 +184,7 @@ function signOut(): AuthStatus {
   seedAccountId = null
   clearTokens(app.getPath('userData'))
   pendingFocus = null
+  if (account) actionRevertNotices.clear(account)
   mailNotifier?.setAccountId(null)
   clearUndo(account ?? undefined)
   snoozeScheduler?.refresh()
@@ -394,7 +401,11 @@ function registerTestIpc(): void {
     if (!snapshot) return
     let rejectTarget = true
     const mutate = async (requestedThreadId: string): Promise<void> => {
-      if (!rejectTarget || requestedThreadId !== threadId) return
+      if (requestedThreadId !== threadId) return
+      if (!rejectTarget) {
+        if (status === 401) testActionProvider = null
+        return
+      }
       rejectTarget = false
       const reason = status === 401 ? 'authentication e2e failure' : 'permanent e2e failure'
       throw new GmailApiError(status, `gmail /threads/${threadId}/modify failed (${status}): ${reason}`)

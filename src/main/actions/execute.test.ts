@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GmailApiError } from '../gmail/client'
+import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
 import {
   classifyActionError,
@@ -42,6 +42,7 @@ describe('queue intent execution', () => {
     expect(classifyActionError(new GmailApiError(403, 'forbidden'))).toBe('permanent')
     expect(classifyActionError(new GmailApiError(404, 'gone'))).toBe('permanent')
     expect(classifyActionError(new GmailApiError(401, 'revoked'))).toBe('auth')
+    expect(classifyActionError(new GmailAuthError('token refresh rejected'))).toBe('auth')
   })
 
   it('stores typed auth markers while recognizing legacy Gmail 401 rows', () => {

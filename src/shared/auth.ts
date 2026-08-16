@@ -7,3 +7,8 @@ export interface AuthStatus {
   signedIn: boolean
   email?: string
 }
+
+export interface AuthSignInResult {
+  status: AuthStatus
+  resumedActions: number
+}

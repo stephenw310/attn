@@ -5,17 +5,22 @@ export interface ToastState {
   message: string
 }
 
-export function useToast(): [ToastState | null, (message: string) => void] {
+export function useToast(): [ToastState | null, (message: string) => Promise<void>] {
   const [toast, setToast] = useState<ToastState | null>(null)
   const tokenRef = useRef(0)
 
-  const showToast = useCallback((message: string) => {
-    const token = ++tokenRef.current
-    setToast({ id: token, message })
-    window.setTimeout(() => {
-      if (tokenRef.current === token) setToast(null)
-    }, 4000)
-  }, [])
+  const showToast = useCallback(
+    (message: string) =>
+      new Promise<void>((resolve) => {
+        const token = ++tokenRef.current
+        setToast({ id: token, message })
+        window.setTimeout(() => {
+          if (tokenRef.current === token) setToast(null)
+          resolve()
+        }, 4000)
+      }),
+    []
+  )
 
   return [toast, showToast]
 }

@@ -99,4 +99,37 @@ describe('snooze scheduler time seam', () => {
     expect(cleared).toEqual([handle])
     expect(armed[1].delayMs).toBe(0)
   })
+
+  it('records automatic returns explicitly in the action payload', () => {
+    let pending = true
+    const payloads: string[] = []
+    const db = {
+      prepare: (sql: string) => ({
+        all: () => (sql.includes('SELECT thread_id FROM reminders') ? [{ thread_id: 'roadmap' }] : []),
+        get: () => undefined,
+        run: (...args: unknown[]) => {
+          if (sql.includes("UPDATE reminders SET state = 'returned'")) {
+            if (!pending) return { changes: 0 }
+            pending = false
+            return { changes: 1 }
+          }
+          if (sql.includes('INSERT INTO action_queue')) payloads.push(String(args[2]))
+          return { changes: 1 }
+        }
+      }),
+      transaction: (callback: () => void) => callback
+    } as unknown as Db
+    const scheduler = new SnoozeScheduler(
+      db,
+      () => 'seed@attn.test',
+      () => {},
+      () => {}
+    )
+
+    scheduler.refresh()
+
+    expect(payloads.map((payload) => JSON.parse(payload))).toEqual([
+      { add: ['INBOX'], remove: [], actionKind: 'snoozeReturn' }
+    ])
+  })
 })

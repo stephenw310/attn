@@ -19,12 +19,6 @@ describe('failed-action recovery helpers', () => {
     ])
   })
 
-  it('normalizes label order for undo matching', () => {
-    expect(
-      queueIntentRef({ kind: 'modifyLabels', threadId: 'a', add: ['B', 'A'], remove: ['D', 'C'] }, 1)
-    ).toEqual(queueIntentRef({ kind: 'modifyLabels', threadId: 'a', add: ['A', 'B'], remove: ['C', 'D'] }, 1))
-  })
-
   it('keeps a newer identical action undoable when an older queue row reverts', () => {
     const intent: QueueIntent = {
       kind: 'modifyLabels',

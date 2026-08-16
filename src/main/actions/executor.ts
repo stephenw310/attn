@@ -1,6 +1,7 @@
 import type { RevertedAction, RevertedActionKind } from '../../shared/actionRevert'
 import type { Db } from '../db'
 import type { GmailThread } from '../gmail/parse'
+import { restoreSnoozeReminder, type SnoozeReminderSnapshot } from '../store/reminders'
 import { nonDraftMessages, persistThread } from '../sync/persist'
 import type { GetThreadOptions, MailActionProvider } from '../sync/provider'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
@@ -42,6 +43,7 @@ interface FailedAuthRow {
 interface DecodedQueueRow {
   intent: QueueIntent
   actionKind?: RevertedActionKind
+  reminderBefore?: SnoozeReminderSnapshot | null
 }
 
 type RecoveryOutcome =
@@ -147,14 +149,22 @@ export class ActionExecutor {
           // poison the queue. Recover the thread from Gmail without replaying
           // or trying to infer the corrupt mutation.
           if (row.state === 'pending') this.markRecovering(row, accountId, error, 'permanent')
-          const outcome = await this.recover(row, accountId, provider, null, 'labels', reverted)
+          const outcome = await this.recover(row, accountId, provider, null, 'labels', undefined, reverted)
           if (outcome.kind === 'continue') continue
           if (outcome.kind === 'retry') retryMs = outcome.delayMs
           break
         }
-        const { intent, actionKind } = decoded
+        const { intent, actionKind, reminderBefore } = decoded
         if (row.state === 'recovering') {
-          const outcome = await this.recover(row, accountId, provider, intent, actionKind, reverted)
+          const outcome = await this.recover(
+            row,
+            accountId,
+            provider,
+            intent,
+            actionKind,
+            reminderBefore,
+            reverted
+          )
           if (outcome.kind === 'continue') continue
           if (outcome.kind === 'retry') retryMs = outcome.delayMs
           break
@@ -177,7 +187,15 @@ export class ActionExecutor {
           if (errorKind === 'permanent') {
             this.markRecovering(row, accountId, error, errorKind)
             this.notify()
-            const outcome = await this.recover(row, accountId, provider, intent, actionKind, reverted)
+            const outcome = await this.recover(
+              row,
+              accountId,
+              provider,
+              intent,
+              actionKind,
+              reminderBefore,
+              reverted
+            )
             if (outcome.kind === 'continue') continue
             if (outcome.kind === 'retry') retryMs = outcome.delayMs
             break
@@ -208,34 +226,13 @@ export class ActionExecutor {
     provider: ActionRecoveryProvider,
     intent: QueueIntent | null,
     actionKind: RevertedActionKind | undefined,
+    reminderBefore: SnoozeReminderSnapshot | null | undefined,
     reverted: RevertedAction[]
   ): Promise<RecoveryOutcome> {
     if (this.stopping || this.accountId() !== accountId) return { kind: 'stop' }
+    let snapshot: GmailThread
     try {
-      const snapshot = await provider.getThread(row.thread_id, { format: 'full' })
-      if (this.stopping || this.accountId() !== accountId) return { kind: 'stop' }
-      const messages = nonDraftMessages(snapshot.messages ?? [])
-      if (messages.length === 0) {
-        this.finishUnrecoverable(row, accountId, actionKind, reverted)
-        return { kind: 'continue' }
-      }
-      this.db.transaction(() => {
-        this.db.prepare('DELETE FROM action_queue WHERE account_id = ? AND id = ?').run(accountId, row.id)
-        persistThread(this.db, accountId, snapshot)
-      })()
-      invalidateRevertedUndo(accountId, [queueRowRef(row.id, row.thread_id)])
-      const returnedToInbox = messages.some((message) => message.labelIds?.includes('INBOX'))
-      reverted.push(
-        revertedAction(
-          intent ?? this.fallbackIntent(row),
-          row.subject ?? '',
-          returnedToInbox,
-          'restored',
-          actionKind
-        )
-      )
-      this.notify()
-      return { kind: 'continue' }
+      snapshot = await provider.getThread(row.thread_id, { format: 'full' })
     } catch (error) {
       if (this.stopping || this.accountId() !== accountId) return { kind: 'stop' }
       const errorKind = classifyActionError(error)
@@ -247,22 +244,63 @@ export class ActionExecutor {
       this.notify()
       return errorKind === 'auth' ? { kind: 'pause' } : { kind: 'retry', delayMs: retryDelayMs(row.attempts) }
     }
+    if (this.stopping || this.accountId() !== accountId) return { kind: 'stop' }
+    const messages = nonDraftMessages(snapshot.messages ?? [])
+    if (messages.length === 0) {
+      this.finishUnrecoverable(row, accountId, actionKind, reverted)
+      return { kind: 'continue' }
+    }
+
+    // Local persistence failures are not Gmail retry failures. Let them surface
+    // without installing a 60-second network retry loop or deleting the row.
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM action_queue WHERE account_id = ? AND id = ?').run(accountId, row.id)
+      if (reminderBefore !== undefined) {
+        restoreSnoozeReminder(this.db, accountId, row.thread_id, reminderBefore)
+      }
+      persistThread(this.db, accountId, snapshot)
+    })()
+    invalidateRevertedUndo(accountId, [queueRowRef(row.id, row.thread_id)])
+    const returnedToInbox = this.threadHasInboxLabel(accountId, row.thread_id)
+    reverted.push(
+      revertedAction(
+        intent ?? this.fallbackIntent(row),
+        row.subject ?? '',
+        returnedToInbox,
+        actionKind === 'snoozeReturn' ? 'keptLocal' : 'restored',
+        actionKind
+      )
+    )
+    this.notify()
+    return { kind: 'continue' }
   }
 
   private decodeRow(row: QueueRow): DecodedQueueRow {
-    if (row.kind !== 'modifyLabels') {
-      return { intent: { kind: row.kind, threadId: row.thread_id } }
-    }
     const payload = decodeLabelDelta(row.payload)
     return {
-      intent: {
-        kind: row.kind,
-        threadId: row.thread_id,
-        add: payload.add,
-        remove: payload.remove
-      },
-      actionKind: payload.actionKind
+      intent:
+        row.kind === 'modifyLabels'
+          ? {
+              kind: row.kind,
+              threadId: row.thread_id,
+              add: payload.add,
+              remove: payload.remove
+            }
+          : { kind: row.kind, threadId: row.thread_id },
+      actionKind: payload.actionKind,
+      reminderBefore: payload.reminderBefore
     }
+  }
+
+  private threadHasInboxLabel(accountId: string, threadId: string): boolean {
+    return Boolean(
+      this.db
+        .prepare(
+          `SELECT 1 FROM thread_labels
+           WHERE account_id = ? AND thread_id = ? AND label_id = 'INBOX'`
+        )
+        .get(accountId, threadId)
+    )
   }
 
   private fallbackIntent(row: QueueRow): QueueIntent {
@@ -332,6 +370,7 @@ export class ActionExecutor {
           auth && !isTypedStoredActionError(row.last_error)
             ? storeActionError(row.last_error ?? 'legacy authentication failure', 'auth')
             : row.last_error
+        if (state === row.state && lastError === row.last_error) continue
         prepare.run(state, lastError, row.account_id, row.id)
       }
     })()

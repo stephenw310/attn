@@ -16,6 +16,8 @@ export class GmailApiError extends Error {
   }
 }
 
+export class GmailAuthError extends Error {}
+
 export class GmailClient {
   constructor(
     private readonly config: OAuthConfig,
@@ -30,7 +32,7 @@ export class GmailClient {
 
   private async refresh(): Promise<string> {
     if (!this.tokens.refresh_token) {
-      throw new Error('no refresh token stored — sign in again')
+      throw new GmailAuthError('no refresh token stored — sign in again')
     }
     const res = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
@@ -43,7 +45,9 @@ export class GmailClient {
       })
     })
     if (!res.ok) {
-      throw new Error(`token refresh failed (${res.status}): ${(await res.text()).slice(0, 300)}`)
+      const message = `token refresh failed (${res.status}): ${(await res.text()).slice(0, 300)}`
+      if (res.status === 400 || res.status === 401) throw new GmailAuthError(message)
+      throw new GmailApiError(res.status, message, res.status === 429 || res.status >= 500)
     }
     const json = (await res.json()) as { access_token: string; expires_in: number }
     // Google's refresh response carries NO refresh_token — merge over the

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
+import type { SnoozeReminderSnapshot } from '../store/reminders'
 import { isStoredAuthActionError, storeActionError } from './execute'
 import { ActionExecutor, type ActionRecoveryProvider } from './executor'
 
@@ -16,7 +17,18 @@ interface FakeRow {
   last_error?: string | null
 }
 
-function fakeDb(rows: FakeRow[]): Db {
+interface FakeDbOptions {
+  failRecoveryDelete?: boolean
+  inboxThreads?: string[]
+  onLegacyPrepareUpdate?: () => void
+  reminders?: Map<string, SnoozeReminderSnapshot>
+}
+
+function fakeDb(rows: FakeRow[], options: FakeDbOptions = {}): Db {
+  const labels = new Map(
+    (options.inboxThreads ?? []).map((threadId) => [threadId, new Set(['INBOX'])] as const)
+  )
+  const reminders = options.reminders ?? new Map<string, SnoozeReminderSnapshot>()
   return {
     prepare: (sql: string) => ({
       run: (...args: unknown[]) => {
@@ -38,6 +50,9 @@ function fakeDb(rows: FakeRow[]): Db {
         } else if (sql.startsWith('DELETE FROM action_queue')) {
           const index = rows.findIndex((item) => item.account_id === args[0] && item.id === args[1])
           if (index >= 0) {
+            if (options.failRecoveryDelete && rows[index].state === 'recovering') {
+              throw new Error('SQLITE_FULL: database or disk is full')
+            }
             rows.splice(index, 1)
             changes = 1
           }
@@ -52,6 +67,7 @@ function fakeDb(rows: FakeRow[]): Db {
         } else if (sql.includes('SET state = ?, last_error = ?')) {
           const row = rows.find((item) => item.account_id === args[2] && item.id === args[3])
           if (row) {
+            options.onLegacyPrepareUpdate?.()
             row.state = args[0] as FakeRow['state']
             row.last_error = args[1] as string | null
             changes = 1
@@ -84,16 +100,48 @@ function fakeDb(rows: FakeRow[]): Db {
             row.state = 'pending'
             changes = 1
           }
+        } else if (sql.startsWith('DELETE FROM thread_labels')) {
+          const threadId = String(args[1])
+          if (sql.includes('label_id = ?')) labels.get(threadId)?.delete(String(args[2]))
+          else labels.delete(threadId)
+        } else if (sql.startsWith('INSERT OR IGNORE INTO thread_labels')) {
+          const threadId = String(args[1])
+          const existing = labels.get(threadId) ?? new Set<string>()
+          existing.add(String(args[2]))
+          labels.set(threadId, existing)
+        } else if (sql.startsWith('DELETE FROM reminders')) {
+          reminders.delete(String(args[1]))
+        } else if (sql.includes('INSERT INTO reminders')) {
+          reminders.set(String(args[1]), {
+            dueAt: Number(args[2]),
+            state: args[3] as SnoozeReminderSnapshot['state']
+          })
         }
         return { changes }
       },
-      get: (accountId: unknown) =>
-        sql.includes('FROM action_queue aq')
-          ? rows.find(
-              (row) => row.account_id === accountId && (row.state === 'pending' || row.state === 'recovering')
-            )
-          : undefined,
-      all: (accountId?: unknown) => {
+      get: (...args: unknown[]) => {
+        if (sql.includes('FROM action_queue aq')) {
+          return rows.find(
+            (row) => row.account_id === args[0] && (row.state === 'pending' || row.state === 'recovering')
+          )
+        }
+        if (sql.includes('SELECT 1 FROM thread_labels')) {
+          return labels.get(String(args[1]))?.has('INBOX') ? { present: 1 } : undefined
+        }
+        if (sql.includes('SELECT due_at AS dueAt, state FROM reminders')) {
+          return reminders.get(String(args[1]))
+        }
+        return undefined
+      },
+      all: (accountId?: unknown, threadId?: unknown) => {
+        if (sql.includes('SELECT payload FROM action_queue')) {
+          return rows.filter(
+            (row) =>
+              row.account_id === accountId &&
+              row.thread_id === threadId &&
+              (row.state === 'pending' || row.state === 'inflight')
+          )
+        }
         if (sql.includes("state IN ('pending', 'recovering', 'failed')")) {
           if (!sql.includes('account_id = ?')) {
             return rows.filter(
@@ -127,14 +175,14 @@ function row(id: number, accountId: string, threadId: string): FakeRow {
   }
 }
 
-function snapshot(threadId: string): GmailThread {
+function snapshot(threadId: string, labelIds: string[] = ['INBOX']): GmailThread {
   return {
     id: threadId,
     messages: [
       {
         id: `${threadId}-message`,
         threadId,
-        labelIds: ['INBOX'],
+        labelIds,
         internalDate: '1',
         snippet: 'Server truth',
         payload: {
@@ -278,13 +326,15 @@ describe('action executor', () => {
     const marker = storeActionError(new GmailApiError(401, 'revoked'), 'auth')
     auth.last_error = marker
 
+    const onLegacyPrepareUpdate = vi.fn()
     new ActionExecutor(
-      fakeDb([auth]),
+      fakeDb([auth], { onLegacyPrepareUpdate }),
       () => null,
       () => null
     )
 
     expect(auth.last_error).toBe(marker)
+    expect(onLegacyPrepareUpdate).not.toHaveBeenCalled()
   })
 
   it('self-heals a legacy permanently failed row on the next online drain', async () => {
@@ -412,6 +462,139 @@ describe('action executor', () => {
     expect(onReverted).toHaveBeenCalledWith('a@example.com', [
       expect.objectContaining({ threadId: 'gone', resolution: 'restored' })
     ])
+  })
+
+  it('rolls back a rejected snooze reminder before restoring Gmail inbox state', async () => {
+    const snooze = row(1, 'a@example.com', 'snooze')
+    snooze.payload = JSON.stringify({
+      add: [],
+      remove: ['INBOX'],
+      actionKind: 'snooze',
+      reminderBefore: null
+    })
+    const reminders = new Map<string, SnoozeReminderSnapshot>([
+      ['snooze', { dueAt: 20_000, state: 'pending' }]
+    ])
+    const actionProvider = provider(vi.fn().mockRejectedValue(new GmailApiError(400, 'bad snooze')))
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb([snooze], { reminders }),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await executor.trigger()
+
+    expect(reminders.has('snooze')).toBe(false)
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({ kind: 'snooze', returnedToInbox: true })
+    ])
+  })
+
+  it('restores a rejected unsnooze reminder so the thread remains reachable in Snoozed', async () => {
+    const unsnooze = row(1, 'a@example.com', 'unsnooze')
+    unsnooze.payload = JSON.stringify({
+      add: ['INBOX'],
+      remove: [],
+      actionKind: 'unsnooze',
+      reminderBefore: { dueAt: 20_000, state: 'pending' }
+    })
+    const reminders = new Map<string, SnoozeReminderSnapshot>()
+    const actionProvider = provider(vi.fn().mockRejectedValue(new GmailApiError(400, 'bad unsnooze')))
+    vi.mocked(actionProvider.getThread).mockResolvedValue(snapshot('unsnooze', []))
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb([unsnooze], { reminders }),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await executor.trigger()
+
+    expect(reminders.get('unsnooze')).toEqual({ dueAt: 20_000, state: 'pending' })
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({ kind: 'unsnooze', returnedToInbox: false })
+    ])
+  })
+
+  it('keeps a rejected automatic snooze return visible in the local inbox', async () => {
+    const returned = row(1, 'a@example.com', 'returned')
+    returned.payload = JSON.stringify({
+      add: ['INBOX'],
+      remove: [],
+      actionKind: 'snoozeReturn'
+    })
+    const reminders = new Map<string, SnoozeReminderSnapshot>([
+      ['returned', { dueAt: 10_000, state: 'returned' }]
+    ])
+    const actionProvider = provider(vi.fn().mockRejectedValue(new GmailApiError(400, 'bad return')))
+    vi.mocked(actionProvider.getThread).mockResolvedValue(snapshot('returned', []))
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb([returned], { reminders }),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await executor.trigger()
+
+    expect(reminders.get('returned')?.state).toBe('returned')
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({
+        kind: 'snoozeReturn',
+        returnedToInbox: true,
+        resolution: 'keptLocal'
+      })
+    ])
+  })
+
+  it('computes revert copy after replaying a later pending action', async () => {
+    const rows = [row(1, 'a@example.com', 'same'), row(2, 'a@example.com', 'same')]
+    const actionProvider = provider(
+      vi.fn().mockRejectedValueOnce(new GmailApiError(400, 'bad archive')).mockResolvedValue(undefined)
+    )
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb(rows),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await executor.trigger()
+
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({ returnedToInbox: false })
+    ])
+  })
+
+  it('does not turn a local recovery write failure into a Gmail retry loop', async () => {
+    vi.useFakeTimers()
+    try {
+      const failed = row(1, 'a@example.com', 'disk-full')
+      const rows = [failed]
+      const actionProvider = provider(vi.fn().mockRejectedValue(new GmailApiError(400, 'bad action')))
+      const executor = new ActionExecutor(
+        fakeDb(rows, { failRecoveryDelete: true }),
+        () => 'a@example.com',
+        () => actionProvider
+      )
+
+      await expect(executor.trigger()).rejects.toThrow('SQLITE_FULL')
+      expect(failed.state).toBe('recovering')
+      expect(actionProvider.getThread).toHaveBeenCalledOnce()
+      expect(vi.getTimerCount()).toBe(0)
+      executor.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('drops only the queue row when a permanent refetch failure cannot restore server truth', async () => {

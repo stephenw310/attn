@@ -11,6 +11,7 @@ import {
   parseAddress,
   parseAddressList
 } from '../gmail/parse'
+import { replaySnoozeReminderDelta } from '../store/reminders'
 import { replayPendingThreadDeltas } from '../store/replay'
 
 export interface LabelRow {
@@ -186,6 +187,7 @@ export function persistThread(
     for (const label of labelUnion) insertLabel.run(accountId, thread.id, label)
   })()
   replayPendingThreadDeltas(db, accountId, thread.id)
+  replaySnoozeReminderDelta(db, accountId, thread.id)
 }
 
 /** A thread snapshot is authoritative for which messages still exist in it. */

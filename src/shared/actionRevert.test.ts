@@ -39,4 +39,19 @@ describe('failed-action toast batching', () => {
       "Couldn't unsnooze 'Roadmap', and Gmail's current version couldn't be loaded. The cached copy was kept."
     )
   })
+
+  it('explains when a rejected snooze return stays local', () => {
+    expect(
+      formatActionRevertToast([
+        { ...reverted('snoozeReturn', 'Roadmap'), returnedToInbox: true, resolution: 'keptLocal' }
+      ])
+    ).toBe("Couldn't return snoozed 'Roadmap' in Gmail — it remains in your Attn inbox.")
+  })
+
+  it('truncates hostile-length subjects without splitting Unicode characters', () => {
+    const subject = `${'a'.repeat(58)}😀${'b'.repeat(100)}`
+    expect(formatActionRevertToast([reverted('archive', subject)])).toBe(
+      `Couldn't archive '${'a'.repeat(58)}😀…' — it's back in your inbox.`
+    )
+  })
 })

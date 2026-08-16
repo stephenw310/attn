@@ -4,7 +4,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
 import type { ActionRevertNotice } from '../shared/actionRevert'
 import { isValidEmail } from '../shared/address'
-import type { AuthStatus } from '../shared/auth'
+import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import {
   type DraftAttachment,
   type DraftInlineImageInput,
@@ -90,7 +90,7 @@ export interface IpcContext {
   db: Db
   currentAccountId: () => string | null
   authStatus: () => AuthStatus
-  signIn: () => Promise<AuthStatus>
+  signIn: () => Promise<AuthSignInResult>
   signOut: () => AuthStatus
   makeClient: () => GmailClient | null
   makeProvider: () => GmailMailProvider | null

@@ -14,7 +14,7 @@ export interface ActionRevertTransport {
 export function subscribeToActionReverts(
   accountId: string,
   transport: ActionRevertTransport,
-  callback: (actions: RevertedAction[]) => void
+  callback: (actions: RevertedAction[]) => void | Promise<void>
 ): () => void {
   let active = true
   let draining = false
@@ -29,8 +29,7 @@ export function subscribeToActionReverts(
         for (;;) {
           const notice = await transport.peek(accountId)
           if (!active || !notice) break
-          callback(notice.actions)
-          await Promise.resolve()
+          await callback(notice.actions)
           if (!active) break
           if (!(await transport.acknowledge(accountId, notice.id))) break
         }

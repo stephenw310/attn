@@ -21,7 +21,7 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
     setError(null)
     window.attn.auth
       .signIn()
-      .then(onStatus)
+      .then(({ status: nextStatus }) => onStatus(nextStatus))
       .catch((reason: unknown) => {
         const message = reason instanceof Error ? reason.message : 'Could not sign in'
         if (!message.includes('sign-in canceled')) setError(message)

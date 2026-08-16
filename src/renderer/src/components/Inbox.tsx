@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthStatus } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { MailLabel } from '../../../shared/mail'
+import { actionReconnectMessage } from '../actionReconnect'
 import { Composer } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
 import { useInboxCommands } from '../hooks/useInboxCommands'
@@ -162,14 +163,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (!window.attn) return
     void window.attn.auth
       .signIn()
-      .then((nextStatus) => {
-        onStatus(nextStatus)
-        showToast('Google reconnected — pending changes are retrying.')
+      .then((result) => {
+        onStatus(result.status)
+        void showToast(actionReconnectMessage(activeAccount ?? '', result))
       })
       .catch((reason: unknown) => {
-        showToast(reason instanceof Error ? reason.message : 'Could not reconnect Google')
+        void showToast(reason instanceof Error ? reason.message : 'Could not reconnect Google')
       })
-  }, [onStatus, showToast])
+  }, [activeAccount, onStatus, showToast])
 
   const switchView = useCallback((next: 'inbox' | 'snoozed' | 'drafts') => {
     activeViewRef.current = next

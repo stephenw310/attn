@@ -1,9 +1,11 @@
 import type { RevertedActionKind } from '../../shared/actionRevert'
+import type { SnoozeReminderSnapshot } from '../store/reminders'
 
 export interface LabelDeltaPayload {
   add: string[]
   remove: string[]
   actionKind?: RevertedActionKind
+  reminderBefore?: SnoozeReminderSnapshot | null
 }
 
 export function decodeLabelDelta(payload: string): LabelDeltaPayload {
@@ -18,7 +20,15 @@ export function decodeLabelDelta(payload: string): LabelDeltaPayload {
   if (candidate.actionKind !== undefined && !actionKinds.has(candidate.actionKind)) {
     throw new Error('Invalid action queue action kind')
   }
-  return { add, remove, ...(candidate.actionKind ? { actionKind: candidate.actionKind } : {}) }
+  if (candidate.reminderBefore !== undefined && !validReminder(candidate.reminderBefore)) {
+    throw new Error('Invalid action queue reminder snapshot')
+  }
+  return {
+    add,
+    remove,
+    ...(candidate.actionKind ? { actionKind: candidate.actionKind } : {}),
+    ...(candidate.reminderBefore !== undefined ? { reminderBefore: candidate.reminderBefore } : {})
+  }
 }
 
 const actionKinds = new Set<RevertedActionKind>([
@@ -27,6 +37,7 @@ const actionKinds = new Set<RevertedActionKind>([
   'restoreInbox',
   'untrash',
   'snooze',
+  'snoozeReturn',
   'unsnooze',
   'undo',
   'spam',
@@ -39,4 +50,18 @@ const actionKinds = new Set<RevertedActionKind>([
 
 function stringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function validReminder(value: unknown): value is SnoozeReminderSnapshot | null {
+  if (value === null) return true
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Partial<SnoozeReminderSnapshot>
+  return (
+    typeof candidate.dueAt === 'number' &&
+    Number.isFinite(candidate.dueAt) &&
+    (candidate.state === 'pending' ||
+      candidate.state === 'returned' ||
+      candidate.state === 'done' ||
+      candidate.state === 'canceled')
+  )
 }

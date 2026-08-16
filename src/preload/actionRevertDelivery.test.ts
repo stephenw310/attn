@@ -81,4 +81,35 @@ describe('action revert delivery', () => {
     expect(transport.peek).toHaveBeenCalledOnce()
     dispose()
   })
+
+  it('waits for each rendered batch before acknowledging and delivering the next one', async () => {
+    const notices: ActionRevertNotice[] = [
+      { id: 10, actions: [action('one')] },
+      { id: 11, actions: [action('two')] }
+    ]
+    const firstDisplayed = deferred<void>()
+    const callback = vi
+      .fn<(actions: RevertedAction[]) => void | Promise<void>>()
+      .mockReturnValueOnce(firstDisplayed.promise)
+    const acknowledge = vi.fn(async (_accountId: string, noticeId: number) => {
+      if (notices[0]?.id !== noticeId) return false
+      notices.shift()
+      return true
+    })
+    const transport: ActionRevertTransport = {
+      peek: vi.fn(async () => notices[0] ?? null),
+      acknowledge,
+      onAvailable: () => () => {}
+    }
+
+    const dispose = subscribeToActionReverts('a@example.com', transport, callback)
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledOnce())
+    expect(acknowledge).not.toHaveBeenCalled()
+
+    firstDisplayed.resolve(undefined)
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledTimes(2))
+    expect(callback.mock.calls.map(([actions]) => actions[0]?.threadId)).toEqual(['one', 'two'])
+    dispose()
+  })
 })

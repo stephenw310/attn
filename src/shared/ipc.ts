@@ -1,6 +1,6 @@
 import type { ActionRevertNotice } from './actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from './actions'
-import type { AuthStatus } from './auth'
+import type { AuthSignInResult, AuthStatus } from './auth'
 import type { ContactSearchResult } from './contacts'
 import type {
   Draft,
@@ -88,7 +88,7 @@ export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]
 
 export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
-  [IPC_CHANNELS.authSignIn]: { args: []; result: AuthStatus }
+  [IPC_CHANNELS.authSignIn]: { args: []; result: AuthSignInResult }
   [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {

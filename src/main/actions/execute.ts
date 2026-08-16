@@ -1,4 +1,4 @@
-import { GmailApiError } from '../gmail/client'
+import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
 
 export type QueueIntent =
@@ -77,7 +77,9 @@ export function isStoredAuthActionError(message: string | null | undefined): boo
 }
 
 export function classifyActionError(error: unknown): ActionErrorKind {
-  if (error instanceof GmailApiError && error.status === 401) return 'auth'
+  if (error instanceof GmailAuthError || (error instanceof GmailApiError && error.status === 401)) {
+    return 'auth'
+  }
   return isPermanentActionError(error) ? 'permanent' : 'retryable'
 }
 

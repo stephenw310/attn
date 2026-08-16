@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { formatActionRevertToast } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
-import type { AuthStatus } from '../shared/auth'
+import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import type { ContactSearchResult } from '../shared/contacts'
 import type {
   Draft,
@@ -36,7 +36,7 @@ const api = {
   platform: process.platform,
   auth: {
     getStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authGetStatus),
-    signIn: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignIn),
+    signIn: (): Promise<AuthSignInResult> => invoke(IPC_CHANNELS.authSignIn),
     signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut)
   },
   mail: {
@@ -64,7 +64,7 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },
-    onActionsReverted: (accountId: string, cb: (message: string) => void): (() => void) =>
+    onActionsReverted: (accountId: string, cb: (message: string) => void | Promise<void>): (() => void) =>
       subscribeToActionReverts(
         accountId,
         {
@@ -78,7 +78,7 @@ const api = {
         },
         (actions) => {
           const message = formatActionRevertToast(actions)
-          if (message) cb(message)
+          return message ? cb(message) : undefined
         }
       ),
     onBodyHydrationFailed: (cb: (accountId: string, threadId: string) => void): (() => void) => {
