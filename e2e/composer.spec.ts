@@ -693,6 +693,51 @@ test('keeps a detached draft escapable when its parent thread is missing', async
   await expect(page.getByTestId('draft-list')).toBeVisible()
 })
 
+test('discards an untouched reply but keeps one the user typed into', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  const design = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
+  await design.click()
+  await composer.openReply()
+  await expect(composer.root).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+
+  // The quote, planned recipients and "Re:" subject are ours, not the user's,
+  // so an unedited reply leaves nothing behind — as Gmail does.
+  await expect(design.getByTestId('chip-draft')).toHaveCount(0)
+  await goToDrafts(page)
+  await expect(page.getByTestId('draft-row').filter({ hasText: 'Design notes' })).toHaveCount(0)
+  await page.keyboard.press('g')
+  await page.keyboard.press('i')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+
+  // One keystroke of the user's own is enough to make it worth keeping.
+  await design.click()
+  await composer.openReply()
+  await composer.typeBody('Worth keeping')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(design.getByTestId('chip-draft')).toBeVisible()
+})
+
+test('discards an untouched reply that was upgraded to reply-all', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  const design = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
+  await design.click()
+  await composer.openReply()
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'reply')
+  await page.getByTestId('composer-discard').click()
+  await expect(composer.root).toHaveCount(0)
+
+  // Reply-All re-plans the recipients on our side; that is not the user
+  // contributing content, so the draft stays discardable.
+  await page.keyboard.press('a')
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'replyAll')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await expect(design.getByTestId('chip-draft')).toHaveCount(0)
+})
+
 test('keeps the view nav and sync footer while an inline draft is open', async ({ page }) => {
   const composer = new ComposerPage(page)
   await expect(page.getByTestId('thread-row').first()).toHaveAttribute('data-selected', 'true')

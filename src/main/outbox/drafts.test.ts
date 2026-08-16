@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import { publicDraftAttachment, type StoredDraftAttachment } from './draftAttachments'
-import { canonicalizeRendererDraft, discardDraft, isEmptyDraft, requestDraftMirror } from './drafts'
+import {
+  canonicalizeRendererDraft,
+  closeDraft,
+  discardDraft,
+  isEmptyDraft,
+  requestDraftMirror
+} from './drafts'
 
 const stored: StoredDraftAttachment = {
   id: 'owned-attachment',
@@ -93,5 +99,67 @@ describe('draft lifecycle guards', () => {
 
       expect(requestDraftMirror(db, 'account', 'draft-1')).toBe(true)
     }
+  })
+})
+
+describe('untouched reply and forward drafts', () => {
+  function draftRow(overrides: Record<string, unknown>): Record<string, unknown> {
+    return {
+      id: 'draft-1',
+      gmail_draft_id: null,
+      gmail_message_id: null,
+      state: 'composing',
+      kind: 'reply',
+      to_json: JSON.stringify([{ name: 'Maya', email: 'maya@example.com' }]),
+      cc_json: '[]',
+      bcc_json: '[]',
+      subject: 'Re: Design notes',
+      body_html: '',
+      body_text: '',
+      attachments_json: '[]',
+      thread_id: 't-design',
+      source_message_id: 'm-1',
+      in_reply_to: '<m-1@example.com>',
+      references_json: '[]',
+      quote_html: '<blockquote>Original</blockquote>',
+      quote_text: '> Original',
+      created_at: 1,
+      updated_at: 1,
+      local_revision: 1,
+      planned_revision: 1,
+      ...overrides
+    }
+  }
+
+  function closeWith(row: Record<string, unknown>): { result: string; sql: string[] } {
+    const sql: string[] = []
+    const db = {
+      prepare: vi.fn((statement: string) => {
+        sql.push(statement)
+        return { get: vi.fn(() => row), run: vi.fn(() => ({ changes: 1 })) }
+      })
+    } as unknown as Db
+    return { result: closeDraft(db, 'account', 'draft-1'), sql }
+  }
+
+  it('discards a reply the user never contributed to, despite its planned content', () => {
+    // Prefilled recipients, subject and quote make this draft non-empty, so
+    // only the planned-revision mark can tell it apart from real user work.
+    expect(isEmptyDraft({ ...emptyDraftInput(), quoteHtml: '<blockquote>Original</blockquote>' })).toBe(false)
+
+    const { result, sql } = closeWith(draftRow({}))
+    expect(result).toBe('discarded')
+    expect(sql.some((statement) => statement.includes('DELETE FROM outbox'))).toBe(true)
+  })
+
+  it('saves the same draft once the user edits it past the planned revision', () => {
+    const { result, sql } = closeWith(draftRow({ local_revision: 2, body_text: 'My reply' }))
+    expect(result).toBe('saved')
+    expect(sql.some((statement) => statement.includes("state = 'drafted'"))).toBe(true)
+  })
+
+  it('leaves imported Gmail drafts, which carry no plan mark, saved on close', () => {
+    const { result } = closeWith(draftRow({ planned_revision: null, local_revision: 1 }))
+    expect(result).toBe('saved')
   })
 })
