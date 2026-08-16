@@ -731,18 +731,6 @@ PRAGMA user_version = 13;
 COMMIT;
 ```
 
-T14E adds one nullable column at revision 14. `planned_revision` records the `local_revision` a reply or
-forward still carried while it held nothing but the plan Attn generated for it, so closing an unedited one
-discards instead of saving. Existing rows upgrade with a NULL mark, which reads as "not a planned draft" and
-leaves every imported or already-saved draft untouched. From a revision-13 profile:
-
-```sql
-BEGIN IMMEDIATE;
-ALTER TABLE outbox ADD COLUMN planned_revision INTEGER;
-PRAGMA user_version = 14;
-COMMIT;
-```
-
 - **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` and are unit-tested against a fake durable store, fake provider, and injected clock.
 - Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.
 - IPC: `outbox:send(draftId)`, `outbox:undoSend(outboxId)` (also reachable via the undo stack), `outbox:listPending()` for the local Outbox page, and broadcast `outbox:changed` consumed by the renderer for refreshes and failure toasts.

@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 14
+export const CURRENT_SCHEMA_VERSION = 13
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -139,10 +139,6 @@ CREATE TABLE outbox (
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL,
   local_revision    INTEGER NOT NULL DEFAULT 0,
-  -- The revision at which a reply/forward still exactly matched the plan we
-  -- generated for it. While local_revision has not moved past this mark the
-  -- user has contributed nothing, so closing discards instead of saving.
-  planned_revision  INTEGER,
   mirror_revision   INTEGER NOT NULL DEFAULT 0,
   remote_updated_at INTEGER,
   remote_fingerprint TEXT,

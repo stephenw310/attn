@@ -51,7 +51,6 @@ import {
   discardDraft,
   getDraft,
   listDrafts,
-  markDraftPlanned,
   reopenDraft,
   reopenThreadDraft,
   requestDraftMirror,
@@ -379,7 +378,6 @@ export function registerIpc(context: IpcContext): () => void {
       quoteText: plan.quoteText
     }
     const id = saveDraft(context.db, account, input)
-    markDraftPlanned(context.db, account, id)
     context.broadcastMailChanged()
     return getDraft(context.db, account, id)
   })

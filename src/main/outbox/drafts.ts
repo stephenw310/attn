@@ -26,12 +26,11 @@ export interface DraftRow {
   created_at: number
   updated_at: number
   local_revision: number
-  planned_revision: number | null
 }
 
 const DRAFT_COLUMNS = `id, gmail_draft_id, gmail_message_id, state, kind, to_json, cc_json, bcc_json,
   subject, body_html, body_text, attachments_json, thread_id, source_message_id, in_reply_to,
-  references_json, quote_html, quote_text, created_at, updated_at, local_revision, planned_revision`
+  references_json, quote_html, quote_text, created_at, updated_at, local_revision`
 
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T
@@ -157,19 +156,6 @@ function mergeAddresses(
 }
 
 /** Upgrade the shared reply slot without overwriting authored content or manually added recipients. */
-/**
- * Gmail does not keep a reply or forward the user never contributed to: the
- * quote, planned recipients and "Re:"/"Fwd:" subject are ours, not theirs, so
- * an unedited one has no content to preserve. Mark the revision the plan
- * produced; `closeDraft` discards while `local_revision` has not moved past it.
- */
-export function markDraftPlanned(db: Db, accountId: string, id: string): void {
-  db.prepare(
-    `UPDATE outbox SET planned_revision = local_revision
-     WHERE account_id = ? AND id = ? AND state = 'composing' AND kind != 'new'`
-  ).run(accountId, id)
-}
-
 export function upgradeReplyToReplyAll(
   db: Db,
   accountId: string,
@@ -190,12 +176,7 @@ export function upgradeReplyToReplyAll(
   const toEmails = new Set(to.map(addressKey))
   const cc = mergeAddresses(parseJson<MailAddress[]>(row.cc_json), plannedCc, toEmails)
   db.prepare(
-    // Reply-All re-plans the recipients; it is our edit, not the user's, so an
-    // untouched reply stays untouched. SQLite reads the right-hand side from
-    // the pre-update row, so this compares the marks before either moves.
     `UPDATE outbox SET kind = 'replyAll', to_json = ?, cc_json = ?, updated_at = ?,
-       planned_revision = CASE WHEN planned_revision = local_revision
-                               THEN local_revision + 1 ELSE planned_revision END,
        local_revision = local_revision + 1
      WHERE account_id = ? AND id = ? AND state = 'composing' AND kind = 'reply'`
   ).run(JSON.stringify(to), JSON.stringify(cc), now, accountId, id)
@@ -216,20 +197,43 @@ export function takeRecoveredDraft(db: Db, accountId: string): Draft | null {
   return row ? toDraft(row) : null
 }
 
-export function isEmptyDraft(draft: DraftSaveInput): boolean {
-  const meaningfulHtml =
+function hasAuthoredBody(draft: DraftSaveInput): boolean {
+  return (
+    draft.bodyText.length > 0 ||
     /<(?:img|table|hr)\b/i.test(draft.bodyHtml) ||
     draft.bodyHtml.replace(/<[^>]*>|&nbsp;|\s/gi, '').length > 0
+  )
+}
+
+export function isEmptyDraft(draft: DraftSaveInput): boolean {
   return (
     draft.to.length === 0 &&
     draft.cc.length === 0 &&
     draft.bcc.length === 0 &&
     draft.subject.length === 0 &&
-    draft.bodyText.length === 0 &&
-    !meaningfulHtml &&
+    !hasAuthoredBody(draft) &&
     draft.attachments.length === 0 &&
     draft.quoteHtml.length === 0 &&
     draft.quoteText.length === 0
+  )
+}
+
+/**
+ * Gmail does not keep a reply or forward the user never contributed to, and
+ * neither should we — but such a draft is not blank: `planReply` fills the
+ * quote, a `Re:`/`Fwd:` subject, and a reply's recipients. So test the fields
+ * the plan never writes instead. It fills `to`/`cc` only for replies, never
+ * `bcc` or a body, and attaches only the source message's inline parts, so
+ * anything in the rest is the user's own work.
+ */
+export function isUntouchedThreadDraft(draft: DraftSaveInput): boolean {
+  if (draft.kind === 'new') return false
+  return (
+    !hasAuthoredBody(draft) &&
+    !draft.attachments.some((attachment) => !attachment.inline) &&
+    draft.bcc.length === 0 &&
+    (draft.kind === 'replyAll' || draft.cc.length === 0) &&
+    (draft.kind !== 'forward' || draft.to.length === 0)
   )
 }
 
@@ -357,10 +361,7 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
   if (!row) throw new Error('draft is unavailable')
   const draft = toDraft(row)
   const input: DraftSaveInput = { ...draft, id: draft.id }
-  // A reply or forward is "empty" while it still holds only the plan we made
-  // for it, even though that plan fills the quote, recipients and subject.
-  const untouchedPlan = row.planned_revision !== null && row.planned_revision === row.local_revision
-  if (!untouchedPlan && !isEmptyDraft(input)) {
+  if (!isEmptyDraft(input) && !isUntouchedThreadDraft(input)) {
     db.prepare("UPDATE outbox SET state = 'drafted', updated_at = ? WHERE account_id = ? AND id = ?").run(
       now,
       accountId,
