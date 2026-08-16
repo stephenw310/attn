@@ -58,6 +58,7 @@ it('quiesces the active checkpoint before shutdown and declines another row', as
   )
 
   const running = executor.trigger()
+  expect(executor.isRunning()).toBe(true)
   let stopped = false
   const stopping = executor.stop().then(() => {
     stopped = true
@@ -68,6 +69,7 @@ it('quiesces the active checkpoint before shutdown and declines another row', as
   release()
   await Promise.all([running, stopping])
   expect(stopped).toBe(true)
+  expect(executor.isRunning()).toBe(false)
   await executor.trigger()
   expect(drain).toHaveBeenCalledOnce()
 })

@@ -6,7 +6,7 @@ import type { RevertedAction } from '../shared/actionRevert'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
-import type { OutboxChanged } from '../shared/outbox'
+import type { OutboxChanged, OutboxProgress } from '../shared/outbox'
 import { clearUndo } from './actions'
 import { ActionExecutor, type ActionRecoveryProvider } from './actions/executor'
 import { ActionRevertNotices } from './actions/revertNotices'
@@ -23,10 +23,12 @@ import { MailNotifier, type PendingFocus } from './notify'
 import { reconcileRemoteDraft } from './outbox/draftSync'
 import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import { OutboxSender } from './outbox/sender'
-import { cleanOutboxSpool } from './outbox/spool'
+import { cleanOutboxSpool, reconcileOutboxSpool } from './outbox/spool'
 import { SnoozeScheduler } from './scheduler'
 import { writeSetting } from './settings'
+import { runLifetimeSweep } from './sync/lifetimeSweep'
 import { deleteThread } from './sync/persist'
+import type { MailProvider } from './sync/provider'
 import { SyncController } from './syncController'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
@@ -71,7 +73,10 @@ let testActionProvider: ActionRecoveryProvider | null = null
 // so a reconnect click resumes the seeded account instead of running the real
 // flow. Production sign-in stays free of test branching.
 let testSeededResume: (() => number) | null = null
+let testAttachmentPickerPaths: string[] | null = null
 let signInInFlight = false
+let teardownPromise: Promise<void> | null = null
+const foregroundProviderWork = new Map<string, number>()
 const actionRevertNotices = new ActionRevertNotices()
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
@@ -88,6 +93,10 @@ function broadcastOutboxChanged(change: OutboxChanged): void {
   mailNotifier?.updateBadge()
 }
 
+function broadcastOutboxProgress(progress: OutboxProgress | null): void {
+  broadcast(IPC_CHANNELS.outboxProgress, progress)
+}
+
 function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
   broadcast(IPC_CHANNELS.mailBodyHydrationFailed, { accountId, threadId })
 }
@@ -95,6 +104,21 @@ function broadcastBodyHydrationFailed(accountId: string, threadId: string): void
 function broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {
   actionRevertNotices.add(accountId, actions)
   broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
+}
+
+function hasForegroundProviderWork(accountId: string): boolean {
+  return (foregroundProviderWork.get(accountId) ?? 0) > 0
+}
+
+async function trackForegroundProviderWork<T>(accountId: string, work: () => Promise<T>): Promise<T> {
+  foregroundProviderWork.set(accountId, (foregroundProviderWork.get(accountId) ?? 0) + 1)
+  try {
+    return await work()
+  } finally {
+    const remaining = (foregroundProviderWork.get(accountId) ?? 1) - 1
+    if (remaining > 0) foregroundProviderWork.set(accountId, remaining)
+    else foregroundProviderWork.delete(accountId)
+  }
 }
 
 function focusInboxThread(threadId: string): void {
@@ -248,6 +272,9 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     if (shouldShow) win.show()
   })
   attachBackgroundWindow(win)
+  // A file dropped outside the composer's drop target must never replace the
+  // sandboxed renderer with file:// content (or navigate it anywhere else).
+  win.webContents.on('will-navigate', (event) => event.preventDefault())
   // All external links open in the system browser, never in-app (SPEC §6).
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
@@ -258,7 +285,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   return win
 }
 
-function initialize(): void {
+async function initialize(): Promise<void> {
   const dbPath = join(app.getPath('userData'), 'attn.db')
   db = openDatabase(dbPath)
   console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
@@ -268,9 +295,16 @@ function initialize(): void {
       | { id: string }
       | undefined
     seedAccountId = existing?.id ?? loadSeed(db, seedPath)
-    console.log(`[sync] sent stage skipped for seeded account ${seedAccountId}`)
+    console.log(`[sync] backfill stages skipped for seeded account ${seedAccountId}`)
   }
   const activeDb = db
+  await reconcileOutboxSpool(activeDb, app.getPath('userData'))
+  // Quitting during that await runs teardown to completion, including
+  // db.close(). Everything below would then build on a closed handle.
+  if (db !== activeDb) {
+    console.log('[boot] aborted: shutdown ran while reconciling the outbox spool')
+    return
+  }
   syncController = new SyncController({
     db: activeDb,
     currentAccountId,
@@ -278,6 +312,7 @@ function initialize(): void {
     isSeeded,
     makeProvider,
     isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
+    hasForegroundProviderWork,
     broadcastState: (state) => broadcast(IPC_CHANNELS.syncState, state),
     broadcastMailChanged,
     getActionExecutor: () => actionExecutor,
@@ -302,6 +337,7 @@ function initialize(): void {
     broadcastMailChanged,
     broadcastOutboxChanged,
     broadcastBodyHydrationFailed,
+    trackForegroundProviderWork,
     pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
       pendingFocus = null
@@ -309,6 +345,13 @@ function initialize(): void {
     peekRevertedActions: (accountId) => actionRevertNotices.peek(accountId),
     acknowledgeRevertedActions: (accountId, noticeId) => actionRevertNotices.acknowledge(accountId, noticeId),
     waitForConversation,
+    pickAttachmentPaths: testUserData
+      ? async () => {
+          const paths = testAttachmentPickerPaths ?? []
+          testAttachmentPickerPaths = null
+          return paths
+        }
+      : undefined,
     draftInlineImageDelay: () => testDraftInlineImageDelayMs,
     consumeTestDraftSaveFailure: () => {
       if (testDraftSaveFailures === 0) return false
@@ -337,10 +380,11 @@ function initialize(): void {
     currentAccountId,
     makeCurrentProvider,
     broadcastOutboxChanged,
-    () => draftMirrorExecutor?.waitForIdle() ?? Promise.resolve(),
+    (signal) => draftMirrorExecutor?.waitForIdle(signal) ?? Promise.resolve(),
     undefined,
     join(app.getPath('userData'), 'outbox'),
-    (id) => cleanOutboxSpool(app.getPath('userData'), id)
+    (id) => cleanOutboxSpool(app.getPath('userData'), id),
+    broadcastOutboxProgress
   )
   snoozeScheduler = new SnoozeScheduler(
     activeDb,
@@ -457,6 +501,11 @@ function registerTestIpc(): void {
   ipcMain.on(TEST_CHANNELS.failNextActionAuth, (_event, threadId: unknown) => {
     installActionFailure(threadId, 401)
   })
+  ipcMain.on(TEST_CHANNELS.setAttachmentPickerFiles, (_event, paths: unknown) => {
+    testAttachmentPickerPaths = Array.isArray(paths)
+      ? paths.filter((path): path is string => typeof path === 'string')
+      : []
+  })
   ipcMain.on(
     TEST_CHANNELS.markDraftMirrored,
     (_event, draftId: unknown, gmailDraftId?: unknown, done?: (error?: string) => void) => {
@@ -527,9 +576,101 @@ function registerTestIpc(): void {
         })
     })
   })
+  ipcMain.on(
+    TEST_CHANNELS.runLifetimeSweep,
+    async (
+      _event,
+      request: {
+        resetCursor?: string
+        threads: import('./gmail/parse').GmailThread[]
+        pages: Array<{
+          pageToken?: string
+          threadIds: string[]
+          nextPageToken?: string
+          resultSizeEstimate?: number
+        }>
+        offlineAtPageToken?: string
+        threadsTotal?: number
+        messagesTotal?: number
+      },
+      done: (result: {
+        cursor: string | null
+        error?: string
+        formats: string[]
+        pageTokens: Array<string | undefined>
+      }) => void
+    ) => {
+      const accountId = currentAccountId()
+      if (!db || !accountId || !request || !Array.isArray(request.threads)) {
+        done({ cursor: null, error: 'invalid lifetime sweep request', formats: [], pageTokens: [] })
+        return
+      }
+      if (request.resetCursor) {
+        db.prepare(
+          `UPDATE sync_state
+           SET sweep_cursor = ?, sweep_threads_done = 0, sweep_threads_total = NULL
+           WHERE account_id = ?`
+        ).run(request.resetCursor, accountId)
+      }
+      const threads = new Map(request.threads.map((thread) => [thread.id, thread]))
+      const formats: string[] = []
+      const pageTokens: Array<string | undefined> = []
+      let failure: unknown
+      const provider = {
+        getProfile: async () => ({
+          emailAddress: accountId,
+          historyId: 'test-history',
+          threadsTotal: request.threadsTotal,
+          messagesTotal: request.messagesTotal
+        }),
+        listThreadIds: async (options = {}) => {
+          pageTokens.push(options.pageToken)
+          if (request.offlineAtPageToken !== undefined && options.pageToken === request.offlineAtPageToken) {
+            throw new Error('offline')
+          }
+          const page = request.pages.find((candidate) => candidate.pageToken === options.pageToken)
+          if (!page) return { threadIds: [] }
+          return page
+        },
+        getThread: async (id: string, options = {}) => {
+          formats.push(options.format ?? 'full')
+          const thread = threads.get(id)
+          if (!thread) throw new Error(`missing test thread ${id}`)
+          return thread
+        }
+      } as MailProvider
+      await runLifetimeSweep(
+        db,
+        provider,
+        accountId,
+        {
+          onProgress: () => {},
+          onError: (error) => {
+            failure = error
+          }
+        },
+        { requestIntervalMs: 0, pagePauseMs: 0 }
+      )
+      const state = db.prepare('SELECT sweep_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
+        | { sweep_cursor: string | null }
+        | undefined
+      done({
+        cursor: state?.sweep_cursor ?? null,
+        ...(failure ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
+        formats,
+        pageTokens
+      })
+    }
+  )
 }
 
-function teardown(): void {
+function teardown(): Promise<void> {
+  if (teardownPromise) return teardownPromise
+  teardownPromise = teardownOwnedResources()
+  return teardownPromise
+}
+
+async function teardownOwnedResources(): Promise<void> {
   // Invoke handlers close over process-owned resources, so remove them before
   // stopping those resources. Iterating the channel map keeps this exhaustive.
   for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel)
@@ -540,10 +681,8 @@ function teardown(): void {
   powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
   actionExecutor?.stop()
   actionExecutor = null
-  void draftMirrorExecutor?.stop()
-  draftMirrorExecutor = null
-  void outboxSender?.stop()
-  outboxSender = null
+  const mirror = draftMirrorExecutor
+  const sender = outboxSender
   snoozeScheduler?.stop()
   snoozeScheduler = null
   mailNotifier?.stop()
@@ -553,7 +692,19 @@ function teardown(): void {
   testDraftInlineImageDelayMs = 0
   testActionProvider = null
   testSeededResume = null
+  testAttachmentPickerPaths = null
   actionRevertNotices.clear()
+  const stopped = await Promise.allSettled([
+    mirror?.stop() ?? Promise.resolve(),
+    sender?.stop() ?? Promise.resolve()
+  ])
+  for (const result of stopped) {
+    if (result.status === 'rejected') {
+      console.error(`[shutdown] worker stop failed: ${String(result.reason)}`)
+    }
+  }
+  draftMirrorExecutor = null
+  outboxSender = null
   db?.close()
   db = null
 }
@@ -573,29 +724,25 @@ else {
     event.preventDefault()
     if (preparingQuit) return
     preparingQuit = true
-    // Give active draft/outbox mutations a bounded grace period to persist their
-    // recovery state before will-quit closes SQLite.
-    void Promise.all([
-      draftMirrorExecutor?.stop() ?? Promise.resolve(),
-      outboxSender?.stop() ?? Promise.resolve()
-    ]).finally(() => {
+    // Gmail draft creation is not idempotent. Quiesce both workers before
+    // teardown closes SQLite, then stop before either can select another row.
+    void teardown().finally(() => {
       quitPrepared = true
       app.quit()
     })
   })
   app.on('second-instance', () => showMainWindow())
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     if (process.platform === 'darwin') app.dock?.setIcon(appIcon)
     try {
-      initialize()
+      await initialize()
     } catch (error) {
       console.error(`[boot] failed: ${error instanceof Error ? error.message : String(error)}`)
-      teardown()
-      app.exit(1)
+      void teardown().finally(() => app.exit(1))
     }
   })
   // Deliberately keep the process alive with no windows so sync and
   // notifications continue running in the background on every platform.
   app.on('window-all-closed', () => {})
-  app.on('will-quit', teardown)
+  app.on('will-quit', () => void teardown())
 }

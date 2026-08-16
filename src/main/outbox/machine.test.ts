@@ -42,6 +42,13 @@ describe('outbox state machine', () => {
     })
   })
 
+  it('does not fire a malformed queued row without a durable send time', () => {
+    expect(planTransition(row({ state: 'queued', sendAt: null }), { type: 'timer' }, NOW)).toEqual({
+      next: row({ state: 'queued', sendAt: null }),
+      effects: []
+    })
+  })
+
   it.each([
     ['after the sending write with a draft id', row({ state: 'sending', gmailDraftId: 'draft-1' }), 'verify'],
     ['between create and id persistence', row({ state: 'sending' }), 'verify-secondary']
@@ -114,10 +121,27 @@ describe('outbox state machine', () => {
 
   it('returns a retryable preflight failure to queued because no remote mutation started', () => {
     expect(
-      planTransition(row({ state: 'sending' }), { type: 'preflight-retry', retryAt: NOW + 5_000 }, NOW)
+      planTransition(
+        row({ state: 'sending' }),
+        { type: 'preflight-retry', exhausted: false, retryAt: NOW + 5_000 },
+        NOW
+      )
     ).toEqual({
       next: row({ state: 'queued', sendAt: NOW + 5_000, attempts: 1 }),
       effects: ['persist', 'arm-timer']
+    })
+  })
+
+  it('fails an exhausted preflight ladder instead of retrying a dead source forever', () => {
+    expect(
+      planTransition(
+        row({ state: 'sending', attempts: 7 }),
+        { type: 'preflight-retry', exhausted: true, retryAt: NOW + 60_000 },
+        NOW
+      )
+    ).toEqual({
+      next: row({ state: 'failed', sendAt: null, attempts: 8 }),
+      effects: ['persist', 'notify']
     })
   })
 

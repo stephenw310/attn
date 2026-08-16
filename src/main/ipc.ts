@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
-import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
+import { resolve } from 'node:path'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  type OpenDialogOptions,
+  shell
+} from 'electron'
 import type { ActionRevertNotice } from '../shared/actionRevert'
 import { isValidEmail } from '../shared/address'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
@@ -62,16 +70,11 @@ import {
 } from './outbox/drafts'
 import { addInlineImage, isSupportedInlineImageMimeType } from './outbox/inlineImages'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
-import {
-  listPendingOutbox,
-  pendingOutboxCount,
-  queueSend,
-  reopenPendingOutbox,
-  undoQueuedSend
-} from './outbox/queue'
+import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from './outbox/queue'
 import { planReply } from './outbox/replyPlan'
 import type { OutboxSender } from './outbox/sender'
-import { cleanOutboxSpool } from './outbox/spool'
+import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from './outbox/spool'
+import { isPathInside } from './pathSafety'
 import type { SnoozeScheduler } from './scheduler'
 import { hydrateMissingThreadBodies } from './sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from './sync/bodyHydration'
@@ -114,11 +117,13 @@ export interface IpcContext {
   broadcastMailChanged: () => void
   broadcastOutboxChanged: (change: import('../shared/outbox').OutboxChanged) => void
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
+  trackForegroundProviderWork: <T>(accountId: string, work: () => Promise<T>) => Promise<T>
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
   peekRevertedActions: (accountId: string) => ActionRevertNotice | null
   acknowledgeRevertedActions: (accountId: string, noticeId: number) => boolean
   waitForConversation: (threadId: string) => Promise<void>
+  pickAttachmentPaths?: () => Promise<string[]>
   draftInlineImageDelay: () => number
   consumeTestDraftSaveFailure: () => boolean
   testUserData: boolean
@@ -252,10 +257,16 @@ async function resolveAttachmentData(
   if (inlineData !== null) return { kind: 'available', data: inlineData }
   if (context.isSeeded()) return { kind: 'signed-out' }
   const client = context.makeClient()
-  if (!client) return { kind: 'signed-out' }
-  const data = (
-    await client.get<{ data?: string }>(`/messages/${request.messageId}/attachments/${request.attachmentId}`)
-  ).data
+  if (!client || !account) return { kind: 'signed-out' }
+  const data = await context.trackForegroundProviderWork(
+    account,
+    async () =>
+      (
+        await client.get<{ data?: string }>(
+          `/messages/${request.messageId}/attachments/${request.attachmentId}`
+        )
+      ).data
+  )
   return typeof data === 'string' ? { kind: 'available', data } : { kind: 'unavailable' }
 }
 
@@ -272,7 +283,10 @@ export function registerIpc(context: IpcContext): () => void {
         )
       }
       context.broadcastBodyHydrationFailed(accountId, threadId)
-    }
+    },
+    undefined,
+    undefined,
+    context.trackForegroundProviderWork
   )
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
@@ -382,6 +396,49 @@ export function registerIpc(context: IpcContext): () => void {
     context.broadcastMailChanged()
     return getDraft(context.db, account, id)
   })
+  handle(IPC_CHANNELS.draftPickAttachments, async (event, id) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    let paths: string[]
+    if (context.pickAttachmentPaths) paths = await context.pickAttachmentPaths()
+    else {
+      const options: OpenDialogOptions = {
+        properties: ['openFile', 'multiSelections'],
+        title: 'Attach files'
+      }
+      const parent = BrowserWindow.fromWebContents(event.sender)
+      paths = (await (parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options)))
+        .filePaths
+    }
+    return spoolDraftAttachments(context.db, app.getPath('userData'), requireAccount(context), id, paths)
+  })
+  handle(IPC_CHANNELS.draftAddAttachments, async (_event, id, paths) => {
+    if (
+      typeof id !== 'string' ||
+      id.length === 0 ||
+      !Array.isArray(paths) ||
+      !paths.every((path) => typeof path === 'string' && path.length > 0)
+    ) {
+      throw new Error('invalid attachments')
+    }
+    return spoolDraftAttachments(context.db, app.getPath('userData'), requireAccount(context), id, paths)
+  })
+  handle(IPC_CHANNELS.draftRemoveAttachment, async (_event, id, attachmentId) => {
+    if (
+      typeof id !== 'string' ||
+      id.length === 0 ||
+      typeof attachmentId !== 'string' ||
+      attachmentId.length === 0
+    ) {
+      throw new Error('invalid attachment')
+    }
+    return removeDraftAttachment(
+      context.db,
+      app.getPath('userData'),
+      requireAccount(context),
+      id,
+      attachmentId
+    )
+  })
   handle(IPC_CHANNELS.draftAddInlineImage, async (_event, id, image) => {
     if (typeof id !== 'string' || id.length === 0 || !isDraftInlineImageInput(image)) {
       throw new Error('invalid inline image')
@@ -414,8 +471,7 @@ export function registerIpc(context: IpcContext): () => void {
       if (attachment.spoolPath) {
         const spoolRoot = resolve(app.getPath('userData'), 'outbox', id)
         const candidate = resolve(attachment.spoolPath)
-        const relativePath = relative(spoolRoot, candidate)
-        if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+        if (!isPathInside(spoolRoot, candidate)) {
           return { error: 'Inline image unavailable' }
         }
         data = await readFile(candidate)
@@ -424,8 +480,12 @@ export function registerIpc(context: IpcContext): () => void {
       } else if (attachment.remoteMessageId && attachment.remoteAttachmentId) {
         const client = context.makeClient()
         if (!client) return { error: 'Inline image requires sign in' }
-        const result = await client.get<{ data?: string }>(
-          `/messages/${encodeURIComponent(attachment.remoteMessageId)}/attachments/${encodeURIComponent(attachment.remoteAttachmentId)}`
+        const remoteMessageId = attachment.remoteMessageId
+        const remoteAttachmentId = attachment.remoteAttachmentId
+        const result = await context.trackForegroundProviderWork(account, () =>
+          client.get<{ data?: string }>(
+            `/messages/${encodeURIComponent(remoteMessageId)}/attachments/${encodeURIComponent(remoteAttachmentId)}`
+          )
         )
         if (!result.data) return { error: 'Inline image unavailable' }
         data = Buffer.from(result.data, 'base64url')
@@ -602,12 +662,14 @@ export function registerIpc(context: IpcContext): () => void {
     if (attemptedInlineImageRepairs.has(repairKey)) return false
     attemptedInlineImageRepairs.add(repairKey)
     try {
-      const thread = await provider.getThread(request.threadId, { format: 'full' })
-      if (context.currentAccountId() !== accountId) return false
-      persistThread(context.db, accountId, thread)
-      await hydrateMissingThreadBodies(context.db, provider, accountId, thread)
-      if (context.currentAccountId() === accountId) context.broadcastMailChanged()
-      return true
+      return await context.trackForegroundProviderWork(accountId, async () => {
+        const thread = await provider.getThread(request.threadId, { format: 'full' })
+        if (context.currentAccountId() !== accountId) return false
+        persistThread(context.db, accountId, thread)
+        await hydrateMissingThreadBodies(context.db, provider, accountId, thread)
+        if (context.currentAccountId() === accountId) context.broadcastMailChanged()
+        return true
+      })
     } catch (error) {
       attemptedInlineImageRepairs.delete(repairKey)
       console.error(
@@ -670,7 +732,7 @@ export function registerIpc(context: IpcContext): () => void {
   })
   handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
     const account = context.currentAccountId()
-    return account ? pendingActionCount(context.db, account) + pendingOutboxCount(context.db, account) : 0
+    return account ? pendingActionCount(context.db, account) : 0
   })
   handle(IPC_CHANNELS.mailGetActionQueueStatus, () => {
     const account = context.currentAccountId()

@@ -68,11 +68,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realDrafts,
     realOutbox,
     outboxFailure,
+    outboxProgress,
     clearOutboxFailure,
     refreshDrafts,
     realUnreadTotal,
     labels,
-    pendingCount,
+    pendingActionCount,
     pausedActionCount,
     mailRevision,
     preserveSelectionOnRefreshRef,
@@ -467,8 +468,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       <MailHeader
         view={view}
         unreadCount={realUnreadTotal}
-        pendingCount={pendingCount}
+        pendingActionCount={pendingActionCount}
         pausedActionCount={pausedActionCount}
+        outboxCount={realOutbox.length}
         selectionCount={view === 'inbox' || view === 'snoozed' ? selectedIds.size : 0}
         composerOpen={composerDraft !== null}
         status={status}
@@ -573,7 +575,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         />
       )}
 
-      <Toast toast={toast} />
+      <Toast toast={toast} progress={outboxProgress} />
 
       {!composerDraft && (
         <MailFooter

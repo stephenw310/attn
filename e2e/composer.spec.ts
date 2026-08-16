@@ -1,6 +1,6 @@
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, truncateSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Page } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
@@ -24,6 +24,13 @@ async function goToDrafts(page: Page): Promise<void> {
   await page.keyboard.press('g')
   await page.keyboard.press('d')
   await draftList.waitFor()
+}
+
+async function setAttachmentPickerFiles(app: ElectronApplication, paths: string[]): Promise<void> {
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.paths), {
+    channel: TEST_CHANNELS.setAttachmentPickerFiles,
+    paths
+  })
 }
 
 async function pasteVisiblePng(composer: ComposerPage): Promise<void> {
@@ -240,6 +247,110 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
   await composer.expectPending(0)
 })
 
+test('spools picked and dropped attachments through queue and relaunch, then cleans on discard', async ({
+  app,
+  boot,
+  page,
+  userData
+}) => {
+  await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 0), TEST_CHANNELS.setUndoSendDelay)
+  const source = join(__dirname, 'fixtures', 't17-attachment.txt')
+  await setAttachmentPickerFiles(app, [source])
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.pickAttachments()
+
+  const chip = composer.attachmentChips
+  await expect(chip).toContainText('t17-attachment.txt')
+  await expect(chip).toContainText('37 B')
+  const artifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(artifactDirectory, { recursive: true })
+  await page.screenshot({ path: join(artifactDirectory, 'attachments.png') })
+  const draftId = await composer.root.getAttribute('data-draft-id')
+  if (!draftId) throw new Error('missing draft id')
+  const spoolDirectory = join(userData, 'outbox', draftId)
+  await expect.poll(() => readdirSync(spoolDirectory).length).toBe(1)
+  const spooled = join(spoolDirectory, readdirSync(spoolDirectory)[0])
+  expect(readFileSync(spooled, 'utf8')).toBe(readFileSync(source, 'utf8'))
+
+  await composer.addRecipient('attachments@example.com')
+  await composer.subject.fill('Durable attachment')
+  await composer.triggerSend()
+  await composer.expectPending(1)
+
+  ;({ app, page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await composer.expectPending(1)
+  await page.keyboard.press('g')
+  await page.keyboard.press('o')
+  await page.getByTestId('outbox-row').click()
+  await expect(composer.attachmentChips).toContainText('t17-attachment.txt')
+  await page.getByTestId('composer-attachment-remove').click()
+  await expect(composer.attachmentChips).toHaveCount(0)
+  await expect.poll(() => readdirSync(spoolDirectory).length).toBe(0)
+
+  await composer.dropFiles([source])
+  await expect(composer.attachmentChips).toContainText('t17-attachment.txt')
+  await page.getByTestId('composer-discard').click()
+
+  ;({ page } = await boot.relaunch())
+  await expect.poll(() => existsSync(spoolDirectory)).toBe(false)
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+})
+
+test('rejects an oversized picked attachment without creating a chip', async ({ app, page, userData }) => {
+  const source = join(userData, 'over-25mb.bin')
+  writeFileSync(source, '')
+  truncateSync(source, 25 * 1024 * 1024 + 1)
+  await setAttachmentPickerFiles(app, [source])
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.pickAttachments()
+
+  await expect(page.getByTestId('toast')).toHaveText('Each attachment must be 25 MB or less')
+  await expect(composer.attachmentChips).toHaveCount(0)
+})
+
+test('renders coarse attachment upload progress in the global toast', async ({ app, page }) => {
+  await page.getByTestId('thread-list').waitFor()
+  await app.evaluate(
+    ({ BrowserWindow }, payload) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(payload.channel, payload.progress)
+      }
+    },
+    {
+      channel: IPC_CHANNELS.outboxProgress,
+      progress: {
+        id: 'sending-attachment',
+        completedBytes: 5,
+        totalBytes: 10,
+        completedAttachments: 1,
+        totalAttachments: 2
+      }
+    }
+  )
+
+  await expect(page.getByTestId('toast')).toContainText('Sending attachments… 1 of 2')
+  await expect(page.getByTestId('outbox-progress')).toHaveAttribute('data-completed-attachments', '1')
+  await app.evaluate(
+    ({ BrowserWindow }, payload) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(payload.channel, payload.change)
+      }
+    },
+    {
+      channel: IPC_CHANNELS.outboxChanged,
+      change: { kind: 'failed', id: 'sending-attachment', error: 'Attachment send failed' }
+    }
+  )
+  await expect(page.getByTestId('toast')).toHaveText('Attachment send failed')
+  await expect(page.getByTestId('outbox-progress')).toHaveCount(0)
+  await app.evaluate(({ BrowserWindow }, channel) => {
+    for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channel, null)
+  }, IPC_CHANNELS.outboxProgress)
+})
+
 test('discovers a provider-gated send through the pending readout and Go to Outbox command', async ({
   app,
   boot,
@@ -263,7 +374,7 @@ test('discovers a provider-gated send through the pending readout and Go to Outb
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
 
-  await page.getByTestId('pending-count').click()
+  await page.getByTestId('outbox-count').click()
   const outbox = page.getByTestId('outbox-list')
   await expect(outbox).toBeVisible()
   await expect(page.getByTestId('selection-count')).toHaveCount(0)
@@ -335,6 +446,9 @@ test('surfaces a durable failed send without interrupting the current task', asy
   await page.keyboard.press('o')
   await expect(page.getByTestId('outbox-list')).toBeVisible()
   await expect(page.getByTestId('outbox-row')).toHaveAttribute('data-outbox-state', 'failed')
+  // Opening the row moves it back to composing, so the reason has to be legible
+  // from the list itself.
+  await expect(page.getByTestId('outbox-error')).toHaveText('Recipient rejected by provider')
   await page.getByTestId('outbox-row').click()
 
   await expect(composer.root).toBeVisible()
@@ -640,8 +754,11 @@ test('spools data images pasted through HTML and saves them as CID parts', async
     composer,
     '<p>Before</p><img alt="pixel.png" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"><p>After</p>'
   )
-  await expect(composer.attachments).toContainText('1 attachment')
+  // A pasted image lives in the body, not the attachment row: it has no chip to
+  // remove, so counting it as an attachment would advertise something unusable.
   await expect(composer.editor.locator('img')).toHaveCount(1)
+  await expect(composer.attachments).toHaveCount(0)
+  await expect(page.getByTestId('composer-attachment-chip')).toHaveCount(0)
   await composer.expectSaved()
   await page.keyboard.press('Escape')
 

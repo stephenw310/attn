@@ -53,8 +53,9 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
 
   await expect(page.getByTestId('action-reconnect')).toContainText('1 paused · Reconnect Google')
   await expect(page.getByTestId('paused-count')).toContainText('1 paused')
-  // The outbox readout keeps its own count and stays clickable while actions
-  // are paused — only triage actions can be held back by an auth failure.
+  // The pending readout still counts the row: a paused action is queued work,
+  // not a separate category, and the reconnect control sits beside it rather
+  // than replacing it.
   await expect(page.getByTestId('pending-count')).toContainText('1 pending')
 
   const dir = join(__dirname, '.artifacts')

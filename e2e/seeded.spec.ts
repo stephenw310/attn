@@ -38,7 +38,7 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
     'I added the launch milestones and owner notes.'
   )
   await expect.poll(mainLog).toContain('[seed] loaded 9 threads for seed@attn.test')
-  await expect.poll(mainLog).toContain('[sync] sent stage skipped for seeded account seed@attn.test')
+  await expect.poll(mainLog).toContain('[sync] backfill stages skipped for seeded account seed@attn.test')
   expect(mainLog()).not.toContain('[sync] history poller started')
 })
 
@@ -127,7 +127,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(status).toHaveAttribute('title', 'Syncing · Recent mail — 428 processed')
   const progress = page.getByTestId('sync-progress')
   await expect(progress).toHaveAttribute('aria-valuenow', '2')
-  await expect(progress.locator('[data-phase-state]')).toHaveCount(5)
+  await expect(progress.locator('[data-phase-state]')).toHaveCount(7)
   await expect(progress.locator('[data-phase-state]').nth(0)).toHaveAttribute('data-phase-state', 'complete')
   await expect(progress.locator('[data-phase-state]').nth(1)).toHaveAttribute('data-phase-state', 'active')
 
@@ -135,9 +135,63 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(status).toContainText('Syncing · Drafts')
   await expect(progress).toHaveAttribute('aria-valuenow', '3')
 
-  await setSyncState(app, { phase: 'syncing', stage: 'sent', threadsDone: 512 })
-  await expect(status).toContainText('Syncing · Sent mail')
+  await setSyncState(app, { phase: 'syncing', stage: 'all-mail', threadsDone: 512 })
+  await expect(status).toContainText('Syncing · All mail')
   await expect(progress).toHaveAttribute('aria-valuenow', '4')
+
+  await setSyncState(app, { phase: 'syncing', stage: 'spam', threadsDone: 530 })
+  await expect(status).toContainText('Syncing · Spam')
+  await expect(progress).toHaveAttribute('aria-valuenow', '5')
+
+  await setSyncState(app, { phase: 'syncing', stage: 'trash', threadsDone: 544 })
+  await expect(status).toContainText('Syncing · Trash')
+  await expect(progress).toHaveAttribute('aria-valuenow', '6')
+
+  await setSyncState(app, {
+    phase: 'indexing',
+    stage: 'lifetime',
+    threadsDone: 750,
+    threadsTotal: 2_000,
+    messagesTotal: 3_200,
+    etaMs: 12 * 60_000,
+    reason: 'running'
+  })
+  await expect(status).toContainText('Live · indexing older mail')
+  await expect(status).toContainText('750 of 2,000 threads indexed · ~12 min left')
+  await expect(status).toHaveAttribute('data-status', 'indexing')
+  const lifetimeProgress = page.getByTestId('lifetime-progress')
+  await expect(lifetimeProgress).toHaveAttribute('aria-valuenow', '750')
+  await expect(lifetimeProgress).toHaveAttribute('aria-valuemax', '2000')
+  await expect(status).toHaveAttribute(
+    'title',
+    'Live · indexing older mail — 750 of 2,000 threads indexed · ~12 min left · 3,200 messages in account'
+  )
+
+  await setSyncState(app, {
+    phase: 'indexing',
+    stage: 'lifetime',
+    threadsDone: 750,
+    threadsTotal: 2_000,
+    reason: 'quota-wait',
+    waitMs: 1_000
+  })
+  await expect(status).toContainText('Quota pacing · 750 of 2,000 threads')
+
+  await setSyncState(app, {
+    phase: 'indexing',
+    stage: 'lifetime',
+    threadsDone: 2_400,
+    reason: 'retry-wait',
+    waitMs: 15_000,
+    message: 'rate limited'
+  })
+  await expect(status).toContainText('Indexing paused · retrying soon · 2,400 threads')
+  await expect(lifetimeProgress).not.toHaveAttribute('aria-valuenow')
+  await expect(lifetimeProgress).not.toHaveAttribute('aria-valuemax')
+  await expect(lifetimeProgress).toHaveAttribute(
+    'aria-valuetext',
+    'Indexing paused · retrying soon · 2,400 threads'
+  )
 
   // An incremental poll is not a backfill phase: no stage label, no progress bar.
   await setSyncState(app, { phase: 'checking' })

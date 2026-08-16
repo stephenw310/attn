@@ -21,6 +21,15 @@ export interface MimeAttachment {
   inline?: boolean
 }
 
+export interface MimeStreamAttachment {
+  filename: string
+  mimeType: string
+  sizeBytes: number
+  open: () => AsyncIterable<Uint8Array>
+  contentId?: string
+  inline?: boolean
+}
+
 export interface MimeDraft {
   to: readonly MailAddress[]
   cc?: readonly MailAddress[]
@@ -239,7 +248,13 @@ function filenameParameters(name: string, filename: string): string[] {
   return parameters
 }
 
-function attachmentPart(attachment: MimeAttachment): string[] {
+interface AttachmentSegment<T> {
+  attachment: T
+}
+
+type MimeSegment<T> = string | AttachmentSegment<T>
+
+function attachmentPart<T extends Omit<MimeAttachment, 'content'>>(attachment: T): MimeSegment<T>[] {
   const filename = singleLine(attachment.filename) || 'attachment'
   const contentId = attachment.contentId ? singleLine(attachment.contentId).replace(/^<|>$/g, '') : ''
 
@@ -257,7 +272,7 @@ function attachmentPart(attachment: MimeAttachment): string[] {
     ),
     ...(contentId ? [`Content-ID: <${contentId}>`] : []),
     '',
-    base64Lines(attachment.content)
+    { attachment }
   ]
 }
 
@@ -277,8 +292,10 @@ function rfc5322Date(date: Date): string {
   return date.toUTCString().replace(/GMT$/, '+0000')
 }
 
-/** Build a complete CRLF-delimited message suitable for Gmail's raw MIME field. */
-export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
+function buildMimeSegments<T extends Omit<MimeAttachment, 'content'>>(
+  draft: Omit<MimeDraft, 'attachments'> & { attachments?: readonly T[] },
+  options: BuildMimeOptions
+): MimeSegment<T>[] {
   if (Number.isNaN(options.date.getTime())) throw new Error('MIME date must be valid')
 
   const messageId = singleLine(options.rfcMessageId)
@@ -319,7 +336,7 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
       '',
       ...alternativeParts(alternativeBoundary, text, html),
       ''
-    ].join(CRLF)
+    ]
   }
 
   const alternativeEntity = [
@@ -343,22 +360,94 @@ export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
         ]
 
   if (regularAttachments.length === 0) {
-    return [...headers, ...bodyEntity, ''].join(CRLF)
+    return [...headers, ...bodyEntity, '']
   }
 
-  const mixedParts: string[] = [`--${mixedBoundary}`, ...bodyEntity]
+  const mixedParts: MimeSegment<T>[] = [`--${mixedBoundary}`, ...bodyEntity]
   for (const attachment of regularAttachments) {
     mixedParts.push(`--${mixedBoundary}`, ...attachmentPart(attachment))
   }
   mixedParts.push(`--${mixedBoundary}--`)
 
-  return [
-    ...headers,
-    `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
-    '',
-    ...mixedParts,
-    ''
-  ].join(CRLF)
+  return [...headers, `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`, '', ...mixedParts, '']
+}
+
+function isAttachmentSegment<T>(segment: MimeSegment<T>): segment is AttachmentSegment<T> {
+  return typeof segment !== 'string'
+}
+
+/** Build a complete CRLF-delimited message suitable for Gmail's raw MIME field. */
+export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
+  return buildMimeSegments(draft, options)
+    .map((segment) => (isAttachmentSegment(segment) ? base64Lines(segment.attachment.content) : segment))
+    .join(CRLF)
+}
+
+async function* base64Stream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
+  let carry = Buffer.alloc(0)
+  let firstLine = true
+  for await (const value of source) {
+    const chunk = Buffer.from(value)
+    const data = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk
+    const completeLength = data.length - (data.length % 57)
+    if (completeLength > 0) {
+      const encoded = data
+        .subarray(0, completeLength)
+        .toString('base64')
+        .replace(/(.{76})(?=.)/g, `$1${CRLF}`)
+      yield Buffer.from(`${firstLine ? '' : CRLF}${encoded}`)
+      firstLine = false
+    }
+    carry = data.subarray(completeLength)
+  }
+  if (carry.length > 0) {
+    yield Buffer.from(`${firstLine ? '' : CRLF}${carry.toString('base64')}`)
+  }
+}
+
+function streamedBase64ByteLength(sizeBytes: number): number {
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw new Error('MIME attachment size must be a non-negative safe integer')
+  }
+  const encodedBytes = 4 * Math.ceil(sizeBytes / 3)
+  if (encodedBytes === 0) return 0
+  return encodedBytes + (Math.ceil(encodedBytes / 76) - 1) * Buffer.byteLength(CRLF)
+}
+
+/** Exact byte count for streamMime, used to make Gmail's multipart request replayable and sized. */
+export function mimeByteLength(
+  draft: Omit<MimeDraft, 'attachments'> & { attachments?: readonly MimeStreamAttachment[] },
+  options: BuildMimeOptions
+): number {
+  const segments = buildMimeSegments(draft, options)
+  return segments.reduce(
+    (total, segment, index) =>
+      total +
+      (isAttachmentSegment(segment)
+        ? streamedBase64ByteLength(segment.attachment.sizeBytes)
+        : Buffer.byteLength(segment)) +
+      (index < segments.length - 1 ? Buffer.byteLength(CRLF) : 0),
+    0
+  )
+}
+
+/** Stream the same deterministic MIME bytes without buffering attachment files in memory. */
+export async function* streamMime(
+  draft: Omit<MimeDraft, 'attachments'> & { attachments?: readonly MimeStreamAttachment[] },
+  options: BuildMimeOptions,
+  onAttachmentComplete: (attachment: MimeStreamAttachment, index: number) => void = () => {}
+): AsyncIterable<Uint8Array> {
+  const segments = buildMimeSegments(draft, options)
+  let attachmentIndex = 0
+  for (const [index, segment] of segments.entries()) {
+    if (isAttachmentSegment(segment)) {
+      yield* base64Stream(segment.attachment.open())
+      onAttachmentComplete(segment.attachment, attachmentIndex++)
+    } else if (segment) {
+      yield Buffer.from(segment)
+    }
+    if (index < segments.length - 1) yield Buffer.from(CRLF)
+  }
 }
 
 /** Validate before queue persistence; buildMime repeats this as a final boundary. */

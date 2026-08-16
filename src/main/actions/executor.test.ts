@@ -255,6 +255,7 @@ describe('action executor', () => {
       )
 
       await executor.trigger()
+      expect(executor.isRunning()).toBe(false)
       await executor.trigger()
 
       expect(rows[0]).toMatchObject({
@@ -382,6 +383,7 @@ describe('action executor', () => {
       expect(actionProvider.getThread).toHaveBeenCalledTimes(2)
       expect(onReverted).toHaveBeenCalledOnce()
       expect(rows).toHaveLength(0)
+      expect(executor.isRunning()).toBe(false)
       executor.stop()
     } finally {
       vi.useRealTimers()

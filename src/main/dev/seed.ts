@@ -153,13 +153,14 @@ export function loadSeed(db: Db, path: string): string {
     for (const thread of fixture.threads) {
       persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))
     }
-    // Seeded stores are complete local snapshots and never contact Gmail. Mark the
-    // backfill complete so relaunches model a settled account.
+    // Seeded stores are complete local snapshots and never contact Gmail. Mark both
+    // foreground backfill and lifetime indexing complete so relaunches stay settled.
     db.prepare(
-      `INSERT INTO sync_state (account_id, backfill_cursor)
-       VALUES (?, 'done')
+      `INSERT INTO sync_state (account_id, backfill_cursor, sweep_cursor)
+       VALUES (?, 'done', 'done')
        ON CONFLICT(account_id) DO UPDATE SET
-         backfill_cursor = excluded.backfill_cursor`
+         backfill_cursor = excluded.backfill_cursor,
+         sweep_cursor = COALESCE(sync_state.sweep_cursor, excluded.sweep_cursor)`
     ).run(fixture.account)
   })()
 
