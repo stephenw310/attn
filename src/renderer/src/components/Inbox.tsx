@@ -45,6 +45,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const resetAccountRef = useRef<string | null | undefined>(undefined)
   const composerOpeningRef = useRef(false)
   const draftOpenRequestRef = useRef(0)
+  const draftOpenTargetRef = useRef<{ request: number; draftId: string } | null>(null)
+  const activeComposerDraftIdRef = useRef<string | null>(null)
   const inlineComposerRef = useRef<ComposerHandle | null>(null)
 
   const activeAccount = status.email ?? null
@@ -80,6 +82,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const showDraft = useCallback(
     (draft: Draft) => {
+      activeComposerDraftIdRef.current = draft.id
       if (draft.kind !== 'new' && draft.threadId) {
         const inboxIndex = (realThreads ?? []).findIndex((thread) => thread.id === draft.threadId)
         const snoozedIndex = (realSnoozedThreads ?? []).findIndex((thread) => thread.id === draft.threadId)
@@ -176,6 +179,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [activeAccount])
 
   useEffect(() => {
+    activeComposerDraftIdRef.current = composerDraft?.id ?? null
+  }, [composerDraft?.id])
+
+  useEffect(() => {
     const visibleCount = view === 'drafts' ? realDrafts.length : threads.length
     setSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(visibleCount - 1, 0))))
     setExitingThreadIds((current) => {
@@ -203,18 +210,37 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       )
       if (!draft || !window.attn) return
       const request = ++draftOpenRequestRef.current
+      draftOpenTargetRef.current = { request, draftId: draft.id }
       void window.attn.draft
         .reopen(draft.id)
         .then((reopened) => {
-          if (
-            reopened &&
-            request === draftOpenRequestRef.current &&
-            selectedThreadIdRef.current === threadId
-          ) {
+          if (!reopened) {
+            if (draftOpenTargetRef.current?.request === request) draftOpenTargetRef.current = null
+            return
+          }
+          const ownsResult =
+            request === draftOpenRequestRef.current && selectedThreadIdRef.current === threadId
+          if (ownsResult) {
+            draftOpenTargetRef.current = null
+            activeComposerDraftIdRef.current = reopened.id
             setComposerDraft(reopened)
+            return
+          }
+
+          // `draft:reopen` mutates the row before returning it. If navigation
+          // superseded this request, release that composing lease unless a
+          // newer request or mounted composer already owns the same row.
+          const pending = draftOpenTargetRef.current
+          if (pending?.draftId === reopened.id || activeComposerDraftIdRef.current === reopened.id) return
+          void window.attn?.draft.close(reopened.id).catch(() => {})
+        })
+        .catch(() => {
+          if (draftOpenTargetRef.current?.request !== request) return
+          draftOpenTargetRef.current = null
+          if (activeComposerDraftIdRef.current !== draft.id) {
+            void window.attn?.draft.close(draft.id).catch(() => {})
           }
         })
-        .catch(() => {})
     },
     [realDrafts]
   )
@@ -335,6 +361,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [realDrafts, reopenDraftForThread, selectedIndex, showDraft, threads, view])
   const finishReaderClose = useCallback(() => {
     draftOpenRequestRef.current += 1
+    draftOpenTargetRef.current = null
     setReaderOpen(false)
     setDetachedDraftThread(null)
   }, [])
@@ -407,6 +434,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   )
 
   const closeComposer = useCallback(() => {
+    activeComposerDraftIdRef.current = null
     setComposerDraft(null)
     void refreshMailRows().catch(() => {
       void refreshDrafts().catch(() => {})
@@ -438,8 +466,29 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     triage({ kind: 'unsnooze', threadIds: [selected.id] })
   }, [closeSnooze, selected, triage])
 
+  const visibleRowCount = view === 'drafts' ? realDrafts.length : threads.length
+
+  const navigateNext = useCallback(() => {
+    if (detachedDraftThread) {
+      finishReaderClose()
+      return
+    }
+    setSelectedIndex((index) => Math.min(index + 1, Math.max(visibleRowCount - 1, 0)))
+  }, [detachedDraftThread, finishReaderClose, visibleRowCount])
+
+  const navigatePrevious = useCallback(() => {
+    if (detachedDraftThread) {
+      finishReaderClose()
+      return
+    }
+    if (readerOpen && selectedIndex === 0) {
+      closeReader()
+      return
+    }
+    setSelectedIndex((index) => Math.max(index - 1, 0))
+  }, [closeReader, detachedDraftThread, finishReaderClose, readerOpen, selectedIndex])
+
   useInboxCommands({
-    threadCount: view === 'drafts' ? realDrafts.length : threads.length,
     selected,
     selectedCount: selectedIds.size,
     selectedIndex,
@@ -448,7 +497,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     starOn,
     markUnreadOn,
     preserveSelectionOnRefreshRef,
-    setSelectedIndex,
+    navigateNext,
+    navigatePrevious,
     clearSelection,
     toggleSelection: toggleFocusedSelection,
     extendSelection: extendSelectionTo,

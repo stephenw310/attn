@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { MailAddress, MessageAttachment, MessageRecipients } from '../../../shared/mail'
 import { MessageBody } from '../MessageBody'
 import type { DisplayMessage } from '../mailDisplay'
@@ -104,7 +104,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     onToggleTrim,
     bodyHydrationMessage
   } = props
-  const bodySurface = mailSurfaceForHtml(message.html)
+  const bodySurface = useMemo(() => mailSurfaceForHtml(message.html), [message.html])
   const htmlSurface = bodySurface === 'light'
   const visibleAttachments = message.attachments.filter((attachment) => !attachment.inline)
 

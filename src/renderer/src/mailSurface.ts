@@ -12,7 +12,6 @@ const RICH_CONTENT = [
   'audio',
   'center',
   'font',
-  '[style]',
   '[bgcolor]',
   '[background]',
   '[width]',
@@ -20,6 +19,80 @@ const RICH_CONTENT = [
   '[align]',
   '[valign]'
 ].join(', ')
+
+const NATIVE_STYLE_PROPERTIES = new Set([
+  'color',
+  'direction',
+  'font',
+  'font-family',
+  'font-feature-settings',
+  'font-size',
+  'font-style',
+  'font-variant',
+  'font-weight',
+  'letter-spacing',
+  'line-height',
+  'text-align',
+  'text-decoration',
+  'text-indent',
+  'text-transform',
+  'white-space',
+  'word-spacing'
+])
+
+function isNeutralCanvas(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/\s+/g, '')
+  return (
+    normalized === 'transparent' ||
+    normalized === 'white' ||
+    normalized === '#fff' ||
+    normalized === '#ffffff' ||
+    normalized === 'rgb(255,255,255)' ||
+    normalized === 'rgba(255,255,255,1)' ||
+    normalized === 'rgba(255,255,255,0)'
+  )
+}
+
+function styleDeclarations(style: string): { property: string; value: string; raw: string }[] {
+  return style.split(';').flatMap((raw) => {
+    const separator = raw.indexOf(':')
+    if (separator <= 0) return []
+    const property = raw
+      .slice(0, separator)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\s/g, '')
+      .toLowerCase()
+    return [{ property, value: raw.slice(separator + 1).trim(), raw: raw.trim() }]
+  })
+}
+
+function hasPresentationStyle(element: HTMLElement): boolean {
+  for (const { property, value } of styleDeclarations(element.getAttribute('style') ?? '')) {
+    if (NATIVE_STYLE_PROPERTIES.has(property)) continue
+    if ((property === 'background' || property === 'background-color') && isNeutralCanvas(value)) {
+      continue
+    }
+    return true
+  }
+  return false
+}
+
+/** Remove sender canvases from content classified for Attn's native dark surface. */
+export function normalizeNativeMailDocument(root: ParentNode): void {
+  root.querySelectorAll('style').forEach((style) => {
+    style.remove()
+  })
+  root.querySelectorAll<HTMLElement>('[bgcolor], [background], [style]').forEach((element) => {
+    element.removeAttribute('bgcolor')
+    element.removeAttribute('background')
+    const style = styleDeclarations(element.getAttribute('style') ?? '')
+      .filter(({ property }) => !property.startsWith('background'))
+      .map(({ raw }) => raw)
+      .join('; ')
+    if (style) element.setAttribute('style', style)
+    else element.removeAttribute('style')
+  })
+}
 
 /**
  * Text-like HTML belongs on Attn's native surface. Presentation HTML keeps a
@@ -33,5 +106,8 @@ export function mailSurfaceForHtml(html: string | null): MailSurface {
   document.querySelectorAll(TRAILING_MAIL).forEach((element) => {
     element.remove()
   })
-  return document.querySelector('style') || document.body.querySelector(RICH_CONTENT) ? 'light' : 'native'
+  if (document.querySelector('style') || document.body.querySelector(RICH_CONTENT)) return 'light'
+  return [...document.body.querySelectorAll<HTMLElement>('[style]')].some(hasPresentationStyle)
+    ? 'light'
+    : 'native'
 }

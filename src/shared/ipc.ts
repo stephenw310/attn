@@ -70,6 +70,7 @@ export const TEST_CHANNELS = {
   reloadSeed: 'attn:test:reloadSeed',
   deleteThread: 'attn:test:deleteThread',
   delayConversation: 'attn:test:delayConversation',
+  delayDraftReopen: 'attn:test:delayDraftReopen',
   delayDraftInlineImage: 'attn:test:delayDraftInlineImage',
   updateMessageBody: 'attn:test:updateMessageBody',
   failNextDraftSave: 'attn:test:failNextDraftSave',

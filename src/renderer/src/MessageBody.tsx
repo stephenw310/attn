@@ -7,7 +7,7 @@ import {
   MAIL_TRIM_MARKER as TRIM_MARKER
 } from '../../shared/mailSanitizer'
 import { forceLightMailCss } from './mailCss'
-import type { MailSurface } from './mailSurface'
+import { type MailSurface, normalizeNativeMailDocument } from './mailSurface'
 import { findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
@@ -58,6 +58,8 @@ function frameReset(surface: MailSurface): string {
   #attn-mail-body,
   #attn-mail-body :where(*) {
     color: inherit !important;
+    background-color: transparent !important;
+    background-image: none !important;
   }
   #attn-mail-body a {
     color: #60a5fa !important;
@@ -133,6 +135,7 @@ function sanitizeToTemplate(html: string, surface: MailSurface): HTMLTemplateEle
   template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
   })
+  if (surface === 'native') normalizeNativeMailDocument(template.content)
   template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
     const normalizedHref = normalizeMailLink(link.getAttribute('href') ?? '')
     if (normalizedHref === null) link.removeAttribute('href')

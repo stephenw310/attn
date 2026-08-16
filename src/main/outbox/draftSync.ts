@@ -79,6 +79,7 @@ interface LocalSyncRow {
   id: string
   state: 'composing' | 'drafted'
   kind: DraftKind
+  thread_id: string | null
   local_revision: number
   mirror_revision: number
   updated_at: number
@@ -117,9 +118,10 @@ export function remoteDraftKind(
 ): DraftKind {
   if (localKind) return localKind
   if (header(remote.message, 'In-Reply-To') || header(remote.message, 'References')) return 'reply'
-  if (knownThread) {
-    return /^(?:fwd?|forward)\s*:/i.test(header(remote.message, 'Subject')) ? 'forward' : 'reply'
-  }
+  // Gmail does not expose a draft-mode flag. A draft attached to an existing
+  // thread with no reply headers is a forward, regardless of the locale used
+  // for its subject prefix (Fwd:, WG:, TR:, ...).
+  if (knownThread) return 'forward'
   return 'new'
 }
 
@@ -221,7 +223,7 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
   const byId = db
     .prepare(
       `SELECT id, state, kind, local_revision, mirror_revision, updated_at, remote_fingerprint,
-              attachments_json
+              attachments_json, thread_id
        FROM outbox WHERE account_id = ? AND gmail_draft_id = ? AND state IN ('composing', 'drafted')`
     )
     .get(accountId, remote.gmailDraftId) as LocalSyncRow | undefined
@@ -348,6 +350,21 @@ export async function reconcileRemoteDraft(
     writeRemoteDraft(db, accountId, remote, undefined)
     return 'remote'
   }
+  const repairsThreadBinding =
+    local.kind === 'new' &&
+    local.thread_id === null &&
+    remote.input.kind !== 'new' &&
+    remote.input.threadId !== null
+  if (repairsThreadBinding) {
+    db.prepare(`UPDATE outbox SET kind = ?, thread_id = ? WHERE account_id = ? AND id = ?`).run(
+      remote.input.kind,
+      remote.input.threadId,
+      accountId,
+      local.id
+    )
+    local.kind = remote.input.kind
+    local.thread_id = remote.input.threadId
+  }
   if (local.matchedCurrentContent) {
     const attachments = refreshRemoteAttachmentLocators(local.attachments_json, remote.storedAttachments)
     db.prepare(
@@ -423,7 +440,7 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
         await provider.getDraft(summary.id),
         provider
       )
-      changed ||= decision === 'remote'
+      changed ||= canRepairThreadBinding || decision === 'remote'
     }
     pageToken = page.nextPageToken
   } while (pageToken)

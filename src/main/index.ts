@@ -57,6 +57,7 @@ let syncController: SyncController | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
+let testDraftReopenDelayMs = 0
 let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
 let signInInFlight = false
@@ -269,6 +270,7 @@ function initialize(): void {
       pendingFocus = null
     },
     waitForConversation,
+    draftReopenDelay: () => testDraftReopenDelayMs,
     draftInlineImageDelay: () => testDraftInlineImageDelayMs,
     consumeTestDraftSaveFailure: () => {
       if (testDraftSaveFailures === 0) return false
@@ -328,6 +330,9 @@ function registerTestIpc(): void {
   ipcMain.on(TEST_CHANNELS.delayConversation, (_event, threadId: unknown, delayMs: unknown) => {
     if (typeof threadId !== 'string' || typeof delayMs !== 'number' || delayMs < 0) return
     testConversationDelay = { threadId, delayMs }
+  })
+  ipcMain.on(TEST_CHANNELS.delayDraftReopen, (_event, delayMs: unknown) => {
+    testDraftReopenDelayMs = typeof delayMs === 'number' && delayMs >= 0 ? delayMs : 0
   })
   ipcMain.on(TEST_CHANNELS.delayDraftInlineImage, (_event, delayMs: unknown) => {
     testDraftInlineImageDelayMs = typeof delayMs === 'number' && delayMs >= 0 ? delayMs : 0
@@ -409,6 +414,7 @@ function teardown(): void {
   mailNotifier = null
   for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
   testDraftSaveFailures = 0
+  testDraftReopenDelayMs = 0
   testDraftInlineImageDelayMs = 0
   db?.close()
   db = null

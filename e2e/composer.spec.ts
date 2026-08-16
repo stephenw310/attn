@@ -468,6 +468,65 @@ test('opens reply, reply-all, and forward drafts from the reader and reuses the 
   await expect(composer.editor).toContainText('Forward this roadmap context')
 })
 
+test('releases a delayed draft reopen when the reader closes first', async ({ app, page }) => {
+  const thread = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
+  await thread.click()
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await composer.typeBody('Keep this delayed reply')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(thread.getByTestId('chip-draft')).toBeVisible()
+
+  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.delayMs), {
+    channel: TEST_CHANNELS.delayDraftReopen,
+    delayMs: 400
+  })
+  await thread.click()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(async () => (await window.attn.draft.takeRecovered())?.id ?? null))
+    .toBeNull()
+
+  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.delayMs), {
+    channel: TEST_CHANNELS.delayDraftReopen,
+    delayMs: 0
+  })
+  await thread.click()
+  await expect(composer.root).toContainText('Keep this delayed reply')
+})
+
+test('keeps a detached draft escapable when its parent thread is missing', async ({ app, page }) => {
+  const thread = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
+  await thread.click()
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await composer.typeBody('Detached reply body')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+
+  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.threadId), {
+    channel: TEST_CHANNELS.deleteThread,
+    threadId: 't-design'
+  })
+  await goToDrafts(page)
+  const draft = page.getByTestId('draft-row').filter({ hasText: 'Design notes' })
+  await draft.click()
+  await expect(composer.root).toBeVisible()
+  await expect(composer.root).toContainText('Detached reply body')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('draft-list')).toBeVisible()
+
+  await draft.click()
+  await page.getByTestId('composer-close').click()
+  await expect(composer.root).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('j')
+  await expect(page.getByTestId('draft-list')).toBeVisible()
+})
+
 test('marks and opens a Gmail forward draft inline when its parent thread is cached', async ({
   app,
   page

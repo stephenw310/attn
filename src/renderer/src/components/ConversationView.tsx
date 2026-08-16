@@ -105,7 +105,7 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
     onToast
   } = props
 
-  const conversationThreadId = conversation?.threadId ?? null
+  const conversationThreadId = conversation?.threadId ?? (inlineComposer ? selected.id : null)
   const newestMessageId = conversation?.messages.at(-1)?.id ?? null
   const messageCount = conversation?.messages.length ?? 0
   const latestTargetKey = conversationThreadId
@@ -187,20 +187,22 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
         tabIndex={-1}
         className="min-h-0 flex-1 overflow-y-auto px-6 py-5 focus:outline-none [scrollbar-gutter:stable]"
       >
-        {conversation ? (
+        {conversation || inlineComposer ? (
           <div
             data-testid="conversation-content"
             className="mx-auto flex w-full flex-col gap-3.5"
             style={{ maxWidth: 'clamp(720px, 72vw, 1120px)' }}
           >
-            <ConversationMessages
-              key={conversation.threadId}
-              conversation={conversation}
-              account={account}
-              online={online}
-              markNewest={inlineComposer === null}
-              onToast={onToast}
-            />
+            {conversation ? (
+              <ConversationMessages
+                key={conversation.threadId}
+                conversation={conversation}
+                account={account}
+                online={online}
+                markNewest={inlineComposer === null}
+                onToast={onToast}
+              />
+            ) : null}
             {inlineComposer ? (
               <div data-testid="conversation-latest-item" data-latest-conversation-item="">
                 {inlineComposer}

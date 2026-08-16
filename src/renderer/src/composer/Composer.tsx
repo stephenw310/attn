@@ -36,7 +36,7 @@ import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
-import { type MailSurface, mailSurfaceForHtml } from '../mailSurface'
+import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
@@ -97,24 +97,14 @@ function quoteSrcDoc(body: string, surface: MailSurface): string {
   const light = surface === 'light'
   const nativeContrast = light
     ? ''
-    : 'body,body :where(*){color:inherit!important}body a{color:#60a5fa!important}'
+    : 'body,body :where(*){color:inherit!important;background-color:transparent!important;background-image:none!important}body a{color:#60a5fa!important}'
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${light ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${light ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
-}
-
-function quoteBodyWithCidPlaceholders(html: string): string {
-  const document = new DOMParser().parseFromString(sanitizeOutgoingHtml(html), 'text/html')
-  for (const image of document.querySelectorAll<HTMLImageElement>('img[src]')) {
-    if ((image.getAttribute('src') ?? '').toLowerCase().startsWith('cid:')) {
-      image.setAttribute('src', TRANSPARENT_IMAGE)
-    }
-  }
-  return document.body.innerHTML
 }
 
 function InlineQuote({ draftId, html }: { draftId: string; html: string }): React.JSX.Element | null {
   const [expanded, setExpanded] = useState(false)
-  const surface = mailSurfaceForHtml(html)
-  const [srcDoc, setSrcDoc] = useState(() => quoteSrcDoc(quoteBodyWithCidPlaceholders(html), surface))
+  const surface = useMemo(() => mailSurfaceForHtml(html), [html])
+  const [srcDoc, setSrcDoc] = useState(() => quoteSrcDoc('', surface))
   const [height, setHeight] = useState(1)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
@@ -169,6 +159,7 @@ function InlineQuote({ draftId, html }: { draftId: string; html: string }): Reac
     if (!html) return
     let cancelled = false
     const document = new DOMParser().parseFromString(sanitizeOutgoingHtml(html), 'text/html')
+    if (surface === 'native') normalizeNativeMailDocument(document.body)
     const pending = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
       const source = image.getAttribute('src') ?? ''
       if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
@@ -216,6 +207,8 @@ function InlineQuote({ draftId, html }: { draftId: string; html: string }): Reac
   if (!html) return null
   return (
     <div className="mx-5 mb-5 text-sm text-ink-dim" data-testid="composer-quote-container">
+      {/* `allow-same-origin` is needed only to measure this scriptless srcdoc,
+          resolve CID images, and forward keyboard events to the app shell. */}
       {expanded && (
         <iframe
           ref={frameRef}

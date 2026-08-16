@@ -69,5 +69,14 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
         '<table style="background:url(https://tracker.test/pixel.gif) #fff"><tr><td>Tracked</td></tr></table>'
       )
     ).not.toContain('style=')
+    for (const value of [
+      'image-set("https://tracker.test/a.png" 1x)',
+      '-webkit-image-set("//tracker.test/a.png" 1x)',
+      'cross-fade("https://tracker.test/a.png", #fff, 50%)',
+      '-moz-element(#remote)',
+      'paint(tracker)'
+    ]) {
+      expect(sanitizeOutgoingHtml(`<div style="background:${value}">Tracked</div>`)).not.toContain('style=')
+    }
   })
 })

@@ -136,17 +136,43 @@ export function useMailData(
 
   const refreshDrafts = async (): Promise<void> => {
     if (!window.attn || !activeAccount) return
+    while (deferRefreshUntilRef.current > Date.now()) {
+      await new Promise<void>((resolve) =>
+        window.setTimeout(resolve, deferRefreshUntilRef.current - Date.now())
+      )
+    }
     const drafts = await window.attn.draft.list()
+    if (activeViewRef.current === 'drafts') {
+      const preserveSelection = preserveSelectionOnRefreshRef.current
+      preserveSelectionOnRefreshRef.current = true
+      setSelectedIndex((current) =>
+        refreshedSelectionIndex(drafts, preserveSelection ? selectedDraftIdRef.current : null, current)
+      )
+    }
     setRealDrafts(drafts)
   }
 
   const refreshMailRows = async (): Promise<void> => {
     if (!window.attn || !activeAccount) return
+    while (deferRefreshUntilRef.current > Date.now()) {
+      await new Promise<void>((resolve) =>
+        window.setTimeout(resolve, deferRefreshUntilRef.current - Date.now())
+      )
+    }
     const [threads, snoozed, drafts] = await Promise.all([
       window.attn.mail.listThreads(),
       window.attn.mail.listSnoozed(),
       window.attn.draft.list()
     ])
+    const visible =
+      activeViewRef.current === 'inbox' ? threads : activeViewRef.current === 'snoozed' ? snoozed : drafts
+    const selectedId =
+      activeViewRef.current === 'drafts' ? selectedDraftIdRef.current : selectedThreadIdRef.current
+    const preserveSelection = preserveSelectionOnRefreshRef.current
+    preserveSelectionOnRefreshRef.current = true
+    setSelectedIndex((current) =>
+      refreshedSelectionIndex(visible, preserveSelection ? selectedId : null, current)
+    )
     setRealThreads(threads)
     setRealSnoozedThreads(snoozed)
     setRealDrafts(drafts)
