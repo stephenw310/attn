@@ -257,6 +257,12 @@ async function initialize(): Promise<void> {
   }
   const activeDb = db
   await reconcileOutboxSpool(activeDb, app.getPath('userData'))
+  // Quitting during that await runs teardown to completion, including
+  // db.close(). Everything below would then build on a closed handle.
+  if (db !== activeDb) {
+    console.log('[boot] aborted: shutdown ran while reconciling the outbox spool')
+    return
+  }
   syncController = new SyncController({
     db: activeDb,
     currentAccountId,

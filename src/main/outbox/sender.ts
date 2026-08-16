@@ -17,6 +17,8 @@ import { validateAttachmentCap } from './spool'
 
 const SECONDARY_CHECK_MS = 10_000
 const SECONDARY_CHECKS = 6
+/** ~6.5 minutes on the 5s/30s/60s ladder before a dead attachment source fails. */
+const MAX_ATTACHMENT_SOURCE_ATTEMPTS = 8
 const OFFLINE_RECHECK_MS = 30_000
 const STOP_TIMEOUT_MS = 5_000
 export const SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
@@ -645,8 +647,17 @@ export class OutboxSender {
     if (!current) return false
     const noRemoteMutation = error instanceof OutboxNoRemoteMutationError
     const cause = noRemoteMutation ? error.reason : error
-    const displayError = userFacingSendError(cause)
+    // last_error is what the user reads, so the provider's own text stays here
+    // in the log — otherwise a field failure leaves no diagnosable trace at all.
+    console.warn(`[outbox] send failed for ${current.id}: ${errorMessage(cause)}`)
     const permanent = noRemoteMutation ? !isRetryableOutboxPreflightError(cause) : permanentSendError(cause)
+    // Offline and quota keep retrying for as long as they last, but a source
+    // that never comes back must stop somewhere the user can see it.
+    const exhausted =
+      cause instanceof DraftAttachmentSourceError && current.attempts + 1 >= MAX_ATTACHMENT_SOURCE_ATTEMPTS
+    const displayError = exhausted
+      ? 'An attachment is still unavailable — reopen the message and attach it again'
+      : userFacingSendError(cause)
     const retryAt = this.time.now() + retryDelayMs(current.attempts)
     const plan = planTransition(
       {
@@ -659,7 +670,7 @@ export class OutboxSender {
       permanent
         ? { type: 'permanent-error' }
         : noRemoteMutation
-          ? { type: 'preflight-retry', retryAt }
+          ? { type: 'preflight-retry', exhausted, retryAt }
           : current.gmail_draft_id === null
             ? { type: 'verification-error', retryAt }
             : { type: 'retryable-error', retryAt },
@@ -680,7 +691,7 @@ export class OutboxSender {
         current.id
       )
     if (persisted.changes === 0) return false
-    if (permanent) {
+    if (plan.next.state === 'failed') {
       this.notify({ kind: 'failed', id: current.id, error: displayError })
       return false
     }

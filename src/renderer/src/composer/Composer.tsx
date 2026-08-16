@@ -90,6 +90,10 @@ function attachmentErrorMessage(error: unknown): string {
     return 'Attachments must total 25 MB or less'
   }
   if (message.includes('Only files can be attached')) return 'Only files can be attached'
+  if (message.includes('Attach no more than')) return message
+  if (message.startsWith('Attachment is unavailable:')) return message
+  if (message.startsWith('Could not copy attachment:')) return message
+  if (message.startsWith('Attachments changed')) return message
   return 'Could not attach file'
 }
 
@@ -311,12 +315,19 @@ function PasteContentPlugin({
 
 interface CommandPluginProps {
   onAttach: () => void
+  onRemoveAttachment: () => void
   onClose: () => void
   onDiscard: () => void
   onSend: () => void
 }
 
-function ComposerCommandPlugin({ onAttach, onClose, onDiscard, onSend }: CommandPluginProps): null {
+function ComposerCommandPlugin({
+  onAttach,
+  onRemoveAttachment,
+  onClose,
+  onDiscard,
+  onSend
+}: CommandPluginProps): null {
   const [editor] = useLexicalComposerContext()
   const quote = useCallback(() => {
     editor.update(() => {
@@ -331,6 +342,7 @@ function ComposerCommandPlugin({ onAttach, onClose, onDiscard, onSend }: Command
         createCommand('composer.discard', onDiscard),
         createCommand('composer.send', onSend),
         createCommand('composer.attach', onAttach),
+        createCommand('composer.removeAttachment', onRemoveAttachment),
         createCommand('composer.bold', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')),
         createCommand('composer.italic', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')),
         createCommand('composer.underline', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline')),
@@ -342,7 +354,7 @@ function ComposerCommandPlugin({ onAttach, onClose, onDiscard, onSend }: Command
         ),
         createCommand('composer.quote', quote)
       ]),
-    [editor, onAttach, onClose, onDiscard, onSend, quote]
+    [editor, onAttach, onRemoveAttachment, onClose, onDiscard, onSend, quote]
   )
   return null
 }
@@ -462,8 +474,23 @@ export function Composer({
 
   const visibleAttachments = attachments.filter((attachment) => !attachment.inline)
 
+  // Attaching is keyboard-reachable, so removing has to be too. Inline body
+  // images have no chip and are removed by editing the body instead.
+  const removeLastAttachment = useCallback(() => {
+    const last = visibleAttachments.at(-1)
+    if (!last) {
+      onToast('No attachments to remove')
+      return
+    }
+    removeAttachment(last.id)
+  }, [onToast, removeAttachment, visibleAttachments])
+
   const closeAndSave = useCallback(() => {
-    if (closing || attachmentMutationRef.current || !window.attn) return
+    if (closing || !window.attn) return
+    if (attachmentMutationRef.current) {
+      onToast('Wait for the current attachment change to finish')
+      return
+    }
     if (!commitPendingRecipients()) {
       onToast('Enter a valid recipient before closing')
       return
@@ -526,7 +553,11 @@ export function Composer({
   }, [])
 
   const discard = useCallback((): void => {
-    if (closing || attachmentMutationRef.current || !window.attn) return
+    if (closing || !window.attn) return
+    if (attachmentMutationRef.current) {
+      onToast('Wait for the current attachment change to finish')
+      return
+    }
     setClosing(true)
     void window.attn.draft
       .discard(draft.id)
@@ -752,6 +783,7 @@ export function Composer({
               />
               <ComposerCommandPlugin
                 onAttach={pickAttachments}
+                onRemoveAttachment={removeLastAttachment}
                 onClose={closeAndSave}
                 onDiscard={discard}
                 onSend={send}
@@ -807,12 +839,12 @@ export function Composer({
                 >
                   <PaperclipIcon />
                 </button>
-                {attachments.length > 0 && (
+                {visibleAttachments.length > 0 && (
                   <div
                     className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
                     data-testid="composer-attachments"
                   >
-                    {attachments.length} attachment{attachments.length === 1 ? '' : 's'}
+                    {visibleAttachments.length} attachment{visibleAttachments.length === 1 ? '' : 's'}
                   </div>
                 )}
               </div>

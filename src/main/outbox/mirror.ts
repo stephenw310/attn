@@ -5,14 +5,14 @@ import type { MailAddress } from '../../shared/address'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { isPathInside } from '../pathSafety'
-import type { MailActionProvider } from '../sync/provider'
+import type { MailActionProvider, ProviderDraft } from '../sync/provider'
 import {
   draftAttachmentsForMirror,
   parseStoredDraftAttachments,
   type StoredDraftAttachment
 } from './draftAttachments'
 import { type DraftMimeAttachment, encodeDraftMessage } from './draftMime'
-import { draftContentFingerprint } from './draftSync'
+import { draftContentFingerprint, refreshRemoteAttachmentLocators, remoteDraftAttachments } from './draftSync'
 import { isEmptyDraft } from './drafts'
 import type { MimeStreamAttachment } from './mime'
 
@@ -114,6 +114,55 @@ export async function deleteDraftCheckpoint(
   return true
 }
 
+/**
+ * Gmail mints a new message id every time a draft is rewritten, and the
+ * attachment ids stored beside it rotate with it. A draft that keeps bytes only
+ * in Gmail therefore holds a dead locator from its own previous checkpoint, so
+ * re-read them from the live draft before hydrating anything remote. Drafts
+ * whose parts are all spooled or carried inline never pay for this.
+ */
+async function refreshRemoteAttachmentIds(
+  db: Db,
+  accountId: string,
+  row: DraftMirrorRow,
+  provider: MailActionProvider,
+  signal?: AbortSignal
+): Promise<StoredDraftAttachment[]> {
+  const attachments = parseStoredDraftAttachments(row.attachments_json)
+  const remoteOnly = attachments.some(
+    (attachment) =>
+      !attachment.spoolPath &&
+      attachment.remoteMessageId &&
+      attachment.remoteAttachmentId &&
+      !attachment.remoteInlineData
+  )
+  if (!remoteOnly || !row.gmail_draft_id || !provider.getDraft) return attachments
+  let remote: ProviderDraft
+  try {
+    remote = await provider.getDraft(row.gmail_draft_id, { signal })
+  } catch (error) {
+    // A missing draft is recreated below; anything else retries with the
+    // locators we already hold rather than failing the whole checkpoint.
+    if (error instanceof GmailApiError) return attachments
+    throw error
+  }
+  const refreshed = refreshRemoteAttachmentLocators(
+    row.attachments_json,
+    remoteDraftAttachments(remote.message)
+  )
+  if (refreshed === row.attachments_json) return attachments
+  const changed = db
+    .prepare(
+      `UPDATE outbox SET attachments_json = ?
+       WHERE account_id = ? AND id = ? AND attachments_json = ?`
+    )
+    .run(refreshed, accountId, row.id, row.attachments_json).changes
+  // A concurrent attachment mutation wins; the next checkpoint refreshes again.
+  if (changed === 0) return attachments
+  row.attachments_json = refreshed
+  return parseStoredDraftAttachments(refreshed)
+}
+
 async function mirrorComposing(
   db: Db,
   accountId: string,
@@ -123,7 +172,7 @@ async function mirrorComposing(
   signal?: AbortSignal
 ): Promise<boolean> {
   if (!provider.saveDraft) return false
-  const attachments = parseStoredDraftAttachments(row.attachments_json)
+  const attachments = await refreshRemoteAttachmentIds(db, accountId, row, provider, signal)
   const mirroredAttachments = draftAttachmentsForMirror(attachments)
   const mimeAttachments = await loadDraftMimeAttachments(
     row.id,

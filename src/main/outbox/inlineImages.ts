@@ -51,7 +51,9 @@ export async function addInlineImage(
   const filename = safeFilename(input.filename)
   const contentId = `${randomUUID()}@attn.local`
   const directory = join(userData, 'outbox', draftId)
-  const spoolPath = join(directory, `${randomUUID()}-${filename}`)
+  // The original name lives in metadata. A UUID-only storage name keeps the
+  // path component under NAME_MAX no matter how long the pasted name is.
+  const spoolPath = join(directory, randomUUID())
   await mkdir(directory, { recursive: true })
   await writeFile(spoolPath, content, { flag: 'wx' })
   const attachment: StoredDraftAttachment = {

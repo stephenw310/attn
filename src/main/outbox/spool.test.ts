@@ -52,6 +52,51 @@ describe('attachment cap math', () => {
 })
 
 describe('attachment spool ownership', () => {
+  it('retries a compare-and-swap conflict instead of discarding copied bytes', async () => {
+    const { root, db, draftId } = await testStore()
+    const source = join(root, 'dropped.txt')
+    await writeFile(source, 'dropped')
+    // Stands in for a paste landing between this call's read and its write.
+    const pasted = {
+      id: 'pasted-image',
+      filename: 'pasted.png',
+      mimeType: 'image/png',
+      sizeBytes: 4,
+      spoolPath: join(root, 'outbox', draftId, 'pasted-image'),
+      contentId: 'cid@attn.local',
+      inline: true
+    }
+    let raced = false
+    const racingDb = {
+      prepare: (sql: string) => {
+        const statement = db.prepare(sql)
+        if (!sql.includes('AND attachments_json = ?')) return statement
+        return {
+          run: (...args: unknown[]) => {
+            if (!raced) {
+              raced = true
+              db.prepare(
+                'UPDATE outbox SET attachments_json = ?, local_revision = local_revision + 1 WHERE id = ?'
+              ).run(JSON.stringify([pasted]), draftId)
+            }
+            return statement.run(...args)
+          }
+        }
+      }
+    } as unknown as typeof db
+
+    await expect(
+      spoolDraftAttachments(racingDb, root, 'me@example.com', draftId, [source])
+    ).resolves.toMatchObject({ changed: true })
+
+    const row = db.prepare('SELECT attachments_json FROM outbox WHERE id = ?').get(draftId) as {
+      attachments_json: string
+    }
+    const stored = parseStoredDraftAttachments(row.attachments_json)
+    expect(stored.map((attachment) => attachment.filename)).toEqual(['pasted.png', 'dropped.txt'])
+    expect(existsSync(stored[1].spoolPath)).toBe(true)
+  })
+
   it('enforces the path-count cap for picker and drop callers in the shared spool boundary', async () => {
     const { root, db, draftId } = await testStore()
     const source = join(root, 'one.txt')

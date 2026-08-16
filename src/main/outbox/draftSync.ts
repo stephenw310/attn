@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { MailAddress } from '../../shared/address'
 import type { DraftKind, DraftSaveInput } from '../../shared/drafts'
 import type { Db } from '../db'
+import type { GmailMessage } from '../gmail/parse'
 import {
   collectAttachments,
   decodeBase64Url,
@@ -121,17 +122,26 @@ export interface ParsedRemoteDraft {
  */
 function claimNonEditableOutboxDraft(db: Db, accountId: string, remote: ProviderDraft): boolean {
   const rfcMessageId = header(remote.message, 'Message-ID').trim()
-  return (
-    db
-      .prepare(
-        `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?
-         WHERE account_id = ? AND state NOT IN ('composing', 'drafted') AND (
-           gmail_draft_id = ? OR
-           (? <> '' AND gmail_draft_id IS NULL AND rfc_message_id = ?)
-         )`
-      )
-      .run(remote.id, remote.message.id, accountId, remote.id, rfcMessageId, rfcMessageId).changes > 0
-  )
+  // Only a row still mid-send can own a Gmail draft it never persisted. A sent
+  // row keeps its Message-ID for a week, and claiming an unrelated orphan draft
+  // onto it would hide that draft from Drafts for good. Resolving the row first
+  // also keeps the claim to exactly one row.
+  const owner = db
+    .prepare(
+      `SELECT id FROM outbox
+       WHERE account_id = ? AND state NOT IN ('composing', 'drafted') AND (
+         gmail_draft_id = ? OR
+         (? <> '' AND gmail_draft_id IS NULL AND rfc_message_id = ? AND state IN ('queued', 'sending'))
+       )
+       ORDER BY updated_at LIMIT 1`
+    )
+    .get(accountId, remote.id, rfcMessageId, rfcMessageId) as { id: string } | undefined
+  if (!owner) return false
+  db.prepare(
+    `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?
+     WHERE account_id = ? AND id = ?`
+  ).run(remote.id, remote.message.id, accountId, owner.id)
+  return true
 }
 
 export function remoteDraftKind(remote: ProviderDraft, localKind?: DraftKind): DraftKind {
@@ -171,6 +181,25 @@ async function remoteDraftBodies(
   return { bodyHtml: merged.bodyHtml ?? '', bodyText: merged.bodyText ?? '' }
 }
 
+/**
+ * Locators for one fetched Gmail message. Both ids rotate every time the draft
+ * is rewritten, so these are only valid for the message they were read from.
+ */
+export function remoteDraftAttachments(message: GmailMessage): StoredDraftAttachment[] {
+  return collectAttachments(message.payload).map((attachment) => ({
+    id: randomUUID(),
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    spoolPath: '',
+    ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
+    ...(attachment.inline ? { inline: true } : {}),
+    remoteMessageId: message.id,
+    remoteAttachmentId: attachment.attachmentId,
+    ...(attachment.inlineData ? { remoteInlineData: attachment.inlineData } : {})
+  }))
+}
+
 export async function parseRemoteDraft(
   db: Db,
   accountId: string,
@@ -191,18 +220,7 @@ export async function parseRemoteDraft(
     .get(accountId, message.threadId)
   const threading = extractThreadingHeaders(message)
   const bodies = await remoteDraftBodies(remote, provider)
-  const attachments: StoredDraftAttachment[] = collectAttachments(message.payload).map((attachment) => ({
-    id: randomUUID(),
-    filename: attachment.filename,
-    mimeType: attachment.mimeType,
-    sizeBytes: attachment.sizeBytes,
-    spoolPath: '',
-    ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
-    ...(attachment.inline ? { inline: true } : {}),
-    remoteMessageId: message.id,
-    remoteAttachmentId: attachment.attachmentId,
-    ...(attachment.inlineData ? { remoteInlineData: attachment.inlineData } : {})
-  }))
+  const attachments = remoteDraftAttachments(message)
   const input: DraftSaveInput = {
     id: null,
     kind,

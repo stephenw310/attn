@@ -153,15 +153,34 @@ export async function spoolDraftAttachments(
         spoolPath
       })
     }
-    const next = [...attachments, ...added]
-    const changed = db
-      .prepare(
-        `UPDATE outbox SET attachments_json = ?, updated_at = ?, local_revision = local_revision + 1
-         WHERE account_id = ? AND id = ? AND state = 'composing' AND attachments_json = ?`
+    // A pasted inline image can land between the read above and this write.
+    // Re-read and re-check the cap rather than discarding bytes already copied.
+    let snapshot: { attachments_json: string } | undefined = row
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        snapshot = db
+          .prepare(
+            `SELECT attachments_json FROM outbox
+             WHERE account_id = ? AND id = ? AND state = 'composing'`
+          )
+          .get(accountId, draftId) as { attachments_json: string } | undefined
+      }
+      if (!snapshot) throw new Error('draft is unavailable')
+      const current = parseStoredDraftAttachments(snapshot.attachments_json)
+      validateAttachmentCap(
+        current.reduce((total, item) => total + item.sizeBytes, 0),
+        added.map((item) => item.sizeBytes)
       )
-      .run(JSON.stringify(next), now ?? Date.now(), accountId, draftId, row.attachments_json).changes
-    if (changed === 0) throw new Error('draft is unavailable')
-    return { attachments: publicDraftAttachments(next), changed: true }
+      const next = [...current, ...added]
+      const changed = db
+        .prepare(
+          `UPDATE outbox SET attachments_json = ?, updated_at = ?, local_revision = local_revision + 1
+           WHERE account_id = ? AND id = ? AND state = 'composing' AND attachments_json = ?`
+        )
+        .run(JSON.stringify(next), now ?? Date.now(), accountId, draftId, snapshot.attachments_json).changes
+      if (changed > 0) return { attachments: publicDraftAttachments(next), changed: true }
+    }
+    throw new Error('Attachments changed — try attaching again')
   } catch (error) {
     await Promise.all(copied.map((path) => rm(path, { force: true }).catch(() => {})))
     // This succeeds only when the failed attempt created an otherwise-empty

@@ -111,6 +111,8 @@ export interface MailActionProvider {
   ): Promise<string>
   updateDraft?(draft: ProviderDraftUpdate, options?: ProviderRequestOptions): Promise<string>
   deleteDraft?(id: string, options?: ProviderRequestOptions): Promise<void>
+  /** Needed to re-read attachment locators, which rotate on every draft rewrite. */
+  getDraft?(id: string, options?: ProviderRequestOptions): Promise<ProviderDraft>
   getAttachmentData?(
     messageId: string,
     attachmentId: string,

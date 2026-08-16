@@ -446,6 +446,9 @@ test('surfaces a durable failed send without interrupting the current task', asy
   await page.keyboard.press('o')
   await expect(page.getByTestId('outbox-list')).toBeVisible()
   await expect(page.getByTestId('outbox-row')).toHaveAttribute('data-outbox-state', 'failed')
+  // Opening the row moves it back to composing, so the reason has to be legible
+  // from the list itself.
+  await expect(page.getByTestId('outbox-error')).toHaveText('Recipient rejected by provider')
   await page.getByTestId('outbox-row').click()
 
   await expect(composer.root).toBeVisible()
@@ -751,8 +754,11 @@ test('spools data images pasted through HTML and saves them as CID parts', async
     composer,
     '<p>Before</p><img alt="pixel.png" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"><p>After</p>'
   )
-  await expect(composer.attachments).toContainText('1 attachment')
+  // A pasted image lives in the body, not the attachment row: it has no chip to
+  // remove, so counting it as an attachment would advertise something unusable.
   await expect(composer.editor.locator('img')).toHaveCount(1)
+  await expect(composer.attachments).toHaveCount(0)
+  await expect(page.getByTestId('composer-attachment-chip')).toHaveCount(0)
   await composer.expectSaved()
   await page.keyboard.press('Escape')
 

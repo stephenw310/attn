@@ -71,6 +71,17 @@ export function OutboxList({
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
                 {item.subject || '(no subject)'}
               </span>
+              {/* Reading why a send failed must not require opening the row,
+                  because opening it moves the message back to composing. */}
+              {item.lastError ? (
+                <span
+                  data-testid="outbox-error"
+                  className="min-w-0 max-w-72 flex-none truncate text-xs text-ink-dim"
+                  title={item.lastError}
+                >
+                  {item.lastError}
+                </span>
+              ) : null}
               <span
                 className={`text-xs capitalize ${
                   item.state === 'failed' || item.state === 'needs-review' ? 'text-danger' : 'text-ink-faint'

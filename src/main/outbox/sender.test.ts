@@ -765,6 +765,39 @@ describe('OutboxSender effect layer', () => {
     })
   })
 
+  it('fails a message whose attachment source never recovers instead of retrying forever', async () => {
+    const getAttachmentData = vi.fn(async () => undefined)
+    const createDraft = vi.fn(async () => 'draft-1')
+    const notify = vi.fn()
+    const store = new FakeOutboxDb(
+      fakeRow({
+        // One short of the ladder's limit, so this attempt is the last one.
+        attempts: 7,
+        attachments_json: JSON.stringify([
+          {
+            id: 'remote-attachment',
+            filename: 'report.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 12,
+            spoolPath: '',
+            remoteMessageId: 'stale-message',
+            remoteAttachmentId: 'stale-locator'
+          }
+        ])
+      })
+    )
+
+    await effectSender(store, effectProvider({ createDraft, getAttachmentData }), { notify }).trigger()
+
+    expect(createDraft).not.toHaveBeenCalled()
+    expect(store.row()).toMatchObject({ state: 'failed', attempts: 8, send_at: null })
+    expect(notify).toHaveBeenCalledWith({
+      kind: 'failed',
+      id: 'outbox-1',
+      error: 'An attachment is still unavailable — reopen the message and attach it again'
+    })
+  })
+
   it('arms elapsed queued work on boot and prunes expired sent rows', async () => {
     const due = fakeRow()
     const expired = fakeRow({

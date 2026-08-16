@@ -255,20 +255,46 @@ describe('draft synchronization identity', () => {
 
   it('binds an orphaned remote draft to its sending row by stable Message-ID', async () => {
     const run = vi.fn(() => ({ changes: 1 }))
-    const db = { prepare: vi.fn(() => ({ run })) } as unknown as Db
+    const claimQuery = vi.fn(() => ({ id: 'outbox-1' }))
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        run,
+        get: sql.includes("state NOT IN ('composing', 'drafted')") ? claimQuery : vi.fn(() => undefined)
+      }))
+    } as unknown as Db
     const remote = providerDraft('Orphan', { mimeType: 'text/plain' })
     if (!remote.message.payload) throw new Error('missing test payload')
     remote.message.payload.headers?.push({ name: 'Message-ID', value: '<stable@attn.local>' })
 
     await expect(reconcileRemoteDraft(db, 'account', remote)).resolves.toBe('local')
-    expect(run).toHaveBeenCalledWith(
-      'draft-1',
-      'message-1',
+    // The Message-ID clause is scoped to rows still mid-send: a `sent` row keeps
+    // its Message-ID for a week and must never absorb an unrelated orphan draft.
+    expect(claimQuery).toHaveBeenCalledWith(
       'account',
       'draft-1',
       '<stable@attn.local>',
       '<stable@attn.local>'
     )
+    expect(db.prepare).toHaveBeenCalledWith(expect.stringContaining("state IN ('queued', 'sending')"))
+    expect(run).toHaveBeenCalledWith('draft-1', 'message-1', 'account', 'outbox-1')
+  })
+
+  it('leaves an orphaned Gmail draft alone when only a sent row shares its Message-ID', async () => {
+    const run = vi.fn(() => ({ changes: 1 }))
+    // No mid-send row matches, so the claim finds nothing and normal import runs.
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        run,
+        get: vi.fn(() => undefined),
+        all: vi.fn(() => (sql.includes('gmail_message_id') ? [] : []))
+      }))
+    } as unknown as Db
+    const remote = providerDraft('Orphan', { mimeType: 'text/plain' })
+    if (!remote.message.payload) throw new Error('missing test payload')
+    remote.message.payload.headers?.push({ name: 'Message-ID', value: '<stable@attn.local>' })
+
+    await expect(reconcileRemoteDraft(db, 'account', remote)).resolves.toBe('remote')
+    expect(run).not.toHaveBeenCalledWith('draft-1', 'message-1', 'account', expect.anything())
   })
 
   it('refreshes remote locators beside a local-only attachment when Gmail replaces the message', async () => {
@@ -338,7 +364,7 @@ describe('draft synchronization identity', () => {
           }
         }
         if (sql.includes("state NOT IN ('composing', 'drafted')")) {
-          return { run: vi.fn(() => ({ changes: 0 })) }
+          return { get: vi.fn(() => undefined) }
         }
         if (sql.includes('UPDATE outbox SET gmail_draft_id')) return { run: update }
         throw new Error(`unexpected SQL: ${sql}`)
