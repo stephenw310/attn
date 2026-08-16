@@ -122,6 +122,13 @@ it stopped instead of restarting:
 6. **reconcile** — authoritative per-system-label id re-lists to repair membership drift.
 7. **lifetime** — a low-priority, quota-throttled, resumable header sweep with no date bound (§9 #17).
 
+**Sent mail and contacts have no stage of their own.** Gmail's unfiltered listing already returns SENT, so
+sent mail rides the all-mail and lifetime stages — the reason the dedicated Sent stage is retired rather
+than reordered. The contact index is derived, not fetched: every persisted message contributes its
+recipients (when the message is SENT) or its sender (otherwise) from headers the metadata format already
+carries, so header-only stages build contacts exactly as full fetches do, and messages labeled SPAM or TRASH
+contribute nothing. Autocomplete therefore ramps across stages 1 → 4 → 7 rather than waiting on one pass.
+
 Stages overlap deliberately and **skip threads already stored** instead of carving exact date complements:
 Gmail's `newer_than`/`older_than` operators have coarse, fuzzy boundaries, so complement queries risk silent
 seam gaps, while re-listing already-fetched ids costs ~1% of the fetch budget (per-thread gets dominate).

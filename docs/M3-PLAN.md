@@ -107,14 +107,27 @@ This is the task the sync redesign exists for. Today's stages are Inbox-scoped p
 ### Target stage order (SPEC F2)
 
 ```
-inbox       12m, INBOX          headers   triage surface + unread count complete first
-bodies      90d, INBOX          full      recent mail readable offline
-drafts      all drafts          full      shipped in T14D
-all-mail    12m, no filter      headers   ← new; subsumes the current `sent` stage
-spam-trash  all (~30d exists)   headers   ← new; explicit label listings
-reconcile   per-label id sweeps           ← generalized in S4
-lifetime    no date bound       headers   T13A's throttled sweep
+stage       scope               fetches   purpose                              contacts
+inbox       12m, INBOX          headers   triage surface + unread count first  senders of received mail
+bodies      90d, INBOX          full      recent mail readable offline         (same threads, refetched)
+drafts      all drafts          full      shipped in T14D                      —
+all-mail    12m, no filter      headers   ← new; SENT lives here               recipients of sent mail
+spam-trash  all (~30d exists)   headers   ← new; explicit label listings       none — excluded by design
+reconcile   per-label id sweeps ids       ← generalized in S4                  —
+lifetime    no date bound       headers   T13A's throttled sweep               everything older than 12m
 ```
+
+**Where Sent mail and the contact index live.** Neither is a stage of its own. Gmail's unfiltered
+`threads.list` already returns SENT, so sent mail is simply part of the all-mail walk (and of the lifetime
+sweep beyond 12 months) — that is precisely why the dedicated `sent` stage is deleted rather than reordered.
+The contact index is not a fetch at all: `persistThread` derives it from headers on every message write,
+recording recipients when a message carries SENT and the sender otherwise, and `METADATA_HEADERS` already
+requests From/To/Cc/Bcc/Reply-To, so header-only stages populate contacts exactly as full fetches do.
+Autocomplete therefore ramps rather than switching on: received senders from the inbox stage, sent
+recipients (which carry 3× weight in `rankContacts`) from all-mail, and pre-12-month history from the
+lifetime sweep. One behavioral difference from today's dedicated SENT pass is worth expecting: sent contacts
+now arrive interleaved by recency instead of as one contiguous block, which suits the ranking formula's
+90-day recency half-life but means "all my sent contacts" is complete only at the end of the stage.
 
 ### Design and implementation
 
