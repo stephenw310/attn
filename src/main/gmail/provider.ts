@@ -209,11 +209,17 @@ export class GmailMailProvider implements MailProvider {
     )
   }
 
-  async getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined> {
+  async getAttachmentData(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined> {
     try {
       return (
         await this.client.get<{ data?: string }>(
-          `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
+          `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+          undefined,
+          { signal: options?.signal }
         )
       ).data
     } catch (error) {

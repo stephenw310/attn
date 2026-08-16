@@ -117,7 +117,7 @@ async function mirrorComposing(
 ): Promise<boolean> {
   if (!provider.saveDraft) return false
   const attachments = parseStoredDraftAttachments(row.attachments_json)
-  const mimeAttachments = await loadDraftMimeAttachments(row.id, attachments, provider, spoolRoot)
+  const mimeAttachments = await loadDraftMimeAttachments(row.id, attachments, provider, spoolRoot, signal)
   const raw = encodeDraftMessage({
     to: parseJson<MailAddress[]>(row.to_json),
     cc: parseJson<MailAddress[]>(row.cc_json),
@@ -176,7 +176,8 @@ export async function loadDraftMimeAttachments(
   draftId: string,
   attachments: readonly StoredDraftAttachment[],
   provider: MailActionProvider,
-  spoolRoot: string | null
+  spoolRoot: string | null,
+  signal?: AbortSignal
 ): Promise<DraftMimeAttachment[]> {
   return Promise.all(
     attachments.map(async (attachment) => {
@@ -193,10 +194,11 @@ export async function loadDraftMimeAttachments(
       } else if (attachment.remoteInlineData) {
         content = Buffer.from(attachment.remoteInlineData, 'base64url')
       } else if (attachment.remoteMessageId && attachment.remoteAttachmentId && provider.getAttachmentData) {
-        const data = await provider.getAttachmentData(
-          attachment.remoteMessageId,
-          attachment.remoteAttachmentId
-        )
+        const data = signal
+          ? await provider.getAttachmentData(attachment.remoteMessageId, attachment.remoteAttachmentId, {
+              signal
+            })
+          : await provider.getAttachmentData(attachment.remoteMessageId, attachment.remoteAttachmentId)
         if (!data) throw new Error(`remote attachment unavailable: ${attachment.filename}`)
         content = Buffer.from(data, 'base64url')
       } else {

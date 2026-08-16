@@ -84,6 +84,21 @@ describe('GmailMailProvider.saveDraft', () => {
   })
 })
 
+describe('GmailMailProvider.getAttachmentData', () => {
+  it('propagates shutdown cancellation to attachment hydration', async () => {
+    const get = vi.fn(async () => ({ data: 'cmVtb3Rl' }))
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+    const controller = new AbortController()
+
+    await expect(
+      provider.getAttachmentData('message/1', 'attachment/1', { signal: controller.signal })
+    ).resolves.toBe('cmVtb3Rl')
+    expect(get).toHaveBeenCalledWith('/messages/message%2F1/attachments/attachment%2F1', undefined, {
+      signal: controller.signal
+    })
+  })
+})
+
 describe('GmailMailProvider outbox operations', () => {
   it('creates once without the generic transient retry loop, then updates by durable id', async () => {
     const post = vi.fn(async () => ({ id: 'draft-1' }))

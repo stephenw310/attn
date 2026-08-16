@@ -26,6 +26,7 @@ import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
+import type { ShowToast } from '../hooks/useToast'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
@@ -39,7 +40,7 @@ interface ComposerProps {
   draft: Draft
   initialError?: string | null
   onClose: () => void
-  onToast: (message: string, durationMs?: number) => void
+  onToast: ShowToast
 }
 
 function TrashIcon(): React.JSX.Element {
@@ -384,7 +385,7 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
       .then(() => window.attn.outbox.send(draft.id))
       .then((result) => {
         onClose()
-        onToast('Sent — Undo (Z)', Math.max(1_000, result.sendAt - Date.now()))
+        onToast('Sent — Undo (Z)', { expiresAt: result.sendAt, countdown: true })
       })
       .catch((error: unknown) => {
         setClosing(false)

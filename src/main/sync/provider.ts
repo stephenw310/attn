@@ -95,7 +95,11 @@ export interface MailActionProvider {
     options?: ProviderRequestOptions
   ): Promise<string>
   deleteDraft?(id: string, options?: ProviderRequestOptions): Promise<void>
-  getAttachmentData?(messageId: string, attachmentId: string): Promise<string | undefined>
+  getAttachmentData?(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined>
 }
 
 export interface MailProvider extends MailActionProvider {
@@ -103,7 +107,11 @@ export interface MailProvider extends MailActionProvider {
   listLabels(): Promise<ProviderLabel[]>
   listThreadIds(options?: ListThreadIdsOptions): Promise<ThreadIdPage>
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
-  getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined>
+  getAttachmentData(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined>
   listHistory(startHistoryId: string, pageToken?: string): Promise<HistoryPage>
   listDrafts(pageToken?: string, options?: ProviderRequestOptions): Promise<DraftPage>
   getDraft(id: string, options?: ProviderRequestOptions): Promise<ProviderDraft>

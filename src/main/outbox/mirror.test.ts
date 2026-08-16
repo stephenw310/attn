@@ -88,6 +88,28 @@ describe('draft mirror attachments', () => {
     expect(loaded[0].inline).toBeUndefined()
     expect(Buffer.from(loaded[0].content).toString()).toBe('data')
   })
+
+  it('propagates shutdown cancellation while hydrating a remote attachment', async () => {
+    const getAttachmentData = vi.fn(async () => Buffer.from('remote data').toString('base64url'))
+    const controller = new AbortController()
+    const remote = {
+      ...attachment(''),
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    await loadDraftMimeAttachments(
+      'draft-1',
+      [remote],
+      { getAttachmentData } as unknown as MailActionProvider,
+      null,
+      controller.signal
+    )
+
+    expect(getAttachmentData).toHaveBeenCalledWith('message-1', 'attachment-1', {
+      signal: controller.signal
+    })
+  })
 })
 
 describe('draft mirror selection', () => {
