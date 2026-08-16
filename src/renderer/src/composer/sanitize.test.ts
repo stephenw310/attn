@@ -59,4 +59,15 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
       expect(sanitized).not.toContain('javascript:')
     }
   })
+
+  it('keeps safe authored backgrounds and drops backgrounds that load resources', () => {
+    expect(
+      sanitizeOutgoingHtml('<table style="background:#fff3d6"><tr><td>Newsletter</td></tr></table>')
+    ).toContain('style="background:#fff3d6"')
+    expect(
+      sanitizeOutgoingHtml(
+        '<table style="background:url(https://tracker.test/pixel.gif) #fff"><tr><td>Tracked</td></tr></table>'
+      )
+    ).not.toContain('style=')
+  })
 })

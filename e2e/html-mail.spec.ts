@@ -60,6 +60,18 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(body.locator('#malformed-cid-image')).not.toHaveAttribute('src')
   await expect(body.locator('#cid-image')).toBeVisible()
   await expect(page.getByTestId('attachment-chip')).toHaveCount(0)
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const footer = document.querySelector<HTMLElement>('[data-testid="mail-footer"]')
+        return (
+          document.scrollingElement?.scrollTop === 0 &&
+          footer !== null &&
+          Math.abs(footer.getBoundingClientRect().bottom - window.innerHeight) < 1
+        )
+      })
+    )
+    .toBe(true)
   // The sender ships its own copies of our marker attributes. Both must be stripped:
   // a surviving trim marker would move the fold to wherever the sender wants, and a
   // surviving cid marker would aim the inline-image patch at the sender's element.
@@ -82,7 +94,11 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
       element.dispatchEvent(event)
       return event.defaultPrevented
     })
-  ).toBe(false)
+  ).toBe(true)
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'replyAll')
+  await page.getByTestId('composer-discard').click()
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 5_000 })
   await expect(body.locator('#remote-image')).toHaveAttribute('src', 'https://remote.attn.test/tracker.gif')
   await expect.poll(() => remoteImageRequests).toBe(1)
   await expect.poll(() => handlerImageRequests).toBe(1)
@@ -214,9 +230,15 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await page.keyboard.press('Escape')
   await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).click()
   await expect(page.getByTestId('html-body-frame')).toBeVisible()
+  await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'native')
+  await expect(page.getByTestId('message-content')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(
     page.frameLocator('[data-testid="html-body-frame"]').locator('#plain-html-copy')
   ).toContainText('Your order total was $24.00.')
+  await expect(page.frameLocator('[data-testid="html-body-frame"]').locator('body')).toHaveCSS(
+    'background-color',
+    'rgba(0, 0, 0, 0)'
+  )
   await page.evaluate(() => window.getSelection()?.removeAllRanges())
   await page
     .frameLocator('[data-testid="html-body-frame"]')

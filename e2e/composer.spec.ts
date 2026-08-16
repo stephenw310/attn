@@ -143,6 +143,29 @@ function remoteReplyDraft(id: string, subject: string, html: string): object {
   }
 }
 
+function remoteForwardDraft(id: string, threadId: string, subject: string, html: string): object {
+  return {
+    id,
+    message: {
+      id: `message-${id}`,
+      threadId,
+      labelIds: ['DRAFT'],
+      internalDate: String(Date.now() + 10_000),
+      payload: {
+        mimeType: 'multipart/alternative',
+        headers: [
+          { name: 'To', value: 'forward-to@example.com' },
+          { name: 'Subject', value: subject }
+        ],
+        parts: [
+          { mimeType: 'text/plain', body: { data: Buffer.from(subject).toString('base64url') } },
+          { mimeType: 'text/html', body: { data: Buffer.from(html).toString('base64url') } }
+        ]
+      }
+    }
+  }
+}
+
 async function visiblePngBase64(page: Page): Promise<string> {
   return page.evaluate(async () => {
     const canvas = document.createElement('canvas')
@@ -183,6 +206,22 @@ function remotePlainDraft(id: string, subject: string, text: string): object {
 test('opens the first-class Drafts view with g d', async ({ page }) => {
   await goToDrafts(page)
   await expect(page.getByTestId('view-title')).toHaveText('Drafts')
+})
+
+test('opens reply and forward from the selected inbox row', async ({ page }) => {
+  await expect(page.getByTestId('thread-row').first()).toHaveAttribute('data-selected', 'true')
+
+  await page.keyboard.press('r')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'reply')
+  await page.getByTestId('composer-discard').click()
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+
+  await page.keyboard.press('f')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
 })
 
 test('opens the composer, validates chips, autocompletes locally, and saves on Escape', async ({
@@ -341,33 +380,68 @@ test('discards an empty draft on close', async ({ page }) => {
 
 test('opens reply, reply-all, and forward drafts from the reader and reuses the reply draft', async ({
   page
-}) => {
+}, testInfo) => {
   await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
   await expect(page.getByTestId('message-card')).toHaveCount(2)
+  const oldestMessage = page.getByTestId('message-card').first()
+  await oldestMessage.evaluate((element) => element.style.setProperty('min-height', '4000px'))
   const composer = new ComposerPage(page)
   await composer.openReply()
   await expect(composer.root).toHaveAttribute('data-draft-kind', 'reply')
+  await expect(composer.root).toHaveAttribute('data-composer-mode', 'inline')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await expect(page.getByTestId('conversation-content').getByTestId('composer')).toBeVisible()
+  await expect(page.getByTestId('message-card')).toHaveCount(2)
+  await expect(page.getByTestId('conversation-back')).toBeEnabled()
   await composer.expectRecipients(['maya+roadmap@example.com'])
-  await expect(page.getByTestId('composer-quote-toggle')).toBeVisible()
+  await expect
+    .poll(async () => {
+      const [viewport, draft] = await Promise.all([
+        page.getByTestId('conversation-scroll').boundingBox(),
+        composer.root.boundingBox()
+      ])
+      return viewport !== null && draft !== null && draft.y + draft.height <= viewport.y + viewport.height + 1
+    })
+    .toBe(true)
+  await oldestMessage.evaluate((element) => element.style.removeProperty('min-height'))
+  const quoteToggle = page.getByTestId('composer-quote-toggle')
+  await expect(quoteToggle).toHaveText('...')
+  await expect(quoteToggle).toHaveAttribute('aria-expanded', 'false')
+  await quoteToggle.click()
+  const quoteFrame = page.getByTestId('composer-quote')
+  await expect(quoteFrame).toHaveAttribute('data-surface', 'native')
+  await expect(quoteFrame).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(page.frameLocator('[data-testid="composer-quote"]').locator('body')).toHaveCSS(
+    'background-color',
+    'rgba(0, 0, 0, 0)'
+  )
+  expect(await quoteToggle.evaluate((element) => element.closest('details'))).toBeNull()
+  await composer.typeBody('Keep this authored reply')
+  await expect(composer.editor).toContainText('Keep this authored reply')
+  await composer.expectSaved()
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'inline-reply.png')
+  await page.screenshot({ path })
+  await testInfo.attach('inline-reply', { path, contentType: 'image/png' })
   const replyId = await composer.root.getAttribute('data-draft-id')
   await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
-  await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(
     page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).getByTestId('chip-draft')
   ).toBeVisible()
 
   await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
-  await composer.openReply()
+  await composer.root.waitFor()
   await expect(composer.root).toHaveAttribute('data-draft-id', replyId ?? '')
-  await composer.typeBody('Keep this authored reply')
-  await composer.expectSaved()
-  await page.keyboard.press('Escape')
+  await expect(composer.editor).toContainText('Keep this authored reply')
+  await page.getByTestId('composer-close').click()
   await expect(composer.root).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
-  await page.keyboard.press('a')
+  await page.keyboard.press('Enter')
   await composer.root.waitFor()
   await expect(composer.root).toHaveAttribute('data-draft-id', replyId ?? '')
   await expect(composer.root).toHaveAttribute('data-draft-kind', 'replyAll')
@@ -381,18 +455,106 @@ test('opens reply, reply-all, and forward drafts from the reader and reuses the 
   await page.keyboard.press('f')
   await composer.root.waitFor()
   await expect(composer.root).toHaveAttribute('data-draft-kind', 'forward')
+  await expect(composer.root).toHaveAttribute('data-composer-mode', 'inline')
   await composer.expectRecipients([])
   await expect(page.getByTestId('composer-quote-toggle')).toBeVisible()
+  await composer.typeBody('Forward this roadmap context')
+  await composer.expectSaved()
+  await page.getByTestId('conversation-back').click()
+  await expect(composer.root).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'forward')
+  await expect(composer.editor).toContainText('Forward this roadmap context')
 })
 
-test('copies and renders quoted CID resources in a reply draft', async ({ page }) => {
+test('marks and opens a Gmail forward draft inline when its parent thread is cached', async ({
+  app,
+  page
+}, testInfo) => {
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteForwardDraft(
+        'gmail-thread-forward',
+        't-design',
+        'Fwd: Design notes',
+        '<p>Forward this design context</p>'
+      )
+    }
+  )
+  if (error) throw new Error(error)
+
+  const thread = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
+  await expect(thread.getByTestId('chip-draft')).toBeVisible()
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'draft-chip.png')
+  await page.screenshot({ path })
+  await testInfo.attach('draft-chip', { path, contentType: 'image/png' })
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Fwd: Design notes' }).click()
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-composer-mode', 'inline')
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
+  await expect(page.getByTestId('conversation-back')).toContainText('Drafts')
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('draft-list')).toBeVisible()
+  await expect(page.getByTestId('view-title')).toHaveText('Drafts')
+  await page.keyboard.press('g')
+  await page.keyboard.press('i')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await thread.click()
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
+  await page.getByTestId('composer-close').click()
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await page.getByTestId('conversation-back').click()
+  const archivedError = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteForwardDraft(
+        'gmail-archived-forward',
+        't-sent-history',
+        'Fwd: Re: Q3 roadmap review',
+        '<p>Forward this archived context</p>'
+      )
+    }
+  )
+  if (archivedError) throw new Error(archivedError)
+
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Fwd: Re: Q3 roadmap review' }).click()
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Re: Q3 roadmap review')
+  await expect(page.getByTestId('message-card')).toContainText('Thanks — I added my notes.')
+  await expect(page.getByTestId('conversation-back')).toContainText('Drafts')
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-composer-mode', 'inline')
+})
+
+test('preserves a newsletter surface and CID resources in a forward draft', async ({ page }, testInfo) => {
   await page.getByTestId('thread-subject').getByText('This week in focus', { exact: true }).click()
-  const composer = new ComposerPage(page)
-  await composer.openReply()
+  await page.keyboard.press('f')
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
   await page.getByTestId('composer-quote-toggle').click()
+  const quoteFrame = page.getByTestId('composer-quote')
+  await expect(quoteFrame).toHaveAttribute('data-surface', 'light')
+  await expect(quoteFrame).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  const quoteBody = page.frameLocator('[data-testid="composer-quote"]')
+  await expect(quoteBody.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   await expect(
-    page.frameLocator('[data-testid="composer-quote"]').locator('img[src]').first()
-  ).toHaveAttribute('src', /^data:image\/gif;base64,/)
+    quoteBody.locator('table').filter({ hasText: 'You completed twelve focused conversations.' })
+  ).toHaveCSS('background-color', 'rgb(255, 243, 214)')
+  await expect(quoteBody.locator('img[src]').first()).toHaveAttribute('src', /^data:image\/gif;base64,/)
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'newsletter-quote.png')
+  await page.screenshot({ path })
+  await testInfo.attach('newsletter quote', { path, contentType: 'image/png' })
   const attachment = await page.evaluate(async () => {
     const id = document.querySelector<HTMLElement>('[data-testid="composer"]')?.dataset.draftId
     const draft = id ? await window.attn.draft.get(id) : null
@@ -400,6 +562,39 @@ test('copies and renders quoted CID resources in a reply draft', async ({ page }
   })
   expect(attachment).toMatchObject({ inline: true, contentId: 'weekly-image@attn.test' })
   expect(attachment).not.toHaveProperty('spoolPath')
+
+  const composer = new ComposerPage(page)
+  await composer.editor.click()
+  await composer.typeBody('Sharing this long read.')
+  await composer.expectSaved()
+  await page.getByTestId('conversation-back').click()
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await page.getByTestId('thread-subject').getByText('This week in focus', { exact: true }).click()
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
+  await page.getByTestId('html-body-frame').evaluate((element) => {
+    const iframe = element as HTMLIFrameElement
+    const marker = iframe.contentDocument?.querySelector('[data-attn-trim-start]')
+    const spacer = iframe.contentDocument?.createElement('div')
+    if (!marker || !spacer) throw new Error('mail trim marker unavailable')
+    spacer.style.height = '2000px'
+    marker.before(spacer)
+  })
+  await expect
+    .poll(() => page.getByTestId('html-body-frame').evaluate((element) => element.clientHeight))
+    .toBeGreaterThan(2_000)
+  await expect(page.getByTestId('composer-inline-header')).toBeInViewport()
+  await expect(page.getByTestId('composer-footer')).toBeInViewport()
+  expect(
+    await page.evaluate(() => {
+      const rootRect = document.getElementById('root')?.getBoundingClientRect()
+      return (
+        document.scrollingElement?.scrollTop === 0 &&
+        rootRect !== undefined &&
+        Math.abs(rootRect.top) < 1 &&
+        Math.abs(rootRect.bottom - window.innerHeight) < 1
+      )
+    })
+  ).toBe(true)
 })
 
 test('preserves rich and opaque draft regions while editing elsewhere', async ({ page }) => {

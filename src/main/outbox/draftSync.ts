@@ -110,9 +110,16 @@ export interface ParsedRemoteDraft {
   fingerprint: string
 }
 
-export function remoteDraftKind(remote: ProviderDraft, localKind?: DraftKind): DraftKind {
+export function remoteDraftKind(
+  remote: ProviderDraft,
+  localKind?: DraftKind,
+  knownThread = false
+): DraftKind {
   if (localKind) return localKind
   if (header(remote.message, 'In-Reply-To') || header(remote.message, 'References')) return 'reply'
+  if (knownThread) {
+    return /^(?:fwd?|forward)\s*:/i.test(header(remote.message, 'Subject')) ? 'forward' : 'reply'
+  }
   return 'new'
 }
 
@@ -161,10 +168,14 @@ export async function parseRemoteDraft(
        WHERE account_id = ? AND gmail_draft_id = ? AND state IN ('composing', 'drafted')`
     )
     .get(accountId, remote.id) as { kind: DraftKind; thread_id: string | null } | undefined
-  const kind = remoteDraftKind(remote, localHint?.kind)
   const knownThread = db
     .prepare('SELECT 1 FROM threads WHERE account_id = ? AND id = ?')
     .get(accountId, message.threadId)
+  // A previous sync may have imported a Gmail thread draft as an unbound new
+  // draft. Only preserve the local kind as an identity hint once it is already
+  // bound; otherwise the authoritative Gmail thread id gets a chance to repair
+  // that classification.
+  const kind = remoteDraftKind(remote, localHint?.thread_id ? localHint.kind : undefined, !!knownThread)
   const threading = extractThreadingHeaders(message)
   const bodies = await remoteDraftBodies(remote, provider)
   const attachments: StoredDraftAttachment[] = collectAttachments(message.payload).map((attachment) => ({
@@ -378,11 +389,19 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
     (
       db
         .prepare(
-          `SELECT gmail_draft_id, gmail_message_id FROM outbox
+          `SELECT gmail_draft_id, gmail_message_id, kind, thread_id FROM outbox
            WHERE account_id = ? AND gmail_draft_id IS NOT NULL AND state IN ('composing', 'drafted')`
         )
-        .all(accountId) as { gmail_draft_id: string; gmail_message_id: string | null }[]
-    ).map((row) => [row.gmail_draft_id, row.gmail_message_id])
+        .all(accountId) as {
+        gmail_draft_id: string
+        gmail_message_id: string | null
+        kind: DraftKind
+        thread_id: string | null
+      }[]
+    ).map((row) => [
+      row.gmail_draft_id,
+      { messageId: row.gmail_message_id, kind: row.kind, threadId: row.thread_id }
+    ])
   )
   const remoteIds = new Set<string>()
   let pageToken: string | undefined
@@ -391,7 +410,13 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
     const page = await provider.listDrafts(pageToken)
     for (const summary of page.drafts) {
       remoteIds.add(summary.id)
-      if (summary.messageId && knownDrafts.get(summary.id) === summary.messageId) continue
+      const known = knownDrafts.get(summary.id)
+      const canRepairThreadBinding =
+        known?.kind === 'new' &&
+        known.threadId === null &&
+        !!summary.threadId &&
+        !!db.prepare('SELECT 1 FROM threads WHERE account_id = ? AND id = ?').get(accountId, summary.threadId)
+      if (summary.messageId && known?.messageId === summary.messageId && !canRepairThreadBinding) continue
       const decision = await reconcileRemoteDraft(
         db,
         accountId,

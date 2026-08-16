@@ -64,6 +64,14 @@ function emptyLookupDb(): Db {
   } as unknown as Db
 }
 
+function knownThreadLookupDb(): Db {
+  return {
+    prepare: vi.fn((sql: string) => ({
+      get: vi.fn(() => (sql.includes('SELECT 1 FROM threads') ? { found: 1 } : undefined))
+    }))
+  } as unknown as Db
+}
+
 describe('remote draft parsing', () => {
   it('retains a text/plain-only draft body', async () => {
     const remote = providerDraft('Plain', {
@@ -96,6 +104,26 @@ describe('remote draft parsing', () => {
     expect(remoteDraftKind(providerDraft('Anything', { mimeType: 'text/plain' }), 'replyAll')).toBe(
       'replyAll'
     )
+  })
+
+  it('binds Gmail drafts whose authoritative thread already exists locally', async () => {
+    const forward = await parseRemoteDraft(
+      knownThreadLookupDb(),
+      'account',
+      providerDraft('Fwd: Existing conversation', { mimeType: 'text/plain' }),
+      null,
+      200
+    )
+    const reply = await parseRemoteDraft(
+      knownThreadLookupDb(),
+      'account',
+      providerDraft('Existing conversation', { mimeType: 'text/plain' }),
+      null,
+      200
+    )
+
+    expect(forward.input).toMatchObject({ kind: 'forward', threadId: 'thread-1' })
+    expect(reply.input).toMatchObject({ kind: 'reply', threadId: 'thread-1' })
   })
 })
 
@@ -140,6 +168,75 @@ describe('draft synchronization identity', () => {
 
     await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
     expect(getDraft).not.toHaveBeenCalled()
+  })
+
+  it('refetches an unchanged legacy draft once to repair its missing thread binding', async () => {
+    const remote = providerDraft('Fwd: Existing conversation', {
+      mimeType: 'text/plain',
+      body: { data: Buffer.from('Forward body').toString('base64url') }
+    })
+    const writeRemote = vi.fn()
+    const db = {
+      prepare: vi.fn((sql: string) => {
+        if (sql.includes('SELECT gmail_draft_id, gmail_message_id, kind, thread_id')) {
+          return {
+            all: vi.fn(() => [
+              {
+                gmail_draft_id: 'draft-1',
+                gmail_message_id: 'message-1',
+                kind: 'new',
+                thread_id: null
+              }
+            ])
+          }
+        }
+        if (sql.includes('SELECT kind, thread_id FROM outbox')) {
+          return { get: vi.fn(() => ({ kind: 'new', thread_id: null })) }
+        }
+        if (sql.includes('SELECT 1 FROM threads')) return { get: vi.fn(() => ({ found: 1 })) }
+        if (sql.includes('SELECT id, state, kind') && sql.includes('gmail_draft_id = ?')) {
+          return {
+            get: vi.fn(() => ({
+              id: 'local-draft',
+              state: 'drafted',
+              kind: 'new',
+              local_revision: 1,
+              mirror_revision: 1,
+              updated_at: 100,
+              remote_fingerprint: 'legacy-unbound-fingerprint',
+              attachments_json: '[]'
+            }))
+          }
+        }
+        if (sql.includes('INSERT INTO outbox')) return { run: writeRemote }
+        if (sql.includes('SELECT id, state, gmail_draft_id, local_revision')) {
+          return {
+            all: vi.fn(() => [
+              {
+                id: 'local-draft',
+                state: 'drafted',
+                gmail_draft_id: 'draft-1',
+                local_revision: 2,
+                mirror_revision: 2
+              }
+            ])
+          }
+        }
+        throw new Error(`unexpected SQL: ${sql}`)
+      })
+    } as unknown as Db
+    const getDraft = vi.fn(async () => remote)
+    const provider = {
+      listDrafts: vi.fn(async () => ({
+        drafts: [{ id: 'draft-1', messageId: 'message-1', threadId: 'thread-1' }]
+      })),
+      getDraft
+    }
+
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(true)
+    expect(getDraft).toHaveBeenCalledWith('draft-1')
+    expect(writeRemote.mock.calls[0]?.[4]).toBe('forward')
+    expect(writeRemote.mock.calls[0]?.[12]).toBe('thread-1')
   })
 
   it('refreshes remote attachment locators when Gmail replaces the draft message', async () => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthStatus } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { MailLabel } from '../../../shared/mail'
-import { Composer } from '../composer/Composer'
+import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
 import { useInboxCommands } from '../hooks/useInboxCommands'
 import { useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
@@ -34,6 +34,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
+  const [detachedDraftThread, setDetachedDraftThread] = useState<DisplayThread | null>(null)
   const [toast, showToast] = useToast()
   const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
@@ -43,6 +44,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const earliestExitIndexRef = useRef<number | null>(null)
   const resetAccountRef = useRef<string | null | undefined>(undefined)
   const composerOpeningRef = useRef(false)
+  const draftOpenRequestRef = useRef(0)
+  const inlineComposerRef = useRef<ComposerHandle | null>(null)
 
   const activeAccount = status.email ?? null
   const {
@@ -53,6 +56,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realSnoozedThreads,
     realDrafts,
     refreshDrafts,
+    refreshMailRows,
     realUnreadTotal,
     labels,
     pendingCount,
@@ -74,6 +78,72 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const { selectedIds, clearSelection, resetSelection, toggleFocusedSelection, extendSelectionTo } =
     useSelectionState(threads, selectedIndex, setSelectedIndex)
 
+  const showDraft = useCallback(
+    (draft: Draft) => {
+      if (draft.kind !== 'new' && draft.threadId) {
+        const inboxIndex = (realThreads ?? []).findIndex((thread) => thread.id === draft.threadId)
+        const snoozedIndex = (realSnoozedThreads ?? []).findIndex((thread) => thread.id === draft.threadId)
+        const cachedThread =
+          inboxIndex >= 0
+            ? displayThread((realThreads ?? [])[inboxIndex])
+            : snoozedIndex >= 0
+              ? displaySnoozedThread((realSnoozedThreads ?? [])[snoozedIndex])
+              : null
+        const fallbackThread: DisplayThread = {
+          id: draft.threadId,
+          from: '',
+          subject: draft.subject.replace(/^(?:(?:re|fwd?|forward)\s*:\s*)+/i, '') || '(no subject)',
+          snippet: '',
+          at: '',
+          unread: false,
+          starred: false,
+          hasAttachment: false,
+          returned: false,
+          hasDraft: true,
+          labelIds: [],
+          lastMsgAt: draft.updatedAt
+        }
+
+        if (activeViewRef.current === 'drafts') {
+          // Keep Drafts as the navigation origin even when the parent thread is
+          // also cached in Inbox or Snoozed. The reader can render that cached
+          // thread as a detached item without changing the underlying list.
+          selectedThreadIdRef.current = draft.threadId
+          setReaderOpen(true)
+          setSnoozeOpen(false)
+          setLabelTargetId(null)
+          setDetachedDraftThread(cachedThread ?? fallbackThread)
+          setComposerDraft(draft)
+          return
+        }
+        const destination =
+          inboxIndex >= 0
+            ? { view: 'inbox' as const, index: inboxIndex }
+            : snoozedIndex >= 0
+              ? { view: 'snoozed' as const, index: snoozedIndex }
+              : null
+        if (destination) {
+          activeViewRef.current = destination.view
+          selectedThreadIdRef.current = draft.threadId
+          selectedDraftIdRef.current = null
+          clearSelection()
+          setView(destination.view)
+          setSelectedIndex(destination.index)
+          setReaderOpen(true)
+          setSnoozeOpen(false)
+          setLabelTargetId(null)
+          setDetachedDraftThread(null)
+        } else {
+          setDetachedDraftThread(fallbackThread)
+          selectedThreadIdRef.current = draft.threadId
+          setReaderOpen(true)
+        }
+      }
+      setComposerDraft(draft)
+    },
+    [clearSelection, realSnoozedThreads, realThreads]
+  )
+
   // Account-scoped UI state has one reset owner. New transient surfaces, such
   // as the M2 composer, join this block rather than growing another effect.
   useEffect(() => {
@@ -84,6 +154,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSnoozeOpen(false)
     setLabelTargetId(null)
     setComposerDraft(null)
+    setDetachedDraftThread(null)
     setExitingThreadIds(new Set())
     selectedThreadIdRef.current = null
     selectedDraftIdRef.current = null
@@ -116,11 +187,41 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (view !== 'drafts' && threads.length === 0) setReaderOpen(false)
   }, [realDrafts.length, threads, view])
 
-  const selected = threads[selectedIndex]
+  const selected = detachedDraftThread ?? threads[selectedIndex]
+  const conversationThreads = detachedDraftThread ? [detachedDraftThread] : threads
+  const conversationSelectedIndex = detachedDraftThread ? 0 : selectedIndex
+  const inlineComposerDraft =
+    composerDraft && composerDraft.kind !== 'new' && readerOpen && selected?.id === composerDraft.threadId
+      ? composerDraft
+      : null
+  const fullWindowComposerDraft = composerDraft && !inlineComposerDraft ? composerDraft : null
+
+  const reopenDraftForThread = useCallback(
+    (threadId: string) => {
+      const draft = realDrafts.find(
+        (candidate) => candidate.kind !== 'new' && candidate.threadId === threadId
+      )
+      if (!draft || !window.attn) return
+      const request = ++draftOpenRequestRef.current
+      void window.attn.draft
+        .reopen(draft.id)
+        .then((reopened) => {
+          if (
+            reopened &&
+            request === draftOpenRequestRef.current &&
+            selectedThreadIdRef.current === threadId
+          ) {
+            setComposerDraft(reopened)
+          }
+        })
+        .catch(() => {})
+    },
+    [realDrafts]
+  )
   const { conversation, scrollRef: conversationScrollRef } = useConversation({
     selected,
-    selectedIndex,
-    threads,
+    selectedIndex: conversationSelectedIndex,
+    threads: conversationThreads,
     readerOpen,
     online,
     account: activeAccount,
@@ -161,6 +262,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetId(null)
+    setDetachedDraftThread(null)
   }, [])
 
   useEffect(() => {
@@ -177,6 +279,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           setRealThreads(nextThreads)
           if (nextIndex < 0) return
           selectedThreadIdRef.current = threadId
+          setDetachedDraftThread(null)
           setSelectedIndex(nextIndex)
           setReaderOpen(true)
         })
@@ -219,7 +322,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       void window.attn.draft
         .reopen(draft.id)
         .then((reopened) => {
-          if (reopened) setComposerDraft(reopened)
+          if (reopened) showDraft(reopened)
         })
         .catch(() => {})
       return
@@ -228,8 +331,20 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (!thread) return
     selectedThreadIdRef.current = thread.id
     setReaderOpen(true)
-  }, [realDrafts, selectedIndex, threads, view])
-  const closeReader = useCallback(() => setReaderOpen(false), [])
+    reopenDraftForThread(thread.id)
+  }, [realDrafts, reopenDraftForThread, selectedIndex, showDraft, threads, view])
+  const finishReaderClose = useCallback(() => {
+    draftOpenRequestRef.current += 1
+    setReaderOpen(false)
+    setDetachedDraftThread(null)
+  }, [])
+  const closeReader = useCallback(() => {
+    if (inlineComposerDraft && inlineComposerRef.current) {
+      inlineComposerRef.current.exitConversation()
+      return
+    }
+    finishReaderClose()
+  }, [finishReaderClose, inlineComposerDraft])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetId(null), [])
   const openSnooze = useCallback(() => {
@@ -246,10 +361,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       // the identity before that refresh starts; the effect that mirrors index
       // changes is deliberately too late for this transition.
       selectedThreadIdRef.current = thread.id
+      setDetachedDraftThread(null)
       setSelectedIndex(index)
       setReaderOpen(true)
+      reopenDraftForThread(thread.id)
     },
-    [threads]
+    [reopenDraftForThread, threads]
   )
   const openComposer = useCallback(() => {
     if (!window.attn || composerOpeningRef.current) return
@@ -267,20 +384,38 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const openReply = useCallback(
     (kind: Exclude<DraftKind, 'new'>) => {
-      if (!window.attn || !readerOpen || !selected || composerOpeningRef.current) return
+      if (!window.attn || !selected || view === 'drafts' || composerOpeningRef.current) return
+      if (!readerOpen) {
+        selectedThreadIdRef.current = selected.id
+        setDetachedDraftThread(null)
+        setReaderOpen(true)
+        setSnoozeOpen(false)
+        setLabelTargetId(null)
+      }
       composerOpeningRef.current = true
       void window.attn.draft
         .createReply(selected.id, kind)
         .then((draft) => {
-          if (draft) setComposerDraft(draft)
+          if (draft) showDraft(draft)
         })
         .catch(() => {})
         .finally(() => {
           composerOpeningRef.current = false
         })
     },
-    [readerOpen, selected]
+    [readerOpen, selected, showDraft, view]
   )
+
+  const closeComposer = useCallback(() => {
+    setComposerDraft(null)
+    void refreshMailRows().catch(() => {
+      void refreshDrafts().catch(() => {})
+    })
+  }, [refreshDrafts, refreshMailRows])
+  const closeComposerAndReader = useCallback(() => {
+    closeComposer()
+    finishReaderClose()
+  }, [closeComposer, finishReaderClose])
 
   const snoozeSelected = useCallback(
     (dueAt: number) => {
@@ -351,10 +486,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         onSwitchView={switchView}
       />
 
-      <div className={`min-h-0 flex-1 ${composerDraft ? 'hidden' : 'flex'}`} aria-hidden={!!composerDraft}>
+      <div
+        className={`min-h-0 flex-1 ${fullWindowComposerDraft ? 'hidden' : 'flex'}`}
+        aria-hidden={!!fullWindowComposerDraft}
+      >
         {view === 'drafts' ? (
           <DraftList
             drafts={realDrafts}
+            readerOpen={readerOpen}
             selectedIndex={selectedIndex}
             selectedRowRef={selectedRowRef}
             onOpen={(index) => {
@@ -365,7 +504,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               void window.attn.draft
                 .reopen(draft.id)
                 .then((reopened) => {
-                  if (reopened) setComposerDraft(reopened)
+                  if (reopened) showDraft(reopened)
                 })
                 .catch(() => {})
             }}
@@ -389,13 +528,27 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         {readerOpen && selected && (
           <ConversationView
             selected={selected}
-            selectedIndex={selectedIndex}
-            threadCount={threads.length}
-            view={view === 'snoozed' ? 'snoozed' : 'inbox'}
+            selectedIndex={conversationSelectedIndex}
+            threadCount={detachedDraftThread ? 1 : threads.length}
+            view={view}
             conversation={conversation}
             account={activeAccount}
             online={online}
             scrollRef={conversationScrollRef}
+            inlineComposer={
+              inlineComposerDraft ? (
+                <Composer
+                  key={inlineComposerDraft.id}
+                  ref={inlineComposerRef}
+                  draft={inlineComposerDraft}
+                  mode="inline"
+                  onClose={closeComposer}
+                  onExit={closeComposerAndReader}
+                  onToast={showToast}
+                />
+              ) : null
+            }
+            inlineComposerDraftId={inlineComposerDraft?.id ?? null}
             onClose={closeReader}
             onToast={showToast}
           />
@@ -420,15 +573,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         />
       )}
 
-      {composerDraft && (
-        <Composer
-          draft={composerDraft}
-          onClose={() => {
-            setComposerDraft(null)
-            void refreshDrafts().catch(() => {})
-          }}
-          onToast={showToast}
-        />
+      {fullWindowComposerDraft && (
+        <Composer draft={fullWindowComposerDraft} onClose={closeComposer} onToast={showToast} />
       )}
 
       <Toast toast={toast} />

@@ -3,6 +3,7 @@ export type CommandContext = 'list' | 'reader' | 'mail' | 'composer' | 'global'
 interface CommandSpec {
   title: string
   shortcut?: string
+  shortcutAliases?: readonly string[]
   context: CommandContext
 }
 
@@ -31,7 +32,12 @@ export const COMMAND_SPECS = {
   'view.drafts': { title: 'Go to Drafts', shortcut: 'g d', context: 'global' },
   'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
   'composer.reply': { title: 'Reply', shortcut: 'r', context: 'reader' },
-  'composer.replyAll': { title: 'Reply all', shortcut: 'a', context: 'reader' },
+  'composer.replyAll': {
+    title: 'Reply all',
+    shortcut: 'a',
+    shortcutAliases: ['Enter'],
+    context: 'reader'
+  },
   'composer.forward': { title: 'Forward', shortcut: 'f', context: 'reader' },
   'composer.close': { title: 'Save and close draft', shortcut: 'Escape', context: 'composer' },
   'composer.discard': { title: 'Discard draft', context: 'composer' },
@@ -73,7 +79,7 @@ const commands: Command[] = []
 export function createCommand(
   id: CommandId,
   run: () => void,
-  overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'context'>> = {}
+  overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'shortcutAliases' | 'context'>> = {}
 ): Command {
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
 }
@@ -130,6 +136,10 @@ function matchesContext(command: Command, context: 'list' | 'reader'): boolean {
   return command.context === 'global' || command.context === 'mail' || command.context === context
 }
 
+function commandShortcuts(command: Command): readonly string[] {
+  return [...(command.shortcut ? [command.shortcut] : []), ...(command.shortcutAliases ?? [])]
+}
+
 // Chord shortcuts are written with a space ("g i"): the prefix key opens a short
 // window in which the next key completes the command. Prefixes are derived from
 // the registry so registering a new chord needs no change to keyboard dispatch.
@@ -137,7 +147,8 @@ export function isChordPrefix(key: string, context: 'list' | 'reader'): boolean 
   const prefix = `${key.toLowerCase()} `
   return commands.some(
     (command) =>
-      matchesContext(command, context) && (command.shortcut?.toLowerCase().startsWith(prefix) ?? false)
+      matchesContext(command, context) &&
+      commandShortcuts(command).some((shortcut) => shortcut.toLowerCase().startsWith(prefix))
   )
 }
 
@@ -150,7 +161,9 @@ export function findCommandByShortcut(shortcut: string, context: 'list' | 'reade
   const normalized = shortcut.toLowerCase()
   return (
     commands.find(
-      (command) => matchesContext(command, context) && command.shortcut?.toLowerCase() === normalized
+      (command) =>
+        matchesContext(command, context) &&
+        commandShortcuts(command).some((candidate) => candidate.toLowerCase() === normalized)
     ) ?? null
   )
 }
@@ -163,8 +176,7 @@ export function matchKey(event: KeyboardEvent, context: 'list' | 'reader'): Comm
     commands.find(
       (command) =>
         matchesContext(command, context) &&
-        command.shortcut !== undefined &&
-        matchesShortcut(event, command.shortcut, context)
+        commandShortcuts(command).some((shortcut) => matchesShortcut(event, shortcut, context))
     ) ?? null
   )
 }
@@ -179,7 +191,8 @@ export function matchComposerKey(event: KeyboardEvent): Command | null {
   return (
     commands.find(
       (command) =>
-        command.context === 'composer' && command.shortcut?.toLowerCase() === shortcut.toLowerCase()
+        command.context === 'composer' &&
+        commandShortcuts(command).some((candidate) => candidate.toLowerCase() === shortcut.toLowerCase())
     ) ?? null
   )
 }

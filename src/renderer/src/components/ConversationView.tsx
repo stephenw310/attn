@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState } from 'react'
+import { type ReactNode, useCallback, useLayoutEffect, useState } from 'react'
 import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
 import type { DisplayConversation, DisplayThread } from '../mailDisplay'
@@ -9,11 +9,12 @@ interface ConversationMessagesProps {
   conversation: DisplayConversation
   account: string | null
   online: boolean
+  markNewest: boolean
   onToast: (message: string) => void
 }
 
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
-  const { conversation, account, online, onToast } = props
+  const { conversation, account, online, markNewest, onToast } = props
   const newestIndex = conversation.messages.length - 1
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
     const newestMessage = conversation.messages[newestIndex]
@@ -47,23 +48,27 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
 
   return (
     <>
-      {conversation.messages.map((message) => (
-        <MessageCard
+      {conversation.messages.map((message, index) => (
+        <div
           key={message.id}
-          threadId={conversation.threadId}
-          message={message}
-          account={account}
-          onToast={onToast}
-          bodyHydrationMessage={bodyHydrationStatusMessage(
-            message.bodyState,
-            online,
-            conversation.bodyHydrationFailed
-          )}
-          collapsed={!expandedMessageIds.has(message.id)}
-          onToggleCollapsed={() => toggleMessage(message.id)}
-          trimExpanded={expandedTrimIds.has(message.id)}
-          onToggleTrim={() => toggleTrim(message.id)}
-        />
+          data-latest-conversation-item={markNewest && index === newestIndex ? '' : undefined}
+        >
+          <MessageCard
+            threadId={conversation.threadId}
+            message={message}
+            account={account}
+            onToast={onToast}
+            bodyHydrationMessage={bodyHydrationStatusMessage(
+              message.bodyState,
+              online,
+              conversation.bodyHydrationFailed
+            )}
+            collapsed={!expandedMessageIds.has(message.id)}
+            onToggleCollapsed={() => toggleMessage(message.id)}
+            trimExpanded={expandedTrimIds.has(message.id)}
+            onToggleTrim={() => toggleTrim(message.id)}
+          />
+        </div>
       ))}
     </>
   )
@@ -73,11 +78,13 @@ interface ConversationViewProps {
   selected: DisplayThread
   selectedIndex: number
   threadCount: number
-  view: 'inbox' | 'snoozed'
+  view: 'inbox' | 'snoozed' | 'drafts'
   conversation: DisplayConversation | null
   account: string | null
   online: boolean
   scrollRef: React.RefObject<HTMLDivElement | null>
+  inlineComposer: ReactNode | null
+  inlineComposerDraftId: string | null
   onClose: () => void
   onToast: (message: string) => void
 }
@@ -92,9 +99,64 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
     account,
     online,
     scrollRef,
+    inlineComposer,
+    inlineComposerDraftId,
     onClose,
     onToast
   } = props
+
+  const conversationThreadId = conversation?.threadId ?? null
+  const newestMessageId = conversation?.messages.at(-1)?.id ?? null
+  const messageCount = conversation?.messages.length ?? 0
+  const latestTargetKey = conversationThreadId
+    ? `${conversationThreadId}:${messageCount}:${newestMessageId ?? ''}:${inlineComposerDraftId ?? ''}`
+    : null
+
+  useLayoutEffect(() => {
+    if (!latestTargetKey) return
+    const scroll = scrollRef.current
+    const content = scroll?.querySelector<HTMLElement>('[data-testid="conversation-content"]')
+    if (!scroll || !content) return
+
+    let tracking = true
+    let frame = 0
+    const alignLatest = (): void => {
+      if (!tracking) return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const target = content.querySelector<HTMLElement>('[data-latest-conversation-item]')
+        if (!target) return
+        const scrollRect = scroll.getBoundingClientRect()
+        const targetRect = target.getBoundingClientRect()
+        const paddingTop = Number.parseFloat(getComputedStyle(scroll).paddingTop) || 0
+        // Move only the conversation pane. `scrollIntoView()` also scrolls the
+        // document's root scrolling element, which pulls the app shell above
+        // the Electron window and strands both footers mid-window.
+        scroll.scrollTop += targetRect.top - scrollRect.top - paddingTop
+      })
+    }
+    const observer = new ResizeObserver(alignLatest)
+    observer.observe(content)
+    const stopTracking = (): void => {
+      tracking = false
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+    scroll.addEventListener('wheel', stopTracking, { passive: true, once: true })
+    scroll.addEventListener('touchstart', stopTracking, { passive: true, once: true })
+    scroll.addEventListener('pointerdown', stopTracking, { passive: true, once: true })
+    window.addEventListener('keydown', stopTracking, { once: true })
+    alignLatest()
+
+    return () => {
+      stopTracking()
+      scroll.removeEventListener('wheel', stopTracking)
+      scroll.removeEventListener('touchstart', stopTracking)
+      scroll.removeEventListener('pointerdown', stopTracking)
+      window.removeEventListener('keydown', stopTracking)
+    }
+  }, [latestTargetKey, scrollRef])
+
   return (
     <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">
       <div className="flex items-center gap-4 border-b border-edge px-6 pt-3 pb-3">
@@ -104,7 +166,7 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
           className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
           onClick={onClose}
         >
-          <span aria-hidden>←</span> {view === 'inbox' ? 'Inbox' : 'Snoozed'}
+          <span aria-hidden>←</span> {view === 'inbox' ? 'Inbox' : view === 'snoozed' ? 'Snoozed' : 'Drafts'}
         </button>
         <h1
           data-testid="conversation-subject"
@@ -136,8 +198,14 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
               conversation={conversation}
               account={account}
               online={online}
+              markNewest={inlineComposer === null}
               onToast={onToast}
             />
+            {inlineComposer ? (
+              <div data-testid="conversation-latest-item" data-latest-conversation-item="">
+                {inlineComposer}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div data-testid="conversation-loading" className="py-10 text-center text-ink-faint">

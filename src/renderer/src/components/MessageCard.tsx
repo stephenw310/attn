@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import type { MailAddress, MessageAttachment, MessageRecipients } from '../../../shared/mail'
 import { MessageBody } from '../MessageBody'
 import type { DisplayMessage } from '../mailDisplay'
+import { mailSurfaceForHtml } from '../mailSurface'
 
 function firstName(address: MailAddress, account: string | null): string {
   if (account && address.email.toLowerCase() === account.toLowerCase()) return 'me'
@@ -103,7 +104,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     onToggleTrim,
     bodyHydrationMessage
   } = props
-  const htmlSurface = message.html !== null
+  const bodySurface = mailSurfaceForHtml(message.html)
+  const htmlSurface = bodySurface === 'light'
   const visibleAttachments = message.attachments.filter((attachment) => !attachment.inline)
 
   const download = useCallback(
@@ -212,6 +214,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         <MessageBody
           bodyText={message.text}
           bodyHtml={message.html}
+          surface={bodySurface}
           threadId={threadId}
           messageId={message.id}
           attachments={message.attachments}

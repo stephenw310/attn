@@ -28,6 +28,7 @@ const ALLOWED_TAGS = [
 ]
 
 export const COMPOSER_STYLE_PROPERTIES = new Set([
+  'background',
   'background-color',
   'border',
   'border-bottom',

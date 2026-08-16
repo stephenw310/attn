@@ -29,6 +29,7 @@
   body,
   #root {
     height: 100%;
+    overflow: clip;
   }
 
   body {
@@ -36,7 +37,6 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-size: 14px;
-    overflow: hidden;
     -webkit-font-smoothing: antialiased;
   }
 

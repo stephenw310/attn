@@ -11,6 +11,7 @@ interface MailDataState {
   realSnoozedThreads: SnoozedThreadRow[] | null
   realDrafts: Draft[]
   refreshDrafts: () => Promise<void>
+  refreshMailRows: () => Promise<void>
   realUnreadTotal: number | null
   labels: MailLabel[]
   pendingCount: number
@@ -139,6 +140,18 @@ export function useMailData(
     setRealDrafts(drafts)
   }
 
+  const refreshMailRows = async (): Promise<void> => {
+    if (!window.attn || !activeAccount) return
+    const [threads, snoozed, drafts] = await Promise.all([
+      window.attn.mail.listThreads(),
+      window.attn.mail.listSnoozed(),
+      window.attn.draft.list()
+    ])
+    setRealThreads(threads)
+    setRealSnoozedThreads(snoozed)
+    setRealDrafts(drafts)
+  }
+
   return {
     sync,
     networkOnline,
@@ -147,6 +160,7 @@ export function useMailData(
     realSnoozedThreads,
     realDrafts,
     refreshDrafts,
+    refreshMailRows,
     realUnreadTotal,
     labels,
     pendingCount,

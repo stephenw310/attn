@@ -77,11 +77,15 @@ export function useInboxCommands(options: Options): void {
         createCommand('view.snoozed', () => switchView('snoozed')),
         createCommand('view.drafts', () => switchView('drafts')),
         createCommand('composer.new', openComposer),
-        ...(readerOpen
+        ...(view !== 'drafts' && selected
           ? [
-              createCommand('composer.reply', () => openReply('reply')),
-              createCommand('composer.replyAll', () => openReply('replyAll')),
-              createCommand('composer.forward', () => openReply('forward'))
+              createCommand('composer.reply', () => openReply('reply'), {
+                context: readerOpen ? 'reader' : 'list'
+              }),
+              ...(readerOpen ? [createCommand('composer.replyAll', () => openReply('replyAll'))] : []),
+              createCommand('composer.forward', () => openReply('forward'), {
+                context: readerOpen ? 'reader' : 'list'
+              })
             ]
           : []),
         createCommand(
