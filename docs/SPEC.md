@@ -1,4 +1,4 @@
-# Attn — Product & Technical Spec (v0.14)
+# Attn — Product & Technical Spec (v0.15)
 
 A desktop email client for **macOS and Windows** modeled on Superhuman's core idea: email triage so fast and keyboard-driven that reaching inbox zero is the default state, not an aspiration.
 
@@ -77,7 +77,7 @@ Serverless roadmap: **v1** pure client → **v1.5** optional *companion Apps Scr
 
 **D4 — Single account throughout v1; multi-account lands in v1.1 (§9).** The data model is multi-account from day one (every row is keyed by account), but the UI assumes one account until the core loop is excellent.
 
-**D5 — SQLite + FTS5 as the local store.** All metadata for the last 12 months, full bodies for the last 90 days, older bodies fetched on demand and cached. Search runs entirely locally against FTS5.
+**D5 — SQLite + FTS5 as the local store.** Message headers for the account's whole lifetime (staged: interactive windows first, then a low-priority background sweep — §9 #17), full bodies for the last 90 days of Inbox mail, older bodies fetched on demand and cached permanently. Attachment bytes are never bulk-synced: metadata rides with full-format fetches, content downloads on demand. Search runs entirely locally against FTS5.
 
 **D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. Layout (revised 2026-08-12 after M1 dogfood and 2026-08-14 after composer dogfood, §9 #7/#9/#11/#13): full-width list ⇄ **full-window conversation or composer** — the active task owns the window; `Esc` or the visible Back/List control restores the prior view at the same selection and scroll position. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing competing panes. This supersedes the centered overlay, the interim reading split, and the docked composer; simultaneous list/reader/composer variants are rejected. Inbox splits render as a horizontal strip (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Settings live behind the account-chip menu (Settings, keyboard shortcuts, split rules, sign out) — no hamburger. Light theme derives from the same tokens at M3 (F14).
 
@@ -106,35 +106,63 @@ Tokens are stored via Electron `safeStorage` (macOS Keychain / Windows DPAPI). N
 
 ### F2 — Sync engine & offline
 
-**Backfill:** on first sync, fetch all labels, Inbox thread/message metadata for the last 12 months
-(headers, snippets, label sets), message bodies for the last 90 days, and Sent metadata for the last 12
-months, newest first. The backfill runs as checkpointed stages (metadata → bodies → sent → membership
-reconcile) with the cursor persisted per page, so a killed or offline-interrupted app resumes where it
-stopped instead of restarting. Older content is fetched on demand and cached permanently. UI renders as
-soon as the first page of metadata lands.
+**Backfill:** on first sync, fetch all labels, then run checkpointed stages in priority order, newest first
+within each stage, with the cursor persisted per page so a killed or offline-interrupted app resumes where
+it stopped instead of restarting:
 
-**Window rationale and completion semantics:** the 12-month metadata window gives a useful year of
-mailbox context without cloning an account's lifetime history; the 90-day body window makes recent mail
-offline-readable without eagerly downloading every old body and attachment; the 12-month Sent window
-provides a fast autocomplete bootstrap and seeds the future Sent view. These are eventual time windows,
-not item caps — an API page size such as 500 must never be presented or implemented as “only sync 500
-messages.” A count cap may bound the first interactive bootstrap only when the remaining window continues
-in the background or is available on demand.
+1. **inbox** — Inbox thread/message metadata (headers, snippets, label sets) for the last 12 months. The
+   triage surface and its unread count are complete after this stage, whatever the user's archive habits.
+2. **bodies** — full Inbox message bodies for the last 90 days.
+3. **drafts** — every Gmail draft (the two-way draft sync owns the mechanism).
+4. **all-mail** — metadata for the last 12 months with **no label filter**: archived, sent, and everything
+   else outside Spam/Trash. Subsumes the earlier dedicated Sent stage; recent search and autocomplete are
+   complete after it.
+5. **spam-trash** — Spam and Trash metadata via explicit label listings (`threads.list` excludes both
+   unless asked). Gmail purges both at ~30 days, so these stages are inherently small.
+6. **reconcile** — authoritative per-system-label id re-lists to repair membership drift.
+7. **lifetime** — a low-priority, quota-throttled, resumable header sweep with no date bound (§9 #17).
 
-**Lifetime contact index (planned as T13A, separate from mail backfill):** after interactive readiness,
-a resumable low-priority pass scans lifetime Sent message headers for recipient addresses and display names.
-It persists its own cursor and aggregate contact statistics, but does not download old bodies or attachments
-and does not create browsable synthetic Sent rows outside the mail window. Recent contacts remain useful
-immediately; while the lifetime pass runs, sync status reads **Live · indexing contacts** with progress and
-quota-wait detail. Importing a user's saved Google Contacts through the People API is a separate opt-in
-product decision because it adds OAuth scope and consent requirements; autocomplete must not imply that the
-Sent-derived index contains an address book the user has never emailed.
+Stages overlap deliberately and **skip threads already stored** instead of carving exact date complements:
+Gmail's `newer_than`/`older_than` operators have coarse, fuzzy boundaries, so complement queries risk silent
+seam gaps, while re-listing already-fetched ids costs ~1% of the fetch budget (per-thread gets dominate).
+Skipping is safe because the history checkpoint is recorded before the first page, so the poller keeps every
+stored thread current from then on. Header-only fetches carry no MIME part tree, so attachment metadata (and
+the local `has:attachment`/filename search it feeds) arrives when a thread is first hydrated. Bodies older
+than the 90-day window are fetched on demand and cached permanently. UI renders as soon as the first page of
+inbox metadata lands.
+
+*Shipped staging:* M2 currently runs inbox → bodies → drafts → sent → reconcile; the lifetime sweep lands
+with T13A, still in M2. The all-mail and spam-trash stages, per-message label storage, and the generalized
+reconcile open M3 (§9 #10, #17).
+
+**Window rationale and completion semantics:** headers are cheap — roughly 1–2 KB and ~10 quota units per
+thread, so a typical account's lifetime header index costs an hour or two of background sweeping and a few
+hundred MB, and it is what makes local search recall, complete system mailboxes, and lifetime contact
+autocomplete trustworthy. Bodies and attachments are orders of magnitude heavier, so only the last 90 days
+of Inbox bodies are fetched eagerly; everything older hydrates on open. Stage boundaries exist only where
+behavior changes, never just to slice dates: the inbox stage guarantees the triage surface first, stages
+2–6 run at normal background priority, and the lifetime sweep drops to a throttled low-priority posture.
+These are eventual windows, not item caps — an API page size such as 500 must never be presented or
+implemented as “only sync 500 messages.” A count cap may bound the first interactive bootstrap only when
+the remaining window continues in the background or is available on demand.
+
+**Lifetime header sweep (T13A as revised by §9 #17; supersedes the Sent-only pass of §9 #15):** after
+interactive readiness, a resumable low-priority pass walks lifetime message headers across the whole account
+(no label filter, newest first), skipping threads already stored. It persists its own cursor, reports
+progress against `getProfile`'s `threadsTotal`/`messagesTotal`, and never downloads old bodies or
+attachments. Contact statistics derive from the same header stream — recipients of Sent mail, senders of
+received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
+never contribute to contacts. While the pass runs, sync status reads **Live · indexing older mail** with
+progress and quota-wait detail. Importing a user's saved Google Contacts through the People API remains a
+separate opt-in product decision because it adds OAuth scope and consent requirements; autocomplete must not
+imply that the mail-derived index contains an address book the user has never emailed.
 
 Backfill has two distinct completion points:
 
 1. **Interactive-ready:** the first recent page is committed and the user can read and triage local mail.
    The fresh-install target remains under 60 seconds on a typical inbox.
-2. **Background index complete:** every configured time window is exhausted. Its duration is proportional
+2. **Background index complete:** every bounded stage is exhausted and the lifetime sweep's cursor reads
+   done. Its duration is proportional
    to mailbox size, Gmail's per-method quota costs, and rate-limit waits; it has no fixed five-minute SLA and
    must never make an already-usable inbox look unavailable.
 
@@ -143,9 +171,7 @@ After interactive readiness, the footer reports **Live · indexing older mail** 
 explicit quota-wait state instead of appearing stuck during backoff. The top-bar “N to zero” value is the
 total unread Inbox count, not sync progress, and may exceed the current rendered-list window.
 
-*M1 staging:* the synced window covers **Inbox** threads only, and on-demand hydration of older bodies is not yet built. M3's system-mailbox work broadens the window to all cached system labels (§9 #10); on-demand body fetch arrives with the FTS5/bodies milestone.
-
-**Incremental:** poll `history.list` from the last stored `historyId` (15s foreground / 60s background). On `historyId` expiry (HTTP 404), fall back to a delta re-list. All writes funnel through a single reducer so server-originated and locally-originated changes apply identically.
+**Incremental:** poll `history.list` from the last stored `historyId` (15s foreground / 60s background). Each cycle also refreshes the label catalog (`labels.list`, 1 unit): history reports label *applications*, never label create/rename/delete, so the catalog would otherwise go stale (T21). On `historyId` expiry (HTTP 404), fall back to a delta re-list; once non-Inbox mail is cached (M3), that recovery must also reconcile every cached system label and tombstone threads purged server-side while the app was away — Spam/Trash auto-purge otherwise leaves ghost rows. All writes funnel through a single reducer so server-originated and locally-originated changes apply identically.
 
 **Action queue:** every user action (archive, label, star, send…) is:
 1. Applied to the local store immediately (optimistic).
@@ -287,7 +313,7 @@ When sending, optionally set "remind me if no reply" (composer control or palett
 
 - Operators: `from:`, `to:`, `subject:`, `in:` (label/view), `is:unread|starred|snoozed`, `has:attachment`, `before:`/`after:`.
 - Result rows open straight into the conversation; `Esc` returns to the result list, then to the inbox.
-- Content older than the synced window: a "Search all of Gmail" row runs the same query server-side (Gmail `q=`) and merges results.
+- Local coverage follows the store: header fields match lifetime mail once the sweep completes; body terms, `has:attachment`, and filenames match only hydrated mail. A "Search all of Gmail" row runs the same query server-side (Gmail `q=`) and merges results; threads it fetches persist through the normal write path and stay cached.
 
 **Acceptance criteria**
 - p95 < 100ms for local queries on a 50,000-message store.
@@ -511,7 +537,7 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading view, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
 - **M1 — Triage core.** First items: **apply the Dispatch direction** (D6 — graphite/amber tokens, `attn:` wordmark, layout per D6, split strip, account menu) and **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). The reading work adds recipients, attachments, quote/signature collapse, and—after M1 dogfood—the full-window conversation that supersedes the interim split. Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
 - **M2 — Mail out.** Composer (rich text, attachments, autocomplete), reply/all/forward, crash-safe drafts, send + undo send, exactly-once outbox. **← daily-drivable.**
-- **M3 — Find & focus.** FTS5 instant search + operators, system mailbox navigation (Inbox/All Mail/Sent/Drafts/Starred/Snoozed/Spam/Trash), split inbox + rules, inbox-zero states, themes, command palette hardened (every command registered).
+- **M3 — Find & focus.** Opens with the sync restructure the utility-process move already implies (§6, §9 #17): the all-mail and spam-trash backfill stages, per-message label storage, and generalized per-label reconcile/expiry recovery — planned as S1–S4 in docs/M3-PLAN.md. Then: FTS5 instant search + operators, system mailbox navigation (Inbox/All Mail/Sent/Drafts/Starred/Snoozed/Spam/Trash), split inbox + rules, inbox-zero states, themes, command palette hardened (every command registered).
 - **M4 — Power finish.** Snippets, follow-up reminders, AI reply drafting (F17), settings surface, badge polish, auto-update + signing/notarization (personal-build packaging shipped early, at M1 exit — §6 Packaging).
 
 **Post-v1 sequence:** v1.1 — global-hotkey quick panel (quick compose + quick search), multi-account (switcher `Mod+1..9`; unified inbox stays out), and custom themes (user token sets over D6's semantic names). v1.5 — companion Apps Script: send later + exact-time snooze return (F7). v2 — hosted backend: read statuses, true multi-device state.
@@ -538,3 +564,4 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 14. **The shortcut footer becomes a contextual chord guide (2026-08-14):** default hints stay minimal and view-specific. A prefix such as `G` temporarily shows valid next keys from the command registry, including fixed mailbox letters and dynamic split digits. The palette and cheat sheet remain the complete references; implementation is an M3 follow-up, separate from composer work.
 15. **Lifetime contact indexing is decoupled from mail history (2026-08-14):** the recent Sent window makes autocomplete useful quickly, then a resumable low-priority header-only pass derives recipients across lifetime Sent without cloning old bodies or creating old browsable mail rows. Importing saved Google Contacts remains a separate OAuth/product decision.
 16. **The composer's narrow schema is reversed for zero-loss editing (2026-08-15):** M2's composer deliberately shipped a minimal node set (bold/italic/underline, lists, links, blockquote) so output would be predictable and pasted junk would be rejected by construction. The narrowness lived in two places we control, neither of them a Lexical limitation: the registered node list in `editorConfig.ts` and the outgoing sanitizer allowlist in `composer/sanitize.ts`. Dogfood rejected the consequence rather than the reasoning: a client that cannot paste an image, and that silently flattens a Gmail-authored draft when you open it, is not a Gmail replacement. Two changes follow. The editor widens to cover what Gmail's own composer emits — inline images, tables, font family and size, text and background colour, alignment, and strikethrough (heading levels are excluded, since Gmail has none) — and anything still outside that set is **preserved byte-for-byte as an opaque region** rather than dropped, so "no formatting loss" becomes an invariant that holds for arbitrary HTML instead of a promise that holds until someone pastes something unusual. The original rationale is retained where it still applies: outgoing content stays untrusted and is still sanitized (M2 global rule 3), the sanitizer's allowlist widens deliberately rather than becoming permissive, and preserved regions are rendered through the same scriptless path as incoming mail. Cost is accepted knowingly: this expands M2 beyond composer-and-send, and F8 snippets and F17 AI drafting must now target a richer document model.
+17. **Lifetime headers replace the 12-month metadata window (2026-08-15):** v0.13's 12-month window was a scoping decision, not an architectural constraint, and it quietly broke three product promises — search recall (mail archived before install was invisible even when weeks old, because backfill was Inbox-scoped), contact autocomplete beyond a year, and complete system mailboxes. Headers are cheap (~1–2 KB and ~10 quota units per thread; a 60k-thread account sweeps in under an hour of background time inside Gmail's ~250 units/user/sec budget) while bodies and attachments are orders of magnitude heavier, so v0.15 retargets the store at **lifetime headers, windowed + on-demand bodies** (D5, F2). The backfill becomes priority-ordered stages over one idempotent walk — inbox → bodies → drafts → all-mail 12m → spam-trash → reconcile → lifetime sweep — where every stage skips already-stored threads, consecutive slices overlap rather than carving Gmail's fuzzy date-operator complements (a seam gap loses mail silently; overlap costs ~1% in listing), and a stage boundary exists only where behavior changes (priority, throttle, or what runs next). Recorded consequences: `threads.list` excludes SPAM/TRASH unless asked and Gmail purges both at ~30 days, so those stages are explicit and inherently small; SPAM/TRASH messages are excluded from contact statistics; per-message label storage becomes necessary once Trash is local, because a thread-level label union cannot express a partially-trashed thread; the poller refreshes `labels.list` each cycle because history never reports label create/rename/delete; and `historyId`-expiry recovery must reconcile every cached system label and tombstone server-purged threads, not just Inbox. Staging: T13A ships the lifetime sweep and contact derivation in M2 (superseding #15's Sent-only pass); the all-mail/spam-trash stages, per-message labels, and recovery generalization open M3 alongside the utility-process move. Deliberately still not fetched: People-API contacts (#15), send-as aliases/signatures (extra OAuth scope — a composer product decision), Gmail-native snooze (not exposed by the API), filters/vacation/forwarding settings, confidential-mode bodies (the API returns placeholders), and legacy Hangouts `CHAT` rows (skipped defensively).

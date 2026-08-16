@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation/composer). **M1 feature work is implemented and audit-clean; only the real-OS notification click-through smoke remains in `docs/M1-PLAN.md`. M2 is underway: R1, R2, R3, and T13 are shipped, T14 is in draft PR #38, and `docs/M2-PLAN.md` guides the remaining composer/outbox work.**
+Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation/composer). **This file records how to work in this repo, never project status: milestone state and task progress live in [docs/SPEC.md](docs/SPEC.md) §8 and the plan docs (`docs/M*-PLAN.md`), which are updated as part of shipping — do not record them here, where they rot.**
 
 This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
 
@@ -95,8 +95,9 @@ Every task that bumps the schema must state its exact local-development DDL in t
 AGENTS.md            This file — the working agreement, shared by every agent tool
 .claude/             Claude Code config: CLAUDE.md (imports this file), settings, hooks
 docs/SPEC.md         Product & technical spec — source of truth for behavior
-docs/M1-PLAN.md      Shipped M1 task record + the remaining notification smoke
-docs/M2-PLAN.md      Current milestone: refactors + composer/outbox task guide
+docs/M1-PLAN.md      M1 task guide: triage core
+docs/M2-PLAN.md      M2 task guide: composer, drafts, send, exactly-once outbox
+docs/M3-PLAN.md      M3 task guide: sync restructure + find & focus
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies
 src/main/            Main process: windows, OAuth, SQLite (db/), Gmail (gmail/, sync/)
