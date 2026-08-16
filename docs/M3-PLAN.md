@@ -4,7 +4,7 @@
 **Basis:** SPEC §8 M3, §9 #10 (system mailboxes are explicit v1 scope), §9 #17 (lifetime headers replace the 12-month window), §6 (utility-process move), F2 (sync engine), F3 (mailbox navigation), F10 (instant search).
 **Goal:** M3 makes everything in the account *findable* — locally, instantly, and without a window cliff. That requires the store to hold the mail first, which is why this milestone opens with sync work rather than with search UI.
 
-**Status:** this document currently plans **only M3's opening sync block (S1–S4)**. The feature tasks that follow it — FTS5 search, mailbox navigation, splits, inbox-zero states, themes, palette hardening — are listed at the end as scope but are **not yet planned**; they get written up when S1–S4 are underway and the store's shape is settled.
+**Status:** this document plans **M3's opening sync block (S1–S4)**. S3 and S4's membership half were pulled forward and shipped with the T13A/sync-stage PR (owner call: land the whole stage pipeline at once rather than splitting across milestones); S1, S2, and S4's existence-sweep tombstone pass remain. The feature tasks that follow — FTS5 search, mailbox navigation, splits, inbox-zero states, themes, palette hardening — are listed at the end as scope but are **not yet planned**; they get written up when the remaining sync work is underway and the store's shape is settled.
 
 ---
 
@@ -112,7 +112,7 @@ Unit: the persist path stores per-message labels from both `full` and `metadata`
 
 ## S3 — All-mail and Spam/Trash backfill stages
 
-**Depends on:** S1, S2 · **Unblocks:** S4, mailbox views, search recall · **Spec:** F2 backfill stages 4–5, §9 #17
+**Status: shipped with the T13A/sync-stage PR — pulled forward from M3 by owner decision, ahead of S1/S2; the stage rewrite therefore lands in the main process and moves with S1 later.** · **Unblocks:** S4, mailbox views, search recall · **Spec:** F2 backfill stages 4–5, §9 #17
 
 ### Why
 
@@ -198,7 +198,7 @@ Unit: cursor routing and resume across every new phase, including the retired `s
 
 ## S4 — Generalized reconcile and expiry recovery
 
-**Depends on:** S3 · **Unblocks:** trustworthy mailbox views · **Spec:** F2 incremental, §9 #17
+**Status: membership half shipped with S3** — `reconcileLabelMembership` generalizes the INBOX-only helper, backfill's reconcile phase re-lists INBOX/SPAM/TRASH, and Spam/Trash candidates missing from their listing are verified thread-by-thread (refetch persists truth; only a 404 deletes). Both the backfill completion path and expiry recovery call the same helpers. **Remaining in M3:** the existence-sweep tombstone pass for label-less orphans (a thread purged server-side while local labels held neither SPAM nor TRASH is still never removed — it needs an unfiltered + Spam + Trash listing walked to exhaustion in one run, which the lifetime sweep's re-walk can double as). · **Unblocks:** trustworthy mailbox views · **Spec:** F2 incremental, §9 #17
 
 ### Why
 

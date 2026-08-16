@@ -48,6 +48,8 @@ export interface ListThreadIdsOptions {
   q?: string
   labelIds?: readonly string[]
   pageToken?: string
+  /** Gmail excludes SPAM/TRASH from listings unless asked, even when labelIds targets them. */
+  includeSpamTrash?: boolean
 }
 
 export interface HistoryMessageEvent {

@@ -93,7 +93,7 @@ export interface InlineImageRepairRequest {
   threadId: string
 }
 
-export type SyncStage = 'metadata' | 'bodies' | 'drafts' | 'sent' | 'reconcile'
+export type SyncStage = 'metadata' | 'bodies' | 'drafts' | 'all-mail' | 'spam' | 'trash' | 'reconcile'
 
 export type SyncState =
   | { phase: 'idle' }

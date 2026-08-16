@@ -138,9 +138,12 @@ the local `has:attachment`/filename search it feeds) arrives when a thread is fi
 than the 90-day window are fetched on demand and cached permanently. UI renders as soon as the first page of
 inbox metadata lands.
 
-*Shipped staging:* M2 runs inbox → bodies → drafts → sent → reconcile, then starts T13A's independent,
-low-priority lifetime sweep. The all-mail and spam-trash stages, per-message label storage, and the
-generalized reconcile open M3 (§9 #10, #17).
+*Shipped staging:* the full bounded pipeline runs as specified — inbox → bodies → drafts → all-mail →
+spam → trash → per-label reconcile (the retired `sent` stage is subsumed by all-mail; old `sent` cursors
+route to it) — then T13A's independent, low-priority lifetime sweep starts. Spam/Trash reconciliation
+verifies each locally-labeled thread missing from the server listing by direct fetch and deletes only on
+404, never on listing absence. Still M3: per-message label storage, the utility-process move, the
+existence-sweep tombstone pass for label-less orphans, and the mailbox/search surfaces (§9 #10, #17).
 
 **Window rationale and completion semantics:** headers are cheap — roughly 1–2 KB and ~10 quota units per
 thread, so a typical account's lifetime header index costs an hour or two of background sweeping and a few

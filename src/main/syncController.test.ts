@@ -34,7 +34,8 @@ const mocks = vi.hoisted(() => {
     FakePoller,
     runInboxBackfill: vi.fn(),
     runLifetimeSweep: vi.fn(),
-    reconcileInboxMembership: vi.fn()
+    reconcileInboxMembership: vi.fn(),
+    reconcilePurgeableMembership: vi.fn(async () => {})
   }
 })
 
@@ -46,7 +47,8 @@ vi.mock('./sync/backfill', async (importOriginal) => ({
 }))
 vi.mock('./sync/poller', () => ({
   HistoryPoller: mocks.FakePoller,
-  reconcileInboxMembership: mocks.reconcileInboxMembership
+  reconcileInboxMembership: mocks.reconcileInboxMembership,
+  reconcilePurgeableMembership: mocks.reconcilePurgeableMembership
 }))
 vi.mock('./sync/lifetimeSweep', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync/lifetimeSweep')>()),
@@ -161,6 +163,8 @@ beforeEach(() => {
   mocks.runInboxBackfill.mockReset()
   mocks.runLifetimeSweep.mockReset()
   mocks.reconcileInboxMembership.mockReset()
+  mocks.reconcilePurgeableMembership.mockReset()
+  mocks.reconcilePurgeableMembership.mockImplementation(async () => {})
 })
 
 afterEach(() => {
@@ -202,7 +206,12 @@ describe('retry routing', () => {
   it('pokes the existing poller instead of starting a second backfill', async () => {
     const { controller, backfills } = harness()
     controller.retry()
-    backfills[0].result.resolve({ threadCount: 1, inboxThreadIds: ['t1'] })
+    backfills[0].result.resolve({
+      threadCount: 1,
+      inboxThreadIds: ['t1'],
+      spamThreadIds: [],
+      trashThreadIds: []
+    })
     await flush()
     const poller = mocks.FakePoller.instances[0]
     expect(poller).toBeDefined()
@@ -251,7 +260,7 @@ describe('generation guards', () => {
     controller.onSignOut()
     states.length = 0
     broadcastMailChanged.mockClear()
-    stale.result.resolve({ threadCount: 3, inboxThreadIds: ['t1'] })
+    stale.result.resolve({ threadCount: 3, inboxThreadIds: ['t1'], spamThreadIds: [], trashThreadIds: [] })
     await flush()
 
     expect(mocks.reconcileInboxMembership).not.toHaveBeenCalled()
@@ -271,7 +280,7 @@ describe('generation guards', () => {
     await flush()
     trigger.mockClear()
 
-    stale.result.resolve({ threadCount: 3, inboxThreadIds: ['t1'] })
+    stale.result.resolve({ threadCount: 3, inboxThreadIds: ['t1'], spamThreadIds: [], trashThreadIds: [] })
     await flush()
 
     // The stale result is discarded rather than reconciled against the new account,
@@ -314,13 +323,32 @@ describe('backfill to poller handoff', () => {
     const { controller, backfills, lifetimeSweeps, states, broadcastMailChanged } = harness()
     controller.retry()
 
-    backfills[0].result.resolve({ threadCount: 2, inboxThreadIds: ['t1', 't2'] })
+    backfills[0].result.resolve({
+      threadCount: 2,
+      inboxThreadIds: ['t1', 't2'],
+      spamThreadIds: ['s1'],
+      trashThreadIds: ['x1']
+    })
     await flush()
 
     expect(mocks.reconcileInboxMembership).toHaveBeenCalledWith(expect.anything(), 'user@example.com', [
       't1',
       't2'
     ])
+    expect(mocks.reconcilePurgeableMembership).toHaveBeenCalledWith(
+      expect.anything(),
+      'user@example.com',
+      expect.anything(),
+      'SPAM',
+      ['s1']
+    )
+    expect(mocks.reconcilePurgeableMembership).toHaveBeenCalledWith(
+      expect.anything(),
+      'user@example.com',
+      expect.anything(),
+      'TRASH',
+      ['x1']
+    )
     expect(states.at(-1)).toEqual({ phase: 'idle' })
     expect(broadcastMailChanged).toHaveBeenCalled()
     expect(mocks.FakePoller.instances[0].started).toBe(true)
@@ -631,7 +659,12 @@ describe('stop', () => {
   it('stops the history poller', async () => {
     const { controller, backfills } = harness()
     controller.retry()
-    backfills[0].result.resolve({ threadCount: 1, inboxThreadIds: ['t1'] })
+    backfills[0].result.resolve({
+      threadCount: 1,
+      inboxThreadIds: ['t1'],
+      spamThreadIds: [],
+      trashThreadIds: []
+    })
     await flush()
 
     controller.stop()
@@ -659,7 +692,7 @@ describe('stop', () => {
 
     controller.stop()
     inFlight.callbacks.onProgress?.({ stage: 'metadata', threadsDone: 1, mailChanged: true })
-    inFlight.result.resolve({ threadCount: 1, inboxThreadIds: ['t1'] })
+    inFlight.result.resolve({ threadCount: 1, inboxThreadIds: ['t1'], spamThreadIds: [], trashThreadIds: [] })
     await flush()
 
     expect(states).toEqual([])

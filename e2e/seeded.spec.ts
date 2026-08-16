@@ -38,7 +38,7 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
     'I added the launch milestones and owner notes.'
   )
   await expect.poll(mainLog).toContain('[seed] loaded 9 threads for seed@attn.test')
-  await expect.poll(mainLog).toContain('[sync] sent stage skipped for seeded account seed@attn.test')
+  await expect.poll(mainLog).toContain('[sync] backfill stages skipped for seeded account seed@attn.test')
   expect(mainLog()).not.toContain('[sync] history poller started')
 })
 
@@ -127,7 +127,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(status).toHaveAttribute('title', 'Syncing · Recent mail — 428 processed')
   const progress = page.getByTestId('sync-progress')
   await expect(progress).toHaveAttribute('aria-valuenow', '2')
-  await expect(progress.locator('[data-phase-state]')).toHaveCount(5)
+  await expect(progress.locator('[data-phase-state]')).toHaveCount(7)
   await expect(progress.locator('[data-phase-state]').nth(0)).toHaveAttribute('data-phase-state', 'complete')
   await expect(progress.locator('[data-phase-state]').nth(1)).toHaveAttribute('data-phase-state', 'active')
 
@@ -135,9 +135,17 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(status).toContainText('Syncing · Drafts')
   await expect(progress).toHaveAttribute('aria-valuenow', '3')
 
-  await setSyncState(app, { phase: 'syncing', stage: 'sent', threadsDone: 512 })
-  await expect(status).toContainText('Syncing · Sent mail')
+  await setSyncState(app, { phase: 'syncing', stage: 'all-mail', threadsDone: 512 })
+  await expect(status).toContainText('Syncing · All mail')
   await expect(progress).toHaveAttribute('aria-valuenow', '4')
+
+  await setSyncState(app, { phase: 'syncing', stage: 'spam', threadsDone: 530 })
+  await expect(status).toContainText('Syncing · Spam')
+  await expect(progress).toHaveAttribute('aria-valuenow', '5')
+
+  await setSyncState(app, { phase: 'syncing', stage: 'trash', threadsDone: 544 })
+  await expect(status).toContainText('Syncing · Trash')
+  await expect(progress).toHaveAttribute('aria-valuenow', '6')
 
   await setSyncState(app, {
     phase: 'indexing',

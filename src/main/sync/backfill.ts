@@ -1,6 +1,11 @@
-// Resumable staged backfill: 12 months of INBOX metadata, 90 days of full
-// INBOX bodies, all Gmail drafts, then 12 months of SENT metadata for local autocomplete.
-// Each completed page checkpoints the next phase/token.
+// Resumable staged backfill in priority order: 12 months of INBOX metadata,
+// 90 days of full INBOX bodies, all Gmail drafts, 12 months of all-mail
+// metadata (archived + sent + everything outside Spam/Trash), then Spam and
+// Trash metadata (Gmail only retains ~30 days of each), then per-label
+// membership reconciliation. Each completed page checkpoints the next
+// phase/token. Overlapping stages skip threads already stored rather than
+// carving date complements — Gmail's date operators have fuzzy boundaries and
+// a seam gap loses mail silently, while re-listing ids is ~1% of fetch cost.
 
 import type { SyncStage } from '../../shared/mail'
 import type { Db } from '../db'
@@ -8,7 +13,7 @@ import { GmailApiError } from '../gmail/client'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { hydrateMissingThreadBodies } from './bodies'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
-import type { DraftPage, MailProvider, ThreadIdPage } from './provider'
+import type { DraftPage, ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
 
 export interface BackfillCallbacks {
   onProgress: (progress: BackfillProgress) => void
@@ -24,11 +29,13 @@ export interface BackfillProgress {
 export interface BackfillResult {
   threadCount: number
   /**
-   * Authoritative INBOX membership from the reconcile phase. Only meaningful for a
-   * run that reached reconciliation — callers must check the plan for 'skip' first,
-   * because reconciling against an empty list would strip INBOX from every thread.
+   * Authoritative per-label membership from the reconcile phase. Only meaningful for
+   * a run that reached reconciliation — callers must check the plan for 'skip' first,
+   * because reconciling against an empty list would strip the label from every thread.
    */
   inboxThreadIds: string[]
+  spamThreadIds: string[]
+  trashThreadIds: string[]
 }
 
 export interface BackfillOptions {
@@ -71,7 +78,9 @@ export async function runInboxBackfill(
       .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null } | undefined
     const plan = planBackfillStart(previous?.backfill_cursor, options.recovery)
-    if (plan.kind === 'skip') return { threadCount: 0, inboxThreadIds: [] }
+    if (plan.kind === 'skip') {
+      return { threadCount: 0, inboxThreadIds: [], spamThreadIds: [], trashThreadIds: [] }
+    }
 
     let cursor = plan.cursor
     if (plan.initialize) {
@@ -149,20 +158,55 @@ export async function runInboxBackfill(
           callbacks.onProgress({ stage: 'drafts', threadsDone, mailChanged: count > 0 })
         }
       })
-      cursor = { phase: 'sent' }
+      cursor = { phase: 'all-mail' }
     }
 
-    if (cursor.phase === 'sent') {
-      callbacks.onProgress({ stage: 'sent', threadsDone, mailChanged: false })
+    if (cursor.phase === 'all-mail') {
+      // No label filter: archived + sent + everything Gmail returns from its
+      // default listing. Threads the INBOX stages already stored are skipped,
+      // which is what keeps the deliberate 12-month overlap nearly free.
+      callbacks.onProgress({ stage: 'all-mail', threadsDone, mailChanged: false })
       await runThreadPhase({
         db,
         provider,
         accountId,
         query: 'newer_than:12m',
-        labelIds: ['SENT'],
-        phase: 'sent',
+        phase: 'all-mail',
         initialPageToken: cursor.pageToken,
-        nextPhase: 'reconcile',
+        nextPhase: 'spam',
+        skipExisting: true,
+        onThread: async (threadId) => {
+          persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
+            metadataOnly: true,
+            inboxVisibility: 'show'
+          })
+        },
+        onPage: (count) => {
+          threadsDone += count
+          callbacks.onProgress({ stage: 'all-mail', threadsDone, mailChanged: true })
+        }
+      })
+      cursor = { phase: 'spam' }
+    }
+
+    for (const junk of [
+      { phase: 'spam', labelId: 'SPAM', nextPhase: 'trash' },
+      { phase: 'trash', labelId: 'TRASH', nextPhase: 'reconcile' }
+    ] as const) {
+      if (cursor.phase !== junk.phase) continue
+      // Gmail purges Spam and Trash at ~30 days, so "everything" is inherently
+      // small here — no date bound needed.
+      callbacks.onProgress({ stage: junk.phase, threadsDone, mailChanged: false })
+      await runThreadPhase({
+        db,
+        provider,
+        accountId,
+        labelIds: [junk.labelId],
+        includeSpamTrash: true,
+        phase: junk.phase,
+        initialPageToken: cursor.pageToken,
+        nextPhase: junk.nextPhase,
+        skipExisting: true,
         onThread: async (threadId) => {
           persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
             metadataOnly: true
@@ -170,25 +214,29 @@ export async function runInboxBackfill(
         },
         onPage: (count) => {
           threadsDone += count
-          callbacks.onProgress({ stage: 'sent', threadsDone, mailChanged: true })
+          callbacks.onProgress({ stage: junk.phase, threadsDone, mailChanged: true })
         }
       })
-      cursor = { phase: 'reconcile' }
+      cursor = { phase: junk.nextPhase }
     }
 
-    // Re-list all INBOX ids for authoritative membership reconciliation. This
-    // remains metadata-free and prevents older local threads being stripped.
+    // Re-list ids per reconciled label for authoritative membership repair.
+    // This remains metadata-free and prevents older local threads being
+    // stripped. Spam/Trash listings double as the purge signal upstream:
+    // locally-labeled threads missing from them get verified thread-by-thread.
     callbacks.onProgress({ stage: 'reconcile', threadsDone, mailChanged: false })
-    const inboxThreadIds = new Set<string>()
-    let pageToken: string | undefined
-    do {
-      const page = await provider.listThreadIds({ labelIds: ['INBOX'], pageToken })
-      for (const threadId of page.threadIds) inboxThreadIds.add(threadId)
-      pageToken = page.nextPageToken
-    } while (pageToken)
+    const inboxThreadIds = await listAllThreadIds(provider, { labelIds: ['INBOX'] })
+    const spamThreadIds = await listAllThreadIds(provider, {
+      labelIds: ['SPAM'],
+      includeSpamTrash: true
+    })
+    const trashThreadIds = await listAllThreadIds(provider, {
+      labelIds: ['TRASH'],
+      includeSpamTrash: true
+    })
 
     db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run('done', accountId)
-    return { threadCount: threadsDone, inboxThreadIds: [...inboxThreadIds] }
+    return { threadCount: threadsDone, inboxThreadIds, spamThreadIds, trashThreadIds }
   } catch (error) {
     callbacks.onError(error)
     return null
@@ -199,24 +247,35 @@ interface ThreadPhaseOptions {
   db: Db
   provider: MailProvider
   accountId: string
-  query: string
-  labelIds: readonly string[]
+  query?: string
+  labelIds?: readonly string[]
+  includeSpamTrash?: boolean
   phase: Exclude<BackfillPhase, 'drafts' | 'reconcile'>
   initialPageToken?: string
   nextPhase: BackfillPhase
+  /**
+   * Skip listed ids already stored locally. Safe because the history checkpoint
+   * predates the first backfill page, so the poller keeps stored threads
+   * current — and it is what makes deliberately overlapping stages cheap.
+   */
+  skipExisting?: boolean
   onThread: (threadId: string) => Promise<void>
   onPage: (count: number) => void
 }
 
 async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
+  const exists = options.skipExisting
+    ? options.db.prepare('SELECT 1 FROM threads WHERE account_id = ? AND id = ?')
+    : null
   let pageToken = options.initialPageToken
   let resetExpiredCursor = false
   for (;;) {
     let page: ThreadIdPage
     try {
       page = await options.provider.listThreadIds({
-        q: options.query,
-        labelIds: options.labelIds,
+        ...(options.query === undefined ? {} : { q: options.query }),
+        ...(options.labelIds === undefined ? {} : { labelIds: options.labelIds }),
+        ...(options.includeSpamTrash ? { includeSpamTrash: true } : {}),
         pageToken
       })
     } catch (error) {
@@ -228,8 +287,11 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
       continue
     }
 
+    const wanted = exists
+      ? page.threadIds.filter((threadId) => !exists.get(options.accountId, threadId))
+      : page.threadIds
     let completed = 0
-    await mapConcurrent(page.threadIds, 3, async (threadId) => {
+    await mapConcurrent(wanted, 3, async (threadId) => {
       try {
         await options.onThread(threadId)
       } catch (error) {
@@ -289,21 +351,44 @@ async function runDraftPhase(options: DraftPhaseOptions): Promise<void> {
     })
     if (completed > 0) options.onPage(completed)
     pageToken = page.nextPageToken
-    checkpoint(options.db, options.accountId, pageToken ? `drafts:${pageToken}` : 'sent')
+    checkpoint(options.db, options.accountId, pageToken ? `drafts:${pageToken}` : 'all-mail')
     if (!pageToken) return
   }
+}
+
+async function listAllThreadIds(
+  provider: MailProvider,
+  options: Pick<ListThreadIdsOptions, 'labelIds' | 'includeSpamTrash'>
+): Promise<string[]> {
+  const threadIds = new Set<string>()
+  let pageToken: string | undefined
+  do {
+    const page = await provider.listThreadIds({ ...options, pageToken })
+    for (const threadId of page.threadIds) threadIds.add(threadId)
+    pageToken = page.nextPageToken
+  } while (pageToken)
+  return [...threadIds]
 }
 
 function parseCursor(raw: string | null | undefined): ParsedCursor {
   if (!raw || raw === 'metadata') return { phase: 'metadata' }
   if (raw === 'bodies') return { phase: 'bodies' }
   if (raw === 'drafts') return { phase: 'drafts' }
-  if (raw === 'sent') return { phase: 'sent' }
+  if (raw === 'all-mail') return { phase: 'all-mail' }
+  if (raw === 'spam') return { phase: 'spam' }
+  if (raw === 'trash') return { phase: 'trash' }
   if (raw === 'reconcile') return { phase: 'reconcile' }
   if (raw.startsWith('metadata:')) return { phase: 'metadata', pageToken: raw.slice('metadata:'.length) }
   if (raw.startsWith('bodies:')) return { phase: 'bodies', pageToken: raw.slice('bodies:'.length) }
   if (raw.startsWith('drafts:')) return { phase: 'drafts', pageToken: raw.slice('drafts:'.length) }
-  if (raw.startsWith('sent:')) return { phase: 'sent', pageToken: raw.slice('sent:'.length) }
+  if (raw.startsWith('all-mail:')) return { phase: 'all-mail', pageToken: raw.slice('all-mail:'.length) }
+  if (raw.startsWith('spam:')) return { phase: 'spam', pageToken: raw.slice('spam:'.length) }
+  if (raw.startsWith('trash:')) return { phase: 'trash', pageToken: raw.slice('trash:'.length) }
+  // The dedicated SENT stage retired when the unfiltered all-mail stage
+  // subsumed it. A profile resuming mid-`sent` restarts at all-mail — the
+  // stored page token belongs to a SENT-scoped listing and cannot continue an
+  // unfiltered one, and skip-if-present makes the re-walk cheap.
+  if (raw === 'sent' || raw.startsWith('sent:')) return { phase: 'all-mail' }
   throw new Error(`Invalid backfill cursor: ${raw}`)
 }
 

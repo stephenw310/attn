@@ -2,13 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SyncStage, SyncState } from '../../../shared/mail'
 import { blurActive } from './blurActive'
 
-const SYNC_STAGES: SyncStage[] = ['metadata', 'bodies', 'drafts', 'sent', 'reconcile']
+const SYNC_STAGES: SyncStage[] = ['metadata', 'bodies', 'drafts', 'all-mail', 'spam', 'trash', 'reconcile']
 
 function syncStageLabel(stage: SyncStage): string {
   if (stage === 'metadata') return 'Message list'
   if (stage === 'bodies') return 'Recent mail'
   if (stage === 'drafts') return 'Drafts'
-  if (stage === 'sent') return 'Sent mail'
+  if (stage === 'all-mail') return 'All mail'
+  if (stage === 'spam') return 'Spam'
+  if (stage === 'trash') return 'Trash'
   return 'Finishing up'
 }
 

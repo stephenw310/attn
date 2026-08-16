@@ -262,7 +262,7 @@ function initialize(): void {
       | { id: string }
       | undefined
     seedAccountId = existing?.id ?? loadSeed(db, seedPath)
-    console.log(`[sync] sent stage skipped for seeded account ${seedAccountId}`)
+    console.log(`[sync] backfill stages skipped for seeded account ${seedAccountId}`)
   }
   const activeDb = db
   syncController = new SyncController({

@@ -21,6 +21,21 @@ describe('GmailMailProvider.listThreadIds', () => {
       pageToken: 'next'
     })
   })
+
+  it('requests Spam/Trash inclusion only when asked', async () => {
+    const get = vi.fn(async () => ({ threads: [] }))
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+
+    await provider.listThreadIds({ labelIds: ['SPAM'], includeSpamTrash: true })
+    expect(get).toHaveBeenCalledWith('/threads', {
+      maxResults: '100',
+      labelIds: ['SPAM'],
+      includeSpamTrash: 'true'
+    })
+
+    await provider.listThreadIds({})
+    expect(get).toHaveBeenLastCalledWith('/threads', { maxResults: '100' })
+  })
 })
 
 describe('GmailMailProvider.saveDraft', () => {

@@ -10,7 +10,7 @@ import type { SnoozeScheduler } from './scheduler'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
-import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
+import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { sameSyncState } from './sync/state'
 
@@ -267,7 +267,7 @@ export class SyncController {
         }
       }
     })
-      .then((result) => {
+      .then(async (result) => {
         if (generation === this.generation) this.running = false
         if (generation !== this.generation) {
           if (this.context.isSignedIn()) void this.resumeOnlineWork()
@@ -283,6 +283,18 @@ export class SyncController {
         const retryRequested = this.backfillRetryGeneration === generation
         if (retryRequested) this.backfillRetryGeneration = null
         reconcileInboxMembership(this.context.db, accountId, result.inboxThreadIds)
+        await reconcilePurgeableMembership(this.context.db, accountId, provider, 'SPAM', result.spamThreadIds)
+        await reconcilePurgeableMembership(
+          this.context.db,
+          accountId,
+          provider,
+          'TRASH',
+          result.trashThreadIds
+        )
+        if (generation !== this.generation) {
+          if (this.context.isSignedIn()) void this.resumeOnlineWork()
+          return
+        }
         this.foregroundFailure = null
         this.setState({ phase: 'idle' })
         this.context.broadcastMailChanged()
@@ -461,6 +473,8 @@ export class SyncController {
       if (!result) throw failure
       if (generation !== this.generation) throw new Error('authentication session changed')
       reconcileInboxMembership(this.context.db, accountId, result.inboxThreadIds)
+      await reconcilePurgeableMembership(this.context.db, accountId, provider, 'SPAM', result.spamThreadIds)
+      await reconcilePurgeableMembership(this.context.db, accountId, provider, 'TRASH', result.trashThreadIds)
     } finally {
       if (generation === this.generation) this.running = false
       else if (this.context.isSignedIn()) void this.resumeOnlineWork()

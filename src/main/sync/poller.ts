@@ -83,24 +83,64 @@ export function missingInboxThreadIds(
   return [...new Set(localInboxThreadIds)].filter((threadId) => !server.has(threadId))
 }
 
-/** Server INBOX membership wins, with still-pending local intent replayed on top. */
+/** Server label membership wins, with still-pending local intent replayed on top. */
+export function reconcileLabelMembership(
+  db: Db,
+  accountId: string,
+  labelId: string,
+  serverThreadIds: Iterable<string>
+): string[] {
+  const rows = db
+    .prepare('SELECT thread_id FROM thread_labels WHERE account_id = ? AND label_id = ?')
+    .all(accountId, labelId) as { thread_id: string }[]
+  const missing = missingInboxThreadIds(
+    rows.map((row) => row.thread_id),
+    serverThreadIds
+  )
+  for (const threadId of missing) {
+    applyThreadDelta(db, accountId, { threadId, add: [], remove: [labelId] })
+    replayPendingThreadDeltas(db, accountId, threadId)
+  }
+  return missing
+}
+
 export function reconcileInboxMembership(
   db: Db,
   accountId: string,
   serverInboxThreadIds: Iterable<string>
 ): string[] {
-  const rows = db
-    .prepare("SELECT thread_id FROM thread_labels WHERE account_id = ? AND label_id = 'INBOX'")
-    .all(accountId) as { thread_id: string }[]
-  const missing = missingInboxThreadIds(
-    rows.map((row) => row.thread_id),
-    serverInboxThreadIds
-  )
-  for (const threadId of missing) {
-    applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
-    replayPendingThreadDeltas(db, accountId, threadId)
+  return reconcileLabelMembership(db, accountId, 'INBOX', serverInboxThreadIds)
+}
+
+/**
+ * Spam and Trash age out server-side (~30-day purge), so a locally-labeled
+ * thread missing from their listing was either relabeled — a refetch persists
+ * the authoritative label set — or permanently deleted, which only a direct
+ * 404 may prove. Never conclude deletion from listing absence alone: an
+ * archived thread legitimately appears in no system-label listing.
+ */
+export async function reconcilePurgeableMembership(
+  db: Db,
+  accountId: string,
+  provider: MailProvider,
+  labelId: 'SPAM' | 'TRASH',
+  serverThreadIds: Iterable<string>,
+  effects: HistoryCycleEffects = {}
+): Promise<void> {
+  for (const threadId of reconcileLabelMembership(db, accountId, labelId, serverThreadIds)) {
+    try {
+      const thread = await provider.getThread(threadId, { format: 'metadata' })
+      if (effects.persist) await effects.persist(thread)
+      else persistThread(db, accountId, thread, { metadataOnly: true })
+    } catch (error) {
+      if (error instanceof GmailApiError && error.status === 404) {
+        if (effects.remove) effects.remove(threadId)
+        else deleteThread(db, accountId, threadId)
+        continue
+      }
+      throw error
+    }
   }
-  return missing
 }
 
 export interface HistoryCycleEffects {

@@ -187,6 +187,7 @@ export class GmailMailProvider implements MailProvider {
     if (options.q) params.q = options.q
     if (options.labelIds?.length) params.labelIds = [...options.labelIds]
     if (options.pageToken) params.pageToken = options.pageToken
+    if (options.includeSpamTrash) params.includeSpamTrash = 'true'
     const result = await this.client.get<{
       threads?: { id: string }[]
       nextPageToken?: string
