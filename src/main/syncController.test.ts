@@ -5,6 +5,7 @@ import type { Db } from './db'
 import { GmailApiError } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
+import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
 import type { BackfillCallbacks, BackfillResult } from './sync/backfill'
 import type { LifetimeSweepCallbacks, LifetimeSweepOptions, LifetimeSweepResult } from './sync/lifetimeSweep'
@@ -76,7 +77,12 @@ function flush(): Promise<void> {
 
 function harness(options: { backfillCursor?: string | null } = {}) {
   const session = { signedIn: true, seeded: false, accountId: 'user@example.com' as string | null }
-  const foregroundWork = { actionActive: false, draftActive: false, providerActive: false }
+  const foregroundWork = {
+    actionActive: false,
+    draftActive: false,
+    outboxActive: false,
+    providerActive: false
+  }
   const states: SyncState[] = []
   const backfills: Array<{ callbacks: BackfillCallbacks; result: Deferred<BackfillResult | null> }> = []
   const lifetimeSweeps: Array<{
@@ -86,6 +92,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
   }> = []
   const trigger = vi.fn(async () => {})
   const mirrorTrigger = vi.fn(async () => {})
+  const outboxTrigger = vi.fn(async () => {})
   const wakeThread = vi.fn()
   const broadcastMailChanged = vi.fn()
   const provider = { id: 'provider' } as unknown as GmailMailProvider
@@ -129,6 +136,8 @@ function harness(options: { backfillCursor?: string | null } = {}) {
         trigger: mirrorTrigger,
         isRunning: () => foregroundWork.draftActive
       }) as unknown as DraftMirrorExecutor,
+    getOutboxSender: () =>
+      ({ trigger: outboxTrigger, isRunning: () => foregroundWork.outboxActive }) as unknown as OutboxSender,
     getSnoozeScheduler: () => ({ wakeThread }) as unknown as SnoozeScheduler
   })
 
@@ -141,6 +150,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     lifetimeSweeps,
     trigger,
     mirrorTrigger,
+    outboxTrigger,
     broadcastMailChanged,
     provider
   }
@@ -381,7 +391,7 @@ describe('backfill to poller handoff', () => {
     expect(states.at(-1)).toEqual({ phase: 'idle' })
   })
 
-  it('makes the sweep yield while actions, hydration, or history polling have foreground priority', () => {
+  it('makes the sweep yield while mail actions, sends, hydration, or history polling have priority', () => {
     const { controller, foregroundWork, lifetimeSweeps } = harness({ backfillCursor: 'done' })
     controller.retry()
     const shouldYield = lifetimeSweeps[0].options.shouldYield
@@ -394,6 +404,10 @@ describe('backfill to poller handoff', () => {
     foregroundWork.draftActive = true
     expect(shouldYield?.()).toBe(true)
     foregroundWork.draftActive = false
+
+    foregroundWork.outboxActive = true
+    expect(shouldYield?.()).toBe(true)
+    foregroundWork.outboxActive = false
 
     foregroundWork.providerActive = true
     expect(shouldYield?.()).toBe(true)

@@ -5,6 +5,7 @@ import { GmailApiError } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import { syncRemoteDrafts } from './outbox/draftSync'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
+import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
@@ -29,6 +30,7 @@ interface SyncControllerContext {
   broadcastMailChanged: () => void
   getActionExecutor: () => ActionExecutor | null
   getDraftMirrorExecutor: () => DraftMirrorExecutor | null
+  getOutboxSender: () => OutboxSender | null
   getSnoozeScheduler: () => SnoozeScheduler | null
 }
 
@@ -115,6 +117,7 @@ export class SyncController {
     }
     void this.context.getActionExecutor()?.trigger()
     void this.context.getDraftMirrorExecutor()?.trigger()
+    void this.context.getOutboxSender()?.trigger()
   }
 
   async resumeOnlineWork(): Promise<void> {
@@ -124,14 +127,16 @@ export class SyncController {
     if (this.context.isSignedIn()) this.startSync()
     await Promise.all([
       this.context.getActionExecutor()?.trigger(),
-      this.context.getDraftMirrorExecutor()?.trigger()
+      this.context.getDraftMirrorExecutor()?.trigger(),
+      this.context.getOutboxSender()?.trigger()
     ])
     if (this.stopped) return
     // A sign-out/account switch can make an active drain finish early. A second
     // pass picks up the newly active account.
     await Promise.all([
       this.context.getActionExecutor()?.trigger(),
-      this.context.getDraftMirrorExecutor()?.trigger()
+      this.context.getDraftMirrorExecutor()?.trigger(),
+      this.context.getOutboxSender()?.trigger()
     ])
   }
 
@@ -337,6 +342,7 @@ export class SyncController {
       kickExecutor: () => {
         void this.context.getActionExecutor()?.trigger()
         void this.context.getDraftMirrorExecutor()?.trigger()
+        void this.context.getOutboxSender()?.trigger()
       }
     })
     this.poller.start()
@@ -413,7 +419,9 @@ export class SyncController {
   private shouldYieldLifetime(accountId: string): boolean {
     if (this.running || this.pollerRunning || this.context.hasForegroundProviderWork(accountId)) return true
     return Boolean(
-      this.context.getActionExecutor()?.isRunning() || this.context.getDraftMirrorExecutor()?.isRunning()
+      this.context.getActionExecutor()?.isRunning() ||
+        this.context.getDraftMirrorExecutor()?.isRunning() ||
+        this.context.getOutboxSender()?.isRunning()
     )
   }
 

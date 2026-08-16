@@ -74,7 +74,22 @@
 }
 
 .app-confirmation-toast {
-  animation: confirmation-toast 4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: confirmation-toast var(--toast-duration, 4s) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes toast-countdown {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.app-toast-countdown {
+  transform-origin: left;
+  animation: toast-countdown var(--toast-duration, 4s) linear both;
 }
 
 @keyframes thread-exit {

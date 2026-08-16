@@ -255,10 +255,10 @@ them too.
   ~250 units/user/sec so interactive calls never queue behind it, and set the duty-cycle constants from the
   real-mailbox measurement below, not guesses.
   The implemented conservative starting posture is one request at a time, a 100 ms inter-request floor
-  (~100 units/sec for metadata gets), and a one-second page-boundary pause. Pending user actions, draft
-  mirrors, body/attachment hydration, and active history cycles make the sweep yield in 250 ms slices. The
-  real-mailbox run may tune
-  these constants before sign-off; it must preserve that priority ordering.
+  (~100 units/sec for metadata gets), and a one-second page-boundary pause. Active user-action replays,
+  draft mirrors, outbox sends, body/attachment hydration, and history cycles make the sweep yield in 250 ms
+  slices. The real-mailbox run may tune these constants before sign-off; it must preserve that priority
+  ordering.
 - **Contacts derive from the same stream** through the existing `contact_messages`/`contacts` projection,
   idempotent with T13's bootstrap contributions. Two hygiene rules land here: messages labeled `SPAM` or
   `TRASH` never contribute contact rows (the poller already trickles spam threads in; a deliberate sweep
@@ -277,12 +277,13 @@ them too.
   additional consent scope, separate opt-in task if ever approved — never silently bundled.
 - **Schema:** add `sweep_cursor`, `sweep_threads_done`, and `sweep_threads_total` to `sync_state`, plus
   `threads.is_inbox_visible` so lifetime-only old Inbox rows retain truthful Gmail labels without entering
-  M2's bounded Inbox surface; bump `CURRENT_SCHEMA_VERSION`. Local dogfood upgrade DDL (AGENTS.md procedure):
+  M2's bounded Inbox surface; bump the T16 revision-13 snapshot to revision 14. Local dogfood upgrade DDL
+  from revision 13 (AGENTS.md procedure):
   `ALTER TABLE sync_state ADD COLUMN sweep_cursor TEXT;`,
   `ALTER TABLE sync_state ADD COLUMN sweep_threads_done INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE sync_state ADD COLUMN sweep_threads_total INTEGER;`, and
-  `ALTER TABLE threads ADD COLUMN is_inbox_visible INTEGER NOT NULL DEFAULT 1;`, with `PRAGMA user_version`
-  bumped in the same transaction.
+  `ALTER TABLE threads ADD COLUMN is_inbox_visible INTEGER NOT NULL DEFAULT 1;`, with
+  `PRAGMA user_version = 14` in the same transaction.
 
 ### Testing and done condition
 
@@ -318,7 +319,7 @@ decision stays recorded.
   between formatting controls and wrapped global shortcut hints.
 - **The local `outbox` row is the draft's source of truth from the moment the composer opens** (state `composing`). T14 adds the draft fields to the current schema snapshot; T16 completes the same table and bumps the schema version again. Create the row on open, before any typing, so there is always something to recover into.
 - **Autosave needs a bounded checkpoint, not just an idle debounce** (review finding, P1). A trailing 1s-idle debounce does *not* bound loss to one second: every keystroke resets the timer, so someone typing continuously for three minutes has written nothing to disk, and a force-quit loses the whole draft — the exact scenario F6's crash-safety criterion is about. Pair the 1s idle trigger with a **hard max-wait (5s) while dirty**, so continuous typing still checkpoints on a fixed interval. Note the test trap the same finding names: a relaunch test that pauses before quitting silently passes, because the pause fires the idle save. The regression test must type *continuously* and relaunch with no idle gap.
-- **Gmail Drafts mirror is best-effort and asynchronous:** debounced (~3s idle) `drafts.create`/`drafts.update` through the provider, storing `gmail_draft_id`. A dedicated mirror executor derives durable work directly from `outbox.local_revision > mirror_revision`; it runs independently from `action_queue`, so mirror backoff can never block a user mail action. A Gmail-side 404 clears the stale id and recreates the remote draft. Normal app shutdown stops before starting another mirror row but waits for the active checkpoint to persist its returned Gmail id before SQLite closes. Discard immediately scrubs local content, retains only a `discarding` tombstone when a remote id exists, and retries `drafts.delete` until that remote copy is gone (404 is success).
+- **Gmail Drafts mirror is best-effort and asynchronous:** debounced (~3s idle) `drafts.create`/`drafts.update` through the provider, storing `gmail_draft_id`. A dedicated mirror executor derives durable work directly from `outbox.local_revision > mirror_revision`; it runs independently from `action_queue`, so mirror backoff can never block a user mail action. A Gmail-side 404 clears the stale id and recreates the remote draft. Mirror mutations are single-attempt and abortable: normal shutdown stops before another row, gives the active checkpoint five seconds to persist any returned Gmail id, then cancels its request while SQLite is still open. Discard immediately scrubs local content, retains only a `discarding` tombstone when a remote id exists, and retries `drafts.delete` until that remote copy is gone (404 is success).
 - **Editor: Lexical** (owner decision, 2026-08-13 — `npm i lexical @lexical/react @lexical/rich-text @lexical/list @lexical/link @lexical/html`). Rejected alternative: raw `contenteditable` + `document.execCommand`. The deciding argument is **M4, not M2** — F8 snippets must expand as a *single* undoable step with `{cursor}` placement, and F17 streams an AI draft into a live editable box. Both are programmatic edits that need correct undo grouping and selection preservation, which a document model provides and `execCommand` (also deprecated) does not. Paste normalization from other mail clients is the second reason. The usual headline reason — cross-browser normalization — is explicitly *not* why we're adopting it: Electron pins one Chromium (D3).
   - **Constrain the schema to F6's surface and nothing more:** bold/italic/underline, ordered/unordered lists, links, blockquote. A narrow schema is the point — it makes output predictable and rejects pasted junk by construction. Do not enable tables, images, code blocks, or collaborative extensions "because they're available".
   - **Serialization:** `@lexical/html` `$generateHtmlFromNodes` on autosave and on send, then **still** through DOMPurify with the minimal allowlist (`p/div/br/b/strong/i/em/u/a[href]/ul/ol/li/blockquote`). The schema makes the sanitizer's job easy; it does not replace it (global rule 3 — outgoing content is untrusted too).
@@ -658,34 +659,59 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
   - **Always send through a Gmail draft.** At send time, if the row has no `gmail_draft_id`, `drafts.create` first (with our Message-ID in the MIME), persist the id, then `drafts.update` + `drafts.send`. The draft id is a *strong, immediately-consistent* handle — no search index involved — and `drafts.send` atomically consumes the draft, so its disappearance is a real signal rather than an inference.
   - **Recovery when a `sending` row is found after a crash or ambiguous error:** `drafts.get(gmail_draft_id)` — **present ⇒ the send did not complete, resend is safe**; **404 ⇒ it did, mark `sent`**. This is the common path and it is decisive.
   - **The residual ambiguity is narrow:** a crash between `drafts.create` and persisting its id. There the Message-ID search is a *secondary* check, run with a bounded verification window (re-check over ~60s rather than trusting one negative), and it searches drafts as well as messages, since an orphaned draft carries the same Message-ID.
-  - **When still unresolved, do not send.** A message that failed to send is recoverable by the user; a duplicate is not, and F6 makes "no duplicate send" the acceptance criterion. Park the row in a `needs-review` state and reopen the composer with a plain explanation ("We couldn't confirm this was sent — check your Sent mail before resending"). Silent dropping is not acceptable either; the user must be told.
+  - **When still unresolved, do not send.** A message that failed to send is recoverable by the user; a duplicate is not, and F6 makes "no duplicate send" the acceptance criterion. Park the row in a `needs-review` state, show a plain explanation ("We couldn't confirm this was sent — check your Sent mail before resending"), and keep the complete message actionable in Outbox without interrupting the user's current task.
   - Keep the client Message-ID regardless — it is what makes both the secondary search and any manual reconciliation possible.
 - **Undo window:** queueing sets `send_at = now + delay` (setting stored via the M1 `settings` table: `undoSendDelaySeconds`, **default 8**; the settings *UI* is M4 — a palette-less default is fine for M2 dogfood). The **scheduler owns the timer** (§6): extend the M1 scheduler pattern with an `OutboxSender` armed on the next due `queued` row; catch-up on boot sends anything whose window elapsed while the app was closed. **Undo (`Z`) rides the existing main-process undo stack:** queueing a send pushes an entry whose inverse flips the row back to `composing`, cancels the timer, and tells the renderer to reopen the composer. Popping it after the send fired reports "Already sent" (no inverse) — deliberately still consuming the stack entry so `Z Z` doesn't skip backwards silently.
 - **Queue validation:** call T15's `validateMimeRecipients` before persisting a queued row. Invalid or missing recipients leave the draft in the composer with an inline error; they must never become a row that can only fail later inside `buildMime`. The builder repeats validation as its final serialization boundary and converts internationalized domains to ASCII IDNs.
 - **Send execution** (the only `send` chokepoint, global rule 9): always the draft path — `drafts.create` if no `gmail_draft_id` yet (persist it *before* sending), then `drafts.update` (raw MIME) and `drafts.send`, which replaces the draft atomically and leaves no husk in Drafts. `messages.send` is deliberately **not** used: it would forfeit the draft-id handle that makes recovery decisive. Calls set `threadId` when replying; attachment payloads use `uploadType=multipart`. A 404 on `drafts.send` means the draft is already consumed — treat as sent, never as a reason to blind-resend.
 - **After confirmed send:** refetch the returned `threadId` through the provider → `persistThread` → `mail:changed`, so the sent message appears in the local thread within a second (and Sent-view data accrues for M3). Reply-sends leave the inbox untouched; F4 auto-advance is not coupled to sending in v1.
-- **Offline and discovery:** rows sit in `queued` past their window while no provider exists; the top-bar pending readout includes `queued`/`sending` outbox rows and is clickable. It and a registered **Go to Outbox** command open an on-demand local view of `queued`, `sending`, `failed`, and `needs-review` items—no permanent sidebar. Actionable rows reopen in the composer with all local content intact. Toast on queue: **"Sent — Undo (Z)"** with the toast persisting for the window's duration rather than the standard 4s.
-- **Failures:** permanent 4xx (bad recipient, size) → `failed` + toast + composer reopens with the error banner and content intact. Retryable errors follow the executor's backoff ladder with the verification-first rule above.
+- **Retry accounting:** `attempts` drives transport backoff; `verify_attempts` counts only successful negative secondary searches. A quota/offline retry can therefore never consume the bounded ~60-second verification window. Intermediate negative checks keep `last_error` clear until the row actually enters `needs-review`.
+- **Shutdown:** outbox mutations are single-attempt requests owned by the durable scheduler, not the Gmail client's long transient retry ladder. Shutdown gives the active request five seconds to quiesce, then aborts it while SQLite is still open so recovery state is persisted before teardown.
+- **Retention:** confirmed sent rows retain their audit/recovery data for seven days, then are pruned on startup or the next confirmed send. Attachment spool bytes are removed immediately on confirmation.
+- **Offline and discovery:** rows sit in `queued` past their window while no provider exists; the top-bar pending readout includes `queued`/`sending` outbox rows and is clickable. It and a registered **Go to Outbox** command open an on-demand local view of `queued`, `sending`, `failed`, and `needs-review` items—no permanent sidebar. Actionable rows reopen in the composer with all local content intact. Toast on queue: **"Sent — Undo (Z)"** with the toast and its progress-bar countdown both bound to the durable `send_at` deadline rather than the standard 4s.
+- **Failures:** permanent 4xx (bad recipient, size) → `failed` + toast; the complete message remains actionable in Outbox and reopens with its error banner when selected. Retryable errors follow the executor's backoff ladder with the verification-first rule above.
 
 ### Implementation guide
 
-**Schema evolution from the T14A–T14D revision-10 snapshot** (update the current snapshot and bump to revision 11):
+**Schema evolution from the shipped T14A–T14D revision-11 snapshot** (update the current snapshot and bump
+to revision 13):
 
 ```sql
 ALTER TABLE outbox ADD COLUMN rfc_message_id TEXT;
 ALTER TABLE outbox ADD COLUMN send_at INTEGER;
 ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE outbox ADD COLUMN verify_attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE outbox ADD COLUMN last_error TEXT;
 CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
 ```
 
-T16 owns the final revision-11 names and exact DDL if implementation discoveries change this list. The PR
-must update this block before merge, then use the `AGENTS.md` manual procedure for any preserved dogfood
-profile: all `ALTER` statements, index creation, and `PRAGMA user_version = 11` happen in one transaction.
+These are the final revision-13 names and exact additive local-development DDL. For a preserved revision-11 dogfood
+profile, apply every statement plus the version stamp in one transaction under the `AGENTS.md` procedure:
 
-- **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` (thin, e2e-covered).
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE outbox ADD COLUMN rfc_message_id TEXT;
+ALTER TABLE outbox ADD COLUMN send_at INTEGER;
+ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE outbox ADD COLUMN verify_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE outbox ADD COLUMN last_error TEXT;
+CREATE INDEX idx_outbox_due ON outbox (account_id, state, send_at);
+PRAGMA user_version = 13;
+COMMIT;
+```
+
+For a local profile created from the draft T16 revision-12 branch, the exact additive upgrade is:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE outbox ADD COLUMN verify_attempts INTEGER NOT NULL DEFAULT 0;
+PRAGMA user_version = 13;
+COMMIT;
+```
+
+- **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` and are unit-tested against a fake durable store, fake provider, and injected clock.
 - Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.
-- IPC: `outbox:send(draftId)`, `outbox:undoSend(outboxId)` (also reachable via the undo stack), `outbox:listPending()` for the local Outbox page, and broadcast `outbox:changed` for composer/toast/readout state.
+- IPC: `outbox:send(draftId)`, `outbox:undoSend(outboxId)` (also reachable via the undo stack), `outbox:listPending()` for the local Outbox page, and broadcast `outbox:changed` consumed by the renderer for refreshes and failure toasts.
 - Reply entry points: `r`/`a`/`f` commands (reader context) call `planReply` and open the composer prefilled; register in the registry (§5 keys).
 - Discovery surface: clicking the pending readout or invoking **Go to Outbox** replaces the current list/reader with the pending-state view; selecting an actionable row reopens the full-window composer. Preserve and restore the prior mailbox context like every other full-window task.
 
@@ -693,7 +719,7 @@ profile: all `ALTER` statements, index creation, and `PRAGMA user_version = 11` 
 
 - **Unit (the heart of the task):** machine transition matrix including every crash point (kill before/after `sending` write, kill after network-ambiguous error, **kill between `drafts.create` and persisting its id** — the one genuinely ambiguous window), draft-present-⇒-resend and draft-404-⇒-sent recovery, the bounded secondary search never resending on a single negative, `needs-review` parking, window catch-up on boot, and undo-after-fire — all against a fake provider + injected clock. This is the M1 "sync-engine correctness" bar applied to send.
 - **E2e (seeded, no network):** `Mod+Enter` queues + toast with undo; `z` inside the window reopens the composer intact; window elapse moves the row to the provider-gate (visible as pending); clicking pending and the palette route each open Outbox with correct state membership; an actionable row reopens intact; relaunch with a queued row preserves it (durability); reply prefill shows quoted history collapsed and correct recipients from the fixture's Reply-To thread.
-- **Manual smoke (signed in, documented in the PR):** real send → lands threaded in Gmail web and leaves **no leftover draft**; undo inside window → nothing sent, composer restored; force-quit during the window → sends on relaunch; force-kill mid-send → exactly one copy in Sent after relaunch (run it several times, since this is the criterion the whole design exists for); reply threading renders correctly in Gmail + one external client.
+- **Manual smoke (signed in, documented in the PR):** real send → lands threaded in Gmail web, leaves **no leftover draft**, and its raw source preserves Attn's supplied Message-ID; undo inside window → nothing sent, composer restored; force-quit during the window → sends on relaunch; force-kill mid-send → exactly one copy in Sent after relaunch (run it several times, since this is the criterion the whole design exists for); reply threading renders correctly in Gmail + one external client.
 
 ### Done when
 

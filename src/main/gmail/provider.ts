@@ -7,6 +7,9 @@ import type {
   ProviderDraft,
   ProviderLabel,
   ProviderProfile,
+  ProviderRequestOptions,
+  ProviderSendResult,
+  RfcMessageMatch,
   ThreadIdPage
 } from '../sync/provider'
 import { GmailApiError, type GmailClient } from './client'
@@ -42,23 +45,54 @@ export class GmailMailProvider implements MailProvider {
     await this.client.post(`/threads/${encodeURIComponent(threadId)}/untrash`, {})
   }
 
-  async saveDraft(draft: { id: string | null; raw: string; threadId?: string | null }): Promise<string> {
+  async saveDraft(
+    draft: { id: string | null; raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string> {
     const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
+    const requestOptions = { retryTransient: false, signal: options?.signal }
     const result = draft.id
-      ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body)
-      : await this.client.post<{ id: string }>('/drafts', body)
+      ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, requestOptions)
+      : await this.client.post<{ id: string }>('/drafts', body, requestOptions)
     return result.id
   }
 
-  async deleteDraft(id: string): Promise<void> {
-    await this.client.delete(`/drafts/${encodeURIComponent(id)}`)
+  async createDraft(
+    draft: { raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string> {
+    const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
+    const result = await this.client.post<{ id: string }>('/drafts', body, {
+      retryTransient: false,
+      signal: options?.signal
+    })
+    return result.id
   }
 
-  async listDrafts(pageToken?: string): Promise<DraftPage> {
+  async updateDraft(
+    draft: { id: string; raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string> {
+    const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
+    const result = await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, {
+      retryTransient: false,
+      signal: options?.signal
+    })
+    return result.id
+  }
+
+  async deleteDraft(id: string, options?: ProviderRequestOptions): Promise<void> {
+    await this.client.delete(`/drafts/${encodeURIComponent(id)}`, {
+      retryTransient: false,
+      signal: options?.signal
+    })
+  }
+
+  async listDrafts(pageToken?: string, options?: ProviderRequestOptions): Promise<DraftPage> {
     const result = await this.client.get<{
       drafts?: { id: string; message?: { id?: string; threadId?: string } }[]
       nextPageToken?: string
-    }>('/drafts', { maxResults: '100', ...(pageToken ? { pageToken } : {}) })
+    }>('/drafts', { maxResults: '100', ...(pageToken ? { pageToken } : {}) }, options)
     return {
       drafts: (result.drafts ?? []).map((draft) => ({
         id: draft.id,
@@ -69,8 +103,74 @@ export class GmailMailProvider implements MailProvider {
     }
   }
 
-  getDraft(id: string): Promise<ProviderDraft> {
-    return this.client.get<ProviderDraft>(`/drafts/${encodeURIComponent(id)}`, { format: 'full' })
+  getDraft(id: string, options?: ProviderRequestOptions): Promise<ProviderDraft> {
+    return this.client.get<ProviderDraft>(`/drafts/${encodeURIComponent(id)}`, { format: 'full' }, options)
+  }
+
+  sendDraft(id: string, options?: ProviderRequestOptions): Promise<ProviderSendResult> {
+    return this.client.post<ProviderSendResult>(
+      '/drafts/send',
+      { id },
+      {
+        retryTransient: false,
+        signal: options?.signal
+      }
+    )
+  }
+
+  async findByRfcId(rfcMessageId: string, options?: ProviderRequestOptions): Promise<RfcMessageMatch | null> {
+    const messageId = rfcMessageId.trim().replace(/[\r\n]/g, '')
+    if (!messageId) return null
+    const query = `rfc822msgid:${messageId}`
+    const drafts = await this.client.get<{
+      messages?: { id: string; threadId?: string }[]
+    }>('/messages', { q: `in:drafts ${query}`, maxResults: '10', includeSpamTrash: 'true' }, options)
+    const messages = await this.client.get<{
+      messages?: { id: string; threadId?: string }[]
+    }>('/messages', { q: query, maxResults: '10', includeSpamTrash: 'true' }, options)
+    const candidates = new Map(
+      [...(drafts.messages ?? []), ...(messages.messages ?? [])].map((message) => [message.id, message])
+    )
+    if (candidates.size > 0) {
+      let pageToken: string | undefined
+      do {
+        const page = await this.listDrafts(pageToken, options)
+        for (const draft of page.drafts) {
+          const message = draft.messageId ? candidates.get(draft.messageId) : undefined
+          if (message) {
+            return {
+              kind: 'draft',
+              draftId: draft.id,
+              messageId: message.id,
+              ...(message.threadId ? { threadId: message.threadId } : {})
+            }
+          }
+        }
+        pageToken = page.nextPageToken
+      } while (pageToken)
+    }
+
+    for (const candidate of messages.messages ?? []) {
+      try {
+        const message = await this.client.get<{
+          id: string
+          threadId?: string
+          labelIds?: string[]
+        }>(`/messages/${encodeURIComponent(candidate.id)}`, { format: 'minimal' }, options)
+        const labels = new Set(message.labelIds ?? [])
+        if (!labels.has('SENT') || labels.has('DRAFT')) continue
+        return {
+          kind: 'message',
+          messageId: message.id,
+          ...((message.threadId ?? candidate.threadId)
+            ? { threadId: message.threadId ?? candidate.threadId }
+            : {})
+        }
+      } catch (error) {
+        if (!(error instanceof GmailApiError) || error.status !== 404) throw error
+      }
+    }
+    return null
   }
 
   getProfile(): Promise<ProviderProfile> {
@@ -101,17 +201,27 @@ export class GmailMailProvider implements MailProvider {
 
   getThread(id: string, options: GetThreadOptions = {}): Promise<GmailThread> {
     const format = options.format ?? 'full'
-    return this.client.get<GmailThread>(`/threads/${encodeURIComponent(id)}`, {
-      format,
-      ...(format === 'metadata' ? { metadataHeaders: METADATA_HEADERS } : {})
-    })
+    return this.client.get<GmailThread>(
+      `/threads/${encodeURIComponent(id)}`,
+      {
+        format,
+        ...(format === 'metadata' ? { metadataHeaders: METADATA_HEADERS } : {})
+      },
+      { signal: options.signal }
+    )
   }
 
-  async getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined> {
+  async getAttachmentData(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined> {
     try {
       return (
         await this.client.get<{ data?: string }>(
-          `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
+          `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+          undefined,
+          { signal: options?.signal }
         )
       ).data
     } catch (error) {

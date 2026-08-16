@@ -124,7 +124,7 @@ describe('draft synchronization identity', () => {
       prepare: vi.fn((sql: string) => ({
         all: vi.fn(() =>
           sql.includes('gmail_message_id')
-            ? [{ gmail_draft_id: 'draft-1', gmail_message_id: 'message-1' }]
+            ? [{ gmail_draft_id: 'draft-1', gmail_message_id: 'message-1', state: 'drafted' }]
             : [
                 {
                   id: 'local-1',
@@ -140,6 +140,44 @@ describe('draft synchronization identity', () => {
 
     await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
     expect(getDraft).not.toHaveBeenCalled()
+  })
+
+  it('does not re-import a Gmail draft already owned by a queued send', async () => {
+    const getDraft = vi.fn()
+    const provider = {
+      listDrafts: vi.fn(async () => ({ drafts: [{ id: 'draft-1', messageId: 'new-message-id' }] })),
+      getDraft
+    }
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        all: vi.fn(() =>
+          sql.includes('gmail_message_id')
+            ? [{ gmail_draft_id: 'draft-1', gmail_message_id: 'old-message-id', state: 'queued' }]
+            : []
+        )
+      }))
+    } as unknown as Db
+
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    expect(getDraft).not.toHaveBeenCalled()
+  })
+
+  it('binds an orphaned remote draft to its sending row by stable Message-ID', async () => {
+    const run = vi.fn(() => ({ changes: 1 }))
+    const db = { prepare: vi.fn(() => ({ run })) } as unknown as Db
+    const remote = providerDraft('Orphan', { mimeType: 'text/plain' })
+    if (!remote.message.payload) throw new Error('missing test payload')
+    remote.message.payload.headers?.push({ name: 'Message-ID', value: '<stable@attn.local>' })
+
+    await expect(reconcileRemoteDraft(db, 'account', remote)).resolves.toBe('local')
+    expect(run).toHaveBeenCalledWith(
+      'draft-1',
+      'message-1',
+      'account',
+      'draft-1',
+      '<stable@attn.local>',
+      '<stable@attn.local>'
+    )
   })
 
   it('refreshes remote attachment locators when Gmail replaces the draft message', async () => {
@@ -200,6 +238,9 @@ describe('draft synchronization identity', () => {
               attachments_json: JSON.stringify([previous])
             }))
           }
+        }
+        if (sql.includes("state NOT IN ('composing', 'drafted')")) {
+          return { run: vi.fn(() => ({ changes: 0 })) }
         }
         if (sql.includes('UPDATE outbox SET gmail_draft_id')) return { run: update }
         throw new Error(`unexpected SQL: ${sql}`)

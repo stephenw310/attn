@@ -230,14 +230,20 @@ describe('lifetime header indexing', () => {
     await runLifetimeSweep(
       fakeDb(state),
       provider({
-        getProfile: vi.fn(async () => ({
-          emailAddress: 'test@example.com',
-          historyId: '101',
-          threadsTotal: 10
-        })),
+        getProfile: vi.fn(async () => {
+          now = 100
+          return {
+            emailAddress: 'test@example.com',
+            historyId: '101',
+            threadsTotal: 10
+          }
+        }),
         listThreadIds: vi
           .fn()
-          .mockResolvedValueOnce({ threadIds: ['old'], nextPageToken: 'page-2', resultSizeEstimate: 10 })
+          .mockImplementationOnce(async () => {
+            now = 200
+            return { threadIds: ['old'], nextPageToken: 'page-2', resultSizeEstimate: 10 }
+          })
           .mockResolvedValueOnce({ threadIds: [] }),
         getThread: vi.fn(async () => {
           now = 1_000
@@ -285,6 +291,34 @@ describe('lifetime header indexing', () => {
     )
     expect(state.cursor).toBe('done')
     expect(state.done).toBe(500)
+  })
+
+  it('does not use the account-wide profile total for an unfiltered listing estimate', async () => {
+    const events = callbacks()
+
+    await runLifetimeSweep(
+      fakeDb({ cursor: 'lifetime', threadIds: new Set<string>() }),
+      provider({
+        getProfile: vi.fn(async () => ({
+          emailAddress: 'test@example.com',
+          historyId: '101',
+          threadsTotal: 50_000
+        })),
+        listThreadIds: vi
+          .fn()
+          .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-2' })
+          .mockResolvedValueOnce({ threadIds: [] })
+      }),
+      'test@example.com',
+      events,
+      { requestIntervalMs: 0, pagePauseMs: 0 }
+    )
+
+    expect(events.onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ threadsDone: 0, reason: 'quota-wait' })
+    )
+    const waiting = events.onProgress.mock.calls.find(([event]) => event.reason === 'quota-wait')?.[0]
+    expect(waiting).not.toHaveProperty('threadsTotal')
   })
 
   it('does not report a mail change when persistence skips a legacy-only thread', async () => {

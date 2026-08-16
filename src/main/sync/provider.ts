@@ -35,6 +35,15 @@ export interface ProviderDraft {
   message: GmailMessage
 }
 
+export interface ProviderSendResult {
+  id: string
+  threadId: string
+}
+
+export type RfcMessageMatch =
+  | { kind: 'draft'; draftId: string; messageId: string; threadId?: string }
+  | { kind: 'message'; messageId: string; threadId?: string }
+
 export interface ListThreadIdsOptions {
   q?: string
   labelIds?: readonly string[]
@@ -63,6 +72,11 @@ export interface HistoryPage {
 
 export interface GetThreadOptions {
   format?: 'full' | 'metadata'
+  signal?: AbortSignal
+}
+
+export interface ProviderRequestOptions {
+  signal?: AbortSignal
 }
 
 export interface MailActionProvider {
@@ -70,9 +84,25 @@ export interface MailActionProvider {
   trashThread(threadId: string): Promise<void>
   untrashThread(threadId: string): Promise<void>
   /** Optional for test providers predating M2; production providers implement it. */
-  saveDraft?(draft: { id: string | null; raw: string; threadId?: string | null }): Promise<string>
-  deleteDraft?(id: string): Promise<void>
-  getAttachmentData?(messageId: string, attachmentId: string): Promise<string | undefined>
+  saveDraft?(
+    draft: { id: string | null; raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string>
+  /** A single, non-retried remote create for the exactly-once outbox protocol. */
+  createDraft?(
+    draft: { raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string>
+  updateDraft?(
+    draft: { id: string; raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string>
+  deleteDraft?(id: string, options?: ProviderRequestOptions): Promise<void>
+  getAttachmentData?(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined>
 }
 
 export interface MailProvider extends MailActionProvider {
@@ -80,8 +110,15 @@ export interface MailProvider extends MailActionProvider {
   listLabels(): Promise<ProviderLabel[]>
   listThreadIds(options?: ListThreadIdsOptions): Promise<ThreadIdPage>
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
-  getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined>
+  getAttachmentData(
+    messageId: string,
+    attachmentId: string,
+    options?: ProviderRequestOptions
+  ): Promise<string | undefined>
   listHistory(startHistoryId: string, pageToken?: string): Promise<HistoryPage>
-  listDrafts(pageToken?: string): Promise<DraftPage>
-  getDraft(id: string): Promise<ProviderDraft>
+  listDrafts(pageToken?: string, options?: ProviderRequestOptions): Promise<DraftPage>
+  getDraft(id: string, options?: ProviderRequestOptions): Promise<ProviderDraft>
+  /** Optional only for narrow test providers; production Gmail implements both. */
+  sendDraft?(id: string, options?: ProviderRequestOptions): Promise<ProviderSendResult>
+  findByRfcId?(rfcMessageId: string, options?: ProviderRequestOptions): Promise<RfcMessageMatch | null>
 }

@@ -162,9 +162,8 @@ export async function runLifetimeSweep(
     }
 
     if (!(await waitForRequestSlot())) return null
-    const profile = await provider.getProfile()
+    const profile = await activeRequest(() => provider.getProfile())
     if (!shouldContinue()) return null
-    const profileThreadsTotal = profile.threadsTotal
     messagesTotal = profile.messagesTotal
     progress('running')
 
@@ -191,7 +190,9 @@ export async function runLifetimeSweep(
         continue
       }
       if (!shouldContinue()) return null
-      threadsTotal ??= page.resultSizeEstimate ?? profileThreadsTotal
+      // The profile total includes Spam and Trash, which this listing excludes.
+      // Keep progress indeterminate when Gmail omits the listing-scoped estimate.
+      threadsTotal ??= page.resultSizeEstimate
 
       let mailChanged = false
       for (const threadId of page.threadIds) {
