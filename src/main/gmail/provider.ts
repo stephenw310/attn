@@ -1,8 +1,10 @@
 import type {
+  DraftPage,
   GetThreadOptions,
   HistoryPage,
   ListThreadIdsOptions,
   MailProvider,
+  ProviderDraft,
   ProviderLabel,
   ProviderProfile,
   ThreadIdPage
@@ -40,8 +42,8 @@ export class GmailMailProvider implements MailProvider {
     await this.client.post(`/threads/${encodeURIComponent(threadId)}/untrash`, {})
   }
 
-  async saveDraft(draft: { id: string | null; raw: string }): Promise<string> {
-    const body = { message: { raw: draft.raw } }
+  async saveDraft(draft: { id: string | null; raw: string; threadId?: string | null }): Promise<string> {
+    const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
     const result = draft.id
       ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body)
       : await this.client.post<{ id: string }>('/drafts', body)
@@ -50,6 +52,25 @@ export class GmailMailProvider implements MailProvider {
 
   async deleteDraft(id: string): Promise<void> {
     await this.client.delete(`/drafts/${encodeURIComponent(id)}`)
+  }
+
+  async listDrafts(pageToken?: string): Promise<DraftPage> {
+    const result = await this.client.get<{
+      drafts?: { id: string; message?: { id?: string; threadId?: string } }[]
+      nextPageToken?: string
+    }>('/drafts', { maxResults: '100', ...(pageToken ? { pageToken } : {}) })
+    return {
+      drafts: (result.drafts ?? []).map((draft) => ({
+        id: draft.id,
+        messageId: draft.message?.id,
+        threadId: draft.message?.threadId
+      })),
+      nextPageToken: result.nextPageToken
+    }
+  }
+
+  getDraft(id: string): Promise<ProviderDraft> {
+    return this.client.get<ProviderDraft>(`/drafts/${encodeURIComponent(id)}`, { format: 'full' })
   }
 
   getProfile(): Promise<ProviderProfile> {

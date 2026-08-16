@@ -6,12 +6,184 @@ import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
+test.setTimeout(60_000)
 
 function selectedIndex(page: Page): Promise<number> {
   return page
     .getByTestId('thread-row')
     .evaluateAll((rows) => rows.findIndex((row) => row.hasAttribute('data-selected')))
 }
+
+async function goToDrafts(page: Page): Promise<void> {
+  const draftList = page.getByTestId('draft-list')
+  const threadList = page.getByTestId('thread-list')
+  if (await draftList.isVisible()) return
+  await expect(draftList.or(threadList)).toBeVisible()
+  if (await draftList.isVisible()) return
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.keyboard.press('g')
+  await page.keyboard.press('d')
+  await draftList.waitFor()
+}
+
+async function pasteVisiblePng(composer: ComposerPage): Promise<void> {
+  await composer.editor.evaluate(async (editor) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 180
+    canvas.height = 72
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('canvas unavailable')
+    context.fillStyle = '#ffb020'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#15171b'
+    context.font = 'bold 18px sans-serif'
+    context.fillText('Inline image', 30, 42)
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (value) => (value ? resolve(value) : reject(new Error('PNG encoding failed'))),
+        'image/png'
+      )
+    )
+    const file = new File([blob], 'inline-image.png', { type: 'image/png' })
+    const clipboard = new DataTransfer()
+    clipboard.items.add(file)
+    editor.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard })
+    )
+  })
+  await expect(composer.editor.locator('img')).toHaveCount(1)
+}
+
+async function pasteHtml(composer: ComposerPage, html: string): Promise<void> {
+  await composer.editor.evaluate((editor, value) => {
+    const clipboard = new DataTransfer()
+    clipboard.setData('text/html', value)
+    editor.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard })
+    )
+  }, html)
+}
+
+function remoteDraft(
+  id: string,
+  subject: string,
+  html: string,
+  bcc = '',
+  inlineImage = false,
+  inlineImageBase64?: string
+): object {
+  const inlineImageData = inlineImageBase64
+    ? Buffer.from(inlineImageBase64, 'base64')
+    : Buffer.from([137, 80, 78, 71])
+  return {
+    id,
+    message: {
+      id: `message-${id}-${subject}`,
+      threadId: `thread-${id}`,
+      labelIds: ['DRAFT'],
+      internalDate: String(Date.now() + 10_000),
+      payload: {
+        mimeType: 'multipart/alternative',
+        headers: [
+          { name: 'To', value: 'remote-to@example.com' },
+          ...(bcc ? [{ name: 'Bcc', value: bcc }] : []),
+          { name: 'Subject', value: subject }
+        ],
+        parts: [
+          { mimeType: 'text/plain', body: { data: Buffer.from(subject).toString('base64url') } },
+          { mimeType: 'text/html', body: { data: Buffer.from(html).toString('base64url') } },
+          ...(inlineImage
+            ? [
+                {
+                  partId: 'remote-inline',
+                  mimeType: 'image/png',
+                  filename: 'remote-inline.png',
+                  headers: [
+                    { name: 'Content-ID', value: '<remote-inline>' },
+                    { name: 'Content-Disposition', value: 'inline' }
+                  ],
+                  body: {
+                    data: inlineImageData.toString('base64url'),
+                    size: inlineImageData.byteLength
+                  }
+                }
+              ]
+            : [])
+        ]
+      }
+    }
+  }
+}
+
+function remoteReplyDraft(id: string, subject: string, html: string): object {
+  return {
+    id,
+    message: {
+      id: `message-${id}`,
+      threadId: 't-roadmap',
+      labelIds: ['DRAFT'],
+      internalDate: String(Date.now() + 10_000),
+      payload: {
+        mimeType: 'multipart/alternative',
+        headers: [
+          { name: 'To', value: 'maya+roadmap@example.com' },
+          { name: 'Subject', value: subject },
+          { name: 'In-Reply-To', value: '<roadmap-reply@example.com>' },
+          {
+            name: 'References',
+            value: '<roadmap-root@example.com> <roadmap-reply@example.com>'
+          }
+        ],
+        parts: [
+          { mimeType: 'text/plain', body: { data: Buffer.from(subject).toString('base64url') } },
+          { mimeType: 'text/html', body: { data: Buffer.from(html).toString('base64url') } }
+        ]
+      }
+    }
+  }
+}
+
+async function visiblePngBase64(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 180
+    canvas.height = 72
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('canvas unavailable')
+    context.fillStyle = '#ffb020'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#15171b'
+    context.font = 'bold 18px sans-serif'
+    context.fillText('Gmail image', 31, 42)
+    const dataUrl = canvas.toDataURL('image/png')
+    return dataUrl.slice(dataUrl.indexOf(',') + 1)
+  })
+}
+
+function remotePlainDraft(id: string, subject: string, text: string): object {
+  return {
+    id,
+    message: {
+      id: `message-${id}-${subject}`,
+      threadId: `thread-${id}`,
+      labelIds: ['DRAFT'],
+      internalDate: String(Date.now() + 10_000),
+      payload: {
+        mimeType: 'text/plain',
+        headers: [
+          { name: 'To', value: 'remote-to@example.com' },
+          { name: 'Subject', value: subject }
+        ],
+        body: { data: Buffer.from(text).toString('base64url') }
+      }
+    }
+  }
+}
+
+test('opens the first-class Drafts view with g d', async ({ page }) => {
+  await goToDrafts(page)
+  await expect(page.getByTestId('view-title')).toHaveText('Drafts')
+})
 
 test('opens the composer, validates chips, autocompletes locally, and saves on Escape', async ({
   page
@@ -56,6 +228,7 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   // Text-entry keys belong to Lexical; they must never leak into list navigation or triage.
   const before = await selectedIndex(page)
   await composer.typeBody(' jke')
+  await pasteVisiblePng(composer)
   expect(await selectedIndex(page)).toBe(before)
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
 
@@ -72,11 +245,27 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(page.getByTestId('toast')).toContainText('Draft saved')
   await composer.expectPending(0)
 
-  // `c` reactivates the single cleanly closed row rather than creating another.
+  // `c` always creates a distinct draft; every older draft remains reachable.
   await composer.openNew()
+  await composer.expectRecipients([])
+  await expect(composer.subject).toHaveValue('')
+  await composer.subject.fill('Second distinct draft')
+  await page.keyboard.press('Escape')
+  await goToDrafts(page)
+  await expect(page.getByTestId('draft-row')).toHaveCount(2)
+  await page.getByTestId('draft-row').filter({ hasText: 'A calmer inbox' }).click()
   await composer.expectRecipients(['maya@example.com'])
   await expect(composer.subject).toHaveValue('A calmer inbox')
   await expect(composer.editor).toContainText('Focused work deserves focused mail. jke')
+  await expect(composer.editor.locator('img')).toHaveCount(1)
+  expect(
+    await page.evaluate(async () => {
+      const draft = (await window.attn.draft.list()).find(
+        (candidate) => candidate.subject === 'A calmer inbox'
+      )
+      return draft?.bodyHtml ?? ''
+    })
+  ).toContain('src="cid:')
   await showCopies.click()
   await expect(composer.recipientField('cc')).toBeVisible()
   await expect(composer.recipientField('bcc')).toBeVisible()
@@ -117,7 +306,8 @@ test('preserves comma names and pending recipients while keeping cleanly closed 
   await input.fill('pending@example.com')
   await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
-  await composer.openNew()
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: '(no subject)' }).click()
   await composer.expectRecipients(['john.doe@example.com', 'pending@example.com'])
 
   // Invalid pending text keeps the composer open instead of being silently lost.
@@ -130,12 +320,527 @@ test('preserves comma names and pending recipients while keeping cleanly closed 
   await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
 
-  // A deliberate save-and-close is discoverable with C, but is not crash recovery.
+  // A deliberate save-and-close is discoverable in Drafts, but is not crash recovery.
   ;({ page } = await boot.relaunch())
   composer = new ComposerPage(page)
   await expect(composer.root).toHaveCount(0)
-  await composer.openNew()
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').click()
   await composer.expectRecipients(['john.doe@example.com', 'pending@example.com'])
+})
+
+test('discards an empty draft on close', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await expect(page.getByTestId('toast')).toContainText('Empty draft discarded')
+  await goToDrafts(page)
+  await expect(page.getByTestId('draft-row')).toHaveCount(0)
+})
+
+test('opens reply, reply-all, and forward drafts from the reader and reuses the reply draft', async ({
+  page
+}) => {
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  await expect(page.getByTestId('message-card')).toHaveCount(2)
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'reply')
+  await composer.expectRecipients(['maya+roadmap@example.com'])
+  await expect(page.getByTestId('composer-quote-toggle')).toBeVisible()
+  const replyId = await composer.root.getAttribute('data-draft-id')
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await expect(
+    page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).getByTestId('chip-draft')
+  ).toBeVisible()
+
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  await composer.openReply()
+  await expect(composer.root).toHaveAttribute('data-draft-id', replyId ?? '')
+  await composer.typeBody('Keep this authored reply')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+
+  await page.keyboard.press('a')
+  await composer.root.waitFor()
+  await expect(composer.root).toHaveAttribute('data-draft-id', replyId ?? '')
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'replyAll')
+  await composer.expectRecipients(['maya+roadmap@example.com', 'priya@example.com'])
+  await composer.expectRecipients(['daniel@example.com'], 'cc')
+  await expect(composer.editor).toContainText('Keep this authored reply')
+  await page.getByTestId('composer-discard').click()
+  await expect(composer.root).toHaveCount(0)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+
+  await page.keyboard.press('f')
+  await composer.root.waitFor()
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'forward')
+  await composer.expectRecipients([])
+  await expect(page.getByTestId('composer-quote-toggle')).toBeVisible()
+})
+
+test('copies and renders quoted CID resources in a reply draft', async ({ page }) => {
+  await page.getByTestId('thread-subject').getByText('This week in focus', { exact: true }).click()
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await page.getByTestId('composer-quote-toggle').click()
+  await expect(
+    page.frameLocator('[data-testid="composer-quote"]').locator('img[src]').first()
+  ).toHaveAttribute('src', /^data:image\/gif;base64,/)
+  const attachment = await page.evaluate(async () => {
+    const id = document.querySelector<HTMLElement>('[data-testid="composer"]')?.dataset.draftId
+    const draft = id ? await window.attn.draft.get(id) : null
+    return draft?.attachments.find((candidate) => candidate.contentId === 'weekly-image@attn.test') ?? null
+  })
+  expect(attachment).toMatchObject({ inline: true, contentId: 'weekly-image@attn.test' })
+  expect(attachment).not.toHaveProperty('spoolPath')
+})
+
+test('preserves rich and opaque draft regions while editing elsewhere', async ({ page }) => {
+  const richHtml =
+    '<p style="color:#c00">Coloured intro</p><img src="data:image/png;base64,iVBORw0KGgo=" alt="inline" style="width:42px; border:3px solid rgb(1, 2, 3)"><table><tbody><tr><td>Keep cell</td></tr></tbody></table><section data-layout="card"><mark>Opaque exact region</mark></section>'
+  await page.getByTestId('thread-list').waitFor({ state: 'attached' })
+  await page.evaluate(async (bodyHtml) => {
+    const { id } = await window.attn.draft.save({
+      ...({
+        id: null,
+        kind: 'new',
+        to: [{ name: '', email: 'rich@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'Rich draft',
+        bodyHtml,
+        bodyText: 'Coloured intro\nKeep cell\nOpaque exact region',
+        attachments: [],
+        threadId: null,
+        sourceMessageId: null,
+        inReplyTo: null,
+        references: [],
+        quoteHtml: '',
+        quoteText: ''
+      } as const)
+    })
+    await window.attn.draft.close(id)
+  }, richHtml)
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Rich draft' }).click()
+  const composer = new ComposerPage(page)
+  await expect(composer.editor.locator('table')).toContainText('Keep cell')
+  await expect(composer.editor.locator('img')).toHaveCount(1)
+  await expect(composer.editor.locator('img')).toHaveCSS('width', '42px')
+  await expect(page.getByTestId('composer-preserved-banner')).toBeVisible()
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await composer.typeBody(' Added outside.')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  const savedHtml = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((candidate) => candidate.subject === 'Rich draft')
+    return draft?.bodyHtml ?? ''
+  })
+  expect(savedHtml).toContain('<table>')
+  expect(savedHtml).toMatch(/color: (?:#c00|rgb\(204, 0, 0\))/)
+  expect(savedHtml).toContain('<section data-layout="card"><mark>Opaque exact region</mark></section>')
+})
+
+test('preserves unsupported foreign HTML pasted into a new draft', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Pasted opaque HTML')
+  await composer.editor.click()
+  const opaque = '<aside data-layout="callout"><mark>Pasted exact region</mark></aside>'
+  await pasteHtml(composer, opaque)
+  await expect(page.getByTestId('composer-preserved-banner')).toBeVisible()
+  await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).toHaveCount(1)
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+
+  const savedHtml = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (candidate) => candidate.subject === 'Pasted opaque HTML'
+    )
+    return draft?.bodyHtml ?? ''
+  })
+  expect(savedHtml).toContain(opaque)
+})
+
+test('spools data images pasted through HTML and saves them as CID parts', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('HTML data image')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<p>Before</p><img alt="pixel.png" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"><p>After</p>'
+  )
+  await expect(composer.attachments).toContainText('1 attachment')
+  await expect(composer.editor.locator('img')).toHaveCount(1)
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+
+  const saved = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (candidate) => candidate.subject === 'HTML data image'
+    )
+    return draft ? { html: draft.bodyHtml, attachments: draft.attachments } : null
+  })
+  expect(saved?.html).toContain('src="cid:')
+  expect(saved?.attachments).toHaveLength(1)
+})
+
+test('rejects a stale discard without deleting a closed draft image', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Keep closed image')
+  await pasteVisiblePng(composer)
+  await composer.expectSaved()
+  const draftId = await composer.root.getAttribute('data-draft-id')
+  if (!draftId) throw new Error('missing draft id')
+  const contentId = await page.evaluate(async (id) => {
+    const draft = await window.attn.draft.get(id)
+    return draft?.attachments[0]?.contentId ?? null
+  }, draftId)
+  if (!contentId) throw new Error('missing inline image content id')
+  await page.keyboard.press('Escape')
+
+  const staleDiscardError = await page.evaluate(async (id) => {
+    try {
+      await window.attn.draft.discard(id)
+      return ''
+    } catch (error) {
+      return String(error)
+    }
+  }, draftId)
+  expect(staleDiscardError).toContain('draft is unavailable')
+
+  const image = await page.evaluate(
+    async ({ id, cid }) => {
+      await window.attn.draft.reopen(id)
+      return window.attn.draft.getInlineImage(id, cid)
+    },
+    { id: draftId, cid: contentId }
+  )
+  expect(image).toHaveProperty('dataUrl')
+  expect('dataUrl' in image ? image.dataUrl : '').toMatch(/^data:image\/png;base64,/)
+})
+
+test('hydrates Gmail CID images and imports its signature as editable composer content', async ({
+  app,
+  page
+}, testInfo) => {
+  const gmailHtml =
+    '<div dir="ltr"><div>Draft from Gmail</div><div><img data-surl="cid:remote-inline" src="cid:remote-inline" alt="Gmail inline image" width="180"></div><div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><div>Best,</div><div>Chao Wu</div><div><a href="https://chaowu.xyz" target="_blank">https://chaowu.xyz</a></div></div></div>'
+  const inlineImageBase64 = await visiblePngBase64(page)
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-signature',
+        'Gmail image and signature',
+        gmailHtml,
+        '',
+        true,
+        inlineImageBase64
+      )
+    }
+  )
+  if (error) throw new Error(error)
+
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Gmail image and signature' }).click()
+  const composer = new ComposerPage(page)
+  await expect(composer.editor.locator('img[alt="Gmail inline image"]')).toHaveAttribute(
+    'src',
+    /^data:image\/png;base64,/
+  )
+  const signature = composer.editor.getByTestId('composer-gmail-signature')
+  await expect(signature).toHaveCount(1)
+  await expect(signature.getByText('Best,')).toBeVisible()
+  await expect(signature.getByText('Chao Wu')).toBeVisible()
+  await expect(signature).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+
+  await signature.getByText('Chao Wu', { exact: true }).click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' — edited')
+  await expect(signature.getByText('Chao Wu — edited', { exact: true })).toBeVisible()
+  await composer.expectSaved()
+
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'gmail-draft.png')
+  await page.screenshot({ path })
+  await testInfo.attach('gmail-draft', { path, contentType: 'image/png' })
+
+  await page.keyboard.press('Escape')
+  const savedHtml = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (candidate) => candidate.subject === 'Gmail image and signature'
+    )
+    return draft?.bodyHtml ?? ''
+  })
+  expect(savedHtml).toContain('data-surl="cid:remote-inline"')
+  expect(savedHtml).toContain('<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr">')
+  expect(savedHtml).toContain('Chao Wu — edited')
+})
+
+test('hydrates bracketed percent-encoded CID images inside preserved HTML', async ({ app, page }) => {
+  const inlineImageBase64 = await visiblePngBase64(page)
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-opaque-cid',
+        'Opaque CID image',
+        '<section data-layout="card"><img src="cid:%3Cremote-inline%3E" alt="Opaque Gmail inline image"></section>',
+        '',
+        true,
+        inlineImageBase64
+      )
+    }
+  )
+  if (error) throw new Error(error)
+
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Opaque CID image' }).click()
+  const composer = new ComposerPage(page)
+  await expect(page.getByTestId('composer-preserved-banner')).toBeVisible()
+  await expect(
+    composer.editor
+      .frameLocator('iframe[title="Preserved draft content"]')
+      .locator('img[alt="Opaque Gmail inline image"]')
+  ).toHaveAttribute('src', /^data:image\/png;base64,/)
+})
+
+test('opens and edits a remote plain-text-only draft without losing its body', async ({ app, page }) => {
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remotePlainDraft('gmail-plain-1', 'Remote plain text', 'Keep the original plain body')
+    }
+  )
+  if (error) throw new Error(error)
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Remote plain text' }).click()
+  const composer = new ComposerPage(page)
+  await expect(composer.editor).toContainText('Keep the original plain body')
+  const draftId = await composer.root.getAttribute('data-draft-id')
+  if (!draftId) throw new Error('remote draft id missing')
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await composer.typeBody(' plus a local edit')
+  await composer.expectSaved()
+  const composingDraft = await page.evaluate(async (id) => window.attn.draft.get(id), draftId)
+  expect(composingDraft?.bodyText).toContain('Keep the original plain body plus a local edit')
+  await page.keyboard.press('Escape')
+
+  const body = await page.evaluate(
+    async (id) => (await window.attn.draft.reopen(id))?.bodyText ?? '',
+    draftId
+  )
+  expect(body).toContain('Keep the original plain body plus a local edit')
+})
+
+test('does not overwrite typing when CID image hydration finishes late', async ({ app, page }) => {
+  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.delayMs), {
+    channel: TEST_CHANNELS.delayDraftInlineImage,
+    delayMs: 500
+  })
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-slow-image',
+        'Slow inline image',
+        '<p>Original body</p><p><img data-surl="cid:remote-inline" src="cid:remote-inline"></p>',
+        '',
+        true
+      )
+    }
+  )
+  if (error) throw new Error(error)
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Slow inline image' }).click()
+  const composer = new ComposerPage(page)
+  await expect(composer.editor).toContainText('Original body')
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await composer.typeBody(' typed before hydration')
+  await expect(composer.editor.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/)
+  await expect(composer.editor).toContainText('Original body typed before hydration')
+})
+
+test('keeps the selected draft stable when a refresh reorders the list', async ({ page }) => {
+  await page.getByTestId('thread-list').waitFor({ state: 'attached' })
+  await page.evaluate(async () => {
+    for (const subject of ['Older selection target', 'Newer draft']) {
+      const { id } = await window.attn.draft.save({ ...emptyDraftInputForTest(), subject })
+      await window.attn.draft.close(id)
+      await new Promise((resolve) => window.setTimeout(resolve, 2))
+    }
+
+    function emptyDraftInputForTest() {
+      return {
+        id: null,
+        kind: 'new' as const,
+        to: [],
+        cc: [],
+        bcc: [],
+        subject: '',
+        bodyHtml: '',
+        bodyText: '',
+        attachments: [],
+        threadId: null,
+        sourceMessageId: null,
+        inReplyTo: null,
+        references: [],
+        quoteHtml: '',
+        quoteText: ''
+      }
+    }
+  })
+  await goToDrafts(page)
+  await page.keyboard.press('j')
+  const selectedId = await page.getByTestId('draft-row').nth(1).getAttribute('data-draft-id')
+  await expect(page.getByTestId('draft-row').nth(1)).toHaveAttribute('data-selected', 'true')
+
+  await page.evaluate(async () => {
+    const input = {
+      id: null,
+      kind: 'new' as const,
+      to: [],
+      cc: [],
+      bcc: [],
+      subject: 'Newest refresh draft',
+      bodyHtml: '',
+      bodyText: '',
+      attachments: [],
+      threadId: null,
+      sourceMessageId: null,
+      inReplyTo: null,
+      references: [],
+      quoteHtml: '',
+      quoteText: ''
+    }
+    const { id } = await window.attn.draft.save(input)
+    await window.attn.draft.close(id)
+  })
+  await expect(page.getByTestId('draft-row')).toHaveCount(3)
+  await expect(page.getByTestId('draft-row').filter({ hasText: 'Older selection target' })).toHaveAttribute(
+    'data-selected',
+    'true'
+  )
+  expect(
+    await page
+      .getByTestId('draft-row')
+      .filter({ hasText: 'Older selection target' })
+      .getAttribute('data-draft-id')
+  ).toBe(selectedId)
+})
+
+test('adopts closed remote edits, preserves Bcc, and defers an edit while open', async ({ app, page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Local draft')
+  await composer.typeBody('Local body')
+  await composer.expectSaved()
+  const id = await composer.root.getAttribute('data-draft-id')
+  if (!id) throw new Error('missing draft id')
+  await page.keyboard.press('Escape')
+  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.id, args.gmailId), {
+    channel: TEST_CHANNELS.markDraftMirrored,
+    id,
+    gmailId: 'gmail-remote-1'
+  })
+  const reconcile = async (subject: string, html: string): Promise<void> => {
+    const error = await app.evaluate(
+      ({ ipcMain }, args) =>
+        new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+      {
+        channel: TEST_CHANNELS.remoteDraft,
+        remote: remoteDraft('gmail-remote-1', subject, html, 'secret@example.com')
+      }
+    )
+    if (error) throw new Error(error)
+  }
+
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-remote-1',
+        'Remote closed edit',
+        '<table><tbody><tr><td>Remote table</td></tr></tbody></table><p><img src="cid:remote-inline"></p>',
+        'secret@example.com',
+        true
+      )
+    }
+  )
+  if (error) throw new Error(error)
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Remote closed edit' }).click()
+  await expect(composer.subject).toHaveValue('Remote closed edit')
+  await composer.expectRecipients(['secret@example.com'], 'bcc')
+  await expect(composer.editor.locator('table')).toContainText('Remote table')
+  await expect(composer.editor.locator('img')).toHaveCount(1)
+
+  await reconcile('Deferred remote edit', '<p>Do not rewrite the open editor</p>')
+  await expect(composer.subject).toHaveValue('Remote closed edit')
+  await page.keyboard.press('Escape')
+  await reconcile('Deferred remote edit', '<p>Adopted after close</p>')
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Deferred remote edit' }).click()
+  await expect(composer.editor).toContainText('Adopted after close')
+})
+
+test('keeps multiple Gmail reply drafts on one thread distinct across sync cycles', async ({ app, page }) => {
+  const remotes = [
+    remoteReplyDraft('gmail-thread-reply-1', 'First Gmail reply', '<p>First remote reply</p>'),
+    remoteReplyDraft('gmail-thread-reply-2', 'Second Gmail reply', '<p>Second remote reply</p>')
+  ]
+  const reconcile = async (): Promise<void> => {
+    for (const remote of remotes) {
+      const error = await app.evaluate(
+        ({ ipcMain }, args) =>
+          new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+        { channel: TEST_CHANNELS.remoteDraft, remote }
+      )
+      if (error) throw new Error(error)
+    }
+  }
+
+  await reconcile()
+  await goToDrafts(page)
+  const first = page.getByTestId('draft-row').filter({ hasText: 'First Gmail reply' })
+  const second = page.getByTestId('draft-row').filter({ hasText: 'Second Gmail reply' })
+  await expect(first).toHaveCount(1)
+  await expect(second).toHaveCount(1)
+  const firstId = await first.getAttribute('data-draft-id')
+  const secondId = await second.getAttribute('data-draft-id')
+  expect(firstId).toBeTruthy()
+  expect(secondId).toBeTruthy()
+  expect(firstId).not.toBe(secondId)
+
+  await reconcile()
+  await expect(first).toHaveAttribute('data-draft-id', firstId ?? '')
+  await expect(second).toHaveAttribute('data-draft-id', secondId ?? '')
 })
 
 test('persists content supplied while creating an id-less draft', async ({ page }) => {
@@ -143,6 +848,7 @@ test('persists content supplied while creating an id-less draft', async ({ page 
   const draft = await page.evaluate(async () => {
     const { id } = await window.attn.draft.save({
       id: null,
+      kind: 'reply',
       to: [{ name: 'Prefilled', email: 'prefilled@example.com' }],
       cc: [],
       bcc: [],
@@ -151,8 +857,11 @@ test('persists content supplied while creating an id-less draft', async ({ page 
       bodyText: 'Prefilled body',
       attachments: [],
       threadId: 'future-reply-thread',
+      sourceMessageId: 'future-source-message',
       inReplyTo: '<parent@example.com>',
-      references: ['<root@example.com>']
+      references: ['<root@example.com>'],
+      quoteHtml: '',
+      quoteText: ''
     })
     return window.attn.draft.get(id)
   })
@@ -166,6 +875,39 @@ test('persists content supplied while creating an id-less draft', async ({ page 
     inReplyTo: '<parent@example.com>',
     references: ['<root@example.com>']
   })
+})
+
+test('lists every distinct draft after relaunch in newest-first order', async ({ boot, page }) => {
+  await page.getByTestId('thread-list').waitFor({ state: 'attached' })
+  await page.evaluate(async () => {
+    for (const subject of ['First durable draft', 'Second durable draft', 'Third durable draft']) {
+      const { id } = await window.attn.draft.save({
+        id: null,
+        kind: 'new',
+        to: [],
+        cc: [],
+        bcc: [],
+        subject,
+        bodyHtml: '',
+        bodyText: '',
+        attachments: [],
+        threadId: null,
+        sourceMessageId: null,
+        inReplyTo: null,
+        references: [],
+        quoteHtml: '',
+        quoteText: ''
+      })
+      await window.attn.draft.close(id)
+      await new Promise((resolve) => window.setTimeout(resolve, 2))
+    }
+  })
+  ;({ page } = await boot.relaunch())
+  await goToDrafts(page)
+  await expect(page.getByTestId('draft-row')).toHaveCount(3)
+  await expect(page.getByTestId('draft-row').first()).toContainText('Third durable draft')
+  await expect(page.getByTestId('draft-row').nth(1)).toContainText('Second durable draft')
+  await expect(page.getByTestId('draft-row').last()).toContainText('First durable draft')
 })
 
 test('restores the same full-window reader after composing', async ({ page }) => {

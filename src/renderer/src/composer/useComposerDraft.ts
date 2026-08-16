@@ -7,7 +7,7 @@ const IDLE_SAVE_MS = 1_000
 const MAX_CHECKPOINT_MS = 5_000
 const MIRROR_IDLE_MS = 3_000
 
-type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject'>
+type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments'>
 
 function toSaveInput(draft: Draft): DraftSaveInput {
   const { createdAt: _createdAt, updatedAt: _updatedAt, ...input } = draft
@@ -131,8 +131,9 @@ export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): Com
   )
 
   const captureEditor = useCallback(
-    (state: EditorState, editor: LexicalEditor, _tags: Set<string>) => {
+    (state: EditorState, editor: LexicalEditor, tags: Set<string>) => {
       editorRef.current = { state, editor }
+      if (tags.has('attn-initial-html') || tags.has('attn-inline-image-load')) return
       markDirty()
     },
     [markDirty]

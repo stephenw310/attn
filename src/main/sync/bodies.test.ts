@@ -30,7 +30,9 @@ function provider(): MailProvider {
     listThreadIds: vi.fn(async () => ({ threadIds: [] })),
     getThread: vi.fn(async () => externalThread()),
     getAttachmentData: vi.fn(async () => Buffer.from('fetched body').toString('base64url')),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '1' }))
+    listHistory: vi.fn(async () => ({ history: [], historyId: '1' })),
+    listDrafts: vi.fn(async () => ({ drafts: [] })),
+    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } }))
   }
 }
 

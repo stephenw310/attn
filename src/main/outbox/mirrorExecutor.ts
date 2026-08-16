@@ -18,7 +18,8 @@ export class DraftMirrorExecutor {
     private readonly accountId: () => string | null,
     private readonly provider: () => MailActionProvider | null,
     private readonly time: SchedulerTime = systemTime,
-    private readonly drainDrafts: MirrorDrain = drainDraftMirrors
+    private readonly drainDrafts: MirrorDrain = drainDraftMirrors,
+    private readonly spoolRoot: string | null = null
   ) {}
 
   trigger(): Promise<void> {
@@ -43,7 +44,7 @@ export class DraftMirrorExecutor {
     try {
       // Finish the current remote checkpoint so its returned Gmail id reaches
       // SQLite, then decline the next row once shutdown has started.
-      await this.drainDrafts(this.db, accountId, this.provider(), () => !this.stopping)
+      await this.drainDrafts(this.db, accountId, this.provider(), () => !this.stopping, this.spoolRoot)
       this.attempts = 0
     } catch (error) {
       if (this.stopping) return

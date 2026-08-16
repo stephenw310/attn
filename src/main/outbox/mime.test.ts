@@ -9,6 +9,30 @@ const OPTIONS = {
   date: new Date('2026-08-13T12:34:56.000Z')
 }
 
+it('wraps inline CID images in multipart/related', () => {
+  const mime = buildMime(
+    {
+      to: [{ name: '', email: 'to@example.com' }],
+      subject: 'Inline image',
+      bodyText: 'Image',
+      bodyHtml: '<p><img src="cid:hero@attn.local"></p>',
+      attachments: [
+        {
+          filename: 'hero.png',
+          mimeType: 'image/png',
+          content: Uint8Array.from([1, 2, 3]),
+          contentId: 'hero@attn.local',
+          inline: true
+        }
+      ]
+    },
+    { accountEmail: 'me@example.com', rfcMessageId: '<inline@attn.local>', date: new Date(0) }
+  )
+  expect(mime).toContain('Content-Type: multipart/related;')
+  expect(mime).toContain('Content-Disposition: inline; filename="hero.png"')
+  expect(mime).toContain('Content-ID: <hero@attn.local>')
+})
+
 const CASES: { fixture: string; draft: MimeDraft }[] = [
   {
     fixture: 'simple-text.eml',

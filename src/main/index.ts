@@ -17,6 +17,7 @@ import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
+import { reconcileRemoteDraft } from './outbox/draftSync'
 import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import { SnoozeScheduler } from './scheduler'
 import { deleteThread } from './sync/persist'
@@ -56,6 +57,7 @@ let syncController: SyncController | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
+let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
 let signInInFlight = false
 
@@ -267,6 +269,7 @@ function initialize(): void {
       pendingFocus = null
     },
     waitForConversation,
+    draftInlineImageDelay: () => testDraftInlineImageDelayMs,
     consumeTestDraftSaveFailure: () => {
       if (testDraftSaveFailures === 0) return false
       testDraftSaveFailures--
@@ -275,7 +278,14 @@ function initialize(): void {
     testUserData: Boolean(testUserData)
   })
   actionExecutor = new ActionExecutor(activeDb, currentAccountId, makeCurrentProvider, broadcastMailChanged)
-  draftMirrorExecutor = new DraftMirrorExecutor(activeDb, currentAccountId, makeCurrentProvider)
+  draftMirrorExecutor = new DraftMirrorExecutor(
+    activeDb,
+    currentAccountId,
+    makeCurrentProvider,
+    undefined,
+    undefined,
+    join(app.getPath('userData'), 'outbox')
+  )
   snoozeScheduler = new SnoozeScheduler(
     activeDb,
     currentAccountId,
@@ -319,27 +329,64 @@ function registerTestIpc(): void {
     if (typeof threadId !== 'string' || typeof delayMs !== 'number' || delayMs < 0) return
     testConversationDelay = { threadId, delayMs }
   })
-  ipcMain.on(TEST_CHANNELS.updateMessageBody, (_event, messageId: unknown, bodyText: unknown) => {
-    if (!db || typeof messageId !== 'string' || typeof bodyText !== 'string') return
-    const account = currentAccountId()
-    if (!account) return
-    db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?').run(
-      bodyText,
-      account,
-      messageId
-    )
-    broadcastMailChanged()
+  ipcMain.on(TEST_CHANNELS.delayDraftInlineImage, (_event, delayMs: unknown) => {
+    testDraftInlineImageDelayMs = typeof delayMs === 'number' && delayMs >= 0 ? delayMs : 0
   })
+  ipcMain.on(
+    TEST_CHANNELS.updateMessageBody,
+    (_event, messageId: unknown, bodyText: unknown, done?: (error?: string) => void) => {
+      // electronApplication.evaluate can interrupt a synchronous SQLite read
+      // in the inspector context. Queue the mutation onto the next main-loop
+      // turn and let the test wait until the write and invalidation complete.
+      setImmediate(() => {
+        try {
+          if (!db || typeof messageId !== 'string' || typeof bodyText !== 'string') {
+            done?.('invalid message update')
+            return
+          }
+          const account = currentAccountId()
+          if (!account) {
+            done?.('account unavailable')
+            return
+          }
+          db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?').run(
+            bodyText,
+            account,
+            messageId
+          )
+          broadcastMailChanged()
+          done?.()
+        } catch (error) {
+          done?.(error instanceof Error ? error.message : String(error))
+        }
+      })
+    }
+  )
   ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
     testDraftSaveFailures++
   })
-  ipcMain.on(TEST_CHANNELS.markDraftMirrored, (_event, draftId: unknown) => {
+  ipcMain.on(TEST_CHANNELS.markDraftMirrored, (_event, draftId: unknown, gmailDraftId?: unknown) => {
     const account = currentAccountId()
     if (!db || !account || typeof draftId !== 'string') return
     db.prepare(
-      `UPDATE outbox SET mirror_revision = local_revision
-       WHERE account_id = ? AND id = ? AND state = 'composing'`
-    ).run(account, draftId)
+      `UPDATE outbox SET mirror_revision = local_revision,
+       gmail_draft_id = COALESCE(?, gmail_draft_id)
+       WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')`
+    ).run(typeof gmailDraftId === 'string' ? gmailDraftId : null, account, draftId)
+  })
+  ipcMain.on(TEST_CHANNELS.remoteDraft, async (_event, remote: unknown, done?: (error?: string) => void) => {
+    const account = currentAccountId()
+    if (!db || !account || !remote || typeof remote !== 'object') {
+      done?.('invalid remote draft')
+      return
+    }
+    try {
+      await reconcileRemoteDraft(db, account, remote as Parameters<typeof reconcileRemoteDraft>[2])
+      broadcastMailChanged()
+      done?.()
+    } catch (error) {
+      done?.(error instanceof Error ? error.message : String(error))
+    }
   })
 }
 
@@ -362,6 +409,7 @@ function teardown(): void {
   mailNotifier = null
   for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
   testDraftSaveFailures = 0
+  testDraftInlineImageDelayMs = 0
   db?.close()
   db = null
 }

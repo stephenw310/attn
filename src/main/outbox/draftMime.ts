@@ -1,4 +1,13 @@
+import { createHash } from 'node:crypto'
 import type { MailAddress } from '../../shared/address'
+
+export interface DraftMimeAttachment {
+  filename: string
+  mimeType: string
+  content: Uint8Array
+  contentId?: string
+  inline?: boolean
+}
 
 export interface DraftMimeInput {
   to: readonly MailAddress[]
@@ -7,6 +16,11 @@ export interface DraftMimeInput {
   subject: string
   bodyHtml: string
   bodyText: string
+  quoteHtml?: string
+  quoteText?: string
+  inReplyTo?: string | null
+  references?: readonly string[]
+  attachments?: readonly DraftMimeAttachment[]
 }
 
 const ENCODED_WORD_BYTES = 45
@@ -51,16 +65,18 @@ function formatAddress(address: MailAddress): string {
 }
 
 function foldHeader(name: string, value: string): string {
-  const tokens = value.split(/\s+/).filter(Boolean)
-  const lines = [`${name}:`]
-  for (const token of tokens) {
-    const current = lines.at(-1) ?? `${name}:`
-    if (`${current} ${token}`.length <= RECOMMENDED_HEADER_WIDTH) {
-      lines[lines.length - 1] = `${current} ${token}`
-    } else {
-      lines.push(` ${token}`)
-    }
+  const lines: string[] = []
+  let prefix = `${name}: `
+  let remaining = value
+  while (prefix.length + remaining.length > RECOMMENDED_HEADER_WIDTH) {
+    let splitAt = remaining.lastIndexOf(' ', RECOMMENDED_HEADER_WIDTH - prefix.length)
+    if (splitAt <= 0) splitAt = remaining.indexOf(' ')
+    if (splitAt <= 0) break
+    lines.push(`${prefix}${remaining.slice(0, splitAt)}`)
+    remaining = remaining.slice(splitAt + 1)
+    prefix = ' '
   }
+  lines.push(`${prefix}${remaining}`)
   return lines.join('\r\n')
 }
 
@@ -73,22 +89,132 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-function wrapBase64(value: string): string {
-  return value.match(/.{1,76}/g)?.join('\r\n') ?? ''
+function wrapBase64(value: string | Uint8Array): string {
+  return (
+    Buffer.from(value)
+      .toString('base64')
+      .match(/.{1,76}/g)
+      ?.join('\r\n') ?? ''
+  )
+}
+
+function safeMimeType(value: string): string {
+  const clean = cleanHeader(value).toLowerCase()
+  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(clean) ? clean : 'application/octet-stream'
+}
+
+function quotedFilename(value: string): string {
+  const clean =
+    cleanHeader(value)
+      .replace(/[^\x20-\x7e]/g, '_')
+      .slice(0, 200) || 'inline-image'
+  return `"${clean.replace(/["\\]/g, '\\$&')}"`
+}
+
+function boundary(kind: 'alternative' | 'related' | 'mixed', input: DraftMimeInput): string {
+  const identity = [
+    kind,
+    input.subject,
+    ...(input.attachments ?? []).map((item) => `${item.contentId ?? ''}\0${item.filename}`)
+  ].join('\0')
+  return `attn-draft-${kind}-${createHash('sha256').update(identity).digest('hex').slice(0, 20)}`
+}
+
+function plainTextHtml(value: string): string {
+  return `<p>${escapeHtml(value).replace(/\r\n?|\n/g, '<br>')}</p>`
+}
+
+/** Canonical HTML representation used by both MIME and conflict fingerprints. */
+export function draftHtmlBody(input: Pick<DraftMimeInput, 'bodyHtml' | 'bodyText' | 'quoteHtml'>): string {
+  const authored = input.bodyHtml || plainTextHtml(input.bodyText)
+  return input.quoteHtml ? `${authored}${authored ? '\n' : ''}${input.quoteHtml}` : authored
+}
+
+function draftTextBody(input: Pick<DraftMimeInput, 'bodyText' | 'quoteText'>): string {
+  if (!input.quoteText) return input.bodyText
+  return input.bodyText ? `${input.bodyText}\n\n${input.quoteText}` : input.quoteText
+}
+
+function textPart(mimeType: 'text/plain' | 'text/html', value: string): string[] {
+  return [
+    `Content-Type: ${mimeType}; charset=UTF-8`,
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrapBase64(value)
+  ]
+}
+
+function attachmentPart(attachment: DraftMimeAttachment): string[] {
+  const contentId = cleanHeader(attachment.contentId ?? '').replace(/^<|>$/g, '')
+  return [
+    `Content-Type: ${safeMimeType(attachment.mimeType)}; name=${quotedFilename(attachment.filename)}`,
+    'Content-Transfer-Encoding: base64',
+    `Content-Disposition: ${attachment.inline ? 'inline' : 'attachment'}; filename=${quotedFilename(attachment.filename)}`,
+    ...(contentId ? [`Content-ID: <${contentId}>`] : []),
+    '',
+    wrapBase64(attachment.content)
+  ]
 }
 
 /** Minimal RFC 5322/2045 envelope for Gmail draft checkpoints; T15 owns final send MIME. */
 export function encodeDraftMessage(input: DraftMimeInput): string {
-  const body = input.bodyHtml || `<p>${escapeHtml(input.bodyText).replace(/\n/g, '<br>')}</p>`
+  const html = draftHtmlBody(input)
+  const text = draftTextBody(input)
+  const attachments = input.attachments ?? []
+  const inlineAttachments = attachments.filter((attachment) => attachment.inline)
+  const regularAttachments = attachments.filter((attachment) => !attachment.inline)
+  const alternativeBoundary = boundary('alternative', input)
+  const relatedBoundary = boundary('related', input)
+  const mixedBoundary = boundary('mixed', input)
   const headers = [
     addressHeader('To', input.to),
     addressHeader('Cc', input.cc),
     addressHeader('Bcc', input.bcc),
     input.subject ? foldHeader('Subject', encodeHeaderText(input.subject)) : null,
-    'MIME-Version: 1.0',
-    'Content-Type: text/html; charset=UTF-8',
-    'Content-Transfer-Encoding: base64'
+    input.inReplyTo ? foldHeader('In-Reply-To', cleanHeader(input.inReplyTo)) : null,
+    input.references?.length
+      ? foldHeader('References', input.references.map(cleanHeader).filter(Boolean).join(' '))
+      : null,
+    'MIME-Version: 1.0'
   ].filter((header): header is string => header !== null)
-  const raw = `${headers.join('\r\n')}\r\n\r\n${wrapBase64(Buffer.from(body).toString('base64'))}`
-  return Buffer.from(raw).toString('base64url')
+
+  const alternativeEntity = [
+    `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+    '',
+    `--${alternativeBoundary}`,
+    ...textPart('text/plain', text),
+    `--${alternativeBoundary}`,
+    ...textPart('text/html', html),
+    `--${alternativeBoundary}--`
+  ]
+  const bodyEntity =
+    inlineAttachments.length === 0
+      ? alternativeEntity
+      : [
+          `Content-Type: multipart/related; boundary="${relatedBoundary}"`,
+          '',
+          `--${relatedBoundary}`,
+          ...alternativeEntity,
+          ...inlineAttachments.flatMap((attachment) => [
+            `--${relatedBoundary}`,
+            ...attachmentPart(attachment)
+          ]),
+          `--${relatedBoundary}--`
+        ]
+  const message =
+    regularAttachments.length === 0
+      ? [...headers, ...bodyEntity]
+      : [
+          ...headers,
+          `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
+          '',
+          `--${mixedBoundary}`,
+          ...bodyEntity,
+          ...regularAttachments.flatMap((attachment) => [
+            `--${mixedBoundary}`,
+            ...attachmentPart(attachment)
+          ]),
+          `--${mixedBoundary}--`
+        ]
+  return Buffer.from(`${message.join('\r\n')}\r\n`).toString('base64url')
 }

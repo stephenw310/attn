@@ -16,8 +16,9 @@ export interface ReplyPlan {
   quoteText: string
   inReplyTo: string | null
   references: string[]
-  /** For Gmail's threadId send hint. Forwards deliberately start a new thread. */
-  threadId: string | null
+  sourceMessageId: string
+  /** For Gmail's threadId hint. Gmail's own composer attempts to retain forwards too. */
+  threadId: string
 }
 
 const REFERENCES_HEADER_MAX_BYTES = 998
@@ -156,7 +157,8 @@ export function planReply(kind: ReplyKind, conversation: Conversation, accountEm
       ...quote,
       inReplyTo: null,
       references: [],
-      threadId: null
+      sourceMessageId: source.id,
+      threadId: conversation.threadId
     }
   }
 
@@ -174,6 +176,7 @@ export function planReply(kind: ReplyKind, conversation: Conversation, accountEm
     subject: prefixedSubject(kind, conversation.subject),
     ...quote,
     ...replyReferences(source),
+    sourceMessageId: source.id,
     threadId: conversation.threadId
   }
 }

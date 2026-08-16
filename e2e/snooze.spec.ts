@@ -95,9 +95,9 @@ test('undoes reminder changes and archive without losing the original due time',
   const originalDue = await rows.first().getByTestId('chip-snooze-due').textContent()
 
   await page.keyboard.press('h')
-  // 'Tonight' (19:00) can never render the same chip text as 'Tomorrow' (9:00);
-  // 'next-week' resolves to the same instant as 'tomorrow' every Sunday.
-  await page.getByTestId('snooze-preset-tonight').click()
+  // Re-snooze target must never resolve to the same instant as 'tomorrow':
+  // 'next-week' does exactly that every Sunday, rendering an identical chip.
+  await page.getByTestId('snooze-preset-later-today').click()
   await expect(rows.first().getByTestId('chip-snooze-due')).not.toHaveText(originalDue ?? '')
   await page.keyboard.press('z')
   await expect(rows).toHaveCount(1)

@@ -16,6 +16,22 @@ export interface ThreadIdPage {
   nextPageToken?: string
 }
 
+export interface ProviderDraftSummary {
+  id: string
+  messageId?: string
+  threadId?: string
+}
+
+export interface DraftPage {
+  drafts: ProviderDraftSummary[]
+  nextPageToken?: string
+}
+
+export interface ProviderDraft {
+  id: string
+  message: GmailMessage
+}
+
 export interface ListThreadIdsOptions {
   q?: string
   labelIds?: readonly string[]
@@ -51,8 +67,9 @@ export interface MailActionProvider {
   trashThread(threadId: string): Promise<void>
   untrashThread(threadId: string): Promise<void>
   /** Optional for test providers predating M2; production providers implement it. */
-  saveDraft?(draft: { id: string | null; raw: string }): Promise<string>
+  saveDraft?(draft: { id: string | null; raw: string; threadId?: string | null }): Promise<string>
   deleteDraft?(id: string): Promise<void>
+  getAttachmentData?(messageId: string, attachmentId: string): Promise<string | undefined>
 }
 
 export interface MailProvider extends MailActionProvider {
@@ -62,4 +79,6 @@ export interface MailProvider extends MailActionProvider {
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
   getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined>
   listHistory(startHistoryId: string, pageToken?: string): Promise<HistoryPage>
+  listDrafts(pageToken?: string): Promise<DraftPage>
+  getDraft(id: string): Promise<ProviderDraft>
 }

@@ -127,14 +127,14 @@ function AccountMenu({
 }
 
 interface MailHeaderProps {
-  view: 'inbox' | 'snoozed'
+  view: 'inbox' | 'snoozed' | 'drafts'
   unreadCount: number | null
   pendingCount: number
   selectionCount: number
   composerOpen: boolean
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
-  onSwitchView: (view: 'inbox' | 'snoozed') => void
+  onSwitchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
 }
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
@@ -167,6 +167,16 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
             }`}
           >
             <span data-testid={view === 'snoozed' ? 'view-title' : undefined}>Snoozed</span>
+          </button>
+          <button
+            type="button"
+            data-testid="view-drafts"
+            onClick={() => onSwitchView('drafts')}
+            className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
+              view === 'drafts' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
+            }`}
+          >
+            <span data-testid={view === 'drafts' ? 'view-title' : undefined}>Drafts</span>
           </button>
         </nav>
       )}

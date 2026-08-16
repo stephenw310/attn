@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
-import { pruneMissingMessages } from './persist'
+import { nonDraftMessages, pruneMissingMessages } from './persist'
 
 describe('thread snapshot persistence', () => {
+  it('excludes Gmail draft messages from the ordinary conversation snapshot', () => {
+    const real = { id: 'sent', threadId: 'thread', labelIds: ['SENT'], snippet: 'Sent copy' }
+    const draft = { id: 'draft', threadId: 'thread', labelIds: ['DRAFT'], snippet: 'Unsent copy' }
+    expect(nonDraftMessages([real, draft])).toEqual([real])
+  })
+
   it('prunes messages absent from the latest surviving thread snapshot', () => {
     const calls: { sql: string; params: unknown[] }[] = []
     const statements: string[] = []

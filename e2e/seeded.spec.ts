@@ -127,13 +127,17 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(status).toHaveAttribute('title', 'Syncing · Recent mail — 428 processed')
   const progress = page.getByTestId('sync-progress')
   await expect(progress).toHaveAttribute('aria-valuenow', '2')
-  await expect(progress.locator('[data-phase-state]')).toHaveCount(4)
+  await expect(progress.locator('[data-phase-state]')).toHaveCount(5)
   await expect(progress.locator('[data-phase-state]').nth(0)).toHaveAttribute('data-phase-state', 'complete')
   await expect(progress.locator('[data-phase-state]').nth(1)).toHaveAttribute('data-phase-state', 'active')
 
+  await setSyncState(app, { phase: 'syncing', stage: 'drafts', threadsDone: 470 })
+  await expect(status).toContainText('Syncing · Drafts')
+  await expect(progress).toHaveAttribute('aria-valuenow', '3')
+
   await setSyncState(app, { phase: 'syncing', stage: 'sent', threadsDone: 512 })
   await expect(status).toContainText('Syncing · Sent mail')
-  await expect(progress).toHaveAttribute('aria-valuenow', '3')
+  await expect(progress).toHaveAttribute('aria-valuenow', '4')
 
   // An incremental poll is not a backfill phase: no stage label, no progress bar.
   await setSyncState(app, { phase: 'checking' })

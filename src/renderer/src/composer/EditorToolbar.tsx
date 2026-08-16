@@ -2,8 +2,14 @@ import { TOGGLE_LINK_COMMAND } from '@lexical/link'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $createQuoteNode } from '@lexical/rich-text'
-import { $setBlocksType } from '@lexical/selection'
-import { $getSelection, $isRangeSelection, FORMAT_TEXT_COMMAND, type TextFormatType } from 'lexical'
+import { $patchStyleText, $setBlocksType } from '@lexical/selection'
+import {
+  $getSelection,
+  $isRangeSelection,
+  FORMAT_ELEMENT_COMMAND,
+  FORMAT_TEXT_COMMAND,
+  type TextFormatType
+} from 'lexical'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createCommand, registerCommands } from '../commands'
 
@@ -24,9 +30,21 @@ export function EditorToolbar(): React.JSX.Element {
   const [linkValue, setLinkValue] = useState('')
   const [linkInvalid, setLinkInvalid] = useState(false)
   const linkInputRef = useRef<HTMLInputElement | null>(null)
-  const format = (value: TextFormatType): void => {
-    editor.dispatchCommand(FORMAT_TEXT_COMMAND, value)
-  }
+  const format = useCallback(
+    (value: TextFormatType): void => {
+      editor.dispatchCommand(FORMAT_TEXT_COMMAND, value)
+    },
+    [editor]
+  )
+  const patchStyle = useCallback(
+    (property: string, value: string) => {
+      editor.update(() => {
+        const selection = $getSelection()
+        if ($isRangeSelection(selection)) $patchStyleText(selection, { [property]: value })
+      })
+    },
+    [editor]
+  )
   const openLink = useCallback((): void => {
     setLinkInvalid(false)
     setLinkOpen(true)
@@ -51,7 +69,21 @@ export function EditorToolbar(): React.JSX.Element {
     if (linkOpen) linkInputRef.current?.focus()
   }, [linkOpen])
 
-  useLayoutEffect(() => registerCommands([createCommand('composer.link', openLink)]), [openLink])
+  useLayoutEffect(
+    () =>
+      registerCommands([
+        createCommand('composer.link', openLink),
+        createCommand('composer.strikethrough', () => format('strikethrough')),
+        createCommand('composer.fontFamily', () => patchStyle('font-family', 'Arial, sans-serif')),
+        createCommand('composer.fontSize', () => patchStyle('font-size', '14px')),
+        createCommand('composer.textColor', () => patchStyle('color', '#202124')),
+        createCommand('composer.backgroundColor', () => patchStyle('background-color', '#fff2cc')),
+        createCommand('composer.alignLeft', () => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'left')),
+        createCommand('composer.alignCenter', () => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'center')),
+        createCommand('composer.alignRight', () => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'right'))
+      ]),
+    [editor, format, openLink, patchStyle]
+  )
 
   const button = 'rounded px-2 py-1 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink'
 
@@ -76,7 +108,90 @@ export function EditorToolbar(): React.JSX.Element {
       >
         U
       </button>
+      <button
+        type="button"
+        className={`${button} line-through`}
+        aria-label="Strikethrough"
+        onClick={() => format('strikethrough')}
+      >
+        S
+      </button>
+      <select
+        data-testid="composer-font-family"
+        aria-label="Font family"
+        className="rounded bg-transparent px-1 py-1 text-xs text-ink-dim"
+        defaultValue=""
+        onChange={(event) => patchStyle('font-family', event.target.value)}
+      >
+        <option value="" disabled>
+          Font
+        </option>
+        <option value="Arial, sans-serif">Arial</option>
+        <option value="Georgia, serif">Serif</option>
+        <option value="monospace">Monospace</option>
+      </select>
+      <select
+        data-testid="composer-font-size"
+        aria-label="Font size"
+        className="rounded bg-transparent px-1 py-1 text-xs text-ink-dim"
+        defaultValue=""
+        onChange={(event) => patchStyle('font-size', event.target.value)}
+      >
+        <option value="" disabled>
+          Size
+        </option>
+        <option value="12px">Small</option>
+        <option value="14px">Normal</option>
+        <option value="18px">Large</option>
+        <option value="24px">Huge</option>
+      </select>
+      <label className="flex items-center" title="Text colour">
+        <span className="sr-only">Text colour</span>
+        <input
+          type="color"
+          data-testid="composer-text-color"
+          aria-label="Text colour"
+          className="size-6 border-0 bg-transparent p-0"
+          defaultValue="#202124"
+          onChange={(event) => patchStyle('color', event.target.value)}
+        />
+      </label>
+      <label className="flex items-center" title="Background colour">
+        <span className="sr-only">Background colour</span>
+        <input
+          type="color"
+          data-testid="composer-background-color"
+          aria-label="Background colour"
+          className="size-6 border-0 bg-transparent p-0"
+          defaultValue="#fff2cc"
+          onChange={(event) => patchStyle('background-color', event.target.value)}
+        />
+      </label>
       <span className="mx-1 h-4 w-px bg-edge" />
+      <button
+        type="button"
+        className={button}
+        aria-label="Align left"
+        onClick={() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'left')}
+      >
+        ≡
+      </button>
+      <button
+        type="button"
+        className={button}
+        aria-label="Align center"
+        onClick={() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'center')}
+      >
+        ≣
+      </button>
+      <button
+        type="button"
+        className={button}
+        aria-label="Align right"
+        onClick={() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'right')}
+      >
+        ≡
+      </button>
       <button
         type="button"
         className={button}
