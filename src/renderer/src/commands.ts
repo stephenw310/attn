@@ -40,6 +40,8 @@ export const COMMAND_SPECS = {
   'composer.close': { title: 'Save and close draft', shortcut: 'Escape', context: 'composer' },
   'composer.discard': { title: 'Discard draft', context: 'composer' },
   'composer.send': { title: 'Send message', shortcut: 'Mod+Enter', context: 'composer' },
+  'composer.attach': { title: 'Attach files', context: 'composer' },
+  'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },
   'composer.bold': { title: 'Bold', shortcut: 'Mod+B', context: 'composer' },
   'composer.italic': { title: 'Italic', shortcut: 'Mod+I', context: 'composer' },
   'composer.underline': { title: 'Underline', shortcut: 'Mod+U', context: 'composer' },

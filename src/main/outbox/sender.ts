@@ -1,25 +1,27 @@
 import type { MailAddress } from '../../shared/address'
 import type { DraftKind } from '../../shared/drafts'
-import type { OutboxChanged } from '../../shared/outbox'
+import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
+import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { isOfflineFailure } from '../sync/failure'
 import { persistThread } from '../sync/persist'
-import type { MailProvider } from '../sync/provider'
+import type { MailProvider, ProviderMimeUpload } from '../sync/provider'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { parseStoredDraftAttachments } from './draftAttachments'
 import { planTransition } from './machine'
-import { buildMime } from './mime'
-import { loadDraftMimeAttachments } from './mirror'
+import { buildMime, mimeByteLength, streamMime } from './mime'
+import { DraftAttachmentSourceError, prepareDraftMimeAttachments } from './mirror'
+import { validateAttachmentCap } from './spool'
 
 const SECONDARY_CHECK_MS = 10_000
 const SECONDARY_CHECKS = 6
+/** ~6.5 minutes on the 5s/30s/60s ladder before a dead attachment source fails. */
+const MAX_ATTACHMENT_SOURCE_ATTEMPTS = 8
 const OFFLINE_RECHECK_MS = 30_000
 const STOP_TIMEOUT_MS = 5_000
 export const SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
-const NEEDS_REVIEW_EXPLANATION = "We couldn't confirm this was sent — check your Sent mail before resending"
-const SEND_FAILURE_TOAST = 'Message could not be sent'
 
 interface SendRow {
   id: string
@@ -64,6 +66,29 @@ function permanentSendError(error: unknown): boolean {
   )
 }
 
+export function userFacingSendError(error: unknown): string {
+  if (error instanceof DraftAttachmentSourceError) {
+    return error.retryable
+      ? 'An attachment is temporarily unavailable — Attn will retry'
+      : 'An attachment could not be read — reopen the message and attach it again'
+  }
+  if (error instanceof GmailApiError) {
+    if (error.status === 401) return 'Gmail authorization expired — sign in again and retry'
+    if (error.status === 413) return 'The message is too large for Gmail'
+    if (error.status === 400) return 'Gmail rejected this message — check its recipients and attachments'
+    if (error.status === 403 && !error.retryable) return 'Gmail did not allow this message to be sent'
+    return 'Gmail could not send this message'
+  }
+  if (isOfflineFailure(error)) return 'No network connection — Attn will retry'
+  if (
+    error instanceof Error &&
+    ['Each attachment must be 25 MB or less', 'Attachments must total 25 MB or less'].includes(error.message)
+  ) {
+    return error.message
+  }
+  return 'Message could not be sent'
+}
+
 class OutboxNoRemoteMutationError extends Error {
   constructor(readonly reason: unknown) {
     super(errorMessage(reason))
@@ -71,7 +96,11 @@ class OutboxNoRemoteMutationError extends Error {
 }
 
 export function isRetryableOutboxPreflightError(error: unknown): boolean {
-  return (error instanceof GmailApiError && error.retryable) || isOfflineFailure(error)
+  return (
+    (error instanceof GmailApiError && error.retryable) ||
+    (error instanceof DraftAttachmentSourceError && error.retryable) ||
+    isOfflineFailure(error)
+  )
 }
 
 export type DraftPresence = 'present' | 'consumed'
@@ -92,7 +121,9 @@ export async function verifyKnownDraft(
 
 export interface DraftSendProtocolInput {
   gmailDraftId: string | null
+  /** Attachment-free create payload; final MIME bytes belong to updateMime. */
   raw: string
+  updateMime?: ProviderMimeUpload
   threadId: string | null
   persistCreatedId: (id: string) => boolean | Promise<boolean>
 }
@@ -136,7 +167,12 @@ export async function executeDraftSendProtocol(
     if (!(await input.persistCreatedId(gmailDraftId))) return { kind: 'aborted' }
   }
   try {
-    await provider.updateDraft({ id: gmailDraftId, raw: input.raw, threadId: input.threadId }, { signal })
+    await provider.updateDraft(
+      input.updateMime
+        ? { id: gmailDraftId, mime: input.updateMime, threadId: input.threadId }
+        : { id: gmailDraftId, raw: input.raw, threadId: input.threadId },
+      { signal }
+    )
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return { kind: 'missing-before-send' }
     throw error
@@ -156,16 +192,18 @@ export class OutboxSender {
   private remoteAbortController: AbortController | null = null
   private stopping = false
   private timer: TimerHandle | null = null
+  private drainAttempts = 0
 
   constructor(
     private readonly db: Db,
     private readonly accountId: () => string | null,
     private readonly provider: () => MailProvider | null,
     private readonly notify: (change: OutboxChanged) => void,
-    private readonly beforeRemote: () => Promise<void> = () => Promise.resolve(),
+    private readonly beforeRemote: (signal?: AbortSignal) => Promise<void> = () => Promise.resolve(),
     private readonly time: SchedulerTime = systemTime,
     private readonly spoolRoot: string | null = null,
-    private readonly cleanSpool: (id: string) => void = () => {}
+    private readonly cleanSpool: (id: string) => void = () => {},
+    private readonly progress: (progress: OutboxProgress | null) => void = () => {}
   ) {}
 
   start(): void {
@@ -188,11 +226,26 @@ export class OutboxSender {
     if (this.timer) this.time.timers.clearTimeout(this.timer)
     this.timer = null
     if (this.drainPromise) return this.drainPromise
-    this.drainPromise = this.drain().finally(() => {
+    this.drainPromise = this.drainSafely().finally(() => {
       this.drainPromise = null
-      if (!this.stopping && !this.timer) this.armFromDatabase()
     })
     return this.drainPromise
+  }
+
+  private async drainSafely(): Promise<void> {
+    try {
+      await this.drain()
+      if (!this.stopping && !this.timer) this.armFromDatabase()
+      this.drainAttempts = 0
+    } catch (error) {
+      if (this.stopping) return
+      console.error(`[outbox] drain failed: ${errorMessage(error)}`)
+      const delay = retryDelayMs(this.drainAttempts++)
+      this.timer = this.time.timers.setTimeout(() => {
+        this.timer = null
+        void this.trigger()
+      }, delay)
+    }
   }
 
   /** True only while send recovery or delivery is active, not while an undo/retry timer is idle. */
@@ -225,7 +278,9 @@ export class OutboxSender {
     const next = this.db
       .prepare(
         `SELECT state, send_at FROM outbox
-         WHERE account_id = ? AND state IN ('queued', 'sending')
+         WHERE account_id = ? AND (
+           state = 'sending' OR (state = 'queued' AND send_at IS NOT NULL)
+         )
          ORDER BY CASE WHEN send_at IS NULL THEN 0 ELSE 1 END, send_at LIMIT 1`
       )
       .get(accountId) as { state: string; send_at: number | null } | undefined
@@ -245,12 +300,14 @@ export class OutboxSender {
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, updated_at, send_at, attempts, verify_attempts
          FROM outbox
-         WHERE account_id = ? AND state IN ('queued', 'sending')
-           AND (send_at IS NULL OR send_at <= ?)
+         WHERE account_id = ? AND (
+           (state = 'sending' AND (send_at IS NULL OR send_at <= ?)) OR
+           (state = 'queued' AND send_at IS NOT NULL AND send_at <= ?)
+         )
          ORDER BY CASE state WHEN 'sending' THEN 0 ELSE 1 END, COALESCE(send_at, 0), updated_at
          LIMIT 1`
       )
-      .get(accountId, this.time.now()) as SendRow | undefined
+      .get(accountId, this.time.now(), this.time.now()) as SendRow | undefined
   }
 
   private async drain(): Promise<void> {
@@ -274,15 +331,20 @@ export class OutboxSender {
         // A mirror create may already own this row. Let it persist its Gmail id
         // while the row is still safely queued, then claim `sending` immediately
         // before the send-side protocol starts.
+        const checkpointController = new AbortController()
+        this.remoteAbortController = checkpointController
         try {
-          await this.beforeRemote()
+          await this.beforeRemote(checkpointController.signal)
         } catch (error) {
+          if (this.stopping && checkpointController.signal.aborted) return
           console.warn(`[outbox] draft checkpoint wait failed: ${errorMessage(error)}`)
           this.timer = this.time.timers.setTimeout(() => {
             this.timer = null
             void this.trigger()
           }, retryDelayMs(row.attempts))
           return
+        } finally {
+          if (this.remoteAbortController === checkpointController) this.remoteAbortController = null
         }
         checkpointWaited = true
         if (this.stopping || this.accountId() !== accountId) return
@@ -331,7 +393,7 @@ export class OutboxSender {
     const controller = new AbortController()
     this.remoteAbortController = controller
     try {
-      if (!checkpointWaited) await this.beforeRemote()
+      if (!checkpointWaited) await this.beforeRemote(controller.signal)
       if (this.stopping || this.accountId() !== initial.account_id) return true
       const row = this.reloadSending(initial.account_id, initial.id)
       if (!row) return false
@@ -363,6 +425,7 @@ export class OutboxSender {
       await this.send(row, provider, controller.signal)
       return false
     } catch (error) {
+      if (this.stopping && controller.signal.aborted) return true
       return this.handleError(initial, error)
     } finally {
       if (this.remoteAbortController === controller) this.remoteAbortController = null
@@ -436,62 +499,110 @@ export class OutboxSender {
     return true
   }
 
-  private async buildRaw(row: SendRow, provider: MailProvider): Promise<string> {
-    const attachments = await loadDraftMimeAttachments(
+  private async prepareSend(
+    row: SendRow,
+    provider: MailProvider,
+    signal?: AbortSignal
+  ): Promise<{ raw: string; updateMime?: ProviderMimeUpload }> {
+    const storedAttachments = parseStoredDraftAttachments(row.attachments_json)
+    const draft = {
+      to: parseJson<MailAddress[]>(row.to_json),
+      cc: parseJson<MailAddress[]>(row.cc_json),
+      bcc: parseJson<MailAddress[]>(row.bcc_json),
+      subject: row.subject,
+      bodyHtml: row.body_html,
+      bodyText: row.body_text,
+      quoteHtml: row.quote_html,
+      quoteText: row.quote_text,
+      inReplyTo: row.in_reply_to,
+      references: parseJson<string[]>(row.references_json)
+    }
+    const options = {
+      accountEmail: row.account_id,
+      rfcMessageId: row.rfc_message_id,
+      date: new Date(row.send_at ?? row.updated_at)
+    }
+    const raw = Buffer.from(buildMime(draft, options)).toString('base64url')
+    if (storedAttachments.length === 0) return { raw }
+
+    validateAttachmentCap(
+      0,
+      storedAttachments.map((attachment) => attachment.sizeBytes)
+    )
+    const attachments = await prepareDraftMimeAttachments(
       row.id,
-      parseStoredDraftAttachments(row.attachments_json),
+      storedAttachments,
       provider,
-      this.spoolRoot
+      this.spoolRoot,
+      signal
     )
-    const mime = buildMime(
-      {
-        to: parseJson<MailAddress[]>(row.to_json),
-        cc: parseJson<MailAddress[]>(row.cc_json),
-        bcc: parseJson<MailAddress[]>(row.bcc_json),
-        subject: row.subject,
-        bodyHtml: row.body_html,
-        bodyText: row.body_text,
-        quoteHtml: row.quote_html,
-        quoteText: row.quote_text,
-        inReplyTo: row.in_reply_to,
-        references: parseJson<string[]>(row.references_json),
-        attachments
-      },
-      {
-        accountEmail: row.account_id,
-        rfcMessageId: row.rfc_message_id,
-        date: new Date(row.send_at ?? row.updated_at)
+    validateAttachmentCap(
+      0,
+      attachments.map((attachment) => attachment.sizeBytes)
+    )
+    const totalBytes = attachments.reduce((total, attachment) => total + attachment.sizeBytes, 0)
+    const progress = this.progress
+    return {
+      raw,
+      updateMime: {
+        sizeBytes: mimeByteLength({ ...draft, attachments }, options),
+        open: () =>
+          (async function* () {
+            let completedBytes = 0
+            progress({
+              id: row.id,
+              completedBytes: 0,
+              totalBytes,
+              completedAttachments: 0,
+              totalAttachments: attachments.length
+            })
+            yield* streamMime({ ...draft, attachments }, options, (attachment, index) => {
+              completedBytes += attachment.sizeBytes
+              progress({
+                id: row.id,
+                completedBytes,
+                totalBytes,
+                completedAttachments: index + 1,
+                totalAttachments: attachments.length
+              })
+            })
+          })()
       }
-    )
-    return Buffer.from(mime).toString('base64url')
+    }
   }
 
   private async send(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<void> {
     if (!provider.createDraft || !provider.updateDraft || !provider.sendDraft) {
       throw new OutboxNoRemoteMutationError(new Error('Gmail draft sending is unavailable'))
     }
-    let raw: string
+    let prepared: { raw: string; updateMime?: ProviderMimeUpload }
     try {
-      raw = await this.buildRaw(row, provider)
+      prepared = await this.prepareSend(row, provider, signal)
     } catch (error) {
       throw new OutboxNoRemoteMutationError(error)
     }
-    const result = await executeDraftSendProtocol(
-      provider,
-      {
-        gmailDraftId: row.gmail_draft_id,
-        raw,
-        threadId: row.thread_id,
-        persistCreatedId: (gmailDraftId) =>
-          this.db
-            .prepare(
-              `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
-               WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-            )
-            .run(gmailDraftId, row.account_id, row.id).changes > 0
-      },
-      signal
-    )
+    let result: DraftSendProtocolResult
+    try {
+      result = await executeDraftSendProtocol(
+        provider,
+        {
+          gmailDraftId: row.gmail_draft_id,
+          raw: prepared.raw,
+          updateMime: prepared.updateMime,
+          threadId: row.thread_id,
+          persistCreatedId: (gmailDraftId) =>
+            this.db
+              .prepare(
+                `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
+                 WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
+              )
+              .run(gmailDraftId, row.account_id, row.id).changes > 0
+        },
+        signal
+      )
+    } finally {
+      if (prepared.updateMime) this.progress(null)
+    }
     if (result.kind === 'aborted') return
     if (result.kind === 'missing-before-send') {
       this.parkNeedsReview(row, true)
@@ -541,7 +652,17 @@ export class OutboxSender {
     if (!current) return false
     const noRemoteMutation = error instanceof OutboxNoRemoteMutationError
     const cause = noRemoteMutation ? error.reason : error
+    // last_error is what the user reads, so the provider's own text stays here
+    // in the log — otherwise a field failure leaves no diagnosable trace at all.
+    console.warn(`[outbox] send failed for ${current.id}: ${errorMessage(cause)}`)
     const permanent = noRemoteMutation ? !isRetryableOutboxPreflightError(cause) : permanentSendError(cause)
+    // Offline and quota keep retrying for as long as they last, but a source
+    // that never comes back must stop somewhere the user can see it.
+    const exhausted =
+      cause instanceof DraftAttachmentSourceError && current.attempts + 1 >= MAX_ATTACHMENT_SOURCE_ATTEMPTS
+    const displayError = exhausted
+      ? 'An attachment is still unavailable — reopen the message and attach it again'
+      : userFacingSendError(cause)
     const retryAt = this.time.now() + retryDelayMs(current.attempts)
     const plan = planTransition(
       {
@@ -554,7 +675,7 @@ export class OutboxSender {
       permanent
         ? { type: 'permanent-error' }
         : noRemoteMutation
-          ? { type: 'preflight-retry', retryAt }
+          ? { type: 'preflight-retry', exhausted, retryAt }
           : current.gmail_draft_id === null
             ? { type: 'verification-error', retryAt }
             : { type: 'retryable-error', retryAt },
@@ -570,13 +691,13 @@ export class OutboxSender {
         plan.next.sendAt,
         plan.next.attempts,
         plan.next.verifyAttempts,
-        errorMessage(cause),
+        displayError,
         current.account_id,
         current.id
       )
     if (persisted.changes === 0) return false
-    if (permanent) {
-      this.notify({ kind: 'failed', id: current.id, error: SEND_FAILURE_TOAST })
+    if (plan.next.state === 'failed') {
+      this.notify({ kind: 'failed', id: current.id, error: displayError })
       return false
     }
     this.notify({ kind: 'changed' })

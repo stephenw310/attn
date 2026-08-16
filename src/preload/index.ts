@@ -1,9 +1,10 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import type { ContactSearchResult } from '../shared/contacts'
 import type {
   Draft,
+  DraftAttachmentMutationResult,
   DraftInlineImageInput,
   DraftInlineImageResult,
   DraftKind,
@@ -22,7 +23,13 @@ import type {
   SyncState,
   ThreadRow
 } from '../shared/mail'
-import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from '../shared/outbox'
+import type {
+  OutboxChanged,
+  OutboxItem,
+  OutboxProgress,
+  QueueSendResult,
+  ReopenOutboxResult
+} from '../shared/outbox'
 
 function invoke<K extends InvokeChannel>(
   channel: K,
@@ -96,6 +103,16 @@ const api = {
     reopen: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftReopen, id),
     createReply: (threadId: string, kind: Exclude<DraftKind, 'new'>): Promise<Draft | null> =>
       invoke(IPC_CHANNELS.draftCreateReply, threadId, kind),
+    pickAttachments: (id: string): Promise<DraftAttachmentMutationResult> =>
+      invoke(IPC_CHANNELS.draftPickAttachments, id),
+    addDroppedFiles: (id: string, files: File[]): Promise<DraftAttachmentMutationResult> =>
+      invoke(
+        IPC_CHANNELS.draftAddAttachments,
+        id,
+        files.map((file) => webUtils.getPathForFile(file)).filter(Boolean)
+      ),
+    removeAttachment: (id: string, attachmentId: string): Promise<DraftAttachmentMutationResult> =>
+      invoke(IPC_CHANNELS.draftRemoveAttachment, id, attachmentId),
     addInlineImage: (id: string, image: DraftInlineImageInput): Promise<DraftInlineImageResult> =>
       invoke(IPC_CHANNELS.draftAddInlineImage, id, image),
     getInlineImage: (id: string, contentId: string): Promise<InlineImageResult> =>
@@ -115,6 +132,11 @@ const api = {
       const listener = (_event: unknown, change: OutboxChanged): void => cb(change)
       ipcRenderer.on(IPC_CHANNELS.outboxChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.outboxChanged, listener)
+    },
+    onProgress: (cb: (progress: OutboxProgress | null) => void): (() => void) => {
+      const listener = (_event: unknown, progress: OutboxProgress | null): void => cb(progress)
+      ipcRenderer.on(IPC_CHANNELS.outboxProgress, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.outboxProgress, listener)
     }
   },
   sync: {

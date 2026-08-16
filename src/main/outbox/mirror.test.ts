@@ -1,15 +1,17 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
-import type { StoredDraftAttachment } from './draftAttachments'
+import { draftAttachmentsForMirror, type StoredDraftAttachment } from './draftAttachments'
 import {
   deleteDraftCheckpoint,
   drainDraftMirrors,
+  isRetryableAttachmentFilesystemError,
   loadDraftMimeAttachments,
+  prepareDraftMimeAttachments,
   saveDraftCheckpoint
 } from './mirror'
 
@@ -61,6 +63,12 @@ describe('draft mirror attachments', () => {
     spoolPath
   })
 
+  it('distinguishes retryable filesystem failures from a missing owned file', () => {
+    expect(isRetryableAttachmentFilesystemError({ code: 'EACCES' })).toBe(true)
+    expect(isRetryableAttachmentFilesystemError({ code: 'EIO' })).toBe(true)
+    expect(isRetryableAttachmentFilesystemError({ code: 'ENOENT' })).toBe(false)
+  })
+
   it('rejects a stored path outside the owning draft directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'attn-mirror-'))
     const outside = join(root, 'secret.txt')
@@ -89,6 +97,43 @@ describe('draft mirror attachments', () => {
     expect(Buffer.from(loaded[0].content).toString()).toBe('data')
   })
 
+  it('keeps main-owned spool paths out of missing-file errors before and during streaming', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'attn-mirror-'))
+    const draftRoot = join(root, 'draft-1')
+    const path = join(draftRoot, 'notes.pdf')
+    await mkdir(draftRoot)
+
+    const missingError = await prepareDraftMimeAttachments(
+      'draft-1',
+      [attachment(path)],
+      {} as MailActionProvider,
+      root
+    ).catch((error: unknown) => error)
+    expect(String(missingError)).toContain('local attachment unavailable: notes.pdf')
+    expect(String(missingError)).not.toContain(root)
+
+    await writeFile(path, 'data')
+    const [prepared] = await prepareDraftMimeAttachments(
+      'draft-1',
+      [attachment(path)],
+      {} as MailActionProvider,
+      root
+    )
+    await rm(path)
+    const streamError = await (async () => {
+      try {
+        for await (const _chunk of prepared.open()) {
+          // Drain the source to surface a late filesystem failure.
+        }
+      } catch (error) {
+        return error
+      }
+      return null
+    })()
+    expect(String(streamError)).toContain('local attachment unavailable: notes.pdf')
+    expect(String(streamError)).not.toContain(root)
+  })
+
   it('propagates shutdown cancellation while hydrating a remote attachment', async () => {
     const getAttachmentData = vi.fn(async () => Buffer.from('remote data').toString('base64url'))
     const controller = new AbortController()
@@ -110,9 +155,101 @@ describe('draft mirror attachments', () => {
       signal: controller.signal
     })
   })
+
+  it('keeps local file bytes out of autosave while retaining inline and remote MIME parts', () => {
+    const localFile = attachment('/owned/outbox/draft-1/notes.pdf')
+    const inline = { ...attachment('/owned/outbox/draft-1/image.png'), id: 'inline', inline: true }
+    const remote = {
+      ...attachment(''),
+      id: 'remote',
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    expect(draftAttachmentsForMirror([localFile, inline, remote]).map((item) => item.id)).toEqual([
+      'inline',
+      'remote'
+    ])
+  })
 })
 
 describe('draft mirror selection', () => {
+  it('re-reads rotated attachment locators before hydrating a remote-only part', async () => {
+    const stale = {
+      id: 'remote-1',
+      filename: 'report.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 4,
+      spoolPath: '',
+      remoteMessageId: 'old-message',
+      remoteAttachmentId: 'old-attachment'
+    }
+    const pending = vi
+      .fn()
+      .mockReturnValueOnce([
+        {
+          id: 'outbox-1',
+          state: 'drafted',
+          gmail_draft_id: 'gmail-1',
+          to_json: '[]',
+          cc_json: '[]',
+          bcc_json: '[]',
+          subject: 'Report',
+          body_html: '<p>see attached</p>',
+          body_text: 'see attached',
+          attachments_json: JSON.stringify([stale]),
+          thread_id: null,
+          in_reply_to: null,
+          references_json: '[]',
+          quote_html: '',
+          quote_text: '',
+          local_revision: 1
+        }
+      ])
+      .mockReturnValueOnce([])
+    const update = vi.fn(() => ({ changes: 1 }))
+    const db = {
+      prepare: vi.fn((sql: string) =>
+        sql.includes('SELECT id, state, gmail_draft_id')
+          ? { all: pending }
+          : { run: update, get: () => undefined }
+      )
+    } as unknown as Db
+    // Gmail replaced the draft's message on the previous checkpoint, so both
+    // ids differ from what the row still stores.
+    const getDraft = vi.fn(async () => ({
+      id: 'gmail-1',
+      message: {
+        id: 'new-message',
+        threadId: 'thread-1',
+        payload: {
+          mimeType: 'multipart/mixed',
+          parts: [
+            { mimeType: 'text/plain', body: { size: 0 } },
+            {
+              mimeType: 'application/pdf',
+              filename: 'report.pdf',
+              body: { attachmentId: 'new-attachment', size: 4 }
+            }
+          ]
+        }
+      }
+    }))
+    const getAttachmentData = vi.fn(async () => Buffer.from('data').toString('base64url'))
+    const saveDraft = vi.fn(async () => 'gmail-1')
+
+    await drainDraftMirrors(db, 'account', {
+      saveDraft,
+      getDraft,
+      getAttachmentData
+    } as unknown as MailActionProvider)
+
+    expect(getDraft).toHaveBeenCalledWith('gmail-1', { signal: undefined })
+    expect(getAttachmentData).toHaveBeenCalledWith('new-message', 'new-attachment')
+    expect(getAttachmentData).not.toHaveBeenCalledWith('old-message', 'old-attachment')
+    expect(saveDraft).toHaveBeenCalledOnce()
+  })
+
   it('mirrors a draft whose only meaningful authored content is HTML', async () => {
     const pending = vi
       .fn()

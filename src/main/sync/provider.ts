@@ -81,6 +81,25 @@ export interface ProviderRequestOptions {
   signal?: AbortSignal
 }
 
+export interface ProviderMimeUpload {
+  sizeBytes: number
+  open: () => AsyncIterable<Uint8Array>
+}
+
+export type ProviderDraftUpdate =
+  | {
+      id: string
+      raw: string
+      mime?: never
+      threadId?: string | null
+    }
+  | {
+      id: string
+      raw?: never
+      mime: ProviderMimeUpload
+      threadId?: string | null
+    }
+
 export interface MailActionProvider {
   modifyThread(threadId: string, add: string[], remove: string[]): Promise<void>
   trashThread(threadId: string): Promise<void>
@@ -95,11 +114,10 @@ export interface MailActionProvider {
     draft: { raw: string; threadId?: string | null },
     options?: ProviderRequestOptions
   ): Promise<string>
-  updateDraft?(
-    draft: { id: string; raw: string; threadId?: string | null },
-    options?: ProviderRequestOptions
-  ): Promise<string>
+  updateDraft?(draft: ProviderDraftUpdate, options?: ProviderRequestOptions): Promise<string>
   deleteDraft?(id: string, options?: ProviderRequestOptions): Promise<void>
+  /** Needed to re-read attachment locators, which rotate on every draft rewrite. */
+  getDraft?(id: string, options?: ProviderRequestOptions): Promise<ProviderDraft>
   getAttachmentData?(
     messageId: string,
     attachmentId: string,

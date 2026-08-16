@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
-import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
+import { resolve } from 'node:path'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  type OpenDialogOptions,
+  shell
+} from 'electron'
 import { isValidEmail } from '../shared/address'
 import type { AuthStatus } from '../shared/auth'
 import {
@@ -60,16 +68,11 @@ import {
 } from './outbox/drafts'
 import { addInlineImage, isSupportedInlineImageMimeType } from './outbox/inlineImages'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
-import {
-  listPendingOutbox,
-  pendingOutboxCount,
-  queueSend,
-  reopenPendingOutbox,
-  undoQueuedSend
-} from './outbox/queue'
+import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from './outbox/queue'
 import { planReply } from './outbox/replyPlan'
 import type { OutboxSender } from './outbox/sender'
-import { cleanOutboxSpool } from './outbox/spool'
+import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from './outbox/spool'
+import { isPathInside } from './pathSafety'
 import type { SnoozeScheduler } from './scheduler'
 import { hydrateMissingThreadBodies } from './sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from './sync/bodyHydration'
@@ -116,6 +119,7 @@ export interface IpcContext {
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
   waitForConversation: (threadId: string) => Promise<void>
+  pickAttachmentPaths?: () => Promise<string[]>
   draftInlineImageDelay: () => number
   consumeTestDraftSaveFailure: () => boolean
   testUserData: boolean
@@ -388,6 +392,49 @@ export function registerIpc(context: IpcContext): () => void {
     context.broadcastMailChanged()
     return getDraft(context.db, account, id)
   })
+  handle(IPC_CHANNELS.draftPickAttachments, async (event, id) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    let paths: string[]
+    if (context.pickAttachmentPaths) paths = await context.pickAttachmentPaths()
+    else {
+      const options: OpenDialogOptions = {
+        properties: ['openFile', 'multiSelections'],
+        title: 'Attach files'
+      }
+      const parent = BrowserWindow.fromWebContents(event.sender)
+      paths = (await (parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options)))
+        .filePaths
+    }
+    return spoolDraftAttachments(context.db, app.getPath('userData'), requireAccount(context), id, paths)
+  })
+  handle(IPC_CHANNELS.draftAddAttachments, async (_event, id, paths) => {
+    if (
+      typeof id !== 'string' ||
+      id.length === 0 ||
+      !Array.isArray(paths) ||
+      !paths.every((path) => typeof path === 'string' && path.length > 0)
+    ) {
+      throw new Error('invalid attachments')
+    }
+    return spoolDraftAttachments(context.db, app.getPath('userData'), requireAccount(context), id, paths)
+  })
+  handle(IPC_CHANNELS.draftRemoveAttachment, async (_event, id, attachmentId) => {
+    if (
+      typeof id !== 'string' ||
+      id.length === 0 ||
+      typeof attachmentId !== 'string' ||
+      attachmentId.length === 0
+    ) {
+      throw new Error('invalid attachment')
+    }
+    return removeDraftAttachment(
+      context.db,
+      app.getPath('userData'),
+      requireAccount(context),
+      id,
+      attachmentId
+    )
+  })
   handle(IPC_CHANNELS.draftAddInlineImage, async (_event, id, image) => {
     if (typeof id !== 'string' || id.length === 0 || !isDraftInlineImageInput(image)) {
       throw new Error('invalid inline image')
@@ -420,8 +467,7 @@ export function registerIpc(context: IpcContext): () => void {
       if (attachment.spoolPath) {
         const spoolRoot = resolve(app.getPath('userData'), 'outbox', id)
         const candidate = resolve(attachment.spoolPath)
-        const relativePath = relative(spoolRoot, candidate)
-        if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+        if (!isPathInside(spoolRoot, candidate)) {
           return { error: 'Inline image unavailable' }
         }
         data = await readFile(candidate)
@@ -671,7 +717,7 @@ export function registerIpc(context: IpcContext): () => void {
   })
   handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
     const account = context.currentAccountId()
-    return account ? pendingActionCount(context.db, account) + pendingOutboxCount(context.db, account) : 0
+    return account ? pendingActionCount(context.db, account) : 0
   })
   return () => bodyHydrator.stop()
 }

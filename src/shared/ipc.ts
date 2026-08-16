@@ -3,6 +3,7 @@ import type { AuthStatus } from './auth'
 import type { ContactSearchResult } from './contacts'
 import type {
   Draft,
+  DraftAttachmentMutationResult,
   DraftInlineImageInput,
   DraftInlineImageResult,
   DraftKind,
@@ -32,6 +33,9 @@ export const IPC_CHANNELS = {
   draftList: 'draft:list',
   draftReopen: 'draft:reopen',
   draftCreateReply: 'draft:createReply',
+  draftPickAttachments: 'draft:pickAttachments',
+  draftAddAttachments: 'draft:addAttachments',
+  draftRemoveAttachment: 'draft:removeAttachment',
   draftAddInlineImage: 'draft:addInlineImage',
   draftGetInlineImage: 'draft:getInlineImage',
   draftClose: 'draft:close',
@@ -43,6 +47,7 @@ export const IPC_CHANNELS = {
   outboxReopen: 'outbox:reopen',
   outboxListPending: 'outbox:listPending',
   outboxChanged: 'outbox:changed',
+  outboxProgress: 'outbox:progress',
   syncGetState: 'sync:getState',
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
@@ -80,6 +85,7 @@ export const TEST_CHANNELS = {
   updateMessageBody: 'attn:test:updateMessageBody',
   failNextDraftSave: 'attn:test:failNextDraftSave',
   markDraftMirrored: 'attn:test:markDraftMirrored',
+  setAttachmentPickerFiles: 'attn:test:setAttachmentPickerFiles',
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',
   remoteDraft: 'attn:test:remoteDraft',
@@ -103,6 +109,18 @@ export interface InvokeChannels {
   [IPC_CHANNELS.draftCreateReply]: {
     args: [threadId: string, kind: Exclude<DraftKind, 'new'>]
     result: Draft | null
+  }
+  [IPC_CHANNELS.draftPickAttachments]: {
+    args: [id: string]
+    result: DraftAttachmentMutationResult
+  }
+  [IPC_CHANNELS.draftAddAttachments]: {
+    args: [id: string, paths: string[]]
+    result: DraftAttachmentMutationResult
+  }
+  [IPC_CHANNELS.draftRemoveAttachment]: {
+    args: [id: string, attachmentId: string]
+    result: DraftAttachmentMutationResult
   }
   [IPC_CHANNELS.draftAddInlineImage]: {
     args: [id: string, image: DraftInlineImageInput]
@@ -152,6 +170,7 @@ export interface InvokeChannels {
 
 export interface BroadcastChannels {
   [IPC_CHANNELS.outboxChanged]: OutboxChanged
+  [IPC_CHANNELS.outboxProgress]: import('./outbox').OutboxProgress | null
   [IPC_CHANNELS.mailChanged]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined

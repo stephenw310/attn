@@ -5,7 +5,7 @@ import appIcon from '../../resources/icon.png?asset'
 import type { AuthStatus } from '../shared/auth'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
-import type { OutboxChanged } from '../shared/outbox'
+import type { OutboxChanged, OutboxProgress } from '../shared/outbox'
 import { clearUndo } from './actions'
 import { ActionExecutor } from './actions/executor'
 import { oauthConfigSearchDirs } from './auth/configPaths'
@@ -21,7 +21,7 @@ import { MailNotifier, type PendingFocus } from './notify'
 import { reconcileRemoteDraft } from './outbox/draftSync'
 import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import { OutboxSender } from './outbox/sender'
-import { cleanOutboxSpool } from './outbox/spool'
+import { cleanOutboxSpool, reconcileOutboxSpool } from './outbox/spool'
 import { SnoozeScheduler } from './scheduler'
 import { writeSetting } from './settings'
 import { runLifetimeSweep } from './sync/lifetimeSweep'
@@ -66,7 +66,9 @@ let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
 let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
+let testAttachmentPickerPaths: string[] | null = null
 let signInInFlight = false
+let teardownPromise: Promise<void> | null = null
 const foregroundProviderWork = new Map<string, number>()
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
@@ -81,6 +83,10 @@ function broadcastMailChanged(): void {
 function broadcastOutboxChanged(change: OutboxChanged): void {
   broadcast(IPC_CHANNELS.outboxChanged, change)
   mailNotifier?.updateBadge()
+}
+
+function broadcastOutboxProgress(progress: OutboxProgress | null): void {
+  broadcast(IPC_CHANNELS.outboxProgress, progress)
 }
 
 function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
@@ -242,6 +248,9 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     if (shouldShow) win.show()
   })
   attachBackgroundWindow(win)
+  // A file dropped outside the composer's drop target must never replace the
+  // sandboxed renderer with file:// content (or navigate it anywhere else).
+  win.webContents.on('will-navigate', (event) => event.preventDefault())
   // All external links open in the system browser, never in-app (SPEC §6).
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
@@ -252,7 +261,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   return win
 }
 
-function initialize(): void {
+async function initialize(): Promise<void> {
   const dbPath = join(app.getPath('userData'), 'attn.db')
   db = openDatabase(dbPath)
   console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
@@ -265,6 +274,13 @@ function initialize(): void {
     console.log(`[sync] backfill stages skipped for seeded account ${seedAccountId}`)
   }
   const activeDb = db
+  await reconcileOutboxSpool(activeDb, app.getPath('userData'))
+  // Quitting during that await runs teardown to completion, including
+  // db.close(). Everything below would then build on a closed handle.
+  if (db !== activeDb) {
+    console.log('[boot] aborted: shutdown ran while reconciling the outbox spool')
+    return
+  }
   syncController = new SyncController({
     db: activeDb,
     currentAccountId,
@@ -303,6 +319,13 @@ function initialize(): void {
       pendingFocus = null
     },
     waitForConversation,
+    pickAttachmentPaths: testUserData
+      ? async () => {
+          const paths = testAttachmentPickerPaths ?? []
+          testAttachmentPickerPaths = null
+          return paths
+        }
+      : undefined,
     draftInlineImageDelay: () => testDraftInlineImageDelayMs,
     consumeTestDraftSaveFailure: () => {
       if (testDraftSaveFailures === 0) return false
@@ -325,10 +348,11 @@ function initialize(): void {
     currentAccountId,
     makeCurrentProvider,
     broadcastOutboxChanged,
-    () => draftMirrorExecutor?.waitForIdle() ?? Promise.resolve(),
+    (signal) => draftMirrorExecutor?.waitForIdle(signal) ?? Promise.resolve(),
     undefined,
     join(app.getPath('userData'), 'outbox'),
-    (id) => cleanOutboxSpool(app.getPath('userData'), id)
+    (id) => cleanOutboxSpool(app.getPath('userData'), id),
+    broadcastOutboxProgress
   )
   snoozeScheduler = new SnoozeScheduler(
     activeDb,
@@ -409,6 +433,11 @@ function registerTestIpc(): void {
   )
   ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
     testDraftSaveFailures++
+  })
+  ipcMain.on(TEST_CHANNELS.setAttachmentPickerFiles, (_event, paths: unknown) => {
+    testAttachmentPickerPaths = Array.isArray(paths)
+      ? paths.filter((path): path is string => typeof path === 'string')
+      : []
   })
   ipcMain.on(
     TEST_CHANNELS.markDraftMirrored,
@@ -568,7 +597,13 @@ function registerTestIpc(): void {
   )
 }
 
-function teardown(): void {
+function teardown(): Promise<void> {
+  if (teardownPromise) return teardownPromise
+  teardownPromise = teardownOwnedResources()
+  return teardownPromise
+}
+
+async function teardownOwnedResources(): Promise<void> {
   // Invoke handlers close over process-owned resources, so remove them before
   // stopping those resources. Iterating the channel map keeps this exhaustive.
   for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel)
@@ -579,10 +614,8 @@ function teardown(): void {
   powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
   actionExecutor?.stop()
   actionExecutor = null
-  void draftMirrorExecutor?.stop()
-  draftMirrorExecutor = null
-  void outboxSender?.stop()
-  outboxSender = null
+  const mirror = draftMirrorExecutor
+  const sender = outboxSender
   snoozeScheduler?.stop()
   snoozeScheduler = null
   mailNotifier?.stop()
@@ -590,6 +623,18 @@ function teardown(): void {
   for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
   testDraftSaveFailures = 0
   testDraftInlineImageDelayMs = 0
+  testAttachmentPickerPaths = null
+  const stopped = await Promise.allSettled([
+    mirror?.stop() ?? Promise.resolve(),
+    sender?.stop() ?? Promise.resolve()
+  ])
+  for (const result of stopped) {
+    if (result.status === 'rejected') {
+      console.error(`[shutdown] worker stop failed: ${String(result.reason)}`)
+    }
+  }
+  draftMirrorExecutor = null
+  outboxSender = null
   db?.close()
   db = null
 }
@@ -609,29 +654,25 @@ else {
     event.preventDefault()
     if (preparingQuit) return
     preparingQuit = true
-    // Give active draft/outbox mutations a bounded grace period to persist their
-    // recovery state before will-quit closes SQLite.
-    void Promise.all([
-      draftMirrorExecutor?.stop() ?? Promise.resolve(),
-      outboxSender?.stop() ?? Promise.resolve()
-    ]).finally(() => {
+    // Gmail draft creation is not idempotent. Quiesce both workers before
+    // teardown closes SQLite, then stop before either can select another row.
+    void teardown().finally(() => {
       quitPrepared = true
       app.quit()
     })
   })
   app.on('second-instance', () => showMainWindow())
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     if (process.platform === 'darwin') app.dock?.setIcon(appIcon)
     try {
-      initialize()
+      await initialize()
     } catch (error) {
       console.error(`[boot] failed: ${error instanceof Error ? error.message : String(error)}`)
-      teardown()
-      app.exit(1)
+      void teardown().finally(() => app.exit(1))
     }
   })
   // Deliberately keep the process alive with no windows so sync and
   // notifications continue running in the background on every platform.
   app.on('window-all-closed', () => {})
-  app.on('will-quit', teardown)
+  app.on('will-quit', () => void teardown())
 }

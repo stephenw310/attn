@@ -8,6 +8,25 @@ import { drainDraftMirrors } from './mirror'
 type MirrorDrain = typeof drainDraftMirrors
 const STOP_TIMEOUT_MS = 5_000
 
+function waitForAbortable(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('request aborted'))
+  return new Promise((resolve, reject) => {
+    const abort = (): void => reject(signal.reason ?? new Error('request aborted'))
+    signal.addEventListener('abort', abort, { once: true })
+    void promise.then(
+      () => {
+        signal.removeEventListener('abort', abort)
+        resolve()
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', abort)
+        reject(error)
+      }
+    )
+  })
+}
+
 export class DraftMirrorExecutor {
   private drainPromise: Promise<void> | null = null
   private remoteAbortController: AbortController | null = null
@@ -58,8 +77,8 @@ export class DraftMirrorExecutor {
   }
 
   /** Let a queued send wait for any checkpoint that already selected its row. */
-  waitForIdle(): Promise<void> {
-    return this.drainPromise ?? Promise.resolve()
+  waitForIdle(signal?: AbortSignal): Promise<void> {
+    return waitForAbortable(this.drainPromise ?? Promise.resolve(), signal)
   }
 
   private async drain(): Promise<void> {

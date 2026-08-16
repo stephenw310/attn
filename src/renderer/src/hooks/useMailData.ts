@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
-import type { OutboxChanged, OutboxItem } from '../../../shared/outbox'
+import type { OutboxChanged, OutboxItem, OutboxProgress } from '../../../shared/outbox'
 import { refreshedSelectionIndex } from '../selection'
 
 interface MailDataState {
@@ -13,11 +13,12 @@ interface MailDataState {
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
   outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
+  outboxProgress: OutboxProgress | null
   clearOutboxFailure: () => void
   refreshDrafts: () => Promise<void>
   realUnreadTotal: number | null
   labels: MailLabel[]
-  pendingCount: number
+  pendingActionCount: number
   mailRevision: number
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
@@ -37,9 +38,10 @@ export function useMailData(
   const [realDrafts, setRealDrafts] = useState<Draft[]>([])
   const [realOutbox, setRealOutbox] = useState<OutboxItem[]>([])
   const [outboxFailure, setOutboxFailure] = useState<Extract<OutboxChanged, { kind: 'failed' }> | null>(null)
+  const [outboxProgress, setOutboxProgress] = useState<OutboxProgress | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
-  const [pendingCount, setPendingCount] = useState(0)
+  const [pendingActionCount, setPendingActionCount] = useState(0)
   const [mailRevision, setMailRevision] = useState(0)
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
@@ -74,9 +76,10 @@ export function useMailData(
     setRealDrafts([])
     setRealOutbox([])
     setOutboxFailure(null)
+    setOutboxProgress(null)
     setRealUnreadTotal(null)
     setLabels([])
-    setPendingCount(0)
+    setPendingActionCount(0)
     setMailRevision(0)
     preserveSelectionOnRefreshRef.current = true
     const bridge = window.attn
@@ -130,9 +133,14 @@ export function useMailData(
           setRealSnoozedThreads(snoozed)
           setRealDrafts(drafts)
           setRealOutbox(outbox)
+          setOutboxProgress((current) =>
+            current && outbox.some((item) => item.id === current.id && item.state === 'sending')
+              ? current
+              : null
+          )
           setLabels(nextLabels)
           setRealUnreadTotal(unread)
-          setPendingCount(pending)
+          setPendingActionCount(pending)
         })
         .catch(() => {})
     }
@@ -143,14 +151,15 @@ export function useMailData(
     })
     const offOutbox = bridge.outbox.onChanged((change) => {
       if (change.kind === 'failed') setOutboxFailure(change)
-      mailChangedPending = true
       refresh()
     })
+    const offProgress = bridge.outbox.onProgress(setOutboxProgress)
     return () => {
       cancelled = true
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
       offOutbox()
+      offProgress()
     }
   }, [activeAccount, activeViewRef, selectedDraftIdRef, selectedThreadIdRef, setSelectedIndex])
 
@@ -169,11 +178,12 @@ export function useMailData(
     realDrafts,
     realOutbox,
     outboxFailure,
+    outboxProgress,
     clearOutboxFailure,
     refreshDrafts,
     realUnreadTotal,
     labels,
-    pendingCount,
+    pendingActionCount,
     mailRevision,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
