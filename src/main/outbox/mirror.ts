@@ -7,6 +7,7 @@ import type { MailActionProvider } from '../sync/provider'
 import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import { type DraftMimeAttachment, encodeDraftMessage } from './draftMime'
 import { draftContentFingerprint } from './draftSync'
+import { isEmptyDraft } from './drafts'
 
 interface DraftMirrorRow {
   id: string
@@ -32,7 +33,7 @@ function parseJson<T>(value: string): T {
 }
 
 function nextPending(db: Db, accountId: string): DraftMirrorRow | undefined {
-  return db
+  const rows = db
     .prepare(
       `SELECT id, state, gmail_draft_id, to_json, cc_json, bcc_json, subject, body_html,
               body_text, attachments_json, thread_id, in_reply_to, references_json, quote_html,
@@ -40,15 +41,33 @@ function nextPending(db: Db, accountId: string): DraftMirrorRow | undefined {
        FROM outbox
        WHERE account_id = ? AND (
          state = 'discarding' OR
-         (state IN ('composing', 'drafted') AND local_revision > mirror_revision AND NOT (
-           to_json = '[]' AND cc_json = '[]' AND bcc_json = '[]' AND subject = '' AND
-           body_text = '' AND attachments_json = '[]'
-         ))
+         (state IN ('composing', 'drafted') AND local_revision > mirror_revision)
        )
        ORDER BY CASE state WHEN 'discarding' THEN 0 ELSE 1 END, updated_at
-       LIMIT 1`
+      `
     )
-    .get(accountId) as DraftMirrorRow | undefined
+    .all(accountId) as DraftMirrorRow[]
+  return rows.find(
+    (row) =>
+      row.state === 'discarding' ||
+      !isEmptyDraft({
+        id: row.id,
+        kind: 'new',
+        to: parseJson<MailAddress[]>(row.to_json),
+        cc: parseJson<MailAddress[]>(row.cc_json),
+        bcc: parseJson<MailAddress[]>(row.bcc_json),
+        subject: row.subject,
+        bodyHtml: row.body_html,
+        bodyText: row.body_text,
+        attachments: parseStoredDraftAttachments(row.attachments_json),
+        threadId: row.thread_id,
+        sourceMessageId: null,
+        inReplyTo: row.in_reply_to,
+        references: parseJson<string[]>(row.references_json),
+        quoteHtml: row.quote_html,
+        quoteText: row.quote_text
+      })
+  )
 }
 
 export async function saveDraftCheckpoint(

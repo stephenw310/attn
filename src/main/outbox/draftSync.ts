@@ -83,6 +83,7 @@ interface LocalSyncRow {
   mirror_revision: number
   updated_at: number
   remote_fingerprint: string | null
+  attachments_json: string
   matchedCurrentContent?: boolean
 }
 
@@ -93,7 +94,6 @@ interface UnboundLocalSyncRow extends LocalSyncRow {
   subject: string
   body_html: string
   body_text: string
-  attachments_json: string
   thread_id: string
   in_reply_to: string | null
   references_json: string
@@ -103,6 +103,7 @@ interface UnboundLocalSyncRow extends LocalSyncRow {
 
 export interface ParsedRemoteDraft {
   input: DraftSaveInput
+  storedAttachments: StoredDraftAttachment[]
   gmailDraftId: string
   gmailMessageId: string
   updatedAt: number
@@ -197,6 +198,7 @@ export async function parseRemoteDraft(
   }
   return {
     input,
+    storedAttachments: attachments,
     gmailDraftId: remote.id,
     gmailMessageId: message.id,
     updatedAt: Number(message.internalDate ?? 0) || now,
@@ -207,7 +209,8 @@ export async function parseRemoteDraft(
 function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): LocalSyncRow | undefined {
   const byId = db
     .prepare(
-      `SELECT id, state, kind, local_revision, mirror_revision, updated_at, remote_fingerprint
+      `SELECT id, state, kind, local_revision, mirror_revision, updated_at, remote_fingerprint,
+              attachments_json
        FROM outbox WHERE account_id = ? AND gmail_draft_id = ? AND state IN ('composing', 'drafted')`
     )
     .get(accountId, remote.gmailDraftId) as LocalSyncRow | undefined
@@ -282,7 +285,7 @@ function writeRemoteDraft(
     input.subject,
     input.bodyHtml,
     input.bodyText,
-    JSON.stringify(input.attachments),
+    JSON.stringify(remote.storedAttachments),
     input.threadId,
     input.sourceMessageId,
     input.inReplyTo,
@@ -295,6 +298,28 @@ function writeRemoteDraft(
     revision,
     remote.updatedAt,
     remote.fingerprint
+  )
+}
+
+function refreshRemoteAttachmentLocators(stored: string, remote: readonly StoredDraftAttachment[]): string {
+  const local = parseStoredDraftAttachments(stored)
+  if (local.length !== remote.length) return stored
+  return JSON.stringify(
+    local.map((attachment, index) => {
+      const replacement = remote[index]
+      const {
+        remoteMessageId: _remoteMessageId,
+        remoteAttachmentId: _remoteAttachmentId,
+        remoteInlineData: _remoteInlineData,
+        ...owned
+      } = attachment
+      return {
+        ...owned,
+        ...(replacement.remoteMessageId ? { remoteMessageId: replacement.remoteMessageId } : {}),
+        ...(replacement.remoteAttachmentId ? { remoteAttachmentId: replacement.remoteAttachmentId } : {}),
+        ...(replacement.remoteInlineData ? { remoteInlineData: replacement.remoteInlineData } : {})
+      }
+    })
   )
 }
 
@@ -313,12 +338,15 @@ export async function reconcileRemoteDraft(
     return 'remote'
   }
   if (local.matchedCurrentContent) {
+    const attachments = refreshRemoteAttachmentLocators(local.attachments_json, remote.storedAttachments)
     db.prepare(
       `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?, mirror_revision = local_revision,
-       remote_updated_at = ?, remote_fingerprint = ? WHERE account_id = ? AND id = ?`
+       attachments_json = ?, remote_updated_at = ?, remote_fingerprint = ?
+       WHERE account_id = ? AND id = ?`
     ).run(
       remote.gmailDraftId,
       remote.gmailMessageId,
+      attachments,
       remote.updatedAt,
       remote.fingerprint,
       accountId,
@@ -336,10 +364,11 @@ export async function reconcileRemoteDraft(
   })
   if (decision === 'remote') writeRemoteDraft(db, accountId, remote, local)
   else if (decision === 'local' && local.remote_fingerprint === remote.fingerprint) {
+    const attachments = refreshRemoteAttachmentLocators(local.attachments_json, remote.storedAttachments)
     db.prepare(
-      `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?, remote_updated_at = ?
+      `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?, attachments_json = ?, remote_updated_at = ?
        WHERE account_id = ? AND id = ?`
-    ).run(remote.gmailDraftId, remote.gmailMessageId, remote.updatedAt, accountId, local.id)
+    ).run(remote.gmailDraftId, remote.gmailMessageId, attachments, remote.updatedAt, accountId, local.id)
   }
   return decision
 }

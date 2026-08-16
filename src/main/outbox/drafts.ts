@@ -98,7 +98,8 @@ export function listDrafts(db: Db, accountId: string): Draft[] {
        WHERE account_id = ? AND state IN ('composing', 'drafted')
          AND NOT (
            to_json = '[]' AND cc_json = '[]' AND bcc_json = '[]' AND subject = '' AND
-           body_html = '' AND body_text = '' AND attachments_json = '[]' AND quote_html = ''
+           body_html = '' AND body_text = '' AND attachments_json = '[]' AND quote_html = '' AND
+           quote_text = ''
          )
        ORDER BY updated_at DESC, created_at DESC, id`
     )
@@ -208,7 +209,8 @@ export function isEmptyDraft(draft: DraftSaveInput): boolean {
     draft.bodyText.length === 0 &&
     !meaningfulHtml &&
     draft.attachments.length === 0 &&
-    draft.quoteHtml.length === 0
+    draft.quoteHtml.length === 0 &&
+    draft.quoteText.length === 0
   )
 }
 
@@ -284,13 +286,25 @@ export function saveDraft(db: Db, accountId: string, input: DraftSaveInput, now 
 export function requestDraftMirror(db: Db, accountId: string, draftId: string): boolean {
   const draft = db
     .prepare(
-      `SELECT to_json, cc_json, bcc_json, subject, body_text, attachments_json
+      `SELECT to_json, cc_json, bcc_json, subject, body_html, body_text, attachments_json,
+              quote_html, quote_text
        FROM outbox
        WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')
          AND local_revision > mirror_revision`
     )
     .get(accountId, draftId) as
-    | Pick<DraftRow, 'to_json' | 'cc_json' | 'bcc_json' | 'subject' | 'body_text' | 'attachments_json'>
+    | Pick<
+        DraftRow,
+        | 'to_json'
+        | 'cc_json'
+        | 'bcc_json'
+        | 'subject'
+        | 'body_html'
+        | 'body_text'
+        | 'attachments_json'
+        | 'quote_html'
+        | 'quote_text'
+      >
     | undefined
   if (
     !draft ||
@@ -300,7 +314,7 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
       cc: parseJson<MailAddress[]>(draft.cc_json),
       bcc: parseJson<MailAddress[]>(draft.bcc_json),
       subject: draft.subject,
-      bodyHtml: '',
+      bodyHtml: draft.body_html,
       bodyText: draft.body_text,
       attachments: publicDraftAttachments(parseStoredDraftAttachments(draft.attachments_json)),
       threadId: null,
@@ -308,8 +322,8 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
       references: [],
       kind: 'new',
       sourceMessageId: null,
-      quoteHtml: '',
-      quoteText: ''
+      quoteHtml: draft.quote_html,
+      quoteText: draft.quote_text
     })
   ) {
     return false
