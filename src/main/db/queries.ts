@@ -58,6 +58,7 @@ export function listInboxThreads(db: Db, accountId: string, limit = 300): Thread
                        AND o.state IN ('composing', 'drafted')) AS has_draft
        FROM threads t
        WHERE t.account_id = ?
+         AND t.is_inbox_visible = 1
          AND EXISTS (SELECT 1 FROM thread_labels tl
                      WHERE tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX')
        ORDER BY t.last_msg_at DESC
@@ -160,6 +161,7 @@ export function countInboxUnread(db: Db, accountId: string): number {
       `SELECT COUNT(*) AS count
        FROM threads t
        WHERE t.account_id = ?
+         AND t.is_inbox_visible = 1
          AND t.is_unread = 1
          AND EXISTS (SELECT 1 FROM thread_labels tl
                      WHERE tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX')`

@@ -3,10 +3,11 @@ import type { Db } from '../db'
 import { nonDraftMessages, pruneMissingMessages } from './persist'
 
 describe('thread snapshot persistence', () => {
-  it('excludes Gmail draft messages from the ordinary conversation snapshot', () => {
+  it('excludes Gmail draft and legacy Chat messages from the ordinary conversation snapshot', () => {
     const real = { id: 'sent', threadId: 'thread', labelIds: ['SENT'], snippet: 'Sent copy' }
     const draft = { id: 'draft', threadId: 'thread', labelIds: ['DRAFT'], snippet: 'Unsent copy' }
-    expect(nonDraftMessages([real, draft])).toEqual([real])
+    const chat = { id: 'chat', threadId: 'thread', labelIds: ['CHAT'], snippet: 'Legacy chat' }
+    expect(nonDraftMessages([real, draft, chat])).toEqual([real])
   })
 
   it('prunes messages absent from the latest surviving thread snapshot', () => {

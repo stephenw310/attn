@@ -195,6 +195,11 @@ export class OutboxSender {
     return this.drainPromise
   }
 
+  /** True only while send recovery or delivery is active, not while an undo/retry timer is idle. */
+  isRunning(): boolean {
+    return this.drainPromise !== null
+  }
+
   async stop(): Promise<void> {
     this.stopping = true
     if (this.timer) this.time.timers.clearTimeout(this.timer)

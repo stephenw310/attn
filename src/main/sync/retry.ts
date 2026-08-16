@@ -15,8 +15,11 @@ export function syncRetryRoute({
 }): SyncRetryRoute {
   if (!signedIn) return 'none'
   if (seeded) return 'seed'
+  // The poller starts at interactive-ready, so an alive poller no longer
+  // implies the backfill finished — check the backfill first.
+  if (backfillRunning) return 'queue-backfill'
   if (hasPoller) return 'poller'
-  return backfillRunning ? 'queue-backfill' : 'start-backfill'
+  return 'start-backfill'
 }
 
 export class OfflineRetryScheduler {

@@ -82,7 +82,8 @@ export const TEST_CHANNELS = {
   markDraftMirrored: 'attn:test:markDraftMirrored',
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',
-  remoteDraft: 'attn:test:remoteDraft'
+  remoteDraft: 'attn:test:remoteDraft',
+  runLifetimeSweep: 'attn:test:runLifetimeSweep'
 } as const
 
 export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]

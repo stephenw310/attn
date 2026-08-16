@@ -93,12 +93,23 @@ export interface InlineImageRepairRequest {
   threadId: string
 }
 
-export type SyncStage = 'metadata' | 'bodies' | 'drafts' | 'sent' | 'reconcile'
+export type SyncStage = 'metadata' | 'bodies' | 'drafts' | 'all-mail' | 'spam' | 'trash' | 'reconcile'
 
 export type SyncState =
   | { phase: 'idle' }
   // An incremental history poll, not a staged backfill: no stage, no progress.
   | { phase: 'checking' }
   | { phase: 'syncing'; stage: SyncStage; threadsDone: number }
+  | {
+      phase: 'indexing'
+      stage: 'lifetime'
+      threadsDone: number
+      threadsTotal?: number
+      messagesTotal?: number
+      etaMs?: number
+      reason: 'running' | 'quota-wait' | 'foreground-yield' | 'retry-wait' | 'paused'
+      waitMs?: number
+      message?: string
+    }
   | { phase: 'offline'; message: string }
   | { phase: 'error'; message: string }

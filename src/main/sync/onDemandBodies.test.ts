@@ -89,6 +89,32 @@ describe('OnDemandBodyHydrator', () => {
     expect(hydrator.state('account@example.com', 'thread-1')).toBe('idle')
   })
 
+  it('marks a coalesced provider request as foreground work exactly once', async () => {
+    const fetched = deferred<GmailThread>()
+    const trackedAccounts: string[] = []
+    const trackProviderWork = async <T>(accountId: string, work: () => Promise<T>): Promise<T> => {
+      trackedAccounts.push(accountId)
+      return work()
+    }
+    const hydrator = new OnDemandBodyHydrator(
+      {} as Db,
+      () => 'account@example.com',
+      vi.fn(),
+      vi.fn(),
+      systemTime,
+      effects(vi.fn(() => new Set<string>())),
+      trackProviderWork
+    )
+    const mail = provider(vi.fn(() => fetched.promise))
+
+    const first = hydrator.request('account@example.com', 'thread-1', mail)
+    const second = hydrator.request('account@example.com', 'thread-1', mail)
+    fetched.resolve(thread)
+    await Promise.all([first, second])
+
+    expect(trackedAccounts).toEqual(['account@example.com'])
+  })
+
   it('marks a successful bodyless fetch unavailable without broadcasting a mail refresh', async () => {
     const onUnavailable = vi.fn()
     const onChanged = vi.fn()

@@ -4,18 +4,37 @@ import { GmailMailProvider } from './provider'
 
 describe('GmailMailProvider.listThreadIds', () => {
   it('passes explicit labels without silently adding INBOX', async () => {
-    const get = vi.fn(async () => ({ threads: [{ id: 'sent-1' }] }))
+    const get = vi.fn(async () => ({ threads: [{ id: 'sent-1' }], resultSizeEstimate: 42 }))
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
 
     await expect(
       provider.listThreadIds({ labelIds: ['SENT'], q: 'newer_than:12m', pageToken: 'next' })
-    ).resolves.toEqual({ threadIds: ['sent-1'], nextPageToken: undefined })
+    ).resolves.toEqual({
+      threadIds: ['sent-1'],
+      nextPageToken: undefined,
+      resultSizeEstimate: 42
+    })
     expect(get).toHaveBeenCalledWith('/threads', {
       maxResults: '100',
       q: 'newer_than:12m',
       labelIds: ['SENT'],
       pageToken: 'next'
     })
+  })
+
+  it('requests Spam/Trash inclusion only when asked', async () => {
+    const get = vi.fn(async () => ({ threads: [] }))
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+
+    await provider.listThreadIds({ labelIds: ['SPAM'], includeSpamTrash: true })
+    expect(get).toHaveBeenCalledWith('/threads', {
+      maxResults: '100',
+      labelIds: ['SPAM'],
+      includeSpamTrash: 'true'
+    })
+
+    await provider.listThreadIds({})
+    expect(get).toHaveBeenLastCalledWith('/threads', { maxResults: '100' })
   })
 })
 
