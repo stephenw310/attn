@@ -262,6 +262,13 @@ them too.
   Gmail supplies one" that F2's footer language promises. Footer state: **Live · indexing older mail** with
   processed/estimated counts and an explicit quota-wait state; quitting or losing connectivity resumes from
   the last durable page.
+- **Relationship to M3's all-mail stage (S3).** This sweep has no date bound, so until S3 lands it is the
+  only path to archived mail of *any* age — in M2 it effectively covers the whole account, newest-first, at
+  throttled speed. S3 later promotes the most recent 12 months into a normal-priority stage that runs ahead
+  of this one, so a fresh install gets its useful year in minutes instead of trickling in behind the
+  throttle; skip-if-present then keeps the two from fetching anything twice, and this task's code does not
+  change when that happens. The one thing this sweep can never reach is Spam and Trash — unfiltered
+  listings exclude both — which is why S3 adds explicit label stages rather than widening this walk.
 - Optional, decide at implementation: a listing-only `q=has:attachment` walk (ids only, ~1% of sweep cost)
   can set the thread-level attachment flag lifetime-wide; header-only threads otherwise gain attachment
   metadata on first hydration (F2).

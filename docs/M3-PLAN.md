@@ -129,6 +129,21 @@ lifetime sweep. One behavioral difference from today's dedicated SENT pass is wo
 now arrive interleaved by recency instead of as one contiguous block, which suits the ranking formula's
 90-day recency half-life but means "all my sent contacts" is complete only at the end of the stage.
 
+### What this adds over T13A's sweep
+
+T13A (M2) already walks the account unfiltered and unbounded, so it reaches everything stage 4 would — the
+delta here is **priority and reach, not existence**. Three things change:
+
+1. **The useful year is promoted out of the throttled tail.** Under T13A alone, archived mail from six
+   months ago arrives at low-priority sweep speed; stage 4 fetches that slice at normal background priority
+   ahead of the sweep, so a fresh install has its year in minutes rather than behind an hour-long throttle.
+2. **Spam and Trash become reachable at all.** Unfiltered listings exclude both, so no amount of sweeping
+   reaches them — only the explicit label stages do.
+3. **The `sent` stage retires**, its job subsumed.
+
+Skip-if-present is what makes the overlap free: stage 4 fetches the year, and T13A's sweep then skips those
+ids and continues into older mail. Neither fetches a thread the other already stored.
+
 ### Design and implementation
 
 - **Provider gains spam/trash reach.** `ListThreadIdsOptions` (`src/main/sync/provider.ts`) grows the knob and `GmailMailProvider.listThreadIds` passes it. Prefer **explicit `labelIds: ['SPAM']` / `['TRASH']` stages over a global `includeSpamTrash=true`**: it keeps junk from interleaving into the 12-month walk, keeps the ordering legible in the footer, and keeps the lifetime sweep correct without a flag (Gmail purges both at ~30 days, so there is no lifetime spam/trash to reach).
