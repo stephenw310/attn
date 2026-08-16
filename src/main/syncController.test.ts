@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SyncState } from '../shared/mail'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
+import { GmailApiError } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
@@ -32,8 +33,7 @@ const mocks = vi.hoisted(() => {
     FakePoller,
     runInboxBackfill: vi.fn(),
     runLifetimeSweep: vi.fn(),
-    reconcileInboxMembership: vi.fn(),
-    pendingActionCount: vi.fn(() => 0)
+    reconcileInboxMembership: vi.fn()
   }
 })
 
@@ -51,8 +51,6 @@ vi.mock('./sync/lifetimeSweep', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync/lifetimeSweep')>()),
   runLifetimeSweep: mocks.runLifetimeSweep
 }))
-vi.mock('./actions', () => ({ pendingActionCount: mocks.pendingActionCount }))
-
 const { SyncController } = await import('./syncController')
 
 interface Deferred<T> {
@@ -78,7 +76,7 @@ function flush(): Promise<void> {
 
 function harness(options: { backfillCursor?: string | null } = {}) {
   const session = { signedIn: true, seeded: false, accountId: 'user@example.com' as string | null }
-  const foregroundWork = { queued: false, providerActive: false }
+  const foregroundWork = { actionActive: false, draftActive: false, providerActive: false }
   const states: SyncState[] = []
   const backfills: Array<{ callbacks: BackfillCallbacks; result: Deferred<BackfillResult | null> }> = []
   const lifetimeSweeps: Array<{
@@ -110,9 +108,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
       get: () =>
         sql.includes('SELECT backfill_cursor')
           ? { backfill_cursor: options.backfillCursor ?? null }
-          : sql.includes('SELECT 1 FROM action_queue') && foregroundWork.queued
-            ? { 1: 1 }
-            : undefined
+          : undefined
     })
   } as unknown as Db
 
@@ -126,8 +122,13 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     hasForegroundProviderWork: () => foregroundWork.providerActive,
     broadcastState: (state) => states.push(state),
     broadcastMailChanged,
-    getActionExecutor: () => ({ trigger }) as unknown as ActionExecutor,
-    getDraftMirrorExecutor: () => ({ trigger: mirrorTrigger }) as unknown as DraftMirrorExecutor,
+    getActionExecutor: () =>
+      ({ trigger, isRunning: () => foregroundWork.actionActive }) as unknown as ActionExecutor,
+    getDraftMirrorExecutor: () =>
+      ({
+        trigger: mirrorTrigger,
+        isRunning: () => foregroundWork.draftActive
+      }) as unknown as DraftMirrorExecutor,
     getSnoozeScheduler: () => ({ wakeThread }) as unknown as SnoozeScheduler
   })
 
@@ -150,8 +151,6 @@ beforeEach(() => {
   mocks.runInboxBackfill.mockReset()
   mocks.runLifetimeSweep.mockReset()
   mocks.reconcileInboxMembership.mockReset()
-  mocks.pendingActionCount.mockReset()
-  mocks.pendingActionCount.mockReturnValue(0)
 })
 
 afterEach(() => {
@@ -341,7 +340,14 @@ describe('backfill to poller handoff', () => {
 
     const poller = mocks.FakePoller.instances[0]
     poller.options.onCycleStart?.()
-    expect(states.at(-1)).toEqual({ phase: 'checking' })
+    expect(states.at(-1)).toEqual({
+      phase: 'indexing',
+      stage: 'lifetime',
+      threadsDone: 500,
+      threadsTotal: 2_000,
+      messagesTotal: 3_000,
+      reason: 'running'
+    })
     sweep.callbacks.onProgress({
       threadsDone: 600,
       threadsTotal: 2_000,
@@ -350,7 +356,14 @@ describe('backfill to poller handoff', () => {
       waitMs: 250,
       mailChanged: false
     })
-    expect(states.at(-1)).toEqual({ phase: 'checking' })
+    expect(states.at(-1)).toEqual({
+      phase: 'indexing',
+      stage: 'lifetime',
+      threadsDone: 500,
+      threadsTotal: 2_000,
+      messagesTotal: 3_000,
+      reason: 'running'
+    })
 
     poller.options.onCycleComplete(false)
     expect(states.at(-1)).toEqual({
@@ -374,9 +387,13 @@ describe('backfill to poller handoff', () => {
     const shouldYield = lifetimeSweeps[0].options.shouldYield
     expect(shouldYield?.()).toBe(false)
 
-    foregroundWork.queued = true
+    foregroundWork.actionActive = true
     expect(shouldYield?.()).toBe(true)
-    foregroundWork.queued = false
+    foregroundWork.actionActive = false
+
+    foregroundWork.draftActive = true
+    expect(shouldYield?.()).toBe(true)
+    foregroundWork.draftActive = false
 
     foregroundWork.providerActive = true
     expect(shouldYield?.()).toBe(true)
@@ -415,7 +432,7 @@ describe('backfill to poller handoff', () => {
     })
   })
 
-  it('does not resurrect stale indexing progress after the lifetime sweep fails', () => {
+  it('keeps a failed lifetime sweep non-blocking while it waits to retry', () => {
     const { controller, lifetimeSweeps, states } = harness({ backfillCursor: 'done' })
     controller.retry()
     const sweep = lifetimeSweeps[0]
@@ -423,11 +440,25 @@ describe('backfill to poller handoff', () => {
 
     sweep.callbacks.onProgress({ threadsDone: 700, reason: 'running', mailChanged: false })
     sweep.callbacks.onError(new Error('lifetime offline'))
-    expect(states.at(-1)).toEqual({ phase: 'offline', message: 'lifetime offline' })
+    expect(states.at(-1)).toEqual({
+      phase: 'indexing',
+      stage: 'lifetime',
+      threadsDone: 700,
+      reason: 'retry-wait',
+      waitMs: 15_000,
+      message: 'lifetime offline'
+    })
 
     poller.options.onCycleStart?.()
     poller.options.onCycleComplete(false)
-    expect(states.at(-1)).toEqual({ phase: 'offline', message: 'lifetime offline' })
+    expect(states.at(-1)).toEqual({
+      phase: 'indexing',
+      stage: 'lifetime',
+      threadsDone: 700,
+      reason: 'retry-wait',
+      waitMs: 15_000,
+      message: 'lifetime offline'
+    })
   })
 
   it('passes a context-supplied isForeground to the poller rather than reaching for Electron', () => {
@@ -495,11 +526,48 @@ describe('offline retry', () => {
     controller.retry()
 
     lifetimeSweeps[0].callbacks.onError(new Error('offline'))
-    expect(states.at(-1)).toEqual({ phase: 'offline', message: 'offline' })
+    expect(states.at(-1)).toEqual({
+      phase: 'indexing',
+      stage: 'lifetime',
+      threadsDone: 0,
+      reason: 'retry-wait',
+      waitMs: 15_000,
+      message: 'offline'
+    })
     await vi.advanceTimersByTimeAsync(15_000)
 
     expect(mocks.runInboxBackfill).not.toHaveBeenCalled()
     expect(mocks.runLifetimeSweep).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a Gmail rate-limit failure without putting the app offline', async () => {
+    vi.useFakeTimers()
+    const { controller, lifetimeSweeps, states } = harness({ backfillCursor: 'done' })
+    controller.retry()
+
+    lifetimeSweeps[0].callbacks.onError(new GmailApiError(429, 'rate limited', true))
+    expect(states.at(-1)).toMatchObject({ phase: 'indexing', reason: 'retry-wait' })
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(mocks.runLifetimeSweep).toHaveBeenCalledTimes(2)
+  })
+
+  it('pauses a non-retryable lifetime failure without masking foreground sync health', async () => {
+    vi.useFakeTimers()
+    const { controller, lifetimeSweeps, states } = harness({ backfillCursor: 'done' })
+    controller.retry()
+
+    lifetimeSweeps[0].callbacks.onError(new GmailApiError(401, 'invalid credentials'))
+    expect(states.at(-1)).toEqual({
+      phase: 'indexing',
+      stage: 'lifetime',
+      threadsDone: 0,
+      reason: 'paused',
+      message: 'invalid credentials'
+    })
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(mocks.runLifetimeSweep).toHaveBeenCalledOnce()
   })
 
   it('invalidates the failed lifetime run before a same-session retry starts', async () => {

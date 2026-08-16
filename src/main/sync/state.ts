@@ -14,7 +14,8 @@ export function sameSyncState(left: SyncState, right: SyncState): boolean {
       left.messagesTotal === right.messagesTotal &&
       left.etaMs === right.etaMs &&
       left.reason === right.reason &&
-      left.waitMs === right.waitMs
+      left.waitMs === right.waitMs &&
+      left.message === right.message
     )
   }
   if (left.phase === 'offline' && right.phase === 'offline') {

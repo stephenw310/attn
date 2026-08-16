@@ -1,17 +1,19 @@
 import type { SyncState } from '../shared/mail'
-import { pendingActionCount } from './actions'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
+import { GmailApiError } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import { syncRemoteDrafts } from './outbox/draftSync'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
-import { syncFailureState } from './sync/failure'
+import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { sameSyncState } from './sync/state'
+
+const LIFETIME_RETRY_MS = 15_000
 
 interface SyncControllerContext {
   db: Db
@@ -41,7 +43,6 @@ export class SyncController {
   private lifetimeRunning = false
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
-  private lifetimeFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
   private pollerRunning = false
   private stopped = false
   private backfillRetryGeneration: number | null = null
@@ -50,7 +51,7 @@ export class SyncController {
   private poller: HistoryPoller | null = null
   private sessionProvider: GmailMailProvider | null = null
   private readonly offlineRetry = new OfflineRetryScheduler(15_000)
-  private readonly lifetimeRetry = new OfflineRetryScheduler(15_000)
+  private readonly lifetimeRetry = new OfflineRetryScheduler(LIFETIME_RETRY_MS)
 
   constructor(private readonly context: SyncControllerContext) {}
 
@@ -102,7 +103,7 @@ export class SyncController {
       return
     }
     if (route === 'poller') {
-      this.poller?.requestRunNow(() => this.setState({ phase: 'checking' }))
+      this.poller?.requestRunNow(() => this.publishChecking())
       const accountId = this.context.currentAccountId()
       if (accountId && this.sessionProvider) {
         this.startLifetimeSweep(accountId, this.sessionProvider, this.generation)
@@ -143,7 +144,6 @@ export class SyncController {
     this.lifetimeRunning = false
     this.lifetimeProgress = null
     this.foregroundFailure = null
-    this.lifetimeFailure = null
     this.lifetimeRunId++
     this.generation++
   }
@@ -171,15 +171,26 @@ export class SyncController {
     return next
   }
 
-  private publishLifetimeFailure(
-    error: unknown,
-    prefix: string
-  ): Extract<SyncState, { phase: 'offline' | 'error' }> {
-    const next = this.failureState(error, prefix)
-    this.lifetimeFailure = next
-    this.lifetimeProgress = null
-    if (!this.foregroundFailure && !this.running && !this.pollerRunning) this.setState(next)
-    return next
+  private publishLifetimePause(error: unknown, prefix: string): boolean {
+    const message = errorMessage(error)
+    const retryable = isOfflineFailure(error) || (error instanceof GmailApiError && error.retryable)
+    console.error(`${prefix}: ${message}`)
+    const previous = this.lifetimeProgress
+    this.lifetimeProgress = {
+      phase: 'indexing',
+      stage: 'lifetime',
+      threadsDone: previous?.threadsDone ?? 0,
+      ...(previous?.threadsTotal === undefined ? {} : { threadsTotal: previous.threadsTotal }),
+      ...(previous?.messagesTotal === undefined ? {} : { messagesTotal: previous.messagesTotal }),
+      ...(previous?.etaMs === undefined ? {} : { etaMs: previous.etaMs }),
+      reason: retryable ? 'retry-wait' : 'paused',
+      ...(retryable ? { waitMs: LIFETIME_RETRY_MS } : {}),
+      message
+    }
+    if (!this.foregroundFailure && !this.running && !this.pollerRunning) {
+      this.setState(this.lifetimeProgress)
+    }
+    return retryable
   }
 
   private scheduleOfflineRetry(generation: number): void {
@@ -307,12 +318,11 @@ export class SyncController {
       onCycleStart: () => {
         if (generation !== this.generation) return
         this.pollerRunning = true
-        this.foregroundFailure = null
-        this.setState({ phase: 'checking' })
       },
       onCycleComplete: (changed) => {
         if (generation !== this.generation) return
         this.pollerRunning = false
+        this.foregroundFailure = null
         this.publishSettledState()
         if (changed) this.context.broadcastMailChanged()
       },
@@ -325,14 +335,12 @@ export class SyncController {
       wakeThread: (threadId) => this.context.getSnoozeScheduler()?.wakeThread(threadId),
       syncDrafts: () => syncRemoteDrafts(this.context.db, accountId, provider),
       kickExecutor: () => {
-        if (pendingActionCount(this.context.db, accountId) > 0) {
-          void this.context.getActionExecutor()?.trigger()
-        }
+        void this.context.getActionExecutor()?.trigger()
         void this.context.getDraftMirrorExecutor()?.trigger()
       }
     })
     this.poller.start()
-    if (runImmediately) this.poller.requestRunNow(() => this.setState({ phase: 'checking' }))
+    if (runImmediately) this.poller.requestRunNow(() => this.publishChecking())
   }
 
   private startLifetimeSweep(accountId: string, provider: GmailMailProvider, generation: number): void {
@@ -357,8 +365,7 @@ export class SyncController {
           if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
           failed = true
           this.lifetimeRunning = false
-          const failure = this.publishLifetimeFailure(error, '[sync] lifetime header sweep failed')
-          if (failure.phase === 'offline') {
+          if (this.publishLifetimePause(error, '[sync] lifetime header sweep failed')) {
             this.scheduleLifetimeRetry(accountId, provider, generation)
           }
         }
@@ -377,15 +384,13 @@ export class SyncController {
         this.lifetimeRunning = false
         if (!result || failed) return
         this.lifetimeProgress = null
-        this.lifetimeFailure = null
         this.publishSettledState()
         console.log(`[sync] lifetime header sweep done: ${result.threadCount} threads for ${accountId}`)
       })
       .catch((error) => {
         if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
         this.lifetimeRunning = false
-        const failure = this.publishLifetimeFailure(error, '[sync] failed after lifetime header sweep')
-        if (failure.phase === 'offline') {
+        if (this.publishLifetimePause(error, '[sync] failed after lifetime header sweep')) {
           this.scheduleLifetimeRetry(accountId, provider, generation)
         }
       })
@@ -393,7 +398,6 @@ export class SyncController {
 
   private publishLifetimeProgress(progress: LifetimeSweepProgress): void {
     const { mailChanged, ...details } = progress
-    this.lifetimeFailure = null
     this.lifetimeProgress = { phase: 'indexing', stage: 'lifetime', ...details }
     if (!this.running && !this.pollerRunning && !this.foregroundFailure) {
       this.setState(this.lifetimeProgress)
@@ -403,27 +407,19 @@ export class SyncController {
 
   private publishSettledState(): void {
     if (this.running || this.pollerRunning) return
-    this.setState(
-      this.foregroundFailure ?? this.lifetimeFailure ?? this.lifetimeProgress ?? { phase: 'idle' }
-    )
+    this.setState(this.foregroundFailure ?? this.lifetimeProgress ?? { phase: 'idle' })
   }
 
   private shouldYieldLifetime(accountId: string): boolean {
     if (this.running || this.pollerRunning || this.context.hasForegroundProviderWork(accountId)) return true
     return Boolean(
-      this.context.db
-        .prepare(
-          `SELECT 1 FROM action_queue
-           WHERE account_id = ? AND state IN ('pending', 'inflight')
-           UNION ALL
-           SELECT 1 FROM outbox
-           WHERE account_id = ? AND
-             (state = 'discarding' OR
-              (state IN ('composing', 'drafted') AND local_revision > mirror_revision))
-           LIMIT 1`
-        )
-        .get(accountId, accountId)
+      this.context.getActionExecutor()?.isRunning() || this.context.getDraftMirrorExecutor()?.isRunning()
     )
+  }
+
+  private publishChecking(): void {
+    this.foregroundFailure = null
+    this.setState({ phase: 'checking' })
   }
 
   private async recoverExpiredHistory(

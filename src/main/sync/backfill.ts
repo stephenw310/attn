@@ -101,7 +101,8 @@ export async function runInboxBackfill(
         nextPhase: 'bodies',
         onThread: async (threadId) => {
           persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
-            metadataOnly: true
+            metadataOnly: true,
+            inboxVisibility: 'show'
           })
         },
         onPage: (count) => {
@@ -125,7 +126,7 @@ export async function runInboxBackfill(
         nextPhase: 'drafts',
         onThread: async (threadId) => {
           const thread = await provider.getThread(threadId, { format: 'full' })
-          persistThread(db, accountId, thread)
+          persistThread(db, accountId, thread, { inboxVisibility: 'show' })
           await hydrateMissingThreadBodies(db, provider, accountId, thread)
         },
         onPage: (count) => {

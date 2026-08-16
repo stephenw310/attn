@@ -107,8 +107,9 @@ export type SyncState =
       threadsTotal?: number
       messagesTotal?: number
       etaMs?: number
-      reason: 'running' | 'quota-wait' | 'foreground-yield'
+      reason: 'running' | 'quota-wait' | 'foreground-yield' | 'retry-wait' | 'paused'
       waitMs?: number
+      message?: string
     }
   | { phase: 'offline'; message: string }
   | { phase: 'error'; message: string }

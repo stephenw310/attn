@@ -28,6 +28,7 @@ CREATE TABLE threads (
   is_unread      INTEGER NOT NULL DEFAULT 0,
   is_starred     INTEGER NOT NULL DEFAULT 0,
   has_attachment INTEGER NOT NULL DEFAULT 0,
+  is_inbox_visible INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (account_id, id)
 );
 CREATE INDEX idx_threads_recent ON threads (account_id, last_msg_at DESC);
@@ -59,10 +60,12 @@ CREATE TABLE thread_labels (
 CREATE INDEX idx_thread_labels_label ON thread_labels (account_id, label_id);
 
 CREATE TABLE sync_state (
-  account_id       TEXT PRIMARY KEY,
-  last_history_id  TEXT,
-  backfill_cursor  TEXT,
-  sweep_cursor     TEXT
+  account_id         TEXT PRIMARY KEY,
+  last_history_id    TEXT,
+  backfill_cursor    TEXT,
+  sweep_cursor       TEXT,
+  sweep_threads_done INTEGER NOT NULL DEFAULT 0,
+  sweep_threads_total INTEGER
 );
 
 CREATE TABLE action_queue (

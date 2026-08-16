@@ -73,5 +73,23 @@ describe('sync state publication', () => {
         { phase: 'indexing', stage: 'lifetime', threadsDone: 51, reason: 'running' }
       )
     ).toBe(false)
+    expect(
+      sameSyncState(
+        {
+          phase: 'indexing',
+          stage: 'lifetime',
+          threadsDone: 50,
+          reason: 'retry-wait',
+          message: 'quota'
+        },
+        {
+          phase: 'indexing',
+          stage: 'lifetime',
+          threadsDone: 50,
+          reason: 'retry-wait',
+          message: 'offline'
+        }
+      )
+    ).toBe(false)
   })
 })

@@ -438,10 +438,11 @@ function registerTestIpc(): void {
         return
       }
       if (request.resetCursor) {
-        db.prepare('UPDATE sync_state SET sweep_cursor = ? WHERE account_id = ?').run(
-          request.resetCursor,
-          accountId
-        )
+        db.prepare(
+          `UPDATE sync_state
+           SET sweep_cursor = ?, sweep_threads_done = 0, sweep_threads_total = NULL
+           WHERE account_id = ?`
+        ).run(request.resetCursor, accountId)
       }
       const threads = new Map(request.threads.map((thread) => [thread.id, thread]))
       const formats: string[] = []
@@ -456,7 +457,9 @@ function registerTestIpc(): void {
         }),
         listThreadIds: async (options = {}) => {
           pageTokens.push(options.pageToken)
-          if (options.pageToken === request.offlineAtPageToken) throw new Error('offline')
+          if (request.offlineAtPageToken !== undefined && options.pageToken === request.offlineAtPageToken) {
+            throw new Error('offline')
+          }
           const page = request.pages.find((candidate) => candidate.pageToken === options.pageToken)
           if (!page) return { threadIds: [] }
           return page

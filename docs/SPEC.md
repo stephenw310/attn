@@ -149,8 +149,9 @@ the remaining window continues in the background or is available on demand.
 **Lifetime header sweep (T13A as revised by §9 #17; supersedes the Sent-only pass of §9 #15):** after
 interactive readiness, a resumable low-priority pass walks lifetime message headers across the whole account
 (no label filter, newest first), skipping threads already stored. It persists its own cursor, reports
-progress against `getProfile`'s `threadsTotal`/`messagesTotal`, and never downloads old bodies or
-attachments. Contact statistics derive from the same header stream — recipients of Sent mail, senders of
+thread progress against the unfiltered listing's `resultSizeEstimate` (and exact exhausted count), reports
+message context from `getProfile().messagesTotal`, and never downloads old bodies or attachments. Contact
+statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
 never contribute to contacts. While the pass runs, sync status reads **Live · indexing older mail** with
 progress and quota-wait detail. Importing a user's saved Google Contacts through the People API remains a

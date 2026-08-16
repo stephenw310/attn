@@ -34,14 +34,14 @@ async function runSweep(app: ElectronApplication, request: SweepRequest): Promis
   )
 }
 
-function oldSentThread(id: string, recipient: string, year: number): GmailThread {
+function oldThread(id: string, recipient: string, year: number, labelIds: string[] = ['SENT']): GmailThread {
   return {
     id,
     messages: [
       {
         id: `message-${id}`,
         threadId: id,
-        labelIds: ['SENT'],
+        labelIds,
         internalDate: String(Date.UTC(year, 0, 2)),
         snippet: `A header-only note to ${recipient}`,
         payload: {
@@ -62,16 +62,25 @@ test('resumes a header-only lifetime sweep across offline relaunch without chang
   boot,
   page
 }) => {
-  const firstThread = oldSentThread('t-lifetime-2009', 'Archive One <archive.one@example.com>', 2009)
-  const secondThread = oldSentThread('t-lifetime-2011', 'Archive Two <archive.two@example.com>', 2011)
+  const firstThread = oldThread('t-lifetime-2009', 'Archive One <archive.one@example.com>', 2009)
+  const oldInboxThread = oldThread(
+    't-lifetime-inbox-2010',
+    'Archive Inbox <archive.inbox@example.com>',
+    2010,
+    ['INBOX', 'UNREAD']
+  )
+  const secondThread = oldThread('t-lifetime-2011', 'Archive Two <archive.two@example.com>', 2011)
   const unreadBefore = await page.evaluate(() => window.attn.mail.getUnreadCount())
+  const inboxIdsBefore = await page.evaluate(async () =>
+    (await window.attn.mail.listThreads()).map((thread) => thread.id)
+  )
 
   const interrupted = await runSweep(boot.app, {
     resetCursor: 'lifetime',
-    threads: [firstThread, secondThread],
+    threads: [firstThread, oldInboxThread, secondThread],
     pages: [
       {
-        threadIds: [firstThread.id],
+        threadIds: [firstThread.id, oldInboxThread.id],
         nextPageToken: 'page-2',
         resultSizeEstimate: 11
       }
@@ -84,17 +93,23 @@ test('resumes a header-only lifetime sweep across offline relaunch without chang
   expect(interrupted).toEqual({
     cursor: 'lifetime:page-2',
     error: 'offline',
-    formats: ['metadata'],
+    formats: ['metadata', 'metadata'],
     pageTokens: [undefined, 'page-2']
   })
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(unreadBefore)
+  expect(
+    await page.evaluate(async () => (await window.attn.mail.listThreads()).map((thread) => thread.id))
+  ).toEqual(inboxIdsBefore)
+  expect(
+    await page.evaluate(() => window.attn.mail.getConversation('t-lifetime-inbox-2010', false))
+  ).toMatchObject({ threadId: 't-lifetime-inbox-2010' })
   expect(await page.evaluate(() => window.attn.contacts.search('archive.one'))).toEqual([
     expect.objectContaining({ email: 'archive.one@example.com' })
   ])
 
   const relaunched = await boot.relaunch()
   const resumed = await runSweep(relaunched.app, {
-    threads: [firstThread, secondThread],
+    threads: [firstThread, oldInboxThread, secondThread],
     pages: [{ pageToken: 'page-2', threadIds: [secondThread.id], resultSizeEstimate: 11 }],
     threadsTotal: 11,
     messagesTotal: 13
@@ -106,6 +121,11 @@ test('resumes a header-only lifetime sweep across offline relaunch without chang
     pageTokens: ['page-2']
   })
   expect(await relaunched.page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(unreadBefore)
+  expect(
+    await relaunched.page.evaluate(async () =>
+      (await window.attn.mail.listThreads()).map((thread) => thread.id)
+    )
+  ).toEqual(inboxIdsBefore)
   expect(
     await relaunched.page.evaluate(() => window.attn.mail.getConversation('t-lifetime-2011', false))
   ).toMatchObject({

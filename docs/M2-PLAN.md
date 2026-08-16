@@ -263,18 +263,26 @@ them too.
   idempotent with T13's bootstrap contributions. Two hygiene rules land here: messages labeled `SPAM` or
   `TRASH` never contribute contact rows (the poller already trickles spam threads in; a deliberate sweep
   must not bulk-import spammers), and legacy Hangouts `CHAT` rows are skipped defensively.
-- Progress reports against `getProfile`'s `threadsTotal`/`messagesTotal` — the "estimated total/ETA when
-  Gmail supplies one" that F2's footer language promises. Footer state: **Live · indexing older mail** with
-  processed/estimated counts and an explicit quota-wait state; quitting or losing connectivity resumes from
-  the last durable page.
+- Progress reports the "estimated total/ETA when Gmail supplies one" that F2's footer language promises.
+  The implementation uses the unfiltered
+  `threads.list` response's listing-scoped `resultSizeEstimate` for thread progress, persists processed and
+  estimated counts beside the page cursor, and snaps the total to the exact count when listing is exhausted;
+  `getProfile().messagesTotal` remains contextual account-wide message count. Footer state: **Live · indexing
+  older mail** with processed/estimated counts and explicit quota-wait/retry-wait states; quitting or losing
+  connectivity resumes from the last durable page without making the live Inbox appear offline.
 - Optional, decide at implementation: a listing-only `q=has:attachment` walk (ids only, ~1% of sweep cost)
   can set the thread-level attachment flag lifetime-wide; header-only threads otherwise gain attachment
   metadata on first hydration (F2).
 - The saved-Google-Contacts (People API) decision is unchanged from v0.14: different address source,
   additional consent scope, separate opt-in task if ever approved — never silently bundled.
-- **Schema:** add a nullable `sweep_cursor TEXT` column to `sync_state`; bump `CURRENT_SCHEMA_VERSION`.
-  Local dogfood upgrade DDL (AGENTS.md procedure): `ALTER TABLE sync_state ADD COLUMN sweep_cursor TEXT;`
-  with `PRAGMA user_version` bumped in the same transaction.
+- **Schema:** add `sweep_cursor`, `sweep_threads_done`, and `sweep_threads_total` to `sync_state`, plus
+  `threads.is_inbox_visible` so lifetime-only old Inbox rows retain truthful Gmail labels without entering
+  M2's bounded Inbox surface; bump `CURRENT_SCHEMA_VERSION`. Local dogfood upgrade DDL (AGENTS.md procedure):
+  `ALTER TABLE sync_state ADD COLUMN sweep_cursor TEXT;`,
+  `ALTER TABLE sync_state ADD COLUMN sweep_threads_done INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE sync_state ADD COLUMN sweep_threads_total INTEGER;`, and
+  `ALTER TABLE threads ADD COLUMN is_inbox_visible INTEGER NOT NULL DEFAULT 1;`, with `PRAGMA user_version`
+  bumped in the same transaction.
 
 ### Testing and done condition
 
@@ -283,10 +291,11 @@ behavior on the injectable `SchedulerTime`, contact idempotency across the T13 o
 contact exclusion. E2e a partially completed sweep across relaunch/offline recovery and assert that no body
 bytes are fetched and unread counts do not change. Manual evidence records wall-clock/quota on a real
 long-lived mailbox with interaction budgets green — the throttle constants get set from that measurement.
-Automated evidence now covers cursor restart/resume, metadata-only fetches, foreground yielding, contact
-idempotency and hygiene, an offline relaunch, unchanged Inbox unread, lifetime autocomplete, and the
-non-blocking footer state. Remaining manual evidence is the wall-clock/quota run on a real long-lived
-mailbox. Done means an address last emailed outside the mail window autocompletes locally, a thread archived
+Automated evidence now covers cursor/progress restart and resume, metadata-only fetches, foreground yielding,
+retryable quota failures, contact idempotency and hygiene, an offline relaunch, unchanged bounded Inbox rows
+and unread count when old Inbox headers arrive, lifetime autocomplete, and the non-blocking footer state.
+Remaining manual evidence is the wall-clock/quota run on a real long-lived mailbox. Done means an address last
+emailed outside the mail window autocompletes locally, a thread archived
 years ago has a local header row, progress never masquerades as a blocked inbox sync, and the People-API
 decision stays recorded.
 

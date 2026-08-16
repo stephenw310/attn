@@ -39,6 +39,12 @@ export function upsertLabels(db: Db, accountId: string, labels: LabelRow[]): voi
 
 export interface PersistThreadOptions {
   metadataOnly?: boolean
+  /**
+   * Lifetime-only rows retain Gmail's labels without entering M2's bounded
+   * Inbox surface. Ordinary refetches preserve that choice; a backfill or a
+   * new Inbox event may explicitly promote the thread.
+   */
+  inboxVisibility?: 'hide' | 'preserve' | 'show'
 }
 
 export function nonDraftMessages(messages: readonly GmailMessage[]): GmailMessage[] {
@@ -53,12 +59,12 @@ export function persistThread(
   accountId: string,
   thread: GmailThread,
   options: PersistThreadOptions = {}
-): void {
+): boolean {
   // Draft messages are represented by outbox rows. Persisting them here would
   // render unsent text as an ordinary conversation message once a threaded
   // Gmail draft appears in a thread snapshot.
   const messages = nonDraftMessages(thread.messages ?? [])
-  if (messages.length === 0) return
+  if (messages.length === 0) return false
 
   const upsertMsg = db.prepare(
     `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
@@ -81,13 +87,15 @@ export function persistThread(
   )
   const upsertThread = db.prepare(
     `INSERT INTO threads (account_id, id, subject, snippet, last_msg_at,
-                          from_display, is_unread, is_starred, has_attachment)
+                          from_display, is_unread, is_starred, has_attachment, is_inbox_visible)
      VALUES (@account_id, @id, @subject, @snippet, @last_msg_at,
-             @from_display, @is_unread, @is_starred, @has_attachment)
+             @from_display, @is_unread, @is_starred, @has_attachment, @insert_inbox_visible)
      ON CONFLICT(account_id, id) DO UPDATE SET
        subject = excluded.subject, snippet = excluded.snippet,
        last_msg_at = excluded.last_msg_at, from_display = excluded.from_display,
        is_unread = excluded.is_unread, is_starred = excluded.is_starred,
+       is_inbox_visible = CASE WHEN @promote_inbox_visible = 1
+                               THEN 1 ELSE threads.is_inbox_visible END,
        has_attachment = CASE WHEN @metadata_only = 1
                              THEN threads.has_attachment ELSE excluded.has_attachment END`
   )
@@ -199,6 +207,8 @@ export function persistThread(
       is_unread: anyUnread,
       is_starred: anyStarred,
       has_attachment: anyAttachment,
+      insert_inbox_visible: options.inboxVisibility === 'hide' ? 0 : 1,
+      promote_inbox_visible: options.inboxVisibility === 'show' ? 1 : 0,
       metadata_only: options.metadataOnly ? 1 : 0
     })
 
@@ -206,6 +216,7 @@ export function persistThread(
     for (const label of labelUnion) insertLabel.run(accountId, thread.id, label)
   })()
   replayPendingThreadDeltas(db, accountId, thread.id)
+  return true
 }
 
 /** A thread snapshot is authoritative for which messages still exist in it. */

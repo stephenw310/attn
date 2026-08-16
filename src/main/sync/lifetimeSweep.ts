@@ -45,6 +45,12 @@ export type LifetimeSweepStartPlan =
   | { kind: 'skip' }
   | { kind: 'run'; pageToken?: string; initialize: boolean }
 
+interface StoredSweepState {
+  sweep_cursor: string | null
+  sweep_threads_done: number
+  sweep_threads_total: number | null
+}
+
 export function planLifetimeSweepStart(rawCursor: string | null | undefined): LifetimeSweepStartPlan {
   if (rawCursor === 'done') return { kind: 'skip' }
   if (!rawCursor || rawCursor === 'lifetime') return { kind: 'run', initialize: !rawCursor }
@@ -60,7 +66,8 @@ export function planLifetimeSweepStart(rawCursor: string | null | undefined): Li
 
 /**
  * Walk Gmail's default, newest-first thread listing with no query or label filter.
- * A page is checkpointed only after every new thread on it has been durably stored.
+ * A page and its processed count are checkpointed only after every id on it has
+ * either been skipped or durably stored.
  */
 export async function runLifetimeSweep(
   db: Db,
@@ -76,28 +83,7 @@ export async function runLifetimeSweep(
   const pagePauseMs = options.pagePauseMs ?? LIFETIME_PAGE_PAUSE_MS
   const foregroundYieldMs = options.foregroundYieldMs ?? LIFETIME_FOREGROUND_YIELD_MS
   let lastRequestAt: number | null = null
-  const startedAt = time.now()
-  const startingThreadsDone = storedThreadCount(db, accountId)
-
-  const progress = (
-    reason: LifetimeSweepProgress['reason'],
-    threadsTotal: number | undefined,
-    messagesTotal: number | undefined,
-    mailChanged = false,
-    waitMs?: number
-  ): void => {
-    const threadsDone = storedThreadCount(db, accountId, threadsTotal)
-    const etaMs = estimateRemainingMs(threadsDone, threadsTotal, startingThreadsDone, time.now() - startedAt)
-    callbacks.onProgress({
-      threadsDone,
-      threadsTotal,
-      messagesTotal,
-      ...(etaMs === undefined ? {} : { etaMs }),
-      reason,
-      ...(waitMs === undefined ? {} : { waitMs }),
-      mailChanged
-    })
-  }
+  let activeElapsedMs = 0
 
   const wait = async (delayMs: number): Promise<boolean> => {
     if (delayMs <= 0) return shouldContinue()
@@ -105,93 +91,140 @@ export async function runLifetimeSweep(
     return shouldContinue()
   }
 
-  const waitForRequestSlot = async (
-    threadsTotal: number | undefined,
-    messagesTotal: number | undefined
-  ): Promise<boolean> => {
-    let yielded = false
-    while (shouldContinue() && shouldYield()) {
-      yielded = true
-      progress('foreground-yield', threadsTotal, messagesTotal, false, foregroundYieldMs)
-      if (!(await wait(foregroundYieldMs))) return false
-    }
-    if (!shouldContinue()) return false
-    if (yielded) progress('running', threadsTotal, messagesTotal)
-
-    if (lastRequestAt !== null) {
-      const remaining = requestIntervalMs - (time.now() - lastRequestAt)
-      if (remaining > 0 && !(await wait(remaining))) return false
-    }
-    lastRequestAt = time.now()
-    return shouldContinue()
-  }
-
   try {
-    const state = db.prepare('SELECT sweep_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
-      | { sweep_cursor: string | null }
-      | undefined
+    const state = db
+      .prepare(
+        `SELECT sweep_cursor, sweep_threads_done, sweep_threads_total
+         FROM sync_state WHERE account_id = ?`
+      )
+      .get(accountId) as StoredSweepState | undefined
     const plan = planLifetimeSweepStart(state?.sweep_cursor)
-    if (plan.kind === 'skip') return { threadCount: storedThreadCount(db, accountId) }
+    if (plan.kind === 'skip') return { threadCount: state?.sweep_threads_done ?? 0 }
 
+    const checkpoint = db.prepare(
+      `UPDATE sync_state
+       SET sweep_cursor = ?, sweep_threads_done = ?, sweep_threads_total = ?
+       WHERE account_id = ?`
+    )
+    let threadsDone = state?.sweep_threads_done ?? 0
+    let threadsTotal = state?.sweep_threads_total ?? undefined
+    let startingThreadsDone = threadsDone
     if (plan.initialize) {
-      db.prepare('UPDATE sync_state SET sweep_cursor = ? WHERE account_id = ?').run('lifetime', accountId)
+      threadsDone = 0
+      threadsTotal = undefined
+      startingThreadsDone = 0
+      checkpoint.run('lifetime', 0, null, accountId)
     }
 
-    if (!(await waitForRequestSlot(undefined, undefined))) return null
+    let messagesTotal: number | undefined
+    const progress = (
+      reason: LifetimeSweepProgress['reason'],
+      mailChanged = false,
+      waitMs?: number
+    ): void => {
+      const etaMs = estimateRemainingMs(threadsDone, threadsTotal, startingThreadsDone, activeElapsedMs)
+      callbacks.onProgress({
+        threadsDone,
+        ...(threadsTotal === undefined ? {} : { threadsTotal }),
+        ...(messagesTotal === undefined ? {} : { messagesTotal }),
+        ...(etaMs === undefined ? {} : { etaMs }),
+        reason,
+        ...(waitMs === undefined ? {} : { waitMs }),
+        mailChanged
+      })
+    }
+
+    const waitForRequestSlot = async (): Promise<boolean> => {
+      let yielded = false
+      while (shouldContinue() && shouldYield()) {
+        yielded = true
+        progress('foreground-yield', false, foregroundYieldMs)
+        if (!(await wait(foregroundYieldMs))) return false
+      }
+      if (!shouldContinue()) return false
+      if (yielded) progress('running')
+
+      if (lastRequestAt !== null) {
+        const remaining = requestIntervalMs - (time.now() - lastRequestAt)
+        if (remaining > 0 && !(await wait(remaining))) return false
+      }
+      lastRequestAt = time.now()
+      return shouldContinue()
+    }
+
+    const activeRequest = async <T>(request: () => Promise<T>): Promise<T> => {
+      const requestStartedAt = time.now()
+      try {
+        return await request()
+      } finally {
+        activeElapsedMs += Math.max(0, time.now() - requestStartedAt)
+      }
+    }
+
+    if (!(await waitForRequestSlot())) return null
     const profile = await provider.getProfile()
     if (!shouldContinue()) return null
-    let threadsTotal = profile.threadsTotal
-    const messagesTotal = profile.messagesTotal
-    progress('running', threadsTotal, messagesTotal)
+    const profileThreadsTotal = profile.threadsTotal
+    messagesTotal = profile.messagesTotal
+    progress('running')
 
     const exists = db.prepare('SELECT 1 FROM threads WHERE account_id = ? AND id = ?')
     let pageToken = plan.pageToken
     let resetExpiredCursor = false
 
     for (;;) {
-      if (!(await waitForRequestSlot(threadsTotal, messagesTotal))) return null
+      if (!(await waitForRequestSlot())) return null
       let page: ThreadIdPage
       try {
         // Deliberately empty: Gmail's default listing covers the whole account
         // except Spam and Trash, which become explicit stages in M3.
-        page = await provider.listThreadIds({ pageToken })
+        page = await activeRequest(() => provider.listThreadIds({ pageToken }))
       } catch (error) {
         if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
         pageToken = undefined
         resetExpiredCursor = true
-        checkpoint(db, accountId, 'lifetime')
+        threadsDone = 0
+        threadsTotal = undefined
+        startingThreadsDone = 0
+        activeElapsedMs = 0
+        checkpoint.run('lifetime', 0, null, accountId)
         continue
       }
       if (!shouldContinue()) return null
-      threadsTotal ??= page.resultSizeEstimate
+      threadsTotal ??= page.resultSizeEstimate ?? profileThreadsTotal
 
       let mailChanged = false
       for (const threadId of page.threadIds) {
         if (!shouldContinue()) return null
-        if (exists.get(accountId, threadId)) continue
-        if (!(await waitForRequestSlot(threadsTotal, messagesTotal))) return null
+        if (exists.get(accountId, threadId)) {
+          threadsDone++
+          continue
+        }
+        if (!(await waitForRequestSlot())) return null
         try {
-          const thread = await provider.getThread(threadId, { format: 'metadata' })
+          const thread = await activeRequest(() => provider.getThread(threadId, { format: 'metadata' }))
           if (!shouldContinue()) return null
-          persistThread(db, accountId, thread, { metadataOnly: true })
-          mailChanged = true
+          mailChanged =
+            persistThread(db, accountId, thread, {
+              metadataOnly: true,
+              inboxVisibility: 'hide'
+            }) || mailChanged
         } catch (error) {
           // A moving mailbox can drop a listed thread before its metadata fetch.
-          if (error instanceof GmailApiError && error.status === 404) continue
-          throw error
+          if (!(error instanceof GmailApiError) || error.status !== 404) throw error
         }
+        threadsDone++
       }
 
       pageToken = page.nextPageToken
-      checkpoint(db, accountId, pageToken ? `lifetime:${pageToken}` : 'done')
-      progress('running', threadsTotal, messagesTotal, mailChanged)
-      if (!pageToken) {
-        return { threadCount: storedThreadCount(db, accountId, threadsTotal) }
-      }
+      if (!pageToken) threadsTotal = threadsDone
+      checkpoint.run(pageToken ? `lifetime:${pageToken}` : 'done', threadsDone, threadsTotal, accountId)
+      progress('running', mailChanged)
+      if (!pageToken) return { threadCount: threadsDone }
 
-      progress('quota-wait', threadsTotal, messagesTotal, false, pagePauseMs)
+      progress('quota-wait', false, pagePauseMs)
       if (!(await wait(pagePauseMs))) return null
-      progress('running', threadsTotal, messagesTotal)
+      progress('running')
     }
   } catch (error) {
     if (shouldContinue()) callbacks.onError(error)
@@ -199,27 +232,16 @@ export async function runLifetimeSweep(
   }
 }
 
-function storedThreadCount(db: Db, accountId: string, total?: number): number {
-  const row = db.prepare('SELECT COUNT(*) AS count FROM threads WHERE account_id = ?').get(accountId) as {
-    count: number
-  }
-  return total === undefined ? row.count : Math.min(row.count, total)
-}
-
 function estimateRemainingMs(
   threadsDone: number,
   threadsTotal: number | undefined,
   startingThreadsDone: number,
-  elapsedMs: number
+  activeElapsedMs: number
 ): number | undefined {
-  if (threadsTotal === undefined || threadsDone >= threadsTotal || elapsedMs <= 0) return undefined
+  if (threadsTotal === undefined || threadsDone >= threadsTotal || activeElapsedMs <= 0) return undefined
   const completedThisRun = threadsDone - startingThreadsDone
   if (completedThisRun <= 0) return undefined
-  return Math.ceil(((threadsTotal - threadsDone) * elapsedMs) / completedThisRun)
-}
-
-function checkpoint(db: Db, accountId: string, cursor: string): void {
-  db.prepare('UPDATE sync_state SET sweep_cursor = ? WHERE account_id = ?').run(cursor, accountId)
+  return Math.ceil(((threadsTotal - threadsDone) * activeElapsedMs) / completedThisRun)
 }
 
 function isExpiredPageToken(error: unknown): boolean {
