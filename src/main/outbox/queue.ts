@@ -24,6 +24,7 @@ interface QueueRow {
   rfc_message_id: string | null
   send_at: number | null
   attempts: number
+  verify_attempts: number
   last_error: string | null
 }
 
@@ -41,7 +42,7 @@ export function queueSend(db: Db, accountId: string, draftId: string, now = Date
   const row = db
     .prepare(
       `SELECT id, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
-              gmail_draft_id, rfc_message_id, send_at, attempts, last_error
+              gmail_draft_id, rfc_message_id, send_at, attempts, verify_attempts, last_error
        FROM outbox WHERE account_id = ? AND id = ? AND state = 'composing'`
     )
     .get(accountId, draftId) as QueueRow | undefined
@@ -61,18 +62,20 @@ export function queueSend(db: Db, accountId: string, draftId: string, now = Date
       state: row.state,
       gmailDraftId: row.gmail_draft_id,
       sendAt: row.send_at,
-      attempts: row.attempts
+      attempts: row.attempts,
+      verifyAttempts: row.verify_attempts
     },
     { type: 'queue', sendAt },
     now
   )
   if (plan.next.state !== 'queued') throw new Error('draft could not be queued')
 
-  const messageId = row.rfc_message_id ?? `<${randomUUID()}@attn.local>`
+  const accountDomain = accountId.slice(accountId.lastIndexOf('@') + 1).toLowerCase()
+  const messageId = row.rfc_message_id ?? `<${randomUUID()}@${accountDomain}>`
   const result = db
     .prepare(
       `UPDATE outbox SET state = 'queued', rfc_message_id = ?, send_at = ?, attempts = 0,
-       last_error = NULL, updated_at = ?
+       verify_attempts = 0, last_error = NULL, updated_at = ?
        WHERE account_id = ? AND id = ? AND state = 'composing'`
     )
     .run(messageId, sendAt, now, accountId, draftId)
@@ -84,7 +87,7 @@ export function listPendingOutbox(db: Db, accountId: string): OutboxItem[] {
   const rows = db
     .prepare(
       `SELECT id, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
-              gmail_draft_id, rfc_message_id, send_at, attempts, last_error
+              gmail_draft_id, rfc_message_id, send_at, attempts, verify_attempts, last_error
        FROM outbox
        WHERE account_id = ? AND state IN ('queued', 'sending', 'failed', 'needs-review')
        ORDER BY COALESCE(send_at, updated_at), updated_at, id`
@@ -117,11 +120,17 @@ export function pendingOutboxCount(db: Db, accountId: string): number {
 export function undoQueuedSend(db: Db, accountId: string, id: string, now = Date.now()): ReopenOutboxResult {
   const row = db
     .prepare(
-      `SELECT state, gmail_draft_id, send_at, attempts FROM outbox
+      `SELECT state, gmail_draft_id, send_at, attempts, verify_attempts FROM outbox
        WHERE account_id = ? AND id = ?`
     )
     .get(accountId, id) as
-    | { state: string; gmail_draft_id: string | null; send_at: number | null; attempts: number }
+    | {
+        state: string
+        gmail_draft_id: string | null
+        send_at: number | null
+        attempts: number
+        verify_attempts: number
+      }
     | undefined
   if (!row) return { draft: null, error: 'Message is no longer in the Outbox' }
   const plan = planTransition(
@@ -129,7 +138,8 @@ export function undoQueuedSend(db: Db, accountId: string, id: string, now = Date
       state: row.state as QueueRow['state'],
       gmailDraftId: row.gmail_draft_id,
       sendAt: row.send_at,
-      attempts: row.attempts
+      attempts: row.attempts,
+      verifyAttempts: row.verify_attempts
     },
     { type: 'undo' },
     now
@@ -137,8 +147,8 @@ export function undoQueuedSend(db: Db, accountId: string, id: string, now = Date
   if (plan.next.state !== 'composing') return { draft: null, error: 'Already sent' }
   const undone = db
     .prepare(
-      `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, last_error = NULL,
-       updated_at = ? WHERE account_id = ? AND id = ? AND state = 'queued'`
+      `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, verify_attempts = 0,
+       last_error = NULL, updated_at = ? WHERE account_id = ? AND id = ? AND state = 'queued'`
     )
     .run(now, accountId, id)
   if (undone.changes === 0) return { draft: null, error: 'Already sent' }
@@ -162,7 +172,8 @@ export function reopenPendingOutbox(
       ? "We couldn't confirm this was sent — check your Sent mail before resending"
       : row.last_error || 'Message could not be sent'
   db.prepare(
-    `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, updated_at = ?
+    `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, verify_attempts = 0,
+     updated_at = ?
      WHERE account_id = ? AND id = ? AND state IN ('failed', 'needs-review')`
   ).run(now, accountId, id)
   return { draft: getDraft(db, accountId, id), error: explanation }

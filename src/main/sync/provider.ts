@@ -69,6 +69,11 @@ export interface HistoryPage {
 
 export interface GetThreadOptions {
   format?: 'full' | 'metadata'
+  signal?: AbortSignal
+}
+
+export interface ProviderRequestOptions {
+  signal?: AbortSignal
 }
 
 export interface MailActionProvider {
@@ -78,8 +83,14 @@ export interface MailActionProvider {
   /** Optional for test providers predating M2; production providers implement it. */
   saveDraft?(draft: { id: string | null; raw: string; threadId?: string | null }): Promise<string>
   /** A single, non-retried remote create for the exactly-once outbox protocol. */
-  createDraft?(draft: { raw: string; threadId?: string | null }): Promise<string>
-  updateDraft?(draft: { id: string; raw: string; threadId?: string | null }): Promise<string>
+  createDraft?(
+    draft: { raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string>
+  updateDraft?(
+    draft: { id: string; raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string>
   deleteDraft?(id: string): Promise<void>
   getAttachmentData?(messageId: string, attachmentId: string): Promise<string | undefined>
 }
@@ -91,9 +102,9 @@ export interface MailProvider extends MailActionProvider {
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
   getAttachmentData(messageId: string, attachmentId: string): Promise<string | undefined>
   listHistory(startHistoryId: string, pageToken?: string): Promise<HistoryPage>
-  listDrafts(pageToken?: string): Promise<DraftPage>
-  getDraft(id: string): Promise<ProviderDraft>
+  listDrafts(pageToken?: string, options?: ProviderRequestOptions): Promise<DraftPage>
+  getDraft(id: string, options?: ProviderRequestOptions): Promise<ProviderDraft>
   /** Optional only for narrow test providers; production Gmail implements both. */
-  sendDraft?(id: string): Promise<ProviderSendResult>
-  findByRfcId?(rfcMessageId: string): Promise<RfcMessageMatch | null>
+  sendDraft?(id: string, options?: ProviderRequestOptions): Promise<ProviderSendResult>
+  findByRfcId?(rfcMessageId: string, options?: ProviderRequestOptions): Promise<RfcMessageMatch | null>
 }

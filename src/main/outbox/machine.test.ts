@@ -9,6 +9,7 @@ function row(patch: Partial<MachineRow> = {}): MachineRow {
     gmailDraftId: null,
     sendAt: null,
     attempts: 0,
+    verifyAttempts: 0,
     ...patch
   }
 }
@@ -67,22 +68,22 @@ describe('outbox state machine', () => {
   })
 
   it('never treats one secondary-search negative as permission to resend', () => {
-    const sending = row({ state: 'sending', attempts: 2 })
+    const sending = row({ state: 'sending', attempts: 4, verifyAttempts: 2 })
     expect(
       planTransition(sending, { type: 'secondary-negative', exhausted: false, retryAt: NOW + 10_000 }, NOW)
     ).toEqual({
-      next: row({ state: 'sending', attempts: 3, sendAt: NOW + 10_000 }),
+      next: row({ state: 'sending', verifyAttempts: 3, sendAt: NOW + 10_000 }),
       effects: ['persist', 'arm-timer']
     })
   })
 
   it('parks residual ambiguity for review after the bounded verification window', () => {
     const plan = planTransition(
-      row({ state: 'sending', attempts: 5 }),
+      row({ state: 'sending', attempts: 8, verifyAttempts: 5 }),
       { type: 'secondary-negative', exhausted: true, retryAt: NOW },
       NOW
     )
-    expect(plan.next).toEqual(row({ state: 'needs-review', attempts: 6 }))
+    expect(plan.next).toEqual(row({ state: 'needs-review', verifyAttempts: 6 }))
     expect(plan.effects).toEqual(['persist', 'notify'])
   })
 
@@ -128,9 +129,19 @@ describe('outbox state machine', () => {
         NOW
       )
     ).toEqual({
-      next: row({ state: 'sending', sendAt: NOW + 5_000, attempts: 2 }),
+      next: row({ state: 'sending', sendAt: NOW + 5_000, attempts: 3 }),
       effects: ['persist', 'arm-timer']
     })
+  })
+
+  it('does not let transport retries exhaust secondary verification', () => {
+    const sending = row({ state: 'sending', attempts: 9 })
+    const plan = planTransition(
+      sending,
+      { type: 'secondary-negative', exhausted: false, retryAt: NOW + 10_000 },
+      NOW
+    )
+    expect(plan.next).toEqual(row({ state: 'sending', sendAt: NOW + 10_000, verifyAttempts: 1 }))
   })
 
   it('catches up an elapsed queued window on boot', () => {

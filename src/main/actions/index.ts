@@ -161,8 +161,8 @@ export function undoLast(db: Db, accountId: string): TriageResult | null {
   if (entry.kind === 'outbox-send') {
     const undone = db
       .prepare(
-        `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, last_error = NULL,
-         updated_at = ? WHERE account_id = ? AND id = ? AND state = 'queued'`
+        `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, verify_attempts = 0,
+         last_error = NULL, updated_at = ? WHERE account_id = ? AND id = ? AND state = 'queued'`
       )
       .run(Date.now(), accountId, entry.outboxId).changes
     return undone ? { label: 'Send undone', reopenDraftId: entry.outboxId } : { label: 'Already sent' }

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
-import type { OutboxItem } from '../../../shared/outbox'
+import type { OutboxChanged, OutboxItem } from '../../../shared/outbox'
 import { refreshedSelectionIndex } from '../selection'
 
 interface MailDataState {
@@ -12,6 +12,8 @@ interface MailDataState {
   realSnoozedThreads: SnoozedThreadRow[] | null
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
+  outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
+  clearOutboxFailure: () => void
   refreshDrafts: () => Promise<void>
   realUnreadTotal: number | null
   labels: MailLabel[]
@@ -34,12 +36,14 @@ export function useMailData(
   const [realSnoozedThreads, setRealSnoozedThreads] = useState<SnoozedThreadRow[] | null>(null)
   const [realDrafts, setRealDrafts] = useState<Draft[]>([])
   const [realOutbox, setRealOutbox] = useState<OutboxItem[]>([])
+  const [outboxFailure, setOutboxFailure] = useState<Extract<OutboxChanged, { kind: 'failed' }> | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [pendingCount, setPendingCount] = useState(0)
   const [mailRevision, setMailRevision] = useState(0)
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
+  const clearOutboxFailure = useCallback(() => setOutboxFailure(null), [])
 
   useEffect(() => {
     if (!window.attn) return
@@ -69,6 +73,7 @@ export function useMailData(
     setRealSnoozedThreads(null)
     setRealDrafts([])
     setRealOutbox([])
+    setOutboxFailure(null)
     setRealUnreadTotal(null)
     setLabels([])
     setPendingCount(0)
@@ -136,10 +141,16 @@ export function useMailData(
       mailChangedPending = true
       refresh()
     })
+    const offOutbox = bridge.outbox.onChanged((change) => {
+      if (change.kind === 'failed') setOutboxFailure(change)
+      mailChangedPending = true
+      refresh()
+    })
     return () => {
       cancelled = true
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
+      offOutbox()
     }
   }, [activeAccount, activeViewRef, selectedDraftIdRef, selectedThreadIdRef, setSelectedIndex])
 
@@ -157,6 +168,8 @@ export function useMailData(
     realSnoozedThreads,
     realDrafts,
     realOutbox,
+    outboxFailure,
+    clearOutboxFailure,
     refreshDrafts,
     realUnreadTotal,
     labels,

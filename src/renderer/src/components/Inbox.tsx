@@ -56,7 +56,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const earliestExitIndexRef = useRef<number | null>(null)
   const resetAccountRef = useRef<string | null | undefined>(undefined)
   const composerOpeningRef = useRef(false)
-  const autoReopeningOutboxRef = useRef<string | null>(null)
 
   const activeAccount = status.email ?? null
   const {
@@ -67,6 +66,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realSnoozedThreads,
     realDrafts,
     realOutbox,
+    outboxFailure,
+    clearOutboxFailure,
     refreshDrafts,
     realUnreadTotal,
     labels,
@@ -101,7 +102,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setLabelTargetId(null)
     setComposerDraft(null)
     setComposerError(null)
-    autoReopeningOutboxRef.current = null
     setExitingThreadIds(new Set())
     selectedThreadIdRef.current = null
     selectedDraftIdRef.current = null
@@ -435,36 +435,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   useSelectedRowScroll(selectedRowRef, selectedIndex, readerOpen)
 
   useEffect(() => {
-    const reopening = autoReopeningOutboxRef.current
-    if (
-      reopening &&
-      !realOutbox.some(
-        (item) => item.id === reopening && (item.state === 'failed' || item.state === 'needs-review')
-      )
-    ) {
-      autoReopeningOutboxRef.current = null
-    }
-    if (!window.attn || !activeAccount || composerDraft || autoReopeningOutboxRef.current) return
-    const item = realOutbox.find(
-      (candidate) => candidate.state === 'failed' || candidate.state === 'needs-review'
-    )
-    if (!item) return
-    autoReopeningOutboxRef.current = item.id
-    void window.attn.outbox
-      .reopen(item.id)
-      .then((result) => {
-        if (!result.draft) {
-          autoReopeningOutboxRef.current = null
-          return
-        }
-        setComposerError(result.error ?? item.lastError ?? 'Message could not be sent')
-        setComposerDraft(result.draft)
-        showToast('Message could not be sent')
-      })
-      .catch(() => {
-        autoReopeningOutboxRef.current = null
-      })
-  }, [activeAccount, composerDraft, realOutbox, showToast])
+    if (!outboxFailure) return
+    showToast(outboxFailure.error)
+    clearOutboxFailure()
+  }, [clearOutboxFailure, outboxFailure, showToast])
 
   return (
     <div className="flex h-full flex-col">

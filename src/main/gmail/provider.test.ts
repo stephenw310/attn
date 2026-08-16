@@ -65,10 +65,17 @@ describe('GmailMailProvider outbox operations', () => {
     expect(post).toHaveBeenCalledWith(
       '/drafts',
       { message: { raw: 'cmF3', threadId: 'thread-1' } },
-      { retryTransient: false }
+      { retryTransient: false, signal: undefined }
     )
     await expect(provider.updateDraft({ id: 'draft-1', raw: 'bmV4dA' })).resolves.toBe('draft-1')
-    expect(put).toHaveBeenCalledWith('/drafts/draft-1', { message: { raw: 'bmV4dA' } })
+    expect(put).toHaveBeenCalledWith(
+      '/drafts/draft-1',
+      { message: { raw: 'bmV4dA' } },
+      {
+        retryTransient: false,
+        signal: undefined
+      }
+    )
   })
 
   it('sends only a known durable Gmail draft id', async () => {
@@ -79,7 +86,14 @@ describe('GmailMailProvider outbox operations', () => {
       id: 'message-1',
       threadId: 'thread-1'
     })
-    expect(post).toHaveBeenCalledWith('/drafts/send', { id: 'draft/1' })
+    expect(post).toHaveBeenCalledWith(
+      '/drafts/send',
+      { id: 'draft/1' },
+      {
+        retryTransient: false,
+        signal: undefined
+      }
+    )
   })
 
   it('finds an orphaned draft even when the draft-scoped search omits it', async () => {
@@ -98,11 +112,16 @@ describe('GmailMailProvider outbox operations', () => {
       messageId: 'draft-message',
       threadId: 'thread-1'
     })
-    expect(get).toHaveBeenNthCalledWith(1, '/messages', {
-      q: 'in:drafts rfc822msgid:<stable@attn.local>',
-      maxResults: '10',
-      includeSpamTrash: 'true'
-    })
+    expect(get).toHaveBeenNthCalledWith(
+      1,
+      '/messages',
+      {
+        q: 'in:drafts rfc822msgid:<stable@attn.local>',
+        maxResults: '10',
+        includeSpamTrash: 'true'
+      },
+      undefined
+    )
   })
 
   it('finds an accepted non-draft message and returns null on bounded negatives', async () => {
@@ -110,7 +129,8 @@ describe('GmailMailProvider outbox operations', () => {
       .fn()
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [{ id: 'sent-message', threadId: 'thread-2' }] })
-      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ drafts: [] })
+      .mockResolvedValueOnce({ id: 'sent-message', threadId: 'thread-2', labelIds: ['SENT'] })
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [] })
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
@@ -121,6 +141,19 @@ describe('GmailMailProvider outbox operations', () => {
       threadId: 'thread-2'
     })
     await expect(provider.findByRfcId('<missing@attn.local>')).resolves.toBeNull()
+  })
+
+  it('never promotes an unverified draft search hit to a sent message', async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({ messages: [{ id: 'draft-message', threadId: 'thread-1' }] })
+      .mockResolvedValueOnce({ drafts: [] })
+      .mockResolvedValueOnce({ id: 'draft-message', threadId: 'thread-1', labelIds: ['DRAFT'] })
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+
+    await expect(provider.findByRfcId('<still-draft@example.com>')).resolves.toBeNull()
+    expect(get).toHaveBeenLastCalledWith('/messages/draft-message', { format: 'minimal' }, undefined)
   })
 })
 
@@ -140,7 +173,7 @@ describe('GmailMailProvider inbound drafts', () => {
       nextPageToken: 'next'
     })
     await provider.getDraft('r/1')
-    expect(get).toHaveBeenNthCalledWith(1, '/drafts', { maxResults: '100' })
-    expect(get).toHaveBeenNthCalledWith(2, '/drafts/r%2F1', { format: 'full' })
+    expect(get).toHaveBeenNthCalledWith(1, '/drafts', { maxResults: '100' }, undefined)
+    expect(get).toHaveBeenNthCalledWith(2, '/drafts/r%2F1', { format: 'full' }, undefined)
   })
 })

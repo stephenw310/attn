@@ -16,6 +16,8 @@ import { loadDraftMimeAttachments } from './mirror'
 const SECONDARY_CHECK_MS = 10_000
 const SECONDARY_CHECKS = 6
 const OFFLINE_RECHECK_MS = 30_000
+const STOP_TIMEOUT_MS = 5_000
+export const SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 const NEEDS_REVIEW_EXPLANATION = "We couldn't confirm this was sent — check your Sent mail before resending"
 
 interface SendRow {
@@ -40,6 +42,7 @@ interface SendRow {
   updated_at: number
   send_at: number | null
   attempts: number
+  verify_attempts: number
 }
 
 function parseJson<T>(value: string): T {
@@ -72,9 +75,13 @@ export function isRetryableOutboxPreflightError(error: unknown): boolean {
 
 export type DraftPresence = 'present' | 'consumed'
 
-export async function verifyKnownDraft(provider: MailProvider, id: string): Promise<DraftPresence> {
+export async function verifyKnownDraft(
+  provider: MailProvider,
+  id: string,
+  signal?: AbortSignal
+): Promise<DraftPresence> {
   try {
-    await provider.getDraft(id)
+    await provider.getDraft(id, { signal })
     return 'present'
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return 'consumed'
@@ -101,7 +108,8 @@ export type DraftSendProtocolResult =
  */
 export async function executeDraftSendProtocol(
   provider: MailProvider,
-  input: DraftSendProtocolInput
+  input: DraftSendProtocolInput,
+  signal?: AbortSignal
 ): Promise<DraftSendProtocolResult> {
   if (!provider.createDraft || !provider.updateDraft || !provider.sendDraft) {
     throw new Error('Gmail draft sending is unavailable')
@@ -109,7 +117,7 @@ export async function executeDraftSendProtocol(
   let gmailDraftId = input.gmailDraftId
   if (!gmailDraftId) {
     try {
-      gmailDraftId = await provider.createDraft({ raw: input.raw, threadId: input.threadId })
+      gmailDraftId = await provider.createDraft({ raw: input.raw, threadId: input.threadId }, { signal })
     } catch (error) {
       // A normal 4xx is a definitive rejection, but 408 specifically means the
       // request outcome is unknown and must enter Message-ID verification.
@@ -127,13 +135,13 @@ export async function executeDraftSendProtocol(
     if (!(await input.persistCreatedId(gmailDraftId))) return { kind: 'aborted' }
   }
   try {
-    await provider.updateDraft({ id: gmailDraftId, raw: input.raw, threadId: input.threadId })
+    await provider.updateDraft({ id: gmailDraftId, raw: input.raw, threadId: input.threadId }, { signal })
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return { kind: 'missing-before-send' }
     throw error
   }
   try {
-    const sent = await provider.sendDraft(gmailDraftId)
+    const sent = await provider.sendDraft(gmailDraftId, { signal })
     return { kind: 'sent', threadId: sent.threadId }
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return { kind: 'consumed' }
@@ -144,6 +152,7 @@ export async function executeDraftSendProtocol(
 /** The sole production chokepoint that may call Gmail drafts.send. */
 export class OutboxSender {
   private drainPromise: Promise<void> | null = null
+  private remoteAbortController: AbortController | null = null
   private stopping = false
   private timer: TimerHandle | null = null
 
@@ -160,6 +169,8 @@ export class OutboxSender {
 
   start(): void {
     this.stopping = false
+    const accountId = this.accountId()
+    if (accountId) this.pruneSent(accountId)
     this.refresh()
   }
 
@@ -183,13 +194,23 @@ export class OutboxSender {
     return this.drainPromise
   }
 
-  stop(): Promise<void> {
+  async stop(): Promise<void> {
     this.stopping = true
     if (this.timer) this.time.timers.clearTimeout(this.timer)
     this.timer = null
-    // An in-flight create must finish persisting its returned Gmail id before
-    // normal shutdown is allowed to close SQLite.
-    return this.drainPromise ?? Promise.resolve()
+    const drain = this.drainPromise
+    if (!drain) return
+    let timeout: TimerHandle | null = null
+    const timedOut = await Promise.race([
+      drain.then(() => false),
+      new Promise<boolean>((resolve) => {
+        timeout = this.time.timers.setTimeout(() => resolve(true), STOP_TIMEOUT_MS)
+      })
+    ])
+    if (timeout) this.time.timers.clearTimeout(timeout)
+    if (!timedOut) return
+    this.remoteAbortController?.abort(new Error('outbox shutdown'))
+    await drain
   }
 
   private armFromDatabase(): void {
@@ -216,7 +237,7 @@ export class OutboxSender {
       .prepare(
         `SELECT id, account_id, state, kind, gmail_draft_id, rfc_message_id, to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
-                references_json, quote_html, quote_text, updated_at, send_at, attempts
+                references_json, quote_html, quote_text, updated_at, send_at, attempts, verify_attempts
          FROM outbox
          WHERE account_id = ? AND state IN ('queued', 'sending')
            AND (send_at IS NULL OR send_at <= ?)
@@ -264,7 +285,8 @@ export class OutboxSender {
             state: row.state,
             gmailDraftId: row.gmail_draft_id,
             sendAt: row.send_at,
-            attempts: row.attempts
+            attempts: row.attempts,
+            verifyAttempts: row.verify_attempts
           },
           { type: 'timer' },
           this.time.now()
@@ -288,7 +310,7 @@ export class OutboxSender {
       .prepare(
         `SELECT id, account_id, state, kind, gmail_draft_id, rfc_message_id, to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
-                references_json, quote_html, quote_text, updated_at, send_at, attempts
+                references_json, quote_html, quote_text, updated_at, send_at, attempts, verify_attempts
          FROM outbox WHERE account_id = ? AND id = ? AND state = 'sending'`
       )
       .get(accountId, id) as SendRow | undefined
@@ -300,6 +322,8 @@ export class OutboxSender {
     recovering: boolean,
     checkpointWaited: boolean
   ): Promise<boolean> {
+    const controller = new AbortController()
+    this.remoteAbortController = controller
     try {
       if (!checkpointWaited) await this.beforeRemote()
       if (this.stopping || this.accountId() !== initial.account_id) return true
@@ -311,40 +335,45 @@ export class OutboxSender {
             state: row.state,
             gmailDraftId: row.gmail_draft_id,
             sendAt: row.send_at,
-            attempts: row.attempts
+            attempts: row.attempts,
+            verifyAttempts: row.verify_attempts
           },
           { type: 'recover' },
           this.time.now()
         )
         if (recovery.effects.includes('verify-secondary')) {
-          return this.verifySecondary(row, provider)
+          return this.verifySecondary(row, provider, controller.signal)
         }
         if (recovery.effects.includes('verify')) {
-          if ((await verifyKnownDraft(provider, row.gmail_draft_id as string)) === 'consumed') {
-            await this.markSent(row, provider, row.thread_id)
+          if (
+            (await verifyKnownDraft(provider, row.gmail_draft_id as string, controller.signal)) === 'consumed'
+          ) {
+            await this.markSent(row, provider, row.thread_id, controller.signal)
             return false
           }
         }
       }
 
-      await this.send(row, provider)
+      await this.send(row, provider, controller.signal)
       return false
     } catch (error) {
       return this.handleError(initial, error)
+    } finally {
+      if (this.remoteAbortController === controller) this.remoteAbortController = null
     }
   }
 
-  private async verifySecondary(row: SendRow, provider: MailProvider): Promise<boolean> {
+  private async verifySecondary(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<boolean> {
     if (!provider.findByRfcId) throw new Error('Gmail Message-ID verification is unavailable')
-    const match = await provider.findByRfcId(row.rfc_message_id)
+    const match = await provider.findByRfcId(row.rfc_message_id, { signal })
     if (match?.kind === 'message') {
-      await this.markSent(row, provider, match.threadId ?? row.thread_id)
+      await this.markSent(row, provider, match.threadId ?? row.thread_id, signal)
       return false
     }
     if (match?.kind === 'draft') {
       this.db
         .prepare(
-          `UPDATE outbox SET gmail_draft_id = ?, last_error = NULL
+          `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
            WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
         )
         .run(match.draftId, row.account_id, row.id)
@@ -352,40 +381,43 @@ export class OutboxSender {
       if (!recovered) return false
       const durableDraftId = recovered.gmail_draft_id
       if (!durableDraftId) return false
-      if ((await verifyKnownDraft(provider, durableDraftId)) === 'consumed') {
+      if ((await verifyKnownDraft(provider, durableDraftId, signal)) === 'consumed') {
         await this.markSent(
           recovered,
           provider,
-          durableDraftId === match.draftId ? (match.threadId ?? recovered.thread_id) : recovered.thread_id
+          durableDraftId === match.draftId ? (match.threadId ?? recovered.thread_id) : recovered.thread_id,
+          signal
         )
         return false
       }
-      await this.send(recovered, provider)
+      await this.send(recovered, provider, signal)
       return false
     }
 
-    const exhausted = row.attempts + 1 >= SECONDARY_CHECKS
+    const exhausted = row.verify_attempts + 1 >= SECONDARY_CHECKS
     const retryAt = this.time.now() + SECONDARY_CHECK_MS
     const plan = planTransition(
       {
         state: row.state,
         gmailDraftId: row.gmail_draft_id,
         sendAt: row.send_at,
-        attempts: row.attempts
+        attempts: row.attempts,
+        verifyAttempts: row.verify_attempts
       },
       { type: 'secondary-negative', exhausted, retryAt },
       this.time.now()
     )
     const persisted = this.db
       .prepare(
-        `UPDATE outbox SET state = ?, send_at = ?, attempts = ?, last_error = ?
+        `UPDATE outbox SET state = ?, send_at = ?, attempts = ?, verify_attempts = ?, last_error = ?
          WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
       )
       .run(
         plan.next.state,
         plan.next.sendAt,
         plan.next.attempts,
-        NEEDS_REVIEW_EXPLANATION,
+        plan.next.verifyAttempts,
+        plan.next.state === 'needs-review' ? NEEDS_REVIEW_EXPLANATION : null,
         row.account_id,
         row.id
       )
@@ -428,7 +460,7 @@ export class OutboxSender {
     return Buffer.from(mime).toString('base64url')
   }
 
-  private async send(row: SendRow, provider: MailProvider): Promise<void> {
+  private async send(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<void> {
     if (!provider.createDraft || !provider.updateDraft || !provider.sendDraft) {
       throw new OutboxNoRemoteMutationError(new Error('Gmail draft sending is unavailable'))
     }
@@ -438,18 +470,22 @@ export class OutboxSender {
     } catch (error) {
       throw new OutboxNoRemoteMutationError(error)
     }
-    const result = await executeDraftSendProtocol(provider, {
-      gmailDraftId: row.gmail_draft_id,
-      raw,
-      threadId: row.thread_id,
-      persistCreatedId: (gmailDraftId) =>
-        this.db
-          .prepare(
-            `UPDATE outbox SET gmail_draft_id = ?, last_error = NULL
-             WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-          )
-          .run(gmailDraftId, row.account_id, row.id).changes > 0
-    })
+    const result = await executeDraftSendProtocol(
+      provider,
+      {
+        gmailDraftId: row.gmail_draft_id,
+        raw,
+        threadId: row.thread_id,
+        persistCreatedId: (gmailDraftId) =>
+          this.db
+            .prepare(
+              `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
+               WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
+            )
+            .run(gmailDraftId, row.account_id, row.id).changes > 0
+      },
+      signal
+    )
     if (result.kind === 'aborted') return
     if (result.kind === 'missing-before-send') {
       this.parkNeedsReview(row, true)
@@ -458,7 +494,8 @@ export class OutboxSender {
     await this.markSent(
       row,
       provider,
-      result.kind === 'sent' ? result.threadId || row.thread_id : row.thread_id
+      result.kind === 'sent' ? result.threadId || row.thread_id : row.thread_id,
+      signal
     )
   }
 
@@ -468,7 +505,8 @@ export class OutboxSender {
         state: row.state,
         gmailDraftId: row.gmail_draft_id,
         sendAt: row.send_at,
-        attempts: row.attempts
+        attempts: row.attempts,
+        verifyAttempts: row.verify_attempts
       },
       { type: 'needs-review' },
       this.time.now()
@@ -476,13 +514,14 @@ export class OutboxSender {
     const parked = this.db
       .prepare(
         `UPDATE outbox SET state = ?, gmail_draft_id = CASE WHEN ? THEN NULL ELSE gmail_draft_id END,
-         send_at = NULL, attempts = ?, last_error = ?
+         send_at = NULL, attempts = ?, verify_attempts = ?, last_error = ?
          WHERE account_id = ? AND id = ? AND state = 'sending'`
       )
       .run(
         plan.next.state,
         clearDraftId ? 1 : 0,
         plan.next.attempts,
+        plan.next.verifyAttempts,
         NEEDS_REVIEW_EXPLANATION,
         row.account_id,
         row.id
@@ -503,7 +542,8 @@ export class OutboxSender {
         state: current.state,
         gmailDraftId: current.gmail_draft_id,
         sendAt: current.send_at,
-        attempts: current.attempts
+        attempts: current.attempts,
+        verifyAttempts: current.verify_attempts
       },
       permanent
         ? { type: 'permanent-error' }
@@ -516,13 +556,14 @@ export class OutboxSender {
     )
     const persisted = this.db
       .prepare(
-        `UPDATE outbox SET state = ?, send_at = ?, attempts = ?, last_error = ?
+        `UPDATE outbox SET state = ?, send_at = ?, attempts = ?, verify_attempts = ?, last_error = ?
          WHERE account_id = ? AND id = ? AND state = 'sending'`
       )
       .run(
         plan.next.state,
         plan.next.sendAt,
         plan.next.attempts,
+        plan.next.verifyAttempts,
         errorMessage(cause),
         current.account_id,
         current.id
@@ -536,25 +577,38 @@ export class OutboxSender {
     return true
   }
 
-  private async markSent(row: SendRow, provider: MailProvider, threadId: string | null): Promise<void> {
+  private async markSent(
+    row: SendRow,
+    provider: MailProvider,
+    threadId: string | null,
+    signal: AbortSignal
+  ): Promise<void> {
+    const now = this.time.now()
     const settled = this.db
       .prepare(
-        `UPDATE outbox SET state = 'sent', send_at = NULL, last_error = NULL
+        `UPDATE outbox SET state = 'sent', send_at = NULL, last_error = NULL, updated_at = ?
          WHERE account_id = ? AND id = ? AND state = 'sending'`
       )
-      .run(row.account_id, row.id)
+      .run(now, row.account_id, row.id)
     if (settled.changes === 0) return
     this.cleanSpool(row.id)
+    this.pruneSent(row.account_id, now)
     this.notify({ kind: 'changed' })
     // Sending is already durably settled. Do not make normal shutdown or an
     // account switch wait on the best-effort post-send conversation refresh.
     if (!threadId || this.stopping || this.accountId() !== row.account_id) return
     try {
-      const thread = await provider.getThread(threadId, { format: 'full' })
+      const thread = await provider.getThread(threadId, { format: 'full', signal })
       persistThread(this.db, row.account_id, thread)
       this.notify({ kind: 'changed' })
     } catch (error) {
       console.warn(`[outbox] sent ${row.id}, but refresh failed: ${errorMessage(error)}`)
     }
+  }
+
+  private pruneSent(accountId: string, now = this.time.now()): void {
+    this.db
+      .prepare("DELETE FROM outbox WHERE account_id = ? AND state = 'sent' AND updated_at < ?")
+      .run(accountId, now - SENT_OUTBOX_RETENTION_MS)
   }
 }

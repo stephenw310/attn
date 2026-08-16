@@ -1,6 +1,5 @@
 import { appendFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import type { AuthStatus } from '../shared/auth'
@@ -22,6 +21,7 @@ import { MailNotifier, type PendingFocus } from './notify'
 import { reconcileRemoteDraft } from './outbox/draftSync'
 import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import { OutboxSender } from './outbox/sender'
+import { cleanOutboxSpool } from './outbox/spool'
 import { SnoozeScheduler } from './scheduler'
 import { writeSetting } from './settings'
 import { deleteThread } from './sync/persist'
@@ -77,15 +77,7 @@ function broadcastMailChanged(): void {
 
 function broadcastOutboxChanged(change: OutboxChanged): void {
   broadcast(IPC_CHANNELS.outboxChanged, change)
-  broadcastMailChanged()
-}
-
-function cleanOutboxSpool(id: string): void {
-  const root = resolve(app.getPath('userData'), 'outbox')
-  const directory = resolve(root, id)
-  const relativePath = relative(root, directory)
-  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) return
-  void rm(directory, { recursive: true, force: true }).catch(() => {})
+  mailNotifier?.updateBadge()
 }
 
 function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
@@ -316,7 +308,7 @@ function initialize(): void {
     () => draftMirrorExecutor?.waitForIdle() ?? Promise.resolve(),
     undefined,
     join(app.getPath('userData'), 'outbox'),
-    cleanOutboxSpool
+    (id) => cleanOutboxSpool(app.getPath('userData'), id)
   )
   snoozeScheduler = new SnoozeScheduler(
     activeDb,

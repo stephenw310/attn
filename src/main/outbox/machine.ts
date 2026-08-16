@@ -5,6 +5,7 @@ export interface MachineRow {
   gmailDraftId: string | null
   sendAt: number | null
   attempts: number
+  verifyAttempts: number
 }
 
 export type MachineEvent =
@@ -43,7 +44,7 @@ export function planTransition(row: MachineRow, event: MachineEvent, now: number
   if (event.type === 'queue') {
     if (row.state !== 'composing') return unchanged(row)
     return {
-      next: { ...row, state: 'queued', sendAt: event.sendAt, attempts: 0 },
+      next: { ...row, state: 'queued', sendAt: event.sendAt, attempts: 0, verifyAttempts: 0 },
       effects: ['persist', 'arm-timer', 'notify']
     }
   }
@@ -51,7 +52,7 @@ export function planTransition(row: MachineRow, event: MachineEvent, now: number
   if (event.type === 'undo') {
     if (row.state !== 'queued') return { next: row, effects: ['notify'] }
     return {
-      next: { ...row, state: 'composing', sendAt: null, attempts: 0 },
+      next: { ...row, state: 'composing', sendAt: null, attempts: 0, verifyAttempts: 0 },
       effects: ['persist', 'notify']
     }
   }
@@ -97,12 +98,18 @@ export function planTransition(row: MachineRow, event: MachineEvent, now: number
     if (row.state !== 'sending') return unchanged(row)
     if (event.exhausted) {
       return {
-        next: { ...row, state: 'needs-review', sendAt: null, attempts: row.attempts + 1 },
+        next: {
+          ...row,
+          state: 'needs-review',
+          sendAt: null,
+          attempts: 0,
+          verifyAttempts: row.verifyAttempts + 1
+        },
         effects: ['persist', 'notify']
       }
     }
     return {
-      next: { ...row, sendAt: event.retryAt, attempts: row.attempts + 1 },
+      next: { ...row, sendAt: event.retryAt, attempts: 0, verifyAttempts: row.verifyAttempts + 1 },
       effects: ['persist', 'arm-timer']
     }
   }
@@ -134,7 +141,7 @@ export function planTransition(row: MachineRow, event: MachineEvent, now: number
   if (event.type === 'verification-error') {
     if (row.state !== 'sending') return unchanged(row)
     return {
-      next: { ...row, sendAt: event.retryAt },
+      next: { ...row, sendAt: event.retryAt, attempts: row.attempts + 1 },
       effects: ['persist', 'arm-timer']
     }
   }

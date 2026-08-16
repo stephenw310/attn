@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
-import { TEST_CHANNELS } from '../src/shared/ipc'
+import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 
@@ -269,7 +269,7 @@ test('discovers a provider-gated send through the pending readout and Go to Outb
   await composer.expectPending(0)
 })
 
-test('reopens a durable failed send even when its live event was missed', async ({ app, boot, page }) => {
+test('surfaces a durable failed send without interrupting the current task', async ({ app, boot, page }) => {
   await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 30), TEST_CHANNELS.setUndoSendDelay)
   let composer = new ComposerPage(page)
   await composer.openNew()
@@ -291,9 +291,30 @@ test('reopens a durable failed send even when its live event was missed', async 
     }
   )
   if (failure) throw new Error(failure)
+  await app.evaluate(
+    ({ BrowserWindow }, payload) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(payload.channel, payload.change)
+      }
+    },
+    {
+      channel: IPC_CHANNELS.outboxChanged,
+      change: { kind: 'failed', id, error: 'Recipient rejected by provider' }
+    }
+  )
+  await expect(page.getByTestId('toast')).toHaveText('Recipient rejected by provider')
+  await expect(composer.root).toHaveCount(0)
 
   ;({ page } = await boot.relaunch())
   composer = new ComposerPage(page)
+  await expect(composer.root).toHaveCount(0)
+  await composer.expectPending(1)
+  await page.keyboard.press('g')
+  await page.keyboard.press('o')
+  await expect(page.getByTestId('outbox-list')).toBeVisible()
+  await expect(page.getByTestId('outbox-row')).toHaveAttribute('data-outbox-state', 'failed')
+  await page.getByTestId('outbox-row').click()
+
   await expect(composer.root).toBeVisible()
   await expect(page.getByTestId('composer-send-error')).toHaveText('Recipient rejected by provider')
   await composer.expectRecipients(['failed@example.com'])

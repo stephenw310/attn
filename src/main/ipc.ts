@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
 import { isValidEmail } from '../shared/address'
@@ -69,6 +69,7 @@ import {
 } from './outbox/queue'
 import { planReply } from './outbox/replyPlan'
 import type { OutboxSender } from './outbox/sender'
+import { cleanOutboxSpool } from './outbox/spool'
 import type { SnoozeScheduler } from './scheduler'
 import { hydrateMissingThreadBodies } from './sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from './sync/bodyHydration'
@@ -234,14 +235,6 @@ function isDraftInlineImageInput(value: unknown): value is DraftInlineImageInput
     typeof image.dataBase64 === 'string' &&
     image.dataBase64.length <= 14 * 1024 * 1024
   )
-}
-
-function cleanDraftSpool(id: string): void {
-  const spoolRoot = resolve(app.getPath('userData'), 'outbox')
-  const directory = resolve(spoolRoot, id)
-  const relativePath = relative(spoolRoot, directory)
-  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) return
-  void rm(directory, { recursive: true, force: true }).catch(() => {})
 }
 
 async function resolveAttachmentData(
@@ -444,7 +437,7 @@ export function registerIpc(context: IpcContext): () => void {
     const result = closeDraft(context.db, requireAccount(context), id)
     context.broadcastMailChanged()
     if (result === 'discarded') {
-      cleanDraftSpool(id)
+      cleanOutboxSpool(app.getPath('userData'), id)
       void context.draftMirrorExecutor()?.trigger()
     }
     return result
@@ -452,7 +445,7 @@ export function registerIpc(context: IpcContext): () => void {
   handle(IPC_CHANNELS.draftDiscard, (_event, id) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
     if (!discardDraft(context.db, requireAccount(context), id)) throw new Error('draft is unavailable')
-    cleanDraftSpool(id)
+    cleanOutboxSpool(app.getPath('userData'), id)
     context.broadcastMailChanged()
     void context.draftMirrorExecutor()?.trigger()
     return undefined

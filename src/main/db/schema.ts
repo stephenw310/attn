@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 12
+export const CURRENT_SCHEMA_VERSION = 13
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -145,6 +145,7 @@ CREATE TABLE outbox (
   rfc_message_id   TEXT,
   send_at          INTEGER,
   attempts         INTEGER NOT NULL DEFAULT 0,
+  verify_attempts  INTEGER NOT NULL DEFAULT 0,
   last_error       TEXT
 );
 CREATE INDEX idx_outbox_composing ON outbox (account_id, state, updated_at DESC);

@@ -16,6 +16,13 @@ export class GmailApiError extends Error {
   }
 }
 
+interface RequestOptions {
+  params?: Record<string, string | string[]>
+  body?: unknown
+  retryTransient?: boolean
+  signal?: AbortSignal
+}
+
 export class GmailClient {
   constructor(
     private readonly config: OAuthConfig,
@@ -23,12 +30,12 @@ export class GmailClient {
     private readonly persist: (t: TokenSet) => void
   ) {}
 
-  private async ensureAccessToken(): Promise<string> {
+  private async ensureAccessToken(signal?: AbortSignal): Promise<string> {
     if (Date.now() < this.tokens.expires_at - 60_000) return this.tokens.access_token
-    return this.refresh()
+    return this.refresh(signal)
   }
 
-  private async refresh(): Promise<string> {
+  private async refresh(signal?: AbortSignal): Promise<string> {
     if (!this.tokens.refresh_token) {
       throw new Error('no refresh token stored — sign in again')
     }
@@ -40,7 +47,8 @@ export class GmailClient {
         client_secret: this.config.client_secret,
         refresh_token: this.tokens.refresh_token,
         grant_type: 'refresh_token'
-      })
+      }),
+      signal
     })
     if (!res.ok) {
       throw new Error(`token refresh failed (${res.status}): ${(await res.text()).slice(0, 300)}`)
@@ -57,16 +65,36 @@ export class GmailClient {
     return this.tokens.access_token
   }
 
-  async get<T>(path: string, params?: Record<string, string | string[]>): Promise<T> {
-    return this.request('GET', path, { params })
+  async get<T>(
+    path: string,
+    params?: Record<string, string | string[]>,
+    options?: { signal?: AbortSignal }
+  ): Promise<T> {
+    return this.request('GET', path, { params, signal: options?.signal })
   }
 
-  async post<T>(path: string, body: unknown, options?: { retryTransient?: boolean }): Promise<T> {
-    return this.request('POST', path, { body, retryTransient: options?.retryTransient })
+  async post<T>(
+    path: string,
+    body: unknown,
+    options?: { retryTransient?: boolean; signal?: AbortSignal }
+  ): Promise<T> {
+    return this.request('POST', path, {
+      body,
+      retryTransient: options?.retryTransient,
+      signal: options?.signal
+    })
   }
 
-  async put<T>(path: string, body: unknown): Promise<T> {
-    return this.request('PUT', path, { body })
+  async put<T>(
+    path: string,
+    body: unknown,
+    options?: { retryTransient?: boolean; signal?: AbortSignal }
+  ): Promise<T> {
+    return this.request('PUT', path, {
+      body,
+      retryTransient: options?.retryTransient,
+      signal: options?.signal
+    })
   }
 
   async delete(path: string): Promise<void> {
@@ -76,11 +104,7 @@ export class GmailClient {
   private async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
-    options: {
-      params?: Record<string, string | string[]>
-      body?: unknown
-      retryTransient?: boolean
-    }
+    options: RequestOptions
   ): Promise<T> {
     const url = new URL(BASE + path)
     if (options.params) {
@@ -94,14 +118,15 @@ export class GmailClient {
     }
     let attempt = 0
     for (;;) {
-      const token = await this.ensureAccessToken()
+      const token = await this.ensureAccessToken(options.signal)
       const res = await fetch(url, {
         method,
         headers: {
           Authorization: `Bearer ${token}`,
           ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
         },
-        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: options.signal
       })
       if (res.ok) {
         const text = await res.text()
@@ -110,7 +135,7 @@ export class GmailClient {
       const text = await res.text()
       if (res.status === 401 && attempt === 0) {
         attempt++
-        await this.refresh()
+        await this.refresh(options.signal)
         continue
       }
       // Gmail reports per-user rate/quota limits as 403, not 429. Per-MINUTE
@@ -123,7 +148,7 @@ export class GmailClient {
         attempt < 7
       ) {
         attempt++
-        await sleep(Math.min(65_000, 1000 * 2 ** attempt) + Math.random() * 1000)
+        await sleep(Math.min(65_000, 1000 * 2 ** attempt) + Math.random() * 1000, options.signal)
         continue
       }
       throw new GmailApiError(
@@ -135,6 +160,17 @@ export class GmailClient {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('request aborted'))
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }, ms)
+    const abort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason ?? new Error('request aborted'))
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
 }
