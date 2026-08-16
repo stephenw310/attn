@@ -10,10 +10,34 @@
 
 ## Why M3 opens with sync
 
-M2 leaves the local store holding Inbox (12 months of metadata, 90 days of bodies), Sent metadata, drafts, and — once T13A lands — a lifetime header sweep of everything Gmail returns from an unfiltered listing. Three gaps remain, and every one of them is a *data* gap that a UI task cannot close:
+### What sync looks like as M3 begins
+
+Two independent mechanisms exist when this milestone starts. Read both before touching either — the most
+likely M3 mistake is re-implementing something T13A already shipped.
+
+**1. The staged backfill** (`src/main/sync/backfill.ts`), one cursor (`sync_state.backfill_cursor`, grammar
+`phase` / `phase:pageToken` / `done`), phases enumerated by `SyncStage` in `src/shared/mail.ts`:
+
+| # | Phase | Listing | Format |
+|---|---|---|---|
+| 1 | `metadata` | `newer_than:12m`, `labelIds: ['INBOX']` | metadata |
+| 2 | `bodies` | `newer_than:90d`, `labelIds: ['INBOX']` | full |
+| 3 | `drafts` | `drafts.list` | full |
+| 4 | `sent` | `newer_than:12m`, `labelIds: ['SENT']` | metadata |
+| 5 | `reconcile` | full INBOX id re-list | ids |
+
+**2. The lifetime sweep** (`src/main/sync/lifetimeSweep.ts`, T13A) — deliberately **not** a backfill phase.
+It has its own cursor (`sync_state.sweep_cursor`, schema v12), its own throttle constants, and its own
+progress/quota-wait reporting; `SyncController.startLifetimeSweep` launches it once the backfill completes.
+It walks Gmail's default listing with **no query and no label filter**, newest-first, skipping threads
+already stored. That shape is correct and M3 does not change it.
+
+So the account-wide walk already exists. What is missing is the *bounded, normal-priority* tier between the
+Inbox stages and that throttled sweep, plus everything Spam/Trash needs. Three gaps remain, and every one
+is a *data* gap that a UI task cannot close:
 
 1. **Spam and Trash are never fetched.** `threads.list` excludes both unless explicitly asked (SPEC §9 #17), so M3's Spam and Trash mailboxes would render empty against a store that never had the rows.
-2. **The 12-month tier is still Inbox-scoped at normal priority.** T13A's sweep does reach archived mail, but it is deliberately throttled and low-priority; a first-run user should not wait on a lifetime sweep to search last quarter's archived mail.
+2. **The 12-month tier is still Inbox-scoped at normal priority.** Stages 1–2 fetch only `INBOX`, and stage 4 only `SENT`, so archived mail from last quarter reaches the store solely through T13A's throttled sweep — minutes of work arriving over hours. A first-run user should not wait on a lifetime walk to search recent archived mail.
 3. **Reconciliation and expiry recovery only understand INBOX.** `reconcileInboxMembership` (`src/main/sync/poller.ts:77`) is hardcoded to one label, and `SyncController.recoverExpiredHistory` re-lists INBOX alone. Once Spam and Trash are cached, that is not merely incomplete — it is actively wrong, because Gmail auto-purges both at ~30 days and nothing would ever remove the local rows.
 
 Building the search and mailbox UI on top of that store would mean shipping views that are quietly missing mail, then fixing sync underneath them. Reverse the order.
@@ -107,15 +131,34 @@ This is the task the sync redesign exists for. Today's stages are Inbox-scoped p
 ### Target stage order (SPEC F2)
 
 ```
-stage       scope               fetches   purpose                              contacts
-inbox       12m, INBOX          headers   triage surface + unread count first  senders of received mail
-bodies      90d, INBOX          full      recent mail readable offline         (same threads, refetched)
-drafts      all drafts          full      shipped in T14D                      —
-all-mail    12m, no filter      headers   ← new; SENT lives here               recipients of sent mail
-spam-trash  all (~30d exists)   headers   ← new; explicit label listings       none — excluded by design
-reconcile   per-label id sweeps ids       ← generalized in S4                  —
-lifetime    no date bound       headers   T13A's throttled sweep               everything older than 12m
+#  stage       scope               fetches   status in M3        contacts
+1  metadata    12m, INBOX          headers   unchanged           senders of received mail
+2  bodies      90d, INBOX          full      unchanged           (same threads, refetched)
+3  drafts      all drafts          full      unchanged (T14D)    —
+4  all-mail    12m, no filter      headers   NEW — replaces (4)  recipients of sent mail
+   ~~sent~~    12m, SENT           headers   DELETED — subsumed  (moves to all-mail)
+5  spam-trash  all (~30d exists)   headers   NEW — label lists   none — excluded by design
+6  reconcile   per-label id lists  ids       GENERALIZED in S4   —
+── backfill_cursor ends here; sweep_cursor takes over ──
+7  lifetime    no date bound       headers   unchanged (T13A)    everything older than 12m
 ```
+
+**The ordering contract.** Each constraint below exists for a stated reason; keep them or state why:
+
+1. **`metadata` stays first and stays INBOX-scoped.** It is what makes the triage surface and the unread
+   count complete within seconds. Merging it into `all-mail` would make an inbox-zero user's five live
+   threads arrive behind thousands of archived ones.
+2. **`all-mail` precedes `spam-trash`.** Real mail before junk; Spam/Trash are the least valuable rows in
+   the account and are inherently small.
+3. **`reconcile` stays last among bounded stages.** It repairs membership against what the earlier stages
+   just wrote; running it before them reconciles a half-filled store.
+4. **The lifetime sweep runs only after every bounded stage reports done.** This is already true —
+   `startLifetimeSweep` fires on backfill completion — but S3 adds stages *before* that completion point, so
+   verify the trigger still keys off the final stage rather than a hardcoded phase name. Starting the
+   throttled walk earlier would put it in contention with the fast tier and delay the useful year.
+5. **Cursor compatibility.** `parseCursor` must route a profile resuming on the retired `sent` token to a
+   valid phase instead of throwing (`Invalid backfill cursor`), since dogfood profiles will be mid-backfill
+   when this lands. `sweep_cursor` is untouched by all of this.
 
 **Where Sent mail and the contact index live.** Neither is a stage of its own. Gmail's unfiltered
 `threads.list` already returns SENT, so sent mail is simply part of the all-mail walk (and of the lifetime
@@ -150,7 +193,7 @@ ids and continues into older mail. Neither fetches a thread the other already st
 - **Skip-if-present is what makes overlapping stages cheap.** Before fetching a listed thread id, skip it when `threads` already holds it. Put the check in the stage runner, not in `persistThread` — the write path stays authoritative for threads that *are* fetched. This is safe because the history checkpoint is recorded before the first backfill page, so anything already stored is kept current by the poller.
 - **Overlap, never complement.** The all-mail stage queries `newer_than:12m` and re-lists what the inbox stage already covered. Do **not** try to carve exact date complements: Gmail's `newer_than`/`older_than` operators are coarse and fuzzy, and a seam gap loses mail invisibly, while re-listing ids costs ~1% of the fetch budget.
 - **The `sent` stage is removed, not kept.** SENT is inside the unfiltered scope, so the dedicated pass is redundant once all-mail runs. Delete the stage, its cursor token, and its status label in the same PR; T13A's contact derivation is unaffected because it reads the same stored messages. Note the interaction: a profile that resumes mid-`sent` on the old cursor grammar must route to a valid new phase rather than throwing in `parseCursor`.
-- **Cursor grammar and stage plumbing.** `parseCursor`/`checkpoint` in `src/main/sync/backfill.ts` gain the new phases with the existing `phase:pageToken` resume semantics; `SyncStage` (`src/shared/mail.ts:96`) gains `'all-mail'` and `'spam-trash'`; `SYNC_STAGES` and `syncStageLabel` (`src/renderer/src/components/SyncStatus.tsx:5`) gain entries ("All mail", "Spam & trash"). The existing `runThreadPhase` handles both new stages as-is — they page thread ids like the others.
+- **Cursor grammar and stage plumbing.** `parseCursor`/`checkpoint` in `src/main/sync/backfill.ts` gain the new phases with the existing `phase:pageToken` resume semantics and drop `sent`; `SyncStage` (`src/shared/mail.ts`) swaps `'sent'` for `'all-mail'` and `'spam-trash'`; `SYNC_STAGES` and `syncStageLabel` (`src/renderer/src/components/SyncStatus.tsx`) follow ("All mail", "Spam & trash"). The existing `runThreadPhase` handles both new stages as-is — they page thread ids like the others. Do **not** add a `'lifetime'` member to `SyncStage`: the sweep reports through its own progress channel and cursor, and duplicating it as a backfill phase would give it two owners.
 - **Skip legacy `CHAT` rows** defensively; old accounts surface Hangouts messages in unfiltered listings.
 - **Seeded accounts skip the new stages** exactly as they skip `sent` today (`src/main/index.ts:236`).
 - **Contact hygiene is a hard prerequisite, and it belongs to T13A.** If T13A has not landed when this starts, this PR carries the rule instead: messages labeled SPAM or TRASH never contribute to `contact_messages`. A deliberate 30-day spam pass would otherwise bulk-import spammer addresses into autocomplete — a visible regression, not a theoretical one.
