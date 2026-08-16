@@ -10,8 +10,9 @@ import {
   type OpenDialogOptions,
   shell
 } from 'electron'
+import type { ActionRevertNotice } from '../shared/actionRevert'
 import { isValidEmail } from '../shared/address'
-import type { AuthStatus } from '../shared/auth'
+import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import {
   type DraftAttachment,
   type DraftInlineImageInput,
@@ -28,6 +29,7 @@ import type {
   InlineImageResult
 } from '../shared/mail'
 import {
+  actionQueueStatus,
   dropOutboxSendUndo,
   isTriageAction,
   pendingActionCount,
@@ -102,7 +104,7 @@ export interface IpcContext {
   db: Db
   currentAccountId: () => string | null
   authStatus: () => AuthStatus
-  signIn: () => Promise<AuthStatus>
+  signIn: () => Promise<AuthSignInResult>
   signOut: () => AuthStatus
   makeClient: () => GmailClient | null
   makeProvider: () => GmailMailProvider | null
@@ -118,6 +120,8 @@ export interface IpcContext {
   trackForegroundProviderWork: <T>(accountId: string, work: () => Promise<T>) => Promise<T>
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
+  peekRevertedActions: (accountId: string) => ActionRevertNotice | null
+  acknowledgeRevertedActions: (accountId: string, noticeId: number) => boolean
   waitForConversation: (threadId: string) => Promise<void>
   pickAttachmentPaths?: () => Promise<string[]>
   draftInlineImageDelay: () => number
@@ -560,6 +564,17 @@ export function registerIpc(context: IpcContext): () => void {
     context.clearPendingFocus()
     return threadId
   })
+  handle(IPC_CHANNELS.mailPeekActionsReverted, (_event, accountId) => {
+    const account = context.currentAccountId()
+    return typeof accountId === 'string' && accountId === account
+      ? context.peekRevertedActions(accountId)
+      : null
+  })
+  handle(IPC_CHANNELS.mailAcknowledgeActionsReverted, (_event, accountId, noticeId) => {
+    if (typeof accountId !== 'string' || typeof noticeId !== 'number') return false
+    if (context.currentAccountId() !== accountId) return false
+    return context.acknowledgeRevertedActions(accountId, noticeId)
+  })
   handle(IPC_CHANNELS.mailListThreads, () => {
     const account = context.currentAccountId()
     // Production deliberately keeps its M1 query cap. The perf-only seam lifts
@@ -718,6 +733,10 @@ export function registerIpc(context: IpcContext): () => void {
   handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
     const account = context.currentAccountId()
     return account ? pendingActionCount(context.db, account) : 0
+  })
+  handle(IPC_CHANNELS.mailGetActionQueueStatus, () => {
+    const account = context.currentAccountId()
+    return account ? actionQueueStatus(context.db, account) : { pending: 0, paused: 0, authPaused: false }
   })
   return () => bodyHydrator.stop()
 }

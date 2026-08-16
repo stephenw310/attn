@@ -1,5 +1,6 @@
-import type { TriageAction, TriageResult } from './actions'
-import type { AuthStatus } from './auth'
+import type { ActionRevertNotice } from './actionRevert'
+import type { ActionQueueStatus, TriageAction, TriageResult } from './actions'
+import type { AuthSignInResult, AuthStatus } from './auth'
 import type { ContactSearchResult } from './contacts'
 import type {
   Draft,
@@ -55,6 +56,8 @@ export const IPC_CHANNELS = {
   mailListSnoozed: 'mail:listSnoozed',
   mailListLabels: 'mail:listLabels',
   mailGetUnreadCount: 'mail:getUnreadCount',
+  mailPeekActionsReverted: 'mail:peekActionsReverted',
+  mailAcknowledgeActionsReverted: 'mail:acknowledgeActionsReverted',
   mailGetConversation: 'mail:getConversation',
   mailDownloadAttachment: 'mail:downloadAttachment',
   mailGetInlineImage: 'mail:getInlineImage',
@@ -64,7 +67,9 @@ export const IPC_CHANNELS = {
   mailMarkReadOnOpen: 'mail:markReadOnOpen',
   mailUndo: 'mail:undo',
   mailGetPendingActionCount: 'mail:getPendingActionCount',
+  mailGetActionQueueStatus: 'mail:getActionQueueStatus',
   mailChanged: 'mail:changed',
+  mailActionsReverted: 'mail:actionsReverted',
   mailBodyHydrationFailed: 'mail:bodyHydrationFailed',
   mailFocusThreadAvailable: 'mail:focusThreadAvailable',
   syncState: 'sync:state'
@@ -85,6 +90,8 @@ export const TEST_CHANNELS = {
   updateMessageBody: 'attn:test:updateMessageBody',
   failNextDraftSave: 'attn:test:failNextDraftSave',
   markDraftMirrored: 'attn:test:markDraftMirrored',
+  failNextAction: 'attn:test:failNextAction',
+  failNextActionAuth: 'attn:test:failNextActionAuth',
   setAttachmentPickerFiles: 'attn:test:setAttachmentPickerFiles',
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',
@@ -96,7 +103,7 @@ export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]
 
 export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
-  [IPC_CHANNELS.authSignIn]: { args: []; result: AuthStatus }
+  [IPC_CHANNELS.authSignIn]: { args: []; result: AuthSignInResult }
   [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {
@@ -145,6 +152,14 @@ export interface InvokeChannels {
   [IPC_CHANNELS.mailListSnoozed]: { args: []; result: SnoozedThreadRow[] }
   [IPC_CHANNELS.mailListLabels]: { args: []; result: MailLabel[] }
   [IPC_CHANNELS.mailGetUnreadCount]: { args: []; result: number }
+  [IPC_CHANNELS.mailPeekActionsReverted]: {
+    args: [accountId: string]
+    result: ActionRevertNotice | null
+  }
+  [IPC_CHANNELS.mailAcknowledgeActionsReverted]: {
+    args: [accountId: string, noticeId: number]
+    result: boolean
+  }
   [IPC_CHANNELS.mailGetConversation]: {
     args: [threadId: string, allowHydration: boolean]
     result: Conversation | null
@@ -166,12 +181,14 @@ export interface InvokeChannels {
   [IPC_CHANNELS.mailMarkReadOnOpen]: { args: [threadId: string]; result: undefined }
   [IPC_CHANNELS.mailUndo]: { args: []; result: TriageResult | null }
   [IPC_CHANNELS.mailGetPendingActionCount]: { args: []; result: number }
+  [IPC_CHANNELS.mailGetActionQueueStatus]: { args: []; result: ActionQueueStatus }
 }
 
 export interface BroadcastChannels {
   [IPC_CHANNELS.outboxChanged]: OutboxChanged
   [IPC_CHANNELS.outboxProgress]: import('./outbox').OutboxProgress | null
   [IPC_CHANNELS.mailChanged]: undefined
+  [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
   [IPC_CHANNELS.syncState]: SyncState

@@ -2,19 +2,21 @@ import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
-import type { AuthStatus } from '../shared/auth'
+import type { RevertedAction } from '../shared/actionRevert'
+import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
 import type { OutboxChanged, OutboxProgress } from '../shared/outbox'
 import { clearUndo } from './actions'
-import { ActionExecutor } from './actions/executor'
+import { ActionExecutor, type ActionRecoveryProvider } from './actions/executor'
+import { ActionRevertNotices } from './actions/revertNotices'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { type Db, openDatabase, schemaVersion } from './db'
-import { loadSeed } from './dev/seed'
-import { GmailClient } from './gmail/client'
+import { loadSeed, readSeedThread } from './dev/seed'
+import { GmailApiError, GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
@@ -66,10 +68,16 @@ let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
 let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
+let testActionProvider: ActionRecoveryProvider | null = null
+// Installed only by registerTestIpc(): the seeded e2e store has no OAuth config,
+// so a reconnect click resumes the seeded account instead of running the real
+// flow. Production sign-in stays free of test branching.
+let testSeededResume: (() => number) | null = null
 let testAttachmentPickerPaths: string[] | null = null
 let signInInFlight = false
 let teardownPromise: Promise<void> | null = null
 const foregroundProviderWork = new Map<string, number>()
+const actionRevertNotices = new ActionRevertNotices()
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
@@ -91,6 +99,11 @@ function broadcastOutboxProgress(progress: OutboxProgress | null): void {
 
 function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
   broadcast(IPC_CHANNELS.mailBodyHydrationFailed, { accountId, threadId })
+}
+
+function broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {
+  actionRevertNotices.add(accountId, actions)
+  broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
 }
 
 function hasForegroundProviderWork(accountId: string): boolean {
@@ -163,17 +176,26 @@ function makeCurrentProvider(): GmailMailProvider | null {
   return controller ? makeProvider(controller.getGeneration()) : null
 }
 
+function makeCurrentActionProvider(): ActionRecoveryProvider | null {
+  return testActionProvider ?? makeCurrentProvider()
+}
+
 async function waitForConversation(threadId: string): Promise<void> {
   const delay = testConversationDelay
   if (!testUserData || delay?.threadId !== threadId) return
   await new Promise((resolve) => setTimeout(resolve, delay.delayMs))
 }
 
-async function signIn(): Promise<AuthStatus> {
+async function signIn(): Promise<AuthSignInResult> {
   const config = loadOAuthConfig(oauthSearchDirs())
-  if (!config) return authStatus()
+  if (!config) {
+    const resumedActions = testSeededResume?.() ?? 0
+    if (resumedActions > 0) syncController?.onSignIn()
+    return { status: authStatus(), resumedActions }
+  }
   if (signInInFlight) cancelActiveSignIn()
   signInInFlight = true
+  let resumedActions = 0
   try {
     const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
     saveTokens(app.getPath('userData'), tokens)
@@ -181,6 +203,7 @@ async function signIn(): Promise<AuthStatus> {
     mailNotifier?.setAccountId(tokens.email ?? null)
     console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
     snoozeScheduler?.refresh()
+    if (tokens.email) resumedActions = actionExecutor?.resumeAuthFailures(tokens.email) ?? 0
     syncController?.onSignIn()
   } catch (error) {
     console.error('[auth] sign-in failed:', error instanceof Error ? error.message : error)
@@ -188,7 +211,7 @@ async function signIn(): Promise<AuthStatus> {
   } finally {
     signInInFlight = false
   }
-  return authStatus()
+  return { status: authStatus(), resumedActions }
 }
 
 function signOut(): AuthStatus {
@@ -198,6 +221,7 @@ function signOut(): AuthStatus {
   seedAccountId = null
   clearTokens(app.getPath('userData'))
   pendingFocus = null
+  if (account) actionRevertNotices.clear(account)
   mailNotifier?.setAccountId(null)
   clearUndo(account ?? undefined)
   snoozeScheduler?.refresh()
@@ -318,6 +342,8 @@ async function initialize(): Promise<void> {
     clearPendingFocus: () => {
       pendingFocus = null
     },
+    peekRevertedActions: (accountId) => actionRevertNotices.peek(accountId),
+    acknowledgeRevertedActions: (accountId, noticeId) => actionRevertNotices.acknowledge(accountId, noticeId),
     waitForConversation,
     pickAttachmentPaths: testUserData
       ? async () => {
@@ -334,7 +360,13 @@ async function initialize(): Promise<void> {
     },
     testUserData: Boolean(testUserData)
   })
-  actionExecutor = new ActionExecutor(activeDb, currentAccountId, makeCurrentProvider, broadcastMailChanged)
+  actionExecutor = new ActionExecutor(
+    activeDb,
+    currentAccountId,
+    makeCurrentActionProvider,
+    broadcastMailChanged,
+    broadcastActionsReverted
+  )
   draftMirrorExecutor = new DraftMirrorExecutor(
     activeDb,
     currentAccountId,
@@ -374,6 +406,7 @@ async function initialize(): Promise<void> {
 
 function registerTestIpc(): void {
   if (!testUserData) return
+  testSeededResume = () => (seedAccountId ? (actionExecutor?.resumeAuthFailures(seedAccountId) ?? 0) : 0)
   ipcMain.on(TEST_CHANNELS.focusThread, (_event, threadId: unknown) => {
     if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
   })
@@ -433,6 +466,40 @@ function registerTestIpc(): void {
   )
   ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
     testDraftSaveFailures++
+  })
+  const installActionFailure = (threadId: unknown, status: 400 | 401): void => {
+    if (!seedPath || typeof threadId !== 'string') return
+    const actionSeedPath = seedPath
+    const snapshot = readSeedThread(actionSeedPath, threadId)
+    if (!snapshot) return
+    let rejectTarget = true
+    const mutate = async (requestedThreadId: string): Promise<void> => {
+      if (requestedThreadId !== threadId) return
+      if (!rejectTarget) {
+        if (status === 401) testActionProvider = null
+        return
+      }
+      rejectTarget = false
+      const reason = status === 401 ? 'authentication e2e failure' : 'permanent e2e failure'
+      throw new GmailApiError(status, `gmail /threads/${threadId}/modify failed (${status}): ${reason}`)
+    }
+    testActionProvider = {
+      modifyThread: mutate,
+      trashThread: mutate,
+      untrashThread: mutate,
+      getThread: async (requestedThreadId) => {
+        const requested = readSeedThread(actionSeedPath, requestedThreadId)
+        if (!requested) throw new GmailApiError(404, 'seed thread unavailable')
+        if (requestedThreadId === threadId) testActionProvider = null
+        return requested
+      }
+    }
+  }
+  ipcMain.on(TEST_CHANNELS.failNextAction, (_event, threadId: unknown) => {
+    installActionFailure(threadId, 400)
+  })
+  ipcMain.on(TEST_CHANNELS.failNextActionAuth, (_event, threadId: unknown) => {
+    installActionFailure(threadId, 401)
   })
   ipcMain.on(TEST_CHANNELS.setAttachmentPickerFiles, (_event, paths: unknown) => {
     testAttachmentPickerPaths = Array.isArray(paths)
@@ -623,7 +690,10 @@ async function teardownOwnedResources(): Promise<void> {
   for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
   testDraftSaveFailures = 0
   testDraftInlineImageDelayMs = 0
+  testActionProvider = null
+  testSeededResume = null
   testAttachmentPickerPaths = null
+  actionRevertNotices.clear()
   const stopped = await Promise.allSettled([
     mirror?.stop() ?? Promise.resolve(),
     sender?.stop() ?? Promise.resolve()

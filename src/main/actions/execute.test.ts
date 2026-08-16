@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GmailApiError } from '../gmail/client'
+import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
-import { executeIntent, isPermanentActionError, retryDelayMs } from './execute'
+import {
+  classifyActionError,
+  executeIntent,
+  isPermanentActionError,
+  isStoredAuthActionError,
+  isTypedStoredActionError,
+  retryDelayMs,
+  storeActionError,
+  storedActionErrorKind
+} from './execute'
 
 describe('queue intent execution', () => {
   it('routes each intent to the provider endpoint abstraction', async () => {
@@ -23,5 +32,27 @@ describe('queue intent execution', () => {
     expect(isPermanentActionError(new GmailApiError(403, 'quota', true))).toBe(false)
     expect(isPermanentActionError(new GmailApiError(400, 'bad request'))).toBe(true)
     expect([0, 1, 2, 3].map(retryDelayMs)).toEqual([5_000, 30_000, 60_000, 60_000])
+  })
+
+  it('classifies retryable, permanent, and auth failures without conflating them', () => {
+    expect(classifyActionError(new TypeError('fetch failed'))).toBe('retryable')
+    expect(classifyActionError(new GmailApiError(503, 'unavailable', true))).toBe('retryable')
+    expect(classifyActionError(new GmailApiError(429, 'quota', true))).toBe('retryable')
+    expect(classifyActionError(new GmailApiError(400, 'bad request'))).toBe('permanent')
+    expect(classifyActionError(new GmailApiError(403, 'forbidden'))).toBe('permanent')
+    expect(classifyActionError(new GmailApiError(404, 'gone'))).toBe('permanent')
+    expect(classifyActionError(new GmailApiError(401, 'revoked'))).toBe('auth')
+    expect(classifyActionError(new GmailAuthError('token refresh rejected'))).toBe('auth')
+  })
+
+  it('stores typed auth markers while recognizing legacy Gmail 401 rows', () => {
+    const legacy = 'gmail /threads/t-roadmap/modify failed (401): invalid credentials'
+    const stored = storeActionError(new GmailApiError(401, 'revoked'), 'auth')
+    expect(isStoredAuthActionError(stored)).toBe(true)
+    expect(isTypedStoredActionError(stored)).toBe(true)
+    expect(storedActionErrorKind(stored)).toBe('auth')
+    expect(isStoredAuthActionError(legacy)).toBe(true)
+    expect(isTypedStoredActionError(legacy)).toBe(false)
+    expect(isStoredAuthActionError('gmail /threads/t-roadmap/modify failed (403): forbidden')).toBe(false)
   })
 })

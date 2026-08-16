@@ -46,6 +46,12 @@ interface SeedFixture {
   threads: { id: string; historyId?: string; messages: SeedMessage[] }[]
 }
 
+function readSeedFixture(path: string): SeedFixture {
+  const fixture = JSON.parse(readFileSync(path, 'utf8')) as SeedFixture
+  if (!fixture.account || !Array.isArray(fixture.threads)) throw new Error('Invalid ATTN_TEST_SEED fixture')
+  return fixture
+}
+
 function payloadFor(message: SeedMessage): GmailPart {
   const bodyParts: GmailPart[] = []
   if (message.bodyText !== undefined) {
@@ -113,9 +119,30 @@ export function resolveInternalDate(message: SeedMessage, now = Date.now()): str
   return String(at.getTime())
 }
 
+function gmailThreadFor(thread: SeedFixture['threads'][number], importedAt: number): GmailThread {
+  return {
+    id: thread.id,
+    historyId: thread.historyId,
+    messages: thread.messages.map((message) => ({
+      id: message.id,
+      threadId: thread.id,
+      labelIds: message.labelIds,
+      internalDate: resolveInternalDate(message, importedAt),
+      snippet: message.snippet,
+      payload: payloadFor(message)
+    }))
+  }
+}
+
+/** Read one authoritative seeded snapshot for an e2e provider seam. */
+export function readSeedThread(path: string, threadId: string, now = Date.now()): GmailThread | null {
+  const fixture = readSeedFixture(path)
+  const thread = fixture.threads.find((candidate) => candidate.id === threadId)
+  return thread ? gmailThreadFor(thread, now) : null
+}
+
 export function loadSeed(db: Db, path: string): string {
-  const fixture = JSON.parse(readFileSync(path, 'utf8')) as SeedFixture
-  if (!fixture.account || !Array.isArray(fixture.threads)) throw new Error('Invalid ATTN_TEST_SEED fixture')
+  const fixture = readSeedFixture(path)
   const importedAt = Date.now()
 
   db.transaction(() => {
@@ -124,19 +151,7 @@ export function loadSeed(db: Db, path: string): string {
     ensureAccount(db, fixture.account, fixture.account)
     upsertLabels(db, fixture.account, fixture.labels ?? [])
     for (const thread of fixture.threads) {
-      const gmailThread: GmailThread = {
-        id: thread.id,
-        historyId: thread.historyId,
-        messages: thread.messages.map((message) => ({
-          id: message.id,
-          threadId: thread.id,
-          labelIds: message.labelIds,
-          internalDate: resolveInternalDate(message, importedAt),
-          snippet: message.snippet,
-          payload: payloadFor(message)
-        }))
-      }
-      persistThread(db, fixture.account, gmailThread)
+      persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))
     }
     // Seeded stores are complete local snapshots and never contact Gmail. Mark both
     // foreground backfill and lifetime indexing complete so relaunches stay settled.

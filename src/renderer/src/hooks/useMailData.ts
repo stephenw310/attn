@@ -19,6 +19,7 @@ interface MailDataState {
   realUnreadTotal: number | null
   labels: MailLabel[]
   pendingActionCount: number
+  pausedActionCount: number
   mailRevision: number
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
@@ -42,6 +43,7 @@ export function useMailData(
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [pendingActionCount, setPendingActionCount] = useState(0)
+  const [pausedActionCount, setPausedActionCount] = useState(0)
   const [mailRevision, setMailRevision] = useState(0)
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
@@ -80,6 +82,7 @@ export function useMailData(
     setRealUnreadTotal(null)
     setLabels([])
     setPendingActionCount(0)
+    setPausedActionCount(0)
     setMailRevision(0)
     preserveSelectionOnRefreshRef.current = true
     const bridge = window.attn
@@ -110,9 +113,10 @@ export function useMailData(
         bridge.outbox.listPending(),
         bridge.mail.listLabels(),
         bridge.mail.getUnreadCount(),
-        bridge.mail.getPendingActionCount()
+        bridge.mail.getPendingActionCount(),
+        bridge.mail.getActionQueueStatus()
       ])
-        .then(([threads, snoozed, drafts, outbox, nextLabels, unread, pending]) => {
+        .then(([threads, snoozed, drafts, outbox, nextLabels, unread, pending, actionStatus]) => {
           if (cancelled) return
           const visible =
             activeViewRef.current === 'inbox'
@@ -141,6 +145,7 @@ export function useMailData(
           setLabels(nextLabels)
           setRealUnreadTotal(unread)
           setPendingActionCount(pending)
+          setPausedActionCount(actionStatus.paused)
         })
         .catch(() => {})
     }
@@ -184,6 +189,7 @@ export function useMailData(
     realUnreadTotal,
     labels,
     pendingActionCount,
+    pausedActionCount,
     mailRevision,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef

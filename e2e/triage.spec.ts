@@ -1,3 +1,6 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
@@ -14,6 +17,58 @@ test('archives with auto-advance and undoes durably', async ({ page }) => {
   await page.keyboard.press('z')
   await expect(rows).toHaveCount(8)
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+})
+
+test('self-heals a permanently rejected archive and invalidates its undo', async ({ app, page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.threadId), {
+    channel: TEST_CHANNELS.failNextAction,
+    threadId: 't-roadmap'
+  })
+
+  await page.keyboard.press('e')
+
+  await expect(page.getByTestId('toast')).toHaveText(
+    "Couldn't archive 'Q3 roadmap review' — it's back in your inbox."
+  )
+  await expect(rows).toHaveCount(8)
+  await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
+
+  await page.keyboard.press('z')
+  await expect(rows).toHaveCount(8)
+  await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
+})
+
+test('makes an auth-paused action visibly reconnectable', async ({ app, page }, testInfo) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.threadId), {
+    channel: TEST_CHANNELS.failNextActionAuth,
+    threadId: 't-roadmap'
+  })
+
+  await page.keyboard.press('e')
+
+  await expect(page.getByTestId('action-reconnect')).toContainText('1 paused · Reconnect Google')
+  await expect(page.getByTestId('paused-count')).toContainText('1 paused')
+  // The pending readout still counts the row: a paused action is queued work,
+  // not a separate category, and the reconnect control sits beside it rather
+  // than replacing it.
+  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'auth-paused.png')
+  await page.screenshot({ path })
+  await testInfo.attach('auth-paused', { path, contentType: 'image/png' })
+
+  await page.getByTestId('action-reconnect').click()
+  await expect(page.getByTestId('action-reconnect')).toHaveCount(0)
+  await expect(page.getByTestId('paused-count')).toHaveCount(0)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
+  await expect(page.getByTestId('toast')).toHaveText('Google reconnected — 1 pending change is retrying.')
 })
 
 test('animates a marked-done row before removing it', async ({ page }) => {

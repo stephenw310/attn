@@ -79,7 +79,11 @@ export class SnoozeScheduler {
         if (markReturned.run(accountId, threadId).changes === 0) continue
         returned++
         applyThreadDelta(this.db, accountId, { threadId, add: ['INBOX'], remove: [] })
-        enqueue.run(accountId, threadId, JSON.stringify({ add: ['INBOX'], remove: [] }))
+        enqueue.run(
+          accountId,
+          threadId,
+          JSON.stringify({ add: ['INBOX'], remove: [], actionKind: 'snoozeReturn' })
+        )
       }
     })()
     return returned

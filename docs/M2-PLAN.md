@@ -753,30 +753,40 @@ Attach → queue → relaunch → send survives with bytes intact; caps enforced
 
 ## T18 — Self-healing failed actions (deciding an M1 deferred call)
 
+**Status: implemented.**
+
 **Depends on:** nothing (parallel-friendly) · **Spec:** F2 action queue + conflict rule; M1 deviations rows 2–3
 
 **Product decision (owner, 2026-08-13):** a permanently failed action **repairs itself and says so** — local state converges back to what the server actually thinks, so an archive Gmail rejected simply reappears in the inbox. No failed-actions panel, no retry button, no error log. Debugging sync is not the user's job.
 
-**The mechanism is refetch, not inverse-delta.** Don't compute a reverse of the failed action — delete the queue row and re-fetch that thread (`getThread` → `persistThread`, which already replays any remaining pending intent on top). Server state is the truth by F2's own conflict rule, so this converges exactly and cannot drift the way a hand-rolled inverse can. It costs one request on a path that is, by construction, rare.
+**The mechanism is refetch, not inverse-delta.** Don't compute a reverse of the failed action — move the row into durable recovery, re-fetch that thread (`getThread` → `persistThread`, which already replays any remaining pending intent on top), and delete the row only after recovery reaches a terminal outcome. Server state is the truth by F2's own conflict rule, so this converges exactly and cannot drift the way a hand-rolled inverse can. It costs one request on a path that is, by construction, rare.
+
+**Recovery is its own durable queue state.** As soon as Gmail permanently rejects an action — including a mutation-side 404 — its row moves to `recovering` before the authoritative refetch starts. A transient failed refetch retries only that read; it must never send the rejected action again, including after a crash or when repairing a pre-T18 `failed` row. A permanent/404 refetch failure, or an empty/draft-only response, terminates recovery by dropping only the queue row: cached mail is never deleted by the action executor, and the notice explicitly says Gmail's current version could not be loaded. Gmail network classification ends before the SQLite recovery transaction; a local persistence fault is logged and leaves the row in `recovering` for the next drain, without being mislabeled as a 60-second Gmail retry and without rejecting `drain()` — every caller floats that promise, so an escaping fault would become an unhandled main-process rejection. A typed stored auth marker covers both Gmail 401s and refresh-token revocation (`invalid_grant`/missing refresh token), pausing execution or recovery until the visible header reconnect action completes successful same-account authentication. `recovering` rows remain in the pending count but are excluded from optimistic-delta replay because Gmail has already rejected their intent. Revert notices use peek/ack delivery and remain buffered in the main process until the active account's renderer displays each batch for its toast interval and acknowledges it; StrictMode cleanup, account changes, and window startup cannot consume a notice unseen, while explicit sign-out clears that account's old-session notices.
+
+**Local-only reminder state is part of the recovery snapshot.** Queue payloads record the exact pre-action snooze reminder when a local mutation changes it. Recovery restores that row atomically with the Gmail snapshot. A rejected snooze cancels the newly-created reminder, a rejected manual unsnooze restores its original due time, and a rejected automatic return is re-added to the local inbox **once, by the executor**, with copy that says Gmail did not accept the return.
+
+**Only a `pending` reminder outranks a server label snapshot.** The overlay that runs after ordinary persistence covers `pending` alone, because Gmail has no concept of "snoozed until" (SPEC §9 #6) and the thread must stay hidden until it fires. `returned` is a display flag for the inbox badge and stays set until the user handles the thread in Attn, so it must **not** act as a label authority: doing so re-adds `INBOX` on every later sync, overriding an archive the user performed in Gmail on another device, and inverts F2's conflict rule. A rejected snooze return is therefore repaired as a one-time write rather than a standing override.
 
 **Three nuances the policy must respect — getting these wrong is worse than the old behavior:**
 
 1. **Only *permanent* failures revert.** Offline, 5xx, and 429 stay retryable with their backoff ladder untouched. Reverting on a transient failure would flicker mail back into the inbox during a network blip — the worst outcome available here. `isPermanentActionError` already draws this line; use it, don't widen it.
-2. **Auth failures never revert.** A 401/revoked token doesn't mean "Gmail rejected this", it means "we couldn't ask". The intent is still valid, so those rows re-pend on the next successful sign-in for the same account (the M1 deviation) instead of discarding 20 archives because a token lapsed. Detect via the stored 401 error string from `GmailApiError` formatting (stable, test-pinned) — no migration needed.
+2. **Auth failures never revert.** A 401, missing refresh token, or rejected refresh (`invalid_grant`) doesn't mean "Gmail rejected this", it means "we couldn't ask". The intent is still valid, so those rows pause behind a typed stored auth marker and re-pend after the user chooses the visible **Reconnect Google** action and completes successful sign-in for the same account. The sign-in result carries the resumed-row count, so the renderer never claims another account or a missing OAuth configuration resumed work. Pre-T18 message-formatted 401 rows are recognized once at executor construction and normalized to the typed marker.
 3. **Sends are the exception (T16).** A failed send must never silently vanish or self-repair — the user wrote that message. It reopens the composer with content intact and the error shown. This task's auto-revert covers triage actions only.
 
-**Telling the user.** Silent reappearance is spooky: mail moving on its own reads as a bug. On revert, one plainly-worded, non-actionable toast — *"Couldn't archive 'Q3 roadmap review' — it's back in your inbox."* Batch to a single toast when several revert together. That is the entire surface: no badge state, no panel, no command.
+When one thread from a bulk action is rejected, only that thread's queued-row reference and inverse are removed from the undo entry; the unaffected threads remain undoable, and the entry's label is rebuilt from the surviving count so `Z` never reports undoing more threads than it restores.
+
+**Telling the user.** Silent reappearance is spooky: mail moving on its own reads as a bug. On revert, one plainly-worded, non-actionable toast — *"Couldn't archive 'Q3 roadmap review' — it's back in your inbox."* Batch to a single toast when several revert together. That is the entire permanent-failure surface: no panel or retry command. Auth pauses are the deliberate exception because the intent is still live; the pending readout becomes an explicit **Reconnect Google** control.
 
 **Consequences (deliberate simplifications):**
-- Footer pending readout stays a single count — the planned `· N failed` split is cut.
-- `pendingActionCount` stops counting permanently-failed rows because they no longer exist; the M1 comment about failed rows haunting the badge forever, and the deviation row behind it, both retire here.
+- Footer pending readout stays a single count, and the auth-pause control is a **separate** `· N paused · Reconnect Google` element beside it. The pending count spans triage actions *and* outbox sends, but only triage actions can be auth-paused, so one combined readout would both over-count the pause and hide the outbox route behind it.
+- `pendingActionCount` uses a count-only query and includes legacy `failed` rows until constructor-time normalization makes their terminal recovery visible; no provider/drain is required for the badge to tell the truth.
 - The `failed` state effectively disappears from `action_queue` for triage intents (auth-stranded rows sit in `pending`). Keep the column — the outbox reuses it.
 - **Undo-stack hygiene:** an undo entry whose action was reverted must not later re-apply. On revert, drop entries referencing that thread+action rather than leaving a `Z` that resurrects a rejected change.
 
 ### Testing
 
-- Unit: three-way permanent / retryable / auth classification (exhaustive); undo-stack invalidation; toast batching.
-- E2e (seeded): drive a permanent failure through the test seam → thread returns to the list, toast appears, pending count returns to zero, and a following `z` does not re-archive it.
+- Unit: three-way permanent / retryable / auth classification including token refresh; snooze/unsnooze/automatic-return reminder convergence; local DB error boundaries; undo-stack invalidation; sequential toast batching.
+- E2e (seeded): drive a permanent failure through the test seam → thread returns to the list, toast appears, pending count returns to zero, and a following `z` does not re-archive it. Drive a refresh-token auth pause → reconnect control → same-account resume → successful drain.
 
 ### Done when
 

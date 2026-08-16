@@ -9,12 +9,16 @@ const QUEUE_METER_STEPS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven'
 function QueueReadout({
   unread,
   pendingActions,
+  pausedActions,
   outbox,
+  onReconnect,
   onOpenOutbox
 }: {
   unread: number | null
   pendingActions: number
+  pausedActions: number
   outbox: number
+  onReconnect: () => void
   onOpenOutbox?: () => void
 }): React.JSX.Element {
   const lit = Math.min(unread ?? 0, 10)
@@ -51,6 +55,20 @@ function QueueReadout({
           onClick={onOpenOutbox}
         >
           · {outbox} in Outbox
+        </button>
+      )}
+      {/* Paused rows are a subset of `pendingActions` — the rest of the queue is
+          still draining — and outbox sends can never be auth-paused at all, so
+          the reconnect control is its own readout rather than a relabeled count. */}
+      {pausedActions > 0 && (
+        <button
+          type="button"
+          data-testid="action-reconnect"
+          onClick={onReconnect}
+          title="Google authorization expired; reconnect to retry paused changes"
+          className="cursor-pointer font-medium text-accent hover:underline"
+        >
+          <span data-testid="paused-count">· {pausedActions} paused</span> · Reconnect Google
         </button>
       )}
     </div>
@@ -155,11 +173,13 @@ interface MailHeaderProps {
   view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   unreadCount: number | null
   pendingActionCount: number
+  pausedActionCount: number
   outboxCount: number
   selectionCount: number
   composerOpen: boolean
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
+  onReconnectActions: () => void
   onSwitchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
   onOpenOutbox: () => void
 }
@@ -169,11 +189,13 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     view,
     unreadCount,
     pendingActionCount,
+    pausedActionCount,
     outboxCount,
     selectionCount,
     composerOpen,
     status,
     onStatus,
+    onReconnectActions,
     onSwitchView,
     onOpenOutbox
   } = props
@@ -229,7 +251,9 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         <QueueReadout
           unread={unreadCount}
           pendingActions={pendingActionCount}
+          pausedActions={pausedActionCount}
           outbox={outboxCount}
+          onReconnect={onReconnectActions}
           onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
         />
         <AccountMenu status={status} onStatus={onStatus} />
