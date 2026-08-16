@@ -4,6 +4,7 @@ import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
 import type { GmailMailProvider } from './gmail/provider'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
+import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
 import type { BackfillCallbacks, BackfillResult } from './sync/backfill'
 import type { HistoryPollerOptions } from './sync/poller'
@@ -76,6 +77,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
   const backfills: Array<{ callbacks: BackfillCallbacks; result: Deferred<BackfillResult | null> }> = []
   const trigger = vi.fn(async () => {})
   const mirrorTrigger = vi.fn(async () => {})
+  const outboxTrigger = vi.fn(async () => {})
   const wakeThread = vi.fn()
   const broadcastMailChanged = vi.fn()
   const provider = { id: 'provider' } as unknown as GmailMailProvider
@@ -101,6 +103,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     broadcastMailChanged,
     getActionExecutor: () => ({ trigger }) as unknown as ActionExecutor,
     getDraftMirrorExecutor: () => ({ trigger: mirrorTrigger }) as unknown as DraftMirrorExecutor,
+    getOutboxSender: () => ({ trigger: outboxTrigger }) as unknown as OutboxSender,
     getSnoozeScheduler: () => ({ wakeThread }) as unknown as SnoozeScheduler
   })
 
@@ -111,6 +114,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     backfills,
     trigger,
     mirrorTrigger,
+    outboxTrigger,
     broadcastMailChanged,
     provider
   }

@@ -6,6 +6,7 @@ import type { RevertedAction } from '../shared/actionRevert'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
+import type { OutboxChanged } from '../shared/outbox'
 import { clearUndo } from './actions'
 import { ActionExecutor, type ActionRecoveryProvider } from './actions/executor'
 import { ActionRevertNotices } from './actions/revertNotices'
@@ -21,7 +22,10 @@ import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
 import { reconcileRemoteDraft } from './outbox/draftSync'
 import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
+import { OutboxSender } from './outbox/sender'
+import { cleanOutboxSpool } from './outbox/spool'
 import { SnoozeScheduler } from './scheduler'
+import { writeSetting } from './settings'
 import { deleteThread } from './sync/persist'
 import { SyncController } from './syncController'
 
@@ -53,6 +57,7 @@ let seedAccountId: string | null = null
 let seedPath: string | undefined
 let actionExecutor: ActionExecutor | null = null
 let draftMirrorExecutor: DraftMirrorExecutor | null = null
+let outboxSender: OutboxSender | null = null
 let snoozeScheduler: SnoozeScheduler | null = null
 let mailNotifier: MailNotifier | null = null
 let syncController: SyncController | null = null
@@ -71,6 +76,11 @@ function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastCha
 
 function broadcastMailChanged(): void {
   broadcast(IPC_CHANNELS.mailChanged, undefined)
+  mailNotifier?.updateBadge()
+}
+
+function broadcastOutboxChanged(change: OutboxChanged): void {
+  broadcast(IPC_CHANNELS.outboxChanged, change)
   mailNotifier?.updateBadge()
 }
 
@@ -188,6 +198,7 @@ function signOut(): AuthStatus {
   mailNotifier?.setAccountId(null)
   clearUndo(account ?? undefined)
   snoozeScheduler?.refresh()
+  outboxSender?.refresh()
   console.log('[auth] signed out')
   return authStatus()
 }
@@ -268,6 +279,7 @@ function initialize(): void {
     broadcastMailChanged,
     getActionExecutor: () => actionExecutor,
     getDraftMirrorExecutor: () => draftMirrorExecutor,
+    getOutboxSender: () => outboxSender,
     getSnoozeScheduler: () => snoozeScheduler
   })
   stopIpc = registerIpc({
@@ -281,9 +293,11 @@ function initialize(): void {
     isSeeded,
     executor: () => actionExecutor,
     draftMirrorExecutor: () => draftMirrorExecutor,
+    outboxSender: () => outboxSender,
     scheduler: () => snoozeScheduler,
     syncController: () => syncController,
     broadcastMailChanged,
+    broadcastOutboxChanged,
     broadcastBodyHydrationFailed,
     pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
@@ -315,6 +329,16 @@ function initialize(): void {
     undefined,
     join(app.getPath('userData'), 'outbox')
   )
+  outboxSender = new OutboxSender(
+    activeDb,
+    currentAccountId,
+    makeCurrentProvider,
+    broadcastOutboxChanged,
+    () => draftMirrorExecutor?.waitForIdle() ?? Promise.resolve(),
+    undefined,
+    join(app.getPath('userData'), 'outbox'),
+    (id) => cleanOutboxSpool(app.getPath('userData'), id)
+  )
   snoozeScheduler = new SnoozeScheduler(
     activeDb,
     currentAccountId,
@@ -322,6 +346,7 @@ function initialize(): void {
     () => void actionExecutor?.trigger()
   )
   snoozeScheduler.start()
+  outboxSender.start()
   powerMonitor.on('resume', refreshSnoozesAfterResume)
   const { startHidden } = initializeBackground(activeDb, createWindow)
   createWindow({ show: !startHidden })
@@ -428,28 +453,75 @@ function registerTestIpc(): void {
   ipcMain.on(TEST_CHANNELS.failNextActionAuth, (_event, threadId: unknown) => {
     installActionFailure(threadId, 401)
   })
-  ipcMain.on(TEST_CHANNELS.markDraftMirrored, (_event, draftId: unknown, gmailDraftId?: unknown) => {
-    const account = currentAccountId()
-    if (!db || !account || typeof draftId !== 'string') return
-    db.prepare(
-      `UPDATE outbox SET mirror_revision = local_revision,
-       gmail_draft_id = COALESCE(?, gmail_draft_id)
-       WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')`
-    ).run(typeof gmailDraftId === 'string' ? gmailDraftId : null, account, draftId)
+  ipcMain.on(
+    TEST_CHANNELS.markDraftMirrored,
+    (_event, draftId: unknown, gmailDraftId?: unknown, done?: (error?: string) => void) => {
+      // Inspector evaluation can interrupt a renderer-initiated synchronous
+      // SQLite read. Defer this test mutation onto the next main-loop turn.
+      setImmediate(() => {
+        try {
+          const account = currentAccountId()
+          if (!db || !account || typeof draftId !== 'string') {
+            done?.('invalid mirrored draft update')
+            return
+          }
+          db.prepare(
+            `UPDATE outbox SET mirror_revision = local_revision,
+             gmail_draft_id = COALESCE(?, gmail_draft_id)
+             WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')`
+          ).run(typeof gmailDraftId === 'string' ? gmailDraftId : null, account, draftId)
+          done?.()
+        } catch (error) {
+          done?.(error instanceof Error ? error.message : String(error))
+        }
+      })
+    }
+  )
+  ipcMain.on(TEST_CHANNELS.setUndoSendDelay, (_event, seconds: unknown) => {
+    if (!db || typeof seconds !== 'number' || ![0, 5, 8, 10, 20, 30].includes(seconds)) return
+    writeSetting(db, 'undoSendDelaySeconds', String(seconds))
   })
-  ipcMain.on(TEST_CHANNELS.remoteDraft, async (_event, remote: unknown, done?: (error?: string) => void) => {
-    const account = currentAccountId()
-    if (!db || !account || !remote || typeof remote !== 'object') {
-      done?.('invalid remote draft')
-      return
+  ipcMain.on(
+    TEST_CHANNELS.failOutbox,
+    (_event, id: unknown, message: unknown, done?: (error?: string) => void) => {
+      setImmediate(() => {
+        try {
+          const account = currentAccountId()
+          if (!db || !account || typeof id !== 'string' || typeof message !== 'string') {
+            done?.('invalid outbox failure')
+            return
+          }
+          const result = db
+            .prepare(
+              `UPDATE outbox SET state = 'failed', send_at = NULL, last_error = ?
+               WHERE account_id = ? AND id = ? AND state = 'queued'`
+            )
+            .run(message, account, id)
+          done?.(result.changes > 0 ? undefined : 'queued message unavailable')
+        } catch (error) {
+          done?.(error instanceof Error ? error.message : String(error))
+        }
+      })
     }
-    try {
-      await reconcileRemoteDraft(db, account, remote as Parameters<typeof reconcileRemoteDraft>[2])
-      broadcastMailChanged()
-      done?.()
-    } catch (error) {
-      done?.(error instanceof Error ? error.message : String(error))
-    }
+  )
+  ipcMain.on(TEST_CHANNELS.remoteDraft, (_event, remote: unknown, done?: (error?: string) => void) => {
+    // Inspector evaluation can interrupt a renderer-initiated SQLite read.
+    // Defer this test-only reconciliation onto the next main-loop turn.
+    setImmediate(() => {
+      const account = currentAccountId()
+      if (!db || !account || !remote || typeof remote !== 'object') {
+        done?.('invalid remote draft')
+        return
+      }
+      void reconcileRemoteDraft(db, account, remote as Parameters<typeof reconcileRemoteDraft>[2])
+        .then(() => {
+          broadcastMailChanged()
+          done?.()
+        })
+        .catch((error: unknown) => {
+          done?.(error instanceof Error ? error.message : String(error))
+        })
+    })
   })
 }
 
@@ -466,6 +538,8 @@ function teardown(): void {
   actionExecutor = null
   void draftMirrorExecutor?.stop()
   draftMirrorExecutor = null
+  void outboxSender?.stop()
+  outboxSender = null
   snoozeScheduler?.stop()
   snoozeScheduler = null
   mailNotifier?.stop()
@@ -481,6 +555,7 @@ function teardown(): void {
 
 function refreshSnoozesAfterResume(): void {
   snoozeScheduler?.refresh()
+  outboxSender?.refresh()
 }
 
 const gotLock = app.requestSingleInstanceLock()
@@ -493,9 +568,12 @@ else {
     event.preventDefault()
     if (preparingQuit) return
     preparingQuit = true
-    // A Gmail draft create is not idempotent. Let the active checkpoint persist
-    // its returned id before will-quit closes SQLite, then stop before another row.
-    void (draftMirrorExecutor?.stop() ?? Promise.resolve()).finally(() => {
+    // Give active draft/outbox mutations a bounded grace period to persist their
+    // recovery state before will-quit closes SQLite.
+    void Promise.all([
+      draftMirrorExecutor?.stop() ?? Promise.resolve(),
+      outboxSender?.stop() ?? Promise.resolve()
+    ]).finally(() => {
       quitPrepared = true
       app.quit()
     })

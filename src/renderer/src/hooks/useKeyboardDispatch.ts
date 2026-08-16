@@ -4,13 +4,14 @@ import { chordKey, findCommandByShortcut, isChordPrefix, matchKey, readingScroll
 interface KeyboardDispatchOptions {
   blocked: boolean
   readerOpen: boolean
+  outboxOpen: boolean
   snoozeOpen: boolean
   onCloseSnooze: () => void
   conversationScrollRef: React.RefObject<HTMLDivElement | null>
 }
 
 export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
-  const { blocked, readerOpen, snoozeOpen, onCloseSnooze, conversationScrollRef } = options
+  const { blocked, readerOpen, outboxOpen, snoozeOpen, onCloseSnooze, conversationScrollRef } = options
   const pendingChordRef = useRef<{ key: string; until: number } | null>(null)
 
   useLayoutEffect(() => {
@@ -31,7 +32,7 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
         target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       if (isTextEntry) return
       if (target && target.tagName === 'BUTTON' && event.key !== 'Escape') return
-      const context = readerOpen ? 'reader' : 'list'
+      const context = readerOpen ? 'reader' : outboxOpen ? 'outbox' : 'list'
       const scroll = conversationScrollRef.current
       if (readerOpen && scroll) {
         const scrollDelta = readingScrollDelta(event, scroll.clientHeight)
@@ -60,5 +61,5 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [blocked, conversationScrollRef, onCloseSnooze, readerOpen, snoozeOpen])
+  }, [blocked, conversationScrollRef, onCloseSnooze, outboxOpen, readerOpen, snoozeOpen])
 }

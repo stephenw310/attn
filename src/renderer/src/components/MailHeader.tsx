@@ -10,12 +10,14 @@ function QueueReadout({
   unread,
   pending,
   authPaused,
-  onReconnect
+  onReconnect,
+  onOpenOutbox
 }: {
   unread: number | null
   pending: number
   authPaused: boolean
   onReconnect: () => void
+  onOpenOutbox?: () => void
 }): React.JSX.Element {
   const lit = Math.min(unread ?? 0, 10)
   return (
@@ -49,7 +51,15 @@ function QueueReadout({
             <span data-testid="pending-count">· {pending} paused</span> · Reconnect Google
           </button>
         ) : (
-          <span data-testid="pending-count">· {pending} pending</span>
+          <button
+            type="button"
+            data-testid="pending-count"
+            disabled={!onOpenOutbox}
+            className="cursor-pointer rounded px-1 py-0.5 hover:bg-active hover:text-ink-dim disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit"
+            onClick={onOpenOutbox}
+          >
+            · {pending} pending
+          </button>
         ))}
     </div>
   )
@@ -150,7 +160,7 @@ function AccountMenu({
 }
 
 interface MailHeaderProps {
-  view: 'inbox' | 'snoozed' | 'drafts'
+  view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   unreadCount: number | null
   pendingCount: number
   actionsAuthPaused: boolean
@@ -160,6 +170,7 @@ interface MailHeaderProps {
   onStatus: (status: AuthStatus) => void
   onReconnectActions: () => void
   onSwitchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
+  onOpenOutbox: () => void
 }
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
@@ -173,7 +184,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     status,
     onStatus,
     onReconnectActions,
-    onSwitchView
+    onSwitchView,
+    onOpenOutbox
   } = props
   return (
     <header className="app-drag flex items-center gap-6 border-b border-edge px-6 py-3">
@@ -229,6 +241,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           pending={pendingCount}
           authPaused={actionsAuthPaused}
           onReconnect={onReconnectActions}
+          onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
         />
         <AccountMenu status={status} onStatus={onStatus} />
       </div>

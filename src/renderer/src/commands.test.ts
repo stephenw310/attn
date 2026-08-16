@@ -56,6 +56,9 @@ describe('command catalog', () => {
       'view.inbox',
       'view.snoozed',
       'view.drafts',
+      'view.outbox',
+      'outbox.open',
+      'outbox.close',
       'composer.new',
       'composer.reply',
       'composer.replyAll',
@@ -100,7 +103,13 @@ describe('command catalog', () => {
     const entries = Object.entries(COMMAND_SPECS)
     const conflicts: string[] = []
     const concreteContexts = (context: (typeof COMMAND_SPECS)[keyof typeof COMMAND_SPECS]['context']) =>
-      context === 'global' || context === 'mail' ? ['list', 'reader'] : [context]
+      context === 'global'
+        ? ['list', 'reader', 'outbox']
+        : context === 'navigation'
+          ? ['list', 'reader', 'outbox']
+          : context === 'mail'
+            ? ['list', 'reader']
+            : [context]
     for (const [index, [leftId, left]] of entries.entries()) {
       for (const [rightId, right] of entries.slice(index + 1)) {
         const overlaps = concreteContexts(left.context).some((context) =>
@@ -129,6 +138,8 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('ArrowUp'), 'list')?.id).toBe('navigate.previous')
     expect(matchKey(key('ArrowDown'), 'reader')).toBeNull()
     expect(matchKey(key('ArrowUp'), 'reader')).toBeNull()
+    expect(matchKey(key('ArrowDown'), 'outbox')?.id).toBe('navigate.next')
+    expect(matchKey(key('ArrowUp'), 'outbox')?.id).toBe('navigate.previous')
     expect(readingScrollDelta(key('ArrowDown'), 800)).toBe(120)
     expect(readingScrollDelta(key('ArrowUp'), 800)).toBe(-120)
   })

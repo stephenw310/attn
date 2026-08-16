@@ -23,6 +23,7 @@ import type {
   SyncState,
   ThreadRow
 } from '../shared/mail'
+import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from '../shared/outbox'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
 function invoke<K extends InvokeChannel>(
@@ -123,6 +124,18 @@ const api = {
     discard: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftDiscard, id),
     mirror: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftMirror, id),
     takeRecovered: (): Promise<Draft | null> => invoke(IPC_CHANNELS.draftTakeRecovered)
+  },
+  outbox: {
+    send: (draftId: string): Promise<QueueSendResult> => invoke(IPC_CHANNELS.outboxSend, draftId),
+    undoSend: (outboxId: string): Promise<ReopenOutboxResult> =>
+      invoke(IPC_CHANNELS.outboxUndoSend, outboxId),
+    reopen: (outboxId: string): Promise<ReopenOutboxResult> => invoke(IPC_CHANNELS.outboxReopen, outboxId),
+    listPending: (): Promise<OutboxItem[]> => invoke(IPC_CHANNELS.outboxListPending),
+    onChanged: (cb: (change: OutboxChanged) => void): (() => void) => {
+      const listener = (_event: unknown, change: OutboxChanged): void => cb(change)
+      ipcRenderer.on(IPC_CHANNELS.outboxChanged, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.outboxChanged, listener)
+    }
   },
   sync: {
     getState: (): Promise<SyncState> => invoke(IPC_CHANNELS.syncGetState),

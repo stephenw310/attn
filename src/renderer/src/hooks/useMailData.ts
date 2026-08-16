@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
+import type { OutboxChanged, OutboxItem } from '../../../shared/outbox'
 import { refreshedSelectionIndex } from '../selection'
 
 interface MailDataState {
@@ -10,6 +11,9 @@ interface MailDataState {
   setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
   realSnoozedThreads: SnoozedThreadRow[] | null
   realDrafts: Draft[]
+  realOutbox: OutboxItem[]
+  outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
+  clearOutboxFailure: () => void
   refreshDrafts: () => Promise<void>
   realUnreadTotal: number | null
   labels: MailLabel[]
@@ -22,7 +26,7 @@ interface MailDataState {
 
 export function useMailData(
   activeAccount: string | null,
-  activeViewRef: React.RefObject<'inbox' | 'snoozed' | 'drafts'>,
+  activeViewRef: React.RefObject<'inbox' | 'snoozed' | 'drafts' | 'outbox'>,
   selectedThreadIdRef: React.RefObject<string | null>,
   selectedDraftIdRef: React.RefObject<string | null>,
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
@@ -32,6 +36,8 @@ export function useMailData(
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [realSnoozedThreads, setRealSnoozedThreads] = useState<SnoozedThreadRow[] | null>(null)
   const [realDrafts, setRealDrafts] = useState<Draft[]>([])
+  const [realOutbox, setRealOutbox] = useState<OutboxItem[]>([])
+  const [outboxFailure, setOutboxFailure] = useState<Extract<OutboxChanged, { kind: 'failed' }> | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [pendingCount, setPendingCount] = useState(0)
@@ -39,6 +45,7 @@ export function useMailData(
   const [mailRevision, setMailRevision] = useState(0)
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
+  const clearOutboxFailure = useCallback(() => setOutboxFailure(null), [])
 
   useEffect(() => {
     if (!window.attn) return
@@ -67,6 +74,8 @@ export function useMailData(
     setRealThreads(null)
     setRealSnoozedThreads(null)
     setRealDrafts([])
+    setRealOutbox([])
+    setOutboxFailure(null)
     setRealUnreadTotal(null)
     setLabels([])
     setPendingCount(0)
@@ -98,29 +107,36 @@ export function useMailData(
         bridge.mail.listThreads(),
         bridge.mail.listSnoozed(),
         bridge.draft.list(),
+        bridge.outbox.listPending(),
         bridge.mail.listLabels(),
         bridge.mail.getUnreadCount(),
+        bridge.mail.getPendingActionCount(),
         bridge.mail.getActionQueueStatus()
       ])
-        .then(([threads, snoozed, drafts, nextLabels, unread, actionStatus]) => {
+        .then(([threads, snoozed, drafts, outbox, nextLabels, unread, pending, actionStatus]) => {
           if (cancelled) return
           const visible =
             activeViewRef.current === 'inbox'
               ? threads
               : activeViewRef.current === 'snoozed'
                 ? snoozed
-                : drafts
+                : activeViewRef.current === 'drafts'
+                  ? drafts
+                  : outbox
           const selectedId =
-            activeViewRef.current === 'drafts' ? selectedDraftIdRef.current : selectedThreadIdRef.current
+            activeViewRef.current === 'drafts' || activeViewRef.current === 'outbox'
+              ? selectedDraftIdRef.current
+              : selectedThreadIdRef.current
           setSelectedIndex((current) =>
             refreshedSelectionIndex(visible, preserveSelection ? selectedId : null, current)
           )
           setRealThreads(threads)
           setRealSnoozedThreads(snoozed)
           setRealDrafts(drafts)
+          setRealOutbox(outbox)
           setLabels(nextLabels)
           setRealUnreadTotal(unread)
-          setPendingCount(actionStatus.pending)
+          setPendingCount(pending)
           setActionsAuthPaused(actionStatus.authPaused)
         })
         .catch(() => {})
@@ -130,10 +146,16 @@ export function useMailData(
       mailChangedPending = true
       refresh()
     })
+    const offOutbox = bridge.outbox.onChanged((change) => {
+      if (change.kind === 'failed') setOutboxFailure(change)
+      mailChangedPending = true
+      refresh()
+    })
     return () => {
       cancelled = true
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
+      offOutbox()
     }
   }, [activeAccount, activeViewRef, selectedDraftIdRef, selectedThreadIdRef, setSelectedIndex])
 
@@ -150,6 +172,9 @@ export function useMailData(
     setRealThreads,
     realSnoozedThreads,
     realDrafts,
+    realOutbox,
+    outboxFailure,
+    clearOutboxFailure,
     refreshDrafts,
     realUnreadTotal,
     labels,
