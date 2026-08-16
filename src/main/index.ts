@@ -8,6 +8,7 @@ import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANN
 import type { SyncState } from '../shared/mail'
 import { clearUndo } from './actions'
 import { ActionExecutor, type ActionRecoveryProvider } from './actions/executor'
+import { ActionRevertNotices } from './actions/revertNotices'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
@@ -62,6 +63,7 @@ let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
 let testActionProvider: ActionRecoveryProvider | null = null
 let signInInFlight = false
+const actionRevertNotices = new ActionRevertNotices()
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
@@ -76,8 +78,9 @@ function broadcastBodyHydrationFailed(accountId: string, threadId: string): void
   broadcast(IPC_CHANNELS.mailBodyHydrationFailed, { accountId, threadId })
 }
 
-function broadcastActionsReverted(actions: RevertedAction[]): void {
-  broadcast(IPC_CHANNELS.mailActionsReverted, actions)
+function broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {
+  actionRevertNotices.add(accountId, actions)
+  broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
   testActionProvider = null
 }
 
@@ -176,6 +179,7 @@ function signOut(): AuthStatus {
   seedAccountId = null
   clearTokens(app.getPath('userData'))
   pendingFocus = null
+  if (account) actionRevertNotices.clear(account)
   mailNotifier?.setAccountId(null)
   clearUndo(account ?? undefined)
   snoozeScheduler?.refresh()
@@ -280,6 +284,7 @@ function initialize(): void {
     clearPendingFocus: () => {
       pendingFocus = null
     },
+    takeRevertedActions: (accountId) => actionRevertNotices.take(accountId),
     waitForConversation,
     draftInlineImageDelay: () => testDraftInlineImageDelayMs,
     consumeTestDraftSaveFailure: () => {
@@ -446,6 +451,7 @@ function teardown(): void {
   testDraftSaveFailures = 0
   testDraftInlineImageDelayMs = 0
   testActionProvider = null
+  actionRevertNotices.clear()
   db?.close()
   db = null
 }

@@ -11,7 +11,7 @@ interface FakeRow {
   thread_id: string
   payload: string
   attempts: number
-  state: 'pending' | 'inflight' | 'failed'
+  state: 'pending' | 'inflight' | 'recovering' | 'failed'
   last_error?: string | null
 }
 
@@ -19,41 +19,84 @@ function fakeDb(rows: FakeRow[]): Db {
   return {
     prepare: (sql: string) => ({
       run: (...args: unknown[]) => {
+        let changes = 0
         if (sql.includes("SET state = 'pending' WHERE state = 'inflight'")) {
-          for (const row of rows) if (row.state === 'inflight') row.state = 'pending'
+          for (const row of rows) {
+            if (row.state !== 'inflight') continue
+            row.state = 'pending'
+            changes++
+          }
         } else if (sql.includes("SET state = 'inflight'")) {
-          const row = rows.find((item) => item.id === args[0])
-          if (row) row.state = 'inflight'
-        } else if (sql.startsWith('DELETE')) {
-          const index = rows.findIndex((item) => item.id === args[0])
-          if (index >= 0) rows.splice(index, 1)
-        } else if (sql.includes('SET state = ?, attempts')) {
+          const row = rows.find(
+            (item) => item.account_id === args[0] && item.id === args[1] && item.state === 'pending'
+          )
+          if (row) {
+            row.state = 'inflight'
+            changes = 1
+          }
+        } else if (sql.startsWith('DELETE FROM action_queue')) {
+          const index = rows.findIndex((item) => item.account_id === args[0] && item.id === args[1])
+          if (index >= 0) {
+            rows.splice(index, 1)
+            changes = 1
+          }
+        } else if (sql.includes('SET state = ?, attempts = 0')) {
           const row = rows.find((item) => item.id === args[2])
           if (row) {
             row.state = args[0] as FakeRow['state']
-            row.attempts++
+            row.attempts = 0
+            row.last_error = null
+            changes = 1
           }
         } else if (sql.includes("SET state = 'pending', attempts")) {
-          const row = rows.find((item) => item.id === args[1])
+          const row = rows.find((item) => item.account_id === args[1] && item.id === args[2])
           if (row) {
             row.state = 'pending'
             row.attempts++
             row.last_error = String(args[0])
+            changes = 1
           }
-        } else if (sql.includes("SET state = 'pending' WHERE id")) {
-          const row = rows.find((item) => item.id === args[0])
-          if (row) row.state = 'pending'
+        } else if (sql.includes("SET state = 'recovering', attempts")) {
+          const row = rows.find((item) => item.account_id === args[2] && item.id === args[3])
+          if (row) {
+            row.state = 'recovering'
+            row.attempts += Number(args[0])
+            row.last_error = String(args[1])
+            changes = 1
+          }
+        } else if (sql.includes("SET state = 'recovering' WHERE account_id")) {
+          const row = rows.find((item) => item.account_id === args[0] && item.id === args[1])
+          if (row) {
+            row.state = 'recovering'
+            changes = 1
+          }
+        } else if (sql.includes("SET state = 'pending' WHERE account_id")) {
+          const row = rows.find((item) => item.account_id === args[0] && item.id === args[1])
+          if (row) {
+            row.state = 'pending'
+            changes = 1
+          }
         }
-        return { changes: 1 }
+        return { changes }
       },
       get: (accountId: unknown) =>
         sql.includes('FROM action_queue aq')
-          ? rows.find((row) => row.account_id === accountId && row.state === 'pending')
+          ? rows.find(
+              (row) => row.account_id === accountId && (row.state === 'pending' || row.state === 'recovering')
+            )
           : undefined,
-      all: (accountId: unknown) =>
-        sql.includes("state = 'failed'")
+      all: (accountId: unknown) => {
+        if (sql.includes("state IN ('pending', 'recovering', 'failed')")) {
+          return rows.filter(
+            (row) =>
+              row.account_id === accountId &&
+              (row.state === 'pending' || row.state === 'recovering' || row.state === 'failed')
+          )
+        }
+        return sql.includes("state = 'failed'")
           ? rows.filter((row) => row.account_id === accountId && row.state === 'failed')
           : []
+      }
     }),
     transaction: (callback: () => unknown) => callback
   } as unknown as Db
@@ -139,12 +182,12 @@ describe('action executor', () => {
     expect(actionProvider.getThread).toHaveBeenCalledWith('bad', { format: 'full' })
     expect(rows).toHaveLength(0)
     expect(onReverted).toHaveBeenCalledOnce()
-    expect(onReverted).toHaveBeenCalledWith([
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
       expect.objectContaining({ threadId: 'bad', kind: 'archive', returnedToInbox: true })
     ])
   })
 
-  it('keeps auth failures pending without arming transient backoff', async () => {
+  it('keeps auth failures paused until successful authentication resumes them', async () => {
     vi.useFakeTimers()
     try {
       const rows = [row(1, 'a@example.com', 'auth')]
@@ -163,11 +206,19 @@ describe('action executor', () => {
       )
 
       await executor.trigger()
+      await executor.trigger()
 
-      expect(rows[0]).toMatchObject({ state: 'pending', attempts: 1 })
+      expect(rows[0]).toMatchObject({
+        state: 'pending',
+        attempts: 1,
+        last_error: 'gmail /threads/auth/modify failed (401): revoked'
+      })
+      expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
       expect(actionProvider.getThread).not.toHaveBeenCalled()
       expect(onReverted).not.toHaveBeenCalled()
       expect(vi.getTimerCount()).toBe(0)
+      expect(executor.resumeAuthFailures('a@example.com')).toBe(1)
+      expect(rows[0]).toMatchObject({ state: 'pending', attempts: 0, last_error: null })
       executor.stop()
     } finally {
       vi.useRealTimers()
@@ -188,19 +239,32 @@ describe('action executor', () => {
     )
 
     expect(executor.resumeAuthFailures('a@example.com')).toBe(1)
-    expect(auth.state).toBe('pending')
+    expect(auth).toMatchObject({ state: 'pending', attempts: 0, last_error: null })
     expect(permanent.state).toBe('failed')
+  })
+
+  it('makes a legacy auth failure visible but does not retry it during startup', async () => {
+    const auth = row(1, 'a@example.com', 'auth')
+    auth.state = 'failed'
+    auth.last_error = 'gmail /threads/auth/modify failed (401): revoked'
+    const actionProvider = provider()
+    const executor = new ActionExecutor(
+      fakeDb([auth]),
+      () => 'a@example.com',
+      () => actionProvider
+    )
+
+    await executor.trigger()
+
+    expect(auth.state).toBe('pending')
+    expect(actionProvider.modifyThread).not.toHaveBeenCalled()
   })
 
   it('self-heals a legacy permanently failed row on the next online drain', async () => {
     const legacy = row(1, 'a@example.com', 'legacy')
     legacy.state = 'failed'
     legacy.last_error = 'gmail /threads/legacy/modify failed (400): bad request'
-    const actionProvider = provider(
-      vi.fn(async () => {
-        throw new GmailApiError(400, 'bad request')
-      })
-    )
+    const actionProvider = provider()
     const onReverted = vi.fn()
     const executor = new ActionExecutor(
       fakeDb([legacy]),
@@ -212,23 +276,27 @@ describe('action executor', () => {
 
     await executor.trigger()
 
+    expect(actionProvider.modifyThread).not.toHaveBeenCalled()
     expect(actionProvider.getThread).toHaveBeenCalledWith('legacy', { format: 'full' })
     expect(onReverted).toHaveBeenCalledOnce()
   })
 
-  it('keeps the row pending when the authoritative recovery refetch is offline', async () => {
+  it('retries only the authoritative refetch after recovery goes offline', async () => {
     vi.useFakeTimers()
     try {
       const pending = row(1, 'a@example.com', 'offline-recovery')
+      const rows = [pending]
       const actionProvider = provider(
         vi.fn(async () => {
           throw new GmailApiError(400, 'bad request')
         })
       )
-      vi.mocked(actionProvider.getThread).mockRejectedValue(new TypeError('fetch failed'))
+      vi.mocked(actionProvider.getThread)
+        .mockRejectedValueOnce(new TypeError('fetch failed'))
+        .mockResolvedValue(snapshot('offline-recovery'))
       const onReverted = vi.fn()
       const executor = new ActionExecutor(
-        fakeDb([pending]),
+        fakeDb(rows),
         () => 'a@example.com',
         () => actionProvider,
         undefined,
@@ -236,14 +304,85 @@ describe('action executor', () => {
       )
 
       await executor.trigger()
+      await executor.trigger()
 
-      expect(pending).toMatchObject({ state: 'pending', attempts: 1 })
+      expect(pending).toMatchObject({ state: 'recovering', attempts: 1 })
+      expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
       expect(onReverted).not.toHaveBeenCalled()
       expect(vi.getTimerCount()).toBe(1)
+      await vi.runAllTimersAsync()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
+      expect(actionProvider.getThread).toHaveBeenCalledTimes(2)
+      expect(onReverted).toHaveBeenCalledOnce()
+      expect(rows).toHaveLength(0)
       executor.stop()
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('resumes an auth-paused recovery without resending the rejected action', async () => {
+    const recovering = row(1, 'a@example.com', 'auth-recovery')
+    const rows = [recovering]
+    const actionProvider = provider(
+      vi.fn(async () => {
+        throw new GmailApiError(400, 'bad request')
+      })
+    )
+    vi.mocked(actionProvider.getThread)
+      .mockRejectedValueOnce(new GmailApiError(401, 'gmail /threads/auth-recovery failed (401): revoked'))
+      .mockResolvedValue(snapshot('auth-recovery'))
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb(rows),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await executor.trigger()
+    await executor.trigger()
+
+    expect(recovering).toMatchObject({
+      state: 'recovering',
+      last_error: 'gmail /threads/auth-recovery failed (401): revoked'
+    })
+    expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
+    expect(actionProvider.getThread).toHaveBeenCalledOnce()
+    expect(executor.resumeAuthFailures('a@example.com')).toBe(1)
+
+    await executor.trigger()
+
+    expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
+    expect(actionProvider.getThread).toHaveBeenCalledTimes(2)
+    expect(onReverted).toHaveBeenCalledOnce()
+    expect(rows).toHaveLength(0)
+  })
+
+  it('treats an action 404 as authoritative local deletion', async () => {
+    const rows = [row(1, 'a@example.com', 'gone')]
+    const actionProvider = provider(
+      vi.fn(async () => {
+        throw new GmailApiError(404, 'gone')
+      })
+    )
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb(rows),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await executor.trigger()
+
+    expect(rows).toHaveLength(0)
+    expect(actionProvider.getThread).not.toHaveBeenCalled()
+    expect(onReverted).not.toHaveBeenCalled()
   })
 
   it('does not let external nudges bypass transient retry backoff', async () => {
@@ -273,6 +412,38 @@ describe('action executor', () => {
       await Promise.resolve()
       expect(actionProvider.modifyThread).toHaveBeenCalledTimes(2)
       expect(rows).toHaveLength(0)
+      executor.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not let one account retry timer block a newly active account', async () => {
+    vi.useFakeTimers()
+    try {
+      const rows = [row(1, 'a@example.com', 'a-retry'), row(2, 'b@example.com', 'b-ready')]
+      let activeAccount = 'a@example.com'
+      const actionProvider = provider(
+        vi
+          .fn()
+          .mockRejectedValueOnce(new GmailApiError(503, 'unavailable', true))
+          .mockResolvedValue(undefined)
+      )
+      const executor = new ActionExecutor(
+        fakeDb(rows),
+        () => activeAccount,
+        () => actionProvider
+      )
+
+      await executor.trigger()
+      expect(vi.getTimerCount()).toBe(1)
+
+      activeAccount = 'b@example.com'
+      await executor.trigger()
+
+      expect(actionProvider.modifyThread).toHaveBeenCalledTimes(2)
+      expect(rows.map((item) => item.thread_id)).toEqual(['a-retry'])
+      expect(vi.getTimerCount()).toBe(0)
       executor.stop()
     } finally {
       vi.useRealTimers()

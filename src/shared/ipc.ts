@@ -45,6 +45,7 @@ export const IPC_CHANNELS = {
   mailListSnoozed: 'mail:listSnoozed',
   mailListLabels: 'mail:listLabels',
   mailGetUnreadCount: 'mail:getUnreadCount',
+  mailTakeActionsReverted: 'mail:takeActionsReverted',
   mailGetConversation: 'mail:getConversation',
   mailDownloadAttachment: 'mail:downloadAttachment',
   mailGetInlineImage: 'mail:getInlineImage',
@@ -117,6 +118,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.mailListSnoozed]: { args: []; result: SnoozedThreadRow[] }
   [IPC_CHANNELS.mailListLabels]: { args: []; result: MailLabel[] }
   [IPC_CHANNELS.mailGetUnreadCount]: { args: []; result: number }
+  [IPC_CHANNELS.mailTakeActionsReverted]: { args: []; result: RevertedAction[] }
   [IPC_CHANNELS.mailGetConversation]: {
     args: [threadId: string, allowHydration: boolean]
     result: Conversation | null
@@ -142,7 +144,7 @@ export interface InvokeChannels {
 
 export interface BroadcastChannels {
   [IPC_CHANNELS.mailChanged]: undefined
-  [IPC_CHANNELS.mailActionsReverted]: RevertedAction[]
+  [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
   [IPC_CHANNELS.syncState]: SyncState

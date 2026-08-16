@@ -2,6 +2,7 @@ import type { RevertedAction, RevertedActionKind } from '../../shared/actionReve
 import type { QueueIntent } from './execute'
 
 export interface QueuedActionRef {
+  queueId: number
   threadId: string
   signature: string
 }
@@ -10,14 +11,16 @@ export interface UndoEntryWithRefs {
   refs: readonly QueuedActionRef[]
 }
 
-export function queueIntentRef(intent: QueueIntent): QueuedActionRef {
+export function queueIntentRef(intent: QueueIntent, queueId: number): QueuedActionRef {
   const delta =
     intent.kind === 'modifyLabels' ? `${normalizedLabels(intent.add)}|${normalizedLabels(intent.remove)}` : ''
-  return { threadId: intent.threadId, signature: `${intent.kind}|${delta}` }
+  return { queueId, threadId: intent.threadId, signature: `${intent.kind}|${delta}` }
 }
 
 export function sameQueuedAction(left: QueuedActionRef, right: QueuedActionRef): boolean {
-  return left.threadId === right.threadId && left.signature === right.signature
+  return (
+    left.queueId === right.queueId && left.threadId === right.threadId && left.signature === right.signature
+  )
 }
 
 export function dropRevertedUndoEntries<T extends UndoEntryWithRefs>(

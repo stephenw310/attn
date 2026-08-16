@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { formatActionRevertToast, type RevertedAction } from '../shared/actionRevert'
+import { formatActionRevertToast } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import type { ContactSearchResult } from '../shared/contacts'
@@ -63,12 +63,24 @@ const api = {
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },
     onActionsReverted: (cb: (message: string) => void): (() => void) => {
-      const listener = (_event: unknown, actions: RevertedAction[]): void => {
-        const message = formatActionRevertToast(actions)
-        if (message) cb(message)
+      let active = true
+      const takePending = async (): Promise<void> => {
+        try {
+          const actions = await invoke(IPC_CHANNELS.mailTakeActionsReverted)
+          if (!active) return
+          const message = formatActionRevertToast(actions)
+          if (message) cb(message)
+        } catch {
+          // The main process may be tearing down; notices remain buffered there.
+        }
       }
+      const listener = (): void => void takePending()
       ipcRenderer.on(IPC_CHANNELS.mailActionsReverted, listener)
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.mailActionsReverted, listener)
+      void takePending()
+      return () => {
+        active = false
+        ipcRenderer.removeListener(IPC_CHANNELS.mailActionsReverted, listener)
+      }
     },
     onBodyHydrationFailed: (cb: (accountId: string, threadId: string) => void): (() => void) => {
       const listener = (_event: unknown, payload: { accountId: string; threadId: string }): void =>

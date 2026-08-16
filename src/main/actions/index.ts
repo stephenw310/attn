@@ -81,21 +81,25 @@ function apply(db: Db, accountId: string, action: TriageAction): ApplyResult {
       applyThreadDelta(db, accountId, { threadId, add: plan.add, remove: plan.remove })
       const archiveWasAlreadyApplied = action.kind === 'archive' && !labelsBefore.get(threadId)?.has('INBOX')
       if (!archiveWasAlreadyApplied) {
-        enqueue.run(
+        const queued = enqueue.run(
           accountId,
           plan.queueKind,
           threadId,
           JSON.stringify({ add: plan.add, remove: plan.remove })
         )
+        const queueId = Number(queued.lastInsertRowid)
         refs.push(
           plan.queueKind === 'modifyLabels'
-            ? queueIntentRef({
-                kind: plan.queueKind,
-                threadId,
-                add: plan.add,
-                remove: plan.remove
-              })
-            : queueIntentRef({ kind: plan.queueKind, threadId })
+            ? queueIntentRef(
+                {
+                  kind: plan.queueKind,
+                  threadId,
+                  add: plan.add,
+                  remove: plan.remove
+                },
+                queueId
+              )
+            : queueIntentRef({ kind: plan.queueKind, threadId }, queueId)
         )
       }
     }
@@ -124,8 +128,13 @@ function applySnooze(db: Db, accountId: string, threadIds: string[], dueAt: numb
     // archive. Gmail-side labels + exact-time return arrive with the v1.5
     // companion script (SPEC F7).
     if (wasInInbox) {
-      enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }))
-      refs.push(queueIntentRef({ kind: 'modifyLabels', threadId, add: [], remove: ['INBOX'] }))
+      const queued = enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }))
+      refs.push(
+        queueIntentRef(
+          { kind: 'modifyLabels', threadId, add: [], remove: ['INBOX'] },
+          Number(queued.lastInsertRowid)
+        )
+      )
     }
   }
   return refs
@@ -227,7 +236,7 @@ export function pendingActionCount(db: Db, accountId: string): number {
   const row = db
     .prepare(
       `SELECT COUNT(*) AS count FROM action_queue
-       WHERE account_id = ? AND state IN ('pending', 'inflight')`
+       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering')`
     )
     .get(accountId) as { count: number }
   return row.count

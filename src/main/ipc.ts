@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, rm } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
+import type { RevertedAction } from '../shared/actionRevert'
 import { isValidEmail } from '../shared/address'
 import type { AuthStatus } from '../shared/auth'
 import {
@@ -95,6 +96,7 @@ export interface IpcContext {
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
+  takeRevertedActions: (accountId: string) => RevertedAction[]
   waitForConversation: (threadId: string) => Promise<void>
   draftInlineImageDelay: () => number
   consumeTestDraftSaveFailure: () => boolean
@@ -456,6 +458,10 @@ export function registerIpc(context: IpcContext): () => void {
     const threadId = takePendingFocus(context.pendingFocus())
     context.clearPendingFocus()
     return threadId
+  })
+  handle(IPC_CHANNELS.mailTakeActionsReverted, () => {
+    const account = context.currentAccountId()
+    return account ? context.takeRevertedActions(account) : []
   })
   handle(IPC_CHANNELS.mailListThreads, () => {
     const account = context.currentAccountId()

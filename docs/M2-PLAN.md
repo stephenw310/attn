@@ -687,6 +687,8 @@ Attach → queue → relaunch → send survives with bytes intact; caps enforced
 
 **The mechanism is refetch, not inverse-delta.** Don't compute a reverse of the failed action — delete the queue row and re-fetch that thread (`getThread` → `persistThread`, which already replays any remaining pending intent on top). Server state is the truth by F2's own conflict rule, so this converges exactly and cannot drift the way a hand-rolled inverse can. It costs one request on a path that is, by construction, rare.
 
+**Recovery is its own durable queue state.** As soon as Gmail permanently rejects an action, its row moves to `recovering` before the authoritative refetch starts. A failed refetch retries only that read — it must never send the rejected action again, including after a crash or when repairing a pre-T18 `failed` row. A stored 401 pauses either execution or recovery until successful same-account authentication clears the marker. `recovering` rows remain in the pending count but are excluded from optimistic-delta replay because Gmail has already rejected their intent. Revert notices are buffered in the main process until the account's renderer consumes them, so a repair during window startup still says what happened.
+
 **Three nuances the policy must respect — getting these wrong is worse than the old behavior:**
 
 1. **Only *permanent* failures revert.** Offline, 5xx, and 429 stay retryable with their backoff ladder untouched. Reverting on a transient failure would flicker mail back into the inbox during a network blip — the worst outcome available here. `isPermanentActionError` already draws this line; use it, don't widen it.
