@@ -7,11 +7,13 @@ import {
   MAIL_TRIM_MARKER as TRIM_MARKER
 } from '../../shared/mailSanitizer'
 import { forceLightMailCss } from './mailCss'
+import { type MailSurface, normalizeNativeMailDocument } from './mailSurface'
 import { findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
   bodyText: string
   bodyHtml: string | null
+  surface: MailSurface
   threadId: string
   messageId: string
   attachments: MessageAttachment[]
@@ -29,23 +31,39 @@ const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, 
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
-const RESET = `
-  :root { color-scheme: only light; }
+function frameReset(surface: MailSurface): string {
+  const light = surface === 'light'
+  return `
+  :root { color-scheme: only ${light ? 'light' : 'dark'}; }
   html, body {
     margin: 0;
     padding: 0;
-    background: #fff;
-    color: #202124;
+    background: ${light ? '#fff' : 'transparent'};
+    color: ${light ? '#202124' : '#e9eaee'};
   }
   html { overflow-x: auto; overflow-y: hidden; }
   body { overflow: visible; }
   body {
-    font: 14px/1.6 Arial, Helvetica, sans-serif;
+    font: ${light ? '14px/1.6 Arial, Helvetica, sans-serif' : '15px/1.7 Arial, Helvetica, sans-serif'};
     overflow-wrap: break-word;
   }
   #attn-mail-body {
     box-sizing: border-box;
-    padding: 12px !important;
+    padding: ${light ? '12px' : '0'} !important;
+  }
+  ${
+    light
+      ? ''
+      : `
+  #attn-mail-body,
+  #attn-mail-body :where(*) {
+    color: inherit !important;
+    background-color: transparent !important;
+    background-image: none !important;
+  }
+  #attn-mail-body a {
+    color: #60a5fa !important;
+  }`
   }
   img { max-width: 100%; height: auto; }
   table { max-width: 100%; }
@@ -55,6 +73,7 @@ const RESET = `
     height: ${TRIM_CONTROL_HEIGHT}px !important;
   }
 `
+}
 
 interface FrameMeasurement {
   srcDoc: string
@@ -103,18 +122,20 @@ function hasRenderableContentBefore(content: DocumentFragment, boundary: Element
   return hasRenderableContent(range.cloneContents())
 }
 
-function sanitizeToTemplate(html: string): HTMLTemplateElement | null {
+function sanitizeToTemplate(html: string, surface: MailSurface): HTMLTemplateElement | null {
   if (!html.trim()) return null
   const clean = sanitizeMailHtml(DOMPurify, html)
 
   const template = document.createElement('template')
   template.innerHTML = clean
   template.content.querySelectorAll('style').forEach((style) => {
-    style.textContent = forceLightMailCss(freezeViewportHeightUnits(style.textContent ?? ''))
+    const frozen = freezeViewportHeightUnits(style.textContent ?? '')
+    style.textContent = surface === 'light' ? forceLightMailCss(frozen) : frozen
   })
   template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
   })
+  if (surface === 'native') normalizeNativeMailDocument(template.content)
   template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
     const normalizedHref = normalizeMailLink(link.getAttribute('href') ?? '')
     if (normalizedHref === null) link.removeAttribute('href')
@@ -155,8 +176,12 @@ function cidReferences(html: string): string[] {
     .map((source) => normalizedContentId(source.slice(4)))
 }
 
-function makeSrcDoc(html: string, inlineImages: ReadonlyMap<string, string>): string | null {
-  const template = sanitizeToTemplate(html)
+function makeSrcDoc(
+  html: string,
+  inlineImages: ReadonlyMap<string, string>,
+  surface: MailSurface
+): string | null {
+  const template = sanitizeToTemplate(html, surface)
   if (!template) return null
   replaceCidSources(template.content, inlineImages)
   const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
@@ -166,7 +191,7 @@ function makeSrcDoc(html: string, inlineImages: ReadonlyMap<string, string>): st
     marker.setAttribute(TRIM_MARKER, '')
     trimStart.before(marker)
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light"><base target="_blank"><style>${RESET}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${surface === 'light' ? 'light' : 'dark'}"><base target="_blank"><style>${frameReset(surface)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
 }
 
 function TrimToggle({
@@ -217,6 +242,7 @@ function TrimToggle({
 export function MessageBody({
   bodyText,
   bodyHtml,
+  surface,
   threadId,
   messageId,
   attachments,
@@ -229,7 +255,10 @@ export function MessageBody({
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
   const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
-  const srcDoc = useMemo(() => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES)), [bodyHtml])
+  const srcDoc = useMemo(
+    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface)),
+    [bodyHtml, surface]
+  )
 
   const applyInlineImages = useCallback(() => {
     const doc = frameRef.current?.contentDocument
@@ -328,6 +357,10 @@ export function MessageBody({
     // Tab owns focus traversal inside the mail document. Forwarding it to the
     // app would prevent the browser from moving through links in the message.
     if (event.key === 'Tab') return
+    const target = event.target as HTMLElement | null
+    // Enter on a focused link or control belongs to that element, not the
+    // reader's convenient Reply-all alias.
+    if (event.key === 'Enter' && target?.closest?.('a, button, input, textarea, select')) return
     const forwarded = new KeyboardEvent('keydown', {
       key: event.key,
       code: event.code,
@@ -393,7 +426,7 @@ export function MessageBody({
   }, [disconnect, observe, oversized, srcDoc])
 
   if (srcDoc === null || oversized) {
-    const lightSurface = bodyHtml !== null
+    const lightSurface = surface === 'light'
     const surfaceClass = lightSurface ? 'p-3 text-[#202124]' : 'text-ink'
     const trimIndex = findTrimIndex(bodyText)
     if (trimIndex === null) {
@@ -432,13 +465,17 @@ export function MessageBody({
   }
 
   return (
-    <div data-testid="html-body-container" className="relative min-w-0 bg-white">
+    <div
+      data-testid="html-body-container"
+      data-surface={surface}
+      className={`relative min-w-0 ${surface === 'light' ? 'bg-white' : 'bg-transparent'}`}
+    >
       {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
         <TrimToggle
           expanded={expanded}
-          lightSurface
+          lightSurface={surface === 'light'}
           onToggle={onToggleTrim}
-          className="absolute left-3 z-10 h-7"
+          className={`absolute z-10 h-7 ${surface === 'light' ? 'left-3' : 'left-0'}`}
           style={{ top: measurement.trimTop }}
         />
       )}
@@ -449,9 +486,9 @@ export function MessageBody({
         sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         srcDoc={srcDoc}
         onLoad={onLoad}
-        className="block w-full border-0 bg-white"
+        className={`block w-full border-0 ${surface === 'light' ? 'bg-white' : 'bg-transparent'}`}
         style={{
-          colorScheme: 'light',
+          colorScheme: surface === 'light' ? 'light' : 'dark',
           height: height ?? 1,
           visibility: height === null ? 'hidden' : 'visible'
         }}

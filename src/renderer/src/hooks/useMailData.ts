@@ -16,6 +16,7 @@ interface MailDataState {
   outboxProgress: OutboxProgress | null
   clearOutboxFailure: () => void
   refreshDrafts: () => Promise<void>
+  refreshMailRows: () => Promise<void>
   realUnreadTotal: number | null
   labels: MailLabel[]
   pendingActionCount: number
@@ -47,6 +48,9 @@ export function useMailData(
   const [mailRevision, setMailRevision] = useState(0)
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
+  const deferGateRef = useRef<Promise<void> | null>(null)
+  const activeAccountRef = useRef(activeAccount)
+  activeAccountRef.current = activeAccount
   const clearOutboxFailure = useCallback(() => setOutboxFailure(null), [])
 
   useEffect(() => {
@@ -168,9 +172,63 @@ export function useMailData(
     }
   }, [activeAccount, activeViewRef, selectedDraftIdRef, selectedThreadIdRef, setSelectedIndex])
 
+  // One shared wait behind the defer gate, mirroring the coalescing timer the
+  // event-driven refresh above uses: N closes during one triage animation
+  // resume as one burst instead of N independent query storms.
+  const awaitRefreshGate = async (): Promise<void> => {
+    if (deferRefreshUntilRef.current <= Date.now()) return
+    if (!deferGateRef.current) {
+      deferGateRef.current = (async () => {
+        // The gate can be pushed forward while we wait, so re-read it rather
+        // than sleeping once against a stale deadline.
+        while (deferRefreshUntilRef.current > Date.now()) {
+          const delay = deferRefreshUntilRef.current - Date.now()
+          await new Promise<void>((resolve) => window.setTimeout(resolve, delay))
+        }
+        deferGateRef.current = null
+      })()
+    }
+    await deferGateRef.current
+  }
+
   const refreshDrafts = async (): Promise<void> => {
-    if (!window.attn || !activeAccount) return
+    const account = activeAccount
+    if (!window.attn || !account) return
+    await awaitRefreshGate()
+    if (!window.attn || activeAccountRef.current !== account) return
     const drafts = await window.attn.draft.list()
+    if (activeViewRef.current === 'drafts') {
+      const preserveSelection = preserveSelectionOnRefreshRef.current
+      preserveSelectionOnRefreshRef.current = true
+      setSelectedIndex((current) =>
+        refreshedSelectionIndex(drafts, preserveSelection ? selectedDraftIdRef.current : null, current)
+      )
+    }
+    setRealDrafts(drafts)
+  }
+
+  const refreshMailRows = async (): Promise<void> => {
+    const account = activeAccount
+    if (!window.attn || !account) return
+    await awaitRefreshGate()
+    if (!window.attn || activeAccountRef.current !== account) return
+    const [threads, snoozed, drafts] = await Promise.all([
+      window.attn.mail.listThreads(),
+      window.attn.mail.listSnoozed(),
+      window.attn.draft.list()
+    ])
+    if (activeAccountRef.current !== account) return
+    const visible =
+      activeViewRef.current === 'inbox' ? threads : activeViewRef.current === 'snoozed' ? snoozed : drafts
+    const selectedId =
+      activeViewRef.current === 'drafts' ? selectedDraftIdRef.current : selectedThreadIdRef.current
+    const preserveSelection = preserveSelectionOnRefreshRef.current
+    preserveSelectionOnRefreshRef.current = true
+    setSelectedIndex((current) =>
+      refreshedSelectionIndex(visible, preserveSelection ? selectedId : null, current)
+    )
+    setRealThreads(threads)
+    setRealSnoozedThreads(snoozed)
     setRealDrafts(drafts)
   }
 
@@ -186,6 +244,7 @@ export function useMailData(
     outboxProgress,
     clearOutboxFailure,
     refreshDrafts,
+    refreshMailRows,
     realUnreadTotal,
     labels,
     pendingActionCount,

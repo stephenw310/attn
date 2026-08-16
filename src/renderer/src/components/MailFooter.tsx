@@ -19,7 +19,15 @@ const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
   { id: 'undo', keys: ['Z'], label: 'undo' }
 ]
 
-function footerShortcuts(readerOpen: boolean, outboxOpen: boolean): ShortcutHint[] {
+function footerShortcuts(readerOpen: boolean, outboxOpen: boolean, composing: boolean): ShortcutHint[] {
+  // An inline composer keeps the list and reader on screen but owns the
+  // keyboard, so advertise the composer's keys rather than dead triage verbs.
+  if (composing) {
+    return [
+      { id: 'send', keys: ['Mod', 'Enter'], label: 'send' },
+      { id: 'back', keys: ['Esc'], label: 'save and close' }
+    ]
+  }
   if (outboxOpen) {
     return [
       { id: 'navigate', keys: ['J', 'K', '↑', '↓'], label: 'navigate' },
@@ -66,6 +74,7 @@ function FooterShortcut({ id, keys, label }: ShortcutHint): React.JSX.Element {
 interface MailFooterProps {
   readerOpen: boolean
   outboxOpen: boolean
+  composing: boolean
   sync: SyncState
   networkOnline: boolean
   onRetry: () => void
@@ -73,11 +82,14 @@ interface MailFooterProps {
 }
 
 export function MailFooter(props: MailFooterProps): React.JSX.Element {
-  const { readerOpen, outboxOpen, sync, networkOnline, onRetry, onCopyError } = props
+  const { readerOpen, outboxOpen, composing, sync, networkOnline, onRetry, onCopyError } = props
   return (
-    <footer className="relative z-40 flex min-h-11 items-center gap-4 border-t border-white/10 bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-[0_-8px_24px_rgba(0,0,0,0.32)]">
+    <footer
+      data-testid="mail-footer"
+      className="relative z-40 flex min-h-11 items-center gap-4 border-t border-white/10 bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-[0_-8px_24px_rgba(0,0,0,0.32)]"
+    >
       <div data-testid="footer-shortcuts" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
-        {footerShortcuts(readerOpen, outboxOpen).map((shortcut) => (
+        {footerShortcuts(readerOpen, outboxOpen, composing).map((shortcut) => (
           <FooterShortcut key={shortcut.id} {...shortcut} />
         ))}
       </div>

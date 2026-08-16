@@ -117,13 +117,19 @@ describe('command catalog', () => {
         const overlaps = concreteContexts(left.context).some((context) =>
           concreteContexts(right.context).includes(context)
         )
-        const leftShortcut = 'shortcut' in left ? left.shortcut : undefined
-        const rightShortcut = 'shortcut' in right ? right.shortcut : undefined
+        const leftShortcuts = [
+          ...('shortcut' in left && left.shortcut ? [left.shortcut] : []),
+          ...('shortcutAliases' in left ? left.shortcutAliases : [])
+        ]
+        const rightShortcuts = [
+          ...('shortcut' in right && right.shortcut ? [right.shortcut] : []),
+          ...('shortcutAliases' in right ? right.shortcutAliases : [])
+        ]
         if (
           overlaps &&
-          leftShortcut !== undefined &&
-          rightShortcut !== undefined &&
-          leftShortcut.toLowerCase() === rightShortcut.toLowerCase()
+          leftShortcuts.some((leftShortcut) =>
+            rightShortcuts.some((rightShortcut) => leftShortcut.toLowerCase() === rightShortcut.toLowerCase())
+          )
         ) {
           conflicts.push(`${leftId}/${rightId}`)
         }
@@ -196,6 +202,23 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('e'), 'reader')?.id).toBe('triage.archive')
     expect(matchKey(key('z'), 'list')?.id).toBe('triage.undo')
     expect(matchKey(key('z'), 'reader')?.id).toBe('triage.undo')
+  })
+
+  test('uses Enter as a reader-only alias for reply all while retaining A', () => {
+    useCommands([createCommand('conversation.open', () => {}), createCommand('composer.replyAll', () => {})])
+    expect(matchKey(key('Enter'), 'list')?.id).toBe('conversation.open')
+    expect(matchKey(key('Enter'), 'reader')?.id).toBe('composer.replyAll')
+    expect(matchKey(key('a'), 'reader')?.id).toBe('composer.replyAll')
+    expect(matchKey(key('a'), 'list')).toBeNull()
+  })
+
+  test('can expose reply and forward in list context for the focused conversation', () => {
+    useCommands([
+      createCommand('composer.reply', () => {}, { context: 'list' }),
+      createCommand('composer.forward', () => {}, { context: 'list' })
+    ])
+    expect(matchKey(key('r'), 'list')?.id).toBe('composer.reply')
+    expect(matchKey(key('f'), 'list')?.id).toBe('composer.forward')
   })
 
   test('looks up registered chord commands instead of bypassing their handlers', () => {

@@ -4,7 +4,7 @@
 **Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through draft PR #38.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39) and T14 (#38, full-window) are shipped. Dogfood of the shipped composer produced four revision tasks, T14A–T14D, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, and two-way Gmail Drafts sync; all four shipped in #43, with draft-mirror reconciliation fixed in #44. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) is implemented; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). T21 adds the poller's label-catalog refresh found during that review. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
+**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window) and T16 (#45) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, and T14E is in flight. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) is implemented; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). T21 adds the poller's label-catalog refresh found during that review. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
@@ -619,6 +619,46 @@ PRAGMA user_version = 11;
 
 ---
 
+## T14E — Inline thread drafting and reliable conversation badges
+
+**Depends on:** T14A, T14B, T14D · **Spec:** F6, §9 #13
+
+**Revision task.** New mail remains a focused full-window task. Reply, reply-all, and forward instead append
+the composer as the final card beneath the source conversation, keeping the referenced messages visible.
+Opening a thread-bound row from Drafts returns to the same context; if the parent has left Inbox but remains
+cached, the Drafts reader opens that conversation directly and returns to Drafts on close.
+Opening a conversation row with a bound draft reopens the newest matching draft inline. The composer's own
+close button leaves the reader open, while either `Esc` or the reader Back control saves the draft and returns
+to the originating list in one action. Opening or navigating to a conversation keeps the reading viewport
+anchored to the newest message or restored draft while asynchronously sized HTML settles. Quoted history sits
+behind an inline `...` control and shares the reader's surface decision: text-like mail uses the native composer
+canvas and normalizes dark sender foreground colours for contrast, while presentation HTML retains a light
+document canvas plus its sanitized structure and explicit styling. From Inbox or Snoozed, `r` and `f` open
+the selected row directly into the corresponding inline composer.
+`Enter` is a reader-only Reply-all alias alongside `a` and retains native activation on focused links.
+
+Gmail-imported forwards need one additional identity rule. A draft whose authoritative Gmail `threadId`
+matches a cached thread is thread-bound even though forwards normally lack `In-Reply-To` and `References`.
+Classify a `Fwd:`/`FW:` subject as `forward` only with that known-thread evidence, preserve new drafts whose
+thread is not cached, and re-fetch unchanged legacy rows once so an earlier unbound import repairs itself.
+
+### Testing
+
+- Unit: remote drafts bind as reply/forward only when their Gmail thread already exists locally.
+- E2e: reply/reply-all/forward keep the original message cards visible; the list row shows a Draft chip;
+  opening both Inbox-bound and archived-parent Gmail forward drafts returns to an inline composer; opening
+  the conversation row itself restores its draft in the viewport after long HTML settles; quoted history
+  reveals inline on the same native or presentation surface as its source; `r`/`f` work from the selected list
+  row; `Enter` opens Reply all; Back and `Esc` exit directly to the originating list without losing it.
+- Visual artifacts: `inline-reply.png` and `draft-chip.png`.
+
+### Done when
+
+Thread drafting never replaces its source conversation, every bound draft is visible from its conversation
+row, cached archived parents remain available from Drafts, and `npm run verify` is green.
+
+---
+
 ## T15 — MIME builder and reply/reply-all/forward semantics
 
 **Shipped (#39). Extended by T14B (entry points, threading headers in the draft mirror) and T14C (`multipart/related` for inline images).**
@@ -935,7 +975,7 @@ created or renamed in Gmail web appears in Attn within one poll interval, verify
 | Decision | Rationale | Revisit |
 |---|---|---|
 | **Lexical** for the composer editor, over raw `contenteditable`/`execCommand` (owner, 2026-08-13) | M4's snippets (single-undo expansion, `{cursor}`) and AI draft streaming are programmatic edits that need a real document model; `execCommand` is deprecated and paste normalization is otherwise hand-rolled. Cross-browser normalization is *not* a factor — Electron pins one Chromium | Only if Lexical's HTML output fights real-world mail rendering; the sanitizer stays either way |
-| Full-window composer instead of a docked overlay | Writing is the active task; the dock felt visually subordinate and overlapped the global footer. Hiding rather than unmounting the prior view preserves exact return context | Revisit only with contrary dogfood evidence |
+| Full-window new-message composer plus inline reply/forward cards instead of a docked overlay | New mail is its own task, while a thread reply depends on visible source context; both modes avoid the old footer collision. Hiding rather than unmounting the prior view preserves exact return context for new mail | Revisit only with contrary dogfood evidence |
 | Gmail draft mirror is async/best-effort; local row is the source of truth | Typing latency and offline composing must never wait on Gmail | v2 multi-device story |
 | Attachments mirror to Gmail only at send time | Autosave-frequency × megabytes would burn quota for convenience | If dogfood shows draft-handoff-to-phone matters |
 | Gmail draft id (always send via `drafts.send`) as the exactly-once handle; client Message-ID demoted to a secondary check | Draft existence is immediately consistent and `drafts.send` consumes it atomically, so recovery is decisive. Search-based verification is not: Gmail's index lags sends and it honors no client idempotency key, so a single negative result cannot authorize a resend | v2 backend could own send |

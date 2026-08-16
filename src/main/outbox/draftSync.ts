@@ -84,6 +84,7 @@ interface LocalSyncRow {
   id: string
   state: 'composing' | 'drafted'
   kind: DraftKind
+  thread_id: string | null
   local_revision: number
   mirror_revision: number
   updated_at: number
@@ -144,9 +145,17 @@ function claimNonEditableOutboxDraft(db: Db, accountId: string, remote: Provider
   return true
 }
 
-export function remoteDraftKind(remote: ProviderDraft, localKind?: DraftKind): DraftKind {
+export function remoteDraftKind(
+  remote: ProviderDraft,
+  localKind?: DraftKind,
+  knownThread = false
+): DraftKind {
   if (localKind) return localKind
   if (header(remote.message, 'In-Reply-To') || header(remote.message, 'References')) return 'reply'
+  // Gmail does not expose a draft-mode flag. A draft attached to an existing
+  // thread with no reply headers is a forward, regardless of the locale used
+  // for its subject prefix (Fwd:, WG:, TR:, ...).
+  if (knownThread) return 'forward'
   return 'new'
 }
 
@@ -214,10 +223,14 @@ export async function parseRemoteDraft(
        WHERE account_id = ? AND gmail_draft_id = ? AND state IN ('composing', 'drafted')`
     )
     .get(accountId, remote.id) as { kind: DraftKind; thread_id: string | null } | undefined
-  const kind = remoteDraftKind(remote, localHint?.kind)
   const knownThread = db
     .prepare('SELECT 1 FROM threads WHERE account_id = ? AND id = ?')
     .get(accountId, message.threadId)
+  // A previous sync may have imported a Gmail thread draft as an unbound new
+  // draft. Only preserve the local kind as an identity hint once it is already
+  // bound; otherwise the authoritative Gmail thread id gets a chance to repair
+  // that classification.
+  const kind = remoteDraftKind(remote, localHint?.thread_id ? localHint.kind : undefined, !!knownThread)
   const threading = extractThreadingHeaders(message)
   const bodies = await remoteDraftBodies(remote, provider)
   const attachments = remoteDraftAttachments(message)
@@ -252,7 +265,7 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
   const byId = db
     .prepare(
       `SELECT id, state, kind, local_revision, mirror_revision, updated_at, remote_fingerprint,
-              attachments_json
+              attachments_json, thread_id
        FROM outbox WHERE account_id = ? AND gmail_draft_id = ? AND state IN ('composing', 'drafted')`
     )
     .get(accountId, remote.gmailDraftId) as LocalSyncRow | undefined
@@ -432,6 +445,21 @@ export async function reconcileRemoteDraft(
     writeRemoteDraft(db, accountId, remote, undefined)
     return 'remote'
   }
+  const repairsThreadBinding =
+    local.kind === 'new' &&
+    local.thread_id === null &&
+    remote.input.kind !== 'new' &&
+    remote.input.threadId !== null
+  if (repairsThreadBinding) {
+    db.prepare(`UPDATE outbox SET kind = ?, thread_id = ? WHERE account_id = ? AND id = ?`).run(
+      remote.input.kind,
+      remote.input.threadId,
+      accountId,
+      local.id
+    )
+    local.kind = remote.input.kind
+    local.thread_id = remote.input.threadId
+  }
   if (local.matchedCurrentContent) {
     const attachments = refreshRemoteAttachmentLocators(local.attachments_json, remote.storedAttachments)
     db.prepare(
@@ -473,15 +501,26 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
     (
       db
         .prepare(
-          `SELECT gmail_draft_id, gmail_message_id, state FROM outbox
+          `SELECT gmail_draft_id, gmail_message_id, state, kind, thread_id FROM outbox
            WHERE account_id = ? AND gmail_draft_id IS NOT NULL
              AND state IN ('composing', 'drafted', 'discarding', 'queued', 'sending', 'failed',
                            'needs-review')`
         )
-        .all(accountId) as { gmail_draft_id: string; gmail_message_id: string | null; state: string }[]
+        .all(accountId) as {
+        gmail_draft_id: string
+        gmail_message_id: string | null
+        state: string
+        kind: DraftKind
+        thread_id: string | null
+      }[]
     ).map((row) => [
       row.gmail_draft_id,
-      { gmailMessageId: row.gmail_message_id, editable: row.state === 'composing' || row.state === 'drafted' }
+      {
+        gmailMessageId: row.gmail_message_id,
+        editable: row.state === 'composing' || row.state === 'drafted',
+        kind: row.kind,
+        threadId: row.thread_id
+      }
     ])
   )
   const remoteIds = new Set<string>()
@@ -493,14 +532,22 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
       remoteIds.add(summary.id)
       const known = knownDrafts.get(summary.id)
       if (known && !known.editable) continue
-      if (summary.messageId && known?.gmailMessageId === summary.messageId) continue
+      // A legacy row imported before thread binding existed still needs one
+      // refetch to learn its parent, even though its remote summary is unchanged.
+      const canRepairThreadBinding =
+        known?.kind === 'new' &&
+        known.threadId === null &&
+        !!summary.threadId &&
+        !!db.prepare('SELECT 1 FROM threads WHERE account_id = ? AND id = ?').get(accountId, summary.threadId)
+      if (summary.messageId && known?.gmailMessageId === summary.messageId && !canRepairThreadBinding)
+        continue
       const decision = await reconcileRemoteDraft(
         db,
         accountId,
         await provider.getDraft(summary.id),
         provider
       )
-      changed ||= decision === 'remote'
+      changed ||= canRepairThreadBinding || decision === 'remote'
     }
     pageToken = page.nextPageToken
   } while (pageToken)

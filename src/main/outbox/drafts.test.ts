@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import { publicDraftAttachment, type StoredDraftAttachment } from './draftAttachments'
-import { canonicalizeRendererDraft, discardDraft, isEmptyDraft, requestDraftMirror } from './drafts'
+import {
+  canonicalizeRendererDraft,
+  discardDraft,
+  isEmptyDraft,
+  isUntouchedThreadDraft,
+  requestDraftMirror
+} from './drafts'
 
 const stored: StoredDraftAttachment = {
   id: 'owned-attachment',
@@ -93,5 +99,67 @@ describe('draft lifecycle guards', () => {
 
       expect(requestDraftMirror(db, 'account', 'draft-1')).toBe(true)
     }
+  })
+})
+
+describe('untouched reply and forward drafts', () => {
+  const quoted: StoredDraftAttachment = { ...stored, inline: true }
+  const attached: StoredDraftAttachment = { ...stored, id: 'user-file', inline: false }
+  const maya = { name: 'Maya', email: 'maya@example.com' }
+
+  // What `planReply` produces for each entry point, and nothing more.
+  const plannedReply = {
+    ...emptyDraftInput(),
+    kind: 'reply' as const,
+    to: [maya],
+    subject: 'Re: Design notes',
+    threadId: 't-design',
+    quoteHtml: '<blockquote>Original</blockquote>',
+    quoteText: '> Original',
+    attachments: [publicDraftAttachment(quoted)]
+  }
+  const plannedForward = {
+    ...plannedReply,
+    kind: 'forward' as const,
+    to: [],
+    subject: 'Fwd: Design notes'
+  }
+  const plannedReplyAll = { ...plannedReply, kind: 'replyAll' as const, cc: [maya] }
+
+  it('does not report a planned reply as blank, so emptiness alone cannot catch it', () => {
+    expect(isEmptyDraft(plannedReply)).toBe(false)
+    expect(isEmptyDraft(plannedForward)).toBe(false)
+  })
+
+  it('treats a draft holding only its plan as untouched', () => {
+    expect(isUntouchedThreadDraft(plannedReply)).toBe(true)
+    expect(isUntouchedThreadDraft(plannedForward)).toBe(true)
+    expect(isUntouchedThreadDraft(plannedReplyAll)).toBe(true)
+  })
+
+  it('counts any body the user authored, including a lone pasted image', () => {
+    expect(isUntouchedThreadDraft({ ...plannedReply, bodyText: 'Thanks' })).toBe(false)
+    expect(isUntouchedThreadDraft({ ...plannedReply, bodyHtml: '<p>Thanks</p>' })).toBe(false)
+    expect(isUntouchedThreadDraft({ ...plannedReply, bodyHtml: '<img src="cid:x">' })).toBe(false)
+    // Whitespace-only markup is still nothing the user meant to keep.
+    expect(isUntouchedThreadDraft({ ...plannedReply, bodyHtml: '<p>&nbsp;</p>' })).toBe(true)
+  })
+
+  it('counts recipients the plan never fills', () => {
+    expect(isUntouchedThreadDraft({ ...plannedForward, to: [maya] })).toBe(false)
+    expect(isUntouchedThreadDraft({ ...plannedReply, cc: [maya] })).toBe(false)
+    expect(isUntouchedThreadDraft({ ...plannedReply, bcc: [maya] })).toBe(false)
+    expect(isUntouchedThreadDraft({ ...plannedReplyAll, bcc: [maya] })).toBe(false)
+  })
+
+  it('counts a file the user attached but not the quoted inline parts', () => {
+    expect(isUntouchedThreadDraft({ ...plannedReply, attachments: [publicDraftAttachment(attached)] })).toBe(
+      false
+    )
+    expect(isUntouchedThreadDraft({ ...plannedReply, attachments: [] })).toBe(true)
+  })
+
+  it('never discards a new draft through this rule', () => {
+    expect(isUntouchedThreadDraft(emptyDraftInput())).toBe(false)
   })
 })

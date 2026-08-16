@@ -44,7 +44,7 @@ function ThreadLabels({
   )
 }
 
-function ReminderChips({ thread }: { thread: DisplayThread }): React.JSX.Element {
+function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Element {
   return (
     <>
       {thread.returned && (
@@ -53,14 +53,6 @@ function ReminderChips({ thread }: { thread: DisplayThread }): React.JSX.Element
           className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
         >
           Returned
-        </span>
-      )}
-      {thread.hasDraft && (
-        <span
-          data-testid="chip-draft"
-          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
-        >
-          Draft
         </span>
       )}
       {thread.dueAt !== undefined && (
@@ -160,6 +152,14 @@ export function ThreadList(props: ThreadListProps): React.JSX.Element {
                 {thread.from}
               </span>
               <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
+                {thread.hasDraft && (
+                  <span
+                    data-testid="chip-draft"
+                    className="flex-none rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent"
+                  >
+                    Draft
+                  </span>
+                )}
                 <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} />
                 {thread.starred && (
                   <span className="flex-none text-star" title="Starred">
@@ -177,7 +177,7 @@ export function ThreadList(props: ThreadListProps): React.JSX.Element {
                 </span>
               </span>
               <span className="flex flex-none items-center gap-2.5 text-xs">
-                <ReminderChips thread={thread} />
+                <ThreadStatusChips thread={thread} />
                 {thread.hasAttachment && <span title="Has attachment">📎</span>}
                 <span
                   className={`min-w-[70px] text-right tabular-nums ${thread.unread ? 'font-medium text-accent' : 'text-ink-faint'}`}

@@ -2,6 +2,7 @@ import type { Draft } from '../../../shared/drafts'
 
 interface DraftListProps {
   drafts: readonly Draft[]
+  readerOpen: boolean
   selectedIndex: number
   selectedRowRef: React.RefObject<HTMLDivElement | null>
   onOpen: (index: number) => void
@@ -15,12 +16,17 @@ function recipientLabel(draft: Draft): string {
 
 export function DraftList({
   drafts,
+  readerOpen,
   selectedIndex,
   selectedRowRef,
   onOpen
 }: DraftListProps): React.JSX.Element {
   return (
-    <main data-testid="draft-list" className="min-h-0 flex-1 overflow-y-auto py-2" aria-label="Drafts">
+    <main
+      data-testid="draft-list"
+      className={`min-h-0 flex-1 overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
+      aria-label="Drafts"
+    >
       {drafts.length === 0 && (
         <div className="flex h-full items-center justify-center text-ink-faint">No drafts</div>
       )}

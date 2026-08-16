@@ -4,7 +4,6 @@ import type { DraftKind } from '../../../shared/drafts'
 import { createCommand, registerCommands } from '../commands'
 
 interface Options {
-  threadCount: number
   selected: { id: string } | undefined
   selectedCount: number
   selectedIndex: number
@@ -13,7 +12,8 @@ interface Options {
   starOn: boolean
   markUnreadOn: boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
-  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
+  navigateNext: () => void
+  navigatePrevious: () => void
   clearSelection: () => void
   toggleSelection: () => void
   extendSelection: (index: number) => void
@@ -33,7 +33,6 @@ interface Options {
 
 export function useInboxCommands(options: Options): void {
   const {
-    threadCount,
     selected,
     selectedCount,
     selectedIndex,
@@ -42,7 +41,8 @@ export function useInboxCommands(options: Options): void {
     starOn,
     markUnreadOn,
     preserveSelectionOnRefreshRef,
-    setSelectedIndex,
+    navigateNext,
+    navigatePrevious,
     clearSelection,
     toggleSelection,
     extendSelection,
@@ -62,20 +62,16 @@ export function useInboxCommands(options: Options): void {
   useLayoutEffect(
     () =>
       registerCommands([
-        createCommand('navigate.next', () =>
-          setSelectedIndex((index) => Math.min(index + 1, Math.max(threadCount - 1, 0)))
-        ),
-        createCommand('navigate.previous', () => {
-          if (readerOpen && selectedIndex === 0) {
-            closeReader()
-            return
-          }
-          setSelectedIndex((index) => Math.max(index - 1, 0))
-        }),
-        createCommand('selection.toggle', toggleSelection),
-        createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
-        createCommand('selection.extendPrevious', () => extendSelection(selectedIndex - 1)),
-        ...(selectedCount > 0 ? [createCommand('selection.clear', clearSelection)] : []),
+        createCommand('navigate.next', navigateNext),
+        createCommand('navigate.previous', navigatePrevious),
+        ...(view !== 'drafts'
+          ? [
+              createCommand('selection.toggle', toggleSelection),
+              createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
+              createCommand('selection.extendPrevious', () => extendSelection(selectedIndex - 1)),
+              ...(selectedCount > 0 ? [createCommand('selection.clear', clearSelection)] : [])
+            ]
+          : []),
         ...(view === 'outbox' ? [createCommand('outbox.close', closeOutbox)] : []),
         ...(readerOpen
           ? [createCommand('conversation.close', closeReader)]
@@ -87,39 +83,43 @@ export function useInboxCommands(options: Options): void {
         createCommand('view.drafts', () => switchView('drafts')),
         createCommand('view.outbox', openOutbox),
         createCommand('composer.new', openComposer),
-        ...(readerOpen
+        ...(view !== 'drafts' && selected
           ? [
-              createCommand('composer.reply', () => openReply('reply')),
-              createCommand('composer.replyAll', () => openReply('replyAll')),
-              createCommand('composer.forward', () => openReply('forward'))
+              createCommand('composer.reply', () => openReply('reply'), {
+                context: readerOpen ? 'reader' : 'list'
+              }),
+              ...(readerOpen ? [createCommand('composer.replyAll', () => openReply('replyAll'))] : []),
+              createCommand('composer.forward', () => openReply('forward'), {
+                context: readerOpen ? 'reader' : 'list'
+              })
             ]
           : []),
-        createCommand(
-          'triage.archive',
-          () => selected && triage({ kind: 'archive', threadIds: [selected.id] })
-        ),
-        createCommand('triage.snooze', openSnooze, {
-          title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later'
-        }),
-        createCommand('triage.trash', () => selected && triage({ kind: 'trash', threadIds: [selected.id] })),
-        createCommand('triage.spam', () => selected && triage({ kind: 'spam', threadIds: [selected.id] })),
-        createCommand(
-          'triage.star',
-          () => selected && triage({ kind: 'star', threadIds: [selected.id], on: starOn }),
-          { title: starOn ? 'Star' : 'Unstar' }
-        ),
-        createCommand(
-          'triage.unread',
-          () =>
-            selected &&
-            triage({
-              kind: 'markUnread',
-              threadIds: [selected.id],
-              on: markUnreadOn
-            }),
-          { title: markUnreadOn ? 'Mark unread' : 'Mark read' }
-        ),
-        createCommand('triage.label', openLabel),
+        ...(view !== 'drafts' && selected
+          ? [
+              createCommand('triage.archive', () => triage({ kind: 'archive', threadIds: [selected.id] })),
+              createCommand('triage.snooze', openSnooze, {
+                title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later'
+              }),
+              createCommand('triage.trash', () => triage({ kind: 'trash', threadIds: [selected.id] })),
+              createCommand('triage.spam', () => triage({ kind: 'spam', threadIds: [selected.id] })),
+              createCommand(
+                'triage.star',
+                () => triage({ kind: 'star', threadIds: [selected.id], on: starOn }),
+                { title: starOn ? 'Star' : 'Unstar' }
+              ),
+              createCommand(
+                'triage.unread',
+                () =>
+                  triage({
+                    kind: 'markUnread',
+                    threadIds: [selected.id],
+                    on: markUnreadOn
+                  }),
+                { title: markUnreadOn ? 'Mark unread' : 'Mark read' }
+              ),
+              createCommand('triage.label', openLabel)
+            ]
+          : []),
         createCommand('triage.undo', () => {
           if (!window.attn) return
           preserveSelectionOnRefreshRef.current = false
@@ -142,6 +142,8 @@ export function useInboxCommands(options: Options): void {
       closeOutbox,
       extendSelection,
       markUnreadOn,
+      navigateNext,
+      navigatePrevious,
       openLabel,
       openComposer,
       openOutbox,
@@ -154,11 +156,9 @@ export function useInboxCommands(options: Options): void {
       selected,
       selectedCount,
       selectedIndex,
-      setSelectedIndex,
       showToast,
       starOn,
       switchView,
-      threadCount,
       toggleSelection,
       triage,
       view

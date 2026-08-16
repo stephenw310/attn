@@ -66,6 +66,7 @@ let syncController: SyncController | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
+let testDraftReopenDelayMs = 0
 let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
 let testActionProvider: ActionRecoveryProvider | null = null
@@ -345,6 +346,7 @@ async function initialize(): Promise<void> {
     peekRevertedActions: (accountId) => actionRevertNotices.peek(accountId),
     acknowledgeRevertedActions: (accountId, noticeId) => actionRevertNotices.acknowledge(accountId, noticeId),
     waitForConversation,
+    draftReopenDelay: () => testDraftReopenDelayMs,
     pickAttachmentPaths: testUserData
       ? async () => {
           const paths = testAttachmentPickerPaths ?? []
@@ -423,13 +425,29 @@ function registerTestIpc(): void {
       }
     })
   })
-  ipcMain.on(TEST_CHANNELS.deleteThread, (_event, threadId: unknown) => {
-    const account = currentAccountId()
-    if (db && account && typeof threadId === 'string') deleteThread(db, account, threadId)
+  ipcMain.on(TEST_CHANNELS.deleteThread, (_event, threadId: unknown, done?: (error?: string) => void) => {
+    // Inspector evaluation can interrupt a renderer-initiated synchronous
+    // SQLite read. Defer this test mutation onto the next main-loop turn.
+    setImmediate(() => {
+      try {
+        const account = currentAccountId()
+        if (!db || !account || typeof threadId !== 'string') {
+          done?.('invalid thread delete')
+          return
+        }
+        deleteThread(db, account, threadId)
+        done?.()
+      } catch (error) {
+        done?.(error instanceof Error ? error.message : String(error))
+      }
+    })
   })
   ipcMain.on(TEST_CHANNELS.delayConversation, (_event, threadId: unknown, delayMs: unknown) => {
     if (typeof threadId !== 'string' || typeof delayMs !== 'number' || delayMs < 0) return
     testConversationDelay = { threadId, delayMs }
+  })
+  ipcMain.on(TEST_CHANNELS.delayDraftReopen, (_event, delayMs: unknown) => {
+    testDraftReopenDelayMs = typeof delayMs === 'number' && delayMs >= 0 ? delayMs : 0
   })
   ipcMain.on(TEST_CHANNELS.delayDraftInlineImage, (_event, delayMs: unknown) => {
     testDraftInlineImageDelayMs = typeof delayMs === 'number' && delayMs >= 0 ? delayMs : 0
@@ -689,6 +707,7 @@ async function teardownOwnedResources(): Promise<void> {
   mailNotifier = null
   for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
   testDraftSaveFailures = 0
+  testDraftReopenDelayMs = 0
   testDraftInlineImageDelayMs = 0
   testActionProvider = null
   testSeededResume = null

@@ -197,20 +197,43 @@ export function takeRecoveredDraft(db: Db, accountId: string): Draft | null {
   return row ? toDraft(row) : null
 }
 
-export function isEmptyDraft(draft: DraftSaveInput): boolean {
-  const meaningfulHtml =
+function hasAuthoredBody(draft: DraftSaveInput): boolean {
+  return (
+    draft.bodyText.length > 0 ||
     /<(?:img|table|hr)\b/i.test(draft.bodyHtml) ||
     draft.bodyHtml.replace(/<[^>]*>|&nbsp;|\s/gi, '').length > 0
+  )
+}
+
+export function isEmptyDraft(draft: DraftSaveInput): boolean {
   return (
     draft.to.length === 0 &&
     draft.cc.length === 0 &&
     draft.bcc.length === 0 &&
     draft.subject.length === 0 &&
-    draft.bodyText.length === 0 &&
-    !meaningfulHtml &&
+    !hasAuthoredBody(draft) &&
     draft.attachments.length === 0 &&
     draft.quoteHtml.length === 0 &&
     draft.quoteText.length === 0
+  )
+}
+
+/**
+ * Gmail does not keep a reply or forward the user never contributed to, and
+ * neither should we — but such a draft is not blank: `planReply` fills the
+ * quote, a `Re:`/`Fwd:` subject, and a reply's recipients. So test the fields
+ * the plan never writes instead. It fills `to`/`cc` only for replies, never
+ * `bcc` or a body, and attaches only the source message's inline parts, so
+ * anything in the rest is the user's own work.
+ */
+export function isUntouchedThreadDraft(draft: DraftSaveInput): boolean {
+  if (draft.kind === 'new') return false
+  return (
+    !hasAuthoredBody(draft) &&
+    !draft.attachments.some((attachment) => !attachment.inline) &&
+    draft.bcc.length === 0 &&
+    (draft.kind === 'replyAll' || draft.cc.length === 0) &&
+    (draft.kind !== 'forward' || draft.to.length === 0)
   )
 }
 
@@ -338,7 +361,7 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
   if (!row) throw new Error('draft is unavailable')
   const draft = toDraft(row)
   const input: DraftSaveInput = { ...draft, id: draft.id }
-  if (!isEmptyDraft(input)) {
+  if (!isEmptyDraft(input) && !isUntouchedThreadDraft(input)) {
     db.prepare("UPDATE outbox SET state = 'drafted', updated_at = ? WHERE account_id = ? AND id = ?").run(
       now,
       accountId,

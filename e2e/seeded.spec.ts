@@ -104,10 +104,12 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
 
   // Removing the only sent contribution drops Priya from the projection while
   // preserving Maya's independent received-mail contributions.
-  await app.evaluate(
-    ({ ipcMain }, channel) => ipcMain.emit(channel, {}, 't-sent-history'),
+  const deleteError = await app.evaluate(
+    ({ ipcMain }, channel) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(channel, {}, 't-sent-history', resolve)),
     TEST_CHANNELS.deleteThread
   )
+  if (deleteError) throw new Error(deleteError)
   expect(await page.evaluate(() => window.attn.contacts.search('pri'))).toEqual([])
   expect(await page.evaluate(() => window.attn.contacts.search('maya'))).toEqual([
     expect.objectContaining({ name: 'Maya Lin', email: 'maya@example.com' })

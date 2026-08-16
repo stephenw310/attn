@@ -78,7 +78,7 @@
           "subject": "Your receipt",
           "snippet": "Thanks for your order.",
           "bodyText": "Your order total was $24.00.",
-          "bodyHtml": "<div id=plain-html-copy>Thanks for your order. Your order total was $24.00.</div><div><br></div><div>Northstar Books</div><div><br></div><span class=gmail_signature_prefix>-- </span><br><div class=gmail_signature>Customer care<br>Northstar Books<table><tr><td>Signature details</td></tr></table></div>",
+          "bodyHtml": "<div id=plain-html-copy>Thanks for your order. Your order total was $24.00.</div><div><br></div><div>Northstar Books</div><div><br></div><span class=gmail_signature_prefix>-- </span><br><div class=gmail_signature style=\"color:#202124\"><span id=native-signature-copy>Customer care</span><br>Northstar Books<br><a id=native-signature-link href=\"https://northstar.example\" style=\"color:#1558d6\">northstar.example</a><table><tr><td>Signature details</td></tr></table></div>",
           "attachments": [
             {
               "attachmentId": "att-receipt-pdf",

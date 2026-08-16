@@ -28,6 +28,7 @@ const ALLOWED_TAGS = [
 ]
 
 export const COMPOSER_STYLE_PROPERTIES = new Set([
+  'background',
   'background-color',
   'border',
   'border-bottom',
@@ -63,6 +64,9 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
   'width'
 ])
 
+const UNSAFE_STYLE_RESOURCE =
+  /(?:url\s*\(|(?:-webkit-)?image-set\s*\(|(?:image|cross-fade|element|-moz-element|paint|src)\s*\(|expression\s*\(|javascript:|@import|behavior\s*:|(?:https?|data|cid|blob|file):|\/\/|\\|\/\*)/i
+
 export function sanitizeComposerStyle(style: string): string {
   return style
     .split(';')
@@ -72,10 +76,7 @@ export function sanitizeComposerStyle(style: string): string {
       if (separator <= 0) return false
       const property = declaration.slice(0, separator).trim().toLowerCase()
       const value = declaration.slice(separator + 1)
-      return (
-        COMPOSER_STYLE_PROPERTIES.has(property) &&
-        !/(?:url\s*\(|expression\s*\(|javascript:|@import|behavior\s*:)/i.test(value)
-      )
+      return COMPOSER_STYLE_PROPERTIES.has(property) && !UNSAFE_STYLE_RESOURCE.test(value)
     })
     .join('; ')
 }

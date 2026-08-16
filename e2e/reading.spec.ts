@@ -132,10 +132,13 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   await expect(attachment).toContainText('receipt.pdf')
   await expect(attachment).toContainText('24 KB')
   const content = page.getByTestId('message-content')
-  await expect(content).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(content).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   const frame = page.getByTestId('html-body-frame')
   const frameBody = page.frameLocator('[data-testid="html-body-frame"]')
-  await expect(frameBody.locator('body')).toHaveCSS('padding-left', '12px')
+  await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'native')
+  await expect(frameBody.locator('body')).toHaveCSS('padding-left', '0px')
+  await expect(frameBody.locator('body')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(frameBody.locator('body')).toHaveCSS('color', 'rgb(233, 234, 238)')
   await expect(frameBody.locator('#plain-html-copy')).toContainText('Your order total was $24.00.')
   expect(
     await frame.evaluate((element) => {
@@ -152,8 +155,11 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   const frameLeft = await frame.evaluate((element) => element.getBoundingClientRect().left)
   const toggleLeft = await toggle.evaluate((element) => element.getBoundingClientRect().left)
   const attachmentLeft = await attachment.evaluate((element) => element.getBoundingClientRect().left)
-  expect(Math.abs(toggleLeft - frameLeft - 12)).toBeLessThan(1)
-  expect(Math.abs(attachmentLeft - frameLeft - 12)).toBeLessThan(1)
+  expect(Math.abs(toggleLeft - frameLeft)).toBeLessThan(1)
+  expect(Math.abs(attachmentLeft - frameLeft)).toBeLessThan(1)
+  await toggle.click()
+  await expect(frameBody.locator('#native-signature-copy')).toHaveCSS('color', 'rgb(233, 234, 238)')
+  await expect(frameBody.locator('#native-signature-link')).toHaveCSS('color', 'rgb(96, 165, 250)')
   expect(
     await attachment.evaluate((element) => element.closest('[data-testid="message-content"]') !== null)
   ).toBe(true)
@@ -177,8 +183,8 @@ test('keeps HTML fallbacks readable and never collapses an all-quote message', a
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
   const fallback = page.getByTestId('plain-text-body')
   await expect(fallback).toHaveText('I found three routes for the conference.')
-  await expect(fallback).toHaveCSS('color', 'rgb(32, 33, 36)')
-  await expect(fallback).toHaveCSS('padding-left', '12px')
+  await expect(fallback).toHaveCSS('color', 'rgb(233, 234, 238)')
+  await expect(fallback).toHaveCSS('padding-left', '0px')
 })
 
 test('collapses sanitized HTML quote and signature blocks behind an expander', async ({ page }) => {

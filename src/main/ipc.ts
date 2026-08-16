@@ -123,6 +123,7 @@ export interface IpcContext {
   peekRevertedActions: (accountId: string) => ActionRevertNotice | null
   acknowledgeRevertedActions: (accountId: string, noticeId: number) => boolean
   waitForConversation: (threadId: string) => Promise<void>
+  draftReopenDelay: () => number
   pickAttachmentPaths?: () => Promise<string[]>
   draftInlineImageDelay: () => number
   consumeTestDraftSaveFailure: () => boolean
@@ -316,8 +317,10 @@ export function registerIpc(context: IpcContext): () => void {
     const account = context.currentAccountId()
     return account ? listDrafts(context.db, account) : []
   })
-  handle(IPC_CHANNELS.draftReopen, (_event, id) => {
+  handle(IPC_CHANNELS.draftReopen, async (_event, id) => {
     if (typeof id !== 'string' || id.length === 0) return null
+    const delay = context.testUserData ? context.draftReopenDelay() : 0
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     return reopenDraft(context.db, requireAccount(context), id)
   })
   handle(IPC_CHANNELS.draftCreateReply, async (_event, threadId, kind) => {
