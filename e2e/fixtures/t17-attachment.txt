@@ -1,0 +1,1 @@
+Attachment bytes survive the outbox.

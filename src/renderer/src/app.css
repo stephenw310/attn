@@ -183,6 +183,12 @@
   animation: status-dot-pulse 1.5s ease-in-out infinite;
 }
 
+[data-status="indexing"] .app-status-dot {
+  background: var(--color-status-live);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-live) 8%, transparent);
+  animation: status-dot-pulse 2.4s ease-in-out infinite;
+}
+
 [data-status="offline"] .app-status-dot {
   background: var(--color-status-offline);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-offline) 8%, transparent);
@@ -229,6 +235,20 @@
   }
 }
 
+@keyframes attachment-progress {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(310%);
+  }
+}
+
+.app-attachment-progress {
+  animation: attachment-progress 1s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-confirmation-toast {
     animation: none;
@@ -241,6 +261,11 @@
   [data-status="syncing"] .app-status-dot,
   [data-status="checking"] .app-status-dot,
   .app-sync-phase-segment[data-phase-state="active"]::after {
+    animation: none;
+  }
+
+  .app-attachment-progress {
+    width: 100%;
     animation: none;
   }
 

@@ -17,6 +17,7 @@ export interface NewMail {
 export interface CyclePlan {
   refetchThreadIds: string[]
   newMail: NewMail[]
+  promoteInboxThreadIds: string[]
 }
 
 export interface FetchedHistoryPlan extends CyclePlan {
@@ -28,6 +29,7 @@ export const historyEvents = new EventEmitter()
 export function planCycle(records: HistoryRecord[]): CyclePlan {
   const refetchThreadIds = new Set<string>()
   const newMail = new Map<string, NewMail>()
+  const promoteInboxThreadIds = new Set<string>()
 
   for (const record of records) {
     for (const message of record.messages ?? []) refetchThreadIds.add(message.threadId)
@@ -38,13 +40,21 @@ export function planCycle(records: HistoryRecord[]): CyclePlan {
       if (labels.has('INBOX') && labels.has('UNREAD') && !labels.has('SENT')) {
         newMail.set(message.id, { threadId: message.threadId, messageId: message.id })
       }
+      if (labels.has('INBOX')) promoteInboxThreadIds.add(message.threadId)
+    }
+    for (const event of record.labelsAdded ?? []) {
+      if (event.labelIds?.includes('INBOX')) promoteInboxThreadIds.add(event.message.threadId)
     }
     for (const events of [record.messagesDeleted, record.labelsAdded, record.labelsRemoved]) {
       for (const event of events ?? []) refetchThreadIds.add(event.message.threadId)
     }
   }
 
-  return { refetchThreadIds: [...refetchThreadIds], newMail: [...newMail.values()] }
+  return {
+    refetchThreadIds: [...refetchThreadIds],
+    newMail: [...newMail.values()],
+    promoteInboxThreadIds: [...promoteInboxThreadIds]
+  }
 }
 
 /** Page history to exhaustion, then reduce all pages as one poll cycle. */
@@ -73,24 +83,64 @@ export function missingInboxThreadIds(
   return [...new Set(localInboxThreadIds)].filter((threadId) => !server.has(threadId))
 }
 
-/** Server INBOX membership wins, with still-pending local intent replayed on top. */
+/** Server label membership wins, with still-pending local intent replayed on top. */
+export function reconcileLabelMembership(
+  db: Db,
+  accountId: string,
+  labelId: string,
+  serverThreadIds: Iterable<string>
+): string[] {
+  const rows = db
+    .prepare('SELECT thread_id FROM thread_labels WHERE account_id = ? AND label_id = ?')
+    .all(accountId, labelId) as { thread_id: string }[]
+  const missing = missingInboxThreadIds(
+    rows.map((row) => row.thread_id),
+    serverThreadIds
+  )
+  for (const threadId of missing) {
+    applyThreadDelta(db, accountId, { threadId, add: [], remove: [labelId] })
+    replayPendingThreadDeltas(db, accountId, threadId)
+  }
+  return missing
+}
+
 export function reconcileInboxMembership(
   db: Db,
   accountId: string,
   serverInboxThreadIds: Iterable<string>
 ): string[] {
-  const rows = db
-    .prepare("SELECT thread_id FROM thread_labels WHERE account_id = ? AND label_id = 'INBOX'")
-    .all(accountId) as { thread_id: string }[]
-  const missing = missingInboxThreadIds(
-    rows.map((row) => row.thread_id),
-    serverInboxThreadIds
-  )
-  for (const threadId of missing) {
-    applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
-    replayPendingThreadDeltas(db, accountId, threadId)
+  return reconcileLabelMembership(db, accountId, 'INBOX', serverInboxThreadIds)
+}
+
+/**
+ * Spam and Trash age out server-side (~30-day purge), so a locally-labeled
+ * thread missing from their listing was either relabeled — a refetch persists
+ * the authoritative label set — or permanently deleted, which only a direct
+ * 404 may prove. Never conclude deletion from listing absence alone: an
+ * archived thread legitimately appears in no system-label listing.
+ */
+export async function reconcilePurgeableMembership(
+  db: Db,
+  accountId: string,
+  provider: MailProvider,
+  labelId: 'SPAM' | 'TRASH',
+  serverThreadIds: Iterable<string>,
+  effects: HistoryCycleEffects = {}
+): Promise<void> {
+  for (const threadId of reconcileLabelMembership(db, accountId, labelId, serverThreadIds)) {
+    try {
+      const thread = await provider.getThread(threadId, { format: 'metadata' })
+      if (effects.persist) await effects.persist(thread)
+      else persistThread(db, accountId, thread, { metadataOnly: true })
+    } catch (error) {
+      if (error instanceof GmailApiError && error.status === 404) {
+        if (effects.remove) effects.remove(threadId)
+        else deleteThread(db, accountId, threadId)
+        continue
+      }
+      throw error
+    }
   }
-  return missing
 }
 
 export interface HistoryCycleEffects {
@@ -111,12 +161,15 @@ export async function runHistoryCycle(
   if (!state?.last_history_id) throw new Error(`missing history checkpoint for ${accountId}`)
 
   const plan = await fetchHistoryPlan(provider, state.last_history_id)
+  const promoteInbox = new Set(plan.promoteInboxThreadIds)
   for (const threadId of plan.refetchThreadIds) {
     try {
       const thread = await provider.getThread(threadId, { format: 'full' })
       if (effects.persist) await effects.persist(thread)
       else {
-        persistThread(db, accountId, thread)
+        persistThread(db, accountId, thread, {
+          inboxVisibility: promoteInbox.has(threadId) ? 'show' : 'preserve'
+        })
         await hydrateMissingThreadBodies(db, provider, accountId, thread)
       }
     } catch (error) {
@@ -144,6 +197,7 @@ export interface HistoryPollerOptions {
   provider: MailProvider
   isForeground: () => boolean
   recoverExpiredHistory: () => Promise<void>
+  onCycleStart?: () => void
   onCycleComplete: (changed: boolean) => void
   onError: (error: unknown) => void
   wakeThread?: (threadId: string) => void
@@ -200,6 +254,7 @@ export class HistoryPoller {
     this.timer = null
     this.executing = true
     this.lastAttemptAt = this.time.now()
+    this.options.onCycleStart?.()
     try {
       let plan: FetchedHistoryPlan | null = null
       if (this.recoveryPending) {

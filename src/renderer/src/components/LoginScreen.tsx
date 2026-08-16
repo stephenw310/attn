@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import type { AuthStatus } from '../../../shared/auth'
+import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
 
 interface LoginScreenProps {
   status: AuthStatus | null
@@ -21,10 +21,10 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
     setError(null)
     window.attn.auth
       .signIn()
-      .then(onStatus)
+      .then(({ status: nextStatus }) => onStatus(nextStatus))
       .catch((reason: unknown) => {
-        const message = reason instanceof Error ? reason.message : 'Could not sign in'
-        if (!message.includes('sign-in canceled')) setError(message)
+        if (isSignInCanceled(reason)) return
+        setError(reason instanceof Error ? reason.message : 'Could not sign in')
       })
       .finally(() => setBusy(false))
   }, [configured, onStatus])

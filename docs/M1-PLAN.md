@@ -637,8 +637,8 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 | Deviation | Where | Revisit |
 |---|---|---|
 | Sync engine remains in the main process instead of the target utility-process hardening (§6) | all | M2/M3 — move when polling + executor are proven; interfaces are already Electron-free (`db/`, `sync/` are plain Node modules) |
-| Permanently-failed queue rows count toward the pending badge forever; `last_error` has no UI surface and no retry/clear affordance | T3 | **Resolved by product call (2026-08-13):** failed triage actions self-heal to server truth with an explanatory toast — no panel, no retry button. Built in M2-PLAN T18 |
-| Hard 401s mark queue rows `failed` permanently — actions queued across a revoked-token window never retry after re-sign-in | T3 | M2-PLAN T18 — auth failures never revert; they re-pend on the next successful sign-in |
+| Permanently-failed queue rows count toward the pending badge forever; `last_error` has no UI surface and no retry/clear affordance | T3 | **Implemented in [M2 T18](M2-PLAN.md#t18--self-healing-failed-actions-deciding-an-m1-deferred-call):** failed triage actions self-heal to server truth with an explanatory toast — no panel, no retry button |
+| Hard 401s mark queue rows `failed` permanently — actions queued across a revoked-token window never retry after re-sign-in | T3 | **Implemented in [M2 T18](M2-PLAN.md#t18--self-healing-failed-actions-deciding-an-m1-deferred-call):** auth failures never revert; they re-pend on the next successful sign-in |
 | `matchKey` drops all Ctrl/Alt/Meta chords, so AltGr-layout keys can't trigger verbs (AZERTY `#` = AltGr+3 = Ctrl+Alt on Windows) | T3 | M3 — F5 palette / configurable keybindings |
 | Executor broadcasts `mail:changed` once per drained row (no batching) | T3 | T10 perf data, if large-queue drains show up |
 | HTML mail renders on a white card in dark theme | T11 | F14 at M3 (sanitize/invert) |

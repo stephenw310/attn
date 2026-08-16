@@ -3,12 +3,14 @@ import { emptyDraftInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import type { GmailPart } from '../gmail/parse'
 import type { MailActionProvider, ProviderDraft } from '../sync/provider'
-import type { StoredDraftAttachment } from './draftAttachments'
+import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import {
   draftContentFingerprint,
+  mergeRemoteDraftAttachments,
   parseRemoteDraft,
   planDraftConflict,
   reconcileRemoteDraft,
+  refreshRemoteAttachmentLocators,
   remoteDraftKind,
   syncRemoteDrafts
 } from './draftSync'
@@ -139,6 +141,95 @@ describe('remote draft parsing', () => {
 })
 
 describe('draft synchronization identity', () => {
+  it('refreshes locators by MIME identity when inline parts precede regular parts remotely', async () => {
+    const regular: StoredDraftAttachment = {
+      id: 'regular',
+      filename: 'report.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 7,
+      spoolPath: '',
+      remoteMessageId: 'old-message',
+      remoteAttachmentId: 'old-regular'
+    }
+    const inline: StoredDraftAttachment = {
+      id: 'inline',
+      filename: 'pasted.png',
+      mimeType: 'image/png',
+      sizeBytes: 6,
+      spoolPath: '/owned/outbox/draft/pasted.png',
+      contentId: 'pasted-image',
+      inline: true,
+      remoteMessageId: 'old-message',
+      remoteAttachmentId: 'old-inline'
+    }
+    const remoteInline = {
+      ...inline,
+      id: 'remote-inline',
+      spoolPath: '',
+      remoteMessageId: 'new-message',
+      remoteAttachmentId: 'new-inline'
+    }
+    const remoteRegular = {
+      ...regular,
+      id: 'remote-regular',
+      remoteMessageId: 'new-message',
+      remoteAttachmentId: 'new-regular'
+    }
+
+    const refreshed = parseStoredDraftAttachments(
+      refreshRemoteAttachmentLocators(JSON.stringify([regular, inline]), [remoteInline, remoteRegular])
+    )
+    expect(refreshed).toEqual([
+      expect.objectContaining({
+        id: 'regular',
+        remoteMessageId: 'new-message',
+        remoteAttachmentId: 'new-regular'
+      }),
+      expect.objectContaining({
+        id: 'inline',
+        remoteMessageId: 'new-message',
+        remoteAttachmentId: 'new-inline'
+      })
+    ])
+
+    const getAttachmentData = vi.fn(async (_messageId: string, attachmentId: string) =>
+      Buffer.from(attachmentId === 'new-regular' ? 'regular' : 'inline').toString('base64url')
+    )
+    const loaded = await loadDraftMimeAttachments(
+      'draft',
+      refreshed.map((attachment) => ({ ...attachment, spoolPath: '' })),
+      { getAttachmentData } as unknown as MailActionProvider,
+      null
+    )
+    expect(
+      loaded.map((attachment) => [attachment.filename, Buffer.from(attachment.content).toString()])
+    ).toEqual([
+      ['report.pdf', 'regular'],
+      ['pasted.png', 'inline']
+    ])
+  })
+
+  it('preserves local-only file attachments when a newer remote body wins', () => {
+    const local: StoredDraftAttachment = {
+      id: 'local-file',
+      filename: 'local.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 4,
+      spoolPath: '/owned/outbox/draft/local.pdf'
+    }
+    const remote: StoredDraftAttachment = {
+      id: 'remote-file',
+      filename: 'remote.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 5,
+      spoolPath: '',
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    expect(mergeRemoteDraftAttachments([remote], JSON.stringify([local]))).toEqual([remote, local])
+  })
+
   it('fingerprints canonical HTML instead of non-round-tripping editor plain text', () => {
     const base = {
       ...emptyDraftInput(),
@@ -230,10 +321,10 @@ describe('draft synchronization identity', () => {
         }
         if (sql.includes('UPDATE outbox SET kind = ?')) return { run: repairBinding }
         if (sql.includes('INSERT INTO outbox')) return { run: writeRemote }
-        // The send state machine never owns this legacy row, so its claim is a
-        // no-op and reconciliation proceeds to the thread-binding repair.
+        // The send state machine never owns this legacy row, so the claim finds
+        // no owner and reconciliation proceeds to the thread-binding repair.
         if (sql.includes("state NOT IN ('composing', 'drafted')")) {
-          return { run: vi.fn(() => ({ changes: 0 })) }
+          return { get: vi.fn(() => undefined) }
         }
         if (sql.includes('SELECT id, state, gmail_draft_id, local_revision')) {
           return {
@@ -290,23 +381,49 @@ describe('draft synchronization identity', () => {
 
   it('binds an orphaned remote draft to its sending row by stable Message-ID', async () => {
     const run = vi.fn(() => ({ changes: 1 }))
-    const db = { prepare: vi.fn(() => ({ run })) } as unknown as Db
+    const claimQuery = vi.fn(() => ({ id: 'outbox-1' }))
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        run,
+        get: sql.includes("state NOT IN ('composing', 'drafted')") ? claimQuery : vi.fn(() => undefined)
+      }))
+    } as unknown as Db
     const remote = providerDraft('Orphan', { mimeType: 'text/plain' })
     if (!remote.message.payload) throw new Error('missing test payload')
     remote.message.payload.headers?.push({ name: 'Message-ID', value: '<stable@attn.local>' })
 
     await expect(reconcileRemoteDraft(db, 'account', remote)).resolves.toBe('local')
-    expect(run).toHaveBeenCalledWith(
-      'draft-1',
-      'message-1',
+    // The Message-ID clause is scoped to rows still mid-send: a `sent` row keeps
+    // its Message-ID for a week and must never absorb an unrelated orphan draft.
+    expect(claimQuery).toHaveBeenCalledWith(
       'account',
       'draft-1',
       '<stable@attn.local>',
       '<stable@attn.local>'
     )
+    expect(db.prepare).toHaveBeenCalledWith(expect.stringContaining("state IN ('queued', 'sending')"))
+    expect(run).toHaveBeenCalledWith('draft-1', 'message-1', 'account', 'outbox-1')
   })
 
-  it('refreshes remote attachment locators when Gmail replaces the draft message', async () => {
+  it('leaves an orphaned Gmail draft alone when only a sent row shares its Message-ID', async () => {
+    const run = vi.fn(() => ({ changes: 1 }))
+    // No mid-send row matches, so the claim finds nothing and normal import runs.
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        run,
+        get: vi.fn(() => undefined),
+        all: vi.fn(() => (sql.includes('gmail_message_id') ? [] : []))
+      }))
+    } as unknown as Db
+    const remote = providerDraft('Orphan', { mimeType: 'text/plain' })
+    if (!remote.message.payload) throw new Error('missing test payload')
+    remote.message.payload.headers?.push({ name: 'Message-ID', value: '<stable@attn.local>' })
+
+    await expect(reconcileRemoteDraft(db, 'account', remote)).resolves.toBe('remote')
+    expect(run).not.toHaveBeenCalledWith('draft-1', 'message-1', 'account', expect.anything())
+  })
+
+  it('refreshes remote locators beside a local-only attachment when Gmail replaces the message', async () => {
     const remote: ProviderDraft = {
       id: 'draft-with-attachment',
       message: {
@@ -344,6 +461,13 @@ describe('draft synchronization identity', () => {
       remoteMessageId: 'message-old',
       remoteAttachmentId: 'attachment-old'
     }
+    const localOnly: StoredDraftAttachment = {
+      id: 'local-file',
+      filename: 'local.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 5,
+      spoolPath: '/owned/outbox/local-draft/local.txt'
+    }
     const update = vi.fn((..._args: unknown[]) => ({ changes: 1 }))
     const db = {
       prepare: vi.fn((sql: string) => {
@@ -361,12 +485,12 @@ describe('draft synchronization identity', () => {
               mirror_revision: 1,
               updated_at: 100,
               remote_fingerprint: parsed.fingerprint,
-              attachments_json: JSON.stringify([previous])
+              attachments_json: JSON.stringify([previous, localOnly])
             }))
           }
         }
         if (sql.includes("state NOT IN ('composing', 'drafted')")) {
-          return { run: vi.fn(() => ({ changes: 0 })) }
+          return { get: vi.fn(() => undefined) }
         }
         if (sql.includes('UPDATE outbox SET gmail_draft_id')) return { run: update }
         throw new Error(`unexpected SQL: ${sql}`)
@@ -381,14 +505,15 @@ describe('draft synchronization identity', () => {
         id: 'stable-local-id',
         remoteMessageId: 'message-new',
         remoteAttachmentId: 'attachment-new'
-      })
+      }),
+      localOnly
     ])
     const getAttachmentData = vi.fn(async (_messageId: string, _attachmentId: string) =>
       Buffer.from('data').toString('base64url')
     )
     await loadDraftMimeAttachments(
       'local-draft',
-      refreshed,
+      [refreshed[0]],
       { getAttachmentData } as unknown as MailActionProvider,
       null
     )

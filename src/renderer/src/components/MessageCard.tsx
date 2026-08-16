@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { MailAddress, MessageAttachment, MessageRecipients } from '../../../shared/mail'
+import { formatBytes } from '../formatBytes'
 import { MessageBody } from '../MessageBody'
 import type { DisplayMessage } from '../mailDisplay'
 import { mailSurfaceForHtml } from '../mailSurface'
@@ -72,12 +73,6 @@ function RecipientLine({
       )}
     </div>
   )
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
 }
 
 interface MessageCardProps {

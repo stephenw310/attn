@@ -1,10 +1,13 @@
 // Minimal authorized Gmail REST client with token refresh and backoff.
 // Plain Node module; token persistence is injected by the caller.
 
+import { randomUUID } from 'node:crypto'
+import { Readable } from 'node:stream'
 import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
 
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
 const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
+const UPLOAD_BASE = 'https://gmail.googleapis.com/upload/gmail/v1/users/me'
 
 export class GmailApiError extends Error {
   constructor(
@@ -16,11 +19,30 @@ export class GmailApiError extends Error {
   }
 }
 
+export class GmailAuthError extends Error {}
+
 interface RequestOptions {
   params?: Record<string, string | string[]>
   body?: unknown
   retryTransient?: boolean
   signal?: AbortSignal
+}
+
+interface MultipartMedia {
+  mimeType: string
+  sizeBytes: number
+  endsWithCrlf?: boolean
+  open: () => AsyncIterable<Uint8Array>
+}
+
+async function* multipartUploadBody(
+  prefix: Uint8Array,
+  suffix: Uint8Array,
+  media: MultipartMedia
+): AsyncIterable<Uint8Array> {
+  yield prefix
+  yield* media.open()
+  yield suffix
 }
 
 export class GmailClient {
@@ -37,7 +59,7 @@ export class GmailClient {
 
   private async refresh(signal?: AbortSignal): Promise<string> {
     if (!this.tokens.refresh_token) {
-      throw new Error('no refresh token stored — sign in again')
+      throw new GmailAuthError('no refresh token stored — sign in again')
     }
     const res = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
@@ -51,7 +73,9 @@ export class GmailClient {
       signal
     })
     if (!res.ok) {
-      throw new Error(`token refresh failed (${res.status}): ${(await res.text()).slice(0, 300)}`)
+      const message = `token refresh failed (${res.status}): ${(await res.text()).slice(0, 300)}`
+      if (res.status === 400 || res.status === 401) throw new GmailAuthError(message)
+      throw new GmailApiError(res.status, message, res.status === 429 || res.status >= 500)
     }
     const json = (await res.json()) as { access_token: string; expires_in: number }
     // Google's refresh response carries NO refresh_token — merge over the
@@ -95,6 +119,59 @@ export class GmailClient {
       retryTransient: options?.retryTransient,
       signal: options?.signal
     })
+  }
+
+  async multipartUpload<T>(
+    method: 'POST' | 'PUT',
+    path: string,
+    metadata: unknown,
+    media: MultipartMedia,
+    options?: { signal?: AbortSignal }
+  ): Promise<T> {
+    const url = new URL(UPLOAD_BASE + path)
+    url.searchParams.set('uploadType', 'multipart')
+    const boundary = `attn-upload-${randomUUID()}`
+    if (!Number.isSafeInteger(media.sizeBytes) || media.sizeBytes < 0) {
+      throw new Error('multipart media size is invalid')
+    }
+    const prefix = Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}` +
+        `\r\n--${boundary}\r\nContent-Type: ${media.mimeType}\r\n\r\n`
+    )
+    const suffix = Buffer.from(`${media.endsWithCrlf ? '' : '\r\n'}--${boundary}--\r\n`)
+    const contentLength = prefix.byteLength + media.sizeBytes + suffix.byteLength
+    let attempt = 0
+    for (;;) {
+      const token = await this.ensureAccessToken(options?.signal)
+      const init = {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+          'Content-Length': String(contentLength)
+        },
+        body: Readable.from(multipartUploadBody(prefix, suffix, media)) as unknown as BodyInit,
+        signal: options?.signal,
+        duplex: 'half' as const
+      } satisfies RequestInit & { duplex: 'half' }
+      const res = await fetch(url, init)
+      if (res.ok) {
+        const text = await res.text()
+        return (text ? JSON.parse(text) : undefined) as T
+      }
+      const text = await res.text()
+      if (res.status === 401 && attempt === 0) {
+        attempt++
+        await this.refresh(options?.signal)
+        continue
+      }
+      const quotaHit = res.status === 403 && /quota|rate ?limit/i.test(text)
+      throw new GmailApiError(
+        res.status,
+        `gmail ${path} upload failed (${res.status}): ${text.slice(0, 300)}`,
+        res.status === 429 || res.status >= 500 || quotaHit
+      )
+    }
   }
 
   async delete(path: string, options?: { retryTransient?: boolean; signal?: AbortSignal }): Promise<void> {

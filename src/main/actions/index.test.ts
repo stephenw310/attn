@@ -1,11 +1,49 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
-import { clearUndo, dropOutboxSendUndo, recordOutboxSendUndo, undoLast } from '.'
+import {
+  actionQueueStatus,
+  clearUndo,
+  dropOutboxSendUndo,
+  pendingActionCount,
+  recordOutboxSendUndo,
+  undoLast
+} from '.'
+import { storeActionError } from './execute'
 
 const ACCOUNT = 'outbox-undo@example.com'
 
 afterEach(() => {
   clearUndo(ACCOUNT)
+})
+
+function queueDb(lastErrors: Array<string | null>): Db {
+  return {
+    prepare: () => ({
+      // Mirrors the query's `last_error IS NOT NULL` filter: only failed rows
+      // are ever materialized.
+      all: () => lastErrors.filter((last_error) => last_error !== null).map((last_error) => ({ last_error })),
+      get: () => ({ count: lastErrors.length })
+    })
+  } as unknown as Db
+}
+
+describe('action queue status', () => {
+  it('keeps legacy failed rows visible in the pending count', () => {
+    const db = queueDb([null])
+    expect(pendingActionCount(db, 'a@example.com')).toBe(1)
+  })
+
+  it('surfaces typed auth pauses separately from ordinary pending work', () => {
+    const db = queueDb([null, storeActionError(new Error('revoked'), 'auth')])
+    // `paused` counts only the auth-held rows, so the header can name them
+    // without implying the rest of the queue is stuck too.
+    expect(actionQueueStatus(db, 'a@example.com')).toEqual({ pending: 2, paused: 1, authPaused: true })
+  })
+
+  it('does not count a non-auth failure as paused', () => {
+    const db = queueDb([storeActionError(new Error('bad request'), 'permanent')])
+    expect(actionQueueStatus(db, 'a@example.com')).toEqual({ pending: 1, paused: 0, authPaused: false })
+  })
 })
 
 describe('outbox undo stack', () => {

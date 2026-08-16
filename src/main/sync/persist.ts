@@ -11,6 +11,7 @@ import {
   parseAddress,
   parseAddressList
 } from '../gmail/parse'
+import { replaySnoozeReminderDelta } from '../store/reminders'
 import { replayPendingThreadDeltas } from '../store/replay'
 
 export interface LabelRow {
@@ -39,10 +40,18 @@ export function upsertLabels(db: Db, accountId: string, labels: LabelRow[]): voi
 
 export interface PersistThreadOptions {
   metadataOnly?: boolean
+  /**
+   * Lifetime-only rows retain Gmail's labels without entering M2's bounded
+   * Inbox surface. Ordinary refetches preserve that choice; a backfill or a
+   * new Inbox event may explicitly promote the thread.
+   */
+  inboxVisibility?: 'hide' | 'preserve' | 'show'
 }
 
 export function nonDraftMessages(messages: readonly GmailMessage[]): GmailMessage[] {
-  return messages.filter((message) => !message.labelIds?.includes('DRAFT'))
+  return messages.filter(
+    (message) => !message.labelIds?.includes('DRAFT') && !message.labelIds?.includes('CHAT')
+  )
 }
 
 /** Persist an authoritative Gmail thread snapshot through the production write path. */
@@ -51,12 +60,12 @@ export function persistThread(
   accountId: string,
   thread: GmailThread,
   options: PersistThreadOptions = {}
-): void {
+): boolean {
   // Draft messages are represented by outbox rows. Persisting them here would
   // render unsent text as an ordinary conversation message once a threaded
   // Gmail draft appears in a thread snapshot.
   const messages = nonDraftMessages(thread.messages ?? [])
-  if (messages.length === 0) return
+  if (messages.length === 0) return false
 
   const upsertMsg = db.prepare(
     `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
@@ -79,13 +88,15 @@ export function persistThread(
   )
   const upsertThread = db.prepare(
     `INSERT INTO threads (account_id, id, subject, snippet, last_msg_at,
-                          from_display, is_unread, is_starred, has_attachment)
+                          from_display, is_unread, is_starred, has_attachment, is_inbox_visible)
      VALUES (@account_id, @id, @subject, @snippet, @last_msg_at,
-             @from_display, @is_unread, @is_starred, @has_attachment)
+             @from_display, @is_unread, @is_starred, @has_attachment, @insert_inbox_visible)
      ON CONFLICT(account_id, id) DO UPDATE SET
        subject = excluded.subject, snippet = excluded.snippet,
        last_msg_at = excluded.last_msg_at, from_display = excluded.from_display,
        is_unread = excluded.is_unread, is_starred = excluded.is_starred,
+       is_inbox_visible = CASE WHEN @promote_inbox_visible = 1
+                               THEN 1 ELSE threads.is_inbox_visible END,
        has_attachment = CASE WHEN @metadata_only = 1
                              THEN threads.has_attachment ELSE excluded.has_attachment END`
   )
@@ -96,6 +107,12 @@ export function persistThread(
   const insertContactMessage = db.prepare(
     `INSERT OR IGNORE INTO contact_messages (account_id, message_id, email, role, name)
      VALUES (?, ?, ?, ?, ?)`
+  )
+  const existingMessageContacts = db.prepare(
+    'SELECT email FROM contact_messages WHERE account_id = ? AND message_id = ?'
+  )
+  const clearMessageContacts = db.prepare(
+    'DELETE FROM contact_messages WHERE account_id = ? AND message_id = ?'
   )
   const incomingMessageIds = messages.map((message) => message.id)
 
@@ -142,14 +159,26 @@ export function persistThread(
         metadata_only: options.metadataOnly ? 1 : 0
       })
 
-      if (msg.labelIds?.includes('SENT')) {
-        for (const recipient of [...recipients.to, ...recipients.cc, ...recipients.bcc]) {
-          const email = insertContactContribution(insertContactMessage, accountId, msg.id, recipient, 'to')
+      // Contact contributions are an authoritative projection of the current
+      // message snapshot. Clear first so a label transition into Spam/Trash
+      // removes a previously valid sender instead of leaving stale autocomplete.
+      for (const row of existingMessageContacts.all(accountId, msg.id) as { email: string }[]) {
+        affectedContactEmails.add(row.email)
+      }
+      clearMessageContacts.run(accountId, msg.id)
+      const contactEligible = !msg.labelIds?.some(
+        (label) => label === 'SPAM' || label === 'TRASH' || label === 'CHAT'
+      )
+      if (contactEligible) {
+        if (msg.labelIds?.includes('SENT')) {
+          for (const recipient of [...recipients.to, ...recipients.cc, ...recipients.bcc]) {
+            const email = insertContactContribution(insertContactMessage, accountId, msg.id, recipient, 'to')
+            if (email) affectedContactEmails.add(email)
+          }
+        } else {
+          const email = insertContactContribution(insertContactMessage, accountId, msg.id, from, 'from')
           if (email) affectedContactEmails.add(email)
         }
-      } else {
-        const email = insertContactContribution(insertContactMessage, accountId, msg.id, from, 'from')
-        if (email) affectedContactEmails.add(email)
       }
 
       for (const label of msg.labelIds ?? []) labelUnion.add(label)
@@ -179,6 +208,8 @@ export function persistThread(
       is_unread: anyUnread,
       is_starred: anyStarred,
       has_attachment: anyAttachment,
+      insert_inbox_visible: options.inboxVisibility === 'hide' ? 0 : 1,
+      promote_inbox_visible: options.inboxVisibility === 'show' ? 1 : 0,
       metadata_only: options.metadataOnly ? 1 : 0
     })
 
@@ -186,6 +217,8 @@ export function persistThread(
     for (const label of labelUnion) insertLabel.run(accountId, thread.id, label)
   })()
   replayPendingThreadDeltas(db, accountId, thread.id)
+  replaySnoozeReminderDelta(db, accountId, thread.id)
+  return true
 }
 
 /** A thread snapshot is authoritative for which messages still exist in it. */

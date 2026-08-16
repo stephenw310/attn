@@ -11,6 +11,8 @@ export const MAX_RETAINED_BODY_HYDRATION_STATES = 256
 
 export type BodyHydrationAttemptState = 'idle' | 'loading' | 'unavailable'
 
+export type TrackProviderWork = <T>(accountId: string, work: () => Promise<T>) => Promise<T>
+
 export interface HydrationEffects {
   persist: (db: Db, accountId: string, thread: GmailThread) => void
   hydrateMissing: (
@@ -49,7 +51,8 @@ export class OnDemandBodyHydrator {
     private readonly onChanged: () => void,
     private readonly onUnavailable: (accountId: string, threadId: string, error?: unknown) => void,
     private readonly time: SchedulerTime = systemTime,
-    private readonly effects: HydrationEffects = productionEffects
+    private readonly effects: HydrationEffects = productionEffects,
+    private readonly trackProviderWork: TrackProviderWork = async (_accountId, work) => work()
   ) {}
 
   state(accountId: string, threadId: string): BodyHydrationAttemptState {
@@ -65,7 +68,9 @@ export class OnDemandBodyHydrator {
     const attemptState: ActiveAttempt = { writable: true, cancel: () => {} }
     this.attempts.set(key, attemptState)
     this.setState(key, 'loading')
-    const attempt = this.run(key, attemptState, accountId, threadId, provider).finally(() => {
+    const attempt = this.trackProviderWork(accountId, () =>
+      this.run(key, attemptState, accountId, threadId, provider)
+    ).finally(() => {
       if (this.inFlight.get(key) === attempt) this.inFlight.delete(key)
       if (this.attempts.get(key) === attemptState) this.attempts.delete(key)
     })

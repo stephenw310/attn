@@ -13,6 +13,10 @@ describe('sync retry routing', () => {
     expect(syncRetryRoute({ signedIn: true, seeded: false, hasPoller: false, backfillRunning: true })).toBe(
       'queue-backfill'
     )
+    // An alive poller no longer implies the backfill finished (interactive-ready start).
+    expect(syncRetryRoute({ signedIn: true, seeded: false, hasPoller: true, backfillRunning: true })).toBe(
+      'queue-backfill'
+    )
     expect(syncRetryRoute({ signedIn: true, seeded: false, hasPoller: false, backfillRunning: false })).toBe(
       'start-backfill'
     )

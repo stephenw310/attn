@@ -4,7 +4,7 @@
 **Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through draft PR #38.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window) and T16 (#45) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, and T14E is in flight. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A is the planned lifetime header sweep (upgraded from Sent-only to the whole account, SPEC §9 #17), and T21 adds the poller's label-catalog refresh found during that review. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
+**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window) and T16 (#45) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, and T14E is in flight. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) is implemented; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). T21 adds the poller's label-catalog refresh found during that review. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
@@ -225,7 +225,7 @@ Verify green; fresh backfill demonstrated end to end; autocomplete data queryabl
 
 ## T13A — Lifetime header sweep and saved-contact decision
 
-**Status: planned follow-up — scope upgraded by SPEC §9 #17.** · **Depends on:** T13 · **Blocks:** T20 sign-off · **Parallel with:** the T14 revisions and the outbox chain · **Spec:** F2 backfill stage 7 + lifetime header sweep, F6 autocomplete
+**Status: implemented; real-Gmail timing/quota evidence remains for sign-off.** · **Depends on:** T13 · **Blocks:** T20 sign-off · **Parallel with:** the T14 revisions and the outbox chain · **Spec:** F2 backfill stage 7 + lifetime header sweep, F6 autocomplete
 
 ### Why this is upgraded from Sent-only
 
@@ -254,22 +254,42 @@ them too.
   polling, body hydration, and the interactive backfill all outrank it: self-throttle well below Gmail's
   ~250 units/user/sec so interactive calls never queue behind it, and set the duty-cycle constants from the
   real-mailbox measurement below, not guesses.
+  The implemented conservative starting posture is one request at a time, a 100 ms inter-request floor
+  (~100 units/sec for metadata gets), and a one-second page-boundary pause. Active user-action replays,
+  draft mirrors, outbox sends, body/attachment hydration, and history cycles make the sweep yield in 250 ms
+  slices. The real-mailbox run may tune these constants before sign-off; it must preserve that priority
+  ordering.
 - **Contacts derive from the same stream** through the existing `contact_messages`/`contacts` projection,
   idempotent with T13's bootstrap contributions. Two hygiene rules land here: messages labeled `SPAM` or
   `TRASH` never contribute contact rows (the poller already trickles spam threads in; a deliberate sweep
   must not bulk-import spammers), and legacy Hangouts `CHAT` rows are skipped defensively.
-- Progress reports against `getProfile`'s `threadsTotal`/`messagesTotal` — the "estimated total/ETA when
-  Gmail supplies one" that F2's footer language promises. Footer state: **Live · indexing older mail** with
-  processed/estimated counts and an explicit quota-wait state; quitting or losing connectivity resumes from
-  the last durable page.
+- Progress reports the "estimated total/ETA when Gmail supplies one" that F2's footer language promises.
+  The implementation uses the unfiltered
+  `threads.list` response's listing-scoped `resultSizeEstimate` for thread progress, persists processed and
+  estimated counts beside the page cursor, and snaps the total to the exact count when listing is exhausted;
+  `getProfile().messagesTotal` remains contextual account-wide message count. Footer state: **Live · indexing
+  older mail** with processed/estimated counts and explicit quota-wait/retry-wait states; quitting or losing
+  connectivity resumes from the last durable page without making the live Inbox appear offline.
+- **Relationship to the bounded all-mail stage.** This sweep has no date bound, so before the all-mail
+  backfill stage existed it was the only path to archived mail of *any* age. The bounded stage fetches the
+  most recent 12 months at normal priority ahead of this walk; skip-if-present keeps the two from fetching
+  anything twice, and this task's code did not change when that stage landed. The one thing this sweep can
+  never reach is Spam and Trash — unfiltered listings exclude both — which is why those are explicit label
+  stages rather than a widening of this walk.
 - Optional, decide at implementation: a listing-only `q=has:attachment` walk (ids only, ~1% of sweep cost)
   can set the thread-level attachment flag lifetime-wide; header-only threads otherwise gain attachment
   metadata on first hydration (F2).
 - The saved-Google-Contacts (People API) decision is unchanged from v0.14: different address source,
   additional consent scope, separate opt-in task if ever approved — never silently bundled.
-- **Schema:** add a nullable `sweep_cursor TEXT` column to `sync_state`; bump `CURRENT_SCHEMA_VERSION`.
-  Local dogfood upgrade DDL (AGENTS.md procedure): `ALTER TABLE sync_state ADD COLUMN sweep_cursor TEXT;`
-  with `PRAGMA user_version` bumped in the same transaction.
+- **Schema:** add `sweep_cursor`, `sweep_threads_done`, and `sweep_threads_total` to `sync_state`, plus
+  `threads.is_inbox_visible` so lifetime-only old Inbox rows retain truthful Gmail labels without entering
+  M2's bounded Inbox surface; bump the T16 revision-13 snapshot to revision 14. Local dogfood upgrade DDL
+  from revision 13 (AGENTS.md procedure):
+  `ALTER TABLE sync_state ADD COLUMN sweep_cursor TEXT;`,
+  `ALTER TABLE sync_state ADD COLUMN sweep_threads_done INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE sync_state ADD COLUMN sweep_threads_total INTEGER;`, and
+  `ALTER TABLE threads ADD COLUMN is_inbox_visible INTEGER NOT NULL DEFAULT 1;`, with
+  `PRAGMA user_version = 14` in the same transaction.
 
 ### Testing and done condition
 
@@ -278,9 +298,13 @@ behavior on the injectable `SchedulerTime`, contact idempotency across the T13 o
 contact exclusion. E2e a partially completed sweep across relaunch/offline recovery and assert that no body
 bytes are fetched and unread counts do not change. Manual evidence records wall-clock/quota on a real
 long-lived mailbox with interaction budgets green — the throttle constants get set from that measurement.
-Done means an address last emailed outside the mail window autocompletes locally, a thread archived years
-ago has a local header row, progress never masquerades as a blocked inbox sync, and the People-API decision
-stays recorded.
+Automated evidence now covers cursor/progress restart and resume, metadata-only fetches, foreground yielding,
+retryable quota failures, contact idempotency and hygiene, an offline relaunch, unchanged bounded Inbox rows
+and unread count when old Inbox headers arrive, lifetime autocomplete, and the non-blocking footer state.
+Remaining manual evidence is the wall-clock/quota run on a real long-lived mailbox. Done means an address last
+emailed outside the mail window autocompletes locally, a thread archived
+years ago has a local header row, progress never masquerades as a blocked inbox sync, and the People-API
+decision stays recorded.
 
 ---
 
@@ -751,13 +775,15 @@ The unit matrix and e2e above are green; the manual exactly-once checklist is ex
 
 ## T17 — Attachments out
 
+**Status: implemented; signed-in Gmail attachment checksum smoke remains PR evidence.**
+
 **Depends on:** T14, T16 · **Spec:** F6 (drag-drop/picker, 25MB, progress)
 
 - **Spool at attach time:** copying the file into `userData/outbox/{draftId}/` immediately makes the draft self-contained (the original can move/delete before send — crash-safety includes attachments). Spool entries are recorded in `attachments_json` (filename, mimeType, sizeBytes, spool path) and cleaned on discard/sent.
 - Drag-and-drop onto the composer + a picker button (`dialog.showOpenDialog` via a new typed IPC). Per-file and total caps enforced at attach time: reject past **25MB total** with a clear toast (Gmail's own limit; oversize handoff links are out of scope v1).
-- MIME: T15 already frames attachments; the sender streams spool files into the multipart upload. Progress: per-outbox-row send progress event (`outbox:progress`) driving a thin bar on the composer/toast — coarse (per-attachment) granularity is fine at these sizes.
-- Mirror behavior: Gmail draft mirrors include attachments only at final send-time build (mirroring megabytes on every autosave would hammer quota; the local spool is the durability story, the mirror is convenience). Note the interaction with T16's draft-only send path: since every send now goes through `drafts.update` + `drafts.send`, the attachment bytes upload as part of that final update — one upload, not two. Document this bound in the PR.
-- Testing — unit: spool naming/cleanup, cap math, MIME framing with spooled files; e2e: attach via a seeded fixture file, chip renders with size, discard cleans the spool (assert via relaunch), oversize rejection toast; manual: real send with mixed attachments arrives intact (checksum the received files).
+- MIME: T15 already frames attachments; the sender streams spool files into a Gmail `uploadType=multipart` draft update. The deterministic serializer computes the exact MIME byte count up front so the upload carries the required top-level `Content-Length` without buffering attachment bytes. Progress: per-outbox-row send progress event (`outbox:progress`) driving a thin bar on the composer/toast — coarse (per-attachment) granularity is fine at these sizes.
+- Mirror behavior: newly attached local files join the Gmail draft only at final send-time build (mirroring megabytes on every autosave would hammer quota; the local spool is the durability story, the mirror is convenience). Inline body images and remote-only MIME parts remain in checkpoints because removing those would break body rendering or T14D's zero-loss remote-draft round trip. Note the interaction with T16's draft-only send path: create uses an attachment-free MIME body carrying the durable Message-ID, then the attachment bytes stream once through the final `drafts.update` before `drafts.send` — one attachment upload, not two. Document this bound in the PR.
+- Testing — unit: spool naming/cleanup, cap math, MIME framing with spooled files; e2e: pick and drop a seeded fixture file, chip renders with size, discard cleans the spool (assert via relaunch), oversize rejection toast; manual: real send with mixed attachments arrives intact (checksum the received files).
 
 ### Done when
 
@@ -767,30 +793,40 @@ Attach → queue → relaunch → send survives with bytes intact; caps enforced
 
 ## T18 — Self-healing failed actions (deciding an M1 deferred call)
 
+**Status: implemented.**
+
 **Depends on:** nothing (parallel-friendly) · **Spec:** F2 action queue + conflict rule; M1 deviations rows 2–3
 
 **Product decision (owner, 2026-08-13):** a permanently failed action **repairs itself and says so** — local state converges back to what the server actually thinks, so an archive Gmail rejected simply reappears in the inbox. No failed-actions panel, no retry button, no error log. Debugging sync is not the user's job.
 
-**The mechanism is refetch, not inverse-delta.** Don't compute a reverse of the failed action — delete the queue row and re-fetch that thread (`getThread` → `persistThread`, which already replays any remaining pending intent on top). Server state is the truth by F2's own conflict rule, so this converges exactly and cannot drift the way a hand-rolled inverse can. It costs one request on a path that is, by construction, rare.
+**The mechanism is refetch, not inverse-delta.** Don't compute a reverse of the failed action — move the row into durable recovery, re-fetch that thread (`getThread` → `persistThread`, which already replays any remaining pending intent on top), and delete the row only after recovery reaches a terminal outcome. Server state is the truth by F2's own conflict rule, so this converges exactly and cannot drift the way a hand-rolled inverse can. It costs one request on a path that is, by construction, rare.
+
+**Recovery is its own durable queue state.** As soon as Gmail permanently rejects an action — including a mutation-side 404 — its row moves to `recovering` before the authoritative refetch starts. A transient failed refetch retries only that read; it must never send the rejected action again, including after a crash or when repairing a pre-T18 `failed` row. A permanent/404 refetch failure, or an empty/draft-only response, terminates recovery by dropping only the queue row: cached mail is never deleted by the action executor, and the notice explicitly says Gmail's current version could not be loaded. Gmail network classification ends before the SQLite recovery transaction; a local persistence fault is logged and leaves the row in `recovering` for the next drain, without being mislabeled as a 60-second Gmail retry and without rejecting `drain()` — every caller floats that promise, so an escaping fault would become an unhandled main-process rejection. A typed stored auth marker covers both Gmail 401s and refresh-token revocation (`invalid_grant`/missing refresh token), pausing execution or recovery until the visible header reconnect action completes successful same-account authentication. `recovering` rows remain in the pending count but are excluded from optimistic-delta replay because Gmail has already rejected their intent. Revert notices use peek/ack delivery and remain buffered in the main process until the active account's renderer displays each batch for its toast interval and acknowledges it; StrictMode cleanup, account changes, and window startup cannot consume a notice unseen, while explicit sign-out clears that account's old-session notices.
+
+**Local-only reminder state is part of the recovery snapshot.** Queue payloads record the exact pre-action snooze reminder when a local mutation changes it. Recovery restores that row atomically with the Gmail snapshot. A rejected snooze cancels the newly-created reminder, a rejected manual unsnooze restores its original due time, and a rejected automatic return is re-added to the local inbox **once, by the executor**, with copy that says Gmail did not accept the return.
+
+**Only a `pending` reminder outranks a server label snapshot.** The overlay that runs after ordinary persistence covers `pending` alone, because Gmail has no concept of "snoozed until" (SPEC §9 #6) and the thread must stay hidden until it fires. `returned` is a display flag for the inbox badge and stays set until the user handles the thread in Attn, so it must **not** act as a label authority: doing so re-adds `INBOX` on every later sync, overriding an archive the user performed in Gmail on another device, and inverts F2's conflict rule. A rejected snooze return is therefore repaired as a one-time write rather than a standing override.
 
 **Three nuances the policy must respect — getting these wrong is worse than the old behavior:**
 
 1. **Only *permanent* failures revert.** Offline, 5xx, and 429 stay retryable with their backoff ladder untouched. Reverting on a transient failure would flicker mail back into the inbox during a network blip — the worst outcome available here. `isPermanentActionError` already draws this line; use it, don't widen it.
-2. **Auth failures never revert.** A 401/revoked token doesn't mean "Gmail rejected this", it means "we couldn't ask". The intent is still valid, so those rows re-pend on the next successful sign-in for the same account (the M1 deviation) instead of discarding 20 archives because a token lapsed. Detect via the stored 401 error string from `GmailApiError` formatting (stable, test-pinned) — no migration needed.
+2. **Auth failures never revert.** A 401, missing refresh token, or rejected refresh (`invalid_grant`) doesn't mean "Gmail rejected this", it means "we couldn't ask". The intent is still valid, so those rows pause behind a typed stored auth marker and re-pend after the user chooses the visible **Reconnect Google** action and completes successful sign-in for the same account. The sign-in result carries the resumed-row count, so the renderer never claims another account or a missing OAuth configuration resumed work. Pre-T18 message-formatted 401 rows are recognized once at executor construction and normalized to the typed marker.
 3. **Sends are the exception (T16).** A failed send must never silently vanish or self-repair — the user wrote that message. It reopens the composer with content intact and the error shown. This task's auto-revert covers triage actions only.
 
-**Telling the user.** Silent reappearance is spooky: mail moving on its own reads as a bug. On revert, one plainly-worded, non-actionable toast — *"Couldn't archive 'Q3 roadmap review' — it's back in your inbox."* Batch to a single toast when several revert together. That is the entire surface: no badge state, no panel, no command.
+When one thread from a bulk action is rejected, only that thread's queued-row reference and inverse are removed from the undo entry; the unaffected threads remain undoable, and the entry's label is rebuilt from the surviving count so `Z` never reports undoing more threads than it restores.
+
+**Telling the user.** Silent reappearance is spooky: mail moving on its own reads as a bug. On revert, one plainly-worded, non-actionable toast — *"Couldn't archive 'Q3 roadmap review' — it's back in your inbox."* Batch to a single toast when several revert together. That is the entire permanent-failure surface: no panel or retry command. Auth pauses are the deliberate exception because the intent is still live; the pending readout becomes an explicit **Reconnect Google** control.
 
 **Consequences (deliberate simplifications):**
-- Footer pending readout stays a single count — the planned `· N failed` split is cut.
-- `pendingActionCount` stops counting permanently-failed rows because they no longer exist; the M1 comment about failed rows haunting the badge forever, and the deviation row behind it, both retire here.
+- Footer pending readout stays a single count, and the auth-pause control is a **separate** `· N paused · Reconnect Google` element beside it. The pending count spans triage actions *and* outbox sends, but only triage actions can be auth-paused, so one combined readout would both over-count the pause and hide the outbox route behind it.
+- `pendingActionCount` uses a count-only query and includes legacy `failed` rows until constructor-time normalization makes their terminal recovery visible; no provider/drain is required for the badge to tell the truth.
 - The `failed` state effectively disappears from `action_queue` for triage intents (auth-stranded rows sit in `pending`). Keep the column — the outbox reuses it.
 - **Undo-stack hygiene:** an undo entry whose action was reverted must not later re-apply. On revert, drop entries referencing that thread+action rather than leaving a `Z` that resurrects a rejected change.
 
 ### Testing
 
-- Unit: three-way permanent / retryable / auth classification (exhaustive); undo-stack invalidation; toast batching.
-- E2e (seeded): drive a permanent failure through the test seam → thread returns to the list, toast appears, pending count returns to zero, and a following `z` does not re-archive it.
+- Unit: three-way permanent / retryable / auth classification including token refresh; snooze/unsnooze/automatic-return reminder convergence; local DB error boundaries; undo-stack invalidation; sequential toast batching.
+- E2e (seeded): drive a permanent failure through the test seam → thread returns to the list, toast appears, pending count returns to zero, and a following `z` does not re-archive it. Drive a refresh-token auth pause → reconnect control → same-account resume → successful drain.
 
 ### Done when
 
@@ -839,8 +875,8 @@ The closing pass that turns "features exist" into "this is my mail client":
 - [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data
 - [ ] Initial-sync evidence separates first-readable-page latency from full background completion and records
       per-stage totals, effective rate, and quota-wait time
-- [ ] Lifetime Sent header indexing finds contacts outside the mail window without creating old mail rows;
-      saved-Google-Contacts scope decision recorded
+- [ ] Lifetime whole-account header indexing finds contacts outside the mail window and creates header rows
+      without downloading old body bytes; saved-Google-Contacts scope decision recorded
 - [ ] Failed triage actions self-heal to server truth with an explanatory toast; auth re-pend shipped; no silent queue states remain
 - [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts
 - [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input)

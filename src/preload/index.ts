@@ -1,9 +1,11 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { formatActionRevertToast } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
-import type { AuthStatus } from '../shared/auth'
+import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import type { ContactSearchResult } from '../shared/contacts'
 import type {
   Draft,
+  DraftAttachmentMutationResult,
   DraftInlineImageInput,
   DraftInlineImageResult,
   DraftKind,
@@ -22,7 +24,14 @@ import type {
   SyncState,
   ThreadRow
 } from '../shared/mail'
-import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from '../shared/outbox'
+import type {
+  OutboxChanged,
+  OutboxItem,
+  OutboxProgress,
+  QueueSendResult,
+  ReopenOutboxResult
+} from '../shared/outbox'
+import { subscribeToActionReverts } from './actionRevertDelivery'
 
 function invoke<K extends InvokeChannel>(
   channel: K,
@@ -35,7 +44,7 @@ const api = {
   platform: process.platform,
   auth: {
     getStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authGetStatus),
-    signIn: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignIn),
+    signIn: (): Promise<AuthSignInResult> => invoke(IPC_CHANNELS.authSignIn),
     signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut)
   },
   mail: {
@@ -57,11 +66,34 @@ const api = {
     markReadOnOpen: (threadId: string): Promise<void> => invoke(IPC_CHANNELS.mailMarkReadOnOpen, threadId),
     undo: (): Promise<TriageResult | null> => invoke(IPC_CHANNELS.mailUndo),
     getPendingActionCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetPendingActionCount),
+    getActionQueueStatus: () => invoke(IPC_CHANNELS.mailGetActionQueueStatus),
     onChanged: (cb: () => void): (() => void) => {
       const listener = (): void => cb()
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },
+    onActionsReverted: (accountId: string, cb: (message: string) => void | Promise<void>): (() => void) =>
+      subscribeToActionReverts(
+        accountId,
+        {
+          peek: (requestedAccountId) => invoke(IPC_CHANNELS.mailPeekActionsReverted, requestedAccountId),
+          acknowledge: (requestedAccountId, noticeId) =>
+            invoke(IPC_CHANNELS.mailAcknowledgeActionsReverted, requestedAccountId, noticeId),
+          onAvailable: (listener) => {
+            ipcRenderer.on(IPC_CHANNELS.mailActionsReverted, listener)
+            return () => ipcRenderer.removeListener(IPC_CHANNELS.mailActionsReverted, listener)
+          },
+          isVisible: () => document.visibilityState === 'visible',
+          onVisibilityChange: (listener) => {
+            document.addEventListener('visibilitychange', listener)
+            return () => document.removeEventListener('visibilitychange', listener)
+          }
+        },
+        (actions) => {
+          const message = formatActionRevertToast(actions)
+          return message ? cb(message) : undefined
+        }
+      ),
     onBodyHydrationFailed: (cb: (accountId: string, threadId: string) => void): (() => void) => {
       const listener = (_event: unknown, payload: { accountId: string; threadId: string }): void =>
         cb(payload.accountId, payload.threadId)
@@ -96,6 +128,16 @@ const api = {
     reopen: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftReopen, id),
     createReply: (threadId: string, kind: Exclude<DraftKind, 'new'>): Promise<Draft | null> =>
       invoke(IPC_CHANNELS.draftCreateReply, threadId, kind),
+    pickAttachments: (id: string): Promise<DraftAttachmentMutationResult> =>
+      invoke(IPC_CHANNELS.draftPickAttachments, id),
+    addDroppedFiles: (id: string, files: File[]): Promise<DraftAttachmentMutationResult> =>
+      invoke(
+        IPC_CHANNELS.draftAddAttachments,
+        id,
+        files.map((file) => webUtils.getPathForFile(file)).filter(Boolean)
+      ),
+    removeAttachment: (id: string, attachmentId: string): Promise<DraftAttachmentMutationResult> =>
+      invoke(IPC_CHANNELS.draftRemoveAttachment, id, attachmentId),
     addInlineImage: (id: string, image: DraftInlineImageInput): Promise<DraftInlineImageResult> =>
       invoke(IPC_CHANNELS.draftAddInlineImage, id, image),
     getInlineImage: (id: string, contentId: string): Promise<InlineImageResult> =>
@@ -115,6 +157,11 @@ const api = {
       const listener = (_event: unknown, change: OutboxChanged): void => cb(change)
       ipcRenderer.on(IPC_CHANNELS.outboxChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.outboxChanged, listener)
+    },
+    onProgress: (cb: (progress: OutboxProgress | null) => void): (() => void) => {
+      const listener = (_event: unknown, progress: OutboxProgress | null): void => cb(progress)
+      ipcRenderer.on(IPC_CHANNELS.outboxProgress, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.outboxProgress, listener)
     }
   },
   sync: {

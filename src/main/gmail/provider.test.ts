@@ -4,18 +4,37 @@ import { GmailMailProvider } from './provider'
 
 describe('GmailMailProvider.listThreadIds', () => {
   it('passes explicit labels without silently adding INBOX', async () => {
-    const get = vi.fn(async () => ({ threads: [{ id: 'sent-1' }] }))
+    const get = vi.fn(async () => ({ threads: [{ id: 'sent-1' }], resultSizeEstimate: 42 }))
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
 
     await expect(
       provider.listThreadIds({ labelIds: ['SENT'], q: 'newer_than:12m', pageToken: 'next' })
-    ).resolves.toEqual({ threadIds: ['sent-1'], nextPageToken: undefined })
+    ).resolves.toEqual({
+      threadIds: ['sent-1'],
+      nextPageToken: undefined,
+      resultSizeEstimate: 42
+    })
     expect(get).toHaveBeenCalledWith('/threads', {
       maxResults: '100',
       q: 'newer_than:12m',
       labelIds: ['SENT'],
       pageToken: 'next'
     })
+  })
+
+  it('requests Spam/Trash inclusion only when asked', async () => {
+    const get = vi.fn(async () => ({ threads: [] }))
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+
+    await provider.listThreadIds({ labelIds: ['SPAM'], includeSpamTrash: true })
+    expect(get).toHaveBeenCalledWith('/threads', {
+      maxResults: '100',
+      labelIds: ['SPAM'],
+      includeSpamTrash: 'true'
+    })
+
+    await provider.listThreadIds({})
+    expect(get).toHaveBeenLastCalledWith('/threads', { maxResults: '100' })
   })
 })
 
@@ -51,9 +70,7 @@ describe('GmailMailProvider.saveDraft', () => {
     await provider.saveDraft({ id: null, raw: 'cmF3', threadId: 'thread-1' })
     expect(post).toHaveBeenCalledWith(
       '/drafts',
-      {
-        message: { raw: 'cmF3', threadId: 'thread-1' }
-      },
+      { message: { raw: 'cmF3', threadId: 'thread-1' } },
       { retryTransient: false, signal: undefined }
     )
   })
@@ -68,7 +85,9 @@ describe('GmailMailProvider.saveDraft', () => {
       signal: undefined
     })
   })
+})
 
+describe('GmailMailProvider.saveDraft', () => {
   it('propagates shutdown cancellation to a single checkpoint request', async () => {
     const post = vi.fn(async () => ({ id: 'gmail-draft-1' }))
     const provider = new GmailMailProvider({ post } as unknown as GmailClient)
@@ -122,6 +141,25 @@ describe('GmailMailProvider outbox operations', () => {
     )
   })
 
+  it('updates an attachment-bearing draft through one multipart media upload', async () => {
+    const multipartUpload = vi.fn(async () => ({ id: 'draft-1' }))
+    const provider = new GmailMailProvider({ multipartUpload } as unknown as GmailClient)
+    const open = async function* (): AsyncIterable<Uint8Array> {
+      yield Buffer.from('raw mime')
+    }
+
+    await expect(
+      provider.updateDraft({ id: 'draft-1', mime: { sizeBytes: 8, open }, threadId: 'thread-1' })
+    ).resolves.toBe('draft-1')
+    expect(multipartUpload).toHaveBeenCalledWith(
+      'PUT',
+      '/drafts/draft-1',
+      { message: { threadId: 'thread-1' } },
+      { mimeType: 'message/rfc822', sizeBytes: 8, endsWithCrlf: true, open },
+      { signal: undefined }
+    )
+  })
+
   it('sends only a known durable Gmail draft id', async () => {
     const post = vi.fn(async () => ({ id: 'message-1', threadId: 'thread-1' }))
     const provider = new GmailMailProvider({ post } as unknown as GmailClient)
@@ -145,6 +183,7 @@ describe('GmailMailProvider outbox operations', () => {
       .fn()
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [{ id: 'draft-message', threadId: 'thread-1' }] })
+      .mockResolvedValueOnce({ id: 'draft-message', threadId: 'thread-1', labelIds: ['DRAFT'] })
       .mockResolvedValueOnce({
         drafts: [{ id: 'draft-1', message: { id: 'draft-message', threadId: 'thread-1' } }]
       })
@@ -160,7 +199,7 @@ describe('GmailMailProvider outbox operations', () => {
       1,
       '/messages',
       {
-        q: 'in:drafts rfc822msgid:<stable@attn.local>',
+        q: 'in:drafts rfc822msgid:stable@attn.local',
         maxResults: '10',
         includeSpamTrash: 'true'
       },
@@ -173,7 +212,6 @@ describe('GmailMailProvider outbox operations', () => {
       .fn()
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [{ id: 'sent-message', threadId: 'thread-2' }] })
-      .mockResolvedValueOnce({ drafts: [] })
       .mockResolvedValueOnce({ id: 'sent-message', threadId: 'thread-2', labelIds: ['SENT'] })
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [] })
@@ -184,6 +222,7 @@ describe('GmailMailProvider outbox operations', () => {
       messageId: 'sent-message',
       threadId: 'thread-2'
     })
+    expect(get.mock.calls.some(([path]) => path === '/drafts')).toBe(false)
     await expect(provider.findByRfcId('<missing@attn.local>')).resolves.toBeNull()
   })
 
@@ -192,12 +231,26 @@ describe('GmailMailProvider outbox operations', () => {
       .fn()
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [{ id: 'draft-message', threadId: 'thread-1' }] })
+      .mockResolvedValueOnce({ id: 'draft-message', threadId: 'thread-1', labelIds: ['DRAFT'] })
+      .mockResolvedValueOnce({ drafts: [] })
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+
+    await expect(provider.findByRfcId('<still-draft@example.com>')).resolves.toBeNull()
+    expect(get).toHaveBeenNthCalledWith(3, '/messages/draft-message', { format: 'minimal' }, undefined)
+    expect(get).toHaveBeenLastCalledWith('/drafts', { maxResults: '100' }, undefined)
+  })
+
+  it('does not page the full drafts list twice for an already-checked candidate', async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce({ messages: [{ id: 'draft-message', threadId: 'thread-1' }] })
+      .mockResolvedValueOnce({ messages: [{ id: 'draft-message', threadId: 'thread-1' }] })
       .mockResolvedValueOnce({ drafts: [] })
       .mockResolvedValueOnce({ id: 'draft-message', threadId: 'thread-1', labelIds: ['DRAFT'] })
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
 
-    await expect(provider.findByRfcId('<still-draft@example.com>')).resolves.toBeNull()
-    expect(get).toHaveBeenLastCalledWith('/messages/draft-message', { format: 'minimal' }, undefined)
+    await expect(provider.findByRfcId('<missing-draft@example.com>')).resolves.toBeNull()
+    expect(get.mock.calls.filter(([path]) => path === '/drafts')).toHaveLength(1)
   })
 })
 

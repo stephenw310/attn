@@ -8,9 +8,9 @@ import {
   publicDraftAttachment,
   type StoredDraftAttachment
 } from './draftAttachments'
+import { validateAttachmentCap } from './spool'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_DRAFT_BYTES = 25 * 1024 * 1024
 const IMAGE_MIME = /^image\/(?:png|jpeg|gif|webp)$/i
 
 export function isSupportedInlineImageMimeType(value: string): boolean {
@@ -46,12 +46,14 @@ export async function addInlineImage(
   if (!row) throw new Error('draft is unavailable')
   const attachments = parseStoredDraftAttachments(row.attachments_json)
   const used = attachments.reduce((total, attachment) => total + attachment.sizeBytes, 0)
-  if (used + content.byteLength > MAX_DRAFT_BYTES) throw new Error('draft attachments exceed 25 MB')
+  validateAttachmentCap(used, [content.byteLength])
 
   const filename = safeFilename(input.filename)
   const contentId = `${randomUUID()}@attn.local`
   const directory = join(userData, 'outbox', draftId)
-  const spoolPath = join(directory, `${randomUUID()}-${filename}`)
+  // The original name lives in metadata. A UUID-only storage name keeps the
+  // path component under NAME_MAX no matter how long the pasted name is.
+  const spoolPath = join(directory, randomUUID())
   await mkdir(directory, { recursive: true })
   await writeFile(spoolPath, content, { flag: 'wx' })
   const attachment: StoredDraftAttachment = {
@@ -63,21 +65,38 @@ export async function addInlineImage(
     contentId,
     inline: true
   }
-  attachments.push(attachment)
   try {
-    const changed = db
-      .prepare(
-        `UPDATE outbox SET attachments_json = ?, updated_at = ?, local_revision = local_revision + 1
-         WHERE account_id = ? AND id = ? AND state = 'composing'`
-      )
-      .run(JSON.stringify(attachments), now, accountId, draftId).changes
-    if (changed === 0) throw new Error('draft is unavailable')
+    let snapshot: { attachments_json: string } | undefined = row
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        snapshot = db
+          .prepare(
+            `SELECT attachments_json FROM outbox
+             WHERE account_id = ? AND id = ? AND state = 'composing'`
+          )
+          .get(accountId, draftId) as { attachments_json: string } | undefined
+      }
+      if (!snapshot) throw new Error('draft is unavailable')
+      const current = parseStoredDraftAttachments(snapshot.attachments_json)
+      const currentBytes = current.reduce((total, item) => total + item.sizeBytes, 0)
+      validateAttachmentCap(currentBytes, [content.byteLength])
+      const next = [...current, attachment]
+      const changed = db
+        .prepare(
+          `UPDATE outbox SET attachments_json = ?, updated_at = ?, local_revision = local_revision + 1
+           WHERE account_id = ? AND id = ? AND state = 'composing' AND attachments_json = ?`
+        )
+        .run(JSON.stringify(next), now, accountId, draftId, snapshot.attachments_json).changes
+      if (changed > 0) {
+        return {
+          attachment: publicDraftAttachment(attachment),
+          dataUrl: `data:${attachment.mimeType};base64,${content.toString('base64')}`
+        }
+      }
+    }
+    throw new Error('Attachments changed — try pasting again')
   } catch (error) {
     await rm(spoolPath, { force: true }).catch(() => {})
     throw error
-  }
-  return {
-    attachment: publicDraftAttachment(attachment),
-    dataUrl: `data:${attachment.mimeType};base64,${content.toString('base64')}`
   }
 }

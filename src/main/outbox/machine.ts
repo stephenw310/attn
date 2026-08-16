@@ -20,7 +20,7 @@ export type MachineEvent =
   | { type: 'secondary-negative'; exhausted: boolean; retryAt: number }
   | { type: 'needs-review' }
   | { type: 'send-confirmed' }
-  | { type: 'preflight-retry'; retryAt: number }
+  | { type: 'preflight-retry'; exhausted: boolean; retryAt: number }
   | { type: 'verification-error'; retryAt: number }
   | { type: 'retryable-error'; retryAt: number }
   | { type: 'permanent-error' }
@@ -132,6 +132,14 @@ export function planTransition(row: MachineRow, event: MachineEvent, now: number
 
   if (event.type === 'preflight-retry') {
     if (row.state !== 'sending') return unchanged(row)
+    // A preflight failure never reached Gmail, so an exhausted ladder is a
+    // plain failure the user can see and act on — never an ambiguous send.
+    if (event.exhausted) {
+      return {
+        next: { ...row, state: 'failed', sendAt: null, attempts: row.attempts + 1 },
+        effects: ['persist', 'notify']
+      }
+    }
     return {
       next: { ...row, state: 'queued', sendAt: event.retryAt, attempts: row.attempts + 1 },
       effects: ['persist', 'arm-timer']

@@ -12,6 +12,8 @@ import {
   missingInboxThreadIds,
   planCycle,
   reconcileInboxMembership,
+  reconcileLabelMembership,
+  reconcilePurgeableMembership,
   runHistoryCycle
 } from './poller'
 import type { HistoryPage, HistoryRecord, MailProvider } from './provider'
@@ -38,7 +40,7 @@ function providerFor(pages: HistoryPage[]): MailProvider {
 }
 
 function plan(refetchThreadIds: string[] = []): FetchedHistoryPlan {
-  return { historyId: '11', refetchThreadIds, newMail: [] }
+  return { historyId: '11', refetchThreadIds, newMail: [], promoteInboxThreadIds: [] }
 }
 
 function checkpointDb(lastHistoryId = '10'): { db: Db; checkpoint: () => string } {
@@ -77,8 +79,20 @@ describe('history cycle planner', () => {
   it('dedupes every affected thread and identifies only inbound unread mail', () => {
     expect(planCycle(fixture)).toEqual({
       refetchThreadIds: ['t-label', 't-deleted', 't-inbound', 't-self', 't-read'],
-      newMail: [{ threadId: 't-inbound', messageId: 'm-inbound' }]
+      newMail: [{ threadId: 't-inbound', messageId: 'm-inbound' }],
+      promoteInboxThreadIds: ['t-inbound', 't-self', 't-read']
     })
+  })
+
+  it('promotes a lifetime-hidden thread when Gmail explicitly adds it to Inbox', () => {
+    expect(
+      planCycle([
+        {
+          id: '12',
+          labelsAdded: [{ message: { id: 'old-message', threadId: 'old-thread' }, labelIds: ['INBOX'] }]
+        }
+      ]).promoteInboxThreadIds
+    ).toEqual(['old-thread'])
   })
 
   it('combines mixed pages and preserves 64-bit history ids', async () => {
@@ -143,6 +157,62 @@ describe('stateful history application', () => {
     reconcileInboxMembership(db, 'test@example.com', ['recent-present', 'old-unlisted'])
 
     expect(labels).toEqual(new Set(['recent-present', 'old-unlisted']))
+  })
+
+  it('reconciles an arbitrary label without touching other memberships', () => {
+    const stripped: unknown[][] = []
+    const db = {
+      prepare: (sql: string) => ({
+        all: (...args: unknown[]) => {
+          if (sql.includes('SELECT thread_id FROM thread_labels') && args[1] === 'SPAM') {
+            return [{ thread_id: 'junk-kept' }, { thread_id: 'junk-gone' }]
+          }
+          return []
+        },
+        run: (...args: unknown[]) => {
+          if (sql.startsWith('DELETE FROM thread_labels')) stripped.push(args)
+          return { changes: 1 }
+        }
+      }),
+      transaction: (fn: () => void) => fn
+    } as unknown as Db
+
+    const missing = reconcileLabelMembership(db, 'test@example.com', 'SPAM', ['junk-kept'])
+
+    expect(missing).toEqual(['junk-gone'])
+    expect(stripped).toEqual([['test@example.com', 'junk-gone', 'SPAM']])
+  })
+
+  it('verifies purge candidates individually: refetch persists, 404 deletes', async () => {
+    const db = {
+      prepare: (sql: string) => ({
+        all: () => {
+          if (sql.includes('SELECT thread_id FROM thread_labels')) {
+            return [{ thread_id: 'relabeled' }, { thread_id: 'purged' }, { thread_id: 'listed' }]
+          }
+          return []
+        },
+        run: () => ({ changes: 1 })
+      }),
+      transaction: (fn: () => void) => fn
+    } as unknown as Db
+    const provider = providerFor([])
+    vi.mocked(provider.getThread)
+      .mockResolvedValueOnce({ id: 'relabeled', messages: [] })
+      .mockRejectedValueOnce(new GmailApiError(404, 'gone'))
+    const persist = vi.fn(async () => {})
+    const remove = vi.fn()
+
+    await reconcilePurgeableMembership(db, 'test@example.com', provider, 'TRASH', ['listed'], {
+      persist,
+      remove
+    })
+
+    // A thread absent from the Trash listing is never deleted on that signal
+    // alone — only a direct 404 proves the purge.
+    expect(provider.getThread).toHaveBeenCalledTimes(2)
+    expect(persist).toHaveBeenCalledWith({ id: 'relabeled', messages: [] })
+    expect(remove).toHaveBeenCalledWith('purged')
   })
 })
 

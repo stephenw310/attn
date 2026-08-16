@@ -1,4 +1,4 @@
-import { GmailApiError } from '../gmail/client'
+import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
 
 export type QueueIntent =
@@ -22,8 +22,65 @@ export function isPermanentActionError(error: unknown): boolean {
     error.status >= 400 &&
     error.status < 500 &&
     !error.retryable &&
-    error.status !== 404
+    error.status !== 401
   )
+}
+
+export type ActionErrorKind = 'auth' | 'permanent' | 'retryable'
+
+const STORED_ERROR_PREFIX = 'attn-action-error:'
+
+interface StoredActionError {
+  version: 1
+  kind: ActionErrorKind
+  message: string
+}
+
+export function storeActionError(error: unknown, kind: ActionErrorKind): string {
+  const stored: StoredActionError = {
+    version: 1,
+    kind,
+    message: error instanceof Error ? error.message : String(error)
+  }
+  return `${STORED_ERROR_PREFIX}${JSON.stringify(stored)}`
+}
+
+export function storedActionErrorKind(message: string | null | undefined): ActionErrorKind | null {
+  if (typeof message !== 'string') return null
+  if (message.startsWith(STORED_ERROR_PREFIX)) {
+    try {
+      const stored = JSON.parse(message.slice(STORED_ERROR_PREFIX.length)) as Partial<StoredActionError>
+      if (
+        stored.version === 1 &&
+        (stored.kind === 'auth' || stored.kind === 'permanent' || stored.kind === 'retryable')
+      ) {
+        return stored.kind
+      }
+    } catch {
+      return null
+    }
+  }
+  // Compatibility for rows written before typed stored errors were introduced.
+  return /\bfailed \(401\):/i.test(message) ? 'auth' : null
+}
+
+export function isTypedStoredActionError(message: string | null | undefined): boolean {
+  return (
+    typeof message === 'string' &&
+    message.startsWith(STORED_ERROR_PREFIX) &&
+    storedActionErrorKind(message) !== null
+  )
+}
+
+export function isStoredAuthActionError(message: string | null | undefined): boolean {
+  return storedActionErrorKind(message) === 'auth'
+}
+
+export function classifyActionError(error: unknown): ActionErrorKind {
+  if (error instanceof GmailAuthError || (error instanceof GmailApiError && error.status === 401)) {
+    return 'auth'
+  }
+  return isPermanentActionError(error) ? 'permanent' : 'retryable'
 }
 
 export function retryDelayMs(previousAttempts: number): number {

@@ -1,5 +1,8 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { OutboxChanged } from '../../shared/outbox'
+import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
@@ -279,7 +282,9 @@ class FakeOutboxDb {
     if (query.startsWith('SELECT state, send_at FROM outbox')) {
       const accountId = String(args[0])
       const row = [...this.rows.values()].find(
-        (candidate) => candidate.account_id === accountId && ['queued', 'sending'].includes(candidate.state)
+        (candidate) =>
+          candidate.account_id === accountId &&
+          (candidate.state === 'sending' || (candidate.state === 'queued' && candidate.send_at !== null))
       )
       return row ? { state: row.state, send_at: row.send_at } : undefined
     }
@@ -290,8 +295,8 @@ class FakeOutboxDb {
         .filter(
           (candidate) =>
             candidate.account_id === accountId &&
-            ['queued', 'sending'].includes(candidate.state) &&
-            (candidate.send_at === null || candidate.send_at <= now)
+            ((candidate.state === 'sending' && (candidate.send_at === null || candidate.send_at <= now)) ||
+              (candidate.state === 'queued' && candidate.send_at !== null && candidate.send_at <= now))
         )
         .sort((left, right) => Number(right.state === 'sending') - Number(left.state === 'sending'))[0]
       return row ? { ...row } : undefined
@@ -422,8 +427,10 @@ function effectSender(
   options: {
     time?: ManualTime
     notify?: (change: OutboxChanged) => void
-    beforeRemote?: () => Promise<void>
+    beforeRemote?: (signal?: AbortSignal) => Promise<void>
     clean?: (id: string) => void
+    spoolRoot?: string | null
+    progress?: (progress: OutboxProgress | null) => void
   } = {}
 ): OutboxSender {
   return new OutboxSender(
@@ -433,12 +440,29 @@ function effectSender(
     options.notify ?? vi.fn(),
     options.beforeRemote,
     options.time ?? new ManualTime(),
-    null,
-    options.clean
+    options.spoolRoot ?? null,
+    options.clean,
+    options.progress
   )
 }
 
 describe('OutboxSender effect layer', () => {
+  it('reports active delivery without treating an idle scheduler timer as running', async () => {
+    let release!: () => void
+    const checkpoint = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const sender = effectSender(new FakeOutboxDb(fakeRow()), effectProvider(), {
+      beforeRemote: () => checkpoint
+    })
+
+    const running = sender.trigger()
+    expect(sender.isRunning()).toBe(true)
+    release()
+    await running
+    expect(sender.isRunning()).toBe(false)
+  })
+
   it('claims a due row once, persists its Gmail id, marks it sent, and cleans its spool', async () => {
     const store = new FakeOutboxDb(fakeRow())
     const clean = vi.fn()
@@ -454,6 +478,100 @@ describe('OutboxSender effect layer', () => {
     expect(updateDraft).toHaveBeenCalledWith(expect.objectContaining({ id: 'draft-1' }), expect.anything())
     expect(sendDraft).toHaveBeenCalledWith('draft-1', expect.anything())
     expect(clean).toHaveBeenCalledWith('outbox-1')
+  })
+
+  it('uploads attachment MIME once through the final update and reports per-file progress', async () => {
+    const spoolRoot = await mkdtemp(join(tmpdir(), 'attn-sender-spool-'))
+    const draftRoot = join(spoolRoot, 'outbox-1')
+    const path = join(draftRoot, 'notes.txt')
+    await mkdir(draftRoot)
+    await writeFile(path, 'attachment bytes')
+    const row = fakeRow({
+      attachments_json: JSON.stringify([
+        {
+          id: 'attachment-1',
+          filename: 'notes.txt',
+          mimeType: 'text/plain',
+          sizeBytes: 16,
+          spoolPath: path
+        }
+      ])
+    })
+    const store = new FakeOutboxDb(row)
+    let uploaded = ''
+    const updateDraft = vi.fn(async (draft: Parameters<NonNullable<MailProvider['updateDraft']>>[0]) => {
+      if (!draft.mime) throw new Error('missing MIME stream')
+      const chunks: Buffer[] = []
+      for await (const chunk of draft.mime.open()) chunks.push(Buffer.from(chunk))
+      const body = Buffer.concat(chunks)
+      expect(draft.mime.sizeBytes).toBe(body.byteLength)
+      uploaded = body.toString()
+      return draft.id
+    })
+    const progress = vi.fn<(value: OutboxProgress | null) => void>()
+    const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
+      expect(Buffer.from(raw, 'base64url').toString()).not.toContain('notes.txt')
+      return 'draft-1'
+    })
+
+    try {
+      await effectSender(store, effectProvider({ createDraft, updateDraft }), {
+        spoolRoot,
+        progress
+      }).trigger()
+    } finally {
+      await rm(spoolRoot, { recursive: true, force: true })
+    }
+
+    expect(createDraft).toHaveBeenCalledOnce()
+    expect(updateDraft).toHaveBeenCalledOnce()
+    expect(uploaded).toContain('Content-Disposition: attachment; filename="notes.txt"')
+    expect(uploaded).toContain(Buffer.from('attachment bytes').toString('base64'))
+    const updates = progress.mock.calls.flatMap(([value]) => (value ? [value] : []))
+    expect(updates.map((value) => value.completedAttachments)).toEqual([0, 1])
+    expect(updates.at(-1)).toMatchObject({ completedBytes: 16, totalBytes: 16 })
+    expect(progress.mock.lastCall?.[0]).toBeNull()
+  })
+
+  it('clears attachment progress when an upload is deferred for retry', async () => {
+    const spoolRoot = await mkdtemp(join(tmpdir(), 'attn-sender-spool-'))
+    const draftRoot = join(spoolRoot, 'outbox-1')
+    const path = join(draftRoot, 'notes.txt')
+    await mkdir(draftRoot)
+    await writeFile(path, 'data')
+    const store = new FakeOutboxDb(
+      fakeRow({
+        gmail_draft_id: 'draft-1',
+        attachments_json: JSON.stringify([
+          {
+            id: 'attachment-1',
+            filename: 'notes.txt',
+            mimeType: 'text/plain',
+            sizeBytes: 4,
+            spoolPath: path
+          }
+        ])
+      })
+    )
+    const progress = vi.fn<(value: OutboxProgress | null) => void>()
+    const updateDraft = vi.fn(async (draft: Parameters<NonNullable<MailProvider['updateDraft']>>[0]) => {
+      if (!draft.mime) throw new Error('missing MIME stream')
+      for await (const _chunk of draft.mime.open()) {
+        // Consume the upload before simulating Gmail's retryable response.
+      }
+      throw new GmailApiError(503, 'unavailable', true)
+    })
+
+    try {
+      await effectSender(store, effectProvider({ updateDraft }), { spoolRoot, progress }).trigger()
+    } finally {
+      await rm(spoolRoot, { recursive: true, force: true })
+    }
+
+    expect(store.row()).toMatchObject({ state: 'sending' })
+    expect(store.row().send_at).toBeGreaterThan(NOW)
+    expect(progress.mock.calls.some(([value]) => value !== null)).toBe(true)
+    expect(progress.mock.lastCall?.[0]).toBeNull()
   })
 
   it('loses a claim race without touching Gmail', async () => {
@@ -618,12 +736,81 @@ describe('OutboxSender effect layer', () => {
     ).trigger()
     expect(invalidStore.row()).toMatchObject({
       state: 'failed',
-      last_error: 'gmail /drafts failed (400): provider diagnostic blob'
+      last_error: 'Gmail rejected this message — check its recipients and attachments'
     })
+    expect(invalidStore.row()?.last_error).not.toContain('provider diagnostic blob')
     expect(notify).toHaveBeenCalledWith({
       kind: 'failed',
       id: 'outbox-1',
-      error: 'Message could not be sent'
+      error: 'Gmail rejected this message — check its recipients and attachments'
+    })
+  })
+
+  it('retries a stale remote attachment locator so draft sync can refresh it', async () => {
+    const getAttachmentData = vi.fn(async () => undefined)
+    const createDraft = vi.fn(async () => 'draft-1')
+    const store = new FakeOutboxDb(
+      fakeRow({
+        attachments_json: JSON.stringify([
+          {
+            id: 'remote-attachment',
+            filename: 'report.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 12,
+            spoolPath: '',
+            remoteMessageId: 'stale-message',
+            remoteAttachmentId: 'stale-locator'
+          }
+        ])
+      })
+    )
+
+    await effectSender(store, effectProvider({ createDraft, getAttachmentData })).trigger()
+
+    expect(getAttachmentData).toHaveBeenCalledWith(
+      'stale-message',
+      'stale-locator',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    expect(createDraft).not.toHaveBeenCalled()
+    expect(store.row()).toMatchObject({
+      state: 'queued',
+      attempts: 1,
+      send_at: NOW + 5_000,
+      last_error: 'An attachment is temporarily unavailable — Attn will retry'
+    })
+  })
+
+  it('fails a message whose attachment source never recovers instead of retrying forever', async () => {
+    const getAttachmentData = vi.fn(async () => undefined)
+    const createDraft = vi.fn(async () => 'draft-1')
+    const notify = vi.fn()
+    const store = new FakeOutboxDb(
+      fakeRow({
+        // One short of the ladder's limit, so this attempt is the last one.
+        attempts: 7,
+        attachments_json: JSON.stringify([
+          {
+            id: 'remote-attachment',
+            filename: 'report.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 12,
+            spoolPath: '',
+            remoteMessageId: 'stale-message',
+            remoteAttachmentId: 'stale-locator'
+          }
+        ])
+      })
+    )
+
+    await effectSender(store, effectProvider({ createDraft, getAttachmentData }), { notify }).trigger()
+
+    expect(createDraft).not.toHaveBeenCalled()
+    expect(store.row()).toMatchObject({ state: 'failed', attempts: 8, send_at: null })
+    expect(notify).toHaveBeenCalledWith({
+      kind: 'failed',
+      id: 'outbox-1',
+      error: 'An attachment is still unavailable — reopen the message and attach it again'
     })
   })
 
@@ -647,6 +834,43 @@ describe('OutboxSender effect layer', () => {
     expect(store.row().state).toBe('sent')
   })
 
+  it('does not spin on a malformed queued row without a send time', async () => {
+    const store = new FakeOutboxDb(fakeRow({ send_at: null }))
+    const time = new ManualTime()
+    const sender = effectSender(store, effectProvider(), { time })
+
+    sender.start()
+    expect(time.nextDelay()).toBeUndefined()
+    await sender.trigger()
+    expect(store.row().state).toBe('queued')
+    expect(time.nextDelay()).toBeUndefined()
+  })
+
+  it('contains top-level drain failures and retries them with backoff', async () => {
+    const time = new ManualTime()
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const brokenDb = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => {
+          throw new Error('database unavailable')
+        })
+      }))
+    } as unknown as Db
+    const sender = new OutboxSender(
+      brokenDb,
+      () => 'me@example.com',
+      () => effectProvider(),
+      vi.fn(),
+      undefined,
+      time
+    )
+
+    await expect(sender.trigger()).resolves.toBeUndefined()
+    expect(error).toHaveBeenCalledWith('[outbox] drain failed: database unavailable')
+    expect(time.nextDelay()).toBe(5_000)
+    error.mockRestore()
+  })
+
   it('aborts a stalled Gmail request after the shutdown grace period and persists recovery state', async () => {
     const store = new FakeOutboxDb(fakeRow())
     const time = new ManualTime()
@@ -668,6 +892,51 @@ describe('OutboxSender effect layer', () => {
     await Promise.all([running, stopping])
 
     expect(observedSignal?.aborted).toBe(true)
-    expect(store.row()).toMatchObject({ state: 'sending', attempts: 1, verify_attempts: 0 })
+    expect(store.row()).toMatchObject({ state: 'sending', attempts: 0, verify_attempts: 0, last_error: null })
+  })
+
+  it('applies the shutdown grace period while waiting for an active mirror checkpoint', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const time = new ManualTime()
+    let observedSignal: AbortSignal | undefined
+    const beforeRemote = vi.fn(
+      async (signal?: AbortSignal) =>
+        new Promise<void>((_resolve, reject) => {
+          observedSignal = signal
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+    )
+    const sender = effectSender(store, effectProvider(), { time, beforeRemote })
+    const running = sender.trigger()
+    await vi.waitFor(() => expect(beforeRemote).toHaveBeenCalledOnce())
+
+    const stopping = sender.stop()
+    expect(time.nextDelay()).toBe(5_000)
+    time.advance(5_000)
+    await Promise.all([running, stopping])
+
+    expect(observedSignal?.aborted).toBe(true)
+    expect(store.row()).toMatchObject({ state: 'queued', attempts: 0, last_error: null })
+  })
+
+  it('stores and broadcasts a stable user-facing error instead of Gmail response text', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const notify = vi.fn()
+    const createDraft = vi.fn(async () => {
+      throw new GmailApiError(400, 'gmail /drafts failed (400): {"error":{"private":"details"}}')
+    })
+    const sender = effectSender(store, effectProvider({ createDraft }), { notify })
+
+    await sender.trigger()
+
+    expect(store.row()).toMatchObject({
+      state: 'failed',
+      last_error: 'Gmail rejected this message — check its recipients and attachments'
+    })
+    expect(notify).toHaveBeenLastCalledWith({
+      kind: 'failed',
+      id: 'outbox-1',
+      error: 'Gmail rejected this message — check its recipients and attachments'
+    })
   })
 })

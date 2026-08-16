@@ -66,6 +66,8 @@ describe('command catalog', () => {
       'composer.close',
       'composer.discard',
       'composer.send',
+      'composer.attach',
+      'composer.removeAttachment',
       'composer.bold',
       'composer.italic',
       'composer.underline',

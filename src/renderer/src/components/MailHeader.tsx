@@ -8,11 +8,17 @@ const QUEUE_METER_STEPS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven'
 
 function QueueReadout({
   unread,
-  pending,
+  pendingActions,
+  pausedActions,
+  outbox,
+  onReconnect,
   onOpenOutbox
 }: {
   unread: number | null
-  pending: number
+  pendingActions: number
+  pausedActions: number
+  outbox: number
+  onReconnect: () => void
   onOpenOutbox?: () => void
 }): React.JSX.Element {
   const lit = Math.min(unread ?? 0, 10)
@@ -35,15 +41,34 @@ function QueueReadout({
       ) : (
         <span className="font-medium">at zero</span>
       )}
-      {pending > 0 && (
+      {pendingActions > 0 && (
+        <span data-testid="pending-count" className="font-medium tabular-nums">
+          · {pendingActions} pending
+        </span>
+      )}
+      {outbox > 0 && (
         <button
           type="button"
-          data-testid="pending-count"
+          data-testid="outbox-count"
           disabled={!onOpenOutbox}
           className="cursor-pointer rounded px-1 py-0.5 hover:bg-active hover:text-ink-dim disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit"
           onClick={onOpenOutbox}
         >
-          · {pending} pending
+          · {outbox} in Outbox
+        </button>
+      )}
+      {/* Paused rows are a subset of `pendingActions` — the rest of the queue is
+          still draining — and outbox sends can never be auth-paused at all, so
+          the reconnect control is its own readout rather than a relabeled count. */}
+      {pausedActions > 0 && (
+        <button
+          type="button"
+          data-testid="action-reconnect"
+          onClick={onReconnect}
+          title="Google authorization expired; reconnect to retry paused changes"
+          className="cursor-pointer font-medium text-accent hover:underline"
+        >
+          <span data-testid="paused-count">· {pausedActions} paused</span> · Reconnect Google
         </button>
       )}
     </div>
@@ -147,11 +172,14 @@ function AccountMenu({
 interface MailHeaderProps {
   view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   unreadCount: number | null
-  pendingCount: number
+  pendingActionCount: number
+  pausedActionCount: number
+  outboxCount: number
   selectionCount: number
   composerOpen: boolean
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
+  onReconnectActions: () => void
   onSwitchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
   onOpenOutbox: () => void
 }
@@ -160,11 +188,14 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   const {
     view,
     unreadCount,
-    pendingCount,
+    pendingActionCount,
+    pausedActionCount,
+    outboxCount,
     selectionCount,
     composerOpen,
     status,
     onStatus,
+    onReconnectActions,
     onSwitchView,
     onOpenOutbox
   } = props
@@ -219,7 +250,10 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         )}
         <QueueReadout
           unread={unreadCount}
-          pending={pendingCount}
+          pendingActions={pendingActionCount}
+          pausedActions={pausedActionCount}
+          outbox={outboxCount}
+          onReconnect={onReconnectActions}
           onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
         />
         <AccountMenu status={status} onStatus={onStatus} />

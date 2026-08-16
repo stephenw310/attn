@@ -39,6 +39,10 @@ export class ComposerPage {
     return this.page.getByTestId('composer-attachments')
   }
 
+  get attachmentChips(): Locator {
+    return this.page.getByTestId('composer-attachment-chip')
+  }
+
   async openNew(): Promise<void> {
     // firstWindow() can resolve while React is still mounting; wait for the
     // inbox command registry before sending the single global keystroke.
@@ -88,11 +92,39 @@ export class ComposerPage {
     await this.editor.pressSequentially(text)
   }
 
+  async pickAttachments(): Promise<void> {
+    await this.page.getByTestId('composer-attach').click()
+  }
+
+  async dropFiles(paths: string[]): Promise<void> {
+    const input = this.page.locator('[data-testid="composer-drop-file-input"]')
+    await this.page.evaluate(() => {
+      const element = document.createElement('input')
+      element.type = 'file'
+      element.multiple = true
+      element.hidden = true
+      element.dataset.testid = 'composer-drop-file-input'
+      document.body.append(element)
+    })
+    await input.setInputFiles(paths)
+    const dataTransfer = await input.evaluateHandle((element: HTMLInputElement) => {
+      const transfer = new DataTransfer()
+      for (const file of element.files ?? []) transfer.items.add(file)
+      return transfer
+    })
+    try {
+      await this.root.dispatchEvent('drop', { dataTransfer })
+    } finally {
+      await dataTransfer.dispose()
+      await input.evaluate((element) => element.remove())
+    }
+  }
+
   async triggerSend(): Promise<void> {
     await this.page.keyboard.press('ControlOrMeta+Enter')
   }
 
-  /** Retries until the header's pending readout settles on `count`. */
+  /** Retries until the header's Outbox readout settles on `count`. */
   async expectPending(count: number): Promise<void> {
     await expect.poll(() => this.readPending()).toBe(count)
   }
@@ -127,12 +159,12 @@ export class ComposerPage {
     // `evaluateAll` neither waits nor throws on an empty match, which is what
     // makes it safe inside a poll: the retry lives in the assertion above.
     const texts = await this.page
-      .getByTestId('pending-count')
+      .getByTestId('outbox-count')
       .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''))
     // The chip renders only above zero, so an absent node is a real zero.
     if (texts.length === 0) return 0
-    const pending = /(\d+)\s+pending/.exec(texts[0])
-    if (!pending) throw new Error(`pending-count did not read as "<n> pending": ${texts[0]}`)
+    const pending = /(\d+)\s+in Outbox/.exec(texts[0])
+    if (!pending) throw new Error(`outbox-count did not read as "<n> in Outbox": ${texts[0]}`)
     return Number(pending[1])
   }
 }
