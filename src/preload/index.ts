@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { formatActionRevertToast, type RevertedAction } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthStatus } from '../shared/auth'
 import type { ContactSearchResult } from '../shared/contacts'
@@ -60,6 +61,14 @@ const api = {
       const listener = (): void => cb()
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
+    },
+    onActionsReverted: (cb: (message: string) => void): (() => void) => {
+      const listener = (_event: unknown, actions: RevertedAction[]): void => {
+        const message = formatActionRevertToast(actions)
+        if (message) cb(message)
+      }
+      ipcRenderer.on(IPC_CHANNELS.mailActionsReverted, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.mailActionsReverted, listener)
     },
     onBodyHydrationFailed: (cb: (accountId: string, threadId: string) => void): (() => void) => {
       const listener = (_event: unknown, payload: { accountId: string; threadId: string }): void =>

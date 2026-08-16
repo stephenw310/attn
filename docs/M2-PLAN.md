@@ -679,6 +679,8 @@ Attach → queue → relaunch → send survives with bytes intact; caps enforced
 
 ## T18 — Self-healing failed actions (deciding an M1 deferred call)
 
+**Status: implemented.**
+
 **Depends on:** nothing (parallel-friendly) · **Spec:** F2 action queue + conflict rule; M1 deviations rows 2–3
 
 **Product decision (owner, 2026-08-13):** a permanently failed action **repairs itself and says so** — local state converges back to what the server actually thinks, so an archive Gmail rejected simply reappears in the inbox. No failed-actions panel, no retry button, no error log. Debugging sync is not the user's job.

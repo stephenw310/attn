@@ -152,6 +152,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const { retrySync, copySyncError } = useSyncActions(sync, showToast)
 
+  useEffect(() => {
+    if (!window.attn || !activeAccount) return
+    return window.attn.mail.onActionsReverted(showToast)
+  }, [activeAccount, showToast])
+
   const switchView = useCallback((next: 'inbox' | 'snoozed' | 'drafts') => {
     activeViewRef.current = next
     selectedThreadIdRef.current = null

@@ -1,3 +1,4 @@
+import type { RevertedAction } from './actionRevert'
 import type { TriageAction, TriageResult } from './actions'
 import type { AuthStatus } from './auth'
 import type { ContactSearchResult } from './contacts'
@@ -54,6 +55,7 @@ export const IPC_CHANNELS = {
   mailUndo: 'mail:undo',
   mailGetPendingActionCount: 'mail:getPendingActionCount',
   mailChanged: 'mail:changed',
+  mailActionsReverted: 'mail:actionsReverted',
   mailBodyHydrationFailed: 'mail:bodyHydrationFailed',
   mailFocusThreadAvailable: 'mail:focusThreadAvailable',
   syncState: 'sync:state'
@@ -74,7 +76,8 @@ export const TEST_CHANNELS = {
   updateMessageBody: 'attn:test:updateMessageBody',
   failNextDraftSave: 'attn:test:failNextDraftSave',
   markDraftMirrored: 'attn:test:markDraftMirrored',
-  remoteDraft: 'attn:test:remoteDraft'
+  remoteDraft: 'attn:test:remoteDraft',
+  failNextAction: 'attn:test:failNextAction'
 } as const
 
 export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]
@@ -139,6 +142,7 @@ export interface InvokeChannels {
 
 export interface BroadcastChannels {
   [IPC_CHANNELS.mailChanged]: undefined
+  [IPC_CHANNELS.mailActionsReverted]: RevertedAction[]
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
   [IPC_CHANNELS.syncState]: SyncState

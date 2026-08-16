@@ -2,18 +2,19 @@ import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
+import type { RevertedAction } from '../shared/actionRevert'
 import type { AuthStatus } from '../shared/auth'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
 import { clearUndo } from './actions'
-import { ActionExecutor } from './actions/executor'
+import { ActionExecutor, type ActionRecoveryProvider } from './actions/executor'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { type Db, openDatabase, schemaVersion } from './db'
-import { loadSeed } from './dev/seed'
-import { GmailClient } from './gmail/client'
+import { loadSeed, readSeedThread } from './dev/seed'
+import { GmailApiError, GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
@@ -59,6 +60,7 @@ let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
 let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
+let testActionProvider: ActionRecoveryProvider | null = null
 let signInInFlight = false
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
@@ -72,6 +74,11 @@ function broadcastMailChanged(): void {
 
 function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
   broadcast(IPC_CHANNELS.mailBodyHydrationFailed, { accountId, threadId })
+}
+
+function broadcastActionsReverted(actions: RevertedAction[]): void {
+  broadcast(IPC_CHANNELS.mailActionsReverted, actions)
+  testActionProvider = null
 }
 
 function focusInboxThread(threadId: string): void {
@@ -129,6 +136,10 @@ function makeCurrentProvider(): GmailMailProvider | null {
   return controller ? makeProvider(controller.getGeneration()) : null
 }
 
+function makeCurrentActionProvider(): ActionRecoveryProvider | null {
+  return testActionProvider ?? makeCurrentProvider()
+}
+
 async function waitForConversation(threadId: string): Promise<void> {
   const delay = testConversationDelay
   if (!testUserData || delay?.threadId !== threadId) return
@@ -147,6 +158,7 @@ async function signIn(): Promise<AuthStatus> {
     mailNotifier?.setAccountId(tokens.email ?? null)
     console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
     snoozeScheduler?.refresh()
+    if (tokens.email) actionExecutor?.resumeAuthFailures(tokens.email)
     syncController?.onSignIn()
   } catch (error) {
     console.error('[auth] sign-in failed:', error instanceof Error ? error.message : error)
@@ -277,7 +289,13 @@ function initialize(): void {
     },
     testUserData: Boolean(testUserData)
   })
-  actionExecutor = new ActionExecutor(activeDb, currentAccountId, makeCurrentProvider, broadcastMailChanged)
+  actionExecutor = new ActionExecutor(
+    activeDb,
+    currentAccountId,
+    makeCurrentActionProvider,
+    broadcastMailChanged,
+    broadcastActionsReverted
+  )
   draftMirrorExecutor = new DraftMirrorExecutor(
     activeDb,
     currentAccountId,
@@ -365,6 +383,23 @@ function registerTestIpc(): void {
   ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
     testDraftSaveFailures++
   })
+  ipcMain.on(TEST_CHANNELS.failNextAction, (_event, threadId: unknown) => {
+    if (!seedPath || typeof threadId !== 'string') return
+    const snapshot = readSeedThread(seedPath, threadId)
+    if (!snapshot) return
+    const fail = async (): Promise<void> => {
+      throw new GmailApiError(400, `gmail /threads/${threadId}/modify failed (400): permanent e2e failure`)
+    }
+    testActionProvider = {
+      modifyThread: fail,
+      trashThread: fail,
+      untrashThread: fail,
+      getThread: async (requestedThreadId) => {
+        if (requestedThreadId !== threadId) throw new GmailApiError(404, 'seed thread unavailable')
+        return snapshot
+      }
+    }
+  })
   ipcMain.on(TEST_CHANNELS.markDraftMirrored, (_event, draftId: unknown, gmailDraftId?: unknown) => {
     const account = currentAccountId()
     if (!db || !account || typeof draftId !== 'string') return
@@ -410,6 +445,7 @@ function teardown(): void {
   for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
   testDraftSaveFailures = 0
   testDraftInlineImageDelayMs = 0
+  testActionProvider = null
   db?.close()
   db = null
 }

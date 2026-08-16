@@ -1,3 +1,4 @@
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
@@ -14,6 +15,29 @@ test('archives with auto-advance and undoes durably', async ({ page }) => {
   await page.keyboard.press('z')
   await expect(rows).toHaveCount(8)
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+})
+
+test('self-heals a permanently rejected archive and invalidates its undo', async ({ app, page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.threadId), {
+    channel: TEST_CHANNELS.failNextAction,
+    threadId: 't-roadmap'
+  })
+
+  await page.keyboard.press('e')
+
+  await expect(page.getByTestId('toast')).toHaveText(
+    "Couldn't archive 'Q3 roadmap review' — it's back in your inbox."
+  )
+  await expect(rows).toHaveCount(8)
+  await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
+
+  await page.keyboard.press('z')
+  await expect(rows).toHaveCount(8)
+  await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
+  await expect(page.getByTestId('pending-count')).toHaveCount(0)
 })
 
 test('animates a marked-done row before removing it', async ({ page }) => {

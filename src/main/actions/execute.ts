@@ -22,8 +22,25 @@ export function isPermanentActionError(error: unknown): boolean {
     error.status >= 400 &&
     error.status < 500 &&
     !error.retryable &&
+    error.status !== 401 &&
     error.status !== 404
   )
+}
+
+export type ActionErrorKind = 'auth' | 'permanent' | 'retryable'
+
+export function isStoredAuthActionError(message: string | null | undefined): boolean {
+  return typeof message === 'string' && /\bfailed \(401\):/i.test(message)
+}
+
+export function classifyActionError(error: unknown): ActionErrorKind {
+  if (
+    (error instanceof GmailApiError && error.status === 401) ||
+    isStoredAuthActionError(error instanceof Error ? error.message : String(error))
+  ) {
+    return 'auth'
+  }
+  return isPermanentActionError(error) ? 'permanent' : 'retryable'
 }
 
 export function retryDelayMs(previousAttempts: number): number {
