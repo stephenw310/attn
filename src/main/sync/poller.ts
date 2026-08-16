@@ -17,6 +17,7 @@ export interface NewMail {
 export interface CyclePlan {
   refetchThreadIds: string[]
   newMail: NewMail[]
+  promoteInboxThreadIds: string[]
 }
 
 export interface FetchedHistoryPlan extends CyclePlan {
@@ -28,6 +29,7 @@ export const historyEvents = new EventEmitter()
 export function planCycle(records: HistoryRecord[]): CyclePlan {
   const refetchThreadIds = new Set<string>()
   const newMail = new Map<string, NewMail>()
+  const promoteInboxThreadIds = new Set<string>()
 
   for (const record of records) {
     for (const message of record.messages ?? []) refetchThreadIds.add(message.threadId)
@@ -38,13 +40,21 @@ export function planCycle(records: HistoryRecord[]): CyclePlan {
       if (labels.has('INBOX') && labels.has('UNREAD') && !labels.has('SENT')) {
         newMail.set(message.id, { threadId: message.threadId, messageId: message.id })
       }
+      if (labels.has('INBOX')) promoteInboxThreadIds.add(message.threadId)
+    }
+    for (const event of record.labelsAdded ?? []) {
+      if (event.labelIds?.includes('INBOX')) promoteInboxThreadIds.add(event.message.threadId)
     }
     for (const events of [record.messagesDeleted, record.labelsAdded, record.labelsRemoved]) {
       for (const event of events ?? []) refetchThreadIds.add(event.message.threadId)
     }
   }
 
-  return { refetchThreadIds: [...refetchThreadIds], newMail: [...newMail.values()] }
+  return {
+    refetchThreadIds: [...refetchThreadIds],
+    newMail: [...newMail.values()],
+    promoteInboxThreadIds: [...promoteInboxThreadIds]
+  }
 }
 
 /** Page history to exhaustion, then reduce all pages as one poll cycle. */
@@ -111,12 +121,15 @@ export async function runHistoryCycle(
   if (!state?.last_history_id) throw new Error(`missing history checkpoint for ${accountId}`)
 
   const plan = await fetchHistoryPlan(provider, state.last_history_id)
+  const promoteInbox = new Set(plan.promoteInboxThreadIds)
   for (const threadId of plan.refetchThreadIds) {
     try {
       const thread = await provider.getThread(threadId, { format: 'full' })
       if (effects.persist) await effects.persist(thread)
       else {
-        persistThread(db, accountId, thread)
+        persistThread(db, accountId, thread, {
+          inboxVisibility: promoteInbox.has(threadId) ? 'show' : 'preserve'
+        })
         await hydrateMissingThreadBodies(db, provider, accountId, thread)
       }
     } catch (error) {
@@ -144,6 +157,7 @@ export interface HistoryPollerOptions {
   provider: MailProvider
   isForeground: () => boolean
   recoverExpiredHistory: () => Promise<void>
+  onCycleStart?: () => void
   onCycleComplete: (changed: boolean) => void
   onError: (error: unknown) => void
   wakeThread?: (threadId: string) => void
@@ -200,6 +214,7 @@ export class HistoryPoller {
     this.timer = null
     this.executing = true
     this.lastAttemptAt = this.time.now()
+    this.options.onCycleStart?.()
     try {
       let plan: FetchedHistoryPlan | null = null
       if (this.recoveryPending) {

@@ -12,6 +12,16 @@ function syncStageLabel(stage: SyncStage): string {
   return 'Finishing up'
 }
 
+function lifetimeEta(etaMs: number | undefined): string {
+  if (etaMs === undefined) return ''
+  const minutes = Math.max(1, Math.ceil(etaMs / 60_000))
+  if (minutes < 60) return ` · ~${minutes} min left`
+  const hours = Math.ceil(minutes / 60)
+  if (hours < 24) return ` · ~${hours} hr left`
+  const days = Math.ceil(hours / 24)
+  return ` · ~${days} day${days === 1 ? '' : 's'} left`
+}
+
 function SyncProgress({ stage }: { stage: SyncStage }): React.JSX.Element {
   const activeIndex = SYNC_STAGES.indexOf(stage)
   return (
@@ -55,8 +65,28 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           ? 'live'
           : sync.phase === 'checking'
             ? 'checking'
-            : 'syncing'
+            : sync.phase === 'indexing'
+              ? 'indexing'
+              : 'syncing'
   const syncingStage = sync.phase === 'syncing' ? sync.stage : 'metadata'
+  const lifetimeCount =
+    sync.phase === 'indexing'
+      ? `${sync.threadsDone.toLocaleString()}${
+          sync.threadsTotal === undefined ? '' : ` of ${sync.threadsTotal.toLocaleString()}`
+        } threads`
+      : ''
+  const lifetimeDetail =
+    sync.phase !== 'indexing'
+      ? ''
+      : sync.reason === 'quota-wait'
+        ? `Quota pacing · ${lifetimeCount}${lifetimeEta(sync.etaMs)}`
+        : sync.reason === 'foreground-yield'
+          ? `Foreground work first · ${lifetimeCount}${lifetimeEta(sync.etaMs)}`
+          : sync.reason === 'retry-wait'
+            ? `Indexing paused · retrying soon · ${lifetimeCount}`
+            : sync.reason === 'paused'
+              ? `Indexing paused · ${lifetimeCount}`
+              : `${lifetimeCount} indexed${lifetimeEta(sync.etaMs)}`
 
   const closeDetails = useCallback(() => {
     setDetailsOpen(false)
@@ -90,23 +120,27 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
   const label =
     displayState === 'live'
       ? 'Live'
-      : displayState === 'offline'
-        ? 'Offline'
-        : displayState === 'error'
-          ? 'Error'
-          : displayState === 'checking'
-            ? 'Checking mail'
-            : `Syncing · ${syncStageLabel(syncingStage)}`
+      : displayState === 'indexing'
+        ? 'Live · indexing older mail'
+        : displayState === 'offline'
+          ? 'Offline'
+          : displayState === 'error'
+            ? 'Error'
+            : displayState === 'checking'
+              ? 'Checking mail'
+              : `Syncing · ${syncStageLabel(syncingStage)}`
   const detail =
     displayState === 'live'
       ? 'Up to date'
-      : displayState === 'offline'
-        ? 'Local mail available'
-        : displayState === 'error'
-          ? 'Click for details'
-          : displayState === 'checking'
-            ? 'Looking for new mail'
-            : null
+      : displayState === 'indexing'
+        ? lifetimeDetail
+        : displayState === 'offline'
+          ? 'Local mail available'
+          : displayState === 'error'
+            ? 'Click for details'
+            : displayState === 'checking'
+              ? 'Looking for new mail'
+              : null
   const title =
     displayState === 'error' && sync.phase === 'error'
       ? sync.message
@@ -114,7 +148,21 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
         ? sync.message
         : displayState === 'syncing' && sync.phase === 'syncing'
           ? `${label} — ${sync.threadsDone} processed`
-          : `${label} — ${detail}`
+          : displayState === 'indexing' && sync.phase === 'indexing'
+            ? `${label} — ${lifetimeDetail}${
+                sync.messagesTotal === undefined
+                  ? ''
+                  : ` · ${sync.messagesTotal.toLocaleString()} messages in account`
+              }`
+            : `${label} — ${detail}`
+  const liveAnnouncement =
+    displayState === 'indexing' && sync.phase === 'indexing'
+      ? sync.reason === 'retry-wait'
+        ? 'Older mail indexing paused; retrying soon'
+        : sync.reason === 'paused'
+          ? 'Older mail indexing paused'
+          : 'Older mail indexing in progress'
+      : `${label}${detail ? `: ${detail}` : ''}`
 
   const body = (
     <>
@@ -128,6 +176,23 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       </span>
       {displayState === 'syncing' && sync.phase === 'syncing' ? (
         <SyncProgress stage={sync.stage} />
+      ) : displayState === 'indexing' && sync.phase === 'indexing' ? (
+        <span
+          data-testid="lifetime-progress"
+          role="progressbar"
+          aria-label={`Lifetime header index: ${lifetimeDetail}`}
+          aria-valuetext={lifetimeDetail}
+          {...(sync.threadsTotal === undefined
+            ? {}
+            : {
+                'aria-valuemin': 0,
+                'aria-valuemax': sync.threadsTotal,
+                'aria-valuenow': Math.min(sync.threadsDone, sync.threadsTotal)
+              })}
+          className="col-start-2 row-start-2 max-w-[174px] overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] leading-[10px] text-ink-faint"
+        >
+          {detail}
+        </span>
       ) : (
         <span className="col-start-2 row-start-2 text-[9.5px] leading-[10px] text-ink-faint">{detail}</span>
       )}
@@ -141,8 +206,10 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       data-status={displayState}
       className="relative ml-auto flex w-[196px] flex-none justify-end"
       title={title}
-      aria-live="polite"
     >
+      <span className="sr-only" aria-live="polite">
+        {liveAnnouncement}
+      </span>
       {displayState === 'error' && sync.phase === 'error' ? (
         <button
           type="button"

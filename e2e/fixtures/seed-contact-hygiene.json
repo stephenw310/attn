@@ -1,0 +1,66 @@
+{
+  "account": "hygiene@attn.test",
+  "labels": [
+    { "id": "INBOX", "name": "Inbox", "type": "system" },
+    { "id": "SPAM", "name": "Spam", "type": "system" },
+    { "id": "TRASH", "name": "Trash", "type": "system" }
+  ],
+  "threads": [
+    {
+      "id": "t-hygiene-valid",
+      "messages": [
+        {
+          "id": "m-hygiene-valid",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 1,
+          "from": "Trusted Friend <trusted@example.com>",
+          "to": "hygiene@attn.test",
+          "subject": "A real conversation",
+          "snippet": "This sender belongs in autocomplete."
+        }
+      ]
+    },
+    {
+      "id": "t-hygiene-spam",
+      "messages": [
+        {
+          "id": "m-hygiene-spam",
+          "labelIds": ["SPAM"],
+          "receivedDaysAgo": 2,
+          "from": "Bulk Spammer <spam-source@example.com>",
+          "to": "hygiene@attn.test",
+          "subject": "Not a real contact",
+          "snippet": "This sender must stay out of autocomplete."
+        }
+      ]
+    },
+    {
+      "id": "t-hygiene-trash",
+      "messages": [
+        {
+          "id": "m-hygiene-trash",
+          "labelIds": ["TRASH"],
+          "receivedDaysAgo": 3,
+          "from": "Deleted Sender <trash-source@example.com>",
+          "to": "hygiene@attn.test",
+          "subject": "Deleted mail",
+          "snippet": "This sender must stay out of autocomplete."
+        }
+      ]
+    },
+    {
+      "id": "t-hygiene-chat",
+      "messages": [
+        {
+          "id": "m-hygiene-chat",
+          "labelIds": ["CHAT"],
+          "receivedDaysAgo": 4,
+          "from": "Legacy Chatter <chat-source@example.com>",
+          "to": "hygiene@attn.test",
+          "subject": "Legacy Hangouts row",
+          "snippet": "This row is not mail."
+        }
+      ]
+    }
+  ]
+}

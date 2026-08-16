@@ -39,6 +39,11 @@ export class ActionExecutor {
     return this.drainPromise
   }
 
+  /** True only while user-action replay is actively using Gmail, not during retry backoff. */
+  isRunning(): boolean {
+    return this.drainPromise !== null
+  }
+
   stop(): void {
     this.stopping = true
     if (this.timer) this.time.timers.clearTimeout(this.timer)

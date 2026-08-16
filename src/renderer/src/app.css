@@ -183,6 +183,12 @@
   animation: status-dot-pulse 1.5s ease-in-out infinite;
 }
 
+[data-status="indexing"] .app-status-dot {
+  background: var(--color-status-live);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-live) 8%, transparent);
+  animation: status-dot-pulse 2.4s ease-in-out infinite;
+}
+
 [data-status="offline"] .app-status-dot {
   background: var(--color-status-offline);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-offline) 8%, transparent);

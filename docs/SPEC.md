@@ -138,9 +138,9 @@ the local `has:attachment`/filename search it feeds) arrives when a thread is fi
 than the 90-day window are fetched on demand and cached permanently. UI renders as soon as the first page of
 inbox metadata lands.
 
-*Shipped staging:* M2 currently runs inbox → bodies → drafts → sent → reconcile; the lifetime sweep lands
-with T13A, still in M2. The all-mail and spam-trash stages, per-message label storage, and the generalized
-reconcile open M3 (§9 #10, #17).
+*Shipped staging:* M2 runs inbox → bodies → drafts → sent → reconcile, then starts T13A's independent,
+low-priority lifetime sweep. The all-mail and spam-trash stages, per-message label storage, and the
+generalized reconcile open M3 (§9 #10, #17).
 
 **Window rationale and completion semantics:** headers are cheap — roughly 1–2 KB and ~10 quota units per
 thread, so a typical account's lifetime header index costs an hour or two of background sweeping and a few
@@ -156,8 +156,9 @@ the remaining window continues in the background or is available on demand.
 **Lifetime header sweep (T13A as revised by §9 #17; supersedes the Sent-only pass of §9 #15):** after
 interactive readiness, a resumable low-priority pass walks lifetime message headers across the whole account
 (no label filter, newest first), skipping threads already stored. It persists its own cursor, reports
-progress against `getProfile`'s `threadsTotal`/`messagesTotal`, and never downloads old bodies or
-attachments. Contact statistics derive from the same header stream — recipients of Sent mail, senders of
+thread progress against the unfiltered listing's `resultSizeEstimate` (and exact exhausted count), reports
+message context from `getProfile().messagesTotal`, and never downloads old bodies or attachments. Contact
+statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
 never contribute to contacts. While the pass runs, sync status reads **Live · indexing older mail** with
 progress and quota-wait detail. Importing a user's saved Google Contacts through the People API remains a

@@ -38,7 +38,7 @@ function providerFor(pages: HistoryPage[]): MailProvider {
 }
 
 function plan(refetchThreadIds: string[] = []): FetchedHistoryPlan {
-  return { historyId: '11', refetchThreadIds, newMail: [] }
+  return { historyId: '11', refetchThreadIds, newMail: [], promoteInboxThreadIds: [] }
 }
 
 function checkpointDb(lastHistoryId = '10'): { db: Db; checkpoint: () => string } {
@@ -77,8 +77,20 @@ describe('history cycle planner', () => {
   it('dedupes every affected thread and identifies only inbound unread mail', () => {
     expect(planCycle(fixture)).toEqual({
       refetchThreadIds: ['t-label', 't-deleted', 't-inbound', 't-self', 't-read'],
-      newMail: [{ threadId: 't-inbound', messageId: 'm-inbound' }]
+      newMail: [{ threadId: 't-inbound', messageId: 'm-inbound' }],
+      promoteInboxThreadIds: ['t-inbound', 't-self', 't-read']
     })
+  })
+
+  it('promotes a lifetime-hidden thread when Gmail explicitly adds it to Inbox', () => {
+    expect(
+      planCycle([
+        {
+          id: '12',
+          labelsAdded: [{ message: { id: 'old-message', threadId: 'old-thread' }, labelIds: ['INBOX'] }]
+        }
+      ]).promoteInboxThreadIds
+    ).toEqual(['old-thread'])
   })
 
   it('combines mixed pages and preserves 64-bit history ids', async () => {

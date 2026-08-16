@@ -24,7 +24,9 @@ import { OutboxSender } from './outbox/sender'
 import { cleanOutboxSpool } from './outbox/spool'
 import { SnoozeScheduler } from './scheduler'
 import { writeSetting } from './settings'
+import { runLifetimeSweep } from './sync/lifetimeSweep'
 import { deleteThread } from './sync/persist'
+import type { MailProvider } from './sync/provider'
 import { SyncController } from './syncController'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
@@ -65,6 +67,7 @@ let testConversationDelay: { threadId: string; delayMs: number } | null = null
 let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
 let signInInFlight = false
+const foregroundProviderWork = new Map<string, number>()
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
@@ -82,6 +85,21 @@ function broadcastOutboxChanged(change: OutboxChanged): void {
 
 function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
   broadcast(IPC_CHANNELS.mailBodyHydrationFailed, { accountId, threadId })
+}
+
+function hasForegroundProviderWork(accountId: string): boolean {
+  return (foregroundProviderWork.get(accountId) ?? 0) > 0
+}
+
+async function trackForegroundProviderWork<T>(accountId: string, work: () => Promise<T>): Promise<T> {
+  foregroundProviderWork.set(accountId, (foregroundProviderWork.get(accountId) ?? 0) + 1)
+  try {
+    return await work()
+  } finally {
+    const remaining = (foregroundProviderWork.get(accountId) ?? 1) - 1
+    if (remaining > 0) foregroundProviderWork.set(accountId, remaining)
+    else foregroundProviderWork.delete(accountId)
+  }
 }
 
 function focusInboxThread(threadId: string): void {
@@ -254,6 +272,7 @@ function initialize(): void {
     isSeeded,
     makeProvider,
     isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
+    hasForegroundProviderWork,
     broadcastState: (state) => broadcast(IPC_CHANNELS.syncState, state),
     broadcastMailChanged,
     getActionExecutor: () => actionExecutor,
@@ -278,6 +297,7 @@ function initialize(): void {
     broadcastMailChanged,
     broadcastOutboxChanged,
     broadcastBodyHydrationFailed,
+    trackForegroundProviderWork,
     pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
       pendingFocus = null
@@ -460,6 +480,92 @@ function registerTestIpc(): void {
         })
     })
   })
+  ipcMain.on(
+    TEST_CHANNELS.runLifetimeSweep,
+    async (
+      _event,
+      request: {
+        resetCursor?: string
+        threads: import('./gmail/parse').GmailThread[]
+        pages: Array<{
+          pageToken?: string
+          threadIds: string[]
+          nextPageToken?: string
+          resultSizeEstimate?: number
+        }>
+        offlineAtPageToken?: string
+        threadsTotal?: number
+        messagesTotal?: number
+      },
+      done: (result: {
+        cursor: string | null
+        error?: string
+        formats: string[]
+        pageTokens: Array<string | undefined>
+      }) => void
+    ) => {
+      const accountId = currentAccountId()
+      if (!db || !accountId || !request || !Array.isArray(request.threads)) {
+        done({ cursor: null, error: 'invalid lifetime sweep request', formats: [], pageTokens: [] })
+        return
+      }
+      if (request.resetCursor) {
+        db.prepare(
+          `UPDATE sync_state
+           SET sweep_cursor = ?, sweep_threads_done = 0, sweep_threads_total = NULL
+           WHERE account_id = ?`
+        ).run(request.resetCursor, accountId)
+      }
+      const threads = new Map(request.threads.map((thread) => [thread.id, thread]))
+      const formats: string[] = []
+      const pageTokens: Array<string | undefined> = []
+      let failure: unknown
+      const provider = {
+        getProfile: async () => ({
+          emailAddress: accountId,
+          historyId: 'test-history',
+          threadsTotal: request.threadsTotal,
+          messagesTotal: request.messagesTotal
+        }),
+        listThreadIds: async (options = {}) => {
+          pageTokens.push(options.pageToken)
+          if (request.offlineAtPageToken !== undefined && options.pageToken === request.offlineAtPageToken) {
+            throw new Error('offline')
+          }
+          const page = request.pages.find((candidate) => candidate.pageToken === options.pageToken)
+          if (!page) return { threadIds: [] }
+          return page
+        },
+        getThread: async (id: string, options = {}) => {
+          formats.push(options.format ?? 'full')
+          const thread = threads.get(id)
+          if (!thread) throw new Error(`missing test thread ${id}`)
+          return thread
+        }
+      } as MailProvider
+      await runLifetimeSweep(
+        db,
+        provider,
+        accountId,
+        {
+          onProgress: () => {},
+          onError: (error) => {
+            failure = error
+          }
+        },
+        { requestIntervalMs: 0, pagePauseMs: 0 }
+      )
+      const state = db.prepare('SELECT sweep_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
+        | { sweep_cursor: string | null }
+        | undefined
+      done({
+        cursor: state?.sweep_cursor ?? null,
+        ...(failure ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
+        formats,
+        pageTokens
+      })
+    }
+  )
 }
 
 function teardown(): void {
