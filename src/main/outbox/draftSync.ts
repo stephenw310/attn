@@ -337,18 +337,46 @@ function writeRemoteDraft(
   )
 }
 
-function refreshRemoteAttachmentLocators(stored: string, remote: readonly StoredDraftAttachment[]): string {
+function attachmentLocatorIdentity(attachment: StoredDraftAttachment): string {
+  return JSON.stringify([
+    attachment.filename,
+    attachment.mimeType,
+    attachment.sizeBytes,
+    attachment.contentId ?? null,
+    attachment.inline ?? false
+  ])
+}
+
+export function refreshRemoteAttachmentLocators(
+  stored: string,
+  remote: readonly StoredDraftAttachment[]
+): string {
   const local = parseStoredDraftAttachments(stored)
   const mirrored = draftAttachmentsForMirror(local)
   if (mirrored.length !== remote.length) return stored
-  let remoteIndex = 0
+  const remoteByIdentity = new Map<string, StoredDraftAttachment[]>()
+  for (const attachment of remote) {
+    const identity = attachmentLocatorIdentity(attachment)
+    const matches = remoteByIdentity.get(identity)
+    if (matches) matches.push(attachment)
+    else remoteByIdentity.set(identity, [attachment])
+  }
+  const replacements = new Map<number, StoredDraftAttachment>()
+  for (const [index, attachment] of local.entries()) {
+    if (!attachment.inline && attachment.spoolPath) continue
+    const matches = remoteByIdentity.get(attachmentLocatorIdentity(attachment))
+    const replacement = matches?.shift()
+    if (!replacement) return stored
+    replacements.set(index, replacement)
+  }
+  if ([...remoteByIdentity.values()].some((matches) => matches.length > 0)) return stored
   return JSON.stringify(
-    local.map((attachment) => {
+    local.map((attachment, index) => {
       // Regular spooled files deliberately do not exist in Gmail until the
       // final send update. Preserve them without letting their presence stop
       // locator refresh for the remote/inline parts that were mirrored.
-      if (!attachment.inline && attachment.spoolPath) return attachment
-      const replacement = remote[remoteIndex++]
+      const replacement = replacements.get(index)
+      if (!replacement) return attachment
       const {
         remoteMessageId: _remoteMessageId,
         remoteAttachmentId: _remoteAttachmentId,
@@ -357,9 +385,15 @@ function refreshRemoteAttachmentLocators(stored: string, remote: readonly Stored
       } = attachment
       return {
         ...owned,
-        ...(replacement.remoteMessageId ? { remoteMessageId: replacement.remoteMessageId } : {}),
-        ...(replacement.remoteAttachmentId ? { remoteAttachmentId: replacement.remoteAttachmentId } : {}),
-        ...(replacement.remoteInlineData ? { remoteInlineData: replacement.remoteInlineData } : {})
+        ...(replacement.remoteMessageId !== undefined
+          ? { remoteMessageId: replacement.remoteMessageId }
+          : {}),
+        ...(replacement.remoteAttachmentId !== undefined
+          ? { remoteAttachmentId: replacement.remoteAttachmentId }
+          : {}),
+        ...(replacement.remoteInlineData !== undefined
+          ? { remoteInlineData: replacement.remoteInlineData }
+          : {})
       }
     })
   )

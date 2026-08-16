@@ -115,7 +115,7 @@ export class ComposerPage {
     await this.page.keyboard.press('ControlOrMeta+Enter')
   }
 
-  /** Retries until the header's pending readout settles on `count`. */
+  /** Retries until the header's Outbox readout settles on `count`. */
   async expectPending(count: number): Promise<void> {
     await expect.poll(() => this.readPending()).toBe(count)
   }
@@ -150,12 +150,12 @@ export class ComposerPage {
     // `evaluateAll` neither waits nor throws on an empty match, which is what
     // makes it safe inside a poll: the retry lives in the assertion above.
     const texts = await this.page
-      .getByTestId('pending-count')
+      .getByTestId('outbox-count')
       .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''))
     // The chip renders only above zero, so an absent node is a real zero.
     if (texts.length === 0) return 0
-    const pending = /(\d+)\s+pending/.exec(texts[0])
-    if (!pending) throw new Error(`pending-count did not read as "<n> pending": ${texts[0]}`)
+    const pending = /(\d+)\s+in Outbox/.exec(texts[0])
+    if (!pending) throw new Error(`outbox-count did not read as "<n> in Outbox": ${texts[0]}`)
     return Number(pending[1])
   }
 }

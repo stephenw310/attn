@@ -120,6 +120,7 @@ describe('GmailMailProvider outbox operations', () => {
       .fn()
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [{ id: 'draft-message', threadId: 'thread-1' }] })
+      .mockResolvedValueOnce({ id: 'draft-message', threadId: 'thread-1', labelIds: ['DRAFT'] })
       .mockResolvedValueOnce({
         drafts: [{ id: 'draft-1', message: { id: 'draft-message', threadId: 'thread-1' } }]
       })
@@ -148,7 +149,6 @@ describe('GmailMailProvider outbox operations', () => {
       .fn()
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [{ id: 'sent-message', threadId: 'thread-2' }] })
-      .mockResolvedValueOnce({ drafts: [] })
       .mockResolvedValueOnce({ id: 'sent-message', threadId: 'thread-2', labelIds: ['SENT'] })
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [] })
@@ -159,6 +159,7 @@ describe('GmailMailProvider outbox operations', () => {
       messageId: 'sent-message',
       threadId: 'thread-2'
     })
+    expect(get.mock.calls.some(([path]) => path === '/drafts')).toBe(false)
     await expect(provider.findByRfcId('<missing@attn.local>')).resolves.toBeNull()
   })
 
@@ -167,12 +168,13 @@ describe('GmailMailProvider outbox operations', () => {
       .fn()
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [{ id: 'draft-message', threadId: 'thread-1' }] })
-      .mockResolvedValueOnce({ drafts: [] })
       .mockResolvedValueOnce({ id: 'draft-message', threadId: 'thread-1', labelIds: ['DRAFT'] })
+      .mockResolvedValueOnce({ drafts: [] })
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
 
     await expect(provider.findByRfcId('<still-draft@example.com>')).resolves.toBeNull()
-    expect(get).toHaveBeenLastCalledWith('/messages/draft-message', { format: 'minimal' }, undefined)
+    expect(get).toHaveBeenNthCalledWith(3, '/messages/draft-message', { format: 'minimal' }, undefined)
+    expect(get).toHaveBeenLastCalledWith('/drafts', { maxResults: '100' }, undefined)
   })
 })
 

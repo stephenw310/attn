@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import type { MailAddress } from '../../shared/address'
 import type { DraftKind } from '../../shared/drafts'
-import type { OutboxItem, PendingOutboxState, QueueSendResult, ReopenOutboxResult } from '../../shared/outbox'
+import type {
+  OutboxItem,
+  OutboxState,
+  PendingOutboxState,
+  QueueSendResult,
+  ReopenOutboxResult
+} from '../../shared/outbox'
 import type { Db } from '../db'
 import { readSetting } from '../settings'
 import { getDraft } from './drafts'
@@ -107,14 +113,13 @@ export function listPendingOutbox(db: Db, accountId: string): OutboxItem[] {
   }))
 }
 
-export function pendingOutboxCount(db: Db, accountId: string): number {
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) AS count FROM outbox
-       WHERE account_id = ? AND state IN ('queued', 'sending', 'failed', 'needs-review')`
-    )
-    .get(accountId) as { count: number }
-  return row.count
+function unavailableUndoMessage(state: OutboxState | undefined): string {
+  if (state === 'sent') return 'Already sent'
+  if (state === 'sending') return 'Sending in progress'
+  if (state === 'failed') return 'Send failed — open it from Outbox to retry'
+  if (state === 'needs-review') return 'Send needs review — check your Sent mail from Outbox'
+  if (state === 'composing' || state === 'drafted') return 'Message is already a draft'
+  return 'Message is no longer in the Outbox'
 }
 
 export function undoQueuedSend(db: Db, accountId: string, id: string, now = Date.now()): ReopenOutboxResult {
@@ -132,7 +137,7 @@ export function undoQueuedSend(db: Db, accountId: string, id: string, now = Date
         verify_attempts: number
       }
     | undefined
-  if (!row) return { draft: null, error: 'Message is no longer in the Outbox' }
+  if (!row) return { draft: null, error: unavailableUndoMessage(undefined) }
   const plan = planTransition(
     {
       state: row.state as QueueRow['state'],
@@ -144,14 +149,21 @@ export function undoQueuedSend(db: Db, accountId: string, id: string, now = Date
     { type: 'undo' },
     now
   )
-  if (plan.next.state !== 'composing') return { draft: null, error: 'Already sent' }
+  if (plan.next.state !== 'composing') {
+    return { draft: null, error: unavailableUndoMessage(row.state as OutboxState) }
+  }
   const undone = db
     .prepare(
       `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, verify_attempts = 0,
        last_error = NULL, updated_at = ? WHERE account_id = ? AND id = ? AND state = 'queued'`
     )
     .run(now, accountId, id)
-  if (undone.changes === 0) return { draft: null, error: 'Already sent' }
+  if (undone.changes === 0) {
+    const current = db
+      .prepare('SELECT state FROM outbox WHERE account_id = ? AND id = ?')
+      .get(accountId, id) as { state: OutboxState } | undefined
+    return { draft: null, error: unavailableUndoMessage(current?.state) }
+  }
   return { draft: getDraft(db, accountId, id), error: null }
 }
 

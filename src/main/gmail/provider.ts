@@ -135,15 +135,14 @@ export class GmailMailProvider implements MailProvider {
     const messages = await this.client.get<{
       messages?: { id: string; threadId?: string }[]
     }>('/messages', { q: query, maxResults: '10', includeSpamTrash: 'true' }, options)
-    const candidates = new Map(
-      [...(drafts.messages ?? []), ...(messages.messages ?? [])].map((message) => [message.id, message])
-    )
-    if (candidates.size > 0) {
+    const draftCandidates = new Map((drafts.messages ?? []).map((message) => [message.id, message]))
+    const findDraftCandidate = async (): Promise<RfcMessageMatch | null> => {
+      if (draftCandidates.size === 0) return null
       let pageToken: string | undefined
       do {
         const page = await this.listDrafts(pageToken, options)
         for (const draft of page.drafts) {
-          const message = draft.messageId ? candidates.get(draft.messageId) : undefined
+          const message = draft.messageId ? draftCandidates.get(draft.messageId) : undefined
           if (message) {
             return {
               kind: 'draft',
@@ -155,7 +154,10 @@ export class GmailMailProvider implements MailProvider {
         }
         pageToken = page.nextPageToken
       } while (pageToken)
+      return null
     }
+    const scopedDraft = await findDraftCandidate()
+    if (scopedDraft) return scopedDraft
 
     for (const candidate of messages.messages ?? []) {
       try {
@@ -165,7 +167,11 @@ export class GmailMailProvider implements MailProvider {
           labelIds?: string[]
         }>(`/messages/${encodeURIComponent(candidate.id)}`, { format: 'minimal' }, options)
         const labels = new Set(message.labelIds ?? [])
-        if (!labels.has('SENT') || labels.has('DRAFT')) continue
+        if (labels.has('DRAFT')) {
+          draftCandidates.set(candidate.id, candidate)
+          continue
+        }
+        if (!labels.has('SENT')) continue
         return {
           kind: 'message',
           messageId: message.id,
@@ -177,7 +183,7 @@ export class GmailMailProvider implements MailProvider {
         if (!(error instanceof GmailApiError) || error.status !== 404) throw error
       }
     }
-    return null
+    return findDraftCandidate()
   }
 
   getProfile(): Promise<ProviderProfile> {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import {
   app,
   BrowserWindow,
@@ -68,16 +68,11 @@ import {
 } from './outbox/drafts'
 import { addInlineImage, isSupportedInlineImageMimeType } from './outbox/inlineImages'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
-import {
-  listPendingOutbox,
-  pendingOutboxCount,
-  queueSend,
-  reopenPendingOutbox,
-  undoQueuedSend
-} from './outbox/queue'
+import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from './outbox/queue'
 import { planReply } from './outbox/replyPlan'
 import type { OutboxSender } from './outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from './outbox/spool'
+import { isPathInside } from './pathSafety'
 import type { SnoozeScheduler } from './scheduler'
 import { hydrateMissingThreadBodies } from './sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from './sync/bodyHydration'
@@ -463,8 +458,7 @@ export function registerIpc(context: IpcContext): () => void {
       if (attachment.spoolPath) {
         const spoolRoot = resolve(app.getPath('userData'), 'outbox', id)
         const candidate = resolve(attachment.spoolPath)
-        const relativePath = relative(spoolRoot, candidate)
-        if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+        if (!isPathInside(spoolRoot, candidate)) {
           return { error: 'Inline image unavailable' }
         }
         data = await readFile(candidate)
@@ -708,7 +702,7 @@ export function registerIpc(context: IpcContext): () => void {
   })
   handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
     const account = context.currentAccountId()
-    return account ? pendingActionCount(context.db, account) + pendingOutboxCount(context.db, account) : 0
+    return account ? pendingActionCount(context.db, account) : 0
   })
   return () => bodyHydrator.stop()
 }

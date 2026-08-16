@@ -45,6 +45,25 @@ test('boots the built app with an isolated store and working IPC bridge', async 
   expect(mainLog()).not.toContain('[sync] history poller started')
 })
 
+test('prevents a file drop from navigating the sandboxed renderer', async ({ app, page }) => {
+  const originalUrl = page.url()
+  const prevented = await app.evaluate(({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0]?.webContents
+    if (!contents) return false
+    let wasPrevented = false
+    contents.emit(
+      'will-navigate',
+      { preventDefault: () => (wasPrevented = true) } as never,
+      'file:///tmp/dropped-attachment.txt'
+    )
+    return wasPrevented
+  })
+
+  expect(prevented).toBe(true)
+  expect(page.url()).toBe(originalUrl)
+  await expect(page.getByTestId('login-screen')).toBeVisible()
+})
+
 test('shows onboarding instead of mock mail while signed out', async ({ page }) => {
   await expect(page.getByTestId('login-screen')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Make space for what matters.' })).toBeVisible()

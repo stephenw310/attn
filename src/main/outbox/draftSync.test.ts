@@ -3,13 +3,14 @@ import { emptyDraftInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import type { GmailPart } from '../gmail/parse'
 import type { MailActionProvider, ProviderDraft } from '../sync/provider'
-import type { StoredDraftAttachment } from './draftAttachments'
+import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import {
   draftContentFingerprint,
   mergeRemoteDraftAttachments,
   parseRemoteDraft,
   planDraftConflict,
   reconcileRemoteDraft,
+  refreshRemoteAttachmentLocators,
   remoteDraftKind,
   syncRemoteDrafts
 } from './draftSync'
@@ -101,6 +102,74 @@ describe('remote draft parsing', () => {
 })
 
 describe('draft synchronization identity', () => {
+  it('refreshes locators by MIME identity when inline parts precede regular parts remotely', async () => {
+    const regular: StoredDraftAttachment = {
+      id: 'regular',
+      filename: 'report.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 7,
+      spoolPath: '',
+      remoteMessageId: 'old-message',
+      remoteAttachmentId: 'old-regular'
+    }
+    const inline: StoredDraftAttachment = {
+      id: 'inline',
+      filename: 'pasted.png',
+      mimeType: 'image/png',
+      sizeBytes: 6,
+      spoolPath: '/owned/outbox/draft/pasted.png',
+      contentId: 'pasted-image',
+      inline: true,
+      remoteMessageId: 'old-message',
+      remoteAttachmentId: 'old-inline'
+    }
+    const remoteInline = {
+      ...inline,
+      id: 'remote-inline',
+      spoolPath: '',
+      remoteMessageId: 'new-message',
+      remoteAttachmentId: 'new-inline'
+    }
+    const remoteRegular = {
+      ...regular,
+      id: 'remote-regular',
+      remoteMessageId: 'new-message',
+      remoteAttachmentId: 'new-regular'
+    }
+
+    const refreshed = parseStoredDraftAttachments(
+      refreshRemoteAttachmentLocators(JSON.stringify([regular, inline]), [remoteInline, remoteRegular])
+    )
+    expect(refreshed).toEqual([
+      expect.objectContaining({
+        id: 'regular',
+        remoteMessageId: 'new-message',
+        remoteAttachmentId: 'new-regular'
+      }),
+      expect.objectContaining({
+        id: 'inline',
+        remoteMessageId: 'new-message',
+        remoteAttachmentId: 'new-inline'
+      })
+    ])
+
+    const getAttachmentData = vi.fn(async (_messageId: string, attachmentId: string) =>
+      Buffer.from(attachmentId === 'new-regular' ? 'regular' : 'inline').toString('base64url')
+    )
+    const loaded = await loadDraftMimeAttachments(
+      'draft',
+      refreshed.map((attachment) => ({ ...attachment, spoolPath: '' })),
+      { getAttachmentData } as unknown as MailActionProvider,
+      null
+    )
+    expect(
+      loaded.map((attachment) => [attachment.filename, Buffer.from(attachment.content).toString()])
+    ).toEqual([
+      ['report.pdf', 'regular'],
+      ['pasted.png', 'inline']
+    ])
+  })
+
   it('preserves local-only file attachments when a newer remote body wins', () => {
     const local: StoredDraftAttachment = {
       id: 'local-file',

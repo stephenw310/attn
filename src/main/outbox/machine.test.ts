@@ -42,6 +42,13 @@ describe('outbox state machine', () => {
     })
   })
 
+  it('does not fire a malformed queued row without a durable send time', () => {
+    expect(planTransition(row({ state: 'queued', sendAt: null }), { type: 'timer' }, NOW)).toEqual({
+      next: row({ state: 'queued', sendAt: null }),
+      effects: []
+    })
+  })
+
   it.each([
     ['after the sending write with a draft id', row({ state: 'sending', gmailDraftId: 'draft-1' }), 'verify'],
     ['between create and id persistence', row({ state: 'sending' }), 'verify-secondary']

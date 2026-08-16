@@ -45,6 +45,7 @@ export interface DraftInlineImageResult {
 
 export interface DraftAttachmentMutationResult {
   attachments: DraftAttachment[]
+  changed: boolean
 }
 
 export interface DraftSaveInput extends Omit<Draft, 'id' | 'createdAt' | 'updatedAt'> {

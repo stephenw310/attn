@@ -1,9 +1,10 @@
 import { createReadStream, type Stats } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import type { MailAddress } from '../../shared/address'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
+import { isPathInside } from '../pathSafety'
 import type { MailActionProvider } from '../sync/provider'
 import {
   draftAttachmentsForMirror,
@@ -199,6 +200,30 @@ function bufferSource(content: Uint8Array): () => AsyncIterable<Uint8Array> {
   }
 }
 
+export class DraftAttachmentSourceError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean
+  ) {
+    super(message)
+  }
+}
+
+export function isRetryableAttachmentFilesystemError(error: unknown): boolean {
+  const code =
+    error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+      ? error.code
+      : null
+  return code !== 'ENOENT' && code !== 'ENOTDIR'
+}
+
+function filesystemAttachmentError(filename: string, error: unknown): DraftAttachmentSourceError {
+  return new DraftAttachmentSourceError(
+    `local attachment unavailable: ${filename}`,
+    isRetryableAttachmentFilesystemError(error)
+  )
+}
+
 function fileSource(path: string, filename: string, expectedBytes: number): () => AsyncIterable<Uint8Array> {
   return async function* () {
     let readBytes = 0
@@ -206,15 +231,18 @@ function fileSource(path: string, filename: string, expectedBytes: number): () =
       for await (const value of createReadStream(path)) {
         const chunk = Buffer.from(value)
         if (readBytes + chunk.byteLength > expectedBytes) {
-          throw new Error('attachment grew while being read')
+          throw new DraftAttachmentSourceError(`local attachment changed unexpectedly: ${filename}`, false)
         }
         readBytes += chunk.byteLength
         yield chunk
       }
-      if (readBytes !== expectedBytes) throw new Error('attachment shrank while being read')
-    } catch {
+      if (readBytes !== expectedBytes) {
+        throw new DraftAttachmentSourceError(`local attachment changed unexpectedly: ${filename}`, false)
+      }
+    } catch (error) {
       // Never let a main-owned spool locator escape through an outbox error.
-      throw new Error(`local attachment unavailable: ${filename}`)
+      if (error instanceof DraftAttachmentSourceError) throw error
+      throw filesystemAttachmentError(filename, error)
     }
   }
 }
@@ -234,18 +262,20 @@ export async function prepareDraftMimeAttachments(
         if (!spoolRoot) throw new Error(`local attachment root unavailable: ${attachment.filename}`)
         const draftRoot = resolve(spoolRoot, draftId)
         const candidate = resolve(attachment.spoolPath)
-        const relativePath = relative(draftRoot, candidate)
-        if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
+        if (!isPathInside(draftRoot, candidate)) {
           throw new Error(`local attachment path escaped its draft: ${attachment.filename}`)
         }
         let details: Stats
         try {
           details = await stat(candidate)
-        } catch {
-          throw new Error(`local attachment unavailable: ${attachment.filename}`)
+        } catch (error) {
+          throw filesystemAttachmentError(attachment.filename, error)
         }
         if (!details.isFile() || details.size !== attachment.sizeBytes) {
-          throw new Error(`local attachment changed unexpectedly: ${attachment.filename}`)
+          throw new DraftAttachmentSourceError(
+            `local attachment changed unexpectedly: ${attachment.filename}`,
+            false
+          )
         }
         sizeBytes = details.size
         open = fileSource(candidate, attachment.filename, details.size)
@@ -262,7 +292,12 @@ export async function prepareDraftMimeAttachments(
             attachment.remoteMessageId,
             attachment.remoteAttachmentId
           )
-          if (!data) throw new Error(`remote attachment unavailable: ${attachment.filename}`)
+          if (!data) {
+            throw new DraftAttachmentSourceError(
+              `remote attachment unavailable: ${attachment.filename}`,
+              true
+            )
+          }
           content = Buffer.from(data, 'base64url')
         } else {
           throw new Error(`attachment unavailable: ${attachment.filename}`)

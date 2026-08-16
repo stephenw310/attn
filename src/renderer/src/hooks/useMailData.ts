@@ -18,7 +18,7 @@ interface MailDataState {
   refreshDrafts: () => Promise<void>
   realUnreadTotal: number | null
   labels: MailLabel[]
-  pendingCount: number
+  pendingActionCount: number
   mailRevision: number
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
@@ -41,7 +41,7 @@ export function useMailData(
   const [outboxProgress, setOutboxProgress] = useState<OutboxProgress | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
-  const [pendingCount, setPendingCount] = useState(0)
+  const [pendingActionCount, setPendingActionCount] = useState(0)
   const [mailRevision, setMailRevision] = useState(0)
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
@@ -79,7 +79,7 @@ export function useMailData(
     setOutboxProgress(null)
     setRealUnreadTotal(null)
     setLabels([])
-    setPendingCount(0)
+    setPendingActionCount(0)
     setMailRevision(0)
     preserveSelectionOnRefreshRef.current = true
     const bridge = window.attn
@@ -140,7 +140,7 @@ export function useMailData(
           )
           setLabels(nextLabels)
           setRealUnreadTotal(unread)
-          setPendingCount(pending)
+          setPendingActionCount(pending)
         })
         .catch(() => {})
     }
@@ -184,7 +184,7 @@ export function useMailData(
     refreshDrafts,
     realUnreadTotal,
     labels,
-    pendingCount,
+    pendingActionCount,
     mailRevision,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
-import { queueSend, undoSendDelayMs } from './queue'
+import { queueSend, undoQueuedSend, undoSendDelayMs } from './queue'
 
 function settingsDb(value: string | undefined): Db {
   return {
@@ -59,5 +59,53 @@ describe('undo send setting', () => {
       .map(([sql]) => String(sql))
       .find((sql) => sql.startsWith('UPDATE outbox'))
     expect(updateSql).toContain('verify_attempts = 0')
+  })
+})
+
+describe('queued send undo races', () => {
+  it.each([
+    ['sending', 'Sending in progress'],
+    ['failed', 'Send failed — open it from Outbox to retry'],
+    ['needs-review', 'Send needs review — check your Sent mail from Outbox']
+  ])('reports %s accurately instead of claiming it was sent', (state, error) => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({
+          state,
+          gmail_draft_id: null,
+          send_at: null,
+          attempts: 1,
+          verify_attempts: 0
+        }))
+      }))
+    } as unknown as Db
+
+    expect(undoQueuedSend(db, 'me@example.com', 'draft-1')).toEqual({ draft: null, error })
+  })
+
+  it('reloads the winning state when the timer claims a queued row during undo', () => {
+    let selected = 0
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: vi.fn(() => {
+          selected++
+          return selected === 1
+            ? {
+                state: 'queued',
+                gmail_draft_id: null,
+                send_at: 1,
+                attempts: 0,
+                verify_attempts: 0
+              }
+            : { state: 'sending' }
+        }),
+        run: vi.fn(() => ({ changes: sql.startsWith('UPDATE outbox') ? 0 : 1 }))
+      }))
+    } as unknown as Db
+
+    expect(undoQueuedSend(db, 'me@example.com', 'draft-1')).toEqual({
+      draft: null,
+      error: 'Sending in progress'
+    })
   })
 })

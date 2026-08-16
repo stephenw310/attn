@@ -11,7 +11,7 @@ import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { parseStoredDraftAttachments } from './draftAttachments'
 import { planTransition } from './machine'
 import { buildMime, mimeByteLength, streamMime } from './mime'
-import { prepareDraftMimeAttachments } from './mirror'
+import { DraftAttachmentSourceError, prepareDraftMimeAttachments } from './mirror'
 import { validateAttachmentCap } from './spool'
 
 const SECONDARY_CHECK_MS = 10_000
@@ -71,7 +71,11 @@ class OutboxNoRemoteMutationError extends Error {
 }
 
 export function isRetryableOutboxPreflightError(error: unknown): boolean {
-  return (error instanceof GmailApiError && error.retryable) || isOfflineFailure(error)
+  return (
+    (error instanceof GmailApiError && error.retryable) ||
+    (error instanceof DraftAttachmentSourceError && error.retryable) ||
+    isOfflineFailure(error)
+  )
 }
 
 export type DraftPresence = 'present' | 'consumed'
@@ -163,6 +167,7 @@ export class OutboxSender {
   private remoteAbortController: AbortController | null = null
   private stopping = false
   private timer: TimerHandle | null = null
+  private drainAttempts = 0
 
   constructor(
     private readonly db: Db,
@@ -196,11 +201,26 @@ export class OutboxSender {
     if (this.timer) this.time.timers.clearTimeout(this.timer)
     this.timer = null
     if (this.drainPromise) return this.drainPromise
-    this.drainPromise = this.drain().finally(() => {
+    this.drainPromise = this.drainSafely().finally(() => {
       this.drainPromise = null
-      if (!this.stopping && !this.timer) this.armFromDatabase()
     })
     return this.drainPromise
+  }
+
+  private async drainSafely(): Promise<void> {
+    try {
+      await this.drain()
+      if (!this.stopping && !this.timer) this.armFromDatabase()
+      this.drainAttempts = 0
+    } catch (error) {
+      if (this.stopping) return
+      console.error(`[outbox] drain failed: ${errorMessage(error)}`)
+      const delay = retryDelayMs(this.drainAttempts++)
+      this.timer = this.time.timers.setTimeout(() => {
+        this.timer = null
+        void this.trigger()
+      }, delay)
+    }
   }
 
   async stop(): Promise<void> {
@@ -228,7 +248,9 @@ export class OutboxSender {
     const next = this.db
       .prepare(
         `SELECT state, send_at FROM outbox
-         WHERE account_id = ? AND state IN ('queued', 'sending')
+         WHERE account_id = ? AND (
+           state = 'sending' OR (state = 'queued' AND send_at IS NOT NULL)
+         )
          ORDER BY CASE WHEN send_at IS NULL THEN 0 ELSE 1 END, send_at LIMIT 1`
       )
       .get(accountId) as { state: string; send_at: number | null } | undefined
@@ -248,12 +270,14 @@ export class OutboxSender {
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, updated_at, send_at, attempts, verify_attempts
          FROM outbox
-         WHERE account_id = ? AND state IN ('queued', 'sending')
-           AND (send_at IS NULL OR send_at <= ?)
+         WHERE account_id = ? AND (
+           (state = 'sending' AND (send_at IS NULL OR send_at <= ?)) OR
+           (state = 'queued' AND send_at IS NOT NULL AND send_at <= ?)
+         )
          ORDER BY CASE state WHEN 'sending' THEN 0 ELSE 1 END, COALESCE(send_at, 0), updated_at
          LIMIT 1`
       )
-      .get(accountId, this.time.now()) as SendRow | undefined
+      .get(accountId, this.time.now(), this.time.now()) as SendRow | undefined
   }
 
   private async drain(): Promise<void> {

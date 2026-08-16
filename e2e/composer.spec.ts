@@ -340,7 +340,7 @@ test('discovers a provider-gated send through the pending readout and Go to Outb
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
 
-  await page.getByTestId('pending-count').click()
+  await page.getByTestId('outbox-count').click()
   const outbox = page.getByTestId('outbox-list')
   await expect(outbox).toBeVisible()
   await expect(page.getByTestId('selection-count')).toHaveCount(0)

@@ -26,6 +26,7 @@ import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
+import { formatBytes } from '../formatBytes'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
@@ -76,12 +77,6 @@ function PaperclipIcon(): React.JSX.Element {
       />
     </svg>
   )
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`
 }
 
 function attachmentErrorMessage(error: unknown): string {
@@ -403,12 +398,14 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
     [updateFields]
   )
   const attach = useCallback(
-    (request: () => Promise<{ attachments: Draft['attachments'] }>) => {
+    (request: () => Promise<{ attachments: Draft['attachments']; changed: boolean }>) => {
       if (closing || attachmentMutationRef.current) return
       attachmentMutationRef.current = true
       setAttaching(true)
       void request()
-        .then((result) => replaceAttachments(result.attachments))
+        .then((result) => {
+          if (result.changed) replaceAttachments(result.attachments)
+        })
         .catch((error: unknown) => onToast(attachmentErrorMessage(error)))
         .finally(() => {
           attachmentMutationRef.current = false

@@ -9,6 +9,7 @@ import { draftAttachmentsForMirror, type StoredDraftAttachment } from './draftAt
 import {
   deleteDraftCheckpoint,
   drainDraftMirrors,
+  isRetryableAttachmentFilesystemError,
   loadDraftMimeAttachments,
   prepareDraftMimeAttachments,
   saveDraftCheckpoint
@@ -51,6 +52,12 @@ describe('draft mirror attachments', () => {
     mimeType: 'application/pdf',
     sizeBytes: 4,
     spoolPath
+  })
+
+  it('distinguishes retryable filesystem failures from a missing owned file', () => {
+    expect(isRetryableAttachmentFilesystemError({ code: 'EACCES' })).toBe(true)
+    expect(isRetryableAttachmentFilesystemError({ code: 'EIO' })).toBe(true)
+    expect(isRetryableAttachmentFilesystemError({ code: 'ENOENT' })).toBe(false)
   })
 
   it('rejects a stored path outside the owning draft directory', async () => {

@@ -51,6 +51,23 @@ describe('attachment cap math', () => {
 })
 
 describe('attachment spool ownership', () => {
+  it('does not revise a draft when the file picker is cancelled', async () => {
+    const { root, db, draftId } = await testStore()
+    const before = db.prepare('SELECT local_revision FROM outbox WHERE id = ?').get(draftId) as {
+      local_revision: number
+    }
+
+    await expect(spoolDraftAttachments(db, root, 'me@example.com', draftId, [])).resolves.toEqual({
+      attachments: [],
+      changed: false
+    })
+    const after = db.prepare('SELECT local_revision FROM outbox WHERE id = ?').get(draftId) as {
+      local_revision: number
+    }
+    expect(after.local_revision).toBe(before.local_revision)
+    db.close()
+  })
+
   it('copies bytes under the draft, records safe metadata, and removes one attachment', async () => {
     const { root, db, draftId } = await testStore()
     const source = join(root, 'quarterly-notes.pdf')

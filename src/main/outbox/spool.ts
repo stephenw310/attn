@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { constants, type Dirent, readdirSync, rmSync, type Stats } from 'node:fs'
 import { copyFile, mkdir, rm, rmdir, stat } from 'node:fs/promises'
-import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import type { DraftAttachmentMutationResult } from '../../shared/drafts'
 import type { Db } from '../db'
+import { isPathInside } from '../pathSafety'
 import {
   parseStoredDraftAttachments,
   publicDraftAttachments,
@@ -69,8 +70,7 @@ function mimeTypeFor(filename: string): string {
 function ownedSpoolPath(userDataPath: string, draftId: string, candidate: string): boolean {
   const draftRoot = resolve(userDataPath, 'outbox', draftId)
   const target = resolve(candidate)
-  const relativePath = relative(draftRoot, target)
-  return Boolean(relativePath) && !relativePath.startsWith('..') && !isAbsolute(relativePath)
+  return isPathInside(draftRoot, target)
 }
 
 async function inspectSource(sourcePath: string): Promise<IncomingAttachment> {
@@ -107,7 +107,7 @@ export async function spoolDraftAttachments(
     .get(accountId, draftId) as { attachments_json: string } | undefined
   if (!row) throw new Error('draft is unavailable')
   const attachments = parseStoredDraftAttachments(row.attachments_json)
-  if (paths.length === 0) return { attachments: publicDraftAttachments(attachments) }
+  if (paths.length === 0) return { attachments: publicDraftAttachments(attachments), changed: false }
 
   const incoming = await Promise.all(paths.map(inspectSource))
   const existingBytes = attachments.reduce((total, attachment) => total + attachment.sizeBytes, 0)
@@ -157,7 +157,7 @@ export async function spoolDraftAttachments(
       )
       .run(JSON.stringify(next), now ?? Date.now(), accountId, draftId, row.attachments_json).changes
     if (changed === 0) throw new Error('draft is unavailable')
-    return { attachments: publicDraftAttachments(next) }
+    return { attachments: publicDraftAttachments(next), changed: true }
   } catch (error) {
     await Promise.all(copied.map((path) => rm(path, { force: true }).catch(() => {})))
     // This succeeds only when the failed attempt created an otherwise-empty
@@ -196,15 +196,14 @@ export async function removeDraftAttachment(
   if (removed.spoolPath && ownedSpoolPath(userDataPath, draftId, removed.spoolPath)) {
     await rm(removed.spoolPath, { force: true }).catch(() => {})
   }
-  return { attachments: publicDraftAttachments(next) }
+  return { attachments: publicDraftAttachments(next), changed: true }
 }
 
 /** Remove one draft's owned attachment directory without escaping userData. */
 export function cleanOutboxSpool(userDataPath: string, id: string): void {
   const root = resolve(userDataPath, 'outbox')
   const directory = resolve(root, id)
-  const relativePath = relative(root, directory)
-  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) return
+  if (!isPathInside(root, directory)) return
   void rm(directory, { recursive: true, force: true }).catch(() => {})
 }
 
@@ -229,8 +228,7 @@ export function reconcileOutboxSpool(db: Db, userDataPath: string): void {
     .all() as { id: string; attachments_json: string }[]
   for (const row of rows) {
     const draftRoot = resolve(root, row.id)
-    const draftRelative = relative(root, draftRoot)
-    if (!draftRelative || draftRelative.startsWith('..') || isAbsolute(draftRelative)) continue
+    if (!isPathInside(root, draftRoot)) continue
     let attachments: StoredDraftAttachment[]
     try {
       attachments = parseStoredDraftAttachments(row.attachments_json)
@@ -248,8 +246,7 @@ export function reconcileOutboxSpool(db: Db, userDataPath: string): void {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const directory = resolve(root, entry.name)
-    const relativePath = relative(root, directory)
-    if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) continue
+    if (!isPathInside(root, directory)) continue
     if (!retained.has(entry.name)) {
       try {
         rmSync(directory, { recursive: true, force: true })

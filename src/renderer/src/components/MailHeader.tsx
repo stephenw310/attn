@@ -8,11 +8,13 @@ const QUEUE_METER_STEPS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven'
 
 function QueueReadout({
   unread,
-  pending,
+  pendingActions,
+  outbox,
   onOpenOutbox
 }: {
   unread: number | null
-  pending: number
+  pendingActions: number
+  outbox: number
   onOpenOutbox?: () => void
 }): React.JSX.Element {
   const lit = Math.min(unread ?? 0, 10)
@@ -35,15 +37,20 @@ function QueueReadout({
       ) : (
         <span className="font-medium">at zero</span>
       )}
-      {pending > 0 && (
+      {pendingActions > 0 && (
+        <span data-testid="pending-count" className="font-medium tabular-nums">
+          · {pendingActions} pending
+        </span>
+      )}
+      {outbox > 0 && (
         <button
           type="button"
-          data-testid="pending-count"
+          data-testid="outbox-count"
           disabled={!onOpenOutbox}
           className="cursor-pointer rounded px-1 py-0.5 hover:bg-active hover:text-ink-dim disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit"
           onClick={onOpenOutbox}
         >
-          · {pending} pending
+          · {outbox} in Outbox
         </button>
       )}
     </div>
@@ -147,7 +154,8 @@ function AccountMenu({
 interface MailHeaderProps {
   view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   unreadCount: number | null
-  pendingCount: number
+  pendingActionCount: number
+  outboxCount: number
   selectionCount: number
   composerOpen: boolean
   status: AuthStatus
@@ -160,7 +168,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   const {
     view,
     unreadCount,
-    pendingCount,
+    pendingActionCount,
+    outboxCount,
     selectionCount,
     composerOpen,
     status,
@@ -219,7 +228,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         )}
         <QueueReadout
           unread={unreadCount}
-          pending={pendingCount}
+          pendingActions={pendingActionCount}
+          outbox={outboxCount}
           onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
         />
         <AccountMenu status={status} onStatus={onStatus} />

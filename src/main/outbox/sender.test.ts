@@ -282,7 +282,9 @@ class FakeOutboxDb {
     if (query.startsWith('SELECT state, send_at FROM outbox')) {
       const accountId = String(args[0])
       const row = [...this.rows.values()].find(
-        (candidate) => candidate.account_id === accountId && ['queued', 'sending'].includes(candidate.state)
+        (candidate) =>
+          candidate.account_id === accountId &&
+          (candidate.state === 'sending' || (candidate.state === 'queued' && candidate.send_at !== null))
       )
       return row ? { state: row.state, send_at: row.send_at } : undefined
     }
@@ -293,8 +295,8 @@ class FakeOutboxDb {
         .filter(
           (candidate) =>
             candidate.account_id === accountId &&
-            ['queued', 'sending'].includes(candidate.state) &&
-            (candidate.send_at === null || candidate.send_at <= now)
+            ((candidate.state === 'sending' && (candidate.send_at === null || candidate.send_at <= now)) ||
+              (candidate.state === 'queued' && candidate.send_at !== null && candidate.send_at <= now))
         )
         .sort((left, right) => Number(right.state === 'sending') - Number(left.state === 'sending'))[0]
       return row ? { ...row } : undefined
@@ -712,6 +714,37 @@ describe('OutboxSender effect layer', () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed' }))
   })
 
+  it('retries a stale remote attachment locator so draft sync can refresh it', async () => {
+    const getAttachmentData = vi.fn(async () => undefined)
+    const createDraft = vi.fn(async () => 'draft-1')
+    const store = new FakeOutboxDb(
+      fakeRow({
+        attachments_json: JSON.stringify([
+          {
+            id: 'remote-attachment',
+            filename: 'report.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 12,
+            spoolPath: '',
+            remoteMessageId: 'stale-message',
+            remoteAttachmentId: 'stale-locator'
+          }
+        ])
+      })
+    )
+
+    await effectSender(store, effectProvider({ createDraft, getAttachmentData })).trigger()
+
+    expect(getAttachmentData).toHaveBeenCalledWith('stale-message', 'stale-locator')
+    expect(createDraft).not.toHaveBeenCalled()
+    expect(store.row()).toMatchObject({
+      state: 'queued',
+      attempts: 1,
+      send_at: NOW + 5_000,
+      last_error: 'remote attachment unavailable: report.pdf'
+    })
+  })
+
   it('arms elapsed queued work on boot and prunes expired sent rows', async () => {
     const due = fakeRow()
     const expired = fakeRow({
@@ -730,6 +763,43 @@ describe('OutboxSender effect layer', () => {
     time.advance(0)
     await sender.trigger()
     expect(store.row().state).toBe('sent')
+  })
+
+  it('does not spin on a malformed queued row without a send time', async () => {
+    const store = new FakeOutboxDb(fakeRow({ send_at: null }))
+    const time = new ManualTime()
+    const sender = effectSender(store, effectProvider(), { time })
+
+    sender.start()
+    expect(time.nextDelay()).toBeUndefined()
+    await sender.trigger()
+    expect(store.row().state).toBe('queued')
+    expect(time.nextDelay()).toBeUndefined()
+  })
+
+  it('contains top-level drain failures and retries them with backoff', async () => {
+    const time = new ManualTime()
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const brokenDb = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => {
+          throw new Error('database unavailable')
+        })
+      }))
+    } as unknown as Db
+    const sender = new OutboxSender(
+      brokenDb,
+      () => 'me@example.com',
+      () => effectProvider(),
+      vi.fn(),
+      undefined,
+      time
+    )
+
+    await expect(sender.trigger()).resolves.toBeUndefined()
+    expect(error).toHaveBeenCalledWith('[outbox] drain failed: database unavailable')
+    expect(time.nextDelay()).toBe(5_000)
+    error.mockRestore()
   })
 
   it('aborts a stalled Gmail request after the shutdown grace period and persists recovery state', async () => {

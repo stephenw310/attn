@@ -72,7 +72,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     refreshDrafts,
     realUnreadTotal,
     labels,
-    pendingCount,
+    pendingActionCount,
     mailRevision,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
@@ -446,7 +446,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       <MailHeader
         view={view}
         unreadCount={realUnreadTotal}
-        pendingCount={pendingCount}
+        pendingActionCount={pendingActionCount}
+        outboxCount={realOutbox.length}
         selectionCount={view === 'inbox' || view === 'snoozed' ? selectedIds.size : 0}
         composerOpen={composerDraft !== null}
         status={status}

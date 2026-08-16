@@ -66,6 +66,7 @@ let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
 let testAttachmentPickerPaths: string[] | null = null
 let signInInFlight = false
+let teardownPromise: Promise<void> | null = null
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
@@ -229,6 +230,9 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     if (shouldShow) win.show()
   })
   attachBackgroundWindow(win)
+  // A file dropped outside the composer's drop target must never replace the
+  // sandboxed renderer with file:// content (or navigate it anywhere else).
+  win.webContents.on('will-navigate', (event) => event.preventDefault())
   // All external links open in the system browser, never in-app (SPEC §6).
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
@@ -476,7 +480,13 @@ function registerTestIpc(): void {
   })
 }
 
-function teardown(): void {
+function teardown(): Promise<void> {
+  if (teardownPromise) return teardownPromise
+  teardownPromise = teardownOwnedResources()
+  return teardownPromise
+}
+
+async function teardownOwnedResources(): Promise<void> {
   // Invoke handlers close over process-owned resources, so remove them before
   // stopping those resources. Iterating the channel map keeps this exhaustive.
   for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel)
@@ -487,10 +497,8 @@ function teardown(): void {
   powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
   actionExecutor?.stop()
   actionExecutor = null
-  void draftMirrorExecutor?.stop()
-  draftMirrorExecutor = null
-  void outboxSender?.stop()
-  outboxSender = null
+  const mirror = draftMirrorExecutor
+  const sender = outboxSender
   snoozeScheduler?.stop()
   snoozeScheduler = null
   mailNotifier?.stop()
@@ -499,6 +507,17 @@ function teardown(): void {
   testDraftSaveFailures = 0
   testDraftInlineImageDelayMs = 0
   testAttachmentPickerPaths = null
+  const stopped = await Promise.allSettled([
+    mirror?.stop() ?? Promise.resolve(),
+    sender?.stop() ?? Promise.resolve()
+  ])
+  for (const result of stopped) {
+    if (result.status === 'rejected') {
+      console.error(`[shutdown] worker stop failed: ${String(result.reason)}`)
+    }
+  }
+  draftMirrorExecutor = null
+  outboxSender = null
   db?.close()
   db = null
 }
@@ -518,12 +537,9 @@ else {
     event.preventDefault()
     if (preparingQuit) return
     preparingQuit = true
-    // A Gmail draft create is not idempotent. Let the active checkpoint persist
-    // its returned id before will-quit closes SQLite, then stop before another row.
-    void Promise.all([
-      draftMirrorExecutor?.stop() ?? Promise.resolve(),
-      outboxSender?.stop() ?? Promise.resolve()
-    ]).finally(() => {
+    // Gmail draft creation is not idempotent. Quiesce both workers before
+    // teardown closes SQLite, then stop before either can select another row.
+    void teardown().finally(() => {
       quitPrepared = true
       app.quit()
     })
@@ -535,12 +551,11 @@ else {
       initialize()
     } catch (error) {
       console.error(`[boot] failed: ${error instanceof Error ? error.message : String(error)}`)
-      teardown()
-      app.exit(1)
+      void teardown().finally(() => app.exit(1))
     }
   })
   // Deliberately keep the process alive with no windows so sync and
   // notifications continue running in the background on every platform.
   app.on('window-all-closed', () => {})
-  app.on('will-quit', teardown)
+  app.on('will-quit', () => void teardown())
 }
