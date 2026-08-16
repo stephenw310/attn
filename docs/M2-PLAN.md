@@ -688,13 +688,15 @@ The unit matrix and e2e above are green; the manual exactly-once checklist is ex
 
 ## T17 — Attachments out
 
+**Status: implemented; signed-in Gmail attachment checksum smoke remains PR evidence.**
+
 **Depends on:** T14, T16 · **Spec:** F6 (drag-drop/picker, 25MB, progress)
 
 - **Spool at attach time:** copying the file into `userData/outbox/{draftId}/` immediately makes the draft self-contained (the original can move/delete before send — crash-safety includes attachments). Spool entries are recorded in `attachments_json` (filename, mimeType, sizeBytes, spool path) and cleaned on discard/sent.
 - Drag-and-drop onto the composer + a picker button (`dialog.showOpenDialog` via a new typed IPC). Per-file and total caps enforced at attach time: reject past **25MB total** with a clear toast (Gmail's own limit; oversize handoff links are out of scope v1).
-- MIME: T15 already frames attachments; the sender streams spool files into the multipart upload. Progress: per-outbox-row send progress event (`outbox:progress`) driving a thin bar on the composer/toast — coarse (per-attachment) granularity is fine at these sizes.
-- Mirror behavior: Gmail draft mirrors include attachments only at final send-time build (mirroring megabytes on every autosave would hammer quota; the local spool is the durability story, the mirror is convenience). Note the interaction with T16's draft-only send path: since every send now goes through `drafts.update` + `drafts.send`, the attachment bytes upload as part of that final update — one upload, not two. Document this bound in the PR.
-- Testing — unit: spool naming/cleanup, cap math, MIME framing with spooled files; e2e: attach via a seeded fixture file, chip renders with size, discard cleans the spool (assert via relaunch), oversize rejection toast; manual: real send with mixed attachments arrives intact (checksum the received files).
+- MIME: T15 already frames attachments; the sender streams spool files into a Gmail `uploadType=multipart` draft update. The deterministic serializer computes the exact MIME byte count up front so the upload carries the required top-level `Content-Length` without buffering attachment bytes. Progress: per-outbox-row send progress event (`outbox:progress`) driving a thin bar on the composer/toast — coarse (per-attachment) granularity is fine at these sizes.
+- Mirror behavior: newly attached local files join the Gmail draft only at final send-time build (mirroring megabytes on every autosave would hammer quota; the local spool is the durability story, the mirror is convenience). Inline body images and remote-only MIME parts remain in checkpoints because removing those would break body rendering or T14D's zero-loss remote-draft round trip. Note the interaction with T16's draft-only send path: create uses an attachment-free MIME body carrying the durable Message-ID, then the attachment bytes stream once through the final `drafts.update` before `drafts.send` — one attachment upload, not two. Document this bound in the PR.
+- Testing — unit: spool naming/cleanup, cap math, MIME framing with spooled files; e2e: pick and drop a seeded fixture file, chip renders with size, discard cleans the spool (assert via relaunch), oversize rejection toast; manual: real send with mixed attachments arrives intact (checksum the received files).
 
 ### Done when
 

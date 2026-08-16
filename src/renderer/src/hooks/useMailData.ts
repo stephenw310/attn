@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
-import type { OutboxChanged, OutboxItem } from '../../../shared/outbox'
+import type { OutboxChanged, OutboxItem, OutboxProgress } from '../../../shared/outbox'
 import { refreshedSelectionIndex } from '../selection'
 
 interface MailDataState {
@@ -13,6 +13,7 @@ interface MailDataState {
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
   outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
+  outboxProgress: OutboxProgress | null
   clearOutboxFailure: () => void
   refreshDrafts: () => Promise<void>
   realUnreadTotal: number | null
@@ -37,6 +38,7 @@ export function useMailData(
   const [realDrafts, setRealDrafts] = useState<Draft[]>([])
   const [realOutbox, setRealOutbox] = useState<OutboxItem[]>([])
   const [outboxFailure, setOutboxFailure] = useState<Extract<OutboxChanged, { kind: 'failed' }> | null>(null)
+  const [outboxProgress, setOutboxProgress] = useState<OutboxProgress | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [pendingCount, setPendingCount] = useState(0)
@@ -74,6 +76,7 @@ export function useMailData(
     setRealDrafts([])
     setRealOutbox([])
     setOutboxFailure(null)
+    setOutboxProgress(null)
     setRealUnreadTotal(null)
     setLabels([])
     setPendingCount(0)
@@ -130,6 +133,11 @@ export function useMailData(
           setRealSnoozedThreads(snoozed)
           setRealDrafts(drafts)
           setRealOutbox(outbox)
+          setOutboxProgress((current) =>
+            current && outbox.some((item) => item.id === current.id && item.state === 'sending')
+              ? current
+              : null
+          )
           setLabels(nextLabels)
           setRealUnreadTotal(unread)
           setPendingCount(pending)
@@ -146,11 +154,13 @@ export function useMailData(
       mailChangedPending = true
       refresh()
     })
+    const offProgress = bridge.outbox.onProgress(setOutboxProgress)
     return () => {
       cancelled = true
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
       offOutbox()
+      offProgress()
     }
   }, [activeAccount, activeViewRef, selectedDraftIdRef, selectedThreadIdRef, setSelectedIndex])
 
@@ -169,6 +179,7 @@ export function useMailData(
     realDrafts,
     realOutbox,
     outboxFailure,
+    outboxProgress,
     clearOutboxFailure,
     refreshDrafts,
     realUnreadTotal,

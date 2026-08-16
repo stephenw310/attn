@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { MailAddress } from '../../shared/mail'
-import { buildMime, type MimeDraft, validateMimeRecipients } from './mime'
+import { buildMime, type MimeDraft, mimeByteLength, streamMime, validateMimeRecipients } from './mime'
 
 const OPTIONS = {
   accountEmail: 'me@example.com',
@@ -31,6 +31,71 @@ it('wraps inline CID images in multipart/related', () => {
   expect(mime).toContain('Content-Type: multipart/related;')
   expect(mime).toContain('Content-Disposition: inline; filename="hero.png"')
   expect(mime).toContain('Content-ID: <hero@attn.local>')
+})
+
+it('streams spooled attachment bytes with framing identical to the buffered builder', async () => {
+  const content = Buffer.from(Array.from({ length: 65_536 }, (_, index) => index))
+  const base = {
+    to: [{ name: '', email: 'to@example.com' }],
+    subject: 'Streamed attachment',
+    bodyText: 'Body',
+    bodyHtml: '<p>Body</p>'
+  }
+  const buffered = buildMime(
+    {
+      ...base,
+      attachments: [{ filename: 'bytes.bin', mimeType: 'application/octet-stream', content }]
+    },
+    OPTIONS
+  )
+  const completed: number[] = []
+  const chunks: Buffer[] = []
+  const streamedDraft = {
+    ...base,
+    attachments: [
+      {
+        filename: 'bytes.bin',
+        mimeType: 'application/octet-stream',
+        sizeBytes: content.byteLength,
+        open: async function* () {
+          yield content.subarray(0, 11)
+          yield content.subarray(11, 103)
+          yield content.subarray(103)
+        }
+      }
+    ]
+  }
+  for await (const chunk of streamMime(streamedDraft, OPTIONS, (_attachment, index) =>
+    completed.push(index)
+  )) {
+    chunks.push(Buffer.from(chunk))
+  }
+
+  const streamed = Buffer.concat(chunks)
+  expect(streamed.toString()).toBe(buffered)
+  expect(mimeByteLength(streamedDraft, OPTIONS)).toBe(streamed.byteLength)
+  expect(chunks.length).toBeLessThan(100)
+  expect(completed).toEqual([0])
+})
+
+it('sizes an empty streamed attachment exactly', async () => {
+  const draft = {
+    to: [{ name: '', email: 'to@example.com' }],
+    subject: 'Empty attachment',
+    bodyText: '',
+    bodyHtml: '',
+    attachments: [
+      {
+        filename: 'empty.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 0,
+        open: async function* () {}
+      }
+    ]
+  }
+  const chunks: Buffer[] = []
+  for await (const chunk of streamMime(draft, OPTIONS)) chunks.push(Buffer.from(chunk))
+  expect(mimeByteLength(draft, OPTIONS)).toBe(Buffer.concat(chunks).byteLength)
 })
 
 const CASES: { fixture: string; draft: MimeDraft }[] = [

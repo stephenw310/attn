@@ -5,7 +5,7 @@ import appIcon from '../../resources/icon.png?asset'
 import type { AuthStatus } from '../shared/auth'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
-import type { OutboxChanged } from '../shared/outbox'
+import type { OutboxChanged, OutboxProgress } from '../shared/outbox'
 import { clearUndo } from './actions'
 import { ActionExecutor } from './actions/executor'
 import { oauthConfigSearchDirs } from './auth/configPaths'
@@ -21,7 +21,7 @@ import { MailNotifier, type PendingFocus } from './notify'
 import { reconcileRemoteDraft } from './outbox/draftSync'
 import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import { OutboxSender } from './outbox/sender'
-import { cleanOutboxSpool } from './outbox/spool'
+import { cleanOutboxSpool, reconcileOutboxSpool } from './outbox/spool'
 import { SnoozeScheduler } from './scheduler'
 import { writeSetting } from './settings'
 import { deleteThread } from './sync/persist'
@@ -64,6 +64,7 @@ let pendingFocus: PendingFocus | null = null
 let testConversationDelay: { threadId: string; delayMs: number } | null = null
 let testDraftInlineImageDelayMs = 0
 let testDraftSaveFailures = 0
+let testAttachmentPickerPaths: string[] | null = null
 let signInInFlight = false
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
@@ -78,6 +79,10 @@ function broadcastMailChanged(): void {
 function broadcastOutboxChanged(change: OutboxChanged): void {
   broadcast(IPC_CHANNELS.outboxChanged, change)
   mailNotifier?.updateBadge()
+}
+
+function broadcastOutboxProgress(progress: OutboxProgress | null): void {
+  broadcast(IPC_CHANNELS.outboxProgress, progress)
 }
 
 function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
@@ -247,6 +252,7 @@ function initialize(): void {
     console.log(`[sync] sent stage skipped for seeded account ${seedAccountId}`)
   }
   const activeDb = db
+  reconcileOutboxSpool(activeDb, app.getPath('userData'))
   syncController = new SyncController({
     db: activeDb,
     currentAccountId,
@@ -283,6 +289,13 @@ function initialize(): void {
       pendingFocus = null
     },
     waitForConversation,
+    pickAttachmentPaths: testUserData
+      ? async () => {
+          const paths = testAttachmentPickerPaths ?? []
+          testAttachmentPickerPaths = null
+          return paths
+        }
+      : undefined,
     draftInlineImageDelay: () => testDraftInlineImageDelayMs,
     consumeTestDraftSaveFailure: () => {
       if (testDraftSaveFailures === 0) return false
@@ -308,7 +321,8 @@ function initialize(): void {
     () => draftMirrorExecutor?.waitForIdle() ?? Promise.resolve(),
     undefined,
     join(app.getPath('userData'), 'outbox'),
-    (id) => cleanOutboxSpool(app.getPath('userData'), id)
+    (id) => cleanOutboxSpool(app.getPath('userData'), id),
+    broadcastOutboxProgress
   )
   snoozeScheduler = new SnoozeScheduler(
     activeDb,
@@ -389,6 +403,11 @@ function registerTestIpc(): void {
   )
   ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
     testDraftSaveFailures++
+  })
+  ipcMain.on(TEST_CHANNELS.setAttachmentPickerFiles, (_event, paths: unknown) => {
+    testAttachmentPickerPaths = Array.isArray(paths)
+      ? paths.filter((path): path is string => typeof path === 'string')
+      : []
   })
   ipcMain.on(
     TEST_CHANNELS.markDraftMirrored,
@@ -479,6 +498,7 @@ function teardown(): void {
   for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
   testDraftSaveFailures = 0
   testDraftInlineImageDelayMs = 0
+  testAttachmentPickerPaths = null
   db?.close()
   db = null
 }

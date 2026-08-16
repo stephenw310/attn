@@ -214,6 +214,20 @@
   }
 }
 
+@keyframes attachment-progress {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(310%);
+  }
+}
+
+.app-attachment-progress {
+  animation: attachment-progress 1s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-confirmation-toast {
     animation: none;
@@ -226,6 +240,11 @@
   [data-status="syncing"] .app-status-dot,
   [data-status="checking"] .app-status-dot,
   .app-sync-phase-segment[data-phase-state="active"]::after {
+    animation: none;
+  }
+
+  .app-attachment-progress {
+    width: 100%;
     animation: none;
   }
 

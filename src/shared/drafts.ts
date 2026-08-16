@@ -43,6 +43,10 @@ export interface DraftInlineImageResult {
   dataUrl: string
 }
 
+export interface DraftAttachmentMutationResult {
+  attachments: DraftAttachment[]
+}
+
 export interface DraftSaveInput extends Omit<Draft, 'id' | 'createdAt' | 'updatedAt'> {
   id: string | null
 }

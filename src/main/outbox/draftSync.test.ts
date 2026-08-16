@@ -6,6 +6,7 @@ import type { MailActionProvider, ProviderDraft } from '../sync/provider'
 import type { StoredDraftAttachment } from './draftAttachments'
 import {
   draftContentFingerprint,
+  mergeRemoteDraftAttachments,
   parseRemoteDraft,
   planDraftConflict,
   reconcileRemoteDraft,
@@ -100,6 +101,27 @@ describe('remote draft parsing', () => {
 })
 
 describe('draft synchronization identity', () => {
+  it('preserves local-only file attachments when a newer remote body wins', () => {
+    const local: StoredDraftAttachment = {
+      id: 'local-file',
+      filename: 'local.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 4,
+      spoolPath: '/owned/outbox/draft/local.pdf'
+    }
+    const remote: StoredDraftAttachment = {
+      id: 'remote-file',
+      filename: 'remote.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 5,
+      spoolPath: '',
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    expect(mergeRemoteDraftAttachments([remote], JSON.stringify([local]))).toEqual([remote, local])
+  })
+
   it('fingerprints canonical HTML instead of non-round-tripping editor plain text', () => {
     const base = {
       ...emptyDraftInput(),
@@ -180,7 +202,7 @@ describe('draft synchronization identity', () => {
     )
   })
 
-  it('refreshes remote attachment locators when Gmail replaces the draft message', async () => {
+  it('refreshes remote locators beside a local-only attachment when Gmail replaces the message', async () => {
     const remote: ProviderDraft = {
       id: 'draft-with-attachment',
       message: {
@@ -218,6 +240,13 @@ describe('draft synchronization identity', () => {
       remoteMessageId: 'message-old',
       remoteAttachmentId: 'attachment-old'
     }
+    const localOnly: StoredDraftAttachment = {
+      id: 'local-file',
+      filename: 'local.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 5,
+      spoolPath: '/owned/outbox/local-draft/local.txt'
+    }
     const update = vi.fn((..._args: unknown[]) => ({ changes: 1 }))
     const db = {
       prepare: vi.fn((sql: string) => {
@@ -235,7 +264,7 @@ describe('draft synchronization identity', () => {
               mirror_revision: 1,
               updated_at: 100,
               remote_fingerprint: parsed.fingerprint,
-              attachments_json: JSON.stringify([previous])
+              attachments_json: JSON.stringify([previous, localOnly])
             }))
           }
         }
@@ -255,14 +284,15 @@ describe('draft synchronization identity', () => {
         id: 'stable-local-id',
         remoteMessageId: 'message-new',
         remoteAttachmentId: 'attachment-new'
-      })
+      }),
+      localOnly
     ])
     const getAttachmentData = vi.fn(async (_messageId: string, _attachmentId: string) =>
       Buffer.from('data').toString('base64url')
     )
     await loadDraftMimeAttachments(
       'local-draft',
-      refreshed,
+      [refreshed[0]],
       { getAttachmentData } as unknown as MailActionProvider,
       null
     )

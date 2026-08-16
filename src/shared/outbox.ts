@@ -36,3 +36,11 @@ export interface ReopenOutboxResult {
 }
 
 export type OutboxChanged = { kind: 'changed' } | { kind: 'failed'; id: string; error: string }
+
+export interface OutboxProgress {
+  id: string
+  completedBytes: number
+  totalBytes: number
+  completedAttachments: number
+  totalAttachments: number
+}

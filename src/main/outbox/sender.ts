@@ -1,17 +1,18 @@
 import type { MailAddress } from '../../shared/address'
 import type { DraftKind } from '../../shared/drafts'
-import type { OutboxChanged } from '../../shared/outbox'
+import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { isOfflineFailure } from '../sync/failure'
 import { persistThread } from '../sync/persist'
-import type { MailProvider } from '../sync/provider'
+import type { MailProvider, ProviderMimeUpload } from '../sync/provider'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { parseStoredDraftAttachments } from './draftAttachments'
 import { planTransition } from './machine'
-import { buildMime } from './mime'
-import { loadDraftMimeAttachments } from './mirror'
+import { buildMime, mimeByteLength, streamMime } from './mime'
+import { prepareDraftMimeAttachments } from './mirror'
+import { validateAttachmentCap } from './spool'
 
 const SECONDARY_CHECK_MS = 10_000
 const SECONDARY_CHECKS = 6
@@ -91,7 +92,9 @@ export async function verifyKnownDraft(
 
 export interface DraftSendProtocolInput {
   gmailDraftId: string | null
+  /** Attachment-free create payload; final MIME bytes belong to updateMime. */
   raw: string
+  updateMime?: ProviderMimeUpload
   threadId: string | null
   persistCreatedId: (id: string) => boolean | Promise<boolean>
 }
@@ -135,7 +138,12 @@ export async function executeDraftSendProtocol(
     if (!(await input.persistCreatedId(gmailDraftId))) return { kind: 'aborted' }
   }
   try {
-    await provider.updateDraft({ id: gmailDraftId, raw: input.raw, threadId: input.threadId }, { signal })
+    await provider.updateDraft(
+      input.updateMime
+        ? { id: gmailDraftId, mime: input.updateMime, threadId: input.threadId }
+        : { id: gmailDraftId, raw: input.raw, threadId: input.threadId },
+      { signal }
+    )
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return { kind: 'missing-before-send' }
     throw error
@@ -164,7 +172,8 @@ export class OutboxSender {
     private readonly beforeRemote: () => Promise<void> = () => Promise.resolve(),
     private readonly time: SchedulerTime = systemTime,
     private readonly spoolRoot: string | null = null,
-    private readonly cleanSpool: (id: string) => void = () => {}
+    private readonly cleanSpool: (id: string) => void = () => {},
+    private readonly progress: (progress: OutboxProgress | null) => void = () => {}
   ) {}
 
   start(): void {
@@ -430,62 +439,103 @@ export class OutboxSender {
     return true
   }
 
-  private async buildRaw(row: SendRow, provider: MailProvider): Promise<string> {
-    const attachments = await loadDraftMimeAttachments(
-      row.id,
-      parseStoredDraftAttachments(row.attachments_json),
-      provider,
-      this.spoolRoot
+  private async prepareSend(
+    row: SendRow,
+    provider: MailProvider
+  ): Promise<{ raw: string; updateMime?: ProviderMimeUpload }> {
+    const storedAttachments = parseStoredDraftAttachments(row.attachments_json)
+    const draft = {
+      to: parseJson<MailAddress[]>(row.to_json),
+      cc: parseJson<MailAddress[]>(row.cc_json),
+      bcc: parseJson<MailAddress[]>(row.bcc_json),
+      subject: row.subject,
+      bodyHtml: row.body_html,
+      bodyText: row.body_text,
+      quoteHtml: row.quote_html,
+      quoteText: row.quote_text,
+      inReplyTo: row.in_reply_to,
+      references: parseJson<string[]>(row.references_json)
+    }
+    const options = {
+      accountEmail: row.account_id,
+      rfcMessageId: row.rfc_message_id,
+      date: new Date(row.send_at ?? row.updated_at)
+    }
+    const raw = Buffer.from(buildMime(draft, options)).toString('base64url')
+    if (storedAttachments.length === 0) return { raw }
+
+    validateAttachmentCap(
+      0,
+      storedAttachments.map((attachment) => attachment.sizeBytes)
     )
-    const mime = buildMime(
-      {
-        to: parseJson<MailAddress[]>(row.to_json),
-        cc: parseJson<MailAddress[]>(row.cc_json),
-        bcc: parseJson<MailAddress[]>(row.bcc_json),
-        subject: row.subject,
-        bodyHtml: row.body_html,
-        bodyText: row.body_text,
-        quoteHtml: row.quote_html,
-        quoteText: row.quote_text,
-        inReplyTo: row.in_reply_to,
-        references: parseJson<string[]>(row.references_json),
-        attachments
-      },
-      {
-        accountEmail: row.account_id,
-        rfcMessageId: row.rfc_message_id,
-        date: new Date(row.send_at ?? row.updated_at)
+    const attachments = await prepareDraftMimeAttachments(row.id, storedAttachments, provider, this.spoolRoot)
+    validateAttachmentCap(
+      0,
+      attachments.map((attachment) => attachment.sizeBytes)
+    )
+    const totalBytes = attachments.reduce((total, attachment) => total + attachment.sizeBytes, 0)
+    const progress = this.progress
+    return {
+      raw,
+      updateMime: {
+        sizeBytes: mimeByteLength({ ...draft, attachments }, options),
+        open: () =>
+          (async function* () {
+            let completedBytes = 0
+            progress({
+              id: row.id,
+              completedBytes: 0,
+              totalBytes,
+              completedAttachments: 0,
+              totalAttachments: attachments.length
+            })
+            yield* streamMime({ ...draft, attachments }, options, (attachment, index) => {
+              completedBytes += attachment.sizeBytes
+              progress({
+                id: row.id,
+                completedBytes,
+                totalBytes,
+                completedAttachments: index + 1,
+                totalAttachments: attachments.length
+              })
+            })
+          })()
       }
-    )
-    return Buffer.from(mime).toString('base64url')
+    }
   }
 
   private async send(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<void> {
     if (!provider.createDraft || !provider.updateDraft || !provider.sendDraft) {
       throw new OutboxNoRemoteMutationError(new Error('Gmail draft sending is unavailable'))
     }
-    let raw: string
+    let prepared: { raw: string; updateMime?: ProviderMimeUpload }
     try {
-      raw = await this.buildRaw(row, provider)
+      prepared = await this.prepareSend(row, provider)
     } catch (error) {
       throw new OutboxNoRemoteMutationError(error)
     }
-    const result = await executeDraftSendProtocol(
-      provider,
-      {
-        gmailDraftId: row.gmail_draft_id,
-        raw,
-        threadId: row.thread_id,
-        persistCreatedId: (gmailDraftId) =>
-          this.db
-            .prepare(
-              `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
-               WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-            )
-            .run(gmailDraftId, row.account_id, row.id).changes > 0
-      },
-      signal
-    )
+    let result: DraftSendProtocolResult
+    try {
+      result = await executeDraftSendProtocol(
+        provider,
+        {
+          gmailDraftId: row.gmail_draft_id,
+          raw: prepared.raw,
+          updateMime: prepared.updateMime,
+          threadId: row.thread_id,
+          persistCreatedId: (gmailDraftId) =>
+            this.db
+              .prepare(
+                `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
+                 WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
+              )
+              .run(gmailDraftId, row.account_id, row.id).changes > 0
+        },
+        signal
+      )
+    } finally {
+      if (prepared.updateMime) this.progress(null)
+    }
     if (result.kind === 'aborted') return
     if (result.kind === 'missing-before-send') {
       this.parkNeedsReview(row, true)

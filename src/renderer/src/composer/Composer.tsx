@@ -58,6 +58,44 @@ function TrashIcon(): React.JSX.Element {
   )
 }
 
+function PaperclipIcon(): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+    >
+      <title>Attach files</title>
+      <path
+        d="m8.5 12.5 6.2-6.2a3 3 0 0 1 4.2 4.2l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`
+}
+
+function attachmentErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('Each attachment must be 25 MB or less')) {
+    return 'Each attachment must be 25 MB or less'
+  }
+  if (message.includes('Attachments must total 25 MB or less')) {
+    return 'Attachments must total 25 MB or less'
+  }
+  if (message.includes('Only files can be attached')) return 'Only files can be attached'
+  return 'Could not attach file'
+}
+
 function composerTitle(kind: Draft['kind']): string {
   if (kind === 'reply') return 'Reply'
   if (kind === 'replyAll') return 'Reply all'
@@ -275,12 +313,13 @@ function PasteContentPlugin({
 }
 
 interface CommandPluginProps {
+  onAttach: () => void
   onClose: () => void
   onDiscard: () => void
   onSend: () => void
 }
 
-function ComposerCommandPlugin({ onClose, onDiscard, onSend }: CommandPluginProps): null {
+function ComposerCommandPlugin({ onAttach, onClose, onDiscard, onSend }: CommandPluginProps): null {
   const [editor] = useLexicalComposerContext()
   const quote = useCallback(() => {
     editor.update(() => {
@@ -294,6 +333,7 @@ function ComposerCommandPlugin({ onClose, onDiscard, onSend }: CommandPluginProp
         createCommand('composer.close', onClose),
         createCommand('composer.discard', onDiscard),
         createCommand('composer.send', onSend),
+        createCommand('composer.attach', onAttach),
         createCommand('composer.bold', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')),
         createCommand('composer.italic', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')),
         createCommand('composer.underline', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline')),
@@ -305,7 +345,7 @@ function ComposerCommandPlugin({ onClose, onDiscard, onSend }: CommandPluginProp
         ),
         createCommand('composer.quote', quote)
       ]),
-    [editor, onClose, onDiscard, onSend, quote]
+    [editor, onAttach, onClose, onDiscard, onSend, quote]
   )
   return null
 }
@@ -315,6 +355,8 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
   const [cc, setCc] = useState<MailAddress[]>(draft.cc)
   const [bcc, setBcc] = useState<MailAddress[]>(draft.bcc)
   const [attachments, setAttachments] = useState(draft.attachments)
+  const [attaching, setAttaching] = useState(false)
+  const [draggingFiles, setDraggingFiles] = useState(false)
   const [subject, setSubject] = useState(draft.subject)
   const [showCopies, setShowCopies] = useState(draft.cc.length > 0 || draft.bcc.length > 0)
   const [closing, setClosing] = useState(false)
@@ -323,6 +365,7 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
   const preparedHtml = useMemo(() => prepareHtmlForEditor(initialHtml), [initialHtml])
   const [hasPreservedContent, setHasPreservedContent] = useState(preparedHtml.issues.length > 0)
   const notePreservedContent = useCallback(() => setHasPreservedContent(true), [])
+  const attachmentMutationRef = useRef(false)
   const toFieldRef = useRef<RecipientFieldHandle | null>(null)
   const ccFieldRef = useRef<RecipientFieldHandle | null>(null)
   const bccFieldRef = useRef<RecipientFieldHandle | null>(null)
@@ -352,9 +395,62 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
     },
     [updateFields]
   )
+  const replaceAttachments = useCallback(
+    (next: Draft['attachments']) => {
+      setAttachments(next)
+      updateFields({ attachments: next })
+    },
+    [updateFields]
+  )
+  const attach = useCallback(
+    (request: () => Promise<{ attachments: Draft['attachments'] }>) => {
+      if (closing || attachmentMutationRef.current) return
+      attachmentMutationRef.current = true
+      setAttaching(true)
+      void request()
+        .then((result) => replaceAttachments(result.attachments))
+        .catch((error: unknown) => onToast(attachmentErrorMessage(error)))
+        .finally(() => {
+          attachmentMutationRef.current = false
+          setAttaching(false)
+        })
+    },
+    [closing, onToast, replaceAttachments]
+  )
+  const pickAttachments = useCallback(() => {
+    const bridge = window.attn
+    if (!bridge) return
+    attach(() => bridge.draft.pickAttachments(draft.id))
+  }, [attach, draft.id])
+  const addDroppedFiles = useCallback(
+    (files: File[]) => {
+      const bridge = window.attn
+      if (!bridge || files.length === 0) return
+      attach(() => bridge.draft.addDroppedFiles(draft.id, files))
+    },
+    [attach, draft.id]
+  )
+  const removeAttachment = useCallback(
+    (attachmentId: string) => {
+      if (!window.attn || closing || attachmentMutationRef.current) return
+      attachmentMutationRef.current = true
+      setAttaching(true)
+      void window.attn.draft
+        .removeAttachment(draft.id, attachmentId)
+        .then((result) => replaceAttachments(result.attachments))
+        .catch(() => onToast('Could not remove attachment'))
+        .finally(() => {
+          attachmentMutationRef.current = false
+          setAttaching(false)
+        })
+    },
+    [closing, draft.id, onToast, replaceAttachments]
+  )
+
+  const visibleAttachments = attachments.filter((attachment) => !attachment.inline)
 
   const closeAndSave = useCallback(() => {
-    if (closing || !window.attn) return
+    if (closing || attachmentMutationRef.current || !window.attn) return
     if (!commitPendingRecipients()) {
       onToast('Enter a valid recipient before closing')
       return
@@ -375,6 +471,10 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
   const send = useCallback(() => {
     if (closing || !window.attn) return
     setSendError(null)
+    if (attachmentMutationRef.current) {
+      setSendError('Wait for attachments to finish')
+      return
+    }
     if (!commitPendingRecipients()) {
       setSendError('Enter a valid recipient before sending')
       return
@@ -413,7 +513,7 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
   }, [])
 
   const discard = useCallback((): void => {
-    if (closing || !window.attn) return
+    if (closing || attachmentMutationRef.current || !window.attn) return
     setClosing(true)
     void window.attn.draft
       .discard(draft.id)
@@ -429,11 +529,32 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
 
   return (
     <section
-      className="flex min-h-0 flex-1 flex-col bg-raised/35"
+      className={`flex min-h-0 flex-1 flex-col bg-raised/35 ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}
       data-draft-kind={draft.kind}
       data-testid="composer"
       aria-label={composerTitle(draft.kind)}
+      data-dragging-files={draggingFiles ? 'true' : undefined}
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes('Files')) return
+        event.preventDefault()
+        setDraggingFiles(true)
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes('Files')) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+        setDraggingFiles(false)
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.includes('Files')) return
+        event.preventDefault()
+        setDraggingFiles(false)
+        addDroppedFiles([...event.dataTransfer.files])
+      }}
       onKeyDownCapture={(event) => {
         const target = event.target as HTMLElement | null
         if (event.key === 'Escape' && target?.closest('[data-composer-transient]')) return
@@ -447,9 +568,10 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
       <header className="flex min-h-13 shrink-0 items-center gap-4 border-b border-edge px-6 py-2.5">
         <button
           type="button"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
           data-testid="composer-close"
           aria-label="Save draft and go back"
+          disabled={attaching || closing}
           onClick={closeAndSave}
         >
           <span aria-hidden>←</span> Back
@@ -565,6 +687,12 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
           </div>
         )}
 
+        {attaching && (
+          <div className="h-0.5 shrink-0 overflow-hidden bg-edge" data-testid="composer-attach-progress">
+            <div className="app-attachment-progress h-full w-1/3 bg-accent" />
+          </div>
+        )}
+
         {hasPreservedContent && (
           <div
             data-testid="composer-preserved-banner"
@@ -601,7 +729,12 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
                 ignoreSelectionChange
                 onChange={(editorState, editor, tags) => captureEditor(editorState, editor, tags)}
               />
-              <ComposerCommandPlugin onClose={closeAndSave} onDiscard={discard} onSend={send} />
+              <ComposerCommandPlugin
+                onAttach={pickAttachments}
+                onClose={closeAndSave}
+                onDiscard={discard}
+                onSend={send}
+              />
               <PasteContentPlugin
                 draftId={draft.id}
                 onAttachment={addAttachment}
@@ -610,9 +743,49 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
               />
               <CollapsedQuote draftId={draft.id} html={draft.quoteHtml} />
             </div>
+            {visibleAttachments.length > 0 && (
+              <div
+                className="flex shrink-0 flex-wrap gap-2 border-t border-edge px-4 py-2.5"
+                data-testid="composer-attachment-chips"
+              >
+                {visibleAttachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex min-w-0 max-w-72 items-center gap-2 rounded-lg border border-edge bg-active/60 px-2.5 py-1.5 text-xs"
+                    data-testid="composer-attachment-chip"
+                    data-attachment-id={attachment.id}
+                  >
+                    <PaperclipIcon />
+                    <span className="min-w-0 truncate font-medium text-ink">{attachment.filename}</span>
+                    <span className="shrink-0 text-ink-faint">{formatBytes(attachment.sizeBytes)}</span>
+                    <button
+                      type="button"
+                      className="flex size-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-edge hover:text-ink"
+                      aria-label={`Remove ${attachment.filename}`}
+                      data-testid="composer-attachment-remove"
+                      disabled={attaching || closing}
+                      onClick={() => removeAttachment(attachment.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <footer className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4">
               <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
                 <EditorToolbar />
+                <button
+                  type="button"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
+                  data-testid="composer-attach"
+                  aria-label="Attach files"
+                  title="Attach files"
+                  disabled={attaching || closing}
+                  onClick={pickAttachments}
+                >
+                  <PaperclipIcon />
+                </button>
                 {attachments.length > 0 && (
                   <div
                     className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
@@ -625,10 +798,11 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
               <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
-                  className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger"
+                  className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
                   data-testid="composer-discard"
                   aria-label="Discard draft"
                   title="Discard draft"
+                  disabled={attaching || closing}
                   onClick={discard}
                 >
                   <TrashIcon />
@@ -636,7 +810,7 @@ export function Composer({ draft, initialError = null, onClose, onToast }: Compo
                 <button
                   type="button"
                   data-testid="composer-send"
-                  disabled={closing}
+                  disabled={attaching || closing}
                   className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
                   title="Send message"
                   onClick={send}

@@ -8,9 +8,9 @@ import {
   publicDraftAttachment,
   type StoredDraftAttachment
 } from './draftAttachments'
+import { validateAttachmentCap } from './spool'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_DRAFT_BYTES = 25 * 1024 * 1024
 const IMAGE_MIME = /^image\/(?:png|jpeg|gif|webp)$/i
 
 export function isSupportedInlineImageMimeType(value: string): boolean {
@@ -46,7 +46,7 @@ export async function addInlineImage(
   if (!row) throw new Error('draft is unavailable')
   const attachments = parseStoredDraftAttachments(row.attachments_json)
   const used = attachments.reduce((total, attachment) => total + attachment.sizeBytes, 0)
-  if (used + content.byteLength > MAX_DRAFT_BYTES) throw new Error('draft attachments exceed 25 MB')
+  validateAttachmentCap(used, [content.byteLength])
 
   const filename = safeFilename(input.filename)
   const contentId = `${randomUUID()}@attn.local`

@@ -1,15 +1,16 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
-import type { StoredDraftAttachment } from './draftAttachments'
+import { draftAttachmentsForMirror, type StoredDraftAttachment } from './draftAttachments'
 import {
   deleteDraftCheckpoint,
   drainDraftMirrors,
   loadDraftMimeAttachments,
+  prepareDraftMimeAttachments,
   saveDraftCheckpoint
 } from './mirror'
 
@@ -78,6 +79,59 @@ describe('draft mirror attachments', () => {
     expect(loaded).toHaveLength(1)
     expect(loaded[0].inline).toBeUndefined()
     expect(Buffer.from(loaded[0].content).toString()).toBe('data')
+  })
+
+  it('keeps main-owned spool paths out of missing-file errors before and during streaming', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'attn-mirror-'))
+    const draftRoot = join(root, 'draft-1')
+    const path = join(draftRoot, 'notes.pdf')
+    await mkdir(draftRoot)
+
+    const missingError = await prepareDraftMimeAttachments(
+      'draft-1',
+      [attachment(path)],
+      {} as MailActionProvider,
+      root
+    ).catch((error: unknown) => error)
+    expect(String(missingError)).toContain('local attachment unavailable: notes.pdf')
+    expect(String(missingError)).not.toContain(root)
+
+    await writeFile(path, 'data')
+    const [prepared] = await prepareDraftMimeAttachments(
+      'draft-1',
+      [attachment(path)],
+      {} as MailActionProvider,
+      root
+    )
+    await rm(path)
+    const streamError = await (async () => {
+      try {
+        for await (const _chunk of prepared.open()) {
+          // Drain the source to surface a late filesystem failure.
+        }
+      } catch (error) {
+        return error
+      }
+      return null
+    })()
+    expect(String(streamError)).toContain('local attachment unavailable: notes.pdf')
+    expect(String(streamError)).not.toContain(root)
+  })
+
+  it('keeps local file bytes out of autosave while retaining inline and remote MIME parts', () => {
+    const localFile = attachment('/owned/outbox/draft-1/notes.pdf')
+    const inline = { ...attachment('/owned/outbox/draft-1/image.png'), id: 'inline', inline: true }
+    const remote = {
+      ...attachment(''),
+      id: 'remote',
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    expect(draftAttachmentsForMirror([localFile, inline, remote]).map((item) => item.id)).toEqual([
+      'inline',
+      'remote'
+    ])
   })
 })
 

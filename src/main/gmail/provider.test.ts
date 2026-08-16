@@ -78,6 +78,25 @@ describe('GmailMailProvider outbox operations', () => {
     )
   })
 
+  it('updates an attachment-bearing draft through one multipart media upload', async () => {
+    const multipartUpload = vi.fn(async () => ({ id: 'draft-1' }))
+    const provider = new GmailMailProvider({ multipartUpload } as unknown as GmailClient)
+    const open = async function* (): AsyncIterable<Uint8Array> {
+      yield Buffer.from('raw mime')
+    }
+
+    await expect(
+      provider.updateDraft({ id: 'draft-1', mime: { sizeBytes: 8, open }, threadId: 'thread-1' })
+    ).resolves.toBe('draft-1')
+    expect(multipartUpload).toHaveBeenCalledWith(
+      'PUT',
+      '/drafts/draft-1',
+      { message: { threadId: 'thread-1' } },
+      { mimeType: 'message/rfc822', sizeBytes: 8, endsWithCrlf: true, open },
+      { signal: undefined }
+    )
+  })
+
   it('sends only a known durable Gmail draft id', async () => {
     const post = vi.fn(async () => ({ id: 'message-1', threadId: 'thread-1' }))
     const provider = new GmailMailProvider({ post } as unknown as GmailClient)

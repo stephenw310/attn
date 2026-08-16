@@ -1,0 +1,145 @@
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { emptyDraftInput } from '../../shared/drafts'
+import { openDatabase } from '../db'
+import { parseStoredDraftAttachments } from './draftAttachments'
+import { saveDraft } from './drafts'
+import {
+  MAX_DRAFT_ATTACHMENT_BYTES,
+  reconcileOutboxSpool,
+  removeDraftAttachment,
+  spoolDraftAttachments,
+  validateAttachmentCap
+} from './spool'
+
+const roots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+})
+
+async function testStore(): Promise<{
+  root: string
+  db: ReturnType<typeof openDatabase>
+  draftId: string
+}> {
+  const root = await mkdtemp(join(tmpdir(), 'attn-spool-'))
+  roots.push(root)
+  const db = openDatabase(join(root, 'attn.db'))
+  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+    'me@example.com',
+    'me@example.com',
+    1
+  )
+  const draftId = saveDraft(db, 'me@example.com', emptyDraftInput(), 10)
+  return { root, db, draftId }
+}
+
+describe('attachment cap math', () => {
+  it('enforces both the per-file and aggregate 25 MB limits without touching disk', () => {
+    expect(() => validateAttachmentCap(0, [MAX_DRAFT_ATTACHMENT_BYTES])).not.toThrow()
+    expect(() => validateAttachmentCap(0, [MAX_DRAFT_ATTACHMENT_BYTES + 1])).toThrow(
+      'Each attachment must be 25 MB or less'
+    )
+    expect(() => validateAttachmentCap(MAX_DRAFT_ATTACHMENT_BYTES - 2, [1, 2])).toThrow(
+      'Attachments must total 25 MB or less'
+    )
+  })
+})
+
+describe('attachment spool ownership', () => {
+  it('copies bytes under the draft, records safe metadata, and removes one attachment', async () => {
+    const { root, db, draftId } = await testStore()
+    const source = join(root, 'quarterly-notes.pdf')
+    await writeFile(source, 'durable attachment bytes')
+
+    const added = await spoolDraftAttachments(db, root, 'me@example.com', draftId, [source], 20)
+    expect(added.attachments).toEqual([
+      expect.objectContaining({
+        filename: 'quarterly-notes.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 24
+      })
+    ])
+    expect(added.attachments[0]).not.toHaveProperty('spoolPath')
+
+    const row = db.prepare('SELECT attachments_json FROM outbox WHERE id = ?').get(draftId) as {
+      attachments_json: string
+    }
+    const stored = parseStoredDraftAttachments(row.attachments_json)
+    expect(stored[0].spoolPath).toContain(join('outbox', draftId))
+    await rm(source)
+    await expect(readFile(stored[0].spoolPath, 'utf8')).resolves.toBe('durable attachment bytes')
+
+    const removed = await removeDraftAttachment(db, root, 'me@example.com', draftId, stored[0].id, 30)
+    expect(removed.attachments).toEqual([])
+    expect(existsSync(stored[0].spoolPath)).toBe(false)
+    db.close()
+  })
+
+  it('uses a bounded storage name while preserving a near-limit display filename', async () => {
+    const { root, db, draftId } = await testStore()
+    const filename = `${'quarterly-notes-'.repeat(15)}.txt`
+    const source = join(root, filename)
+    await writeFile(source, 'data')
+
+    await spoolDraftAttachments(db, root, 'me@example.com', draftId, [source])
+    const row = db.prepare('SELECT attachments_json FROM outbox WHERE id = ?').get(draftId) as {
+      attachments_json: string
+    }
+    const [stored] = parseStoredDraftAttachments(row.attachments_json)
+
+    expect(stored.filename).toBe(filename)
+    expect(basename(stored.spoolPath)).toHaveLength(36)
+    db.close()
+  })
+
+  it('does not expose source or profile paths through filesystem errors', async () => {
+    const { root, db, draftId } = await testStore()
+    const missing = join(root, 'private-source-name.txt')
+
+    await expect(spoolDraftAttachments(db, root, 'me@example.com', draftId, [missing])).rejects.not.toThrow(
+      root
+    )
+
+    const source = join(root, 'available.txt')
+    await writeFile(source, 'data')
+    await expect(
+      spoolDraftAttachments(db, join(root, 'attn.db'), 'me@example.com', draftId, [source])
+    ).rejects.not.toThrow(root)
+    db.close()
+  })
+
+  it('removes orphaned directories and files while retaining referenced spool bytes', async () => {
+    const { root, db, draftId } = await testStore()
+    const source = join(root, 'keep.bin')
+    await writeFile(source, 'keep')
+    await spoolDraftAttachments(db, root, 'me@example.com', draftId, [source])
+    const row = db.prepare('SELECT attachments_json FROM outbox WHERE id = ?').get(draftId) as {
+      attachments_json: string
+    }
+    const [stored] = parseStoredDraftAttachments(row.attachments_json)
+    const kept = join(root, 'outbox', draftId)
+    const orphaned = join(root, 'outbox', 'already-sent')
+    const damagedDraftId = saveDraft(db, 'me@example.com', emptyDraftInput(), 11)
+    const damaged = join(root, 'outbox', damagedDraftId)
+    await mkdir(orphaned, { recursive: true })
+    await mkdir(damaged, { recursive: true })
+    const orphanedFile = join(kept, 'interrupted-copy.bin')
+    await writeFile(orphanedFile, 'remove')
+    await writeFile(join(orphaned, 'remove.bin'), 'remove')
+    await writeFile(join(damaged, 'preserve.bin'), 'preserve')
+    db.prepare("UPDATE outbox SET attachments_json = '{' WHERE id = ?").run(damagedDraftId)
+
+    reconcileOutboxSpool(db, root)
+
+    expect(existsSync(stored.spoolPath)).toBe(true)
+    expect(existsSync(orphanedFile)).toBe(false)
+    expect(existsSync(orphaned)).toBe(false)
+    expect(existsSync(damaged)).toBe(true)
+    db.close()
+  })
+})

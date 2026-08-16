@@ -1,13 +1,19 @@
-import { readFile } from 'node:fs/promises'
+import { createReadStream, type Stats } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { MailAddress } from '../../shared/address'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
-import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
+import {
+  draftAttachmentsForMirror,
+  parseStoredDraftAttachments,
+  type StoredDraftAttachment
+} from './draftAttachments'
 import { type DraftMimeAttachment, encodeDraftMessage } from './draftMime'
 import { draftContentFingerprint } from './draftSync'
 import { isEmptyDraft } from './drafts'
+import type { MimeStreamAttachment } from './mime'
 
 interface DraftMirrorRow {
   id: string
@@ -110,7 +116,8 @@ async function mirrorComposing(
 ): Promise<boolean> {
   if (!provider.saveDraft) return false
   const attachments = parseStoredDraftAttachments(row.attachments_json)
-  const mimeAttachments = await loadDraftMimeAttachments(row.id, attachments, provider, spoolRoot)
+  const mirroredAttachments = draftAttachmentsForMirror(attachments)
+  const mimeAttachments = await loadDraftMimeAttachments(row.id, mirroredAttachments, provider, spoolRoot)
   const raw = encodeDraftMessage({
     to: parseJson<MailAddress[]>(row.to_json),
     cc: parseJson<MailAddress[]>(row.cc_json),
@@ -148,7 +155,7 @@ async function mirrorComposing(
     subject: row.subject,
     bodyHtml: row.body_html,
     bodyText: row.body_text,
-    attachments,
+    attachments: mirroredAttachments,
     threadId: row.thread_id,
     inReplyTo: row.in_reply_to,
     references: parseJson<string[]>(row.references_json),
@@ -170,34 +177,104 @@ export async function loadDraftMimeAttachments(
   provider: MailActionProvider,
   spoolRoot: string | null
 ): Promise<DraftMimeAttachment[]> {
+  const prepared = await prepareDraftMimeAttachments(draftId, attachments, provider, spoolRoot)
+  return Promise.all(
+    prepared.map(async (attachment) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of attachment.open()) chunks.push(Buffer.from(chunk))
+      return {
+        filename: attachment.filename,
+        mimeType: attachment.mimeType,
+        content: Buffer.concat(chunks),
+        ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
+        ...(attachment.inline ? { inline: true } : {})
+      }
+    })
+  )
+}
+
+function bufferSource(content: Uint8Array): () => AsyncIterable<Uint8Array> {
+  return async function* () {
+    yield content
+  }
+}
+
+function fileSource(path: string, filename: string, expectedBytes: number): () => AsyncIterable<Uint8Array> {
+  return async function* () {
+    let readBytes = 0
+    try {
+      for await (const value of createReadStream(path)) {
+        const chunk = Buffer.from(value)
+        if (readBytes + chunk.byteLength > expectedBytes) {
+          throw new Error('attachment grew while being read')
+        }
+        readBytes += chunk.byteLength
+        yield chunk
+      }
+      if (readBytes !== expectedBytes) throw new Error('attachment shrank while being read')
+    } catch {
+      // Never let a main-owned spool locator escape through an outbox error.
+      throw new Error(`local attachment unavailable: ${filename}`)
+    }
+  }
+}
+
+/** Validate every source before draft creation, then return replayable send-time streams. */
+export async function prepareDraftMimeAttachments(
+  draftId: string,
+  attachments: readonly StoredDraftAttachment[],
+  provider: MailActionProvider,
+  spoolRoot: string | null
+): Promise<MimeStreamAttachment[]> {
   return Promise.all(
     attachments.map(async (attachment) => {
-      let content: Uint8Array
+      let sizeBytes = attachment.sizeBytes
+      let open: () => AsyncIterable<Uint8Array>
       if (attachment.spoolPath) {
         if (!spoolRoot) throw new Error(`local attachment root unavailable: ${attachment.filename}`)
         const draftRoot = resolve(spoolRoot, draftId)
         const candidate = resolve(attachment.spoolPath)
         const relativePath = relative(draftRoot, candidate)
-        if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+        if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
           throw new Error(`local attachment path escaped its draft: ${attachment.filename}`)
         }
-        content = await readFile(candidate)
-      } else if (attachment.remoteInlineData) {
-        content = Buffer.from(attachment.remoteInlineData, 'base64url')
-      } else if (attachment.remoteMessageId && attachment.remoteAttachmentId && provider.getAttachmentData) {
-        const data = await provider.getAttachmentData(
-          attachment.remoteMessageId,
-          attachment.remoteAttachmentId
-        )
-        if (!data) throw new Error(`remote attachment unavailable: ${attachment.filename}`)
-        content = Buffer.from(data, 'base64url')
+        let details: Stats
+        try {
+          details = await stat(candidate)
+        } catch {
+          throw new Error(`local attachment unavailable: ${attachment.filename}`)
+        }
+        if (!details.isFile() || details.size !== attachment.sizeBytes) {
+          throw new Error(`local attachment changed unexpectedly: ${attachment.filename}`)
+        }
+        sizeBytes = details.size
+        open = fileSource(candidate, attachment.filename, details.size)
       } else {
-        throw new Error(`attachment unavailable: ${attachment.filename}`)
+        let content: Buffer
+        if (attachment.remoteInlineData) {
+          content = Buffer.from(attachment.remoteInlineData, 'base64url')
+        } else if (
+          attachment.remoteMessageId &&
+          attachment.remoteAttachmentId &&
+          provider.getAttachmentData
+        ) {
+          const data = await provider.getAttachmentData(
+            attachment.remoteMessageId,
+            attachment.remoteAttachmentId
+          )
+          if (!data) throw new Error(`remote attachment unavailable: ${attachment.filename}`)
+          content = Buffer.from(data, 'base64url')
+        } else {
+          throw new Error(`attachment unavailable: ${attachment.filename}`)
+        }
+        sizeBytes = content.byteLength
+        open = bufferSource(content)
       }
       return {
         filename: attachment.filename,
         mimeType: attachment.mimeType,
-        content,
+        sizeBytes,
+        open,
         ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
         ...(attachment.inline ? { inline: true } : {})
       }

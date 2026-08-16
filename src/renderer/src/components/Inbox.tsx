@@ -67,6 +67,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realDrafts,
     realOutbox,
     outboxFailure,
+    outboxProgress,
     clearOutboxFailure,
     refreshDrafts,
     realUnreadTotal,
@@ -548,7 +549,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         />
       )}
 
-      <Toast toast={toast} />
+      <Toast toast={toast} progress={outboxProgress} />
 
       {!composerDraft && (
         <MailFooter

@@ -35,6 +35,10 @@ export class ComposerPage {
     return this.page.getByTestId('composer-attachments')
   }
 
+  get attachmentChips(): Locator {
+    return this.page.getByTestId('composer-attachment-chip')
+  }
+
   async openNew(): Promise<void> {
     // firstWindow() can resolve while React is still mounting; wait for the
     // inbox command registry before sending the single global keystroke.
@@ -77,6 +81,34 @@ export class ComposerPage {
 
   async typeBody(text: string): Promise<void> {
     await this.editor.pressSequentially(text)
+  }
+
+  async pickAttachments(): Promise<void> {
+    await this.page.getByTestId('composer-attach').click()
+  }
+
+  async dropFiles(paths: string[]): Promise<void> {
+    const input = this.page.locator('[data-testid="composer-drop-file-input"]')
+    await this.page.evaluate(() => {
+      const element = document.createElement('input')
+      element.type = 'file'
+      element.multiple = true
+      element.hidden = true
+      element.dataset.testid = 'composer-drop-file-input'
+      document.body.append(element)
+    })
+    await input.setInputFiles(paths)
+    const dataTransfer = await input.evaluateHandle((element: HTMLInputElement) => {
+      const transfer = new DataTransfer()
+      for (const file of element.files ?? []) transfer.items.add(file)
+      return transfer
+    })
+    try {
+      await this.root.dispatchEvent('drop', { dataTransfer })
+    } finally {
+      await dataTransfer.dispose()
+      await input.evaluate((element) => element.remove())
+    }
   }
 
   async triggerSend(): Promise<void> {

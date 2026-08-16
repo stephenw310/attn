@@ -16,7 +16,11 @@ import {
 } from '../gmail/parse'
 import { mergeExternalBodies } from '../sync/mergeBodies'
 import type { MailProvider, ProviderDraft } from '../sync/provider'
-import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
+import {
+  draftAttachmentsForMirror,
+  parseStoredDraftAttachments,
+  type StoredDraftAttachment
+} from './draftAttachments'
 import { draftHtmlBody } from './draftMime'
 
 export type DraftConflictDecision = 'defer' | 'local' | 'remote'
@@ -254,7 +258,7 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
         subject: candidate.subject,
         bodyHtml: candidate.body_html,
         bodyText: candidate.body_text,
-        attachments: parseStoredDraftAttachments(candidate.attachments_json),
+        attachments: draftAttachmentsForMirror(parseStoredDraftAttachments(candidate.attachments_json)),
         threadId: candidate.thread_id,
         inReplyTo: candidate.in_reply_to,
         references: JSON.parse(candidate.references_json) as string[],
@@ -263,6 +267,17 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
       }) === remote.fingerprint
   )
   return matched ? { ...matched, matchedCurrentContent: true } : undefined
+}
+
+export function mergeRemoteDraftAttachments(
+  remote: readonly StoredDraftAttachment[],
+  localStored?: string
+): StoredDraftAttachment[] {
+  if (!localStored) return [...remote]
+  const localOnlyAttachments = parseStoredDraftAttachments(localStored).filter(
+    (attachment) => Boolean(attachment.spoolPath) && !attachment.inline
+  )
+  return [...remote, ...localOnlyAttachments]
 }
 
 function writeRemoteDraft(
@@ -274,6 +289,7 @@ function writeRemoteDraft(
   const input = remote.input
   const id = local?.id ?? randomUUID()
   const revision = Math.max(local?.local_revision ?? 0, local?.mirror_revision ?? 0) + 1
+  const storedAttachments = mergeRemoteDraftAttachments(remote.storedAttachments, local?.attachments_json)
   db.prepare(
     `INSERT INTO outbox (
        id, account_id, gmail_draft_id, gmail_message_id, state, kind, to_json, cc_json, bcc_json,
@@ -305,7 +321,7 @@ function writeRemoteDraft(
     input.subject,
     input.bodyHtml,
     input.bodyText,
-    JSON.stringify(remote.storedAttachments),
+    JSON.stringify(storedAttachments),
     input.threadId,
     input.sourceMessageId,
     input.inReplyTo,
@@ -323,10 +339,16 @@ function writeRemoteDraft(
 
 function refreshRemoteAttachmentLocators(stored: string, remote: readonly StoredDraftAttachment[]): string {
   const local = parseStoredDraftAttachments(stored)
-  if (local.length !== remote.length) return stored
+  const mirrored = draftAttachmentsForMirror(local)
+  if (mirrored.length !== remote.length) return stored
+  let remoteIndex = 0
   return JSON.stringify(
-    local.map((attachment, index) => {
-      const replacement = remote[index]
+    local.map((attachment) => {
+      // Regular spooled files deliberately do not exist in Gmail until the
+      // final send update. Preserve them without letting their presence stop
+      // locator refresh for the remote/inline parts that were mirrored.
+      if (!attachment.inline && attachment.spoolPath) return attachment
+      const replacement = remote[remoteIndex++]
       const {
         remoteMessageId: _remoteMessageId,
         remoteAttachmentId: _remoteAttachmentId,

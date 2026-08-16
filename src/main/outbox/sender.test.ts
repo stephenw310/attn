@@ -1,5 +1,8 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { OutboxChanged } from '../../shared/outbox'
+import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
@@ -424,6 +427,8 @@ function effectSender(
     notify?: (change: OutboxChanged) => void
     beforeRemote?: () => Promise<void>
     clean?: (id: string) => void
+    spoolRoot?: string | null
+    progress?: (progress: OutboxProgress | null) => void
   } = {}
 ): OutboxSender {
   return new OutboxSender(
@@ -433,8 +438,9 @@ function effectSender(
     options.notify ?? vi.fn(),
     options.beforeRemote,
     options.time ?? new ManualTime(),
-    null,
-    options.clean
+    options.spoolRoot ?? null,
+    options.clean,
+    options.progress
   )
 }
 
@@ -454,6 +460,100 @@ describe('OutboxSender effect layer', () => {
     expect(updateDraft).toHaveBeenCalledWith(expect.objectContaining({ id: 'draft-1' }), expect.anything())
     expect(sendDraft).toHaveBeenCalledWith('draft-1', expect.anything())
     expect(clean).toHaveBeenCalledWith('outbox-1')
+  })
+
+  it('uploads attachment MIME once through the final update and reports per-file progress', async () => {
+    const spoolRoot = await mkdtemp(join(tmpdir(), 'attn-sender-spool-'))
+    const draftRoot = join(spoolRoot, 'outbox-1')
+    const path = join(draftRoot, 'notes.txt')
+    await mkdir(draftRoot)
+    await writeFile(path, 'attachment bytes')
+    const row = fakeRow({
+      attachments_json: JSON.stringify([
+        {
+          id: 'attachment-1',
+          filename: 'notes.txt',
+          mimeType: 'text/plain',
+          sizeBytes: 16,
+          spoolPath: path
+        }
+      ])
+    })
+    const store = new FakeOutboxDb(row)
+    let uploaded = ''
+    const updateDraft = vi.fn(async (draft: Parameters<NonNullable<MailProvider['updateDraft']>>[0]) => {
+      if (!draft.mime) throw new Error('missing MIME stream')
+      const chunks: Buffer[] = []
+      for await (const chunk of draft.mime.open()) chunks.push(Buffer.from(chunk))
+      const body = Buffer.concat(chunks)
+      expect(draft.mime.sizeBytes).toBe(body.byteLength)
+      uploaded = body.toString()
+      return draft.id
+    })
+    const progress = vi.fn<(value: OutboxProgress | null) => void>()
+    const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
+      expect(Buffer.from(raw, 'base64url').toString()).not.toContain('notes.txt')
+      return 'draft-1'
+    })
+
+    try {
+      await effectSender(store, effectProvider({ createDraft, updateDraft }), {
+        spoolRoot,
+        progress
+      }).trigger()
+    } finally {
+      await rm(spoolRoot, { recursive: true, force: true })
+    }
+
+    expect(createDraft).toHaveBeenCalledOnce()
+    expect(updateDraft).toHaveBeenCalledOnce()
+    expect(uploaded).toContain('Content-Disposition: attachment; filename="notes.txt"')
+    expect(uploaded).toContain(Buffer.from('attachment bytes').toString('base64'))
+    const updates = progress.mock.calls.flatMap(([value]) => (value ? [value] : []))
+    expect(updates.map((value) => value.completedAttachments)).toEqual([0, 1])
+    expect(updates.at(-1)).toMatchObject({ completedBytes: 16, totalBytes: 16 })
+    expect(progress.mock.lastCall?.[0]).toBeNull()
+  })
+
+  it('clears attachment progress when an upload is deferred for retry', async () => {
+    const spoolRoot = await mkdtemp(join(tmpdir(), 'attn-sender-spool-'))
+    const draftRoot = join(spoolRoot, 'outbox-1')
+    const path = join(draftRoot, 'notes.txt')
+    await mkdir(draftRoot)
+    await writeFile(path, 'data')
+    const store = new FakeOutboxDb(
+      fakeRow({
+        gmail_draft_id: 'draft-1',
+        attachments_json: JSON.stringify([
+          {
+            id: 'attachment-1',
+            filename: 'notes.txt',
+            mimeType: 'text/plain',
+            sizeBytes: 4,
+            spoolPath: path
+          }
+        ])
+      })
+    )
+    const progress = vi.fn<(value: OutboxProgress | null) => void>()
+    const updateDraft = vi.fn(async (draft: Parameters<NonNullable<MailProvider['updateDraft']>>[0]) => {
+      if (!draft.mime) throw new Error('missing MIME stream')
+      for await (const _chunk of draft.mime.open()) {
+        // Consume the upload before simulating Gmail's retryable response.
+      }
+      throw new GmailApiError(503, 'unavailable', true)
+    })
+
+    try {
+      await effectSender(store, effectProvider({ updateDraft }), { spoolRoot, progress }).trigger()
+    } finally {
+      await rm(spoolRoot, { recursive: true, force: true })
+    }
+
+    expect(store.row()).toMatchObject({ state: 'sending' })
+    expect(store.row().send_at).toBeGreaterThan(NOW)
+    expect(progress.mock.calls.some(([value]) => value !== null)).toBe(true)
+    expect(progress.mock.lastCall?.[0]).toBeNull()
   })
 
   it('loses a claim race without touching Gmail', async () => {

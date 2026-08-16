@@ -5,6 +5,7 @@ import type {
   ListThreadIdsOptions,
   MailProvider,
   ProviderDraft,
+  ProviderDraftUpdate,
   ProviderLabel,
   ProviderProfile,
   ProviderRequestOptions,
@@ -65,10 +66,23 @@ export class GmailMailProvider implements MailProvider {
     return result.id
   }
 
-  async updateDraft(
-    draft: { id: string; raw: string; threadId?: string | null },
-    options?: ProviderRequestOptions
-  ): Promise<string> {
+  async updateDraft(draft: ProviderDraftUpdate, options?: ProviderRequestOptions): Promise<string> {
+    if (draft.mime) {
+      const result = await this.client.multipartUpload<{ id: string }>(
+        'PUT',
+        `/drafts/${encodeURIComponent(draft.id)}`,
+        { message: draft.threadId ? { threadId: draft.threadId } : {} },
+        {
+          mimeType: 'message/rfc822',
+          sizeBytes: draft.mime.sizeBytes,
+          endsWithCrlf: true,
+          open: draft.mime.open
+        },
+        { signal: options?.signal }
+      )
+      return result.id
+    }
+    if (draft.raw === undefined) throw new Error('Draft update content is required')
     const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
     const result = await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, {
       retryTransient: false,
