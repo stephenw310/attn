@@ -75,26 +75,32 @@ export async function saveDraftCheckpoint(
   id: string | null,
   raw: string,
   onRemoteMissing: () => boolean,
-  threadId: string | null = null
+  threadId: string | null = null,
+  signal?: AbortSignal
 ): Promise<string | null> {
-  if (!provider.saveDraft) return null
+  const saveDraft = provider.saveDraft?.bind(provider)
+  if (!saveDraft) return null
   const request = threadId ? { id, raw, threadId } : { id, raw }
+  const save = (next: typeof request): Promise<string> =>
+    signal ? saveDraft(next, { signal }) : saveDraft(next)
   try {
-    return await provider.saveDraft(request)
+    return await save(request)
   } catch (error) {
     if (!(id && error instanceof GmailApiError && error.status === 404)) throw error
     if (!onRemoteMissing()) return null
-    return provider.saveDraft(threadId ? { id: null, raw, threadId } : { id: null, raw })
+    return save(threadId ? { id: null, raw, threadId } : { id: null, raw })
   }
 }
 
 export async function deleteDraftCheckpoint(
   provider: Pick<MailActionProvider, 'deleteDraft'>,
-  id: string
+  id: string,
+  signal?: AbortSignal
 ): Promise<boolean> {
   if (!provider.deleteDraft) return false
   try {
-    await provider.deleteDraft(id)
+    if (signal) await provider.deleteDraft(id, { signal })
+    else await provider.deleteDraft(id)
   } catch (error) {
     if (!(error instanceof GmailApiError && error.status === 404)) throw error
   }
@@ -106,7 +112,8 @@ async function mirrorComposing(
   accountId: string,
   row: DraftMirrorRow,
   provider: MailActionProvider,
-  spoolRoot: string | null
+  spoolRoot: string | null,
+  signal?: AbortSignal
 ): Promise<boolean> {
   if (!provider.saveDraft) return false
   const attachments = parseStoredDraftAttachments(row.attachments_json)
@@ -138,7 +145,8 @@ async function mirrorComposing(
         .get(accountId, row.id) as { state: string } | undefined
       return current?.state === 'composing' || current?.state === 'drafted'
     },
-    row.thread_id
+    row.thread_id,
+    signal
   )
   if (!gmailDraftId) return false
   const fingerprint = draftContentFingerprint({
@@ -209,10 +217,11 @@ async function deleteDiscarded(
   db: Db,
   accountId: string,
   row: DraftMirrorRow,
-  provider: MailActionProvider | null
+  provider: MailActionProvider | null,
+  signal?: AbortSignal
 ): Promise<boolean> {
   if (row.gmail_draft_id) {
-    if (!provider || !(await deleteDraftCheckpoint(provider, row.gmail_draft_id))) return false
+    if (!provider || !(await deleteDraftCheckpoint(provider, row.gmail_draft_id, signal))) return false
   }
   db.prepare("DELETE FROM outbox WHERE account_id = ? AND id = ? AND state = 'discarding'").run(
     accountId,
@@ -227,16 +236,17 @@ export async function drainDraftMirrors(
   accountId: string,
   provider: MailActionProvider | null,
   shouldContinue: () => boolean = () => true,
-  spoolRoot: string | null = null
+  spoolRoot: string | null = null,
+  signal?: AbortSignal
 ): Promise<void> {
   while (shouldContinue()) {
     const row = nextPending(db, accountId)
     if (!row) return
     const progressed =
       row.state === 'discarding'
-        ? await deleteDiscarded(db, accountId, row, provider)
+        ? await deleteDiscarded(db, accountId, row, provider, signal)
         : provider
-          ? await mirrorComposing(db, accountId, row, provider, spoolRoot)
+          ? await mirrorComposing(db, accountId, row, provider, spoolRoot, signal)
           : false
     if (!progressed) return
   }

@@ -19,6 +19,7 @@ const OFFLINE_RECHECK_MS = 30_000
 const STOP_TIMEOUT_MS = 5_000
 export const SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 const NEEDS_REVIEW_EXPLANATION = "We couldn't confirm this was sent — check your Sent mail before resending"
+const SEND_FAILURE_TOAST = 'Message could not be sent'
 
 interface SendRow {
   id: string
@@ -570,7 +571,7 @@ export class OutboxSender {
       )
     if (persisted.changes === 0) return false
     if (permanent) {
-      this.notify({ kind: 'failed', id: current.id, error: errorMessage(cause) })
+      this.notify({ kind: 'failed', id: current.id, error: SEND_FAILURE_TOAST })
       return false
     }
     this.notify({ kind: 'changed' })

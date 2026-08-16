@@ -35,6 +35,15 @@ describe('draft mirror recovery', () => {
     expect(saveDraft).toHaveBeenCalledOnce()
   })
 
+  it('propagates cancellation to the active Gmail checkpoint', async () => {
+    const saveDraft = vi.fn(async () => 'draft-id')
+    const controller = new AbortController()
+
+    await saveDraftCheckpoint({ saveDraft }, null, 'raw', () => true, null, controller.signal)
+
+    expect(saveDraft).toHaveBeenCalledWith({ id: null, raw: 'raw' }, { signal: controller.signal })
+  })
+
   it('treats an already-deleted Gmail draft as a successful discard', async () => {
     const provider = {
       deleteDraft: vi.fn().mockRejectedValue(new GmailApiError(404, 'gone'))

@@ -81,7 +81,10 @@ export interface MailActionProvider {
   trashThread(threadId: string): Promise<void>
   untrashThread(threadId: string): Promise<void>
   /** Optional for test providers predating M2; production providers implement it. */
-  saveDraft?(draft: { id: string | null; raw: string; threadId?: string | null }): Promise<string>
+  saveDraft?(
+    draft: { id: string | null; raw: string; threadId?: string | null },
+    options?: ProviderRequestOptions
+  ): Promise<string>
   /** A single, non-retried remote create for the exactly-once outbox protocol. */
   createDraft?(
     draft: { raw: string; threadId?: string | null },
@@ -91,7 +94,7 @@ export interface MailActionProvider {
     draft: { id: string; raw: string; threadId?: string | null },
     options?: ProviderRequestOptions
   ): Promise<string>
-  deleteDraft?(id: string): Promise<void>
+  deleteDraft?(id: string, options?: ProviderRequestOptions): Promise<void>
   getAttachmentData?(messageId: string, attachmentId: string): Promise<string | undefined>
 }
 

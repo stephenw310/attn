@@ -48,6 +48,12 @@ export function queueSend(db: Db, accountId: string, draftId: string, now = Date
     .get(accountId, draftId) as QueueRow | undefined
   if (!row) throw new Error('draft is unavailable')
 
+  const accountSeparator = accountId.lastIndexOf('@')
+  if (accountSeparator <= 0 || accountSeparator === accountId.length - 1) {
+    throw new Error('sender account is missing a Message-ID domain')
+  }
+  const accountDomain = accountId.slice(accountSeparator + 1).toLowerCase()
+
   validateMimeRecipients(
     {
       to: parseAddresses(row.to_json),
@@ -70,7 +76,6 @@ export function queueSend(db: Db, accountId: string, draftId: string, now = Date
   )
   if (plan.next.state !== 'queued') throw new Error('draft could not be queued')
 
-  const accountDomain = accountId.slice(accountId.lastIndexOf('@') + 1).toLowerCase()
   const messageId = row.rfc_message_id ?? `<${randomUUID()}@${accountDomain}>`
   const result = db
     .prepare(
