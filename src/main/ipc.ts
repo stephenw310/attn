@@ -93,6 +93,7 @@ export interface IpcContext {
   syncController: () => SyncController | null
   broadcastMailChanged: () => void
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
+  trackForegroundProviderWork: <T>(accountId: string, work: () => Promise<T>) => Promise<T>
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
   waitForConversation: (threadId: string) => Promise<void>
@@ -237,10 +238,16 @@ async function resolveAttachmentData(
   if (inlineData !== null) return { kind: 'available', data: inlineData }
   if (context.isSeeded()) return { kind: 'signed-out' }
   const client = context.makeClient()
-  if (!client) return { kind: 'signed-out' }
-  const data = (
-    await client.get<{ data?: string }>(`/messages/${request.messageId}/attachments/${request.attachmentId}`)
-  ).data
+  if (!client || !account) return { kind: 'signed-out' }
+  const data = await context.trackForegroundProviderWork(
+    account,
+    async () =>
+      (
+        await client.get<{ data?: string }>(
+          `/messages/${request.messageId}/attachments/${request.attachmentId}`
+        )
+      ).data
+  )
   return typeof data === 'string' ? { kind: 'available', data } : { kind: 'unavailable' }
 }
 
@@ -257,7 +264,10 @@ export function registerIpc(context: IpcContext): () => void {
         )
       }
       context.broadcastBodyHydrationFailed(accountId, threadId)
-    }
+    },
+    undefined,
+    undefined,
+    context.trackForegroundProviderWork
   )
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
@@ -409,8 +419,12 @@ export function registerIpc(context: IpcContext): () => void {
       } else if (attachment.remoteMessageId && attachment.remoteAttachmentId) {
         const client = context.makeClient()
         if (!client) return { error: 'Inline image requires sign in' }
-        const result = await client.get<{ data?: string }>(
-          `/messages/${encodeURIComponent(attachment.remoteMessageId)}/attachments/${encodeURIComponent(attachment.remoteAttachmentId)}`
+        const remoteMessageId = attachment.remoteMessageId
+        const remoteAttachmentId = attachment.remoteAttachmentId
+        const result = await context.trackForegroundProviderWork(account, () =>
+          client.get<{ data?: string }>(
+            `/messages/${encodeURIComponent(remoteMessageId)}/attachments/${encodeURIComponent(remoteAttachmentId)}`
+          )
         )
         if (!result.data) return { error: 'Inline image unavailable' }
         data = Buffer.from(result.data, 'base64url')
@@ -544,12 +558,14 @@ export function registerIpc(context: IpcContext): () => void {
     if (attemptedInlineImageRepairs.has(repairKey)) return false
     attemptedInlineImageRepairs.add(repairKey)
     try {
-      const thread = await provider.getThread(request.threadId, { format: 'full' })
-      if (context.currentAccountId() !== accountId) return false
-      persistThread(context.db, accountId, thread)
-      await hydrateMissingThreadBodies(context.db, provider, accountId, thread)
-      if (context.currentAccountId() === accountId) context.broadcastMailChanged()
-      return true
+      return await context.trackForegroundProviderWork(accountId, async () => {
+        const thread = await provider.getThread(request.threadId, { format: 'full' })
+        if (context.currentAccountId() !== accountId) return false
+        persistThread(context.db, accountId, thread)
+        await hydrateMissingThreadBodies(context.db, provider, accountId, thread)
+        if (context.currentAccountId() === accountId) context.broadcastMailChanged()
+        return true
+      })
     } catch (error) {
       attemptedInlineImageRepairs.delete(repairKey)
       console.error(

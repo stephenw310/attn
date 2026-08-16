@@ -3,6 +3,8 @@ import type { GmailMessage, GmailThread } from '../gmail/parse'
 export interface ProviderProfile {
   emailAddress: string
   historyId: string
+  messagesTotal?: number
+  threadsTotal?: number
 }
 
 export interface ProviderLabel {
@@ -14,6 +16,7 @@ export interface ProviderLabel {
 export interface ThreadIdPage {
   threadIds: string[]
   nextPageToken?: string
+  resultSizeEstimate?: number
 }
 
 export interface ProviderDraftSummary {

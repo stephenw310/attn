@@ -90,10 +90,12 @@ export class GmailMailProvider implements MailProvider {
     const result = await this.client.get<{
       threads?: { id: string }[]
       nextPageToken?: string
+      resultSizeEstimate?: number
     }>('/threads', params)
     return {
       threadIds: (result.threads ?? []).map((thread) => thread.id),
-      nextPageToken: result.nextPageToken
+      nextPageToken: result.nextPageToken,
+      resultSizeEstimate: result.resultSizeEstimate
     }
   }
 

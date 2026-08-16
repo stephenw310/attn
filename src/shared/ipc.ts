@@ -74,7 +74,8 @@ export const TEST_CHANNELS = {
   updateMessageBody: 'attn:test:updateMessageBody',
   failNextDraftSave: 'attn:test:failNextDraftSave',
   markDraftMirrored: 'attn:test:markDraftMirrored',
-  remoteDraft: 'attn:test:remoteDraft'
+  remoteDraft: 'attn:test:remoteDraft',
+  runLifetimeSweep: 'attn:test:runLifetimeSweep'
 } as const
 
 export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]

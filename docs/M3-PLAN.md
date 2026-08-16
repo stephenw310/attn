@@ -10,7 +10,9 @@
 
 ## Why M3 opens with sync
 
-M2 leaves the local store holding Inbox (12 months of metadata, 90 days of bodies), Sent metadata, drafts, and — once T13A lands — a lifetime header sweep of everything Gmail returns from an unfiltered listing. Three gaps remain, and every one of them is a *data* gap that a UI task cannot close:
+M2 leaves the local store holding Inbox (12 months of metadata, 90 days of bodies), Sent metadata, drafts,
+and T13A's lifetime header sweep of everything Gmail returns from an unfiltered listing. Three gaps remain,
+and every one of them is a *data* gap that a UI task cannot close:
 
 1. **Spam and Trash are never fetched.** `threads.list` excludes both unless explicitly asked (SPEC §9 #17), so M3's Spam and Trash mailboxes would render empty against a store that never had the rows.
 2. **The 12-month tier is still Inbox-scoped at normal priority.** T13A's sweep does reach archived mail, but it is deliberately throttled and low-priority; a first-run user should not wait on a lifetime sweep to search last quarter's archived mail.
@@ -125,7 +127,9 @@ lifetime    no date bound       headers   T13A's throttled sweep
 - **Cursor grammar and stage plumbing.** `parseCursor`/`checkpoint` in `src/main/sync/backfill.ts` gain the new phases with the existing `phase:pageToken` resume semantics; `SyncStage` (`src/shared/mail.ts:96`) gains `'all-mail'` and `'spam-trash'`; `SYNC_STAGES` and `syncStageLabel` (`src/renderer/src/components/SyncStatus.tsx:5`) gain entries ("All mail", "Spam & trash"). The existing `runThreadPhase` handles both new stages as-is — they page thread ids like the others.
 - **Skip legacy `CHAT` rows** defensively; old accounts surface Hangouts messages in unfiltered listings.
 - **Seeded accounts skip the new stages** exactly as they skip `sent` today (`src/main/index.ts:236`).
-- **Contact hygiene is a hard prerequisite, and it belongs to T13A.** If T13A has not landed when this starts, this PR carries the rule instead: messages labeled SPAM or TRASH never contribute to `contact_messages`. A deliberate 30-day spam pass would otherwise bulk-import spammer addresses into autocomplete — a visible regression, not a theoretical one.
+- **Contact hygiene is a hard prerequisite supplied by T13A.** Preserve its rule that messages labeled SPAM
+  or TRASH never contribute to `contact_messages`. A deliberate 30-day spam pass would otherwise
+  bulk-import spammer addresses into autocomplete — a visible regression, not a theoretical one.
 
 ### Testing and done condition
 

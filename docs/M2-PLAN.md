@@ -4,7 +4,7 @@
 **Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through draft PR #38.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39) and T14 (#38, full-window) are shipped. Dogfood of the shipped composer produced four revision tasks, T14A–T14D, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, and two-way Gmail Drafts sync; all four shipped in #43, with draft-mirror reconciliation fixed in #44. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A is the planned lifetime header sweep (upgraded from Sent-only to the whole account, SPEC §9 #17), and T21 adds the poller's label-catalog refresh found during that review. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
+**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39) and T14 (#38, full-window) are shipped. Dogfood of the shipped composer produced four revision tasks, T14A–T14D, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, and two-way Gmail Drafts sync; all four shipped in #43, with draft-mirror reconciliation fixed in #44. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) is implemented; its real-mailbox quota/timing run remains sign-off evidence. T21 adds the poller's label-catalog refresh found during that review. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
@@ -225,7 +225,7 @@ Verify green; fresh backfill demonstrated end to end; autocomplete data queryabl
 
 ## T13A — Lifetime header sweep and saved-contact decision
 
-**Status: planned follow-up — scope upgraded by SPEC §9 #17.** · **Depends on:** T13 · **Blocks:** T20 sign-off · **Parallel with:** the T14 revisions and the outbox chain · **Spec:** F2 backfill stage 7 + lifetime header sweep, F6 autocomplete
+**Status: implemented; real-Gmail timing/quota evidence remains for sign-off.** · **Depends on:** T13 · **Blocks:** T20 sign-off · **Parallel with:** the T14 revisions and the outbox chain · **Spec:** F2 backfill stage 7 + lifetime header sweep, F6 autocomplete
 
 ### Why this is upgraded from Sent-only
 
@@ -254,6 +254,11 @@ them too.
   polling, body hydration, and the interactive backfill all outrank it: self-throttle well below Gmail's
   ~250 units/user/sec so interactive calls never queue behind it, and set the duty-cycle constants from the
   real-mailbox measurement below, not guesses.
+  The implemented conservative starting posture is one request at a time, a 100 ms inter-request floor
+  (~100 units/sec for metadata gets), and a one-second page-boundary pause. Pending user actions, draft
+  mirrors, body/attachment hydration, and active history cycles make the sweep yield in 250 ms slices. The
+  real-mailbox run may tune
+  these constants before sign-off; it must preserve that priority ordering.
 - **Contacts derive from the same stream** through the existing `contact_messages`/`contacts` projection,
   idempotent with T13's bootstrap contributions. Two hygiene rules land here: messages labeled `SPAM` or
   `TRASH` never contribute contact rows (the poller already trickles spam threads in; a deliberate sweep
@@ -278,9 +283,12 @@ behavior on the injectable `SchedulerTime`, contact idempotency across the T13 o
 contact exclusion. E2e a partially completed sweep across relaunch/offline recovery and assert that no body
 bytes are fetched and unread counts do not change. Manual evidence records wall-clock/quota on a real
 long-lived mailbox with interaction budgets green — the throttle constants get set from that measurement.
-Done means an address last emailed outside the mail window autocompletes locally, a thread archived years
-ago has a local header row, progress never masquerades as a blocked inbox sync, and the People-API decision
-stays recorded.
+Automated evidence now covers cursor restart/resume, metadata-only fetches, foreground yielding, contact
+idempotency and hygiene, an offline relaunch, unchanged Inbox unread, lifetime autocomplete, and the
+non-blocking footer state. Remaining manual evidence is the wall-clock/quota run on a real long-lived
+mailbox. Done means an address last emailed outside the mail window autocompletes locally, a thread archived
+years ago has a local header row, progress never masquerades as a blocked inbox sync, and the People-API
+decision stays recorded.
 
 ---
 
@@ -774,8 +782,8 @@ The closing pass that turns "features exist" into "this is my mail client":
 - [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data
 - [ ] Initial-sync evidence separates first-readable-page latency from full background completion and records
       per-stage totals, effective rate, and quota-wait time
-- [ ] Lifetime Sent header indexing finds contacts outside the mail window without creating old mail rows;
-      saved-Google-Contacts scope decision recorded
+- [ ] Lifetime whole-account header indexing finds contacts outside the mail window and creates header rows
+      without downloading old body bytes; saved-Google-Contacts scope decision recorded
 - [ ] Failed triage actions self-heal to server truth with an explanatory toast; auth re-pend shipped; no silent queue states remain
 - [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts
 - [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input)

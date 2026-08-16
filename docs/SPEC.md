@@ -131,9 +131,9 @@ the local `has:attachment`/filename search it feeds) arrives when a thread is fi
 than the 90-day window are fetched on demand and cached permanently. UI renders as soon as the first page of
 inbox metadata lands.
 
-*Shipped staging:* M2 currently runs inbox → bodies → drafts → sent → reconcile; the lifetime sweep lands
-with T13A, still in M2. The all-mail and spam-trash stages, per-message label storage, and the generalized
-reconcile open M3 (§9 #10, #17).
+*Shipped staging:* M2 runs inbox → bodies → drafts → sent → reconcile, then starts T13A's independent,
+low-priority lifetime sweep. The all-mail and spam-trash stages, per-message label storage, and the
+generalized reconcile open M3 (§9 #10, #17).
 
 **Window rationale and completion semantics:** headers are cheap — roughly 1–2 KB and ~10 quota units per
 thread, so a typical account's lifetime header index costs an hour or two of background sweeping and a few

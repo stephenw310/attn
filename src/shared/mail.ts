@@ -100,5 +100,15 @@ export type SyncState =
   // An incremental history poll, not a staged backfill: no stage, no progress.
   | { phase: 'checking' }
   | { phase: 'syncing'; stage: SyncStage; threadsDone: number }
+  | {
+      phase: 'indexing'
+      stage: 'lifetime'
+      threadsDone: number
+      threadsTotal?: number
+      messagesTotal?: number
+      etaMs?: number
+      reason: 'running' | 'quota-wait' | 'foreground-yield'
+      waitMs?: number
+    }
   | { phase: 'offline'; message: string }
   | { phase: 'error'; message: string }

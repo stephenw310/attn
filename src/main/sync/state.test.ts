@@ -20,6 +20,28 @@ describe('sync state publication', () => {
       sameSyncState({ phase: 'error', message: 'offline' }, { phase: 'error', message: 'offline' })
     ).toBe(true)
     expect(sameSyncState({ phase: 'checking' }, { phase: 'checking' })).toBe(true)
+    expect(
+      sameSyncState(
+        {
+          phase: 'indexing',
+          stage: 'lifetime',
+          threadsDone: 50,
+          threadsTotal: 100,
+          etaMs: 60_000,
+          reason: 'quota-wait',
+          waitMs: 1_000
+        },
+        {
+          phase: 'indexing',
+          stage: 'lifetime',
+          threadsDone: 50,
+          threadsTotal: 100,
+          etaMs: 60_000,
+          reason: 'quota-wait',
+          waitMs: 1_000
+        }
+      )
+    ).toBe(true)
   })
 
   it('publishes phase, progress, and error changes', () => {
@@ -44,6 +66,12 @@ describe('sync state publication', () => {
     expect(sameSyncState({ phase: 'checking' }, { phase: 'idle' })).toBe(false)
     expect(
       sameSyncState({ phase: 'checking' }, { phase: 'syncing', stage: 'reconcile', threadsDone: 0 })
+    ).toBe(false)
+    expect(
+      sameSyncState(
+        { phase: 'indexing', stage: 'lifetime', threadsDone: 50, reason: 'running' },
+        { phase: 'indexing', stage: 'lifetime', threadsDone: 51, reason: 'running' }
+      )
     ).toBe(false)
   })
 })

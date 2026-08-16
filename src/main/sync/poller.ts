@@ -144,6 +144,7 @@ export interface HistoryPollerOptions {
   provider: MailProvider
   isForeground: () => boolean
   recoverExpiredHistory: () => Promise<void>
+  onCycleStart?: () => void
   onCycleComplete: (changed: boolean) => void
   onError: (error: unknown) => void
   wakeThread?: (threadId: string) => void
@@ -200,6 +201,7 @@ export class HistoryPoller {
     this.timer = null
     this.executing = true
     this.lastAttemptAt = this.time.now()
+    this.options.onCycleStart?.()
     try {
       let plan: FetchedHistoryPlan | null = null
       if (this.recoveryPending) {

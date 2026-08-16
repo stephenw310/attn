@@ -8,6 +8,7 @@ import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { SnoozeScheduler } from './scheduler'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { syncFailureState } from './sync/failure'
+import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
 import { HistoryPoller, reconcileInboxMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { sameSyncState } from './sync/state'
@@ -20,6 +21,8 @@ interface SyncControllerContext {
   makeProvider: (generation: number) => GmailMailProvider | null
   /** Drives the poller's foreground/background cadence; owned by index.ts so this stays Electron-free. */
   isForeground: () => boolean
+  /** True while an interactive body or attachment request is using Gmail for this account. */
+  hasForegroundProviderWork: (accountId: string) => boolean
   broadcastState: (state: SyncState) => void
   broadcastMailChanged: () => void
   getActionExecutor: () => ActionExecutor | null
@@ -35,11 +38,19 @@ interface SyncControllerContext {
 export class SyncController {
   private state: SyncState = { phase: 'idle' }
   private running = false
+  private lifetimeRunning = false
+  private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
+  private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
+  private lifetimeFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
+  private pollerRunning = false
   private stopped = false
   private backfillRetryGeneration: number | null = null
   private generation = 0
+  private lifetimeRunId = 0
   private poller: HistoryPoller | null = null
+  private sessionProvider: GmailMailProvider | null = null
   private readonly offlineRetry = new OfflineRetryScheduler(15_000)
+  private readonly lifetimeRetry = new OfflineRetryScheduler(15_000)
 
   constructor(private readonly context: SyncControllerContext) {}
 
@@ -78,6 +89,7 @@ export class SyncController {
   retry(): void {
     if (this.stopped) return
     this.offlineRetry.clear()
+    this.lifetimeRetry.clear()
     const route = syncRetryRoute({
       signedIn: this.context.isSignedIn(),
       seeded: this.context.isSeeded(),
@@ -91,6 +103,10 @@ export class SyncController {
     }
     if (route === 'poller') {
       this.poller?.requestRunNow(() => this.setState({ phase: 'checking' }))
+      const accountId = this.context.currentAccountId()
+      if (accountId && this.sessionProvider) {
+        this.startLifetimeSweep(accountId, this.sessionProvider, this.generation)
+      }
     } else if (route === 'queue-backfill') {
       this.backfillRetryGeneration = this.generation
     } else {
@@ -121,8 +137,14 @@ export class SyncController {
   private resetSession(): void {
     this.stopHistoryPoller()
     this.offlineRetry.clear()
+    this.lifetimeRetry.clear()
     this.backfillRetryGeneration = null
     this.running = false
+    this.lifetimeRunning = false
+    this.lifetimeProgress = null
+    this.foregroundFailure = null
+    this.lifetimeFailure = null
+    this.lifetimeRunId++
     this.generation++
   }
 
@@ -133,10 +155,30 @@ export class SyncController {
     this.context.broadcastState(state)
   }
 
-  private publishFailure(error: unknown, prefix: string): SyncState {
+  private failureState(error: unknown, prefix: string): Extract<SyncState, { phase: 'offline' | 'error' }> {
     const next = syncFailureState(error)
-    this.setState(next)
     console.error(`${prefix}: ${next.message}`)
+    return next
+  }
+
+  private publishForegroundFailure(
+    error: unknown,
+    prefix: string
+  ): Extract<SyncState, { phase: 'offline' | 'error' }> {
+    const next = this.failureState(error, prefix)
+    this.foregroundFailure = next
+    this.setState(next)
+    return next
+  }
+
+  private publishLifetimeFailure(
+    error: unknown,
+    prefix: string
+  ): Extract<SyncState, { phase: 'offline' | 'error' }> {
+    const next = this.failureState(error, prefix)
+    this.lifetimeFailure = next
+    this.lifetimeProgress = null
+    if (!this.foregroundFailure && !this.running && !this.pollerRunning) this.setState(next)
     return next
   }
 
@@ -147,8 +189,26 @@ export class SyncController {
     )
   }
 
+  private scheduleLifetimeRetry(accountId: string, provider: GmailMailProvider, generation: number): void {
+    this.lifetimeRetry.schedule(
+      () =>
+        !this.stopped &&
+        generation === this.generation &&
+        this.context.isSignedIn() &&
+        this.context.currentAccountId() === accountId,
+      () => this.startLifetimeSweep(accountId, provider, generation)
+    )
+  }
+
   private startSync(): void {
-    if (this.stopped || this.running || this.context.isSeeded() || this.poller) return
+    if (this.stopped || this.running || this.context.isSeeded()) return
+    if (this.poller) {
+      const accountId = this.context.currentAccountId()
+      if (accountId && this.sessionProvider) {
+        this.startLifetimeSweep(accountId, this.sessionProvider, this.generation)
+      }
+      return
+    }
     this.offlineRetry.clear()
     const generation = this.generation
     const accountId = this.context.currentAccountId()
@@ -156,16 +216,19 @@ export class SyncController {
     if (!accountId) return
     if (!provider) {
       const message = 'OAuth configuration unavailable — add oauth.config.json'
-      this.setState({ phase: 'error', message })
+      this.foregroundFailure = { phase: 'error', message }
+      this.setState(this.foregroundFailure)
       console.error(`[sync] failed: ${message}`)
       return
     }
+    this.foregroundFailure = null
     const state = this.context.db
       .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null } | undefined
     const backfillPlan = planBackfillStart(state?.backfill_cursor)
     if (backfillPlan.kind === 'skip') {
       this.startHistoryPoller(accountId, provider, generation, true)
+      this.startLifetimeSweep(accountId, provider, generation)
       return
     }
     if (this.backfillRetryGeneration === generation) this.backfillRetryGeneration = null
@@ -182,7 +245,7 @@ export class SyncController {
       onError: (error) => {
         if (generation !== this.generation) return
         this.running = false
-        const failure = this.publishFailure(error, '[sync] failed')
+        const failure = this.publishForegroundFailure(error, '[sync] failed')
         if (this.backfillRetryGeneration !== generation && failure.phase === 'offline') {
           this.scheduleOfflineRetry(generation)
         }
@@ -204,10 +267,12 @@ export class SyncController {
         const retryRequested = this.backfillRetryGeneration === generation
         if (retryRequested) this.backfillRetryGeneration = null
         reconcileInboxMembership(this.context.db, accountId, result.inboxThreadIds)
+        this.foregroundFailure = null
         this.setState({ phase: 'idle' })
         this.context.broadcastMailChanged()
         console.log(`[sync] backfill done: ${result.threadCount} threads for ${accountId}`)
         this.startHistoryPoller(accountId, provider, generation, retryRequested)
+        this.startLifetimeSweep(accountId, provider, generation)
       })
       .catch((error) => {
         if (generation === this.generation) this.running = false
@@ -215,7 +280,7 @@ export class SyncController {
           if (this.context.isSignedIn()) void this.resumeOnlineWork()
           return
         }
-        const failure = this.publishFailure(error, '[sync] failed after backfill')
+        const failure = this.publishForegroundFailure(error, '[sync] failed after backfill')
         if (this.backfillRetryGeneration === generation) {
           this.backfillRetryGeneration = null
           this.startSync()
@@ -232,21 +297,30 @@ export class SyncController {
     runImmediately = false
   ): void {
     if (this.stopped || generation !== this.generation || this.poller) return
+    this.sessionProvider = provider
     this.poller = new HistoryPoller({
       db: this.context.db,
       accountId,
       provider,
       isForeground: this.context.isForeground,
       recoverExpiredHistory: () => this.recoverExpiredHistory(accountId, provider, generation),
+      onCycleStart: () => {
+        if (generation !== this.generation) return
+        this.pollerRunning = true
+        this.foregroundFailure = null
+        this.setState({ phase: 'checking' })
+      },
       onCycleComplete: (changed) => {
         if (generation !== this.generation) return
-        this.setState({ phase: 'idle' })
+        this.pollerRunning = false
+        this.publishSettledState()
         if (changed) this.context.broadcastMailChanged()
       },
       onError: (error) => {
         if (generation !== this.generation) return
         this.running = false
-        this.publishFailure(error, '[sync] history poll failed')
+        this.pollerRunning = false
+        this.publishForegroundFailure(error, '[sync] history poll failed')
       },
       wakeThread: (threadId) => this.context.getSnoozeScheduler()?.wakeThread(threadId),
       syncDrafts: () => syncRemoteDrafts(this.context.db, accountId, provider),
@@ -259,6 +333,97 @@ export class SyncController {
     })
     this.poller.start()
     if (runImmediately) this.poller.requestRunNow(() => this.setState({ phase: 'checking' }))
+  }
+
+  private startLifetimeSweep(accountId: string, provider: GmailMailProvider, generation: number): void {
+    if (this.stopped || this.lifetimeRunning || generation !== this.generation || this.context.isSeeded()) {
+      return
+    }
+    this.lifetimeRetry.clear()
+    this.lifetimeRunning = true
+    const lifetimeRunId = ++this.lifetimeRunId
+    let failed = false
+    console.log(`[sync] lifetime header sweep started for ${accountId}`)
+    void runLifetimeSweep(
+      this.context.db,
+      provider,
+      accountId,
+      {
+        onProgress: (progress) => {
+          if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
+          this.publishLifetimeProgress(progress)
+        },
+        onError: (error) => {
+          if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
+          failed = true
+          this.lifetimeRunning = false
+          const failure = this.publishLifetimeFailure(error, '[sync] lifetime header sweep failed')
+          if (failure.phase === 'offline') {
+            this.scheduleLifetimeRetry(accountId, provider, generation)
+          }
+        }
+      },
+      {
+        shouldContinue: () =>
+          !this.stopped &&
+          generation === this.generation &&
+          lifetimeRunId === this.lifetimeRunId &&
+          this.context.currentAccountId() === accountId,
+        shouldYield: () => this.shouldYieldLifetime(accountId)
+      }
+    )
+      .then((result) => {
+        if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
+        this.lifetimeRunning = false
+        if (!result || failed) return
+        this.lifetimeProgress = null
+        this.lifetimeFailure = null
+        this.publishSettledState()
+        console.log(`[sync] lifetime header sweep done: ${result.threadCount} threads for ${accountId}`)
+      })
+      .catch((error) => {
+        if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
+        this.lifetimeRunning = false
+        const failure = this.publishLifetimeFailure(error, '[sync] failed after lifetime header sweep')
+        if (failure.phase === 'offline') {
+          this.scheduleLifetimeRetry(accountId, provider, generation)
+        }
+      })
+  }
+
+  private publishLifetimeProgress(progress: LifetimeSweepProgress): void {
+    const { mailChanged, ...details } = progress
+    this.lifetimeFailure = null
+    this.lifetimeProgress = { phase: 'indexing', stage: 'lifetime', ...details }
+    if (!this.running && !this.pollerRunning && !this.foregroundFailure) {
+      this.setState(this.lifetimeProgress)
+    }
+    if (mailChanged) this.context.broadcastMailChanged()
+  }
+
+  private publishSettledState(): void {
+    if (this.running || this.pollerRunning) return
+    this.setState(
+      this.foregroundFailure ?? this.lifetimeFailure ?? this.lifetimeProgress ?? { phase: 'idle' }
+    )
+  }
+
+  private shouldYieldLifetime(accountId: string): boolean {
+    if (this.running || this.pollerRunning || this.context.hasForegroundProviderWork(accountId)) return true
+    return Boolean(
+      this.context.db
+        .prepare(
+          `SELECT 1 FROM action_queue
+           WHERE account_id = ? AND state IN ('pending', 'inflight')
+           UNION ALL
+           SELECT 1 FROM outbox
+           WHERE account_id = ? AND
+             (state = 'discarding' OR
+              (state IN ('composing', 'drafted') AND local_revision > mirror_revision))
+           LIMIT 1`
+        )
+        .get(accountId, accountId)
+    )
   }
 
   private async recoverExpiredHistory(
@@ -301,5 +466,7 @@ export class SyncController {
   private stopHistoryPoller(): void {
     this.poller?.stop()
     this.poller = null
+    this.pollerRunning = false
+    this.sessionProvider = null
   }
 }
