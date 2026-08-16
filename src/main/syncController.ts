@@ -51,7 +51,6 @@ export class SyncController {
   private generation = 0
   private lifetimeRunId = 0
   private poller: HistoryPoller | null = null
-  private sessionProvider: GmailMailProvider | null = null
   private readonly offlineRetry = new OfflineRetryScheduler(15_000)
   private readonly lifetimeRetry = new OfflineRetryScheduler(LIFETIME_RETRY_MS)
 
@@ -106,10 +105,9 @@ export class SyncController {
     }
     if (route === 'poller') {
       this.poller?.requestRunNow(() => this.publishChecking())
-      const accountId = this.context.currentAccountId()
-      if (accountId && this.sessionProvider) {
-        this.startLifetimeSweep(accountId, this.sessionProvider, this.generation)
-      }
+      // A poller can outlive a failed backfill now — startSync resumes an
+      // unfinished cursor, or falls through to the lifetime sweep when done.
+      this.startSync()
     } else if (route === 'queue-backfill') {
       this.backfillRetryGeneration = this.generation
     } else {
@@ -217,14 +215,10 @@ export class SyncController {
   }
 
   private startSync(): void {
+    // An alive poller no longer implies the backfill finished (it starts at
+    // interactive-ready), so always route through the cursor plan below;
+    // startHistoryPoller no-ops when the poller already exists.
     if (this.stopped || this.running || this.context.isSeeded()) return
-    if (this.poller) {
-      const accountId = this.context.currentAccountId()
-      if (accountId && this.sessionProvider) {
-        this.startLifetimeSweep(accountId, this.sessionProvider, this.generation)
-      }
-      return
-    }
     this.offlineRetry.clear()
     const generation = this.generation
     const accountId = this.context.currentAccountId()
@@ -257,6 +251,14 @@ export class SyncController {
         const { mailChanged, ...stateProgress } = progress
         this.setState({ phase: 'syncing', ...stateProgress })
         if (mailChanged) this.context.broadcastMailChanged()
+        // Interactive-ready: the Inbox list is complete once the metadata
+        // stage ends, so start polling here instead of after the whole
+        // backfill — new mail must not wait out the archive stages. History
+        // replays from the pre-backfill checkpoint, so the early start is
+        // safe, and cycle completions stay silent while `running` holds.
+        if (progress.stage !== 'metadata') {
+          this.startHistoryPoller(accountId, provider, generation)
+        }
       },
       onError: (error) => {
         if (generation !== this.generation) return
@@ -299,7 +301,11 @@ export class SyncController {
         this.setState({ phase: 'idle' })
         this.context.broadcastMailChanged()
         console.log(`[sync] backfill done: ${result.threadCount} threads for ${accountId}`)
+        const pollerExisted = this.poller !== null
         this.startHistoryPoller(accountId, provider, generation, retryRequested)
+        if (pollerExisted && retryRequested) {
+          this.poller?.requestRunNow(() => this.publishChecking())
+        }
         this.startLifetimeSweep(accountId, provider, generation)
       })
       .catch((error) => {
@@ -325,7 +331,6 @@ export class SyncController {
     runImmediately = false
   ): void {
     if (this.stopped || generation !== this.generation || this.poller) return
-    this.sessionProvider = provider
     this.poller = new HistoryPoller({
       db: this.context.db,
       accountId,
@@ -345,7 +350,8 @@ export class SyncController {
       },
       onError: (error) => {
         if (generation !== this.generation) return
-        this.running = false
+        // Never clear `running` here: a concurrent backfill owns that flag,
+        // and recovery's own finally block already releases it.
         this.pollerRunning = false
         this.publishForegroundFailure(error, '[sync] history poll failed')
       },
@@ -450,6 +456,13 @@ export class SyncController {
     if (this.stopped || generation !== this.generation) {
       throw new Error('authentication session changed')
     }
+    // The poller can hit an expired checkpoint while a resumed backfill is
+    // mid-flight. Two concurrent backfills would race the cursor, so defer:
+    // the next poll cycle re-detects the expiry once the backfill finishes.
+    if (this.running) {
+      console.warn('[sync] history recovery deferred — backfill in progress')
+      return
+    }
     this.running = true
     this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
     let failure: unknown = new Error('history recovery backfill failed')
@@ -485,6 +498,5 @@ export class SyncController {
     this.poller?.stop()
     this.poller = null
     this.pollerRunning = false
-    this.sessionProvider = null
   }
 }

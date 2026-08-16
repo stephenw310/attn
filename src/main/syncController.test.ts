@@ -78,7 +78,12 @@ function flush(): Promise<void> {
 }
 
 function harness(options: { backfillCursor?: string | null } = {}) {
-  const session = { signedIn: true, seeded: false, accountId: 'user@example.com' as string | null }
+  const session = {
+    signedIn: true,
+    seeded: false,
+    accountId: 'user@example.com' as string | null,
+    backfillCursor: options.backfillCursor ?? null
+  }
   const foregroundWork = {
     actionActive: false,
     draftActive: false,
@@ -115,9 +120,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
   const db = {
     prepare: (sql: string) => ({
       get: () =>
-        sql.includes('SELECT backfill_cursor')
-          ? { backfill_cursor: options.backfillCursor ?? null }
-          : undefined
+        sql.includes('SELECT backfill_cursor') ? { backfill_cursor: session.backfillCursor } : undefined
     })
   } as unknown as Db
 
@@ -204,7 +207,7 @@ describe('retry routing', () => {
   })
 
   it('pokes the existing poller instead of starting a second backfill', async () => {
-    const { controller, backfills } = harness()
+    const { controller, session, backfills } = harness()
     controller.retry()
     backfills[0].result.resolve({
       threadCount: 1,
@@ -212,6 +215,7 @@ describe('retry routing', () => {
       spamThreadIds: [],
       trashThreadIds: []
     })
+    session.backfillCursor = 'done'
     await flush()
     const poller = mocks.FakePoller.instances[0]
     expect(poller).toBeDefined()
@@ -317,6 +321,44 @@ describe('backfill to poller handoff', () => {
       expect.anything(),
       expect.anything()
     )
+  })
+
+  it('starts the poller at interactive-ready, once, and keeps its cycles silent mid-backfill', async () => {
+    const { controller, session, backfills, states, broadcastMailChanged } = harness()
+    controller.retry()
+    expect(mocks.FakePoller.instances).toHaveLength(0)
+
+    // Inbox metadata still streaming: not interactive-ready yet.
+    backfills[0].callbacks.onProgress({ stage: 'metadata', threadsDone: 40, mailChanged: true })
+    expect(mocks.FakePoller.instances).toHaveLength(0)
+
+    // Leaving the metadata stage is the interactive-ready signal.
+    backfills[0].callbacks.onProgress({ stage: 'bodies', threadsDone: 40, mailChanged: false })
+    const poller = mocks.FakePoller.instances[0]
+    expect(poller).toBeDefined()
+    expect(poller.started).toBe(true)
+
+    // A poll cycle completing mid-backfill broadcasts mail but never
+    // publishes a settled state over the syncing progress display.
+    broadcastMailChanged.mockClear()
+    states.length = 0
+    poller.options.onCycleStart?.()
+    poller.options.onCycleComplete(true)
+    expect(broadcastMailChanged).toHaveBeenCalledOnce()
+    expect(states).toEqual([])
+
+    // Later stages and completion reuse the same poller instance.
+    backfills[0].callbacks.onProgress({ stage: 'all-mail', threadsDone: 90, mailChanged: true })
+    backfills[0].result.resolve({
+      threadCount: 90,
+      inboxThreadIds: ['t1'],
+      spamThreadIds: [],
+      trashThreadIds: []
+    })
+    session.backfillCursor = 'done'
+    await flush()
+    expect(mocks.FakePoller.instances).toHaveLength(1)
+    expect(states.at(-1)).toEqual({ phase: 'idle' })
   })
 
   it('reconciles, publishes idle, and starts the poller after a successful backfill', async () => {
