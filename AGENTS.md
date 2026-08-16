@@ -96,6 +96,7 @@ AGENTS.md            This file — the working agreement, shared by every agent 
 docs/SPEC.md         Product & technical spec — source of truth for behavior
 docs/M1-PLAN.md      Shipped M1 task record + the remaining notification smoke
 docs/M2-PLAN.md      Current milestone: refactors + composer/outbox task guide
+docs/M3-PLAN.md      Next milestone: sync restructure (S1–S4) planned; feature half pending
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies
 src/main/            Main process: windows, OAuth, SQLite (db/), Gmail (gmail/, sync/)
