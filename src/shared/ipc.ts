@@ -1,5 +1,5 @@
-import type { RevertedAction } from './actionRevert'
-import type { TriageAction, TriageResult } from './actions'
+import type { ActionRevertNotice } from './actionRevert'
+import type { ActionQueueStatus, TriageAction, TriageResult } from './actions'
 import type { AuthStatus } from './auth'
 import type { ContactSearchResult } from './contacts'
 import type {
@@ -45,7 +45,8 @@ export const IPC_CHANNELS = {
   mailListSnoozed: 'mail:listSnoozed',
   mailListLabels: 'mail:listLabels',
   mailGetUnreadCount: 'mail:getUnreadCount',
-  mailTakeActionsReverted: 'mail:takeActionsReverted',
+  mailPeekActionsReverted: 'mail:peekActionsReverted',
+  mailAcknowledgeActionsReverted: 'mail:acknowledgeActionsReverted',
   mailGetConversation: 'mail:getConversation',
   mailDownloadAttachment: 'mail:downloadAttachment',
   mailGetInlineImage: 'mail:getInlineImage',
@@ -55,6 +56,7 @@ export const IPC_CHANNELS = {
   mailMarkReadOnOpen: 'mail:markReadOnOpen',
   mailUndo: 'mail:undo',
   mailGetPendingActionCount: 'mail:getPendingActionCount',
+  mailGetActionQueueStatus: 'mail:getActionQueueStatus',
   mailChanged: 'mail:changed',
   mailActionsReverted: 'mail:actionsReverted',
   mailBodyHydrationFailed: 'mail:bodyHydrationFailed',
@@ -78,7 +80,8 @@ export const TEST_CHANNELS = {
   failNextDraftSave: 'attn:test:failNextDraftSave',
   markDraftMirrored: 'attn:test:markDraftMirrored',
   remoteDraft: 'attn:test:remoteDraft',
-  failNextAction: 'attn:test:failNextAction'
+  failNextAction: 'attn:test:failNextAction',
+  failNextActionAuth: 'attn:test:failNextActionAuth'
 } as const
 
 export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]
@@ -118,7 +121,14 @@ export interface InvokeChannels {
   [IPC_CHANNELS.mailListSnoozed]: { args: []; result: SnoozedThreadRow[] }
   [IPC_CHANNELS.mailListLabels]: { args: []; result: MailLabel[] }
   [IPC_CHANNELS.mailGetUnreadCount]: { args: []; result: number }
-  [IPC_CHANNELS.mailTakeActionsReverted]: { args: []; result: RevertedAction[] }
+  [IPC_CHANNELS.mailPeekActionsReverted]: {
+    args: [accountId: string]
+    result: ActionRevertNotice | null
+  }
+  [IPC_CHANNELS.mailAcknowledgeActionsReverted]: {
+    args: [accountId: string, noticeId: number]
+    result: boolean
+  }
   [IPC_CHANNELS.mailGetConversation]: {
     args: [threadId: string, allowHydration: boolean]
     result: Conversation | null
@@ -140,6 +150,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.mailMarkReadOnOpen]: { args: [threadId: string]; result: undefined }
   [IPC_CHANNELS.mailUndo]: { args: []; result: TriageResult | null }
   [IPC_CHANNELS.mailGetPendingActionCount]: { args: []; result: number }
+  [IPC_CHANNELS.mailGetActionQueueStatus]: { args: []; result: ActionQueueStatus }
 }
 
 export interface BroadcastChannels {

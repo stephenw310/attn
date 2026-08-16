@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, rm } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { app, type IpcMainInvokeEvent, ipcMain, shell } from 'electron'
-import type { RevertedAction } from '../shared/actionRevert'
+import type { ActionRevertNotice } from '../shared/actionRevert'
 import { isValidEmail } from '../shared/address'
 import type { AuthStatus } from '../shared/auth'
 import {
@@ -20,7 +20,14 @@ import type {
   InlineImageRequest,
   InlineImageResult
 } from '../shared/mail'
-import { isTriageAction, pendingActionCount, performTriage, snoozeThreads, undoLast } from './actions'
+import {
+  actionQueueStatus,
+  isTriageAction,
+  pendingActionCount,
+  performTriage,
+  snoozeThreads,
+  undoLast
+} from './actions'
 import type { ActionExecutor } from './actions/executor'
 import { writeAttachment } from './attachments'
 import type { Db } from './db'
@@ -96,7 +103,8 @@ export interface IpcContext {
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
-  takeRevertedActions: (accountId: string) => RevertedAction[]
+  peekRevertedActions: (accountId: string) => ActionRevertNotice | null
+  acknowledgeRevertedActions: (accountId: string, noticeId: number) => boolean
   waitForConversation: (threadId: string) => Promise<void>
   draftInlineImageDelay: () => number
   consumeTestDraftSaveFailure: () => boolean
@@ -459,9 +467,16 @@ export function registerIpc(context: IpcContext): () => void {
     context.clearPendingFocus()
     return threadId
   })
-  handle(IPC_CHANNELS.mailTakeActionsReverted, () => {
+  handle(IPC_CHANNELS.mailPeekActionsReverted, (_event, accountId) => {
     const account = context.currentAccountId()
-    return account ? context.takeRevertedActions(account) : []
+    return typeof accountId === 'string' && accountId === account
+      ? context.peekRevertedActions(accountId)
+      : null
+  })
+  handle(IPC_CHANNELS.mailAcknowledgeActionsReverted, (_event, accountId, noticeId) => {
+    if (typeof accountId !== 'string' || typeof noticeId !== 'number') return false
+    if (context.currentAccountId() !== accountId) return false
+    return context.acknowledgeRevertedActions(accountId, noticeId)
   })
   handle(IPC_CHANNELS.mailListThreads, () => {
     const account = context.currentAccountId()
@@ -615,6 +630,10 @@ export function registerIpc(context: IpcContext): () => void {
   handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
     const account = context.currentAccountId()
     return account ? pendingActionCount(context.db, account) : 0
+  })
+  handle(IPC_CHANNELS.mailGetActionQueueStatus, () => {
+    const account = context.currentAccountId()
+    return account ? actionQueueStatus(context.db, account) : { pending: 0, authPaused: false }
   })
   return () => bodyHydrator.stop()
 }

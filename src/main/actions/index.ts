@@ -1,6 +1,8 @@
-import type { TriageAction, TriageResult } from '../../shared/actions'
+import type { RevertedActionKind } from '../../shared/actionRevert'
+import type { ActionQueueStatus, TriageAction, TriageResult } from '../../shared/actions'
 import type { Db } from '../db'
 import { applyThreadDelta } from '../store/mutate'
+import { isStoredAuthActionError } from './execute'
 import { actionLabel, inverseForThread, planAction } from './plan'
 import { dropRevertedUndoEntries, type QueuedActionRef, queueIntentRef } from './revert'
 
@@ -42,7 +44,12 @@ interface ApplyResult {
   refs: QueuedActionRef[]
 }
 
-function apply(db: Db, accountId: string, action: TriageAction): ApplyResult {
+function apply(
+  db: Db,
+  accountId: string,
+  action: TriageAction,
+  actionKind = noticeKindForAction(action)
+): ApplyResult {
   const plan = planAction(action)
   const labelsBefore = new Map(
     action.threadIds.map((threadId) => [threadId, labelsFor(db, accountId, threadId)] as const)
@@ -85,7 +92,7 @@ function apply(db: Db, accountId: string, action: TriageAction): ApplyResult {
           accountId,
           plan.queueKind,
           threadId,
-          JSON.stringify({ add: plan.add, remove: plan.remove })
+          JSON.stringify({ add: plan.add, remove: plan.remove, actionKind })
         )
         const queueId = Number(queued.lastInsertRowid)
         refs.push(
@@ -107,7 +114,13 @@ function apply(db: Db, accountId: string, action: TriageAction): ApplyResult {
   return { undo, refs }
 }
 
-function applySnooze(db: Db, accountId: string, threadIds: string[], dueAt: number): QueuedActionRef[] {
+function applySnooze(
+  db: Db,
+  accountId: string,
+  threadIds: string[],
+  dueAt: number,
+  actionKind: RevertedActionKind = 'snooze'
+): QueuedActionRef[] {
   const upsertReminder = db.prepare(
     `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
      VALUES (?, ?, 'snooze', ?, 'pending')
@@ -128,7 +141,11 @@ function applySnooze(db: Db, accountId: string, threadIds: string[], dueAt: numb
     // archive. Gmail-side labels + exact-time return arrive with the v1.5
     // companion script (SPEC F7).
     if (wasInInbox) {
-      const queued = enqueue.run(accountId, threadId, JSON.stringify({ add: [], remove: ['INBOX'] }))
+      const queued = enqueue.run(
+        accountId,
+        threadId,
+        JSON.stringify({ add: [], remove: ['INBOX'], actionKind })
+      )
       refs.push(
         queueIntentRef(
           { kind: 'modifyLabels', threadId, add: [], remove: ['INBOX'] },
@@ -181,8 +198,8 @@ export function undoLast(db: Db, accountId: string): TriageResult | null {
   if (!entry) return null
   db.transaction(() => {
     for (const action of entry.undo) {
-      if (action.kind === 'snoozeAt') applySnooze(db, accountId, action.threadIds, action.dueAt)
-      else apply(db, accountId, action)
+      if (action.kind === 'snoozeAt') applySnooze(db, accountId, action.threadIds, action.dueAt, 'undo')
+      else apply(db, accountId, action, 'undo')
     }
   })()
   return { label: `Undid ${entry.label.toLowerCase()}` }
@@ -233,11 +250,36 @@ function stringArray(value: unknown): value is string[] {
 }
 
 export function pendingActionCount(db: Db, accountId: string): number {
-  const row = db
+  return actionQueueStatus(db, accountId).pending
+}
+
+export function actionQueueStatus(db: Db, accountId: string): ActionQueueStatus {
+  const rows = db
     .prepare(
-      `SELECT COUNT(*) AS count FROM action_queue
-       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering')`
+      `SELECT last_error FROM action_queue
+       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering', 'failed')`
     )
-    .get(accountId) as { count: number }
-  return row.count
+    .all(accountId) as { last_error: string | null }[]
+  return {
+    pending: rows.length,
+    authPaused: rows.some((row) => isStoredAuthActionError(row.last_error))
+  }
+}
+
+function noticeKindForAction(action: TriageAction): RevertedActionKind {
+  switch (action.kind) {
+    case 'restoreInbox':
+    case 'untrash':
+    case 'unsnooze':
+    case 'archive':
+    case 'trash':
+    case 'spam':
+      return action.kind
+    case 'star':
+      return action.on ? 'star' : 'unstar'
+    case 'markUnread':
+      return action.on ? 'markUnread' : 'markRead'
+    case 'label':
+      return 'labels'
+  }
 }

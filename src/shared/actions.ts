@@ -7,3 +7,8 @@ export type TriageAction =
 export interface TriageResult {
   label: string
 }
+
+export interface ActionQueueStatus {
+  pending: number
+  authPaused: boolean
+}

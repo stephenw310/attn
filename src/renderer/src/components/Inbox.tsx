@@ -56,6 +56,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realUnreadTotal,
     labels,
     pendingCount,
+    actionsAuthPaused,
     mailRevision,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
@@ -154,8 +155,21 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   useEffect(() => {
     if (!window.attn || !activeAccount) return
-    return window.attn.mail.onActionsReverted(showToast)
+    return window.attn.mail.onActionsReverted(activeAccount, showToast)
   }, [activeAccount, showToast])
+
+  const reconnectActions = useCallback(() => {
+    if (!window.attn) return
+    void window.attn.auth
+      .signIn()
+      .then((nextStatus) => {
+        onStatus(nextStatus)
+        showToast('Google reconnected — pending changes are retrying.')
+      })
+      .catch((reason: unknown) => {
+        showToast(reason instanceof Error ? reason.message : 'Could not reconnect Google')
+      })
+  }, [onStatus, showToast])
 
   const switchView = useCallback((next: 'inbox' | 'snoozed' | 'drafts') => {
     activeViewRef.current = next
@@ -349,10 +363,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         view={view}
         unreadCount={realUnreadTotal}
         pendingCount={pendingCount}
+        actionsAuthPaused={actionsAuthPaused}
         selectionCount={view === 'drafts' ? 0 : selectedIds.size}
         composerOpen={composerDraft !== null}
         status={status}
         onStatus={onStatus}
+        onReconnectActions={reconnectActions}
         onSwitchView={switchView}
       />
 

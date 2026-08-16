@@ -6,7 +6,10 @@ import {
   executeIntent,
   isPermanentActionError,
   isStoredAuthActionError,
-  retryDelayMs
+  isTypedStoredActionError,
+  retryDelayMs,
+  storeActionError,
+  storedActionErrorKind
 } from './execute'
 
 describe('queue intent execution', () => {
@@ -37,14 +40,18 @@ describe('queue intent execution', () => {
     expect(classifyActionError(new GmailApiError(429, 'quota', true))).toBe('retryable')
     expect(classifyActionError(new GmailApiError(400, 'bad request'))).toBe('permanent')
     expect(classifyActionError(new GmailApiError(403, 'forbidden'))).toBe('permanent')
-    expect(classifyActionError(new GmailApiError(404, 'gone'))).toBe('retryable')
+    expect(classifyActionError(new GmailApiError(404, 'gone'))).toBe('permanent')
     expect(classifyActionError(new GmailApiError(401, 'revoked'))).toBe('auth')
   })
 
-  it('pins the stored Gmail 401 format used to recover legacy auth-stranded rows', () => {
-    const stored = 'gmail /threads/t-roadmap/modify failed (401): invalid credentials'
+  it('stores typed auth markers while recognizing legacy Gmail 401 rows', () => {
+    const legacy = 'gmail /threads/t-roadmap/modify failed (401): invalid credentials'
+    const stored = storeActionError(new GmailApiError(401, 'revoked'), 'auth')
     expect(isStoredAuthActionError(stored)).toBe(true)
-    expect(classifyActionError(new Error(stored))).toBe('auth')
+    expect(isTypedStoredActionError(stored)).toBe(true)
+    expect(storedActionErrorKind(stored)).toBe('auth')
+    expect(isStoredAuthActionError(legacy)).toBe(true)
+    expect(isTypedStoredActionError(legacy)).toBe(false)
     expect(isStoredAuthActionError('gmail /threads/t-roadmap/modify failed (403): forbidden')).toBe(false)
   })
 })

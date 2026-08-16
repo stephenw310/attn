@@ -81,7 +81,6 @@ function broadcastBodyHydrationFailed(accountId: string, threadId: string): void
 function broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {
   actionRevertNotices.add(accountId, actions)
   broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
-  testActionProvider = null
 }
 
 function focusInboxThread(threadId: string): void {
@@ -179,7 +178,6 @@ function signOut(): AuthStatus {
   seedAccountId = null
   clearTokens(app.getPath('userData'))
   pendingFocus = null
-  if (account) actionRevertNotices.clear(account)
   mailNotifier?.setAccountId(null)
   clearUndo(account ?? undefined)
   snoozeScheduler?.refresh()
@@ -284,7 +282,8 @@ function initialize(): void {
     clearPendingFocus: () => {
       pendingFocus = null
     },
-    takeRevertedActions: (accountId) => actionRevertNotices.take(accountId),
+    peekRevertedActions: (accountId) => actionRevertNotices.peek(accountId),
+    acknowledgeRevertedActions: (accountId, noticeId) => actionRevertNotices.acknowledge(accountId, noticeId),
     waitForConversation,
     draftInlineImageDelay: () => testDraftInlineImageDelayMs,
     consumeTestDraftSaveFailure: () => {
@@ -388,22 +387,35 @@ function registerTestIpc(): void {
   ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
     testDraftSaveFailures++
   })
-  ipcMain.on(TEST_CHANNELS.failNextAction, (_event, threadId: unknown) => {
+  const installActionFailure = (threadId: unknown, status: 400 | 401): void => {
     if (!seedPath || typeof threadId !== 'string') return
-    const snapshot = readSeedThread(seedPath, threadId)
+    const actionSeedPath = seedPath
+    const snapshot = readSeedThread(actionSeedPath, threadId)
     if (!snapshot) return
-    const fail = async (): Promise<void> => {
-      throw new GmailApiError(400, `gmail /threads/${threadId}/modify failed (400): permanent e2e failure`)
+    let rejectTarget = true
+    const mutate = async (requestedThreadId: string): Promise<void> => {
+      if (!rejectTarget || requestedThreadId !== threadId) return
+      rejectTarget = false
+      const reason = status === 401 ? 'authentication e2e failure' : 'permanent e2e failure'
+      throw new GmailApiError(status, `gmail /threads/${threadId}/modify failed (${status}): ${reason}`)
     }
     testActionProvider = {
-      modifyThread: fail,
-      trashThread: fail,
-      untrashThread: fail,
+      modifyThread: mutate,
+      trashThread: mutate,
+      untrashThread: mutate,
       getThread: async (requestedThreadId) => {
-        if (requestedThreadId !== threadId) throw new GmailApiError(404, 'seed thread unavailable')
-        return snapshot
+        const requested = readSeedThread(actionSeedPath, requestedThreadId)
+        if (!requested) throw new GmailApiError(404, 'seed thread unavailable')
+        if (requestedThreadId === threadId) testActionProvider = null
+        return requested
       }
     }
+  }
+  ipcMain.on(TEST_CHANNELS.failNextAction, (_event, threadId: unknown) => {
+    installActionFailure(threadId, 400)
+  })
+  ipcMain.on(TEST_CHANNELS.failNextActionAuth, (_event, threadId: unknown) => {
+    installActionFailure(threadId, 401)
   })
   ipcMain.on(TEST_CHANNELS.markDraftMirrored, (_event, draftId: unknown, gmailDraftId?: unknown) => {
     const account = currentAccountId()

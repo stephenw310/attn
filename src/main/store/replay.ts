@@ -15,7 +15,12 @@ export function replayPendingThreadDeltas(db: Db, accountId: string, threadId: s
     )
     .all(accountId, threadId) as PendingRow[]
   for (const row of rows) {
-    const { add, remove } = decodeLabelDelta(row.payload)
-    applyThreadDelta(db, accountId, { threadId, add, remove })
+    try {
+      const { add, remove } = decodeLabelDelta(row.payload)
+      applyThreadDelta(db, accountId, { threadId, add, remove })
+    } catch {
+      // The executor repairs malformed rows from an authoritative refetch.
+      // One corrupt later row must not roll back persistence for this snapshot.
+    }
   }
 }

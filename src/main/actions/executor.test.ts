@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
+import { isStoredAuthActionError, storeActionError } from './execute'
 import { ActionExecutor, type ActionRecoveryProvider } from './executor'
 
 interface FakeRow {
@@ -48,6 +49,13 @@ function fakeDb(rows: FakeRow[]): Db {
             row.last_error = null
             changes = 1
           }
+        } else if (sql.includes('SET state = ?, last_error = ?')) {
+          const row = rows.find((item) => item.account_id === args[2] && item.id === args[3])
+          if (row) {
+            row.state = args[0] as FakeRow['state']
+            row.last_error = args[1] as string | null
+            changes = 1
+          }
         } else if (sql.includes("SET state = 'pending', attempts")) {
           const row = rows.find((item) => item.account_id === args[1] && item.id === args[2])
           if (row) {
@@ -85,8 +93,13 @@ function fakeDb(rows: FakeRow[]): Db {
               (row) => row.account_id === accountId && (row.state === 'pending' || row.state === 'recovering')
             )
           : undefined,
-      all: (accountId: unknown) => {
+      all: (accountId?: unknown) => {
         if (sql.includes("state IN ('pending', 'recovering', 'failed')")) {
+          if (!sql.includes('account_id = ?')) {
+            return rows.filter(
+              (row) => row.state === 'pending' || row.state === 'recovering' || row.state === 'failed'
+            )
+          }
           return rows.filter(
             (row) =>
               row.account_id === accountId &&
@@ -210,9 +223,9 @@ describe('action executor', () => {
 
       expect(rows[0]).toMatchObject({
         state: 'pending',
-        attempts: 1,
-        last_error: 'gmail /threads/auth/modify failed (401): revoked'
+        attempts: 1
       })
+      expect(isStoredAuthActionError(rows[0].last_error)).toBe(true)
       expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
       expect(actionProvider.getThread).not.toHaveBeenCalled()
       expect(onReverted).not.toHaveBeenCalled()
@@ -240,7 +253,7 @@ describe('action executor', () => {
 
     expect(executor.resumeAuthFailures('a@example.com')).toBe(1)
     expect(auth).toMatchObject({ state: 'pending', attempts: 0, last_error: null })
-    expect(permanent.state).toBe('failed')
+    expect(permanent.state).toBe('recovering')
   })
 
   it('makes a legacy auth failure visible but does not retry it during startup', async () => {
@@ -258,6 +271,20 @@ describe('action executor', () => {
 
     expect(auth.state).toBe('pending')
     expect(actionProvider.modifyThread).not.toHaveBeenCalled()
+  })
+
+  it('does not wrap an already-typed auth marker again during startup', () => {
+    const auth = row(1, 'a@example.com', 'auth')
+    const marker = storeActionError(new GmailApiError(401, 'revoked'), 'auth')
+    auth.last_error = marker
+
+    new ActionExecutor(
+      fakeDb([auth]),
+      () => null,
+      () => null
+    )
+
+    expect(auth.last_error).toBe(marker)
   })
 
   it('self-heals a legacy permanently failed row on the next online drain', async () => {
@@ -347,9 +374,9 @@ describe('action executor', () => {
     await executor.trigger()
 
     expect(recovering).toMatchObject({
-      state: 'recovering',
-      last_error: 'gmail /threads/auth-recovery failed (401): revoked'
+      state: 'recovering'
     })
+    expect(isStoredAuthActionError(recovering.last_error)).toBe(true)
     expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
     expect(actionProvider.getThread).toHaveBeenCalledOnce()
     expect(executor.resumeAuthFailures('a@example.com')).toBe(1)
@@ -362,7 +389,7 @@ describe('action executor', () => {
     expect(rows).toHaveLength(0)
   })
 
-  it('treats an action 404 as authoritative local deletion', async () => {
+  it('refetches after a mutation 404 instead of deleting cached mail', async () => {
     const rows = [row(1, 'a@example.com', 'gone')]
     const actionProvider = provider(
       vi.fn(async () => {
@@ -381,8 +408,84 @@ describe('action executor', () => {
     await executor.trigger()
 
     expect(rows).toHaveLength(0)
-    expect(actionProvider.getThread).not.toHaveBeenCalled()
-    expect(onReverted).not.toHaveBeenCalled()
+    expect(actionProvider.getThread).toHaveBeenCalledWith('gone', { format: 'full' })
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({ threadId: 'gone', resolution: 'restored' })
+    ])
+  })
+
+  it('drops only the queue row when a permanent refetch failure cannot restore server truth', async () => {
+    const rows = [row(1, 'a@example.com', 'unavailable'), row(2, 'a@example.com', 'good')]
+    const actionProvider = provider(
+      vi.fn().mockRejectedValueOnce(new GmailApiError(400, 'bad mutation')).mockResolvedValue(undefined)
+    )
+    vi.mocked(actionProvider.getThread).mockRejectedValueOnce(new GmailApiError(404, 'not found'))
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb(rows),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await executor.trigger()
+
+    expect(rows).toHaveLength(0)
+    expect(actionProvider.modifyThread).toHaveBeenCalledTimes(2)
+    expect(actionProvider.getThread).toHaveBeenCalledOnce()
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({ threadId: 'unavailable', resolution: 'unavailable' })
+    ])
+  })
+
+  it('treats an empty authoritative response as unavailable without blocking later actions', async () => {
+    const rows = [row(1, 'a@example.com', 'empty'), row(2, 'a@example.com', 'good')]
+    const actionProvider = provider(
+      vi.fn().mockRejectedValueOnce(new GmailApiError(400, 'bad mutation')).mockResolvedValue(undefined)
+    )
+    vi.mocked(actionProvider.getThread).mockResolvedValueOnce({ id: 'empty', messages: [] })
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb(rows),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await executor.trigger()
+
+    expect(rows).toHaveLength(0)
+    expect(actionProvider.modifyThread).toHaveBeenCalledTimes(2)
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({ threadId: 'empty', resolution: 'unavailable' })
+    ])
+  })
+
+  it('recovers a corrupt payload without rejecting drain or blocking later actions', async () => {
+    const corrupt = row(1, 'a@example.com', 'corrupt')
+    corrupt.payload = '{not-json'
+    const rows = [corrupt, row(2, 'a@example.com', 'good')]
+    const actionProvider = provider()
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb(rows),
+      () => 'a@example.com',
+      () => actionProvider,
+      undefined,
+      onReverted
+    )
+
+    await expect(executor.trigger()).resolves.toBeUndefined()
+
+    expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
+    expect(actionProvider.modifyThread).toHaveBeenCalledWith('good', [], ['INBOX'])
+    expect(actionProvider.getThread).toHaveBeenCalledWith('corrupt', { format: 'full' })
+    expect(rows).toHaveLength(0)
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({ threadId: 'corrupt', kind: 'labels', resolution: 'restored' })
+    ])
   })
 
   it('does not let external nudges bypass transient retry backoff', async () => {

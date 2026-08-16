@@ -23,6 +23,7 @@ import type {
   SyncState,
   ThreadRow
 } from '../shared/mail'
+import { subscribeToActionReverts } from './actionRevertDelivery'
 
 function invoke<K extends InvokeChannel>(
   channel: K,
@@ -57,31 +58,29 @@ const api = {
     markReadOnOpen: (threadId: string): Promise<void> => invoke(IPC_CHANNELS.mailMarkReadOnOpen, threadId),
     undo: (): Promise<TriageResult | null> => invoke(IPC_CHANNELS.mailUndo),
     getPendingActionCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetPendingActionCount),
+    getActionQueueStatus: () => invoke(IPC_CHANNELS.mailGetActionQueueStatus),
     onChanged: (cb: () => void): (() => void) => {
       const listener = (): void => cb()
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },
-    onActionsReverted: (cb: (message: string) => void): (() => void) => {
-      let active = true
-      const takePending = async (): Promise<void> => {
-        try {
-          const actions = await invoke(IPC_CHANNELS.mailTakeActionsReverted)
-          if (!active) return
+    onActionsReverted: (accountId: string, cb: (message: string) => void): (() => void) =>
+      subscribeToActionReverts(
+        accountId,
+        {
+          peek: (requestedAccountId) => invoke(IPC_CHANNELS.mailPeekActionsReverted, requestedAccountId),
+          acknowledge: (requestedAccountId, noticeId) =>
+            invoke(IPC_CHANNELS.mailAcknowledgeActionsReverted, requestedAccountId, noticeId),
+          onAvailable: (listener) => {
+            ipcRenderer.on(IPC_CHANNELS.mailActionsReverted, listener)
+            return () => ipcRenderer.removeListener(IPC_CHANNELS.mailActionsReverted, listener)
+          }
+        },
+        (actions) => {
           const message = formatActionRevertToast(actions)
           if (message) cb(message)
-        } catch {
-          // The main process may be tearing down; notices remain buffered there.
         }
-      }
-      const listener = (): void => void takePending()
-      ipcRenderer.on(IPC_CHANNELS.mailActionsReverted, listener)
-      void takePending()
-      return () => {
-        active = false
-        ipcRenderer.removeListener(IPC_CHANNELS.mailActionsReverted, listener)
-      }
-    },
+      ),
     onBodyHydrationFailed: (cb: (accountId: string, threadId: string) => void): (() => void) => {
       const listener = (_event: unknown, payload: { accountId: string; threadId: string }): void =>
         cb(payload.accountId, payload.threadId)

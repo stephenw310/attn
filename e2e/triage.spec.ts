@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
@@ -38,6 +40,25 @@ test('self-heals a permanently rejected archive and invalidates its undo', async
   await expect(rows).toHaveCount(8)
   await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
   await expect(page.getByTestId('pending-count')).toHaveCount(0)
+})
+
+test('makes an auth-paused action visibly reconnectable', async ({ app, page }, testInfo) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.threadId), {
+    channel: TEST_CHANNELS.failNextActionAuth,
+    threadId: 't-roadmap'
+  })
+
+  await page.keyboard.press('e')
+
+  await expect(page.getByTestId('action-reconnect')).toContainText('1 paused · Reconnect Google')
+  await expect(page.getByTestId('pending-count')).toContainText('1 paused')
+
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'auth-paused.png')
+  await page.screenshot({ path })
+  await testInfo.attach('auth-paused', { path, contentType: 'image/png' })
 })
 
 test('animates a marked-done row before removing it', async ({ page }) => {
