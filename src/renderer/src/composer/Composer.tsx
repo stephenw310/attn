@@ -45,6 +45,7 @@ import { editorConfig } from './editorConfig'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
+import { rootLevelNodes } from './rootNodes'
 import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
@@ -293,7 +294,7 @@ function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string })
     })
     editor.update(
       () => {
-        const nodes = $generateNodesFromDOM(editor, document)
+        const nodes = rootLevelNodes($generateNodesFromDOM(editor, document))
         const root = $getRoot()
         root.clear()
         root.append(...(nodes.length > 0 ? nodes : [$createParagraphNode()]))
