@@ -75,6 +75,53 @@ function splitText(bodyText: string): { bodyText: string; quoteText: string } {
   return { bodyText, quoteText: '' }
 }
 
+interface Boundary {
+  bodyHtml: string
+  quoteHtml: string
+}
+
+/**
+ * Gmail wraps a whole draft body in a `<div dir="ltr">`, so the quote is rarely
+ * a top-level sibling. Descend through single wrappers to find it, and rebuild
+ * the body with those wrappers closed around it — slicing alone would leave the
+ * body with unclosed tags and hand their closes to the quote.
+ */
+function locateQuote(
+  html: string,
+  children: Node[],
+  contentStart: number,
+  contentEnd: number,
+  open: string,
+  close: string
+): Boundary | null {
+  const offset = findQuoteStart(children)?.sourceCodeLocation?.startOffset
+  if (offset !== undefined) {
+    const body = html.slice(contentStart, offset).trimEnd()
+    // Nothing above the quote means the author wrote nothing to separate.
+    if (!body) return null
+    return {
+      bodyHtml: `${open}${body}${close}`,
+      // To the end of the content, not the end of the element: trailing bytes
+      // belong to the quote rather than being dropped.
+      quoteHtml: html.slice(offset, contentEnd).trim()
+    }
+  }
+  const meaningful = children.filter((node) => !isBlank(node))
+  if (meaningful.length !== 1) return null
+  const wrapper = meaningful[0]
+  if (!isElement(wrapper)) return null
+  const location = wrapper.sourceCodeLocation
+  if (!location?.startTag || !location.endTag) return null
+  return locateQuote(
+    html,
+    wrapper.childNodes,
+    location.startTag.endOffset,
+    location.endTag.startOffset,
+    `${open}${html.slice(location.startOffset, location.startTag.endOffset)}`,
+    `${html.slice(location.endTag.startOffset, location.endOffset)}${close}`
+  )
+}
+
 /**
  * Returns the original string unchanged in `bodyHtml` when no trailing quote is
  * recognizable, which is the safe outcome: the draft keeps working exactly as
@@ -84,14 +131,7 @@ export function splitQuotedTrail(bodyHtml: string, bodyText: string): SplitQuote
   const merged = { bodyHtml, quoteHtml: '', bodyText, quoteText: '' }
   if (!bodyHtml.trim()) return merged
   const fragment = parseFragment(bodyHtml, { sourceCodeLocationInfo: true })
-  const start = findQuoteStart(fragment.childNodes)
-  const offset = start?.sourceCodeLocation?.startOffset
-  if (offset === undefined || offset <= 0) return merged
-  return {
-    bodyHtml: bodyHtml.slice(0, offset).trimEnd(),
-    // To the end of the string, not to the end of the element: trailing bytes
-    // belong to the quote rather than being dropped.
-    quoteHtml: bodyHtml.slice(offset).trim(),
-    ...splitText(bodyText)
-  }
+  const found = locateQuote(bodyHtml, fragment.childNodes, 0, bodyHtml.length, '', '')
+  if (!found) return merged
+  return { ...found, ...splitText(bodyText) }
 }
