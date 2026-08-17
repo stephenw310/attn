@@ -67,27 +67,45 @@ function isInertClass(value: string, hasStylesheet: boolean): boolean {
   return !value.split(/\s+/).some((name) => STRUCTURAL_CLASSES.has(name))
 }
 
-const BLOCK_TAGS = new Set([
-  'address',
-  'article',
-  'aside',
-  'details',
-  'dl',
-  'fieldset',
-  'figcaption',
-  'figure',
-  'footer',
-  'header',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'main',
-  'nav',
-  'pre',
-  'section'
+/**
+ * An allowlist rather than a list of block tags, because the block side is
+ * open-ended: `table`, `div`, `p` and `blockquote` all belong there, and so
+ * does any unknown element a sender invents. Getting this wrong is visible —
+ * an inline marker makes the editor render the region as a narrow inline box,
+ * which squeezes a table-based newsletter well below its designed width.
+ */
+const INLINE_TAGS = new Set([
+  'a',
+  'abbr',
+  'b',
+  'bdi',
+  'bdo',
+  'big',
+  'br',
+  'cite',
+  'code',
+  'data',
+  'dfn',
+  'em',
+  'font',
+  'i',
+  'img',
+  'kbd',
+  'mark',
+  'q',
+  's',
+  'samp',
+  'small',
+  'span',
+  'strike',
+  'strong',
+  'sub',
+  'sup',
+  'time',
+  'tt',
+  'u',
+  'var',
+  'wbr'
 ])
 
 const INHERITED_TEXT_STYLES = new Set([
@@ -350,7 +368,7 @@ export function prepareHtmlForEditor(html: string): { html: string; issues: stri
     // ability to edit it and showing a banner about formatting that is gone.
     let replacement = ''
     if (preserved && draftHtmlFidelityIssues(preserved, hasStylesheet).length > 0) {
-      const markerTag = BLOCK_TAGS.has(region.tag) ? 'div' : 'span'
+      const markerTag = INLINE_TAGS.has(region.tag) ? 'span' : 'div'
       replacement = `<${markerTag} data-attn-opaque="${encodeOpaque(preserved)}"></${markerTag}>`
       issues.unshift(...region.issues)
     } else {

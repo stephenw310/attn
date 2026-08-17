@@ -124,6 +124,27 @@ describe('composer HTML fidelity', () => {
     expect(restoreOpaqueHtml(prepared.html)).toBe(html)
   })
 
+  it('preserves a block region as a block, so a wide newsletter keeps its width', () => {
+    // A `span` marker makes the editor render the region as an inline box at a
+    // fixed narrow width, which squeezes a table-based newsletter.
+    const table = prepareHtmlForEditor(
+      '<table role="presentation"><tr><td width="600">Wide</td></tr></table>'
+    )
+    expect(table.html).toContain('<div data-attn-opaque=')
+    expect(table.html).not.toContain('<span data-attn-opaque=')
+
+    const quoted = prepareHtmlForEditor('<div class="gmail_quote"><p>Quoted</p></div>')
+    expect(quoted.html).toContain('<div data-attn-opaque=')
+  })
+
+  it('keeps a genuinely inline region inline', () => {
+    const image = prepareHtmlForEditor(
+      '<p>See <img src="https://attn.test/a.png" role="presentation"> here</p>'
+    )
+    expect(image.html).toContain('<span data-attn-opaque=')
+    expect(image.html).not.toContain('<div data-attn-opaque=')
+  })
+
   it('turns unknown safe regions opaque and restores their original bytes', () => {
     const html = '<section data-layout="card"><p>Keep <mark>this</mark></p></section>'
     const prepared = prepareHtmlForEditor(html)
