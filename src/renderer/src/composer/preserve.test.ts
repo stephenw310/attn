@@ -93,6 +93,37 @@ describe('composer HTML fidelity', () => {
     expect(prepared.html).toContain('Text')
   })
 
+  it('keeps text editable through Gmail editor classes and no-op declarations', () => {
+    // What Gmail wraps around typed text in a synced draft. Its class names
+    // point at a stylesheet that does not travel with the mail, and the two
+    // declarations set nothing, so none of it is formatting worth freezing.
+    const prepared = prepareHtmlForEditor(
+      '<div dir="ltr"><div><span class="Q6ibn ng" style="border-style:none;background:none">hi</span></div></div>'
+    )
+
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).not.toContain('data-attn-opaque')
+    expect(prepared.html).toContain('hi')
+  })
+
+  it('freezes a class once the document carries a stylesheet that could target it', () => {
+    const prepared = prepareHtmlForEditor('<style>.hero{color:red}</style><p class="hero">Designed</p>')
+
+    expect(prepared.issues.length).toBeGreaterThan(0)
+    expect(prepared.html).toContain('data-attn-opaque')
+  })
+
+  it('keeps Gmail structural markers frozen so a quoted trail survives the round trip', () => {
+    // Attn's own trim and surface rules key on `gmail_quote`, and so does
+    // Gmail's quote collapsing. Losing the class would break both.
+    const html = '<div class="gmail_quote"><div>Original note</div></div>'
+    const prepared = prepareHtmlForEditor(html)
+
+    expect(prepared.issues).toContain('div[class]')
+    expect(prepared.html).toContain('data-attn-opaque')
+    expect(restoreOpaqueHtml(prepared.html)).toBe(html)
+  })
+
   it('turns unknown safe regions opaque and restores their original bytes', () => {
     const html = '<section data-layout="card"><p>Keep <mark>this</mark></p></section>'
     const prepared = prepareHtmlForEditor(html)

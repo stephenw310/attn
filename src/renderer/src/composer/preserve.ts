@@ -39,6 +39,34 @@ const TAG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
 
 const GMAIL_SIGNATURE_ATTRIBUTES = new Set(['class', 'data-smartmail'])
 
+/**
+ * Classes that carry meaning rather than paint. Attn's trim boundary and
+ * surface classification key on these, and so does Gmail's own quote
+ * collapsing, so they must survive a round trip byte-for-byte.
+ */
+const STRUCTURAL_CLASSES = new Set([
+  'gmail_attr',
+  'gmail_quote',
+  'gmail_quote_container',
+  'gmail_signature',
+  'gmail_signature_prefix'
+])
+
+function hasStylesheetMarkup(html: string): boolean {
+  return /<style[\s>]/i.test(html)
+}
+
+/**
+ * A class paints only when a stylesheet targets it, and a draft body carries no
+ * stylesheet of its own. Gmail's editor classes — `Q6ibn ng` around typed text,
+ * `gmail_default` on a wrapper — are therefore inert, and freezing the user's
+ * own words to preserve them buys nothing.
+ */
+function isInertClass(value: string, hasStylesheet: boolean): boolean {
+  if (hasStylesheet) return false
+  return !value.split(/\s+/).some((name) => STRUCTURAL_CLASSES.has(name))
+}
+
 const BLOCK_TAGS = new Set([
   'address',
   'article',
@@ -130,7 +158,7 @@ function materializeInheritedTextStyles(document: Document): void {
   }
 }
 
-function unsupportedReason(element: Element): string | null {
+function unsupportedReason(element: Element, hasStylesheet: boolean): string | null {
   const tag = element.tagName.toLowerCase()
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
   const attributes = new Map(
@@ -140,6 +168,7 @@ function unsupportedReason(element: Element): string | null {
     tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.getAttributeNames()) {
+    if (attribute === 'class' && isInertClass(attributes.get('class') ?? '', hasStylesheet)) continue
     if (
       !GLOBAL_ATTRIBUTES.has(attribute) &&
       !tagAttributes.has(attribute) &&
@@ -160,7 +189,10 @@ function unsupportedReason(element: Element): string | null {
   return null
 }
 
-function sourceUnsupportedReason(element: DefaultTreeAdapterTypes.Element): string | null {
+function sourceUnsupportedReason(
+  element: DefaultTreeAdapterTypes.Element,
+  hasStylesheet: boolean
+): string | null {
   const tag = element.tagName.toLowerCase()
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
   const attributes = new Map(element.attrs.map((attribute) => [attribute.name, attribute.value]))
@@ -168,7 +200,9 @@ function sourceUnsupportedReason(element: DefaultTreeAdapterTypes.Element): stri
     tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.attrs) {
+    const inertClass = attribute.name === 'class' && isInertClass(attribute.value, hasStylesheet)
     if (
+      !inertClass &&
       !GLOBAL_ATTRIBUTES.has(attribute.name) &&
       !tagAttributes.has(attribute.name) &&
       !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute.name))
@@ -186,10 +220,19 @@ function sourceUnsupportedReason(element: DefaultTreeAdapterTypes.Element): stri
   return null
 }
 
-export function draftHtmlFidelityIssues(html: string): string[] {
+/**
+ * `hasStylesheet` is passed in when judging a fragment lifted out of a larger
+ * document: the fragment has lost the context that decides whether a class
+ * paints, and the two walks must agree or a region freezes on one pass and not
+ * the other.
+ */
+export function draftHtmlFidelityIssues(
+  html: string,
+  hasStylesheet: boolean = hasStylesheetMarkup(html)
+): string[] {
   const document = new DOMParser().parseFromString(html, 'text/html')
   return [...document.body.querySelectorAll('*')]
-    .map(unsupportedReason)
+    .map((element) => unsupportedReason(element, hasStylesheet))
     .filter((reason): reason is string => reason !== null)
 }
 
@@ -222,12 +265,12 @@ interface OpaqueSourceRegion {
   issues: string[]
 }
 
-function opaqueSourceRegions(html: string): OpaqueSourceRegion[] {
+function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSourceRegion[] {
   const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
   const regions: OpaqueSourceRegion[] = []
   const visit = (node: DefaultTreeAdapterTypes.ChildNode, owner: OpaqueSourceRegion | null): void => {
     if (!('tagName' in node)) return
-    const reason = sourceUnsupportedReason(node)
+    const reason = sourceUnsupportedReason(node, hasStylesheet)
     let region = owner
     if (reason && !owner) {
       const location = node.sourceCodeLocation
@@ -291,8 +334,12 @@ function sanitizedDomMatchesSource(source: string, sanitized: string): boolean {
 export function prepareHtmlForEditor(html: string): { html: string; issues: string[] } {
   if (!html.trim()) return { html: '', issues: [] }
   const issues: string[] = []
+  // Decided once, from the whole document, and reused for every region below.
+  const hasStylesheet = hasStylesheetMarkup(html)
   let marked = html
-  for (const region of opaqueSourceRegions(html).sort((left, right) => right.start - left.start)) {
+  for (const region of opaqueSourceRegions(html, hasStylesheet).sort(
+    (left, right) => right.start - left.start
+  )) {
     const source = html.slice(region.start, region.end)
     const sanitized = sanitizeDraftHtmlForImport(source)
     const preserved = sanitizedDomMatchesSource(source, sanitized) ? source : sanitized
@@ -302,7 +349,7 @@ export function prepareHtmlForEditor(html: string): { html: string; issues: stri
     // making it read-only would preserve nothing while costing the user the
     // ability to edit it and showing a banner about formatting that is gone.
     let replacement = ''
-    if (preserved && draftHtmlFidelityIssues(preserved).length > 0) {
+    if (preserved && draftHtmlFidelityIssues(preserved, hasStylesheet).length > 0) {
       const markerTag = BLOCK_TAGS.has(region.tag) ? 'div' : 'span'
       replacement = `<${markerTag} data-attn-opaque="${encodeOpaque(preserved)}"></${markerTag}>`
       issues.unshift(...region.issues)
