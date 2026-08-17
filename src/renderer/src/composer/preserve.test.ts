@@ -54,6 +54,45 @@ describe('composer HTML fidelity', () => {
     expect(prepareHtmlForEditor('   ')).toEqual({ html: '', issues: [] })
   })
 
+  it('keeps a Gmail-authored signature block fully editable', () => {
+    // Every Gmail draft with a signature carries `<br clear="all">`. The
+    // sanitizer drops `clear` either way, so freezing the remaining `<br>`
+    // would preserve nothing and only cost editability.
+    const html =
+      '<div dir="ltr"><div><br clear="all"></div><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature"><div dir="ltr"><div>Bests,</div>Chao Wu<div><a href="https://chaowu.xyz" target="_blank">https://chaowu.xyz</a><br></div></div></div></div></div>'
+    const prepared = prepareHtmlForEditor(html)
+
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).not.toContain('data-attn-opaque')
+    expect(prepared.html).toContain('<br>')
+    expect(prepared.html).toContain('https://chaowu.xyz')
+  })
+
+  it('still freezes a region that survives sanitization, and reports its nested issues', () => {
+    const prepared = prepareHtmlForEditor('<section data-layout="card"><div align="center">x</div></section>')
+
+    expect(prepared.html).toContain('data-attn-opaque=')
+    expect(prepared.issues).toEqual(['<section>', 'div[align]'])
+  })
+
+  it('does not freeze formatting the import sanitizer removes on its own', () => {
+    // `float` and `align` never reach the stored draft either way, so an opaque
+    // region would preserve nothing and only cost the user an editable line.
+    for (const html of ['<div style="float:left">Floated</div>', '<div align="center">Centered</div>']) {
+      const prepared = prepareHtmlForEditor(html)
+      expect(prepared.issues).toEqual([])
+      expect(prepared.html).not.toContain('data-attn-opaque')
+    }
+  })
+
+  it('drops a nested issue along with the region that stops being opaque', () => {
+    const prepared = prepareHtmlForEditor('<div clear="all"><p clear="all">Text</p></div>')
+
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).not.toContain('data-attn-opaque')
+    expect(prepared.html).toContain('Text')
+  })
+
   it('turns unknown safe regions opaque and restores their original bytes', () => {
     const html = '<section data-layout="card"><p>Keep <mark>this</mark></p></section>'
     const prepared = prepareHtmlForEditor(html)

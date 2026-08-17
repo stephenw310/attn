@@ -214,25 +214,32 @@ interface OpaqueSourceRegion {
   start: number
   end: number
   tag: string
+  /**
+   * Every unsupported node sits in exactly one top-most region's subtree, so
+   * issues are reported per region rather than as one flat list — a region that
+   * turns out to preserve nothing must take its nested issues with it.
+   */
+  issues: string[]
 }
 
-function opaqueSourceRegions(html: string): { regions: OpaqueSourceRegion[]; issues: string[] } {
+function opaqueSourceRegions(html: string): OpaqueSourceRegion[] {
   const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
   const regions: OpaqueSourceRegion[] = []
-  const issues: string[] = []
-  const visit = (node: DefaultTreeAdapterTypes.ChildNode, insideOpaque: boolean): void => {
+  const visit = (node: DefaultTreeAdapterTypes.ChildNode, owner: OpaqueSourceRegion | null): void => {
     if (!('tagName' in node)) return
     const reason = sourceUnsupportedReason(node)
-    if (reason) issues.push(reason)
-    const opaque = insideOpaque || reason !== null
-    const location = node.sourceCodeLocation
-    if (reason && !insideOpaque && location) {
-      regions.push({ start: location.startOffset, end: location.endOffset, tag: node.tagName })
+    let region = owner
+    if (reason && !owner) {
+      const location = node.sourceCodeLocation
+      if (!location) return
+      region = { start: location.startOffset, end: location.endOffset, tag: node.tagName, issues: [] }
+      regions.push(region)
     }
-    for (const child of node.childNodes) visit(child, opaque)
+    if (reason && region) region.issues.push(reason)
+    for (const child of node.childNodes) visit(child, region)
   }
-  for (const child of fragment.childNodes) visit(child, false)
-  return { regions, issues }
+  for (const child of fragment.childNodes) visit(child, null)
+  return regions
 }
 
 /** DOMPurify remains the security authority; serialization differences alone do not make safe HTML lossy. */
@@ -283,17 +290,26 @@ function sanitizedDomMatchesSource(source: string, sanitized: string): boolean {
 /** Replace only top-most unsupported regions so nested source survives as one exact unit. */
 export function prepareHtmlForEditor(html: string): { html: string; issues: string[] } {
   if (!html.trim()) return { html: '', issues: [] }
-  const { regions, issues } = opaqueSourceRegions(html)
+  const issues: string[] = []
   let marked = html
-  for (const region of regions.sort((left, right) => right.start - left.start)) {
+  for (const region of opaqueSourceRegions(html).sort((left, right) => right.start - left.start)) {
     const source = html.slice(region.start, region.end)
     const sanitized = sanitizeDraftHtmlForImport(source)
     const preserved = sanitizedDomMatchesSource(source, sanitized) ? source : sanitized
-    const markerTag = BLOCK_TAGS.has(region.tag) ? 'div' : 'span'
-    const marker = preserved
-      ? `<${markerTag} data-attn-opaque="${encodeOpaque(preserved)}"></${markerTag}>`
-      : ''
-    marked = `${marked.slice(0, region.start)}${marker}${marked.slice(region.end)}`
+    // Freezing is for content the editor cannot represent. When the sanitizer
+    // has already dropped whatever was unsupported — Gmail's `<br clear="all">`
+    // being the everyday case — what is left is ordinary editable markup, and
+    // making it read-only would preserve nothing while costing the user the
+    // ability to edit it and showing a banner about formatting that is gone.
+    let replacement = ''
+    if (preserved && draftHtmlFidelityIssues(preserved).length > 0) {
+      const markerTag = BLOCK_TAGS.has(region.tag) ? 'div' : 'span'
+      replacement = `<${markerTag} data-attn-opaque="${encodeOpaque(preserved)}"></${markerTag}>`
+      issues.unshift(...region.issues)
+    } else {
+      replacement = preserved
+    }
+    marked = `${marked.slice(0, region.start)}${replacement}${marked.slice(region.end)}`
   }
   const safe = sanitizeDraftHtmlForImport(marked)
   const document = new DOMParser().parseFromString(safe, 'text/html')
