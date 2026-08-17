@@ -19,6 +19,7 @@ import { mergeExternalBodies } from '../sync/mergeBodies'
 import type { MailProvider, ProviderDraft } from '../sync/provider'
 import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import { draftHtmlBody, mimeFilename } from './draftMime'
+import { splitQuotedTrail } from './quoteSplit'
 
 export type DraftConflictDecision = 'defer' | 'local' | 'remote'
 
@@ -232,6 +233,14 @@ export async function parseRemoteDraft(
   const threading = extractThreadingHeaders(message)
   const bodies = await remoteDraftBodies(remote, provider)
   const attachments = remoteDraftAttachments(message)
+  // Gmail stores a draft as one document, so a reply comes back with its quoted
+  // trail merged into the body. Recover the two columns, or the trail lands in
+  // the editor as authored content. A `new` draft is left alone: a quote at the
+  // end of one is something its author put there.
+  const parts =
+    kind === 'new'
+      ? { bodyHtml: bodies.bodyHtml, bodyText: bodies.bodyText, quoteHtml: '', quoteText: '' }
+      : splitQuotedTrail(bodies.bodyHtml, bodies.bodyText)
   const input: DraftSaveInput = {
     id: null,
     kind,
@@ -239,15 +248,15 @@ export async function parseRemoteDraft(
     cc: parseAddressList(header(message, 'Cc')),
     bcc: parseAddressList(header(message, 'Bcc')),
     subject: header(message, 'Subject'),
-    bodyHtml: bodies.bodyHtml,
-    bodyText: bodies.bodyText,
+    bodyHtml: parts.bodyHtml,
+    bodyText: parts.bodyText,
     attachments,
     threadId: localHint?.thread_id ?? (kind === 'new' || !knownThread ? null : message.threadId),
     sourceMessageId: null,
     inReplyTo: parseMessageIds(header(message, 'In-Reply-To'))[0] ?? null,
     references: threading.references,
-    quoteHtml: '',
-    quoteText: ''
+    quoteHtml: parts.quoteHtml,
+    quoteText: parts.quoteText
   }
   return {
     input,

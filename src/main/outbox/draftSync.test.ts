@@ -102,6 +102,49 @@ describe('remote draft parsing', () => {
     expect(parsed.input.bodyText).toBe('Large body')
   })
 
+  it('recovers a reply quote that Gmail merged into the body, without changing the fingerprint', async () => {
+    const bodyHtml =
+      '<div>my answer</div>\n<div>On Sun, 16 Aug 2026, Sender wrote:</div><blockquote><table width="600"><tr><td>Newsletter</td></tr></table></blockquote>'
+    const remote = providerDraft(
+      'Re: Newsletter',
+      { mimeType: 'text/html', body: { data: Buffer.from(bodyHtml).toString('base64url') } },
+      [{ name: 'In-Reply-To', value: '<original@attn.test>' }]
+    )
+    const parsed = await parseRemoteDraft(emptyLookupDb(), 'account', remote, null, 200)
+
+    expect(parsed.input.kind).toBe('reply')
+    expect(parsed.input.bodyHtml).toBe('<div>my answer</div>')
+    expect(parsed.input.quoteHtml).toContain('<blockquote>')
+    // The local row that mirrored this same content must not read as changed,
+    // or every sync would import the draft over the author's own copy.
+    expect(parsed.fingerprint).toBe(
+      draftContentFingerprint({
+        ...emptyDraftInput(),
+        subject: 'Re: Newsletter',
+        // The two columns a local row holds are stated here; recipients and
+        // threading are borrowed, since neither is what this pins.
+        bodyHtml: '<div>my answer</div>',
+        quoteHtml: parsed.input.quoteHtml,
+        to: parsed.input.to,
+        inReplyTo: parsed.input.inReplyTo,
+        references: parsed.input.references
+      })
+    )
+  })
+
+  it('leaves a new draft that ends in a quote alone', async () => {
+    const bodyHtml = '<div>see below</div><blockquote>Pasted material</blockquote>'
+    const remote = providerDraft('Notes', {
+      mimeType: 'text/html',
+      body: { data: Buffer.from(bodyHtml).toString('base64url') }
+    })
+    const parsed = await parseRemoteDraft(emptyLookupDb(), 'account', remote, null, 200)
+
+    expect(parsed.input.kind).toBe('new')
+    expect(parsed.input.bodyHtml).toBe(bodyHtml)
+    expect(parsed.input.quoteHtml).toBe('')
+  })
+
   it('does not infer forwarding from user-authored subject text', () => {
     expect(remoteDraftKind(providerDraft('Fwd: still a new draft', { mimeType: 'text/plain' }))).toBe('new')
     expect(remoteDraftKind(providerDraft('Anything', { mimeType: 'text/plain' }), 'replyAll')).toBe(

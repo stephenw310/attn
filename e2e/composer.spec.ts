@@ -77,7 +77,8 @@ function remoteDraft(
   html: string,
   bcc = '',
   inlineImage = false,
-  inlineImageBase64?: string
+  inlineImageBase64?: string,
+  extraHeaders: { name: string; value: string }[] = []
 ): object {
   const inlineImageData = inlineImageBase64
     ? Buffer.from(inlineImageBase64, 'base64')
@@ -94,7 +95,8 @@ function remoteDraft(
         headers: [
           { name: 'To', value: 'remote-to@example.com' },
           ...(bcc ? [{ name: 'Bcc', value: bcc }] : []),
-          { name: 'Subject', value: subject }
+          { name: 'Subject', value: subject },
+          ...extraHeaders
         ],
         parts: [
           { mimeType: 'text/plain', body: { data: Buffer.from(subject).toString('base64url') } },
@@ -1750,4 +1752,36 @@ test('keeps the caret in a recipient field while a preserved region sits in the 
   await page.keyboard.type('da@attn.test')
 
   await expect(to).toHaveValue('ada@attn.test')
+})
+
+test('restores the collapsed quote on a reply Gmail merged into one document', async ({ app, page }) => {
+  // Gmail stores a draft as a single document, so Attn's own reply comes back
+  // with its quoted trail joined to the body. Left merged, the quoted mail
+  // loads into the editor: a newsletter freezes into a read-only region and the
+  // banner appears over content the author never wrote.
+  const merged =
+    '<div>my answer</div>\n<div>On Sun, 16 Aug 2026, AlphaSignal wrote:</div>' +
+    '<blockquote><table role="presentation" width="600"><tr><td bgcolor="#f6d5c4">Newsletter</td></tr></table></blockquote>'
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft('merged-reply', 'Re: Newsletter', merged, '', false, undefined, [
+        { name: 'In-Reply-To', value: '<original@attn.test>' }
+      ])
+    }
+  )
+  if (error) throw new Error(error)
+
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Re: Newsletter' }).click()
+  const composer = new ComposerPage(page)
+  await expect(composer.editor).toContainText('my answer')
+
+  // The quoted trail belongs to the collapsed quote, not the editor.
+  await expect(page.getByTestId('composer-quote-container')).toHaveCount(1)
+  await expect(composer.editor).not.toContainText('Newsletter')
+  await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
 })
