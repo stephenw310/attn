@@ -4,7 +4,7 @@ import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
-import { GmailApiError } from '../gmail/client'
+import { GmailApiError, GmailAuthError } from '../gmail/client'
 import { isOfflineFailure } from '../sync/failure'
 import { persistThread } from '../sync/persist'
 import type { MailProvider, ProviderMimeUpload } from '../sync/provider'
@@ -72,6 +72,9 @@ export function userFacingSendError(error: unknown): string {
       ? 'An attachment is temporarily unavailable — Attn will retry'
       : 'An attachment could not be read — reopen the message and attach it again'
   }
+  // The client refreshes on a bare 401, so a revoked/expired refresh token
+  // surfaces as GmailAuthError from the token endpoint, not as a 401 response.
+  if (error instanceof GmailAuthError) return 'Gmail authorization expired — sign in again and retry'
   if (error instanceof GmailApiError) {
     if (error.status === 401) return 'Gmail authorization expired — sign in again and retry'
     if (error.status === 413) return 'The message is too large for Gmail'
@@ -99,6 +102,9 @@ export function isRetryableOutboxPreflightError(error: unknown): boolean {
   return (
     (error instanceof GmailApiError && error.retryable) ||
     (error instanceof DraftAttachmentSourceError && error.retryable) ||
+    // The intent is still valid; it resumes after the user reconnects (T18's
+    // rule for triage actions applies to sends too).
+    error instanceof GmailAuthError ||
     isOfflineFailure(error)
   )
 }
@@ -161,6 +167,11 @@ export async function executeDraftSendProtocol(
       ) {
         throw new OutboxNoRemoteMutationError(error)
       }
+      // A failed token refresh happens before the request is issued (or after
+      // Gmail already rejected it with 401), so no draft can exist. Treating it
+      // as ambiguous would send this row into Message-ID verification after
+      // reconnect and park a never-sent message in needs-review.
+      if (error instanceof GmailAuthError) throw new OutboxNoRemoteMutationError(error)
       throw error
     }
     if (!gmailDraftId) throw new Error('Gmail draft create returned no id')

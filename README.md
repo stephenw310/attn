@@ -2,11 +2,13 @@
 
 Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
 
-**Current state: M1 feature work is complete; M2 (mail out) is underway.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. M2's renderer decomposition, main-process seams, mail-out test scaffolding, and sent-mail/contact foundation have shipped; the crash-safe composer is underway in draft PR #38 and is moving to the same full-window focus model. The only open M1 evidence item is a real-OS notification click-through smoke (see the M1 plan).
+**Current state: M1 feature work is complete; M2 (mail out) feature work has shipped and its hardening/sign-off pass is open.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. M2 added the full-window composer with crash-safe local drafts, inline reply/reply-all/forward drafting, rich content with a zero-formatting-loss invariant, two-way Gmail Drafts sync, attachments (spooled locally, mirrored to Gmail), send with undo send behind an exactly-once outbox, self-healing failed triage actions, on-demand body hydration, and a lifetime header sweep with the full staged backfill (inbox → bodies → drafts → all-mail → spam → trash → reconcile). Still open before M2 sign-off: the poller's label-catalog refresh (T21), the T20 hardening pass (10k-list decision, composer latency profile, token-bucket limiter, backfill evidence, a dogfood week), and the manual real-Gmail evidence items — see the M2 plan. The only open M1 evidence item is a real-OS notification click-through smoke (see the M1 plan).
 
-- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.14)
+- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.15)
 - **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist
-- **[docs/M2-PLAN.md](docs/M2-PLAN.md)** — M2 implementation plan: pre-M2 refactors, composer, drafts, send + undo send, exactly-once outbox
+- **[docs/M2-PLAN.md](docs/M2-PLAN.md)** — M2 implementation plan: pre-M2 refactors, composer, drafts, send + undo send, exactly-once outbox, and the M2 exit checklist
+- **[docs/M3-PLAN.md](docs/M3-PLAN.md)** — M3 opening block: utility-process sync, per-message labels, expiry-recovery tombstones; feature tasks (search, mailboxes, splits, themes, palette) still to be planned
+- **[docs/REVIEW-2026-08-16.md](docs/REVIEW-2026-08-16.md)** — review of `main` at the end of M2 feature work: verified invariants, bugs (fixed and open), doc corrections, refactor proposals, and the M2 close-out / M3 start checklist
 - **[AGENTS.md](AGENTS.md)** — working agreement for coding agents (verification contract, test harness, conventions). `.claude/CLAUDE.md` imports it, so Claude Code picks it up automatically; other tools read it directly.
 
 ## Prerequisites
@@ -47,7 +49,7 @@ Typecheck → lint/format → unit tests → production build → Playwright end
 | `npm run build` | Production bundles into `out/` |
 | `npm run toolchain` | Repair the Electron binary / native-module setup |
 
-The e2e suite writes `login.png`, `inbox.png`, `reading.png`, `simple-mail.png`, and `label-picker.png` under `e2e/.artifacts/`; failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
+The e2e suite writes visual-review screenshots under `e2e/.artifacts/` — `login.png`, `inbox.png`, `reading.png`, `simple-mail.png`, `label-picker.png`, `auth-paused.png`, `composer.png`, `inline-reply.png`, `draft-chip.png`, `attachments.png`, `newsletter-quote.png`, and `gmail-draft.png` (the authoritative list is in AGENTS.md); failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
 
 ## Package & install locally
 

@@ -1,10 +1,13 @@
 import type { SyncState } from '../../../shared/mail'
+import { modKeyLabel } from '../platform'
 import { Kbd } from './Kbd'
 import { SyncStatus } from './SyncStatus'
 
 interface ShortcutHint {
   id: string
+  /** Alternatives by default (`J / K`); a chord is pressed together (`⌘ + Enter`). */
   keys: string[]
+  chord?: boolean
   label: string
 }
 
@@ -24,7 +27,7 @@ function footerShortcuts(readerOpen: boolean, outboxOpen: boolean, composing: bo
   // keyboard, so advertise the composer's keys rather than dead triage verbs.
   if (composing) {
     return [
-      { id: 'send', keys: ['Mod', 'Enter'], label: 'send' },
+      { id: 'send', keys: [modKeyLabel(), 'Enter'], chord: true, label: 'send' },
       { id: 'back', keys: ['Esc'], label: 'save and close' }
     ]
   }
@@ -52,7 +55,7 @@ function footerShortcuts(readerOpen: boolean, outboxOpen: boolean, composing: bo
   ]
 }
 
-function FooterShortcut({ id, keys, label }: ShortcutHint): React.JSX.Element {
+function FooterShortcut({ id, keys, chord, label }: ShortcutHint): React.JSX.Element {
   return (
     <span
       data-testid={`footer-shortcut-${id}`}
@@ -61,7 +64,7 @@ function FooterShortcut({ id, keys, label }: ShortcutHint): React.JSX.Element {
       <span className="flex items-center gap-0.5">
         {keys.map((key, index) => (
           <span key={key} className="contents">
-            {index > 0 && <span aria-hidden>/</span>}
+            {index > 0 && <span aria-hidden>{chord ? '+' : '/'}</span>}
             <Kbd>{key}</Kbd>
           </span>
         ))}

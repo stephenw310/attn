@@ -611,6 +611,13 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
   }[]
   for (const row of missing) {
     if (remoteIds.has(row.gmail_draft_id)) continue
+    // A row bound during this listing — its first mirror checkpoint returned a
+    // Gmail id after `knownDrafts` was read but before the listing finished —
+    // is absent from a listing that predates the create, not deleted remotely.
+    // Judging it now would delete a drafted row (re-imported next cycle under a
+    // new id) or, for a composing row, clear the binding so the mirror creates a
+    // second Gmail draft. Leave it for the next cycle's authoritative listing.
+    if (!knownDrafts.has(row.gmail_draft_id)) continue
     if (row.state === 'composing' || row.local_revision > row.mirror_revision) {
       db.prepare(
         `UPDATE outbox SET gmail_draft_id = NULL, gmail_message_id = NULL, mirror_revision = 0,

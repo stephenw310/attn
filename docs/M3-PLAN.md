@@ -24,13 +24,13 @@ progress/quota-wait reporting; `SyncController.startLifetimeSweep` launches it o
 It walks Gmail's default listing with **no query and no label filter**, newest-first, skipping threads
 already stored. That shape is correct and M3 does not change it.
 
-Three gaps remained after T13A, and every one is a *data* gap that a UI task cannot close:
+Three *data* gaps existed after T13A was designed, and every one is a gap a UI task cannot close. Two and a half of them closed when S3 and S4's membership half shipped early in the T13A PR (#51); the record below keeps the reasoning and marks what is left:
 
-1. **Spam and Trash are never fetched.** `threads.list` excludes both unless explicitly asked (SPEC §9 #17), so M3's Spam and Trash mailboxes would render empty against a store that never had the rows.
-2. **The 12-month tier is still Inbox-scoped at normal priority.** Stages 1–2 fetch only `INBOX`, and stage 4 only `SENT`, so archived mail from last quarter reaches the store solely through T13A's throttled sweep — minutes of work arriving over hours. A first-run user should not wait on a lifetime walk to search recent archived mail.
-3. **Reconciliation and expiry recovery only understand INBOX.** `reconcileInboxMembership` (`src/main/sync/poller.ts:77`) is hardcoded to one label, and `SyncController.recoverExpiredHistory` re-lists INBOX alone. Once Spam and Trash are cached, that is not merely incomplete — it is actively wrong, because Gmail auto-purges both at ~30 days and nothing would ever remove the local rows.
+1. ~~**Spam and Trash are never fetched.**~~ **Closed by S3 (#51):** explicit `SPAM`/`TRASH` label stages run after all-mail (`src/main/sync/backfill.ts`), because `threads.list` excludes both unless asked (SPEC §9 #17). Without them M3's Spam and Trash mailboxes would render empty against a store that never had the rows.
+2. ~~**The 12-month tier is still Inbox-scoped at normal priority.**~~ **Closed by S3 (#51):** the unfiltered `all-mail` stage fetches the last 12 months of archived + sent mail at normal background priority and the dedicated `sent` stage is retired (old `sent` cursors route to `all-mail` in `parseCursor`). Archived mail from last quarter no longer arrives only through T13A's throttled sweep.
+3. **Reconciliation and expiry recovery understood only INBOX — half closed.** `reconcileLabelMembership` (`src/main/sync/poller.ts:87`) now generalizes the INBOX-only helper, `reconcilePurgeableMembership` (`poller.ts:122`) verifies Spam/Trash candidates thread-by-thread and deletes only on a direct 404, and both the backfill completion path and `SyncController.recoverExpiredHistory` call the same helpers. **Still open (S4):** the existence-sweep tombstone pass — a thread purged server-side while its local labels held neither `SPAM` nor `TRASH` is never removed, because Gmail auto-purges Spam/Trash at ~30 days and only an unfiltered + Spam + Trash listing walked to exhaustion in one run (or a per-thread 404) can prove non-existence.
 
-Building the search and mailbox UI on top of that store would mean shipping views that are quietly missing mail, then fixing sync underneath them. Reverse the order.
+Building the search and mailbox UI on top of an incomplete store would mean shipping views that are quietly missing mail, then fixing sync underneath them. The remaining sync work (S1, S2, S4's tombstone pass) therefore still precedes the feature tasks.
 
 ```mermaid
 graph LR
@@ -47,13 +47,13 @@ graph LR
   S2 --> F
 ```
 
-Parallelization: S1 and S2 are independent of each other and can run side by side. S3 wants both landed first — S1 so the stage rewrite happens in its final home, S2 so the new rows are stored with honest per-message labels from the first fetch rather than being backfilled into correctness later.
+Parallelization: S1 and S2 are independent of each other and can run side by side. The graph above records the intended order; in practice S3 shipped first (in the main process, ahead of S1 and S2), so S1 now moves the finished stage set as-is, and S2 backfills per-message labels into rows S3 already stored — existing rows read `NULL` until their next refetch, as S2's PR notes must say. S4's tombstone pass still waits on S2, because it needs per-message `TRASH`/`SPAM` truth to avoid deleting a partially-trashed live thread.
 
 ---
 
 ## Global rules (carried from M2, still binding)
 
-1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION` (currently 11). Throwaway profiles may be deleted and re-synced; a real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and **every schema-changing task publishes its exact DDL**.
+1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION` (currently 14, after T16's revision 13 and T13A's revision 14). Throwaway profiles may be deleted and re-synced; a real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and **every schema-changing task publishes its exact DDL**.
 2. **IPC has three parts** (main handler, preload bridge, typed channel map in `src/shared/`) — all in the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike.
 4. **Select on `data-testid`** in e2e.
@@ -94,14 +94,14 @@ Existing unit + e2e coverage passes with the boundary moved; add a supervisor te
 
 `persistThread` (`src/main/sync/persist.ts`) collects `labelUnion` across a thread's messages and writes it to `thread_labels`; `messages` has no label column at all. A thread-level union cannot express a partially-trashed or partially-spammed thread, which is exactly what Gmail produces — deleting one message from a live conversation is ordinary behavior. Once Trash and Spam are cached (S3), that union would put a live thread in the Trash view and hide it from All Mail. Gmail's own semantics are per-message, so the store has to be too.
 
-The same column fixes a second known wrinkle: a Gmail-side reply draft arriving on an existing thread through the history path is persisted as an ordinary message, so the reader can render an in-progress draft as if it were sent mail. With per-message labels, `DRAFT` is visible to the query layer and the reader can exclude it.
+A related wrinkle was already closed in M2 (T14B): `persistThread` drops `DRAFT`- and `CHAT`-labelled messages at the top of its loop (`nonDraftMessages`, `src/main/sync/persist.ts:51`), so a Gmail-side reply draft arriving through the history path is never stored as an ordinary message. Per-message labels make that decision queryable instead of a write-time filter, and — the part that matters here — let a *stored* message's `TRASH`/`SPAM` membership be read per row. One edge the filter leaves for this task: when every message in an authoritative snapshot is a draft, `persistThread` returns early and never prunes the thread's stale non-draft rows (`persist.ts:67-68`), so a thread whose real messages were permanently deleted while a draft remains keeps them locally until the S4 tombstone pass. Handle that pruning here, where the message loop is being reworked anyway.
 
 ### Design and implementation
 
 - Add `labels_json TEXT` to `messages`, written from `msg.labelIds` in the same loop that builds `labelUnion`. Keep `thread_labels` as the thread-level projection — mailbox list queries stay fast against it — but let per-message queries (conversation rendering, Trash/Spam membership, draft exclusion) read the new column.
 - **Metadata-only refetches must not clobber it.** `persistThread`'s upsert already guards `attachments_json` behind `@metadata_only`; label ids *are* present on metadata-format fetches, so `labels_json` can be written unconditionally — assert that in a test rather than assuming it.
 - Decide and document the view rules that follow Gmail's own semantics: **Trash and Spam list any thread with at least one message carrying that label** — a single deleted message must be findable in Trash even though its conversation lives on — while **All Mail lists any thread with at least one message outside SPAM/TRASH**. A mixed thread therefore appears in both, and each view renders the mailbox-appropriate message subset: normal reading contexts exclude trashed/spammed messages, the Trash/Spam reader surfaces them. Encode membership in one query helper, not per call site.
-- Update the reader to exclude `DRAFT`-labeled messages from the conversation body, deferring to M2's composer for those.
+- Keep the reader free of `DRAFT`-labeled messages — today that holds because the write path never stores them; once per-message labels exist, decide whether the filter stays at write time or moves to the query layer, and keep the T14B unit test (`persistThread` skips a `DRAFT` message) green either way.
 - **Schema:** bump `CURRENT_SCHEMA_VERSION`. Local dogfood DDL: `ALTER TABLE messages ADD COLUMN labels_json TEXT;` plus the `PRAGMA user_version` bump in the same `BEGIN IMMEDIATE … COMMIT`. Existing rows read as `NULL` and are repopulated by ordinary refetches; note in the PR that a mixed-label thread stays thread-level-only until its next fetch.
 
 ### Testing and done condition

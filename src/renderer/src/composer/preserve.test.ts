@@ -137,6 +137,66 @@ describe('composer HTML fidelity', () => {
     expect(quoted.html).toContain('<div data-attn-opaque=')
   })
 
+  it('keeps a cell inside its table when the cell carries formatting the sanitizer drops', () => {
+    // A `td`/`tr` region cannot stand alone: parsed outside its table the HTML
+    // parser drops the cell and keeps only its text, and a marker put in its
+    // place is foster-parented out of the table. Before the region was lifted to
+    // the enclosing table, `<td bgcolor>` dumped "Cell A" beside the table with
+    // no banner — in the editor and in outgoing mail. The presentational
+    // attribute itself is dropped by the import sanitizer, by design.
+    const shape = (html: string): { cells: string[]; stray: string } => {
+      const body = new DOMParser().parseFromString(html, 'text/html').body
+      const cells = [...body.querySelectorAll('td, th')].map((cell) => cell.textContent ?? '')
+      const stray = [...body.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent?.trim() ?? '')
+        .join('')
+      return { cells, stray }
+    }
+    const cases = [
+      '<table><tbody><tr><td bgcolor="#eeeeee">Cell A</td><td>Cell B</td></tr></tbody></table>',
+      '<table><tbody><tr bgcolor="#ffffff"><td>Row</td></tr></tbody></table>',
+      '<table><tbody><tr><td align="center">Text</td></tr></tbody></table>',
+      '<table><tbody><tr><td valign="top" style="padding:4px">Text</td></tr></tbody></table>',
+      '<table><tbody><tr><td style="vertical-align:top;overflow:hidden">Docs cell</td></tr></tbody></table>'
+    ]
+    for (const html of cases) {
+      const prepared = prepareHtmlForEditor(html)
+      const outgoing = restoreOpaqueHtml(sanitizeOutgoingHtml(prepared.html))
+      // Sanitizer-dropped formatting never freezes: the table stays editable.
+      expect(prepared.html, html).not.toContain('data-attn-opaque')
+      expect(shape(prepared.html), html).toEqual({ ...shape(html), stray: '' })
+      expect(shape(outgoing), html).toEqual({ ...shape(html), stray: '' })
+    }
+  })
+
+  it('freezes the whole table when a cell holds content the editor cannot represent', () => {
+    // Content that survives sanitization but has no editor node freezes as one
+    // exact unit — the enclosing table, never a bare `td` the parser would drop.
+    const html =
+      '<table><tbody><tr><td data-x="1"><marquee>Keep</marquee></td><td>Plain</td></tr></tbody></table>'
+    const prepared = prepareHtmlForEditor(html)
+
+    expect(prepared.issues).toContain('<marquee>')
+    expect(prepared.html).toMatch(/^<div data-attn-opaque="[A-Za-z0-9_-]+"><\/div>$/)
+    expect(restoreOpaqueHtml(prepared.html)).toBe(html)
+    expect(restoreOpaqueHtml(sanitizeOutgoingHtml(prepared.html))).toBe(html)
+  })
+
+  it('freezes only the nearest table around an unrepresentable cell and leaves the outer one editable', () => {
+    const inner = '<table><tbody><tr><td data-x="1"><marquee>Inner</marquee></td></tr></tbody></table>'
+    const html = `<p>Intro</p><table><tbody><tr><td>Outer</td><td>${inner}</td></tr></tbody></table><p>Outro</p>`
+    const prepared = prepareHtmlForEditor(html)
+
+    expect(prepared.html).toContain('<p>Intro</p>')
+    expect(prepared.html).toContain('<td>Outer</td>')
+    expect(prepared.html).toContain('<p>Outro</p>')
+    expect(prepared.html.match(/data-attn-opaque=/g)).toHaveLength(1)
+    expect(restoreOpaqueHtml(prepared.html)).toContain(inner)
+    // The outer table stays a real, editable table with the frozen inner one in its cell.
+    expect(restoreOpaqueHtml(sanitizeOutgoingHtml(prepared.html))).toBe(html)
+  })
+
   it('keeps a genuinely inline region inline', () => {
     const image = prepareHtmlForEditor(
       '<p>See <img src="https://attn.test/a.png" role="presentation"> here</p>'

@@ -17,7 +17,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | Command | Use |
 |---|---|
 | `npm run verify` | The full gate — the definition of done |
-| `npm run test:unit` | Pure-module unit tests across main + renderer (no Electron-ABI SQLite imports) |
+| `npm run test:unit` | Unit tests across main + renderer. Decisions live in pure planner modules, but DB-touching code can be unit-tested too: better-sqlite3 ships Node-API prebuilds, so `openDatabase(':memory:')` works under vitest (see `outbox/{spool,queue,inlineImages}.test.ts`) — no Electron needed |
 | `npm run e2e` | Build + e2e only |
 | `npm run e2e:only` | E2e without rebuilding — **only** when `out/` already matches `src/` |
 | `npm run e2e:only -- --grep <pattern>` | One test while iterating |
@@ -28,7 +28,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run package:win` | Build and verify the Windows installer for the current architecture |
 | `npm run package:verify` | Assert packaged runtime assets and native module architecture |
 
-**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/login.png`, `inbox.png`, `reading.png`, `simple-mail.png`, `label-picker.png`, and `auth-paused.png`. After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
+**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/login.png`, `inbox.png`, `reading.png`, `simple-mail.png`, `label-picker.png`, `auth-paused.png`, `composer.png`, `inline-reply.png`, `draft-chip.png`, `attachments.png`, `newsletter-quote.png`, and `gmail-draft.png` (grep `e2e/*.spec.ts` for `.artifacts` when adding one, and list it here). After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
 
 ## How the e2e harness works
 
