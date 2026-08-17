@@ -102,6 +102,49 @@ describe('remote draft parsing', () => {
     expect(parsed.input.bodyText).toBe('Large body')
   })
 
+  it('recovers a reply quote that Gmail merged into the body, without changing the fingerprint', async () => {
+    const bodyHtml =
+      '<div>my answer</div>\n<div>On Sun, 16 Aug 2026, Sender wrote:</div><blockquote><table width="600"><tr><td>Newsletter</td></tr></table></blockquote>'
+    const remote = providerDraft(
+      'Re: Newsletter',
+      { mimeType: 'text/html', body: { data: Buffer.from(bodyHtml).toString('base64url') } },
+      [{ name: 'In-Reply-To', value: '<original@attn.test>' }]
+    )
+    const parsed = await parseRemoteDraft(emptyLookupDb(), 'account', remote, null, 200)
+
+    expect(parsed.input.kind).toBe('reply')
+    expect(parsed.input.bodyHtml).toBe('<div>my answer</div>')
+    expect(parsed.input.quoteHtml).toContain('<blockquote>')
+    // The local row that mirrored this same content must not read as changed,
+    // or every sync would import the draft over the author's own copy.
+    expect(parsed.fingerprint).toBe(
+      draftContentFingerprint({
+        ...emptyDraftInput(),
+        subject: 'Re: Newsletter',
+        // The two columns a local row holds are stated here; recipients and
+        // threading are borrowed, since neither is what this pins.
+        bodyHtml: '<div>my answer</div>',
+        quoteHtml: parsed.input.quoteHtml,
+        to: parsed.input.to,
+        inReplyTo: parsed.input.inReplyTo,
+        references: parsed.input.references
+      })
+    )
+  })
+
+  it('leaves a new draft that ends in a quote alone', async () => {
+    const bodyHtml = '<div>see below</div><blockquote>Pasted material</blockquote>'
+    const remote = providerDraft('Notes', {
+      mimeType: 'text/html',
+      body: { data: Buffer.from(bodyHtml).toString('base64url') }
+    })
+    const parsed = await parseRemoteDraft(emptyLookupDb(), 'account', remote, null, 200)
+
+    expect(parsed.input.kind).toBe('new')
+    expect(parsed.input.bodyHtml).toBe(bodyHtml)
+    expect(parsed.input.quoteHtml).toBe('')
+  })
+
   it('does not infer forwarding from user-authored subject text', () => {
     expect(remoteDraftKind(providerDraft('Fwd: still a new draft', { mimeType: 'text/plain' }))).toBe('new')
     expect(remoteDraftKind(providerDraft('Anything', { mimeType: 'text/plain' }), 'replyAll')).toBe(
@@ -228,6 +271,111 @@ describe('draft synchronization identity', () => {
     }
 
     expect(mergeRemoteDraftAttachments([remote], JSON.stringify([local]))).toEqual([remote, local])
+  })
+
+  it('does not duplicate a mirrored file when Gmail echoes it back', () => {
+    const local: StoredDraftAttachment = {
+      id: 'local-file',
+      filename: 'report.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      spoolPath: '/owned/outbox/draft/report.pdf'
+    }
+    // What parseRemoteDraft builds from the draft this file was mirrored into.
+    const echo: StoredDraftAttachment = {
+      id: 'remote-echo',
+      filename: 'report.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      spoolPath: '',
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    const once = mergeRemoteDraftAttachments([echo], JSON.stringify([local]))
+    expect(once).toEqual([local])
+    // Round-tripping again must stay a fixed point rather than compounding.
+    expect(mergeRemoteDraftAttachments([echo], JSON.stringify(once))).toEqual([local])
+  })
+
+  it('pairs an echo whose filename MIME encoding stripped non-ASCII characters', () => {
+    // The upload writes `filename="r_sum_.pdf"`, so that is the only name Gmail
+    // can echo. Matching on the raw name would append a second copy per round
+    // trip, and each checkpoint would then upload every copy.
+    const local: StoredDraftAttachment = {
+      id: 'local-file',
+      filename: 'résumé.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      spoolPath: '/owned/outbox/draft/résumé.pdf'
+    }
+    const echo: StoredDraftAttachment = {
+      id: 'remote-echo',
+      filename: 'r_sum_.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      spoolPath: '',
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    const once = mergeRemoteDraftAttachments([echo], JSON.stringify([local]))
+    expect(once).toEqual([local])
+    expect(mergeRemoteDraftAttachments([echo], JSON.stringify(once))).toEqual([local])
+  })
+
+  it('fingerprints a filename the way Gmail will echo it', () => {
+    const base = { ...emptyDraftInput(), to: [{ name: '', email: 'to@example.com' }] }
+    const attachment = { id: 'a', mimeType: 'application/pdf', sizeBytes: 10 }
+    expect(
+      draftContentFingerprint({
+        ...base,
+        attachments: [{ ...attachment, filename: 'résumé.pdf' }]
+      })
+    ).toBe(
+      draftContentFingerprint({
+        ...base,
+        attachments: [{ ...attachment, filename: 'r_sum_.pdf' }]
+      })
+    )
+  })
+
+  it('pairs an echo with its own file when two attachments share a name', () => {
+    const first: StoredDraftAttachment = {
+      id: 'first',
+      filename: 'photo.jpg',
+      mimeType: 'image/jpeg',
+      sizeBytes: 10,
+      spoolPath: '/owned/outbox/draft/1/photo.jpg'
+    }
+    const second: StoredDraftAttachment = { ...first, id: 'second', sizeBytes: 20 }
+    const echoes: StoredDraftAttachment[] = [
+      { ...second, id: 'echo-second', spoolPath: '', remoteAttachmentId: 'b' },
+      { ...first, id: 'echo-first', spoolPath: '', remoteAttachmentId: 'a' }
+    ]
+
+    expect(mergeRemoteDraftAttachments(echoes, JSON.stringify([first, second]))).toEqual([second, first])
+  })
+
+  it('keeps an inline image spool-backed instead of adopting the remote copy', () => {
+    const local: StoredDraftAttachment = {
+      id: 'inline-local',
+      filename: 'pasted.png',
+      mimeType: 'image/png',
+      sizeBytes: 7,
+      spoolPath: '/owned/outbox/draft/pasted.png',
+      contentId: 'pasted@attn.local',
+      inline: true
+    }
+    const echo: StoredDraftAttachment = {
+      ...local,
+      id: 'inline-remote',
+      spoolPath: '',
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    }
+
+    expect(mergeRemoteDraftAttachments([echo], JSON.stringify([local]))).toEqual([local])
   })
 
   it('fingerprints canonical HTML instead of non-round-tripping editor plain text', () => {

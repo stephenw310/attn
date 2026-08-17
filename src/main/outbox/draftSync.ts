@@ -17,12 +17,9 @@ import {
 } from '../gmail/parse'
 import { mergeExternalBodies } from '../sync/mergeBodies'
 import type { MailProvider, ProviderDraft } from '../sync/provider'
-import {
-  draftAttachmentsForMirror,
-  parseStoredDraftAttachments,
-  type StoredDraftAttachment
-} from './draftAttachments'
-import { draftHtmlBody } from './draftMime'
+import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
+import { draftHtmlBody, mimeFilename } from './draftMime'
+import { splitQuotedTrail } from './quoteSplit'
 
 export type DraftConflictDecision = 'defer' | 'local' | 'remote'
 
@@ -67,7 +64,9 @@ export function draftContentFingerprint(draft: FingerprintDraft): string {
     subject: draft.subject,
     bodyHtml: draftHtmlBody(draft),
     attachments: draft.attachments.map((attachment) => ({
-      filename: attachment.filename,
+      // Hash the name Gmail will echo, not the one on disk, or a non-ASCII
+      // filename makes the local and remote fingerprints permanently disagree.
+      filename: mimeFilename(attachment.filename),
       mimeType: attachment.mimeType,
       sizeBytes: attachment.sizeBytes,
       contentId: attachment.contentId ?? null,
@@ -234,6 +233,14 @@ export async function parseRemoteDraft(
   const threading = extractThreadingHeaders(message)
   const bodies = await remoteDraftBodies(remote, provider)
   const attachments = remoteDraftAttachments(message)
+  // Gmail stores a draft as one document, so a reply comes back with its quoted
+  // trail merged into the body. Recover the two columns, or the trail lands in
+  // the editor as authored content. A `new` draft is left alone: a quote at the
+  // end of one is something its author put there.
+  const parts =
+    kind === 'new'
+      ? { bodyHtml: bodies.bodyHtml, bodyText: bodies.bodyText, quoteHtml: '', quoteText: '' }
+      : splitQuotedTrail(bodies.bodyHtml, bodies.bodyText)
   const input: DraftSaveInput = {
     id: null,
     kind,
@@ -241,15 +248,15 @@ export async function parseRemoteDraft(
     cc: parseAddressList(header(message, 'Cc')),
     bcc: parseAddressList(header(message, 'Bcc')),
     subject: header(message, 'Subject'),
-    bodyHtml: bodies.bodyHtml,
-    bodyText: bodies.bodyText,
+    bodyHtml: parts.bodyHtml,
+    bodyText: parts.bodyText,
     attachments,
     threadId: localHint?.thread_id ?? (kind === 'new' || !knownThread ? null : message.threadId),
     sourceMessageId: null,
     inReplyTo: parseMessageIds(header(message, 'In-Reply-To'))[0] ?? null,
     references: threading.references,
-    quoteHtml: '',
-    quoteText: ''
+    quoteHtml: parts.quoteHtml,
+    quoteText: parts.quoteText
   }
   return {
     input,
@@ -289,7 +296,7 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
         subject: candidate.subject,
         bodyHtml: candidate.body_html,
         bodyText: candidate.body_text,
-        attachments: draftAttachmentsForMirror(parseStoredDraftAttachments(candidate.attachments_json)),
+        attachments: parseStoredDraftAttachments(candidate.attachments_json),
         threadId: candidate.thread_id,
         inReplyTo: candidate.in_reply_to,
         references: JSON.parse(candidate.references_json) as string[],
@@ -300,15 +307,48 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
   return matched ? { ...matched, matchedCurrentContent: true } : undefined
 }
 
+/**
+ * Now that spooled files are mirrored, Gmail echoes them back as remote-only
+ * parts on the next read. Appending the local copy unconditionally would store
+ * the same file twice, and the next checkpoint would upload both — doubling on
+ * every round trip. Pair each echo with the local entry that produced it and
+ * keep the local one: the spool is the durable source of the bytes, while
+ * Gmail's attachment locators rotate on every draft rewrite.
+ */
+function matchesLocalAttachment(
+  remote: StoredDraftAttachment,
+  local: StoredDraftAttachment,
+  loose: boolean
+): boolean {
+  if (remote.contentId && local.contentId) return remote.contentId === local.contentId
+  if (remote.contentId || local.contentId) return false
+  if (mimeFilename(remote.filename) !== mimeFilename(local.filename)) return false
+  if (remote.mimeType !== local.mimeType) return false
+  return loose || remote.sizeBytes === local.sizeBytes
+}
+
 export function mergeRemoteDraftAttachments(
   remote: readonly StoredDraftAttachment[],
   localStored?: string
 ): StoredDraftAttachment[] {
   if (!localStored) return [...remote]
-  const localOnlyAttachments = parseStoredDraftAttachments(localStored).filter(
-    (attachment) => Boolean(attachment.spoolPath) && !attachment.inline
+  const spooled = parseStoredDraftAttachments(localStored).filter((attachment) =>
+    Boolean(attachment.spoolPath)
   )
-  return [...remote, ...localOnlyAttachments]
+  const unmatched = new Set(spooled)
+  const take = (candidate: StoredDraftAttachment, loose: boolean): StoredDraftAttachment | undefined => {
+    for (const local of unmatched) {
+      if (!matchesLocalAttachment(candidate, local, loose)) continue
+      unmatched.delete(local)
+      return local
+    }
+    return undefined
+  }
+  // Exact size first, so two same-named files pair with their own echo before a
+  // size that Gmail reported differently is allowed to absorb one.
+  const paired = remote.map((candidate) => ({ candidate, local: take(candidate, false) }))
+  const merged = paired.map(({ candidate, local }) => local ?? take(candidate, true) ?? candidate)
+  return [...merged, ...spooled.filter((local) => unmatched.has(local))]
 }
 
 function writeRemoteDraft(
@@ -370,7 +410,9 @@ function writeRemoteDraft(
 
 function attachmentLocatorIdentity(attachment: StoredDraftAttachment): string {
   return JSON.stringify([
-    attachment.filename,
+    // Matched across the same local/remote seam as the fingerprint, so it must
+    // normalize the filename the same way.
+    mimeFilename(attachment.filename),
     attachment.mimeType,
     attachment.sizeBytes,
     attachment.contentId ?? null,
@@ -383,8 +425,6 @@ export function refreshRemoteAttachmentLocators(
   remote: readonly StoredDraftAttachment[]
 ): string {
   const local = parseStoredDraftAttachments(stored)
-  const mirrored = draftAttachmentsForMirror(local)
-  if (mirrored.length !== remote.length) return stored
   const remoteByIdentity = new Map<string, StoredDraftAttachment[]>()
   for (const attachment of remote) {
     const identity = attachmentLocatorIdentity(attachment)
@@ -394,18 +434,23 @@ export function refreshRemoteAttachmentLocators(
   }
   const replacements = new Map<number, StoredDraftAttachment>()
   for (const [index, attachment] of local.entries()) {
-    if (!attachment.inline && attachment.spoolPath) continue
-    const matches = remoteByIdentity.get(attachmentLocatorIdentity(attachment))
-    const replacement = matches?.shift()
-    if (!replacement) return stored
-    replacements.set(index, replacement)
+    const spooledFile = Boolean(attachment.spoolPath) && !attachment.inline
+    const replacement = remoteByIdentity.get(attachmentLocatorIdentity(attachment))?.shift()
+    if (!replacement) {
+      // A spooled file may simply not have reached Gmail yet, and its absence
+      // must not stop the parts Gmail does hold from being refreshed. Anything
+      // else missing means the two sides disagree — leave the row untouched.
+      if (spooledFile) continue
+      return stored
+    }
+    // Matched spooled files still consume their echo so the leftover check
+    // below stays a real assertion, but keep the spool as the byte source:
+    // Gmail's locators rotate on every rewrite, the spool does not.
+    if (!spooledFile) replacements.set(index, replacement)
   }
   if ([...remoteByIdentity.values()].some((matches) => matches.length > 0)) return stored
   return JSON.stringify(
     local.map((attachment, index) => {
-      // Regular spooled files deliberately do not exist in Gmail until the
-      // final send update. Preserve them without letting their presence stop
-      // locator refresh for the remote/inline parts that were mirrored.
       const replacement = replacements.get(index)
       if (!replacement) return attachment
       const {

@@ -1,15 +1,25 @@
 import { createHash } from 'node:crypto'
 import type { MailAddress } from '../../shared/address'
 
-export interface DraftMimeAttachment {
+/** Identity every attachment shape carries, whatever supplies its bytes. */
+interface DraftMimeAttachmentIdentity {
   filename: string
   mimeType: string
-  content: Uint8Array
   contentId?: string
   inline?: boolean
 }
 
-export interface DraftMimeInput {
+export interface DraftMimeAttachment extends DraftMimeAttachmentIdentity {
+  content: Uint8Array
+}
+
+/** Spool-backed attachment whose bytes are read only while the request streams. */
+export interface DraftMimeStreamAttachment extends DraftMimeAttachmentIdentity {
+  sizeBytes: number
+  open: () => AsyncIterable<Uint8Array>
+}
+
+export interface DraftMimeInput<TAttachment extends DraftMimeAttachmentIdentity = DraftMimeAttachment> {
   to: readonly MailAddress[]
   cc: readonly MailAddress[]
   bcc: readonly MailAddress[]
@@ -20,8 +30,13 @@ export interface DraftMimeInput {
   quoteText?: string
   inReplyTo?: string | null
   references?: readonly string[]
-  attachments?: readonly DraftMimeAttachment[]
+  attachments?: readonly TAttachment[]
 }
+
+type AttachmentSegment<T> = { attachment: T }
+type DraftMimeSegment<T> = string | AttachmentSegment<T>
+
+const CRLF = '\r\n'
 
 const ENCODED_WORD_BYTES = 45
 const RECOMMENDED_HEADER_WIDTH = 78
@@ -103,15 +118,28 @@ function safeMimeType(value: string): string {
   return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(clean) ? clean : 'application/octet-stream'
 }
 
-function quotedFilename(value: string): string {
-  const clean =
+/**
+ * The only filename Gmail ever sees, and therefore the only one it can echo
+ * back. Identity comparisons against a remote draft must run through this or a
+ * name carrying non-ASCII characters will never match the file that produced
+ * it. Idempotent, so applying it to an already-echoed name is safe.
+ */
+export function mimeFilename(value: string): string {
+  return (
     cleanHeader(value)
       .replace(/[^\x20-\x7e]/g, '_')
       .slice(0, 200) || 'inline-image'
-  return `"${clean.replace(/["\\]/g, '\\$&')}"`
+  )
 }
 
-function boundary(kind: 'alternative' | 'related' | 'mixed', input: DraftMimeInput): string {
+function quotedFilename(value: string): string {
+  return `"${mimeFilename(value).replace(/["\\]/g, '\\$&')}"`
+}
+
+function boundary<T extends DraftMimeAttachmentIdentity>(
+  kind: 'alternative' | 'related' | 'mixed',
+  input: DraftMimeInput<T>
+): string {
   const identity = [
     kind,
     input.subject,
@@ -144,7 +172,7 @@ function textPart(mimeType: 'text/plain' | 'text/html', value: string): string[]
   ]
 }
 
-function attachmentPart(attachment: DraftMimeAttachment): string[] {
+function attachmentPart<T extends DraftMimeAttachmentIdentity>(attachment: T): DraftMimeSegment<T>[] {
   const contentId = cleanHeader(attachment.contentId ?? '').replace(/^<|>$/g, '')
   return [
     `Content-Type: ${safeMimeType(attachment.mimeType)}; name=${quotedFilename(attachment.filename)}`,
@@ -152,12 +180,21 @@ function attachmentPart(attachment: DraftMimeAttachment): string[] {
     `Content-Disposition: ${attachment.inline ? 'inline' : 'attachment'}; filename=${quotedFilename(attachment.filename)}`,
     ...(contentId ? [`Content-ID: <${contentId}>`] : []),
     '',
-    wrapBase64(attachment.content)
+    { attachment }
   ]
 }
 
-/** Minimal RFC 5322/2045 envelope for Gmail draft checkpoints; T15 owns final send MIME. */
-export function encodeDraftMessage(input: DraftMimeInput): string {
+function isAttachmentSegment<T>(segment: DraftMimeSegment<T>): segment is AttachmentSegment<T> {
+  return typeof segment !== 'string'
+}
+
+/**
+ * One layout shared by the buffered and streamed encoders, so a draft's bytes
+ * cannot depend on which one wrote them.
+ */
+function draftMimeSegments<T extends DraftMimeAttachmentIdentity>(
+  input: DraftMimeInput<T>
+): DraftMimeSegment<T>[] {
   const html = draftHtmlBody(input)
   const text = draftTextBody(input)
   const attachments = input.attachments ?? []
@@ -178,7 +215,7 @@ export function encodeDraftMessage(input: DraftMimeInput): string {
     'MIME-Version: 1.0'
   ].filter((header): header is string => header !== null)
 
-  const alternativeEntity = [
+  const alternativeEntity: DraftMimeSegment<T>[] = [
     `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
     '',
     `--${alternativeBoundary}`,
@@ -187,7 +224,7 @@ export function encodeDraftMessage(input: DraftMimeInput): string {
     ...textPart('text/html', html),
     `--${alternativeBoundary}--`
   ]
-  const bodyEntity =
+  const bodyEntity: DraftMimeSegment<T>[] =
     inlineAttachments.length === 0
       ? alternativeEntity
       : [
@@ -201,7 +238,7 @@ export function encodeDraftMessage(input: DraftMimeInput): string {
           ]),
           `--${relatedBoundary}--`
         ]
-  const message =
+  const message: DraftMimeSegment<T>[] =
     regularAttachments.length === 0
       ? [...headers, ...bodyEntity]
       : [
@@ -216,5 +253,70 @@ export function encodeDraftMessage(input: DraftMimeInput): string {
           ]),
           `--${mixedBoundary}--`
         ]
-  return Buffer.from(`${message.join('\r\n')}\r\n`).toString('base64url')
+  // The trailing empty segment is what gives the message its final CRLF.
+  return [...message, '']
+}
+
+/** Minimal RFC 5322/2045 envelope for Gmail draft checkpoints; T15 owns final send MIME. */
+export function encodeDraftMessage(input: DraftMimeInput): string {
+  const body = draftMimeSegments(input)
+    .map((segment) => (isAttachmentSegment(segment) ? wrapBase64(segment.attachment.content) : segment))
+    .join(CRLF)
+  return Buffer.from(body).toString('base64url')
+}
+
+function streamedBase64ByteLength(sizeBytes: number): number {
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw new Error('draft attachment size must be a non-negative safe integer')
+  }
+  const encodedBytes = 4 * Math.ceil(sizeBytes / 3)
+  if (encodedBytes === 0) return 0
+  return encodedBytes + (Math.ceil(encodedBytes / 76) - 1) * Buffer.byteLength(CRLF)
+}
+
+/** Exact byte count for streamDraftMessage; Gmail's multipart upload must declare it up front. */
+export function draftMimeByteLength(input: DraftMimeInput<DraftMimeStreamAttachment>): number {
+  const segments = draftMimeSegments(input)
+  return segments.reduce(
+    (total, segment, index) =>
+      total +
+      (isAttachmentSegment(segment)
+        ? streamedBase64ByteLength(segment.attachment.sizeBytes)
+        : Buffer.byteLength(segment)) +
+      (index < segments.length - 1 ? Buffer.byteLength(CRLF) : 0),
+    0
+  )
+}
+
+async function* base64Stream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
+  let carry = Buffer.alloc(0)
+  let firstLine = true
+  for await (const value of source) {
+    const chunk = Buffer.from(value)
+    const data = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk
+    // 57 raw bytes encode to exactly one 76-character base64 line.
+    const completeLength = data.length - (data.length % 57)
+    if (completeLength > 0) {
+      const encoded = data
+        .subarray(0, completeLength)
+        .toString('base64')
+        .replace(/(.{76})(?=.)/g, `$1${CRLF}`)
+      yield Buffer.from(`${firstLine ? '' : CRLF}${encoded}`)
+      firstLine = false
+    }
+    carry = data.subarray(completeLength)
+  }
+  if (carry.length > 0) yield Buffer.from(`${firstLine ? '' : CRLF}${carry.toString('base64')}`)
+}
+
+/** The same bytes encodeDraftMessage would produce, without holding attachments in memory. */
+export async function* streamDraftMessage(
+  input: DraftMimeInput<DraftMimeStreamAttachment>
+): AsyncIterable<Uint8Array> {
+  const segments = draftMimeSegments(input)
+  for (const [index, segment] of segments.entries()) {
+    if (isAttachmentSegment(segment)) yield* base64Stream(segment.attachment.open())
+    else if (segment) yield Buffer.from(segment)
+    if (index < segments.length - 1) yield Buffer.from(CRLF)
+  }
 }

@@ -77,7 +77,8 @@ function remoteDraft(
   html: string,
   bcc = '',
   inlineImage = false,
-  inlineImageBase64?: string
+  inlineImageBase64?: string,
+  extraHeaders: { name: string; value: string }[] = []
 ): object {
   const inlineImageData = inlineImageBase64
     ? Buffer.from(inlineImageBase64, 'base64')
@@ -94,7 +95,8 @@ function remoteDraft(
         headers: [
           { name: 'To', value: 'remote-to@example.com' },
           ...(bcc ? [{ name: 'Bcc', value: bcc }] : []),
-          { name: 'Subject', value: subject }
+          { name: 'Subject', value: subject },
+          ...extraHeaders
         ],
         parts: [
           { mimeType: 'text/plain', body: { data: Buffer.from(subject).toString('base64url') } },
@@ -1691,4 +1693,95 @@ test('discard removes the local recovery surface', async ({ boot, page }) => {
   ;({ page } = await boot.relaunch())
   composer = new ComposerPage(page)
   await expect(composer.root).toHaveCount(0)
+})
+
+test('keeps the caret in a recipient field while a preserved region sits in the body', async ({
+  boot,
+  page
+}) => {
+  // A reply whose body carries markup the editor cannot represent — the shape a
+  // reply takes once it has round-tripped through Gmail with a rich quoted
+  // trail. Registering a Lexical node transform runs it over the whole document
+  // inside an editor update, and that update writes the DOM selection back into
+  // the editor, so an unstable plugin prop steals the caret on every keystroke.
+  await page.evaluate(async () => {
+    await window.attn?.draft.save({
+      id: null,
+      kind: 'reply',
+      to: [],
+      cc: [],
+      bcc: [],
+      subject: 'Re: Roadmap',
+      // The links matter: the transform that gets re-registered is the one that
+      // scans for URLs, so it only dirties nodes when the body contains some.
+      bodyHtml:
+        '<div>my reply</div><div><a href="https://attn.test/agenda">agenda</a> and https://attn.test/more</div>' +
+        '<section data-layout="card"><table><tr><td><a href="https://attn.test/x">Preserved region</a></td></tr></table></section>',
+      bodyText: 'my reply',
+      attachments: [],
+      threadId: 't-roadmap',
+      sourceMessageId: null,
+      inReplyTo: null,
+      references: [],
+      quoteHtml: '',
+      quoteText: ''
+    })
+  })
+
+  // Relaunch so the draft is reloaded from the store, then leave the recovered
+  // full-window composer and reopen the draft inline on its own thread.
+  ;({ page } = await boot.relaunch())
+  const composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await page.getByTestId('thread-row').first().click()
+  await page.keyboard.press('Enter')
+  // Inline placement is load-bearing: the editor only takes focus on open in
+  // this mode, which is what leaves a selection for the update to write back.
+  await expect(page.getByTestId('conversation-view').getByTestId('composer-to')).toBeVisible()
+  await expect(page.getByTestId('composer-editor').locator('iframe')).toHaveCount(1)
+  await expect(page.getByTestId('composer-editor')).toBeFocused()
+
+  const to = page.getByTestId('composer-to').locator('input').first()
+  await to.click()
+  await page.keyboard.type('a')
+  // Waiting for the checkpoint is what makes this deterministic: the caret used
+  // to move during the render and effect cycle that the first edit kicks off.
+  await expect(page.getByTestId('composer-save-status')).toHaveAttribute('data-save-status', 'saved')
+  await page.keyboard.type('da@attn.test')
+
+  await expect(to).toHaveValue('ada@attn.test')
+})
+
+test('restores the collapsed quote on a reply Gmail merged into one document', async ({ app, page }) => {
+  // Gmail stores a draft as a single document, so Attn's own reply comes back
+  // with its quoted trail joined to the body. Left merged, the quoted mail
+  // loads into the editor: a newsletter freezes into a read-only region and the
+  // banner appears over content the author never wrote.
+  const merged =
+    '<div>my answer</div>\n<div>On Sun, 16 Aug 2026, AlphaSignal wrote:</div>' +
+    '<blockquote><table role="presentation" width="600"><tr><td bgcolor="#f6d5c4">Newsletter</td></tr></table></blockquote>'
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft('merged-reply', 'Re: Newsletter', merged, '', false, undefined, [
+        { name: 'In-Reply-To', value: '<original@attn.test>' }
+      ])
+    }
+  )
+  if (error) throw new Error(error)
+
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Re: Newsletter' }).click()
+  const composer = new ComposerPage(page)
+  await expect(composer.editor).toContainText('my answer')
+
+  // The quoted trail belongs to the collapsed quote, not the editor.
+  await expect(page.getByTestId('composer-quote-container')).toHaveCount(1)
+  await expect(composer.editor).not.toContainText('Newsletter')
+  await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
 })

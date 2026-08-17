@@ -45,6 +45,7 @@ import { editorConfig } from './editorConfig'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
+import { rootLevelNodes } from './rootNodes'
 import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
@@ -123,6 +124,17 @@ function composerTitle(kind: Draft['kind']): string {
 
 const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 const QUOTE_MAX_HEIGHT = 720
+
+/**
+ * Module scope on purpose. `LinkPlugin` re-registers its node transform
+ * whenever this identity changes, and registering a transform runs it over the
+ * whole document inside an `editor.update`. That update reconciles the DOM
+ * selection back into the editor, so an inline arrow here pulls the caret out
+ * of the recipient fields on every keystroke.
+ */
+function validateComposerUrl(url: string): boolean {
+  return /^(?:https?:|mailto:)/i.test(url)
+}
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -293,7 +305,7 @@ function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string })
     })
     editor.update(
       () => {
-        const nodes = $generateNodesFromDOM(editor, document)
+        const nodes = rootLevelNodes($generateNodesFromDOM(editor, document))
         const root = $getRoot()
         root.clear()
         root.append(...(nodes.length > 0 ? nodes : [$createParagraphNode()]))
@@ -928,13 +940,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <HistoryPlugin />
               <ListPlugin />
               <TablePlugin />
-              <LinkPlugin validateUrl={(url) => /^(?:https?:|mailto:)/i.test(url)} />
+              <LinkPlugin validateUrl={validateComposerUrl} />
               <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
               {mode === 'inline' && draft.kind !== 'forward' && <AutoFocusPlugin />}
-              <OnChangePlugin
-                ignoreSelectionChange
-                onChange={(editorState, editor, tags) => captureEditor(editorState, editor, tags)}
-              />
+              <OnChangePlugin ignoreSelectionChange onChange={captureEditor} />
               <ComposerCommandPlugin
                 onAttach={pickAttachments}
                 onRemoveAttachment={removeLastAttachment}

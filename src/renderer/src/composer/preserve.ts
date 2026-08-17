@@ -39,27 +39,73 @@ const TAG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
 
 const GMAIL_SIGNATURE_ATTRIBUTES = new Set(['class', 'data-smartmail'])
 
-const BLOCK_TAGS = new Set([
-  'address',
-  'article',
-  'aside',
-  'details',
-  'dl',
-  'fieldset',
-  'figcaption',
-  'figure',
-  'footer',
-  'header',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'main',
-  'nav',
-  'pre',
-  'section'
+/**
+ * Classes that carry meaning rather than paint. Attn's trim boundary and
+ * surface classification key on these, and so does Gmail's own quote
+ * collapsing, so they must survive a round trip byte-for-byte.
+ */
+const STRUCTURAL_CLASSES = new Set([
+  'gmail_attr',
+  'gmail_quote',
+  'gmail_quote_container',
+  'gmail_signature',
+  'gmail_signature_prefix'
+])
+
+function hasStylesheetMarkup(html: string): boolean {
+  return /<style[\s>]/i.test(html)
+}
+
+/**
+ * A class paints only when a stylesheet targets it, and a draft body carries no
+ * stylesheet of its own. Gmail's editor classes — `Q6ibn ng` around typed text,
+ * `gmail_default` on a wrapper — are therefore inert, and freezing the user's
+ * own words to preserve them buys nothing.
+ */
+function isInertClass(value: string, hasStylesheet: boolean): boolean {
+  if (hasStylesheet) return false
+  return !value.split(/\s+/).some((name) => STRUCTURAL_CLASSES.has(name))
+}
+
+/**
+ * An allowlist rather than a list of block tags, because the block side is
+ * open-ended: `table`, `div`, `p` and `blockquote` all belong there, and so
+ * does any unknown element a sender invents. Getting this wrong is visible —
+ * an inline marker makes the editor render the region as a narrow inline box,
+ * which squeezes a table-based newsletter well below its designed width.
+ */
+const INLINE_TAGS = new Set([
+  'a',
+  'abbr',
+  'b',
+  'bdi',
+  'bdo',
+  'big',
+  'br',
+  'cite',
+  'code',
+  'data',
+  'dfn',
+  'em',
+  'font',
+  'i',
+  'img',
+  'kbd',
+  'mark',
+  'q',
+  's',
+  'samp',
+  'small',
+  'span',
+  'strike',
+  'strong',
+  'sub',
+  'sup',
+  'time',
+  'tt',
+  'u',
+  'var',
+  'wbr'
 ])
 
 const INHERITED_TEXT_STYLES = new Set([
@@ -130,7 +176,7 @@ function materializeInheritedTextStyles(document: Document): void {
   }
 }
 
-function unsupportedReason(element: Element): string | null {
+function unsupportedReason(element: Element, hasStylesheet: boolean): string | null {
   const tag = element.tagName.toLowerCase()
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
   const attributes = new Map(
@@ -140,6 +186,7 @@ function unsupportedReason(element: Element): string | null {
     tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.getAttributeNames()) {
+    if (attribute === 'class' && isInertClass(attributes.get('class') ?? '', hasStylesheet)) continue
     if (
       !GLOBAL_ATTRIBUTES.has(attribute) &&
       !tagAttributes.has(attribute) &&
@@ -160,7 +207,10 @@ function unsupportedReason(element: Element): string | null {
   return null
 }
 
-function sourceUnsupportedReason(element: DefaultTreeAdapterTypes.Element): string | null {
+function sourceUnsupportedReason(
+  element: DefaultTreeAdapterTypes.Element,
+  hasStylesheet: boolean
+): string | null {
   const tag = element.tagName.toLowerCase()
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
   const attributes = new Map(element.attrs.map((attribute) => [attribute.name, attribute.value]))
@@ -168,7 +218,9 @@ function sourceUnsupportedReason(element: DefaultTreeAdapterTypes.Element): stri
     tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.attrs) {
+    const inertClass = attribute.name === 'class' && isInertClass(attribute.value, hasStylesheet)
     if (
+      !inertClass &&
       !GLOBAL_ATTRIBUTES.has(attribute.name) &&
       !tagAttributes.has(attribute.name) &&
       !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute.name))
@@ -186,10 +238,19 @@ function sourceUnsupportedReason(element: DefaultTreeAdapterTypes.Element): stri
   return null
 }
 
-export function draftHtmlFidelityIssues(html: string): string[] {
+/**
+ * `hasStylesheet` is passed in when judging a fragment lifted out of a larger
+ * document: the fragment has lost the context that decides whether a class
+ * paints, and the two walks must agree or a region freezes on one pass and not
+ * the other.
+ */
+export function draftHtmlFidelityIssues(
+  html: string,
+  hasStylesheet: boolean = hasStylesheetMarkup(html)
+): string[] {
   const document = new DOMParser().parseFromString(html, 'text/html')
   return [...document.body.querySelectorAll('*')]
-    .map(unsupportedReason)
+    .map((element) => unsupportedReason(element, hasStylesheet))
     .filter((reason): reason is string => reason !== null)
 }
 
@@ -214,25 +275,32 @@ interface OpaqueSourceRegion {
   start: number
   end: number
   tag: string
+  /**
+   * Every unsupported node sits in exactly one top-most region's subtree, so
+   * issues are reported per region rather than as one flat list — a region that
+   * turns out to preserve nothing must take its nested issues with it.
+   */
+  issues: string[]
 }
 
-function opaqueSourceRegions(html: string): { regions: OpaqueSourceRegion[]; issues: string[] } {
+function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSourceRegion[] {
   const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
   const regions: OpaqueSourceRegion[] = []
-  const issues: string[] = []
-  const visit = (node: DefaultTreeAdapterTypes.ChildNode, insideOpaque: boolean): void => {
+  const visit = (node: DefaultTreeAdapterTypes.ChildNode, owner: OpaqueSourceRegion | null): void => {
     if (!('tagName' in node)) return
-    const reason = sourceUnsupportedReason(node)
-    if (reason) issues.push(reason)
-    const opaque = insideOpaque || reason !== null
-    const location = node.sourceCodeLocation
-    if (reason && !insideOpaque && location) {
-      regions.push({ start: location.startOffset, end: location.endOffset, tag: node.tagName })
+    const reason = sourceUnsupportedReason(node, hasStylesheet)
+    let region = owner
+    if (reason && !owner) {
+      const location = node.sourceCodeLocation
+      if (!location) return
+      region = { start: location.startOffset, end: location.endOffset, tag: node.tagName, issues: [] }
+      regions.push(region)
     }
-    for (const child of node.childNodes) visit(child, opaque)
+    if (reason && region) region.issues.push(reason)
+    for (const child of node.childNodes) visit(child, region)
   }
-  for (const child of fragment.childNodes) visit(child, false)
-  return { regions, issues }
+  for (const child of fragment.childNodes) visit(child, null)
+  return regions
 }
 
 /** DOMPurify remains the security authority; serialization differences alone do not make safe HTML lossy. */
@@ -283,17 +351,30 @@ function sanitizedDomMatchesSource(source: string, sanitized: string): boolean {
 /** Replace only top-most unsupported regions so nested source survives as one exact unit. */
 export function prepareHtmlForEditor(html: string): { html: string; issues: string[] } {
   if (!html.trim()) return { html: '', issues: [] }
-  const { regions, issues } = opaqueSourceRegions(html)
+  const issues: string[] = []
+  // Decided once, from the whole document, and reused for every region below.
+  const hasStylesheet = hasStylesheetMarkup(html)
   let marked = html
-  for (const region of regions.sort((left, right) => right.start - left.start)) {
+  for (const region of opaqueSourceRegions(html, hasStylesheet).sort(
+    (left, right) => right.start - left.start
+  )) {
     const source = html.slice(region.start, region.end)
     const sanitized = sanitizeDraftHtmlForImport(source)
     const preserved = sanitizedDomMatchesSource(source, sanitized) ? source : sanitized
-    const markerTag = BLOCK_TAGS.has(region.tag) ? 'div' : 'span'
-    const marker = preserved
-      ? `<${markerTag} data-attn-opaque="${encodeOpaque(preserved)}"></${markerTag}>`
-      : ''
-    marked = `${marked.slice(0, region.start)}${marker}${marked.slice(region.end)}`
+    // Freezing is for content the editor cannot represent. When the sanitizer
+    // has already dropped whatever was unsupported — Gmail's `<br clear="all">`
+    // being the everyday case — what is left is ordinary editable markup, and
+    // making it read-only would preserve nothing while costing the user the
+    // ability to edit it and showing a banner about formatting that is gone.
+    let replacement = ''
+    if (preserved && draftHtmlFidelityIssues(preserved, hasStylesheet).length > 0) {
+      const markerTag = INLINE_TAGS.has(region.tag) ? 'span' : 'div'
+      replacement = `<${markerTag} data-attn-opaque="${encodeOpaque(preserved)}"></${markerTag}>`
+      issues.unshift(...region.issues)
+    } else {
+      replacement = preserved
+    }
+    marked = `${marked.slice(0, region.start)}${replacement}${marked.slice(region.end)}`
   }
   const safe = sanitizeDraftHtmlForImport(marked)
   const document = new DOMParser().parseFromString(safe, 'text/html')

@@ -115,8 +115,12 @@ function forwardQuote(source: ConversationMsg, subject: string): Pick<ReplyPlan,
     ...(cc ? [`Cc: ${cc}`] : [])
   ]
   const htmlLines = headerLines.map((line) => escapeHtml(line)).join('<br>')
+  // `gmail_quote` is what Gmail itself wraps a forward in, and it renders the
+  // same for a recipient. Attn needs it because a forward's own markup carries
+  // nothing to recognise: without the container, a draft that round-trips
+  // through Gmail comes back with its forwarded message merged into the body.
   return {
-    quoteHtml: `<div>${htmlLines}</div><br><div>${bodyHtmlForQuote(source)}</div>`,
+    quoteHtml: `<div class="gmail_quote"><div>${htmlLines}</div><br><div>${bodyHtmlForQuote(source)}</div></div>`,
     quoteText: `${headerLines.join('\n')}\n\n${source.bodyText}`
   }
 }

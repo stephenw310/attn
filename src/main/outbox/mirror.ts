@@ -6,12 +6,15 @@ import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { isPathInside } from '../pathSafety'
 import type { MailActionProvider, ProviderDraft } from '../sync/provider'
+import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import {
-  draftAttachmentsForMirror,
-  parseStoredDraftAttachments,
-  type StoredDraftAttachment
-} from './draftAttachments'
-import { type DraftMimeAttachment, encodeDraftMessage } from './draftMime'
+  type DraftMimeAttachment,
+  type DraftMimeInput,
+  type DraftMimeStreamAttachment,
+  draftMimeByteLength,
+  encodeDraftMessage,
+  streamDraftMessage
+} from './draftMime'
 import { draftContentFingerprint, refreshRemoteAttachmentLocators, remoteDraftAttachments } from './draftSync'
 import { isEmptyDraft } from './drafts'
 import type { MimeStreamAttachment } from './mime'
@@ -163,6 +166,70 @@ async function refreshRemoteAttachmentIds(
   return parseStoredDraftAttachments(refreshed)
 }
 
+/**
+ * Attachment bytes stream through an idempotent PUT, which can take long enough
+ * that a quit aborts it. The freshly minted draft id is therefore persisted
+ * before the upload starts: an aborted upload leaves `mirror_revision` behind
+ * `local_revision`, so the next drain resumes against the same remote draft
+ * instead of creating a second one.
+ */
+async function streamDraftCheckpoint(
+  db: Db,
+  accountId: string,
+  row: DraftMirrorRow,
+  provider: MailActionProvider,
+  body: Omit<DraftMimeInput, 'attachments'>,
+  attachments: readonly StoredDraftAttachment[],
+  spoolRoot: string | null,
+  onRemoteMissing: () => boolean,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const updateDraft = provider.updateDraft?.bind(provider)
+  if (!updateDraft) return null
+  const prepared = await prepareDraftMimeAttachments(row.id, attachments, provider, spoolRoot, signal)
+  const message: DraftMimeInput<DraftMimeStreamAttachment> = { ...body, attachments: prepared }
+  const upload = {
+    sizeBytes: draftMimeByteLength(message),
+    open: () => streamDraftMessage(message)
+  }
+
+  const create = async (): Promise<string | null> => {
+    const created = await saveDraftCheckpoint(
+      provider,
+      null,
+      encodeDraftMessage(body),
+      onRemoteMissing,
+      row.thread_id,
+      signal
+    )
+    if (!created) return null
+    db.prepare('UPDATE outbox SET gmail_draft_id = ? WHERE account_id = ? AND id = ?').run(
+      created,
+      accountId,
+      row.id
+    )
+    return created
+  }
+
+  const id = row.gmail_draft_id ?? (await create())
+  if (!id) return null
+  const request = row.thread_id ? { id, mime: upload, threadId: row.thread_id } : { id, mime: upload }
+  try {
+    return await updateDraft(request, { signal })
+  } catch (error) {
+    if (!(error instanceof GmailApiError && error.status === 404)) throw error
+    if (!onRemoteMissing()) return null
+    const recreated = await create()
+    if (!recreated) return null
+    return updateDraft(
+      row.thread_id
+        ? { id: recreated, mime: upload, threadId: row.thread_id }
+        : { id: recreated, mime: upload },
+      { signal }
+    )
+  }
+}
+
 async function mirrorComposing(
   db: Db,
   accountId: string,
@@ -172,16 +239,8 @@ async function mirrorComposing(
   signal?: AbortSignal
 ): Promise<boolean> {
   if (!provider.saveDraft) return false
-  const attachments = await refreshRemoteAttachmentIds(db, accountId, row, provider, signal)
-  const mirroredAttachments = draftAttachmentsForMirror(attachments)
-  const mimeAttachments = await loadDraftMimeAttachments(
-    row.id,
-    mirroredAttachments,
-    provider,
-    spoolRoot,
-    signal
-  )
-  const raw = encodeDraftMessage({
+  const mirroredAttachments = await refreshRemoteAttachmentIds(db, accountId, row, provider, signal)
+  const body = {
     to: parseJson<MailAddress[]>(row.to_json),
     cc: parseJson<MailAddress[]>(row.cc_json),
     bcc: parseJson<MailAddress[]>(row.bcc_json),
@@ -191,26 +250,52 @@ async function mirrorComposing(
     quoteHtml: row.quote_html,
     quoteText: row.quote_text,
     inReplyTo: row.in_reply_to,
-    references: parseJson<string[]>(row.references_json),
-    attachments: mimeAttachments
-  })
-  const gmailDraftId = await saveDraftCheckpoint(
-    provider,
-    row.gmail_draft_id,
-    raw,
-    () => {
-      db.prepare(
-        `UPDATE outbox SET gmail_draft_id = NULL, mirror_revision = 0
+    references: parseJson<string[]>(row.references_json)
+  }
+  const onRemoteMissing = (): boolean => {
+    db.prepare(
+      `UPDATE outbox SET gmail_draft_id = NULL, mirror_revision = 0
        WHERE account_id = ? AND id = ? AND gmail_draft_id = ?`
-      ).run(accountId, row.id, row.gmail_draft_id)
-      const current = db
-        .prepare('SELECT state FROM outbox WHERE account_id = ? AND id = ?')
-        .get(accountId, row.id) as { state: string } | undefined
-      return current?.state === 'composing' || current?.state === 'drafted'
-    },
-    row.thread_id,
-    signal
-  )
+    ).run(accountId, row.id, row.gmail_draft_id)
+    const current = db
+      .prepare('SELECT state FROM outbox WHERE account_id = ? AND id = ?')
+      .get(accountId, row.id) as { state: string } | undefined
+    return current?.state === 'composing' || current?.state === 'drafted'
+  }
+  // Streaming keeps a 25 MB attachment out of memory, but Gmail's upload
+  // endpoint is PUT-only, so a draft with no id yet is created from its body
+  // alone and the bytes follow. Providers without `updateDraft` (test doubles
+  // predating the upload path) keep the buffered encoder.
+  const gmailDraftId =
+    provider.updateDraft && mirroredAttachments.length > 0
+      ? await streamDraftCheckpoint(
+          db,
+          accountId,
+          row,
+          provider,
+          body,
+          mirroredAttachments,
+          spoolRoot,
+          onRemoteMissing,
+          signal
+        )
+      : await saveDraftCheckpoint(
+          provider,
+          row.gmail_draft_id,
+          encodeDraftMessage({
+            ...body,
+            attachments: await loadDraftMimeAttachments(
+              row.id,
+              mirroredAttachments,
+              provider,
+              spoolRoot,
+              signal
+            )
+          }),
+          onRemoteMissing,
+          row.thread_id,
+          signal
+        )
   if (!gmailDraftId) return false
   const fingerprint = draftContentFingerprint({
     to: parseJson<MailAddress[]>(row.to_json),
