@@ -1,6 +1,11 @@
 import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
-import { encodeDraftMessage } from './draftMime'
+import {
+  type DraftMimeStreamAttachment,
+  draftMimeByteLength,
+  encodeDraftMessage,
+  streamDraftMessage
+} from './draftMime'
 
 function decode(encoded: string): string {
   return Buffer.from(encoded, 'base64url').toString()
@@ -126,6 +131,62 @@ describe('draft checkpoint MIME', () => {
       .split('\r\n--attn-draft-related-')[0]
       .replaceAll('\r\n', '')
     expect(Buffer.from(imageBody, 'base64')).toEqual(Buffer.from(bytes))
+  })
+
+  it('streams the exact bytes the buffered encoder produces, at the declared length', async () => {
+    // Deliberately not a multiple of 57: the base64 line packing has to carry
+    // a remainder across chunk boundaries to match the buffered encoding.
+    const bytes = Buffer.from(Array.from({ length: 5_000 }, (_, index) => index % 251))
+    const chunked = (size: number) =>
+      async function* (): AsyncIterable<Uint8Array> {
+        for (let offset = 0; offset < bytes.length; offset += size) {
+          yield bytes.subarray(offset, offset + size)
+        }
+      }
+    const identity = {
+      to: [{ name: '', email: 'to@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 'With attachments',
+      bodyHtml: '<p>Body</p>',
+      bodyText: 'Body'
+    }
+    const streamAttachments: DraftMimeStreamAttachment[] = [
+      { filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: bytes.length, open: chunked(997) },
+      {
+        filename: 'pasted.png',
+        mimeType: 'image/png',
+        sizeBytes: bytes.length,
+        contentId: 'pasted@attn.local',
+        inline: true,
+        open: chunked(64)
+      }
+    ]
+    const buffered = Buffer.from(
+      encodeDraftMessage({
+        ...identity,
+        attachments: [
+          { filename: 'report.pdf', mimeType: 'application/pdf', content: bytes },
+          {
+            filename: 'pasted.png',
+            mimeType: 'image/png',
+            content: bytes,
+            contentId: 'pasted@attn.local',
+            inline: true
+          }
+        ]
+      }),
+      'base64url'
+    )
+
+    const chunks: Buffer[] = []
+    for await (const chunk of streamDraftMessage({ ...identity, attachments: streamAttachments })) {
+      chunks.push(Buffer.from(chunk))
+    }
+    const streamed = Buffer.concat(chunks)
+
+    expect(streamed.equals(buffered)).toBe(true)
+    expect(draftMimeByteLength({ ...identity, attachments: streamAttachments })).toBe(streamed.length)
   })
 
   it('folds long headers and body encoding below transport line limits', () => {

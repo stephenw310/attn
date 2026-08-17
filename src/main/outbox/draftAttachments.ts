@@ -47,10 +47,3 @@ export function publicDraftAttachment(attachment: StoredDraftAttachment): DraftA
 export function publicDraftAttachments(attachments: readonly StoredDraftAttachment[]): DraftAttachment[] {
   return attachments.map(publicDraftAttachment)
 }
-
-/** Local file bytes are durable here and join the Gmail draft only in the final send update. */
-export function draftAttachmentsForMirror(
-  attachments: readonly StoredDraftAttachment[]
-): StoredDraftAttachment[] {
-  return attachments.filter((attachment) => attachment.inline || !attachment.spoolPath)
-}

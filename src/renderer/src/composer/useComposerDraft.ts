@@ -5,9 +5,23 @@ import { serializeEditorState } from './serialize'
 
 const IDLE_SAVE_MS = 1_000
 const MAX_CHECKPOINT_MS = 5_000
-const MIRROR_IDLE_MS = 3_000
+export const MIRROR_IDLE_MS = 3_000
+/**
+ * Gmail replaces a draft wholesale, so every checkpoint re-uploads all of its
+ * attachment bytes. Drafts carrying a real payload therefore wait longer
+ * between pushes — a body edit is not worth another few megabytes. Attaching or
+ * removing a file still pushes on the short interval, since that is the change
+ * the user is waiting to see on the Gmail side.
+ */
+export const MIRROR_PAYLOAD_IDLE_MS = 15_000
+export const MIRROR_PAYLOAD_BYTES = 1_000_000
 
 type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments'>
+
+export function mirrorIdleMs(attachments: DraftSaveInput['attachments']): number {
+  const bytes = (attachments ?? []).reduce((total, attachment) => total + attachment.sizeBytes, 0)
+  return bytes > MIRROR_PAYLOAD_BYTES ? MIRROR_PAYLOAD_IDLE_MS : MIRROR_IDLE_MS
+}
 
 function toSaveInput(draft: Draft): DraftSaveInput {
   const { createdAt: _createdAt, updatedAt: _updatedAt, ...input } = draft
@@ -107,25 +121,28 @@ export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): Com
   }, [armSaveTimers, clearTimers])
   commitRef.current = commit
 
-  const markDirty = useCallback(() => {
-    if (!mountedRef.current) return
-    localRevisionRef.current++
-    setSaveStatus('unsaved')
-    armSaveTimers(true)
-    if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
-    mirrorTimerRef.current = window.setTimeout(() => {
-      mirrorTimerRef.current = null
-      void commitRef
-        .current()
-        .then(() => (mountedRef.current ? window.attn?.draft.mirror(draft.id) : undefined))
-        .catch(() => {})
-    }, MIRROR_IDLE_MS)
-  }, [armSaveTimers, draft.id])
+  const markDirty = useCallback(
+    (mirrorDelayMs?: number) => {
+      if (!mountedRef.current) return
+      localRevisionRef.current++
+      setSaveStatus('unsaved')
+      armSaveTimers(true)
+      if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
+      mirrorTimerRef.current = window.setTimeout(() => {
+        mirrorTimerRef.current = null
+        void commitRef
+          .current()
+          .then(() => (mountedRef.current ? window.attn?.draft.mirror(draft.id) : undefined))
+          .catch(() => {})
+      }, mirrorDelayMs ?? mirrorIdleMs(draftRef.current.attachments))
+    },
+    [armSaveTimers, draft.id]
+  )
 
   const updateFields = useCallback(
     (patch: Partial<MutableDraftFields>) => {
       Object.assign(draftRef.current, patch)
-      markDirty()
+      markDirty(patch.attachments ? MIRROR_IDLE_MS : undefined)
     },
     [markDirty]
   )

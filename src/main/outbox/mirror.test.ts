@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
-import { draftAttachmentsForMirror, type StoredDraftAttachment } from './draftAttachments'
+import type { StoredDraftAttachment } from './draftAttachments'
 import {
   deleteDraftCheckpoint,
   drainDraftMirrors,
@@ -156,20 +156,82 @@ describe('draft mirror attachments', () => {
     })
   })
 
-  it('keeps local file bytes out of autosave while retaining inline and remote MIME parts', () => {
-    const localFile = attachment('/owned/outbox/draft-1/notes.pdf')
-    const inline = { ...attachment('/owned/outbox/draft-1/image.png'), id: 'inline', inline: true }
-    const remote = {
-      ...attachment(''),
-      id: 'remote',
-      remoteMessageId: 'message-1',
-      remoteAttachmentId: 'attachment-1'
-    }
+  it('streams a spooled file into the Gmail draft and makes its id durable first', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'attn-mirror-'))
+    await mkdir(join(root, 'draft-1'), { recursive: true })
+    const spoolPath = join(root, 'draft-1', 'notes.pdf')
+    await writeFile(spoolPath, 'file bytes')
 
-    expect(draftAttachmentsForMirror([localFile, inline, remote]).map((item) => item.id)).toEqual([
-      'inline',
-      'remote'
-    ])
+    const pending = vi
+      .fn()
+      .mockReturnValueOnce([
+        {
+          id: 'draft-1',
+          state: 'drafted',
+          gmail_draft_id: null,
+          to_json: '[{"name":"","email":"to@example.com"}]',
+          cc_json: '[]',
+          bcc_json: '[]',
+          subject: 'With a file',
+          body_html: '<p>Body</p>',
+          body_text: 'Body',
+          attachments_json: JSON.stringify([{ ...attachment(spoolPath), sizeBytes: 'file bytes'.length }]),
+          thread_id: null,
+          in_reply_to: null,
+          references_json: '[]',
+          quote_html: '',
+          quote_text: '',
+          local_revision: 1
+        }
+      ])
+      .mockReturnValueOnce([])
+    const writes: string[] = []
+    const db = {
+      prepare: vi.fn((sql: string) => {
+        if (sql.includes('SELECT id, state, gmail_draft_id')) return { all: pending }
+        return {
+          run: (...args: unknown[]) => {
+            writes.push(`${sql.replace(/\s+/g, ' ').trim()} :: ${JSON.stringify(args)}`)
+            return { changes: 1 }
+          },
+          get: () => undefined
+        }
+      })
+    } as unknown as Db
+
+    const saveDraft = vi.fn(async (_draft: { id: string | null; raw: string }) => 'gmail-1')
+    let uploaded = Buffer.alloc(0)
+    let idPersistedBeforeUpload = false
+    const updateDraft = vi.fn(
+      async (draft: { id: string; mime?: { open: () => AsyncIterable<Uint8Array> } }) => {
+        idPersistedBeforeUpload = writes.some(
+          (write) => write.includes('SET gmail_draft_id = ?') && write.includes('gmail-1')
+        )
+        const chunks: Buffer[] = []
+        for await (const chunk of draft.mime?.open() ?? []) chunks.push(Buffer.from(chunk))
+        uploaded = Buffer.concat(chunks)
+        return draft.id
+      }
+    )
+
+    await drainDraftMirrors(
+      db,
+      'account',
+      { saveDraft, updateDraft } as unknown as MailActionProvider,
+      () => true,
+      root
+    )
+
+    // The create mints an id from the body alone; the bytes follow over PUT.
+    expect(saveDraft).toHaveBeenCalledOnce()
+    const createdRaw = Buffer.from(String(saveDraft.mock.calls[0]?.[0].raw), 'base64url').toString()
+    expect(createdRaw).not.toContain('notes.pdf')
+    expect(updateDraft).toHaveBeenCalledOnce()
+    expect(idPersistedBeforeUpload).toBe(true)
+    expect(uploaded.toString()).toContain('filename="notes.pdf"')
+    expect(uploaded.toString()).toContain(Buffer.from('file bytes').toString('base64'))
+
+    await rm(root, { recursive: true, force: true })
   })
 })
 
