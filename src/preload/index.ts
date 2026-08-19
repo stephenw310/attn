@@ -11,6 +11,7 @@ import type {
   DraftKind,
   DraftSaveInput
 } from '../shared/drafts'
+import { nonEmptyString } from '../shared/guards'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   Conversation,
@@ -104,7 +105,7 @@ const api = {
       let active = true
       const takePendingFocus = async (): Promise<void> => {
         const threadId = await invoke(IPC_CHANNELS.mailTakePendingFocus)
-        if (active && typeof threadId === 'string' && threadId.length > 0) cb(threadId)
+        if (active && nonEmptyString(threadId)) cb(threadId)
       }
       const listener = (): void => void takePendingFocus()
       ipcRenderer.on(IPC_CHANNELS.mailFocusThreadAvailable, listener)

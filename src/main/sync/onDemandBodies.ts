@@ -38,6 +38,12 @@ interface ActiveAttempt {
 
 class HydrationStoppedError extends Error {}
 
+export interface OnDemandBodyHydratorOptions {
+  time?: SchedulerTime
+  effects?: HydrationEffects
+  trackProviderWork?: TrackProviderWork
+}
+
 /** Account-scoped single-flight coordinator for on-demand full-body fetches. */
 export class OnDemandBodyHydrator {
   private readonly inFlight = new Map<string, Promise<void>>()
@@ -45,15 +51,21 @@ export class OnDemandBodyHydrator {
   private readonly states = new Map<string, Exclude<BodyHydrationAttemptState, 'idle'>>()
   private stopped = false
 
+  private readonly time: SchedulerTime
+  private readonly effects: HydrationEffects
+  private readonly trackProviderWork: TrackProviderWork
+
   constructor(
     private readonly db: Db,
     private readonly currentAccountId: () => string | null,
     private readonly onChanged: () => void,
     private readonly onUnavailable: (accountId: string, threadId: string, error?: unknown) => void,
-    private readonly time: SchedulerTime = systemTime,
-    private readonly effects: HydrationEffects = productionEffects,
-    private readonly trackProviderWork: TrackProviderWork = async (_accountId, work) => work()
-  ) {}
+    options: OnDemandBodyHydratorOptions = {}
+  ) {
+    this.time = options.time ?? systemTime
+    this.effects = options.effects ?? productionEffects
+    this.trackProviderWork = options.trackProviderWork ?? (async (_accountId, work) => work())
+  }
 
   state(accountId: string, threadId: string): BodyHydrationAttemptState {
     return this.states.get(this.key(accountId, threadId)) ?? 'idle'

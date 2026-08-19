@@ -438,11 +438,13 @@ function effectSender(
     () => 'me@example.com',
     () => remote,
     options.notify ?? vi.fn(),
-    options.beforeRemote,
-    options.time ?? new ManualTime(),
-    options.spoolRoot ?? null,
-    options.clean,
-    options.progress
+    {
+      beforeRemote: options.beforeRemote,
+      time: options.time ?? new ManualTime(),
+      spoolRoot: options.spoolRoot ?? null,
+      cleanSpool: options.clean,
+      progress: options.progress
+    }
   )
 }
 
@@ -861,8 +863,7 @@ describe('OutboxSender effect layer', () => {
       () => 'me@example.com',
       () => effectProvider(),
       vi.fn(),
-      undefined,
-      time
+      { time }
     )
 
     await expect(sender.trigger()).resolves.toBeUndefined()

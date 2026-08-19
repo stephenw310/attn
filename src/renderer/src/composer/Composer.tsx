@@ -34,6 +34,8 @@ import {
 } from 'react'
 import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
+import { errorMessage } from '../../../shared/error'
+import { escapeHtmlText as escapeHtml } from '../../../shared/html'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
 import { formatBytes } from '../formatBytes'
@@ -101,7 +103,7 @@ function PaperclipIcon(): React.JSX.Element {
 }
 
 function attachmentErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = errorMessage(error)
   if (message.includes('Each attachment must be 25 MB or less')) {
     return 'Each attachment must be 25 MB or less'
   }
@@ -135,10 +137,6 @@ const QUOTE_MAX_HEIGHT = 720
  */
 function validateComposerUrl(url: string): boolean {
   return /^(?:https?:|mailto:)/i.test(url)
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function plainTextForEditor(value: string): string {
@@ -650,7 +648,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       })
       .catch((error: unknown) => {
         setClosing(false)
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorMessage(error)
         setSendError(
           message.includes('at least one recipient')
             ? 'Add at least one recipient'

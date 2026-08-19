@@ -1,3 +1,4 @@
+import { errorMessage } from '../../shared/error'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
 
@@ -40,7 +41,7 @@ export function storeActionError(error: unknown, kind: ActionErrorKind): string 
   const stored: StoredActionError = {
     version: 1,
     kind,
-    message: error instanceof Error ? error.message : String(error)
+    message: errorMessage(error)
   }
   return `${STORED_ERROR_PREFIX}${JSON.stringify(stored)}`
 }

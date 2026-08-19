@@ -100,8 +100,6 @@ export const TEST_CHANNELS = {
   runLifetimeSweep: 'attn:test:runLifetimeSweep'
 } as const
 
-export type TestChannel = (typeof TEST_CHANNELS)[keyof typeof TEST_CHANNELS]
-
 export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthSignInResult }

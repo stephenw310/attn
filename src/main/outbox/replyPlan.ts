@@ -1,5 +1,6 @@
 // Pure reply/reply-all/forward planning over the locally cached conversation.
 
+import { normalizeEmailKey } from '../../shared/address'
 import type { Conversation, ConversationMsg, MailAddress } from '../../shared/mail'
 import { sanitizeQuoteHtml } from './quoteSanitizer'
 import { escapeHtml, singleLine } from './text'
@@ -38,7 +39,7 @@ function uniqueAddresses(
   for (const candidate of addresses) {
     const address = cleanAddress(candidate)
     if (!address) continue
-    const key = address.email.toLowerCase()
+    const key = normalizeEmailKey(address.email)
     if (excludedEmails.has(key) || seen.has(key)) continue
     seen.add(key)
     result.push(address)
@@ -53,8 +54,8 @@ function latestMessage(messages: readonly ConversationMsg[]): ConversationMsg {
 
 function latestReplyMessage(messages: readonly ConversationMsg[], accountEmail: string): ConversationMsg {
   const latest = latestMessage(messages)
-  const self = accountEmail.trim().toLowerCase()
-  const nonSelf = messages.filter((message) => message.fromEmail.trim().toLowerCase() !== self)
+  const self = normalizeEmailKey(accountEmail)
+  const nonSelf = messages.filter((message) => normalizeEmailKey(message.fromEmail) !== self)
   return nonSelf.length > 0 ? latestMessage(nonSelf) : latest
 }
 
@@ -146,7 +147,7 @@ export function planReply(kind: ReplyKind, conversation: Conversation, accountEm
     kind === 'forward'
       ? latestMessage(conversation.messages)
       : latestReplyMessage(conversation.messages, accountEmail)
-  const self = new Set([accountEmail.trim().toLowerCase()])
+  const self = new Set([normalizeEmailKey(accountEmail)])
   const replyTargets =
     source.recipients.replyTo.length > 0
       ? source.recipients.replyTo
@@ -170,7 +171,7 @@ export function planReply(kind: ReplyKind, conversation: Conversation, accountEm
     kind === 'replyAll' ? [...replyTargets, ...source.recipients.to] : replyTargets,
     self
   )
-  const toEmails = new Set([...self, ...to.map((address) => address.email.toLowerCase())])
+  const toEmails = new Set([...self, ...to.map((address) => normalizeEmailKey(address.email))])
   const cc = kind === 'replyAll' ? uniqueAddresses(source.recipients.cc, toEmails) : []
   const quote = replyQuote(source)
 

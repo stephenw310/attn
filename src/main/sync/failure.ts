@@ -1,3 +1,4 @@
+import { errorMessage } from '../../shared/error'
 import type { SyncState } from '../../shared/mail'
 
 const OFFLINE_ERROR_CODES = new Set([
@@ -25,9 +26,7 @@ export function syncFailureState(error: unknown): Extract<SyncState, { phase: 'o
   return isOfflineFailure(error) ? { phase: 'offline', message } : { phase: 'error', message }
 }
 
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+export { errorMessage }
 
 export function isOfflineFailure(error: unknown): boolean {
   const seen = new Set<unknown>()

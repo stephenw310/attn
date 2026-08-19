@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import { normalizeEmailKey } from '../../../shared/address'
 import type { MailAddress, MessageAttachment, MessageRecipients } from '../../../shared/mail'
 import { formatBytes } from '../formatBytes'
 import { MessageBody } from '../MessageBody'
@@ -6,7 +7,7 @@ import type { DisplayMessage } from '../mailDisplay'
 import { mailSurfaceForHtml } from '../mailSurface'
 
 function firstName(address: MailAddress, account: string | null): string {
-  if (account && address.email.toLowerCase() === account.toLowerCase()) return 'me'
+  if (account && normalizeEmailKey(address.email) === normalizeEmailKey(account)) return 'me'
   if (address.name.toLowerCase() === 'me' || address.email.toLowerCase() === 'you') return 'me'
   return address.name.trim().split(/\s+/)[0] || address.email
 }

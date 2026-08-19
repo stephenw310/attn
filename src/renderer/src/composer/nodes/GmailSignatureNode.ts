@@ -1,11 +1,9 @@
 import {
-  $applyNodeReplacement,
   $setDirectionFromDOM,
   type DOMConversionMap,
   type DOMExportOutput,
   type EditorConfig,
   ElementNode,
-  type LexicalNode,
   type SerializedElementNode
 } from 'lexical'
 
@@ -88,12 +86,4 @@ export class GmailSignatureNode extends ElementNode {
   isShadowRoot(): boolean {
     return true
   }
-}
-
-export function $createGmailSignatureNode(): GmailSignatureNode {
-  return $applyNodeReplacement(new GmailSignatureNode())
-}
-
-export function $isGmailSignatureNode(node: LexicalNode | null | undefined): node is GmailSignatureNode {
-  return node instanceof GmailSignatureNode
 }

@@ -1,3 +1,4 @@
+import { errorMessage } from '../../shared/error'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
@@ -27,6 +28,12 @@ function waitForAbortable(promise: Promise<void>, signal?: AbortSignal): Promise
   })
 }
 
+export interface DraftMirrorExecutorOptions {
+  time?: SchedulerTime
+  drainDrafts?: MirrorDrain
+  spoolRoot?: string | null
+}
+
 export class DraftMirrorExecutor {
   private drainPromise: Promise<void> | null = null
   private remoteAbortController: AbortController | null = null
@@ -34,14 +41,20 @@ export class DraftMirrorExecutor {
   private timer: TimerHandle | null = null
   private attempts = 0
 
+  private readonly time: SchedulerTime
+  private readonly drainDrafts: MirrorDrain
+  private readonly spoolRoot: string | null
+
   constructor(
     private readonly db: Db,
     private readonly accountId: () => string | null,
     private readonly provider: () => MailActionProvider | null,
-    private readonly time: SchedulerTime = systemTime,
-    private readonly drainDrafts: MirrorDrain = drainDraftMirrors,
-    private readonly spoolRoot: string | null = null
-  ) {}
+    options: DraftMirrorExecutorOptions = {}
+  ) {
+    this.time = options.time ?? systemTime
+    this.drainDrafts = options.drainDrafts ?? drainDraftMirrors
+    this.spoolRoot = options.spoolRoot ?? null
+  }
 
   trigger(): Promise<void> {
     if (this.stopping || this.timer) return Promise.resolve()
@@ -100,7 +113,7 @@ export class DraftMirrorExecutor {
       this.attempts = 0
     } catch (error) {
       if (this.stopping) return
-      console.error(`[draft] mirror failed: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(`[draft] mirror failed: ${errorMessage(error)}`)
       const retryable = !(error instanceof GmailApiError) || error.retryable
       if (!retryable) return
       const delay = retryDelayMs(this.attempts++)

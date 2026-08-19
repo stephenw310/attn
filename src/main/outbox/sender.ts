@@ -1,5 +1,6 @@
 import type { MailAddress } from '../../shared/address'
 import type { DraftKind } from '../../shared/drafts'
+import { errorMessage } from '../../shared/error'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
 import { retryDelayMs } from '../actions/execute'
@@ -50,10 +51,6 @@ interface SendRow {
 
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function permanentSendError(error: unknown): boolean {
@@ -197,6 +194,14 @@ export async function executeDraftSendProtocol(
   }
 }
 
+export interface OutboxSenderOptions {
+  beforeRemote?: (signal?: AbortSignal) => Promise<void>
+  time?: SchedulerTime
+  spoolRoot?: string | null
+  cleanSpool?: (id: string) => void
+  progress?: (progress: OutboxProgress | null) => void
+}
+
 /** The sole production chokepoint that may call Gmail drafts.send. */
 export class OutboxSender {
   private drainPromise: Promise<void> | null = null
@@ -205,17 +210,25 @@ export class OutboxSender {
   private timer: TimerHandle | null = null
   private drainAttempts = 0
 
+  private readonly beforeRemote: (signal?: AbortSignal) => Promise<void>
+  private readonly time: SchedulerTime
+  private readonly spoolRoot: string | null
+  private readonly cleanSpool: (id: string) => void
+  private readonly progress: (progress: OutboxProgress | null) => void
+
   constructor(
     private readonly db: Db,
     private readonly accountId: () => string | null,
     private readonly provider: () => MailProvider | null,
     private readonly notify: (change: OutboxChanged) => void,
-    private readonly beforeRemote: (signal?: AbortSignal) => Promise<void> = () => Promise.resolve(),
-    private readonly time: SchedulerTime = systemTime,
-    private readonly spoolRoot: string | null = null,
-    private readonly cleanSpool: (id: string) => void = () => {},
-    private readonly progress: (progress: OutboxProgress | null) => void = () => {}
-  ) {}
+    options: OutboxSenderOptions = {}
+  ) {
+    this.beforeRemote = options.beforeRemote ?? (() => Promise.resolve())
+    this.time = options.time ?? systemTime
+    this.spoolRoot = options.spoolRoot ?? null
+    this.cleanSpool = options.cleanSpool ?? (() => {})
+    this.progress = options.progress ?? (() => {})
+  }
 
   start(): void {
     this.stopping = false

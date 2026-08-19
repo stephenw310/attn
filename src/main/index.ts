@@ -4,8 +4,8 @@ import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import type { RevertedAction } from '../shared/actionRevert'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
-import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS, TEST_CHANNELS } from '../shared/ipc'
-import type { SyncState } from '../shared/mail'
+import { errorMessage } from '../shared/error'
+import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { OutboxChanged, OutboxProgress } from '../shared/outbox'
 import { clearUndo } from './actions'
 import { ActionExecutor, type ActionRecoveryProvider } from './actions/executor'
@@ -15,21 +15,17 @@ import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/go
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { type Db, openDatabase, schemaVersion } from './db'
-import { loadSeed, readSeedThread } from './dev/seed'
-import { GmailApiError, GmailClient } from './gmail/client'
+import { loadSeed } from './dev/seed'
+import { GmailClient } from './gmail/client'
 import { GmailMailProvider } from './gmail/provider'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
-import { reconcileRemoteDraft } from './outbox/draftSync'
 import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import { OutboxSender } from './outbox/sender'
 import { cleanOutboxSpool, reconcileOutboxSpool } from './outbox/spool'
 import { SnoozeScheduler } from './scheduler'
-import { writeSetting } from './settings'
-import { runLifetimeSweep } from './sync/lifetimeSweep'
-import { deleteThread } from './sync/persist'
-import type { MailProvider } from './sync/provider'
 import { SyncController } from './syncController'
+import { TestSeams } from './testIpc'
 
 // E2E seam: an isolated userData dir gives each test run a fresh DB and empty
 // token store. Must be set before requestSingleInstanceLock() so concurrent
@@ -65,20 +61,22 @@ let mailNotifier: MailNotifier | null = null
 let syncController: SyncController | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
-let testConversationDelay: { threadId: string; delayMs: number } | null = null
-let testDraftReopenDelayMs = 0
-let testDraftInlineImageDelayMs = 0
-let testDraftSaveFailures = 0
-let testActionProvider: ActionRecoveryProvider | null = null
-// Installed only by registerTestIpc(): the seeded e2e store has no OAuth config,
-// so a reconnect click resumes the seeded account instead of running the real
-// flow. Production sign-in stays free of test branching.
-let testSeededResume: (() => number) | null = null
-let testAttachmentPickerPaths: string[] | null = null
 let signInInFlight = false
 let teardownPromise: Promise<void> | null = null
 const foregroundProviderWork = new Map<string, number>()
 const actionRevertNotices = new ActionRevertNotices()
+// All attn:test:* seams live in testIpc.ts; inert (and never registered) in
+// production, where the deps below are read lazily so boot order is unchanged.
+const testSeams = new TestSeams(Boolean(testUserData), {
+  db: () => db,
+  seedPath: () => seedPath,
+  seedAccountId: () => seedAccountId,
+  currentAccountId,
+  actionExecutor: () => actionExecutor,
+  syncController: () => syncController,
+  broadcastMailChanged,
+  focusInboxThread
+})
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
@@ -178,19 +176,13 @@ function makeCurrentProvider(): GmailMailProvider | null {
 }
 
 function makeCurrentActionProvider(): ActionRecoveryProvider | null {
-  return testActionProvider ?? makeCurrentProvider()
-}
-
-async function waitForConversation(threadId: string): Promise<void> {
-  const delay = testConversationDelay
-  if (!testUserData || delay?.threadId !== threadId) return
-  await new Promise((resolve) => setTimeout(resolve, delay.delayMs))
+  return testSeams.provider() ?? makeCurrentProvider()
 }
 
 async function signIn(): Promise<AuthSignInResult> {
   const config = loadOAuthConfig(oauthSearchDirs())
   if (!config) {
-    const resumedActions = testSeededResume?.() ?? 0
+    const resumedActions = testSeams.seededResume()
     if (resumedActions > 0) syncController?.onSignIn()
     return { status: authStatus(), resumedActions }
   }
@@ -345,49 +337,26 @@ async function initialize(): Promise<void> {
     },
     peekRevertedActions: (accountId) => actionRevertNotices.peek(accountId),
     acknowledgeRevertedActions: (accountId, noticeId) => actionRevertNotices.acknowledge(accountId, noticeId),
-    waitForConversation,
-    draftReopenDelay: () => testDraftReopenDelayMs,
-    pickAttachmentPaths: testUserData
-      ? async () => {
-          const paths = testAttachmentPickerPaths ?? []
-          testAttachmentPickerPaths = null
-          return paths
-        }
-      : undefined,
-    draftInlineImageDelay: () => testDraftInlineImageDelayMs,
-    consumeTestDraftSaveFailure: () => {
-      if (testDraftSaveFailures === 0) return false
-      testDraftSaveFailures--
-      return true
-    },
+    waitForConversation: (threadId) => testSeams.waitForConversation(threadId),
+    draftReopenDelay: () => testSeams.draftReopenDelay(),
+    pickAttachmentPaths: testUserData ? async () => testSeams.takeAttachmentPickerPaths() : undefined,
+    draftInlineImageDelay: () => testSeams.draftInlineImageDelay(),
+    consumeTestDraftSaveFailure: () => testSeams.consumeDraftSaveFailure(),
     testUserData: Boolean(testUserData)
   })
-  actionExecutor = new ActionExecutor(
-    activeDb,
-    currentAccountId,
-    makeCurrentActionProvider,
-    broadcastMailChanged,
-    broadcastActionsReverted
-  )
-  draftMirrorExecutor = new DraftMirrorExecutor(
-    activeDb,
-    currentAccountId,
-    makeCurrentProvider,
-    undefined,
-    undefined,
-    join(app.getPath('userData'), 'outbox')
-  )
-  outboxSender = new OutboxSender(
-    activeDb,
-    currentAccountId,
-    makeCurrentProvider,
-    broadcastOutboxChanged,
-    (signal) => draftMirrorExecutor?.waitForIdle(signal) ?? Promise.resolve(),
-    undefined,
-    join(app.getPath('userData'), 'outbox'),
-    (id) => cleanOutboxSpool(app.getPath('userData'), id),
-    broadcastOutboxProgress
-  )
+  actionExecutor = new ActionExecutor(activeDb, currentAccountId, makeCurrentActionProvider, {
+    notify: broadcastMailChanged,
+    notifyReverted: broadcastActionsReverted
+  })
+  draftMirrorExecutor = new DraftMirrorExecutor(activeDb, currentAccountId, makeCurrentProvider, {
+    spoolRoot: join(app.getPath('userData'), 'outbox')
+  })
+  outboxSender = new OutboxSender(activeDb, currentAccountId, makeCurrentProvider, broadcastOutboxChanged, {
+    beforeRemote: (signal) => draftMirrorExecutor?.waitForIdle(signal) ?? Promise.resolve(),
+    spoolRoot: join(app.getPath('userData'), 'outbox'),
+    cleanSpool: (id) => cleanOutboxSpool(app.getPath('userData'), id),
+    progress: broadcastOutboxProgress
+  })
   snoozeScheduler = new SnoozeScheduler(
     activeDb,
     currentAccountId,
@@ -401,285 +370,9 @@ async function initialize(): Promise<void> {
   createWindow({ show: !startHidden })
   mailNotifier = new MailNotifier(activeDb, currentAccountId(), showMainWindow, focusInboxThread)
   mailNotifier.start()
-  registerTestIpc()
+  testSeams.register()
   if (authStatus().signedIn) void syncController.resumeOnlineWork()
   app.on('activate', () => showMainWindow())
-}
-
-function registerTestIpc(): void {
-  if (!testUserData) return
-  testSeededResume = () => (seedAccountId ? (actionExecutor?.resumeAuthFailures(seedAccountId) ?? 0) : 0)
-  ipcMain.on(TEST_CHANNELS.focusThread, (_event, threadId: unknown) => {
-    if (typeof threadId === 'string' && threadId.length > 0) focusInboxThread(threadId)
-  })
-  ipcMain.on(TEST_CHANNELS.setSyncState, (_event, state: SyncState) => syncController?.setStateForTest(state))
-  ipcMain.on(TEST_CHANNELS.reloadSeed, (_event, done: (error?: string) => void) => {
-    // Avoid re-entering better-sqlite3 if the renderer is finishing an IPC read
-    // in the same turn, and let the test wait for the replay to commit.
-    setImmediate(() => {
-      try {
-        if (db && seedPath) loadSeed(db, seedPath)
-        done()
-      } catch (error) {
-        done(error instanceof Error ? error.message : String(error))
-      }
-    })
-  })
-  ipcMain.on(TEST_CHANNELS.deleteThread, (_event, threadId: unknown, done?: (error?: string) => void) => {
-    // Inspector evaluation can interrupt a renderer-initiated synchronous
-    // SQLite read. Defer this test mutation onto the next main-loop turn.
-    setImmediate(() => {
-      try {
-        const account = currentAccountId()
-        if (!db || !account || typeof threadId !== 'string') {
-          done?.('invalid thread delete')
-          return
-        }
-        deleteThread(db, account, threadId)
-        done?.()
-      } catch (error) {
-        done?.(error instanceof Error ? error.message : String(error))
-      }
-    })
-  })
-  ipcMain.on(TEST_CHANNELS.delayConversation, (_event, threadId: unknown, delayMs: unknown) => {
-    if (typeof threadId !== 'string' || typeof delayMs !== 'number' || delayMs < 0) return
-    testConversationDelay = { threadId, delayMs }
-  })
-  ipcMain.on(TEST_CHANNELS.delayDraftReopen, (_event, delayMs: unknown) => {
-    testDraftReopenDelayMs = typeof delayMs === 'number' && delayMs >= 0 ? delayMs : 0
-  })
-  ipcMain.on(TEST_CHANNELS.delayDraftInlineImage, (_event, delayMs: unknown) => {
-    testDraftInlineImageDelayMs = typeof delayMs === 'number' && delayMs >= 0 ? delayMs : 0
-  })
-  ipcMain.on(
-    TEST_CHANNELS.updateMessageBody,
-    (_event, messageId: unknown, bodyText: unknown, done?: (error?: string) => void) => {
-      // electronApplication.evaluate can interrupt a synchronous SQLite read
-      // in the inspector context. Queue the mutation onto the next main-loop
-      // turn and let the test wait until the write and invalidation complete.
-      setImmediate(() => {
-        try {
-          if (!db || typeof messageId !== 'string' || typeof bodyText !== 'string') {
-            done?.('invalid message update')
-            return
-          }
-          const account = currentAccountId()
-          if (!account) {
-            done?.('account unavailable')
-            return
-          }
-          db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?').run(
-            bodyText,
-            account,
-            messageId
-          )
-          broadcastMailChanged()
-          done?.()
-        } catch (error) {
-          done?.(error instanceof Error ? error.message : String(error))
-        }
-      })
-    }
-  )
-  ipcMain.on(TEST_CHANNELS.failNextDraftSave, () => {
-    testDraftSaveFailures++
-  })
-  const installActionFailure = (threadId: unknown, status: 400 | 401): void => {
-    if (!seedPath || typeof threadId !== 'string') return
-    const actionSeedPath = seedPath
-    const snapshot = readSeedThread(actionSeedPath, threadId)
-    if (!snapshot) return
-    let rejectTarget = true
-    const mutate = async (requestedThreadId: string): Promise<void> => {
-      if (requestedThreadId !== threadId) return
-      if (!rejectTarget) {
-        if (status === 401) testActionProvider = null
-        return
-      }
-      rejectTarget = false
-      const reason = status === 401 ? 'authentication e2e failure' : 'permanent e2e failure'
-      throw new GmailApiError(status, `gmail /threads/${threadId}/modify failed (${status}): ${reason}`)
-    }
-    testActionProvider = {
-      modifyThread: mutate,
-      trashThread: mutate,
-      untrashThread: mutate,
-      getThread: async (requestedThreadId) => {
-        const requested = readSeedThread(actionSeedPath, requestedThreadId)
-        if (!requested) throw new GmailApiError(404, 'seed thread unavailable')
-        if (requestedThreadId === threadId) testActionProvider = null
-        return requested
-      }
-    }
-  }
-  ipcMain.on(TEST_CHANNELS.failNextAction, (_event, threadId: unknown) => {
-    installActionFailure(threadId, 400)
-  })
-  ipcMain.on(TEST_CHANNELS.failNextActionAuth, (_event, threadId: unknown) => {
-    installActionFailure(threadId, 401)
-  })
-  ipcMain.on(TEST_CHANNELS.setAttachmentPickerFiles, (_event, paths: unknown) => {
-    testAttachmentPickerPaths = Array.isArray(paths)
-      ? paths.filter((path): path is string => typeof path === 'string')
-      : []
-  })
-  ipcMain.on(
-    TEST_CHANNELS.markDraftMirrored,
-    (_event, draftId: unknown, gmailDraftId?: unknown, done?: (error?: string) => void) => {
-      // Inspector evaluation can interrupt a renderer-initiated synchronous
-      // SQLite read. Defer this test mutation onto the next main-loop turn.
-      setImmediate(() => {
-        try {
-          const account = currentAccountId()
-          if (!db || !account || typeof draftId !== 'string') {
-            done?.('invalid mirrored draft update')
-            return
-          }
-          db.prepare(
-            `UPDATE outbox SET mirror_revision = local_revision,
-             gmail_draft_id = COALESCE(?, gmail_draft_id)
-             WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')`
-          ).run(typeof gmailDraftId === 'string' ? gmailDraftId : null, account, draftId)
-          done?.()
-        } catch (error) {
-          done?.(error instanceof Error ? error.message : String(error))
-        }
-      })
-    }
-  )
-  ipcMain.on(TEST_CHANNELS.setUndoSendDelay, (_event, seconds: unknown) => {
-    if (!db || typeof seconds !== 'number' || ![0, 5, 8, 10, 20, 30].includes(seconds)) return
-    writeSetting(db, 'undoSendDelaySeconds', String(seconds))
-  })
-  ipcMain.on(
-    TEST_CHANNELS.failOutbox,
-    (_event, id: unknown, message: unknown, done?: (error?: string) => void) => {
-      setImmediate(() => {
-        try {
-          const account = currentAccountId()
-          if (!db || !account || typeof id !== 'string' || typeof message !== 'string') {
-            done?.('invalid outbox failure')
-            return
-          }
-          const result = db
-            .prepare(
-              `UPDATE outbox SET state = 'failed', send_at = NULL, last_error = ?
-               WHERE account_id = ? AND id = ? AND state = 'queued'`
-            )
-            .run(message, account, id)
-          done?.(result.changes > 0 ? undefined : 'queued message unavailable')
-        } catch (error) {
-          done?.(error instanceof Error ? error.message : String(error))
-        }
-      })
-    }
-  )
-  ipcMain.on(TEST_CHANNELS.remoteDraft, (_event, remote: unknown, done?: (error?: string) => void) => {
-    // Inspector evaluation can interrupt a renderer-initiated SQLite read.
-    // Defer this test-only reconciliation onto the next main-loop turn.
-    setImmediate(() => {
-      const account = currentAccountId()
-      if (!db || !account || !remote || typeof remote !== 'object') {
-        done?.('invalid remote draft')
-        return
-      }
-      void reconcileRemoteDraft(db, account, remote as Parameters<typeof reconcileRemoteDraft>[2])
-        .then(() => {
-          broadcastMailChanged()
-          done?.()
-        })
-        .catch((error: unknown) => {
-          done?.(error instanceof Error ? error.message : String(error))
-        })
-    })
-  })
-  ipcMain.on(
-    TEST_CHANNELS.runLifetimeSweep,
-    async (
-      _event,
-      request: {
-        resetCursor?: string
-        threads: import('./gmail/parse').GmailThread[]
-        pages: Array<{
-          pageToken?: string
-          threadIds: string[]
-          nextPageToken?: string
-          resultSizeEstimate?: number
-        }>
-        offlineAtPageToken?: string
-        threadsTotal?: number
-        messagesTotal?: number
-      },
-      done: (result: {
-        cursor: string | null
-        error?: string
-        formats: string[]
-        pageTokens: Array<string | undefined>
-      }) => void
-    ) => {
-      const accountId = currentAccountId()
-      if (!db || !accountId || !request || !Array.isArray(request.threads)) {
-        done({ cursor: null, error: 'invalid lifetime sweep request', formats: [], pageTokens: [] })
-        return
-      }
-      if (request.resetCursor) {
-        db.prepare(
-          `UPDATE sync_state
-           SET sweep_cursor = ?, sweep_threads_done = 0, sweep_threads_total = NULL
-           WHERE account_id = ?`
-        ).run(request.resetCursor, accountId)
-      }
-      const threads = new Map(request.threads.map((thread) => [thread.id, thread]))
-      const formats: string[] = []
-      const pageTokens: Array<string | undefined> = []
-      let failure: unknown
-      const provider = {
-        getProfile: async () => ({
-          emailAddress: accountId,
-          historyId: 'test-history',
-          threadsTotal: request.threadsTotal,
-          messagesTotal: request.messagesTotal
-        }),
-        listThreadIds: async (options = {}) => {
-          pageTokens.push(options.pageToken)
-          if (request.offlineAtPageToken !== undefined && options.pageToken === request.offlineAtPageToken) {
-            throw new Error('offline')
-          }
-          const page = request.pages.find((candidate) => candidate.pageToken === options.pageToken)
-          if (!page) return { threadIds: [] }
-          return page
-        },
-        getThread: async (id: string, options = {}) => {
-          formats.push(options.format ?? 'full')
-          const thread = threads.get(id)
-          if (!thread) throw new Error(`missing test thread ${id}`)
-          return thread
-        }
-      } as MailProvider
-      await runLifetimeSweep(
-        db,
-        provider,
-        accountId,
-        {
-          onProgress: () => {},
-          onError: (error) => {
-            failure = error
-          }
-        },
-        { requestIntervalMs: 0, pagePauseMs: 0 }
-      )
-      const state = db.prepare('SELECT sweep_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
-        | { sweep_cursor: string | null }
-        | undefined
-      done({
-        cursor: state?.sweep_cursor ?? null,
-        ...(failure ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
-        formats,
-        pageTokens
-      })
-    }
-  )
 }
 
 function teardown(): Promise<void> {
@@ -705,13 +398,7 @@ async function teardownOwnedResources(): Promise<void> {
   snoozeScheduler = null
   mailNotifier?.stop()
   mailNotifier = null
-  for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
-  testDraftSaveFailures = 0
-  testDraftReopenDelayMs = 0
-  testDraftInlineImageDelayMs = 0
-  testActionProvider = null
-  testSeededResume = null
-  testAttachmentPickerPaths = null
+  testSeams.dispose()
   actionRevertNotices.clear()
   const stopped = await Promise.allSettled([
     mirror?.stop() ?? Promise.resolve(),
@@ -756,7 +443,7 @@ else {
     try {
       await initialize()
     } catch (error) {
-      console.error(`[boot] failed: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(`[boot] failed: ${errorMessage(error)}`)
       void teardown().finally(() => app.exit(1))
     }
   })

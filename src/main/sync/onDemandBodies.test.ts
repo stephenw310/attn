@@ -58,14 +58,10 @@ describe('OnDemandBodyHydrator', () => {
       .mockReturnValueOnce(new Set())
     const hydrationEffects = effects(missingMessageIds)
     const onChanged = vi.fn()
-    const hydrator = new OnDemandBodyHydrator(
-      {} as Db,
-      () => 'account@example.com',
-      onChanged,
-      vi.fn(),
-      systemTime,
-      hydrationEffects
-    )
+    const hydrator = new OnDemandBodyHydrator({} as Db, () => 'account@example.com', onChanged, vi.fn(), {
+      time: systemTime,
+      effects: hydrationEffects
+    })
     const mail = provider(getThread)
 
     const first = hydrator.request('account@example.com', 'thread-1', mail)
@@ -96,15 +92,11 @@ describe('OnDemandBodyHydrator', () => {
       trackedAccounts.push(accountId)
       return work()
     }
-    const hydrator = new OnDemandBodyHydrator(
-      {} as Db,
-      () => 'account@example.com',
-      vi.fn(),
-      vi.fn(),
-      systemTime,
-      effects(vi.fn(() => new Set<string>())),
+    const hydrator = new OnDemandBodyHydrator({} as Db, () => 'account@example.com', vi.fn(), vi.fn(), {
+      time: systemTime,
+      effects: effects(vi.fn(() => new Set<string>())),
       trackProviderWork
-    )
+    })
     const mail = provider(vi.fn(() => fetched.promise))
 
     const first = hydrator.request('account@example.com', 'thread-1', mail)
@@ -125,8 +117,7 @@ describe('OnDemandBodyHydrator', () => {
       () => 'account@example.com',
       onChanged,
       onUnavailable,
-      systemTime,
-      hydrationEffects
+      { time: systemTime, effects: hydrationEffects }
     )
 
     await hydrator.request('account@example.com', 'thread-1', mail)
@@ -137,14 +128,10 @@ describe('OnDemandBodyHydrator', () => {
   })
 
   it('bounds retained unavailable states while preserving the most recent attempts', async () => {
-    const hydrator = new OnDemandBodyHydrator(
-      {} as Db,
-      () => 'account@example.com',
-      vi.fn(),
-      vi.fn(),
-      systemTime,
-      effects(vi.fn(() => new Set(['message-1'])))
-    )
+    const hydrator = new OnDemandBodyHydrator({} as Db, () => 'account@example.com', vi.fn(), vi.fn(), {
+      time: systemTime,
+      effects: effects(vi.fn(() => new Set(['message-1'])))
+    })
     const mail = provider(vi.fn(async (id: string) => ({ id, messages: [] })))
 
     for (let index = 0; index <= MAX_RETAINED_BODY_HYDRATION_STATES; index++) {
@@ -170,8 +157,7 @@ describe('OnDemandBodyHydrator', () => {
       () => 'account@example.com',
       onChanged,
       onUnavailable,
-      systemTime,
-      effects(missingMessageIds)
+      { time: systemTime, effects: effects(missingMessageIds) }
     )
 
     await hydrator.request('account@example.com', 'thread-1', provider(vi.fn(async () => thread)))
@@ -199,8 +185,7 @@ describe('OnDemandBodyHydrator', () => {
       () => 'account@example.com',
       onChanged,
       onUnavailable,
-      systemTime,
-      effects(missingMessageIds)
+      { time: systemTime, effects: effects(missingMessageIds) }
     )
     const mail = provider(getThread)
 
@@ -219,14 +204,10 @@ describe('OnDemandBodyHydrator', () => {
     const hydrationEffects = effects(vi.fn(() => new Set(['message-1'])))
     const onChanged = vi.fn()
     const onUnavailable = vi.fn()
-    const hydrator = new OnDemandBodyHydrator(
-      {} as Db,
-      () => account,
-      onChanged,
-      onUnavailable,
-      systemTime,
-      hydrationEffects
-    )
+    const hydrator = new OnDemandBodyHydrator({} as Db, () => account, onChanged, onUnavailable, {
+      time: systemTime,
+      effects: hydrationEffects
+    })
     const attempt = hydrator.request(
       'account@example.com',
       'thread-1',
@@ -253,8 +234,7 @@ describe('OnDemandBodyHydrator', () => {
       () => 'account@example.com',
       onChanged,
       onUnavailable,
-      systemTime,
-      hydrationEffects
+      { time: systemTime, effects: hydrationEffects }
     )
     const attempt = hydrator.request(
       'account@example.com',
@@ -276,14 +256,10 @@ describe('OnDemandBodyHydrator', () => {
     vi.useFakeTimers()
     const getThread = vi.fn<MailProvider['getThread']>(() => new Promise(() => {}))
     const onUnavailable = vi.fn()
-    const hydrator = new OnDemandBodyHydrator(
-      {} as Db,
-      () => 'account@example.com',
-      vi.fn(),
-      onUnavailable,
-      systemTime,
-      effects(vi.fn(() => new Set(['message-1'])))
-    )
+    const hydrator = new OnDemandBodyHydrator({} as Db, () => 'account@example.com', vi.fn(), onUnavailable, {
+      time: systemTime,
+      effects: effects(vi.fn(() => new Set(['message-1'])))
+    })
     const mail = provider(getThread)
 
     const attempt = hydrator.request('account@example.com', 'thread-1', mail)

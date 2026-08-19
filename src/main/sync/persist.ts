@@ -221,18 +221,6 @@ export function persistThread(
   return true
 }
 
-/** A thread snapshot is authoritative for which messages still exist in it. */
-export function pruneMissingMessages(
-  db: Db,
-  accountId: string,
-  threadId: string,
-  incomingMessageIds: string[]
-): void {
-  db.transaction(() => {
-    rebuildContacts(db, accountId, removeMissingMessages(db, accountId, threadId, incomingMessageIds))
-  })()
-}
-
 function removeMissingMessages(
   db: Db,
   accountId: string,

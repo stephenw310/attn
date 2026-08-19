@@ -53,8 +53,7 @@ it('quiesces the active checkpoint before shutdown and declines another row', as
     {} as Db,
     () => 'user@example.com',
     () => null,
-    systemTime,
-    drain
+    { time: systemTime, drainDrafts: drain }
   )
 
   const running = executor.trigger()
@@ -89,8 +88,7 @@ it('aborts a stalled checkpoint after the shutdown grace period', async () => {
     {} as Db,
     () => 'user@example.com',
     () => null,
-    time,
-    drain
+    { time, drainDrafts: drain }
   )
 
   const running = executor.trigger()
