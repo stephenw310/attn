@@ -226,6 +226,7 @@ These are the milestone's feature half. They depend on S1–S4 and get planned o
 - **F11 — split inbox + rules.**
 - **Inbox-zero states, F14 themes, and palette hardening** (every command registered and asserted).
 - **§9 #14 — the contextual chord guide** in the shortcut footer, deferred from M2.
+- **§5 reader keys `N`/`P`/`O` — decided 2026-08-17: bind, not cut** (SPEC §9 #18d); lands with palette hardening's registry-completeness assertion.
 
 ---
 
@@ -235,4 +236,4 @@ These are the milestone's feature half. They depend on S1–S4 and get planned o
 |---|---|---|
 | Does the utility process own SQLite, or does main? | Reaches most of `src/main/`; two writers is a corruption bug | S1 design |
 | Pathological-mailbox posture — design target (e.g. smooth to 250k messages), then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages; lifetime headers can exceed that | S3, informed by T13A's real-mailbox measurement |
-| Is the lifetime attachment-flag walk (`q=has:attachment`, ids only) worth its ~1% cost? | Decides whether `has:attachment` is trustworthy locally before mail is hydrated | S3 or T13A, whichever runs second |
+| ~~Is the lifetime attachment-flag walk (`q=has:attachment`, ids only) worth its ~1% cost?~~ **Decided yes (owner, 2026-08-17, SPEC §9 #18c)** | Makes `has:attachment` trustworthy locally before mail is hydrated | Implement beside the sweep |

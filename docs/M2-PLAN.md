@@ -276,9 +276,9 @@ them too.
   anything twice, and this task's code did not change when that stage landed. The one thing this sweep can
   never reach is Spam and Trash — unfiltered listings exclude both — which is why those are explicit label
   stages rather than a widening of this walk.
-- Optional, decide at implementation: a listing-only `q=has:attachment` walk (ids only, ~1% of sweep cost)
-  can set the thread-level attachment flag lifetime-wide; header-only threads otherwise gain attachment
-  metadata on first hydration (F2).
+- **Decided (owner, 2026-08-17, SPEC §9 #18c): run the listing-only `q=has:attachment` walk** (ids only,
+  ~1% of sweep cost) to set the thread-level attachment flag lifetime-wide; header-only threads still gain
+  full attachment metadata on first hydration (F2).
 - The saved-Google-Contacts (People API) decision is unchanged from v0.14: different address source,
   additional consent scope, separate opt-in task if ever approved — never silently bundled.
 - **Schema:** add `sweep_cursor`, `sweep_threads_done`, and `sweep_threads_total` to `sync_state`, plus
@@ -451,7 +451,7 @@ CREATE INDEX idx_outbox_thread_kind ON outbox (
 - `r`/`a`/`f` in the reader context call the shipped `planReply(kind, conversation, accountEmail)` and open the composer prefilled, writing `kind`, `thread_id`, `source_message_id`, `in_reply_to` and `references` onto the row.
 - **Fix the mirror's lost threading.** `DraftMimeInput` (`outbox/draftMime.ts:3`) carries only to/cc/bcc/subject/body, and `saveDraft` posts `{ message: { raw } }` with no `threadId` (`gmail/provider.ts:44`). A reply draft written in Attn therefore arrives in Gmail Drafts detached from its conversation. Add `In-Reply-To`/`References` to the draft MIME and `threadId` to the `saveDraft` payload.
 - **Exclude `DRAFT`-labelled messages from the message store — a correctness fix this task forces.** Nothing in `src/` filters the `DRAFT` label today (`grep -rn "'DRAFT'" src/ --include=*.ts | grep -v test` returns nothing). `persistThread` writes every message in a thread snapshot into `messages`, and the history poller refetches any touched thread and calls it. That is latent only because Attn's drafts are currently unthreaded and lack `INBOX`, so they never reach `listInboxThreads`. **Adding `threadId` above breaks that:** the draft message lands in a real conversation, the next poll refetches the thread, `persistThread` stores the draft as an ordinary message, and `getConversation` renders it as though it had been sent — while the same draft also exists as an `outbox` row. Fix at the single choke point both callers share: `persistThread` skips messages whose `labelIds` include `DRAFT`, at the top of the message loop so a draft also cannot drive the thread's `last_msg_at` or snippet.
-- **Forwards attempt threading.** `planReply` already returns `threadId` for every kind and Gmail's own client keeps forwards in the conversation, so match it. **Unverified:** Gmail may require the `Subject` to match the thread for `threadId` to be honoured, and forwards are prefixed `Fwd: `. This is a named line in T16's manual smoke, not an assumption: *"forward from a thread lands in the same conversation, or record the observed behaviour."*
+- **Forwards attempt threading.** `planReply` already returns `threadId` for every kind and Gmail's own client keeps forwards in the conversation, so match it. **Unverified:** Gmail may require the `Subject` to match the thread for `threadId` to be honoured, and forwards are prefixed `Fwd: `. This is a named line in T16's manual smoke, not an assumption: *"forward from a thread lands in the same conversation, or record the observed behaviour."* **Observed (owner, real Gmail, 2026-08-17): forwards land in the source conversation — `threadId` plus the `Fwd:`-prefixed subject is honoured with no reply headers. Closed (SPEC §9 #18b).**
 
 ### Testing
 
