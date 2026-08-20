@@ -3,6 +3,7 @@ import { expect, test } from './electron'
 
 const SAMPLE_COUNT = 5
 const THREAD_COUNT = 10_000
+const PERF_TEST_TIMEOUT_MS = 120_000
 const LIST_RENDER_CEILING_MS = 2_000
 const CONVERSATION_OPEN_CEILING_MS = 50
 const TRIAGE_FEEDBACK_CEILING_MS = 16
@@ -14,8 +15,11 @@ const COMPOSER_PAINT_P95_CEILING_MS = 20
 const MEMORY_CEILING_MB = 500
 
 test.use({ seed: '.artifacts/perf-seed.json' })
+// GitHub's Linux runner can spend close to the ordinary 30-second test timeout
+// importing the 10,000-thread seed before a metric starts. Keep the measured
+// interaction ceilings strict while giving fixture setup and teardown headroom.
 // A retry would hide the instability this smoke is intended to expose.
-test.describe.configure({ retries: 0 })
+test.describe.configure({ retries: 0, timeout: PERF_TEST_TIMEOUT_MS })
 
 function median(samples: readonly number[]): number {
   const sorted = [...samples].sort((a, b) => a - b)
