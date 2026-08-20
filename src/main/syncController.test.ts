@@ -427,7 +427,9 @@ describe('backfill to poller handoff', () => {
   })
 
   it('publishes lifetime progress as live indexing and restores it after a history cycle', async () => {
-    const { controller, lifetimeSweeps, attachmentWalks, states } = harness({ backfillCursor: 'done' })
+    const { controller, lifetimeSweeps, attachmentWalks, states, broadcastMailChanged } = harness({
+      backfillCursor: 'done'
+    })
     controller.retry()
     const sweep = lifetimeSweeps[0]
 
@@ -435,8 +437,7 @@ describe('backfill to poller handoff', () => {
       threadsDone: 500,
       threadsTotal: 2_000,
       messagesTotal: 3_000,
-      reason: 'running',
-      mailChanged: false
+      reason: 'running'
     })
     expect(states.at(-1)).toEqual({
       phase: 'indexing',
@@ -446,6 +447,7 @@ describe('backfill to poller handoff', () => {
       messagesTotal: 3_000,
       reason: 'running'
     })
+    expect(broadcastMailChanged).not.toHaveBeenCalled()
 
     const poller = mocks.FakePoller.instances[0]
     poller.options.onCycleStart?.()
@@ -462,8 +464,7 @@ describe('backfill to poller handoff', () => {
       threadsTotal: 2_000,
       messagesTotal: 3_000,
       reason: 'foreground-yield',
-      waitMs: 250,
-      mailChanged: false
+      waitMs: 250
     })
     expect(states.at(-1)).toEqual({
       phase: 'indexing',
@@ -590,8 +591,7 @@ describe('backfill to poller handoff', () => {
     sweep.callbacks.onProgress({
       threadsDone: 700,
       threadsTotal: 2_000,
-      reason: 'running',
-      mailChanged: false
+      reason: 'running'
     })
     expect(states.at(-1)).toEqual({ phase: 'offline', message: 'history offline' })
 
@@ -612,7 +612,7 @@ describe('backfill to poller handoff', () => {
     const sweep = lifetimeSweeps[0]
     const poller = mocks.FakePoller.instances[0]
 
-    sweep.callbacks.onProgress({ threadsDone: 700, reason: 'running', mailChanged: false })
+    sweep.callbacks.onProgress({ threadsDone: 700, reason: 'running' })
     sweep.callbacks.onError(new Error('lifetime offline'))
     expect(states.at(-1)).toEqual({
       phase: 'indexing',
@@ -767,7 +767,7 @@ describe('offline retry', () => {
 
     failed.result.resolve(null)
     await flush()
-    retried.callbacks.onProgress({ threadsDone: 900, reason: 'running', mailChanged: false })
+    retried.callbacks.onProgress({ threadsDone: 900, reason: 'running' })
     expect(states.at(-1)).toEqual({
       phase: 'indexing',
       stage: 'lifetime',

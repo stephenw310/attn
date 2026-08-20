@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useLayoutEffect, useState } from 'react'
+import { memo, type ReactNode, useCallback, useLayoutEffect, useState } from 'react'
 import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
 import type { DisplayConversation, DisplayThread } from '../mailDisplay'
@@ -89,7 +89,9 @@ interface ConversationViewProps {
   onToast: (message: string) => void
 }
 
-export function ConversationView(props: ConversationViewProps): React.JSX.Element {
+export const ConversationView = memo(function ConversationView(
+  props: ConversationViewProps
+): React.JSX.Element {
   const {
     selected,
     selectedIndex,
@@ -224,4 +226,4 @@ export function ConversationView(props: ConversationViewProps): React.JSX.Elemen
       </div>
     </section>
   )
-}
+})
