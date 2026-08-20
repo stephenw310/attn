@@ -276,9 +276,21 @@ them too.
   anything twice, and this task's code did not change when that stage landed. The one thing this sweep can
   never reach is Spam and Trash — unfiltered listings exclude both — which is why those are explicit label
   stages rather than a widening of this walk.
-- **Decided (owner, 2026-08-17, SPEC §9 #18c): run the listing-only `q=has:attachment` walk** (ids only,
-  ~1% of sweep cost) to set the thread-level attachment flag lifetime-wide; header-only threads still gain
-  full attachment metadata on first hydration (F2).
+- **Decided (owner, 2026-08-17, SPEC §9 #18c) and shipped: the listing-only `q=has:attachment` walk** (ids
+  only, ~1% of sweep cost) sets the thread-level attachment flag lifetime-wide; header-only threads still
+  gain full attachment metadata on first hydration (F2). It lives in `src/main/sync/attachmentFlags.ts`
+  with its own resumable cursor, runs as the tail of `startLifetimeSweep` (so it also runs on a launch where
+  the sweep itself has nothing left to do), shares the sweep's yield/cancel posture, and only ever *raises*
+  the flag on threads the store already holds — absence from the listing is not evidence, since the listing
+  excludes Spam/Trash and answers from Gmail's own index. Schema revision 14 → 15; local dogfood upgrade DDL
+  (AGENTS.md procedure):
+
+  ```sql
+  BEGIN IMMEDIATE;
+  ALTER TABLE sync_state ADD COLUMN attachment_cursor TEXT;
+  PRAGMA user_version = 15;
+  COMMIT;
+  ```
 - The saved-Google-Contacts (People API) decision is unchanged from v0.14: different address source,
   additional consent scope, separate opt-in task if ever approved — never silently bundled.
 - **Schema:** add `sweep_cursor`, `sweep_threads_done`, and `sweep_threads_total` to `sync_state`, plus

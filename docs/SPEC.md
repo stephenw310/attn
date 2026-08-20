@@ -336,7 +336,7 @@ When sending, optionally set "remind me if no reply" (composer control or palett
 
 - Operators: `from:`, `to:`, `subject:`, `in:` (label/view), `is:unread|starred|snoozed`, `has:attachment`, `before:`/`after:`.
 - Result rows open straight into the conversation; `Esc` returns to the result list, then to the inbox.
-- Local coverage follows the store: header fields match lifetime mail once the sweep completes; body terms, `has:attachment`, and filenames match only hydrated mail. A "Search all of Gmail" row runs the same query server-side (Gmail `q=`) and merges results; threads it fetches persist through the normal write path and stay cached.
+- Local coverage follows the store: header fields match lifetime mail once the sweep completes; body terms and filenames match only hydrated mail, while `has:attachment` matches lifetime-wide once the ids-only attachment pass that follows the sweep has run (§9 #18c). A "Search all of Gmail" row runs the same query server-side (Gmail `q=`) and merges results; threads it fetches persist through the normal write path and stay cached.
 
 **Acceptance criteria**
 - p95 < 100ms for local queries on a 50,000-message store.
