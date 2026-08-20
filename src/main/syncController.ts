@@ -421,12 +421,14 @@ export class SyncController {
   }
 
   private publishLifetimeProgress(progress: LifetimeSweepProgress): void {
-    const { mailChanged, ...details } = progress
-    this.lifetimeProgress = { phase: 'indexing', stage: 'lifetime', ...details }
+    this.lifetimeProgress = { phase: 'indexing', stage: 'lifetime', ...progress }
     if (!this.running && !this.pollerRunning && !this.foregroundFailure) {
       this.setState(this.lifetimeProgress)
     }
-    if (mailChanged) this.context.broadcastMailChanged()
+    // Lifetime rows are deliberately hidden from every current mailbox. Their
+    // headers and contact projections are queried on demand, so broadcasting a
+    // visible-mail refresh here only makes the renderer rebuild its list and
+    // reader after every archival page with no possible UI change.
   }
 
   private publishSettledState(): void {

@@ -341,12 +341,20 @@ export function MessageBody({
       const scrollbarHeight =
         doc.documentElement.scrollWidth > doc.documentElement.clientWidth ? HORIZONTAL_SCROLLBAR_HEIGHT : 0
       if (srcDoc !== null) {
-        setMeasuredFrame({
+        const next = {
           srcDoc,
           fullHeight: Math.ceil(scrollHeight + scrollbarHeight),
           trimTop,
           scrollbarHeight
-        })
+        }
+        setMeasuredFrame((current) =>
+          current?.srcDoc === next.srcDoc &&
+          current.fullHeight === next.fullHeight &&
+          current.trimTop === next.trimTop &&
+          current.scrollbarHeight === next.scrollbarHeight
+            ? current
+            : next
+        )
       }
     },
     [srcDoc]

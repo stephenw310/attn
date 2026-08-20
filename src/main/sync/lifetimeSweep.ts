@@ -18,7 +18,6 @@ export interface LifetimeSweepProgress {
   etaMs?: number
   reason: 'running' | 'quota-wait' | 'foreground-yield'
   waitMs?: number
-  mailChanged: boolean
 }
 
 export interface LifetimeSweepCallbacks {
@@ -117,11 +116,7 @@ export async function runLifetimeSweep(
     }
 
     let messagesTotal: number | undefined
-    const progress = (
-      reason: LifetimeSweepProgress['reason'],
-      mailChanged = false,
-      waitMs?: number
-    ): void => {
+    const progress = (reason: LifetimeSweepProgress['reason'], waitMs?: number): void => {
       const etaMs = estimateRemainingMs(threadsDone, threadsTotal, startingThreadsDone, activeElapsedMs)
       callbacks.onProgress({
         threadsDone,
@@ -129,8 +124,7 @@ export async function runLifetimeSweep(
         ...(messagesTotal === undefined ? {} : { messagesTotal }),
         ...(etaMs === undefined ? {} : { etaMs }),
         reason,
-        ...(waitMs === undefined ? {} : { waitMs }),
-        mailChanged
+        ...(waitMs === undefined ? {} : { waitMs })
       })
     }
 
@@ -138,7 +132,7 @@ export async function runLifetimeSweep(
       let yielded = false
       while (shouldContinue() && shouldYield()) {
         yielded = true
-        progress('foreground-yield', false, foregroundYieldMs)
+        progress('foreground-yield', foregroundYieldMs)
         if (!(await wait(foregroundYieldMs))) return false
       }
       if (!shouldContinue()) return false
@@ -194,7 +188,6 @@ export async function runLifetimeSweep(
       // Keep progress indeterminate when Gmail omits the listing-scoped estimate.
       threadsTotal ??= page.resultSizeEstimate
 
-      let mailChanged = false
       for (const threadId of page.threadIds) {
         if (!shouldContinue()) return null
         if (exists.get(accountId, threadId)) {
@@ -205,11 +198,10 @@ export async function runLifetimeSweep(
         try {
           const thread = await activeRequest(() => provider.getThread(threadId, { format: 'metadata' }))
           if (!shouldContinue()) return null
-          mailChanged =
-            persistThread(db, accountId, thread, {
-              metadataOnly: true,
-              inboxVisibility: 'hide'
-            }) || mailChanged
+          persistThread(db, accountId, thread, {
+            metadataOnly: true,
+            inboxVisibility: 'hide'
+          })
         } catch (error) {
           // A moving mailbox can drop a listed thread before its metadata fetch.
           if (!(error instanceof GmailApiError) || error.status !== 404) throw error
@@ -220,10 +212,10 @@ export async function runLifetimeSweep(
       pageToken = page.nextPageToken
       if (!pageToken) threadsTotal = threadsDone
       checkpoint.run(pageToken ? `lifetime:${pageToken}` : 'done', threadsDone, threadsTotal, accountId)
-      progress('running', mailChanged)
+      progress('running')
       if (!pageToken) return { threadCount: threadsDone }
 
-      progress('quota-wait', false, pagePauseMs)
+      progress('quota-wait', pagePauseMs)
       if (!(await wait(pagePauseMs))) return null
       progress('running')
     }

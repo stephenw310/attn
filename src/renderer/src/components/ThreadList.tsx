@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { MailLabel } from '../../../shared/mail'
 import { dateGroup } from '../dateGroup'
 import type { DisplayThread } from '../mailDisplay'
@@ -82,7 +83,7 @@ interface ThreadListProps {
   onOpen: (index: number) => void
 }
 
-export function ThreadList(props: ThreadListProps): React.JSX.Element {
+export const ThreadList = memo(function ThreadList(props: ThreadListProps): React.JSX.Element {
   const {
     threads,
     view,
@@ -191,4 +192,4 @@ export function ThreadList(props: ThreadListProps): React.JSX.Element {
       })}
     </main>
   )
-}
+})

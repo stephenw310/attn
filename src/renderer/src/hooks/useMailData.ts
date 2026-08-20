@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
 import type { OutboxChanged, OutboxItem, OutboxProgress } from '../../../shared/outbox'
+import { reuseLabels, reuseSnoozedRows, reuseThreadRows } from '../mailDataEquality'
 import { refreshedSelectionIndex } from '../selection'
 
 interface MailDataState {
@@ -137,8 +138,8 @@ export function useMailData(
           setSelectedIndex((current) =>
             refreshedSelectionIndex(visible, preserveSelection ? selectedId : null, current)
           )
-          setRealThreads(threads)
-          setRealSnoozedThreads(snoozed)
+          setRealThreads((current) => reuseThreadRows(current, threads))
+          setRealSnoozedThreads((current) => reuseSnoozedRows(current, snoozed))
           setRealDrafts(drafts)
           setRealOutbox(outbox)
           setOutboxProgress((current) =>
@@ -146,7 +147,7 @@ export function useMailData(
               ? current
               : null
           )
-          setLabels(nextLabels)
+          setLabels((current) => reuseLabels(current, nextLabels))
           setRealUnreadTotal(unread)
           setPendingActionCount(pending)
           setPausedActionCount(actionStatus.paused)
@@ -227,8 +228,8 @@ export function useMailData(
     setSelectedIndex((current) =>
       refreshedSelectionIndex(visible, preserveSelection ? selectedId : null, current)
     )
-    setRealThreads(threads)
-    setRealSnoozedThreads(snoozed)
+    setRealThreads((current) => reuseThreadRows(current, threads))
+    setRealSnoozedThreads((current) => reuseSnoozedRows(current, snoozed))
     setRealDrafts(drafts)
   }
 

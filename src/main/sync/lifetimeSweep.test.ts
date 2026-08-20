@@ -321,8 +321,8 @@ describe('lifetime header indexing', () => {
     expect(waiting).not.toHaveProperty('threadsTotal')
   })
 
-  it('does not report a mail change when persistence skips a legacy-only thread', async () => {
-    mocks.persistThread.mockReturnValue(false)
+  it('does not expose hidden persistence as a visible-mail change signal', async () => {
+    mocks.persistThread.mockReturnValue(true)
     const events = callbacks()
 
     await runLifetimeSweep(
@@ -336,6 +336,6 @@ describe('lifetime header indexing', () => {
       { requestIntervalMs: 0, pagePauseMs: 0 }
     )
 
-    expect(events.onProgress.mock.calls.every(([event]) => event.mailChanged === false)).toBe(true)
+    expect(events.onProgress.mock.calls.every(([event]) => !('mailChanged' in event))).toBe(true)
   })
 })
