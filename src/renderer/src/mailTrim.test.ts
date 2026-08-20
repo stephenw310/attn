@@ -22,9 +22,17 @@ describe('findTrimIndex', () => {
     expect(findTrimIndex('Approved.\nSent from my Galaxy S25')).toBe('Approved.'.length)
   })
 
+  it('finds decorated team signatures before trailing disclaimers', () => {
+    const body =
+      'We thank you for your trust and confidence.\n\n-- The Stokes Pharmacy Team --\nThis email may contain confidential information.'
+    expect(findTrimIndex(body)).toBe('We thank you for your trust and confidence.\n'.length)
+  })
+
   it('leaves normal text and mid-line delimiters untouched', () => {
     expect(findTrimIndex('No quoted content here.')).toBeNull()
     expect(findTrimIndex('Keep this -- text in the middle.')).toBeNull()
+    expect(findTrimIndex('Treat the -- draft status -- as ordinary inline text.')).toBeNull()
+    expect(findTrimIndex('Overview\n-- RELEASE NOTES --\nThe release includes three fixes.')).toBeNull()
     expect(findTrimIndex('> Quoted example\nAuthored text after it.')).toBeNull()
   })
 

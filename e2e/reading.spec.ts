@@ -140,13 +140,21 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   await expect(frameBody.locator('body')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(frameBody.locator('body')).toHaveCSS('color', 'rgb(233, 234, 238)')
   await expect(frameBody.locator('#plain-html-copy')).toContainText('Your order total was $24.00.')
+  const generatedLink = frameBody.getByRole('link', {
+    name: 'https://northstar.test/orders/24.pdf'
+  })
+  await expect(generatedLink).toHaveAttribute('href', 'https://northstar.test/orders/24.pdf')
+  await expect(generatedLink).toHaveAttribute('target', '_blank')
+  await expect(generatedLink).toHaveCSS('color', 'rgb(96, 165, 250)')
   expect(
     await frame.evaluate((element) => {
       const iframe = element as HTMLIFrameElement
       const marker = iframe.contentDocument?.querySelector<HTMLElement>('[data-attn-trim-start]')
+      const decorated = iframe.contentDocument?.querySelector<HTMLElement>('#decorated-signature-copy')
       const prefix = iframe.contentDocument?.querySelector<HTMLElement>('.gmail_signature_prefix')
-      return marker && prefix
+      return marker && decorated && prefix
         ? Math.abs(marker.getBoundingClientRect().bottom - iframe.clientHeight) < 1 &&
+            decorated.getBoundingClientRect().top >= iframe.clientHeight &&
             prefix.getBoundingClientRect().top >= iframe.clientHeight
         : false
     })
@@ -158,6 +166,8 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   expect(Math.abs(toggleLeft - frameLeft)).toBeLessThan(1)
   expect(Math.abs(attachmentLeft - frameLeft)).toBeLessThan(1)
   await toggle.click()
+  await expect(frameBody.locator('#decorated-signature-copy')).toContainText('-- The Northstar Books Team --')
+  await expect(frameBody.locator('#signature-disclaimer')).toContainText('Confidential order information.')
   await expect(frameBody.locator('#native-signature-copy')).toHaveCSS('color', 'rgb(233, 234, 238)')
   await expect(frameBody.locator('#native-signature-link')).toHaveCSS('color', 'rgb(96, 165, 250)')
   expect(
@@ -167,6 +177,25 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   await expect(page.getByTestId('toast')).toHaveText('Attachments download when signed in')
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('conversation-view')).toHaveCount(0)
+})
+
+test('linkifies plain-text mail and collapses decorated signature lines', async ({ page }) => {
+  await page.getByTestId('thread-row').filter({ hasText: 'Research summary' }).click()
+  const visible = page.getByTestId('plain-text-visible')
+  await expect(visible).toContainText('The latest usability findings are promising.')
+  const generatedLink = visible.getByRole('link', {
+    name: 'https://research.example/findings'
+  })
+  await expect(generatedLink).toHaveAttribute('href', 'https://research.example/findings')
+  await expect(generatedLink).toHaveAttribute('target', '_blank')
+  await expect(generatedLink).toHaveCSS('color', 'rgb(96, 165, 250)')
+
+  const toggle = page.getByTestId('mail-trim-toggle')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByTestId('plain-text-trimmed')).toHaveCount(0)
+  await toggle.click()
+  await expect(page.getByTestId('plain-text-trimmed')).toContainText('-- The Research Team --')
+  await expect(page.getByTestId('plain-text-trimmed')).toContainText('Confidential research notes.')
 })
 
 test('keeps HTML fallbacks readable and never collapses an all-quote message', async ({ page }) => {

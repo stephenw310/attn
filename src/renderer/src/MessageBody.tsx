@@ -7,8 +7,14 @@ import {
   MAIL_TRIM_MARKER as TRIM_MARKER
 } from '../../shared/mailSanitizer'
 import { forceLightMailCss } from './mailCss'
+import {
+  type InlineImageReference,
+  matchInlineImageReferences,
+  normalizedContentId
+} from './mailInlineImages'
+import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
 import { type MailSurface, normalizeNativeMailDocument } from './mailSurface'
-import { findTrimIndex } from './mailTrim'
+import { findSignatureLineIndex, findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
   bodyText: string
@@ -115,11 +121,38 @@ function hasRenderableContent(content: DocumentFragment): boolean {
   return Boolean(visibleProbe.textContent?.trim()) || Boolean(visibleProbe.querySelector(MEANINGFUL_ELEMENTS))
 }
 
-function hasRenderableContentBefore(content: DocumentFragment, boundary: Element): boolean {
+function hasRenderableContentBefore(content: DocumentFragment, boundary: Node): boolean {
   const range = document.createRange()
   range.setStart(content, 0)
   range.setEndBefore(boundary)
   return hasRenderableContent(range.cloneContents())
+}
+
+function wholeLineSignatureContainer(text: Text): Node {
+  if (text.data.includes('\n')) return text
+  let boundary: Node = text
+  let parent = text.parentElement
+  while (parent && parent.textContent === text.data) {
+    boundary = parent
+    parent = parent.parentElement
+  }
+  return boundary
+}
+
+function findHtmlTrimStart(content: DocumentFragment): Node | null {
+  const walker = document.createTreeWalker(content, 5)
+  let current = walker.nextNode()
+  while (current) {
+    if (current instanceof Element && current.matches(TRIM_SELECTOR)) return current
+    if (current instanceof Text && !current.parentElement?.closest(`${TRIM_SELECTOR}, a, style, title`)) {
+      const signatureIndex = findSignatureLineIndex(current.data)
+      if (signatureIndex !== null) {
+        return signatureIndex === 0 ? wholeLineSignatureContainer(current) : current.splitText(signatureIndex)
+      }
+    }
+    current = walker.nextNode()
+  }
+  return null
 }
 
 function sanitizeToTemplate(html: string, surface: MailSurface): HTMLTemplateElement | null {
@@ -141,6 +174,7 @@ function sanitizeToTemplate(html: string, surface: MailSurface): HTMLTemplateEle
     if (normalizedHref === null) link.removeAttribute('href')
     else link.setAttribute('href', normalizedHref)
   })
+  linkifyBareMailUrls(template.content)
   if (!hasRenderableContent(template.content)) return null
 
   return template
@@ -159,21 +193,20 @@ function replaceCidSources(content: DocumentFragment, inlineImages: ReadonlyMap<
   })
 }
 
-function normalizedContentId(value: string): string {
-  try {
-    return decodeURIComponent(value).replace(/^<|>$/g, '').toLowerCase()
-  } catch {
-    return value.replace(/^<|>$/g, '').toLowerCase()
-  }
-}
-
-function cidReferences(html: string): string[] {
+function cidReferences(html: string): InlineImageReference[] {
   if (!/cid:/i.test(html)) return []
   const parsed = new DOMParser().parseFromString(html, 'text/html')
-  return [...parsed.querySelectorAll<HTMLImageElement>('img[src]')]
-    .map((image) => image.getAttribute('src')?.trim() ?? '')
-    .filter((source) => source.toLowerCase().startsWith('cid:'))
-    .map((source) => normalizedContentId(source.slice(4)))
+  return [...parsed.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
+    const source = image.getAttribute('src')?.trim() ?? ''
+    if (!source.toLowerCase().startsWith('cid:')) return []
+    const filenameHint = image.getAttribute('alt')?.trim()
+    return [
+      {
+        contentId: normalizedContentId(source.slice(4)),
+        ...(filenameHint ? { filenameHint } : {})
+      }
+    ]
+  })
 }
 
 function makeSrcDoc(
@@ -184,14 +217,36 @@ function makeSrcDoc(
   const template = sanitizeToTemplate(html, surface)
   if (!template) return null
   replaceCidSources(template.content, inlineImages)
-  const trimMatch = template.content.querySelector<HTMLElement>(TRIM_SELECTOR)
+  const trimMatch = findHtmlTrimStart(template.content)
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
   if (trimStart) {
     const marker = document.createElement('div')
     marker.setAttribute(TRIM_MARKER, '')
-    trimStart.before(marker)
+    trimStart.parentNode?.insertBefore(marker, trimStart)
   }
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${surface === 'light' ? 'light' : 'dark'}"><base target="_blank"><style>${frameReset(surface)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
+}
+
+function LinkedMailText({ text }: { text: string }): React.JSX.Element {
+  let offset = 0
+  const content = mailTextParts(text).map((part) => {
+    const start = offset
+    offset += part.text.length
+    return part.href ? (
+      <a
+        key={`${start}:${part.href}`}
+        href={part.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[#60a5fa]"
+      >
+        {part.text}
+      </a>
+    ) : (
+      part.text
+    )
+  })
+  return <>{content}</>
 }
 
 function TrimToggle({
@@ -276,18 +331,9 @@ export function MessageBody({
     inlineImagesRef.current = EMPTY_IMAGES
     if (bodyHtml === null || !attn) return
     const references = cidReferences(bodyHtml)
-    const cidAttachments = attachments
-      .filter((attachment) => attachment.mimeType.startsWith('image/'))
-      .map((attachment) => {
-        const filename = attachment.filename.toLowerCase()
-        const contentIds = attachment.contentId
-          ? [attachment.contentId.toLowerCase()]
-          : references.filter((reference) => reference === filename || reference.startsWith(`${filename}@`))
-        return { attachment, contentIds }
-      })
-      .filter(({ contentIds }) => contentIds.length > 0)
+    const cidAttachments = matchInlineImageReferences(attachments, references)
     const matchedReferences = new Set(cidAttachments.flatMap(({ contentIds }) => contentIds))
-    if (references.some((reference) => !matchedReferences.has(reference))) {
+    if (references.some((reference) => !matchedReferences.has(reference.contentId))) {
       void attn.mail.repairInlineImages({ threadId }).catch(() => {})
     }
     let cancelled = false
@@ -435,7 +481,7 @@ export function MessageBody({
           data-testid="plain-text-body"
           className={`whitespace-pre-wrap leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
         >
-          {bodyText}
+          <LinkedMailText text={bodyText} />
         </div>
       )
     }
@@ -447,7 +493,7 @@ export function MessageBody({
         className={`leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
       >
         <div data-testid="plain-text-visible" className="whitespace-pre-wrap">
-          {visibleText}
+          <LinkedMailText text={visibleText} />
         </div>
         <TrimToggle
           expanded={expanded}
@@ -457,7 +503,7 @@ export function MessageBody({
         />
         {expanded && (
           <div data-testid="plain-text-trimmed" className="whitespace-pre-wrap">
-            {trimmedText}
+            <LinkedMailText text={trimmedText} />
           </div>
         )}
       </div>
