@@ -1,5 +1,7 @@
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { resolveInternalDate } from './seed'
+import { openDatabase } from '../db'
+import { loadSeed, resolveInternalDate } from './seed'
 
 const base = { id: 'm1', from: 'a@b.test', to: 'c@d.test', subject: 's' }
 
@@ -34,5 +36,28 @@ describe('resolveInternalDate', () => {
     expect(() => resolveInternalDate({ ...base, receivedDaysAgo: 0, receivedAt: 'noon' })).toThrow(
       /receivedAt/
     )
+  })
+})
+
+describe('loadSeed', () => {
+  it('applies one authoritative label catalog and reports only final-state changes', () => {
+    const db = openDatabase(':memory:')
+    const fixturePath = fileURLToPath(new URL('../../../e2e/fixtures/seed-inbox.json', import.meta.url))
+    try {
+      expect(loadSeed(db, fixturePath).labelsChanged).toBe(true)
+      expect(
+        loadSeed(db, fixturePath, {
+          labels: [{ id: 'Label_2', name: 'active projects', type: 'user' }]
+        }).labelsChanged
+      ).toBe(true)
+      expect(db.prepare('SELECT id, name FROM labels').all()).toEqual([
+        { id: 'Label_2', name: 'active projects' }
+      ])
+
+      expect(loadSeed(db, fixturePath).labelsChanged).toBe(true)
+      expect(loadSeed(db, fixturePath).labelsChanged).toBe(false)
+    } finally {
+      db.close()
+    }
   })
 })

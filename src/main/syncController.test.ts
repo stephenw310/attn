@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => {
     FakePoller,
     runInboxBackfill: vi.fn(),
     runLifetimeSweep: vi.fn(),
+    syncLabelCatalog: vi.fn(),
     reconcileInboxMembership: vi.fn(),
     reconcilePurgeableMembership: vi.fn(async () => {})
   }
@@ -54,6 +55,7 @@ vi.mock('./sync/lifetimeSweep', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync/lifetimeSweep')>()),
   runLifetimeSweep: mocks.runLifetimeSweep
 }))
+vi.mock('./sync/labels', () => ({ syncLabelCatalog: mocks.syncLabelCatalog }))
 const { SyncController } = await import('./syncController')
 
 interface Deferred<T> {
@@ -157,6 +159,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     mirrorTrigger,
     outboxTrigger,
     broadcastMailChanged,
+    db,
     provider
   }
 }
@@ -165,6 +168,7 @@ beforeEach(() => {
   mocks.FakePoller.instances = []
   mocks.runInboxBackfill.mockReset()
   mocks.runLifetimeSweep.mockReset()
+  mocks.syncLabelCatalog.mockReset()
   mocks.reconcileInboxMembership.mockReset()
   mocks.reconcilePurgeableMembership.mockReset()
   mocks.reconcilePurgeableMembership.mockImplementation(async () => {})
@@ -551,6 +555,16 @@ describe('backfill to poller handoff', () => {
     controller.retry()
 
     expect(mocks.FakePoller.instances[0].options.isForeground()).toBe(false)
+  })
+
+  it('gives each poll cycle an authoritative label-catalog refresh', async () => {
+    const { controller, db, provider } = harness({ backfillCursor: 'done' })
+    mocks.syncLabelCatalog.mockResolvedValue(true)
+    controller.retry()
+
+    await expect(mocks.FakePoller.instances[0].options.syncLabels?.()).resolves.toBe(true)
+
+    expect(mocks.syncLabelCatalog).toHaveBeenCalledWith(db, 'user@example.com', provider)
   })
 
   it('wakes the draft mirror after an inbound sweep can make local work pending', () => {

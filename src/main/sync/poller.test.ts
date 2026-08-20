@@ -218,13 +218,15 @@ describe('stateful history application', () => {
 
 describe('history poller lifecycle', () => {
   it('reports healthy empty cycles without broadcasting a mail change', async () => {
-    const options = pollerOptions()
+    const syncLabels = vi.fn(async () => false)
+    const options = pollerOptions({ syncLabels })
     const poller = new HistoryPoller(options)
     const onStarted = vi.fn()
     poller.start()
     expect(poller.requestRunNow(onStarted)).toBe('started')
     expect(onStarted).toHaveBeenCalledOnce()
     await vi.waitFor(() => expect(options.onCycleComplete).toHaveBeenCalledOnce())
+    expect(syncLabels).toHaveBeenCalledOnce()
     expect(options.onCycleComplete).toHaveBeenCalledWith(false)
     poller.stop()
   })
@@ -239,6 +241,48 @@ describe('history poller lifecycle', () => {
 
     expect(syncDrafts).toHaveBeenCalledOnce()
     expect(options.onCycleComplete).toHaveBeenCalledWith(true)
+    poller.stop()
+  })
+
+  it('refreshes labels once after history and reports a catalog change', async () => {
+    const calls: string[] = []
+    const runCycle = vi.fn(async () => {
+      calls.push('history')
+      return plan()
+    })
+    const syncLabels = vi.fn(async () => {
+      calls.push('labels')
+      return true
+    })
+    const options = pollerOptions({ runCycle, syncLabels })
+    const poller = new HistoryPoller(options)
+    poller.start()
+
+    await poller.runNow()
+
+    expect(syncLabels).toHaveBeenCalledOnce()
+    expect(calls).toEqual(['history', 'labels'])
+    expect(options.onCycleComplete).toHaveBeenCalledWith(true)
+    poller.stop()
+  })
+
+  it('keeps a label-list failure out of the mail-poll error path', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const syncDrafts = vi.fn(async () => false)
+    const options = pollerOptions({
+      syncLabels: vi.fn(async () => Promise.reject(new Error('labels down'))),
+      syncDrafts
+    })
+    const poller = new HistoryPoller(options)
+    poller.start()
+
+    await poller.runNow()
+
+    expect(options.onError).not.toHaveBeenCalled()
+    expect(syncDrafts).toHaveBeenCalledOnce()
+    expect(options.onCycleComplete).toHaveBeenCalledWith(false)
+    expect(warning).toHaveBeenCalledWith('[sync] label catalog refresh failed: labels down')
+    warning.mockRestore()
     poller.stop()
   })
 
