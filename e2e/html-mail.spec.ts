@@ -56,9 +56,11 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     'https://www.kimi.com?referer=upcoming_invoice'
   )
   await expect(body.locator('#cid-image')).toHaveAttribute('src', /^data:image\/gif;base64,/)
+  await expect(body.locator('#filename-cid-image')).toHaveAttribute('src', /^data:image\/png;base64,/)
   await expect(iframe).toHaveAttribute('data-load-count', '1')
   await expect(body.locator('#malformed-cid-image')).not.toHaveAttribute('src')
   await expect(body.locator('#cid-image')).toBeVisible()
+  await expect(body.locator('#filename-cid-image')).toBeVisible()
   await expect(page.getByTestId('attachment-chip')).toHaveCount(0)
   await expect
     .poll(() =>
