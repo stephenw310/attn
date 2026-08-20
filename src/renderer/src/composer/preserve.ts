@@ -322,7 +322,9 @@ function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSource
       region = { start: location.startOffset, end: location.endOffset, tag: node.tagName, issues: [] }
       regions.push(region)
     }
-    if (reason && region) region.issues.push(reason)
+    // A promoted table reports the cell's reason, and the cell then reports it
+    // again on its own visit; the banner reads one list, so keep it distinct.
+    if (reason && region && !region.issues.includes(reason)) region.issues.push(reason)
     for (const child of node.childNodes) visit(child, region)
   }
   for (const child of fragment.childNodes) visit(child, null)

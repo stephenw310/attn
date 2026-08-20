@@ -60,6 +60,35 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
     }
   })
 
+  it('keeps legacy presentational table attributes, and only on table elements', () => {
+    // SPEC §9 #18a: real mail paints tables with these, and ALLOWED_URI_REGEXP
+    // was stripping them from every attribute value that is not a URI.
+    const table =
+      '<table border="1" cellpadding="4" cellspacing="0" bgcolor="#ffffff"><tbody><tr bgcolor="#eeeeee"><td align="center" valign="top">Cell</td></tr></tbody></table>'
+
+    for (const sanitized of [sanitizeDraftHtmlForImport(table), sanitizeOutgoingHtml(table)]) {
+      expect(sanitized).toContain('border="1"')
+      expect(sanitized).toContain('cellpadding="4"')
+      expect(sanitized).toContain('cellspacing="0"')
+      expect(sanitized).toContain('bgcolor="#ffffff"')
+      expect(sanitized).toContain('bgcolor="#eeeeee"')
+      expect(sanitized).toContain('align="center"')
+      expect(sanitized).toContain('valign="top"')
+    }
+
+    // Outside a table they stay dropped: `<div align>` remains an editable line
+    // rather than becoming a frozen region (see the fidelity suite).
+    const block = '<div align="center" bgcolor="#eeeeee">Centered</div>'
+    for (const sanitized of [sanitizeDraftHtmlForImport(block), sanitizeOutgoingHtml(block)]) {
+      expect(sanitized).toBe('<div>Centered</div>')
+    }
+
+    // Widening presentational names must not widen resource loading.
+    expect(
+      sanitizeOutgoingHtml('<table background="https://tracker.test/p.gif"><tr><td>x</td></tr></table>')
+    ).not.toContain('tracker.test')
+  })
+
   it('keeps safe authored backgrounds and drops backgrounds that load resources', () => {
     expect(
       sanitizeOutgoingHtml('<table style="background:#fff3d6"><tr><td>Newsletter</td></tr></table>')
