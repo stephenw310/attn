@@ -352,7 +352,10 @@ export function registerIpc(context: IpcContext): () => void {
     const plan = planReply(kind, conversation, account)
     const source = conversation.messages.find((message) => message.id === plan.sourceMessageId)
     const quotedAttachments: StoredDraftAttachment[] = (source?.attachments ?? [])
-      .filter((attachment) => attachment.inline && attachment.contentId)
+      .filter(
+        (attachment) =>
+          (attachment.inline && Boolean(attachment.contentId)) || (kind === 'forward' && !attachment.inline)
+      )
       .map((attachment) => {
         const inlineData = getInlineAttachmentData(
           context.db,
@@ -366,10 +369,11 @@ export function registerIpc(context: IpcContext): () => void {
           mimeType: attachment.mimeType,
           sizeBytes: attachment.sizeBytes,
           spoolPath: '',
-          contentId: attachment.contentId,
-          inline: true,
+          planned: true,
           remoteMessageId: plan.sourceMessageId,
           remoteAttachmentId: attachment.attachmentId,
+          ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
+          ...(attachment.inline ? { inline: true } : {}),
           ...(inlineData ? { remoteInlineData: inlineData } : {})
         }
       })

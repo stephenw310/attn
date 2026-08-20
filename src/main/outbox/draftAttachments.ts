@@ -4,6 +4,8 @@ import type { DraftAttachment } from '../../shared/drafts'
 /** Main-process-only attachment data. None of these locators cross the preload bridge. */
 export interface StoredDraftAttachment extends DraftAttachment {
   spoolPath: string
+  /** Created as part of Attn's reply/forward plan, rather than added by the user. */
+  planned?: boolean
   remoteMessageId?: string
   remoteAttachmentId?: string
   /** Small Gmail MIME parts arrive inline on drafts.get and are decoded only when rendered. */

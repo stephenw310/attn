@@ -105,6 +105,14 @@ describe('draft lifecycle guards', () => {
 describe('untouched reply and forward drafts', () => {
   const quoted: StoredDraftAttachment = { ...stored, inline: true }
   const attached: StoredDraftAttachment = { ...stored, id: 'user-file', inline: false }
+  const forwarded: StoredDraftAttachment = {
+    ...attached,
+    id: 'forwarded-file',
+    spoolPath: '',
+    planned: true,
+    remoteMessageId: 'm-design',
+    remoteAttachmentId: 'source-file'
+  }
   const maya = { name: 'Maya', email: 'maya@example.com' }
 
   // What `planReply` produces for each entry point, and nothing more.
@@ -122,7 +130,8 @@ describe('untouched reply and forward drafts', () => {
     ...plannedReply,
     kind: 'forward' as const,
     to: [],
-    subject: 'Fwd: Design notes'
+    subject: 'Fwd: Design notes',
+    attachments: [quoted, forwarded]
   }
   const plannedReplyAll = { ...plannedReply, kind: 'replyAll' as const, cc: [maya] }
 
@@ -157,6 +166,17 @@ describe('untouched reply and forward drafts', () => {
       false
     )
     expect(isUntouchedThreadDraft({ ...plannedReply, attachments: [] })).toBe(true)
+  })
+
+  it('does not count source files that the forward plan attached', () => {
+    expect(isUntouchedThreadDraft(plannedForward)).toBe(true)
+    expect(
+      isUntouchedThreadDraft({ ...plannedForward, attachments: [...plannedForward.attachments, attached] })
+    ).toBe(false)
+  })
+
+  it('counts a forward edit even when removing a planned file leaves no authored field behind', () => {
+    expect(isUntouchedThreadDraft({ ...plannedForward, attachments: [] }, true)).toBe(false)
   })
 
   it('never discards a new draft through this rule', () => {
