@@ -233,6 +233,70 @@ test('opens reply and forward from the selected inbox row', async ({ page }) => 
   await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
 })
 
+test('carries source attachments into a forward draft and preserves them on reopen', async ({ page }) => {
+  const receipt = page.getByTestId('thread-row').filter({ hasText: 'Your receipt' })
+  await receipt.click()
+  await page.keyboard.press('f')
+
+  const composer = new ComposerPage(page)
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'forward')
+  await expect(composer.attachments).toHaveText('1 attachment')
+  await expect(composer.attachmentChips).toHaveCount(1)
+  await expect(composer.attachmentChips).toContainText('receipt.pdf')
+  const attachment = await page.evaluate(async () => {
+    const id = document.querySelector<HTMLElement>('[data-testid="composer"]')?.dataset.draftId
+    return id ? (await window.attn.draft.get(id))?.attachments[0] : null
+  })
+  expect(attachment).toMatchObject({
+    filename: 'receipt.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 24_576
+  })
+  expect(attachment).not.toHaveProperty('spoolPath')
+  expect(attachment).not.toHaveProperty('planned')
+
+  await composer.typeBody('Sharing this receipt.')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await expect(receipt.getByTestId('chip-draft')).toBeVisible()
+
+  await receipt.click()
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'forward')
+  await expect(composer.attachmentChips).toHaveCount(1)
+  await expect(composer.attachmentChips).toContainText('receipt.pdf')
+})
+
+test('discards an untouched forward even when the source has an attachment', async ({ page }) => {
+  const receipt = page.getByTestId('thread-row').filter({ hasText: 'Your receipt' })
+  await receipt.click()
+  await page.keyboard.press('f')
+  await expect(page.getByTestId('composer-attachment-chip')).toContainText('receipt.pdf')
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await expect(receipt.getByTestId('chip-draft')).toHaveCount(0)
+  await goToDrafts(page)
+  await expect(page.getByTestId('draft-row').filter({ hasText: 'Your receipt' })).toHaveCount(0)
+})
+
+test('keeps a forward draft when the user removes its source attachment', async ({ page }) => {
+  const receipt = page.getByTestId('thread-row').filter({ hasText: 'Your receipt' })
+  await receipt.click()
+  await page.keyboard.press('f')
+  await expect(page.getByTestId('composer-attachment-chip')).toContainText('receipt.pdf')
+
+  await page.getByTestId('composer-attachment-remove').click()
+  await expect(page.getByTestId('composer-attachment-chip')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await expect(receipt.getByTestId('chip-draft')).toBeVisible()
+
+  await receipt.click()
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
+  await expect(page.getByTestId('composer-attachment-chip')).toHaveCount(0)
+})
+
 test('validates recipients before queueing a send', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

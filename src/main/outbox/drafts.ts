@@ -223,14 +223,18 @@ export function isEmptyDraft(draft: DraftSaveInput): boolean {
  * neither should we — but such a draft is not blank: `planReply` fills the
  * quote, a `Re:`/`Fwd:` subject, and a reply's recipients. So test the fields
  * the plan never writes instead. It fills `to`/`cc` only for replies, never
- * `bcc` or a body, and attaches only the source message's inline parts, so
- * anything in the rest is the user's own work.
+ * `bcc` or a body. Attachments marked `planned` came from the source message;
+ * ordinary attachments came from the user. The marker remains main-process
+ * only and survives remote-locator refreshes.
  */
-export function isUntouchedThreadDraft(draft: DraftSaveInput): boolean {
+export function isUntouchedThreadDraft(draft: DraftSaveInput, forwardEditedSincePlan = false): boolean {
   if (draft.kind === 'new') return false
   return (
+    !forwardEditedSincePlan &&
     !hasAuthoredBody(draft) &&
-    !draft.attachments.some((attachment) => !attachment.inline) &&
+    !draft.attachments.some(
+      (attachment) => !attachment.inline && !('planned' in attachment && attachment.planned === true)
+    ) &&
     draft.bcc.length === 0 &&
     (draft.kind === 'replyAll' || draft.cc.length === 0) &&
     (draft.kind !== 'forward' || draft.to.length === 0)
@@ -360,8 +364,17 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
     .get(accountId, id) as DraftRow | undefined
   if (!row) throw new Error('draft is unavailable')
   const draft = toDraft(row)
-  const input: DraftSaveInput = { ...draft, id: draft.id }
-  if (!isEmptyDraft(input) && !isUntouchedThreadDraft(input)) {
+  const input: DraftSaveInput = {
+    ...draft,
+    id: draft.id,
+    attachments: parseStoredDraftAttachments(row.attachments_json)
+  }
+  // Forward planning is the only system path that creates a removable regular
+  // attachment, and it writes revision 1. Any later revision therefore means
+  // the user changed the forward even if the final fields alone cannot show it
+  // (most importantly, when they removed every forwarded file).
+  const forwardEditedSincePlan = row.kind === 'forward' && row.local_revision > 1
+  if (!isEmptyDraft(input) && !isUntouchedThreadDraft(input, forwardEditedSincePlan)) {
     db.prepare("UPDATE outbox SET state = 'drafted', updated_at = ? WHERE account_id = ? AND id = ?").run(
       now,
       accountId,
