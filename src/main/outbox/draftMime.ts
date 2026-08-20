@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { MailAddress } from '../../shared/address'
+import { escapeHtmlText as escapeHtml } from '../../shared/html'
 
 /** Identity every attachment shape carries, whatever supplies its bytes. */
 interface DraftMimeAttachmentIdentity {
@@ -98,10 +99,6 @@ function foldHeader(name: string, value: string): string {
 function addressHeader(name: string, addresses: readonly MailAddress[]): string | null {
   if (addresses.length === 0) return null
   return foldHeader(name, addresses.map(formatAddress).join(', '))
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function wrapBase64(value: string | Uint8Array): string {

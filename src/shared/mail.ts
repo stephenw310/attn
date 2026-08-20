@@ -1,3 +1,6 @@
+import type { MailAddress } from './address'
+
+export type { MailAddress } from './address'
 // Mail data contracts shared by main, preload, and renderer.
 
 export interface ThreadRow {
@@ -22,11 +25,6 @@ export interface MailLabel {
   id: string
   name: string
   type: string
-}
-
-export interface MailAddress {
-  name: string
-  email: string
 }
 
 export interface MessageRecipients {

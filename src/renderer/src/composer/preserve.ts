@@ -283,12 +283,38 @@ interface OpaqueSourceRegion {
   issues: string[]
 }
 
+/**
+ * Elements the HTML parser only accepts inside a table. A region cut at one of
+ * these cannot stand alone: its slice, parsed in a body context, drops the
+ * `td`/`tr` and keeps only its text, and any marker put in its place is
+ * foster-parented out of the table by the final parse — either way the cell's
+ * content lands beside the table with no banner. Such a region is lifted to the
+ * nearest enclosing table so the whole table freezes as one exact unit.
+ */
+const TABLE_SCOPED_TAGS = new Set(['caption', 'col', 'colgroup', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'])
+
 function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSourceRegion[] {
   const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
+  const promotedTables = new Map<DefaultTreeAdapterTypes.Element, string>()
+  const promote = (
+    node: DefaultTreeAdapterTypes.ChildNode,
+    table: DefaultTreeAdapterTypes.Element | null
+  ): void => {
+    if (!('tagName' in node)) return
+    const tag = node.tagName.toLowerCase()
+    if (table && TABLE_SCOPED_TAGS.has(tag) && !promotedTables.has(table)) {
+      const reason = sourceUnsupportedReason(node, hasStylesheet)
+      if (reason) promotedTables.set(table, reason)
+    }
+    const nearestTable = tag === 'table' ? node : table
+    for (const child of node.childNodes) promote(child, nearestTable)
+  }
+  for (const child of fragment.childNodes) promote(child, null)
+
   const regions: OpaqueSourceRegion[] = []
   const visit = (node: DefaultTreeAdapterTypes.ChildNode, owner: OpaqueSourceRegion | null): void => {
     if (!('tagName' in node)) return
-    const reason = sourceUnsupportedReason(node, hasStylesheet)
+    const reason = promotedTables.get(node) ?? sourceUnsupportedReason(node, hasStylesheet)
     let region = owner
     if (reason && !owner) {
       const location = node.sourceCodeLocation

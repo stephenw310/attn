@@ -3,7 +3,6 @@ import {
   type DOMConversionMap,
   type DOMExportOutput,
   type EditorConfig,
-  type LexicalNode,
   type NodeKey,
   type SerializedLexicalNode,
   type Spread
@@ -189,8 +188,4 @@ export function $createImageNode(
   style = ''
 ): ImageNode {
   return new ImageNode(src, contentId, altText, width, height, style)
-}
-
-export function $isImageNode(node: LexicalNode | null | undefined): node is ImageNode {
-  return node instanceof ImageNode
 }

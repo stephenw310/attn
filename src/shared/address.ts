@@ -72,3 +72,8 @@ export function parseRecipientInput(raw: string): RecipientParseResult {
     invalid
   }
 }
+
+/** Case/whitespace-insensitive comparison key for an email address (review R8). */
+export function normalizeEmailKey(email: string): string {
+  return email.trim().toLowerCase()
+}

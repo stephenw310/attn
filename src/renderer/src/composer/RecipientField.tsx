@@ -1,5 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { isValidEmail, type MailAddress, parseRecipientInput } from '../../../shared/address'
+import {
+  isValidEmail,
+  type MailAddress,
+  normalizeEmailKey,
+  parseRecipientInput
+} from '../../../shared/address'
 import type { ContactSearchResult } from '../../../shared/contacts'
 import { useAutocomplete } from './useAutocomplete'
 
@@ -45,8 +50,8 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
         setInvalid(invalidRecipient.email)
         return
       }
-      const seen = new Set(recipients.map((recipient) => recipient.email.toLowerCase()))
-      const unique = next.filter((recipient) => !seen.has(recipient.email.toLowerCase()))
+      const seen = new Set(recipients.map((recipient) => normalizeEmailKey(recipient.email)))
+      const unique = next.filter((recipient) => !seen.has(normalizeEmailKey(recipient.email)))
       if (unique.length > 0) onChange([...recipients, ...unique])
       setQuery('')
       setInvalid(null)

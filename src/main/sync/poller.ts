@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { errorMessage } from '../../shared/error'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
@@ -281,9 +282,7 @@ export class HistoryPoller {
         try {
           draftsChanged = (await this.options.syncDrafts()) === true
         } catch (error) {
-          console.warn(
-            `[draft] inbound sync failed: ${error instanceof Error ? error.message : String(error)}`
-          )
+          console.warn(`[draft] inbound sync failed: ${errorMessage(error)}`)
         }
       }
       if (this.stopped) return

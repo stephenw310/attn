@@ -34,7 +34,11 @@ function SyncProgress({ stage }: { stage: SyncStage }): React.JSX.Element {
       aria-valuemin={1}
       aria-valuemax={SYNC_STAGES.length}
       aria-valuenow={activeIndex + 1}
-      className="col-start-2 grid h-[3px] w-44 grid-cols-5 gap-[3px] overflow-hidden"
+      className="col-start-2 grid h-[3px] w-44 gap-[3px] overflow-hidden"
+      // One column per stage, derived from the list: a fixed `grid-cols-N` went
+      // stale when the pipeline grew from five stages to seven and clipped the
+      // last two segments into an invisible second row.
+      style={{ gridTemplateColumns: `repeat(${SYNC_STAGES.length}, minmax(0, 1fr))` }}
     >
       {SYNC_STAGES.map((item, index) => (
         <i

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, type NativeImage, Notification, nativeImage } from 'electron'
 import badgeIcon from '../../resources/tray.png?asset'
+import { errorMessage } from '../shared/error'
 import type { Db } from './db'
 import { countInboxUnread } from './db/queries'
 import { deleteSetting, readSetting, writeSetting } from './settings'
@@ -93,7 +94,7 @@ export function isolateNotificationFailure(operation: () => void, report: (messa
   try {
     operation()
   } catch (error) {
-    report(error instanceof Error ? error.message : String(error))
+    report(errorMessage(error))
   }
 }
 
@@ -287,7 +288,7 @@ export class MailNotifier {
         }
       })
     } catch (error) {
-      console.error(`[badge] failed: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(`[badge] failed: ${errorMessage(error)}`)
     }
   }
 

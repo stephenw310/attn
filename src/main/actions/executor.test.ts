@@ -204,7 +204,7 @@ describe('action executor', () => {
       fakeDb(rows),
       () => 'a@example.com',
       () => actionProvider,
-      notify
+      { notify }
     )
     await executor.trigger()
     expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
@@ -223,8 +223,7 @@ describe('action executor', () => {
       fakeDb(rows),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
     await executor.trigger()
     expect(actionProvider.modifyThread).toHaveBeenCalledTimes(2)
@@ -250,8 +249,7 @@ describe('action executor', () => {
         fakeDb(rows),
         () => 'a@example.com',
         () => actionProvider,
-        undefined,
-        onReverted
+        { notifyReverted: onReverted }
       )
 
       await executor.trigger()
@@ -336,8 +334,7 @@ describe('action executor', () => {
       fakeDb([legacy]),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -365,8 +362,7 @@ describe('action executor', () => {
         fakeDb(rows),
         () => 'a@example.com',
         () => actionProvider,
-        undefined,
-        onReverted
+        { notifyReverted: onReverted }
       )
 
       await executor.trigger()
@@ -406,8 +402,7 @@ describe('action executor', () => {
       fakeDb(rows),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -441,8 +436,7 @@ describe('action executor', () => {
       fakeDb(rows),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -471,8 +465,7 @@ describe('action executor', () => {
       fakeDb([snooze], { reminders }),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -499,8 +492,7 @@ describe('action executor', () => {
       fakeDb([unsnooze], { reminders }),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -528,8 +520,7 @@ describe('action executor', () => {
       fakeDb([returned], { reminders }),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -554,8 +545,7 @@ describe('action executor', () => {
       fakeDb(rows),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -601,8 +591,7 @@ describe('action executor', () => {
       fakeDb(rows),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -626,8 +615,7 @@ describe('action executor', () => {
       fakeDb(rows),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await executor.trigger()
@@ -649,8 +637,7 @@ describe('action executor', () => {
       fakeDb(rows),
       () => 'a@example.com',
       () => actionProvider,
-      undefined,
-      onReverted
+      { notifyReverted: onReverted }
     )
 
     await expect(executor.trigger()).resolves.toBeUndefined()

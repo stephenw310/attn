@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
-import { nonDraftMessages, pruneMissingMessages } from './persist'
+import { nonDraftMessages, persistThread } from './persist'
 
 describe('thread snapshot persistence', () => {
   it('excludes Gmail draft and legacy Chat messages from the ordinary conversation snapshot', () => {
@@ -25,7 +25,15 @@ describe('thread snapshot persistence', () => {
       transaction: (callback: () => void) => callback
     } as unknown as Db
 
-    pruneMissingMessages(db, 'account', 'thread', ['m2', 'm3'])
+    // The production path: an authoritative snapshot holding m2/m3 must remove
+    // any other stored message of the thread and rebuild its contacts.
+    persistThread(db, 'account', {
+      id: 'thread',
+      messages: [
+        { id: 'm2', threadId: 'thread', labelIds: ['INBOX'] },
+        { id: 'm3', threadId: 'thread', labelIds: ['INBOX'] }
+      ]
+    })
 
     expect(statements.filter((sql) => sql.includes('id NOT IN (?, ?)'))).toHaveLength(3)
     expect(calls).toContainEqual({

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { MailAddress } from '../../shared/address'
+import { type MailAddress, normalizeEmailKey } from '../../shared/address'
 import type { Draft, DraftKind, DraftSaveInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import { parseStoredDraftAttachments, publicDraftAttachments } from './draftAttachments'
@@ -136,7 +136,7 @@ export function reopenThreadDraft(
 }
 
 function addressKey(address: MailAddress): string {
-  return address.email.trim().toLowerCase()
+  return normalizeEmailKey(address.email)
 }
 
 function mergeAddresses(

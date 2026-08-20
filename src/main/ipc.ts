@@ -16,10 +16,11 @@ import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import {
   type DraftAttachment,
   type DraftInlineImageInput,
-  type DraftKind,
   type DraftSaveInput,
   emptyDraftInput
 } from '../shared/drafts'
+import { errorMessage } from '../shared/error'
+import { nonEmptyString } from '../shared/guards'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   DownloadAttachmentRequest,
@@ -135,12 +136,7 @@ type AttachmentDataRequest = Pick<DownloadAttachmentRequest, 'messageId' | 'atta
 function isAttachmentDataRequest(value: unknown): value is AttachmentDataRequest {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<AttachmentDataRequest>
-  return (
-    typeof candidate.messageId === 'string' &&
-    candidate.messageId.length > 0 &&
-    typeof candidate.attachmentId === 'string' &&
-    candidate.attachmentId.length > 0
-  )
+  return nonEmptyString(candidate.messageId) && nonEmptyString(candidate.attachmentId)
 }
 
 function isDownloadAttachmentRequest(value: unknown): value is DownloadAttachmentRequest {
@@ -162,7 +158,7 @@ function isInlineImageRequest(value: unknown): value is InlineImageRequest {
 function isInlineImageRepairRequest(value: unknown): value is InlineImageRepairRequest {
   if (!value || typeof value !== 'object') return false
   const threadId = (value as Partial<InlineImageRepairRequest>).threadId
-  return typeof threadId === 'string' && threadId.length > 0 && threadId.length <= 256
+  return nonEmptyString(threadId) && threadId.length <= 256
 }
 
 function isSnoozeRequest(value: unknown): value is SnoozeRequest {
@@ -171,7 +167,7 @@ function isSnoozeRequest(value: unknown): value is SnoozeRequest {
   return (
     Array.isArray(candidate.threadIds) &&
     candidate.threadIds.length > 0 &&
-    candidate.threadIds.every((id) => typeof id === 'string' && id.length > 0) &&
+    candidate.threadIds.every((id) => nonEmptyString(id)) &&
     typeof candidate.dueAt === 'number' &&
     Number.isFinite(candidate.dueAt)
   )
@@ -196,8 +192,7 @@ function isDraftSaveInput(value: unknown): value is DraftSaveInput {
       if (!attachment || typeof attachment !== 'object') return false
       const candidate = attachment as Partial<DraftAttachment>
       return (
-        typeof candidate.id === 'string' &&
-        candidate.id.length > 0 &&
+        nonEmptyString(candidate.id) &&
         candidate.id.length <= 200 &&
         typeof candidate.filename === 'string' &&
         candidate.filename.length <= 500 &&
@@ -279,15 +274,11 @@ export function registerIpc(context: IpcContext): () => void {
     context.broadcastMailChanged,
     (accountId, threadId, error) => {
       if (error !== undefined) {
-        console.warn(
-          `[mail] body hydration failed for ${threadId}: ${error instanceof Error ? error.message : String(error)}`
-        )
+        console.warn(`[mail] body hydration failed for ${threadId}: ${errorMessage(error)}`)
       }
       context.broadcastBodyHydrationFailed(accountId, threadId)
     },
-    undefined,
-    undefined,
-    context.trackForegroundProviderWork
+    { trackProviderWork: context.trackForegroundProviderWork }
   )
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
@@ -318,7 +309,7 @@ export function registerIpc(context: IpcContext): () => void {
     return account ? listDrafts(context.db, account) : []
   })
   handle(IPC_CHANNELS.draftReopen, async (_event, id) => {
-    if (typeof id !== 'string' || id.length === 0) return null
+    if (!nonEmptyString(id)) return null
     const delay = context.testUserData ? context.draftReopenDelay() : 0
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     return reopenDraft(context.db, requireAccount(context), id)
@@ -332,7 +323,7 @@ export function registerIpc(context: IpcContext): () => void {
       return null
     }
     const account = requireAccount(context)
-    const existing = reopenThreadDraft(context.db, account, threadId, kind as Exclude<DraftKind, 'new'>)
+    const existing = reopenThreadDraft(context.db, account, threadId, kind)
     const shouldUpgradeReplyAll = kind === 'replyAll' && existing?.kind === 'reply'
     if (existing && !shouldUpgradeReplyAll) return existing
     await context.waitForConversation(threadId)
@@ -357,7 +348,7 @@ export function registerIpc(context: IpcContext): () => void {
     if (!conversation || conversation.messages.some((message) => message.bodyState !== 'complete')) {
       return null
     }
-    const plan = planReply(kind as Exclude<DraftKind, 'new'>, conversation, account)
+    const plan = planReply(kind, conversation, account)
     const source = conversation.messages.find((message) => message.id === plan.sourceMessageId)
     const quotedAttachments: StoredDraftAttachment[] = (source?.attachments ?? [])
       .filter((attachment) => attachment.inline && attachment.contentId)
@@ -400,7 +391,7 @@ export function registerIpc(context: IpcContext): () => void {
     return getDraft(context.db, account, id)
   })
   handle(IPC_CHANNELS.draftPickAttachments, async (event, id) => {
-    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    if (!nonEmptyString(id)) throw new Error('invalid draft id')
     let paths: string[]
     if (context.pickAttachmentPaths) paths = await context.pickAttachmentPaths()
     else {
@@ -419,7 +410,7 @@ export function registerIpc(context: IpcContext): () => void {
       typeof id !== 'string' ||
       id.length === 0 ||
       !Array.isArray(paths) ||
-      !paths.every((path) => typeof path === 'string' && path.length > 0)
+      !paths.every((path) => nonEmptyString(path))
     ) {
       throw new Error('invalid attachments')
     }
@@ -443,7 +434,7 @@ export function registerIpc(context: IpcContext): () => void {
     )
   })
   handle(IPC_CHANNELS.draftAddInlineImage, async (_event, id, image) => {
-    if (typeof id !== 'string' || id.length === 0 || !isDraftInlineImageInput(image)) {
+    if (!nonEmptyString(id) || !isDraftInlineImageInput(image)) {
       throw new Error('invalid inline image')
     }
     return addInlineImage(context.db, app.getPath('userData'), requireAccount(context), id, image)
@@ -500,7 +491,7 @@ export function registerIpc(context: IpcContext): () => void {
     }
   })
   handle(IPC_CHANNELS.draftClose, (_event, id) => {
-    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    if (!nonEmptyString(id)) throw new Error('invalid draft id')
     const result = closeDraft(context.db, requireAccount(context), id)
     context.broadcastMailChanged()
     if (result === 'discarded') {
@@ -510,7 +501,7 @@ export function registerIpc(context: IpcContext): () => void {
     return result
   })
   handle(IPC_CHANNELS.draftDiscard, (_event, id) => {
-    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    if (!nonEmptyString(id)) throw new Error('invalid draft id')
     if (!discardDraft(context.db, requireAccount(context), id)) throw new Error('draft is unavailable')
     cleanOutboxSpool(app.getPath('userData'), id)
     context.broadcastMailChanged()
@@ -518,7 +509,7 @@ export function registerIpc(context: IpcContext): () => void {
     return undefined
   })
   handle(IPC_CHANNELS.draftMirror, (_event, id) => {
-    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    if (!nonEmptyString(id)) throw new Error('invalid draft id')
     if (requestDraftMirror(context.db, requireAccount(context), id)) {
       void context.draftMirrorExecutor()?.trigger()
     }
@@ -526,7 +517,7 @@ export function registerIpc(context: IpcContext): () => void {
   })
   handle(IPC_CHANNELS.draftTakeRecovered, () => takeRecoveredDraft(context.db, requireAccount(context)))
   handle(IPC_CHANNELS.outboxSend, (_event, id) => {
-    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid draft id')
+    if (!nonEmptyString(id)) throw new Error('invalid draft id')
     const account = requireAccount(context)
     const result = queueSend(context.db, account, id)
     recordOutboxSendUndo(account, id)
@@ -535,7 +526,7 @@ export function registerIpc(context: IpcContext): () => void {
     return result
   })
   handle(IPC_CHANNELS.outboxUndoSend, (_event, id) => {
-    if (typeof id !== 'string' || id.length === 0) return { draft: null, error: 'Invalid message' }
+    if (!nonEmptyString(id)) return { draft: null, error: 'Invalid message' }
     const account = requireAccount(context)
     const result = undoQueuedSend(context.db, account, id)
     if (result.draft) dropOutboxSendUndo(account, id)
@@ -544,7 +535,7 @@ export function registerIpc(context: IpcContext): () => void {
     return result
   })
   handle(IPC_CHANNELS.outboxReopen, (_event, id) => {
-    if (typeof id !== 'string' || id.length === 0) return { draft: null, error: 'Invalid message' }
+    if (!nonEmptyString(id)) return { draft: null, error: 'Invalid message' }
     const account = requireAccount(context)
     const result = reopenPendingOutbox(context.db, account, id)
     if (result.draft) {
@@ -635,7 +626,7 @@ export function registerIpc(context: IpcContext): () => void {
       shell.showItemInFolder(path)
       return { path }
     } catch (error) {
-      console.error(`[attachment] download failed: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(`[attachment] download failed: ${errorMessage(error)}`)
       return { error: 'Could not download attachment' } satisfies DownloadAttachmentResult
     }
   })
@@ -650,9 +641,7 @@ export function registerIpc(context: IpcContext): () => void {
         dataUrl: `data:${request.mimeType.toLowerCase()};base64,${bytes.toString('base64')}`
       }
     } catch (error) {
-      console.error(
-        `[attachment] inline image failed: ${error instanceof Error ? error.message : String(error)}`
-      )
+      console.error(`[attachment] inline image failed: ${errorMessage(error)}`)
       return { error: 'Could not load inline image' } satisfies InlineImageResult
     }
   })
@@ -675,9 +664,7 @@ export function registerIpc(context: IpcContext): () => void {
       })
     } catch (error) {
       attemptedInlineImageRepairs.delete(repairKey)
-      console.error(
-        `[attachment] inline image repair failed: ${error instanceof Error ? error.message : String(error)}`
-      )
+      console.error(`[attachment] inline image repair failed: ${errorMessage(error)}`)
       return false
     }
   })
@@ -699,7 +686,7 @@ export function registerIpc(context: IpcContext): () => void {
     return result
   })
   handle(IPC_CHANNELS.mailMarkReadOnOpen, (_event, threadId) => {
-    if (typeof threadId !== 'string' || threadId.length === 0) throw new Error('invalid thread id')
+    if (!nonEmptyString(threadId)) throw new Error('invalid thread id')
     const account = requireAccount(context)
     const thread = context.db
       .prepare('SELECT is_unread FROM threads WHERE account_id = ? AND id = ?')

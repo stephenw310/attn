@@ -1,9 +1,7 @@
 import {
-  $applyNodeReplacement,
   $isTextNode,
   type DOMConversionMap,
   type DOMConversionOutput,
-  type LexicalNode,
   type SerializedTextNode,
   TextNode
 } from 'lexical'
@@ -39,12 +37,4 @@ export class StyledTextNode extends TextNode {
       span: () => ({ conversion: styleConversion, priority: 1 })
     }
   }
-}
-
-export function $createStyledTextNode(text = ''): StyledTextNode {
-  return $applyNodeReplacement(new StyledTextNode(text))
-}
-
-export function $isStyledTextNode(node: LexicalNode | null | undefined): node is StyledTextNode {
-  return node instanceof StyledTextNode
 }

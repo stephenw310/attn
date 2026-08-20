@@ -3,7 +3,6 @@ import {
   type DOMConversionMap,
   type DOMExportOutput,
   type EditorConfig,
-  type LexicalNode,
   type NodeKey,
   type SerializedLexicalNode,
   type Spread
@@ -193,8 +192,4 @@ export class OpaqueHtmlNode extends DecoratorNode<React.JSX.Element> {
   decorate(_editor: unknown, _config: EditorConfig): React.JSX.Element {
     return <OpaqueHtmlPreview encoded={this.__html} inline={this.__inline} />
   }
-}
-
-export function $isOpaqueHtmlNode(node: LexicalNode | null | undefined): node is OpaqueHtmlNode {
-  return node instanceof OpaqueHtmlNode
 }

@@ -53,20 +53,30 @@ type RecoveryOutcome =
   | { kind: 'retry'; delayMs: number }
   | { kind: 'stop' }
 
+export interface ActionExecutorOptions {
+  notify?: () => void
+  notifyReverted?: (accountId: string, actions: RevertedAction[]) => void
+  time?: SchedulerTime
+}
+
 export class ActionExecutor {
   private drainPromise: Promise<void> | null = null
   private stopping = false
   private timer: TimerHandle | null = null
   private timerAccountId: string | null = null
+  private readonly notify: () => void
+  private readonly notifyReverted: (accountId: string, actions: RevertedAction[]) => void
+  private readonly time: SchedulerTime
 
   constructor(
     private readonly db: Db,
     private readonly accountId: () => string | null,
     private readonly provider: () => ActionRecoveryProvider | null,
-    private readonly notify: () => void = () => {},
-    private readonly notifyReverted: (accountId: string, actions: RevertedAction[]) => void = () => {},
-    private readonly time: SchedulerTime = systemTime
+    options: ActionExecutorOptions = {}
   ) {
+    this.notify = options.notify ?? (() => {})
+    this.notifyReverted = options.notifyReverted ?? (() => {})
+    this.time = options.time ?? systemTime
     db.prepare("UPDATE action_queue SET state = 'pending' WHERE state = 'inflight'").run()
     this.prepareLegacyFailures()
   }

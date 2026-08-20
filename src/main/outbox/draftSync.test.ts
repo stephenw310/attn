@@ -527,6 +527,87 @@ describe('draft synchronization identity', () => {
     expect(getDraft).not.toHaveBeenCalled()
   })
 
+  it('removes or unbinds a known draft that a complete listing no longer returns', async () => {
+    const run = vi.fn(() => ({ changes: 1 }))
+    const provider = { listDrafts: vi.fn(async () => ({ drafts: [] })), getDraft: vi.fn() }
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        run,
+        all: vi.fn(() =>
+          sql.includes('gmail_message_id')
+            ? [
+                { gmail_draft_id: 'draft-closed', gmail_message_id: 'm1', state: 'drafted' },
+                { gmail_draft_id: 'draft-open', gmail_message_id: 'm2', state: 'composing' }
+              ]
+            : [
+                {
+                  id: 'closed',
+                  state: 'drafted',
+                  gmail_draft_id: 'draft-closed',
+                  local_revision: 1,
+                  mirror_revision: 1
+                },
+                {
+                  id: 'open',
+                  state: 'composing',
+                  gmail_draft_id: 'draft-open',
+                  local_revision: 3,
+                  mirror_revision: 3
+                }
+              ]
+        )
+      }))
+    } as unknown as Db
+
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(true)
+    // Deleted in Gmail while closed and fully mirrored → the local row goes too.
+    expect(db.prepare).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM outbox'))
+    expect(run).toHaveBeenCalledWith('account', 'closed')
+    // An open composer never loses text: it drops the dead binding instead.
+    expect(db.prepare).toHaveBeenCalledWith(expect.stringContaining('gmail_draft_id = NULL'))
+    expect(run).toHaveBeenCalledWith('account', 'open')
+  })
+
+  it('does not judge a draft that acquired its Gmail id while the listing was in flight', async () => {
+    // The mirror's first checkpoint (drafts.create) can return between the
+    // known-draft snapshot and the end of a paginated drafts.list. Such a row is
+    // bound but absent from a listing that predates its creation; treating that
+    // absence as a remote deletion would delete a drafted row or, for an open
+    // composer, clear the binding and make the mirror create a duplicate.
+    const run = vi.fn(() => ({ changes: 1 }))
+    const provider = { listDrafts: vi.fn(async () => ({ drafts: [] })), getDraft: vi.fn() }
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        run,
+        all: vi.fn(() =>
+          sql.includes('gmail_message_id')
+            ? [] // nothing was bound when the listing began
+            : [
+                {
+                  id: 'closed',
+                  state: 'drafted',
+                  gmail_draft_id: 'draft-created-during-listing',
+                  local_revision: 1,
+                  mirror_revision: 1
+                },
+                {
+                  id: 'open',
+                  state: 'composing',
+                  gmail_draft_id: 'draft-created-during-listing-2',
+                  local_revision: 3,
+                  mirror_revision: 3
+                }
+              ]
+        )
+      }))
+    } as unknown as Db
+
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    expect(run).not.toHaveBeenCalled()
+    expect(db.prepare).not.toHaveBeenCalledWith(expect.stringContaining('DELETE FROM outbox'))
+    expect(db.prepare).not.toHaveBeenCalledWith(expect.stringContaining('gmail_draft_id = NULL'))
+  })
+
   it('binds an orphaned remote draft to its sending row by stable Message-ID', async () => {
     const run = vi.fn(() => ({ changes: 1 }))
     const claimQuery = vi.fn(() => ({ id: 'outbox-1' }))

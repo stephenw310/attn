@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import type { Db } from '../db'
-import { GmailApiError } from '../gmail/client'
+import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
 import type { SchedulerTime, TimerHandle } from '../time'
 import {
@@ -438,11 +438,13 @@ function effectSender(
     () => 'me@example.com',
     () => remote,
     options.notify ?? vi.fn(),
-    options.beforeRemote,
-    options.time ?? new ManualTime(),
-    options.spoolRoot ?? null,
-    options.clean,
-    options.progress
+    {
+      beforeRemote: options.beforeRemote,
+      time: options.time ?? new ManualTime(),
+      spoolRoot: options.spoolRoot ?? null,
+      cleanSpool: options.clean,
+      progress: options.progress
+    }
   )
 }
 
@@ -861,8 +863,7 @@ describe('OutboxSender effect layer', () => {
       () => 'me@example.com',
       () => effectProvider(),
       vi.fn(),
-      undefined,
-      time
+      { time }
     )
 
     await expect(sender.trigger()).resolves.toBeUndefined()
@@ -938,5 +939,42 @@ describe('OutboxSender effect layer', () => {
       id: 'outbox-1',
       error: 'Gmail rejected this message — check its recipients and attachments'
     })
+  })
+
+  it('keeps a send whose token refresh failed queued, named, and resumable after reconnect', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const time = new ManualTime()
+    // A revoked refresh token fails at the token endpoint before the request is
+    // issued, so no draft can exist. Before this was classified, the row went to
+    // Message-ID verification and — after the user reconnected — six negative
+    // searches parked a never-sent message in needs-review.
+    let authorized = false
+    const createDraft = vi.fn(async () => {
+      if (!authorized) throw new GmailAuthError('token refresh failed (400): invalid_grant')
+      return 'created-draft'
+    })
+    const findByRfcId = vi.fn()
+    const remote = effectProvider({ createDraft, findByRfcId })
+    const sender = effectSender(store, remote, { time })
+
+    await sender.trigger()
+
+    // Nothing reached Gmail: the row is back in `queued` (still undoable), the
+    // reason the user reads is the authorization, and a retry is armed.
+    expect(store.row()).toMatchObject({
+      state: 'queued',
+      attempts: 1,
+      verify_attempts: 0,
+      last_error: 'Gmail authorization expired — sign in again and retry'
+    })
+    expect(createDraft).toHaveBeenCalledTimes(1)
+    expect(findByRfcId).not.toHaveBeenCalled()
+
+    // Reconnect (resumeOnlineWork triggers the sender) → it simply sends.
+    authorized = true
+    time.advance(5_000)
+    await sender.trigger()
+    expect(store.row()).toMatchObject({ state: 'sent', gmail_draft_id: 'created-draft' })
+    expect(findByRfcId).not.toHaveBeenCalled()
   })
 })

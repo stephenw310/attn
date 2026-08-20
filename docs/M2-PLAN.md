@@ -4,7 +4,7 @@
 **Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through draft PR #38.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Current progress:** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window) and T16 (#45) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, and T14E is in flight. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) is implemented; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). T21 adds the poller's label-catalog refresh found during that review. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
+**Current progress (2026-08-16):** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window), T16 (#45), T17 (#48), T18 (#47), and T19 (#41) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, T14E shipped in #50, and #52 fixed the composer bugs found while dogfooding them. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) shipped in #51; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). **Open for M2 exit:** T21 (the poller's label-catalog refresh, found during that review — not yet implemented), T20 (hardening and sign-off), and the manual real-Gmail evidence items listed in the T20 exit checklist. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
@@ -59,7 +59,7 @@ Parallelization: T15 is pure modules and can run beside T14. T13A, T18, T19, and
 7. **Every user-facing action is a registered command** (F5). New contexts (`composer`) still register; the M3 palette will assert the full inventory.
 8. **If your task changes the verify pipeline or harness behavior, update AGENTS.md in the same PR.**
 9. **New (exactly-once discipline):** any code path that can call `messages.send`/`drafts.send` must be reachable only from the outbox state machine in T16. No convenience send helpers anywhere else — one chokepoint, one invariant.
-10. **New (pure-core discipline):** better-sqlite3 cannot load under vitest (Electron ABI), so DB-touching logic stays thin and e2e-covered while decisions live in pure planner modules (the T7 poller and T9 notifier pattern). The outbox machine, reply computation, MIME builder, and contact ranking are all built as pure functions with exhaustive unit tests.
+10. **New (pure-core discipline):** decisions live in pure planner modules (the T7 poller and T9 notifier pattern) so the outbox machine, reply computation, MIME builder, and contact ranking are pure functions with exhaustive unit tests. *Correction (2026-08-16):* the premise this rule was written under — "better-sqlite3 cannot load under vitest (Electron ABI)" — is wrong: better-sqlite3 ships Node-API prebuilds and `openDatabase(':memory:')` works under vitest, as `outbox/{spool,queue,inlineImages}.test.ts` already rely on. Keep decisions pure, but do not leave thin DB CRUD (e.g. `outbox/drafts.ts`) untested on that account.
 11. **Best-effort draft work never enters `action_queue`.** That queue is reserved for user mail intents keyed by a Gmail thread id. Gmail draft checkpoints derive their own durable work from `outbox.local_revision > mirror_revision`, so a quota/network failure cannot head-of-line-block archive, trash, snooze, or label changes.
 
 ---
@@ -276,9 +276,9 @@ them too.
   anything twice, and this task's code did not change when that stage landed. The one thing this sweep can
   never reach is Spam and Trash — unfiltered listings exclude both — which is why those are explicit label
   stages rather than a widening of this walk.
-- Optional, decide at implementation: a listing-only `q=has:attachment` walk (ids only, ~1% of sweep cost)
-  can set the thread-level attachment flag lifetime-wide; header-only threads otherwise gain attachment
-  metadata on first hydration (F2).
+- **Decided (owner, 2026-08-17, SPEC §9 #18c): run the listing-only `q=has:attachment` walk** (ids only,
+  ~1% of sweep cost) to set the thread-level attachment flag lifetime-wide; header-only threads still gain
+  full attachment metadata on first hydration (F2).
 - The saved-Google-Contacts (People API) decision is unchanged from v0.14: different address source,
   additional consent scope, separate opt-in task if ever approved — never silently bundled.
 - **Schema:** add `sweep_cursor`, `sweep_threads_done`, and `sweep_threads_total` to `sync_state`, plus
@@ -311,8 +311,6 @@ decision stays recorded.
 ## T14 — Composer shell: full-window focus, crash-safe local drafts, autocomplete
 
 **Shipped (#38). Kept as the record of what landed. Its draft behaviour, editor schema, and one-draft-per-account rule (enforced in `saveDraft`, not just the UI) are superseded by T14A–T14D; amend those tasks rather than this one.**
-
-**Status: underway in draft PR #38; full-window revision requested after dogfood.**
 
 **Depends on:** R1, R3, T13 (can start against a stubbed `contacts:search`) · **Unblocks:** T16, T17 · **Spec:** F6, §5 composer keys
 
@@ -388,7 +386,7 @@ Draft lifecycle (open/type/autosave retry/close/discard/reopen/relaunch-recover)
 
 ## T14A — Drafts as first-class objects
 
-**Depends on:** T14 (shipped) · **Unblocks:** T14B, T14C, T14D · **Spec:** F6 (drafts), §5 `G` `D`
+**Status: shipped in PR #43 (at schema revision 11).** · **Depends on:** T14 (shipped) · **Unblocks:** T14B, T14C, T14D · **Spec:** F6 (drafts), §5 `G` `D`
 
 **Revision task.** T14 shipped the composer and stays as the record of what landed; this task changes the behaviour it defined. Do not rewrite T14.
 
@@ -444,7 +442,7 @@ CREATE INDEX idx_outbox_thread_kind ON outbox (
 
 ## T14B — Reply and forward entry points
 
-**Depends on:** T14A, T15 (shipped) · **Spec:** F6, §5 `R`/`A`/`F`
+**Status: shipped in PR #43.** · **Depends on:** T14A, T15 (shipped) · **Spec:** F6, §5 `R`/`A`/`F`
 
 **Revision task.** T15 shipped `planReply` with a full unit matrix, but nothing calls it: `r`/`a`/`f` are absent from `commands.ts`, and the plan buries the wiring in T16, blocking reply behind the send machinery for no reason.
 
@@ -453,7 +451,7 @@ CREATE INDEX idx_outbox_thread_kind ON outbox (
 - `r`/`a`/`f` in the reader context call the shipped `planReply(kind, conversation, accountEmail)` and open the composer prefilled, writing `kind`, `thread_id`, `source_message_id`, `in_reply_to` and `references` onto the row.
 - **Fix the mirror's lost threading.** `DraftMimeInput` (`outbox/draftMime.ts:3`) carries only to/cc/bcc/subject/body, and `saveDraft` posts `{ message: { raw } }` with no `threadId` (`gmail/provider.ts:44`). A reply draft written in Attn therefore arrives in Gmail Drafts detached from its conversation. Add `In-Reply-To`/`References` to the draft MIME and `threadId` to the `saveDraft` payload.
 - **Exclude `DRAFT`-labelled messages from the message store — a correctness fix this task forces.** Nothing in `src/` filters the `DRAFT` label today (`grep -rn "'DRAFT'" src/ --include=*.ts | grep -v test` returns nothing). `persistThread` writes every message in a thread snapshot into `messages`, and the history poller refetches any touched thread and calls it. That is latent only because Attn's drafts are currently unthreaded and lack `INBOX`, so they never reach `listInboxThreads`. **Adding `threadId` above breaks that:** the draft message lands in a real conversation, the next poll refetches the thread, `persistThread` stores the draft as an ordinary message, and `getConversation` renders it as though it had been sent — while the same draft also exists as an `outbox` row. Fix at the single choke point both callers share: `persistThread` skips messages whose `labelIds` include `DRAFT`, at the top of the message loop so a draft also cannot drive the thread's `last_msg_at` or snippet.
-- **Forwards attempt threading.** `planReply` already returns `threadId` for every kind and Gmail's own client keeps forwards in the conversation, so match it. **Unverified:** Gmail may require the `Subject` to match the thread for `threadId` to be honoured, and forwards are prefixed `Fwd: `. This is a named line in T16's manual smoke, not an assumption: *"forward from a thread lands in the same conversation, or record the observed behaviour."*
+- **Forwards attempt threading.** `planReply` already returns `threadId` for every kind and Gmail's own client keeps forwards in the conversation, so match it. **Unverified:** Gmail may require the `Subject` to match the thread for `threadId` to be honoured, and forwards are prefixed `Fwd: `. This is a named line in T16's manual smoke, not an assumption: *"forward from a thread lands in the same conversation, or record the observed behaviour."* **Observed (owner, real Gmail, 2026-08-17): forwards land in the source conversation — `threadId` plus the `Fwd:`-prefixed subject is honoured with no reply headers. Closed (SPEC §9 #18b).**
 
 ### Testing
 
@@ -469,7 +467,7 @@ Reply, reply-all and forward open prefilled and their drafts mirror into Gmail t
 
 ## T14C — Rich content and the zero-loss invariant
 
-**Depends on:** T14A · **Unblocks:** T14D · **Spec:** F6 (rich text, zero formatting loss), §9 #16
+**Status: shipped in PR #43.** · **Depends on:** T14A · **Unblocks:** T14D · **Spec:** F6 (rich text, zero formatting loss), §9 #16
 
 **Revision task.** It reverses a settled policy; read §9 #16 before starting. The *policy* change is the significant part — the implementation is smaller than it first appears (see Cost below).
 
@@ -531,7 +529,7 @@ No draft loses formatting by being opened in Attn, demonstrated by the invariant
 
 ## T14D — Two-way Gmail Drafts sync
 
-**Depends on:** T14A, T14C · **Spec:** F6 (draft sync)
+**Status: shipped in PR #43; mirror reconciliation fixed in #44; round-trip quote/attachment fixes in #52.** · **Depends on:** T14A, T14C · **Spec:** F6 (draft sync)
 
 **Revision task.** The shipped mirror is one-way by construction: `saveDraft`/`deleteDraft` are the only draft provider methods (`sync/provider.ts:54`), backfill fetches `INBOX` and `SENT` only, and nothing ever reads a draft back.
 
@@ -621,7 +619,7 @@ PRAGMA user_version = 11;
 
 ## T14E — Inline thread drafting and reliable conversation badges
 
-**Depends on:** T14A, T14B, T14D · **Spec:** F6, §9 #13
+**Status: shipped in PR #50; dogfood fixes in #52.** · **Depends on:** T14A, T14B, T14D · **Spec:** F6, §9 #13
 
 **Revision task.** New mail remains a focused full-window task. Reply, reply-all, and forward instead append
 the composer as the final card beneath the source conversation, keeping the referenced messages visible.
@@ -693,6 +691,8 @@ Builder + planner land with the test matrix above; no send path exists yet; veri
 ---
 
 ## T16 — Outbox: send, undo send, exactly-once
+
+**Status: shipped in PR #45; manual exactly-once matrix on real Gmail remains sign-off evidence.**
 
 **Amended by T14A–T14D:** the outbox now holds many drafts at once, so "one chokepoint" in global rule 9 constrains *code paths*, never the number of messages in flight. Its "Reply entry points" bullet moves to T14B. Add the forward-threading check named there to the manual smoke list.
 
@@ -873,18 +873,20 @@ The closing pass that turns "features exist" into "this is my mail client":
 
 ### Done when — the M2 exit checklist
 
-- [ ] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites
-- [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links)
-- [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates
-- [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data
+Status annotations as of 2026-08-16 (a review pass over `main` at #52 — `npm run verify` green: typecheck, lint, 486 unit tests, 109 e2e specs):
+
+- [ ] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites — *every task except **T21** is merged; T21 is the last unimplemented M2 task*
+- [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links) — *automated coverage exists for composer open, force-quit recovery, undo-send, and no-duplicate-send at unit level; the closing PR still has to cite it*
+- [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates — *manual evidence outstanding*
+- [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data — *not started (T20 items 1–2)*
 - [ ] Initial-sync evidence separates first-readable-page latency from full background completion and records
-      per-stage totals, effective rate, and quota-wait time
+      per-stage totals, effective rate, and quota-wait time — *not started (T20 item 4); T13A's real-mailbox run doubles as this evidence*
 - [ ] Lifetime whole-account header indexing finds contacts outside the mail window and creates header rows
-      without downloading old body bytes; saved-Google-Contacts scope decision recorded
-- [ ] Failed triage actions self-heal to server truth with an explanatory toast; auth re-pend shipped; no silent queue states remain
-- [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts
-- [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input)
-- [ ] SPEC/README/AGENTS/M1-plan deviation rows updated to the shipped reality
+      without downloading old body bytes; saved-Google-Contacts scope decision recorded — *implemented and e2e-covered (#51); real-mailbox wall-clock/quota run outstanding; People-API decision recorded in T13A*
+- [x] Failed triage actions self-heal to server truth with an explanatory toast; auth re-pend shipped; no silent queue states remain — *T18 (#47), unit + e2e covered*
+- [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts — *T19 (#41) shipped; signed-in manual smoke outstanding*
+- [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input) — *outstanding; #52 is the first batch of dogfood fixes*
+- [ ] SPEC/README/AGENTS/M1-plan deviation rows updated to the shipped reality — *status paragraphs, risk register, and artifact lists refreshed 2026-08-16; the virtualization/300-cap deviation rows in docs/M1-PLAN.md stay open until T20 item 1 resolves them with data*
 
 Then M3 (search, system mailboxes, splits, palette, themes) starts with the utility-process task below. It is deliberately **not** done in M2: moving the process boundary while building the outbox would risk the exactly-once invariant for a jank win whose real driver is M3's FTS indexing.
 
@@ -942,7 +944,7 @@ coverage proves completion, cancellation, timeout, and view-change reset behavio
 
 ## T21 — Label-catalog refresh in the poller
 
-**Status: new (found during the SPEC §9 #17 sync review).** · **Depends on:** nothing · **Parallel with:** everything · **Spec:** F2 incremental
+**Status: not yet implemented (found during the SPEC §9 #17 sync review; still open for M2 exit as of 2026-08-16 — `listLabels()` runs only at backfill start, `src/main/sync/backfill.ts:98`, and `upsertLabels` has no delete semantics).** · **Depends on:** nothing · **Parallel with:** everything · **Spec:** F2 incremental
 
 ### Why
 
@@ -981,9 +983,9 @@ created or renamed in Gmail web appears in Attn within one poll interval, verify
 | **Lexical** for the composer editor, over raw `contenteditable`/`execCommand` (owner, 2026-08-13) | M4's snippets (single-undo expansion, `{cursor}`) and AI draft streaming are programmatic edits that need a real document model; `execCommand` is deprecated and paste normalization is otherwise hand-rolled. Cross-browser normalization is *not* a factor — Electron pins one Chromium | Only if Lexical's HTML output fights real-world mail rendering; the sanitizer stays either way |
 | Full-window new-message composer plus inline reply/forward cards instead of a docked overlay | New mail is its own task, while a thread reply depends on visible source context; both modes avoid the old footer collision. Hiding rather than unmounting the prior view preserves exact return context for new mail | Revisit only with contrary dogfood evidence |
 | Gmail draft mirror is async/best-effort; local row is the source of truth | Typing latency and offline composing must never wait on Gmail | v2 multi-device story |
-| Attachments mirror to Gmail only at send time | Autosave-frequency × megabytes would burn quota for convenience | If dogfood shows draft-handoff-to-phone matters |
+| ~~Attachments mirror to Gmail only at send time~~ **Reversed (owner, 2026-08-16, T17):** every attachment mirrors so a Gmail-side draft is complete and sendable from web/mobile; the checkpoint interval lengthens with payload (`MIRROR_PAYLOAD_IDLE_MS`) instead | Dogfood showed a Gmail draft that looked finished but sent without its files was worse than the bandwidth saved | Tune the three mirror constants from real-mailbox measurement |
 | Gmail draft id (always send via `drafts.send`) as the exactly-once handle; client Message-ID demoted to a secondary check | Draft existence is immediately consistent and `drafts.send` consumes it atomically, so recovery is decisive. Search-based verification is not: Gmail's index lags sends and it honors no client idempotency key, so a single negative result cannot authorize a resend | v2 backend could own send |
 | On unresolvable send ambiguity, park in `needs-review` and tell the user rather than resending | F6 makes "no duplicate send" an acceptance criterion; an unsent message is user-recoverable, a duplicate is not | If dogfood shows the state never occurs in practice |
 | Replies to mail cached before the headers landed may lack `References` (threadId still set) | Server-side threading remains intact; during development, reset and re-sync instead of maintaining a header backfill | Revisit before the app has external users |
-| One live composer at a time | Single window, single account; multiple drafts arrive with M3's Drafts view | M3 |
+| ~~One live composer at a time~~ **Superseded by T14A (#43):** drafts are unlimited and listed in the M2 Drafts view; only one composer is *mounted* at a time, which is a rendering fact rather than a limit | Single window, single account | M3 absorbs the Drafts view into the unified mailbox shell |
 | Utility-process move deferred to M3 | Don't move the process boundary under the outbox build | M3 first hardening task |
