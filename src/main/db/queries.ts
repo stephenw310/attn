@@ -27,6 +27,9 @@ interface StoredAttachment extends MessageAttachment {
   inlineData?: string
 }
 
+/** Measured-safe bound; the renderer windows lists above 500 rows. */
+export const THREAD_LIST_LIMIT = 10_000
+
 function labelIdsForThreads(db: Db, accountId: string, threadIds: readonly string[]): Map<string, string[]> {
   const result = new Map<string, string[]>()
   if (threadIds.length === 0) return result
@@ -45,7 +48,7 @@ function labelIdsForThreads(db: Db, accountId: string, threadIds: readonly strin
   return result
 }
 
-export function listInboxThreads(db: Db, accountId: string, limit = 300): ThreadRow[] {
+export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_LIMIT): ThreadRow[] {
   const rows = db
     .prepare(
       `SELECT t.id, t.from_display, t.subject, t.snippet, t.last_msg_at,
@@ -97,7 +100,7 @@ export function listInboxThreads(db: Db, accountId: string, limit = 300): Thread
   }))
 }
 
-export function listSnoozedThreads(db: Db, accountId: string, limit = 300): SnoozedThreadRow[] {
+export function listSnoozedThreads(db: Db, accountId: string, limit = THREAD_LIST_LIMIT): SnoozedThreadRow[] {
   const rows = db
     .prepare(
       `SELECT t.id, t.from_display, t.subject, t.snippet, t.last_msg_at,

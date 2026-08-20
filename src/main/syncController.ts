@@ -188,6 +188,7 @@ export class SyncController {
       ...(previous?.threadsTotal === undefined ? {} : { threadsTotal: previous.threadsTotal }),
       ...(previous?.messagesTotal === undefined ? {} : { messagesTotal: previous.messagesTotal }),
       ...(previous?.etaMs === undefined ? {} : { etaMs: previous.etaMs }),
+      ...(previous?.quotaWaitMs === undefined ? {} : { quotaWaitMs: previous.quotaWaitMs }),
       reason: retryable ? 'retry-wait' : 'paused',
       ...(retryable ? { waitMs: LIFETIME_RETRY_MS } : {}),
       message
@@ -269,6 +270,10 @@ export class SyncController {
         if (this.backfillRetryGeneration !== generation && failure.phase === 'offline') {
           this.scheduleOfflineRetry(generation)
         }
+      },
+      onMetric: (metric) => {
+        if (generation !== this.generation) return
+        console.log(`[sync:metric] ${JSON.stringify(metric)}`)
       }
     })
       .then(async (result) => {
@@ -416,6 +421,15 @@ export class SyncController {
           return
         }
         console.log(`[sync] lifetime header sweep done: ${result.threadCount} threads for ${accountId}`)
+        console.log(
+          `[sync:metric] ${JSON.stringify({
+            kind: 'lifetime-complete',
+            threadsDone: result.threadCount,
+            elapsedMs: result.elapsedMs,
+            ...(result.threadsPerMinute === undefined ? {} : { threadsPerMinute: result.threadsPerMinute }),
+            quotaWaitMs: result.quotaWaitMs
+          })}`
+        )
         // The ids-only attachment tail runs on the sweep's completion, including
         // the launch where the sweep itself has nothing left to do.
         const flags = await runAttachmentFlagWalk(
@@ -530,6 +544,10 @@ export class SyncController {
           },
           onError: (error) => {
             failure = error
+          },
+          onMetric: (metric) => {
+            if (generation !== this.generation) return
+            console.log(`[sync:metric] ${JSON.stringify({ ...metric, recovery: true })}`)
           }
         },
         { recovery: true }

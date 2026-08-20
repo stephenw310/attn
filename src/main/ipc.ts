@@ -572,10 +572,7 @@ export function registerIpc(context: IpcContext): () => void {
   })
   handle(IPC_CHANNELS.mailListThreads, () => {
     const account = context.currentAccountId()
-    // Production deliberately keeps its M1 query cap. The perf-only seam lifts
-    // it so the renderer benchmark actually mounts the generated 2,000 rows.
-    const limit = context.testUserData && process.env.ATTN_E2E_PERF === '1' ? 2_000 : undefined
-    return account ? listInboxThreads(context.db, account, limit) : []
+    return account ? listInboxThreads(context.db, account) : []
   })
   handle(IPC_CHANNELS.mailListSnoozed, () => {
     const account = context.currentAccountId()

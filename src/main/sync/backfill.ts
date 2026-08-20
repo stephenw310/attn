@@ -11,6 +11,7 @@ import type { SyncStage } from '../../shared/mail'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
+import { type SchedulerTime, systemTime } from '../time'
 import { hydrateMissingThreadBodies } from './bodies'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 import type { DraftPage, ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
@@ -19,13 +20,44 @@ import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './w
 export interface BackfillCallbacks {
   onProgress: (progress: BackfillProgress) => void
   onError: (error: unknown) => void
+  onMetric?: (metric: BackfillMetric) => void
 }
 
 export interface BackfillProgress {
   stage: BackfillPhase
   threadsDone: number
+  stageThreadsDone?: number
+  stageThreadsTotal?: number
+  elapsedMs?: number
+  stageElapsedMs?: number
+  threadsPerMinute?: number
+  stageThreadsPerMinute?: number
+  quotaWaitMs?: number
+  firstReadableMs?: number
+  interactiveReadyMs?: number
   mailChanged: boolean
 }
+
+export type BackfillMetric =
+  | {
+      kind: 'stage-complete'
+      stage: BackfillPhase
+      threadsDone: number
+      threadsTotal?: number
+      elapsedMs: number
+      threadsPerMinute?: number
+      quotaWaitMs: number
+      firstReadableMs?: number
+      interactiveReadyMs?: number
+    }
+  | {
+      kind: 'complete'
+      threadsDone: number
+      elapsedMs: number
+      quotaWaitMs: number
+      firstReadableMs?: number
+      interactiveReadyMs?: number
+    }
 
 export interface BackfillResult {
   threadCount: number
@@ -42,6 +74,7 @@ export interface BackfillResult {
 export interface BackfillOptions {
   /** Restart a completed backfill, but resume one already in progress. */
   recovery?: boolean
+  time?: SchedulerTime
 }
 
 export type BackfillPhase = SyncStage
@@ -70,8 +103,84 @@ export async function runInboxBackfill(
   callbacks: BackfillCallbacks,
   options: BackfillOptions = {}
 ): Promise<BackfillResult | null> {
+  const time = options.time ?? systemTime
+  const startedAt = time.now()
+  const quotaWaitStartedAt = provider.quotaMetrics?.().waitMs ?? 0
+  let threadsDone = 0
+  let stageStartedAt = startedAt
+  let stageThreadsDone = 0
+  let stageThreadsTotal: number | undefined
+  let stageQuotaWaitStartedAt = 0
+  let firstReadableMs: number | undefined
+  let interactiveReadyMs: number | undefined
+
+  const quotaWaitMs = (): number =>
+    Math.max(0, (provider.quotaMetrics?.().waitMs ?? quotaWaitStartedAt) - quotaWaitStartedAt)
+  const rate = (count: number, elapsedMs: number): number | undefined =>
+    count > 0 && elapsedMs > 0 ? Math.round((count * 60_000) / elapsedMs) : undefined
+  const emitProgress = (stage: BackfillPhase, mailChanged: boolean): void => {
+    const elapsedMs = Math.max(0, time.now() - startedAt)
+    const stageElapsedMs = Math.max(0, time.now() - stageStartedAt)
+    callbacks.onProgress({
+      stage,
+      threadsDone,
+      stageThreadsDone,
+      ...(stageThreadsTotal === undefined ? {} : { stageThreadsTotal }),
+      elapsedMs,
+      stageElapsedMs,
+      ...(rate(threadsDone, elapsedMs) === undefined
+        ? {}
+        : { threadsPerMinute: rate(threadsDone, elapsedMs) }),
+      ...(rate(stageThreadsDone, stageElapsedMs) === undefined
+        ? {}
+        : { stageThreadsPerMinute: rate(stageThreadsDone, stageElapsedMs) }),
+      quotaWaitMs: quotaWaitMs(),
+      ...(firstReadableMs === undefined ? {} : { firstReadableMs }),
+      ...(interactiveReadyMs === undefined ? {} : { interactiveReadyMs }),
+      mailChanged
+    })
+  }
+  const beginStage = (stage: BackfillPhase): void => {
+    stageStartedAt = time.now()
+    stageThreadsDone = 0
+    stageThreadsTotal = undefined
+    stageQuotaWaitStartedAt = quotaWaitMs()
+    emitProgress(stage, false)
+  }
+  const pageCompleted = (
+    stage: BackfillPhase,
+    count: number,
+    total: number | undefined,
+    mailChanged = count > 0,
+    cumulative = true
+  ): void => {
+    if (cumulative) threadsDone += count
+    stageThreadsDone += count
+    stageThreadsTotal ??= total
+    if (stage === 'metadata' && firstReadableMs === undefined && (count > 0 || total === 0)) {
+      firstReadableMs = Math.max(0, time.now() - startedAt)
+    }
+    emitProgress(stage, mailChanged)
+  }
+  const completeStage = (stage: BackfillPhase): void => {
+    const elapsedMs = Math.max(0, time.now() - stageStartedAt)
+    callbacks.onMetric?.({
+      kind: 'stage-complete',
+      stage,
+      threadsDone: stageThreadsDone,
+      ...(stageThreadsTotal === undefined ? {} : { threadsTotal: stageThreadsTotal }),
+      elapsedMs,
+      ...(rate(stageThreadsDone, elapsedMs) === undefined
+        ? {}
+        : { threadsPerMinute: rate(stageThreadsDone, elapsedMs) }),
+      quotaWaitMs: Math.max(0, quotaWaitMs() - stageQuotaWaitStartedAt),
+      ...(firstReadableMs === undefined ? {} : { firstReadableMs }),
+      ...(interactiveReadyMs === undefined ? {} : { interactiveReadyMs })
+    })
+  }
+
   try {
-    const profile = await provider.getProfile()
+    const profile = await provider.getProfile({ priority: 'foreground' })
     const accountId = profile.emailAddress
     ensureAccount(db, accountId, profile.emailAddress)
 
@@ -95,11 +204,10 @@ export async function runInboxBackfill(
       ).run(accountId, profile.historyId)
     }
 
-    upsertLabels(db, accountId, await provider.listLabels())
-    let threadsDone = 0
+    upsertLabels(db, accountId, await provider.listLabels({ priority: 'foreground' }))
 
     if (cursor.phase === 'metadata') {
-      callbacks.onProgress({ stage: 'metadata', threadsDone, mailChanged: false })
+      beginStage('metadata')
       await runThreadPhase({
         db,
         provider,
@@ -109,22 +217,28 @@ export async function runInboxBackfill(
         phase: 'metadata',
         initialPageToken: cursor.pageToken,
         nextPhase: 'bodies',
+        priority: 'foreground',
         onThread: async (threadId) => {
-          persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
-            metadataOnly: true,
-            inboxVisibility: 'show'
-          })
+          persistThread(
+            db,
+            accountId,
+            await provider.getThread(threadId, { format: 'metadata', priority: 'foreground' }),
+            {
+              metadataOnly: true,
+              inboxVisibility: 'show'
+            }
+          )
         },
-        onPage: (count) => {
-          threadsDone += count
-          callbacks.onProgress({ stage: 'metadata', threadsDone, mailChanged: true })
-        }
+        onPage: (count, total) => pageCompleted('metadata', count, total)
       })
+      if (firstReadableMs === undefined) firstReadableMs = Math.max(0, time.now() - startedAt)
+      interactiveReadyMs = Math.max(0, time.now() - startedAt)
+      completeStage('metadata')
       cursor = { phase: 'bodies' }
     }
 
     if (cursor.phase === 'bodies') {
-      callbacks.onProgress({ stage: 'bodies', threadsDone, mailChanged: false })
+      beginStage('bodies')
       await runThreadPhase({
         db,
         provider,
@@ -134,31 +248,30 @@ export async function runInboxBackfill(
         phase: 'bodies',
         initialPageToken: cursor.pageToken,
         nextPhase: 'drafts',
+        priority: 'background',
         onThread: async (threadId) => {
-          const thread = await provider.getThread(threadId, { format: 'full' })
+          const thread = await provider.getThread(threadId, { format: 'full', priority: 'background' })
           persistThread(db, accountId, thread, { inboxVisibility: 'show' })
-          await hydrateMissingThreadBodies(db, provider, accountId, thread)
+          await hydrateMissingThreadBodies(db, provider, accountId, thread, undefined, {
+            priority: 'background'
+          })
         },
-        onPage: (count) => {
-          threadsDone += count
-          callbacks.onProgress({ stage: 'bodies', threadsDone, mailChanged: true })
-        }
+        onPage: (count, total) => pageCompleted('bodies', count, total)
       })
+      completeStage('bodies')
       cursor = { phase: 'drafts' }
     }
 
     if (cursor.phase === 'drafts') {
-      callbacks.onProgress({ stage: 'drafts', threadsDone, mailChanged: false })
+      beginStage('drafts')
       await runDraftPhase({
         db,
         provider,
         accountId,
         initialPageToken: cursor.pageToken,
-        onPage: (count) => {
-          threadsDone += count
-          callbacks.onProgress({ stage: 'drafts', threadsDone, mailChanged: count > 0 })
-        }
+        onPage: (count) => pageCompleted('drafts', count, undefined)
       })
+      completeStage('drafts')
       cursor = { phase: 'all-mail' }
     }
 
@@ -166,7 +279,7 @@ export async function runInboxBackfill(
       // No label filter: archived + sent + everything Gmail returns from its
       // default listing. Threads the INBOX stages already stored are skipped,
       // which is what keeps the deliberate 12-month overlap nearly free.
-      callbacks.onProgress({ stage: 'all-mail', threadsDone, mailChanged: false })
+      beginStage('all-mail')
       await runThreadPhase({
         db,
         provider,
@@ -176,17 +289,21 @@ export async function runInboxBackfill(
         initialPageToken: cursor.pageToken,
         nextPhase: 'spam',
         skipExisting: true,
+        priority: 'background',
         onThread: async (threadId) => {
-          persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
-            metadataOnly: true,
-            inboxVisibility: 'show'
-          })
+          persistThread(
+            db,
+            accountId,
+            await provider.getThread(threadId, { format: 'metadata', priority: 'background' }),
+            {
+              metadataOnly: true,
+              inboxVisibility: 'show'
+            }
+          )
         },
-        onPage: (count) => {
-          threadsDone += count
-          callbacks.onProgress({ stage: 'all-mail', threadsDone, mailChanged: true })
-        }
+        onPage: (count, total) => pageCompleted('all-mail', count, total)
       })
+      completeStage('all-mail')
       cursor = { phase: 'spam' }
     }
 
@@ -197,7 +314,7 @@ export async function runInboxBackfill(
       if (cursor.phase !== junk.phase) continue
       // Gmail purges Spam and Trash at ~30 days, so "everything" is inherently
       // small here — no date bound needed.
-      callbacks.onProgress({ stage: junk.phase, threadsDone, mailChanged: false })
+      beginStage(junk.phase)
       await runThreadPhase({
         db,
         provider,
@@ -208,16 +325,18 @@ export async function runInboxBackfill(
         initialPageToken: cursor.pageToken,
         nextPhase: junk.nextPhase,
         skipExisting: true,
+        priority: 'background',
         onThread: async (threadId) => {
-          persistThread(db, accountId, await provider.getThread(threadId, { format: 'metadata' }), {
-            metadataOnly: true
-          })
+          persistThread(
+            db,
+            accountId,
+            await provider.getThread(threadId, { format: 'metadata', priority: 'background' }),
+            { metadataOnly: true }
+          )
         },
-        onPage: (count) => {
-          threadsDone += count
-          callbacks.onProgress({ stage: junk.phase, threadsDone, mailChanged: true })
-        }
+        onPage: (count, total) => pageCompleted(junk.phase, count, total)
       })
+      completeStage(junk.phase)
       cursor = { phase: junk.nextPhase }
     }
 
@@ -225,18 +344,36 @@ export async function runInboxBackfill(
     // This remains metadata-free and prevents older local threads being
     // stripped. Spam/Trash listings double as the purge signal upstream:
     // locally-labeled threads missing from them get verified thread-by-thread.
-    callbacks.onProgress({ stage: 'reconcile', threadsDone, mailChanged: false })
-    const inboxThreadIds = await listAllThreadIds(provider, { labelIds: ['INBOX'] })
-    const spamThreadIds = await listAllThreadIds(provider, {
-      labelIds: ['SPAM'],
-      includeSpamTrash: true
-    })
-    const trashThreadIds = await listAllThreadIds(provider, {
-      labelIds: ['TRASH'],
-      includeSpamTrash: true
-    })
+    beginStage('reconcile')
+    const reconcilePage = (count: number): void => pageCompleted('reconcile', count, undefined, false, false)
+    const inboxThreadIds = await listAllThreadIds(provider, { labelIds: ['INBOX'] }, reconcilePage)
+    const spamThreadIds = await listAllThreadIds(
+      provider,
+      {
+        labelIds: ['SPAM'],
+        includeSpamTrash: true
+      },
+      reconcilePage
+    )
+    const trashThreadIds = await listAllThreadIds(
+      provider,
+      {
+        labelIds: ['TRASH'],
+        includeSpamTrash: true
+      },
+      reconcilePage
+    )
+    completeStage('reconcile')
 
     db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run('done', accountId)
+    callbacks.onMetric?.({
+      kind: 'complete',
+      threadsDone,
+      elapsedMs: Math.max(0, time.now() - startedAt),
+      quotaWaitMs: quotaWaitMs(),
+      ...(firstReadableMs === undefined ? {} : { firstReadableMs }),
+      ...(interactiveReadyMs === undefined ? {} : { interactiveReadyMs })
+    })
     return { threadCount: threadsDone, inboxThreadIds, spamThreadIds, trashThreadIds }
   } catch (error) {
     callbacks.onError(error)
@@ -254,6 +391,7 @@ interface ThreadPhaseOptions {
   phase: Exclude<BackfillPhase, 'drafts' | 'reconcile'>
   initialPageToken?: string
   nextPhase: BackfillPhase
+  priority: 'foreground' | 'background'
   /**
    * Skip listed ids already stored locally. Safe because the history checkpoint
    * predates the first backfill page, so the poller keeps stored threads
@@ -261,7 +399,7 @@ interface ThreadPhaseOptions {
    */
   skipExisting?: boolean
   onThread: (threadId: string) => Promise<void>
-  onPage: (count: number) => void
+  onPage: (count: number, threadsTotal: number | undefined) => void
 }
 
 async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
@@ -277,7 +415,8 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
         ...(options.query === undefined ? {} : { q: options.query }),
         ...(options.labelIds === undefined ? {} : { labelIds: options.labelIds }),
         ...(options.includeSpamTrash ? { includeSpamTrash: true } : {}),
-        pageToken
+        pageToken,
+        priority: options.priority
       })
     } catch (error) {
       if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
@@ -305,7 +444,9 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
       }
       completed++
     })
-    if (completed > 0) options.onPage(completed)
+    if (completed > 0 || page.resultSizeEstimate !== undefined) {
+      options.onPage(completed, page.resultSizeEstimate)
+    }
     pageToken = page.nextPageToken
     checkpoint(options.db, options.accountId, pageToken ? `${options.phase}:${pageToken}` : options.nextPhase)
     if (!pageToken) return
@@ -326,7 +467,7 @@ async function runDraftPhase(options: DraftPhaseOptions): Promise<void> {
   for (;;) {
     let page: DraftPage
     try {
-      page = await options.provider.listDrafts(pageToken)
+      page = await options.provider.listDrafts(pageToken, { priority: 'background' })
     } catch (error) {
       if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
       pageToken = undefined
@@ -341,8 +482,10 @@ async function runDraftPhase(options: DraftPhaseOptions): Promise<void> {
         await reconcileRemoteDraft(
           options.db,
           options.accountId,
-          await options.provider.getDraft(summary.id),
-          options.provider
+          await options.provider.getDraft(summary.id, { priority: 'background' }),
+          options.provider,
+          undefined,
+          { priority: 'background' }
         )
       } catch (error) {
         if (error instanceof GmailApiError && error.status === 404) return
@@ -359,13 +502,15 @@ async function runDraftPhase(options: DraftPhaseOptions): Promise<void> {
 
 async function listAllThreadIds(
   provider: MailProvider,
-  options: Pick<ListThreadIdsOptions, 'labelIds' | 'includeSpamTrash'>
+  options: Pick<ListThreadIdsOptions, 'labelIds' | 'includeSpamTrash'>,
+  onPage?: (count: number) => void
 ): Promise<string[]> {
   const threadIds = new Set<string>()
   let pageToken: string | undefined
   do {
-    const page = await provider.listThreadIds({ ...options, pageToken })
+    const page = await provider.listThreadIds({ ...options, pageToken, priority: 'background' })
     for (const threadId of page.threadIds) threadIds.add(threadId)
+    if (page.threadIds.length > 0) onPage?.(page.threadIds.length)
     pageToken = page.nextPageToken
   } while (pageToken)
   return [...threadIds]

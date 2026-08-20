@@ -211,6 +211,10 @@ describe('stateful history application', () => {
     // A thread absent from the Trash listing is never deleted on that signal
     // alone — only a direct 404 proves the purge.
     expect(provider.getThread).toHaveBeenCalledTimes(2)
+    expect(provider.getThread).toHaveBeenNthCalledWith(1, 'relabeled', {
+      format: 'metadata',
+      priority: 'background'
+    })
     expect(persist).toHaveBeenCalledWith({ id: 'relabeled', messages: [] })
     expect(remove).toHaveBeenCalledWith('purged')
   })

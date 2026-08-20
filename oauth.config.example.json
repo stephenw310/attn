@@ -1,4 +1,5 @@
 {
   "client_id": "",
-  "client_secret": ""
+  "client_secret": "",
+  "quota_units_per_minute": 6000
 }

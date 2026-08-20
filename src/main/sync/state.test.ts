@@ -56,6 +56,12 @@ describe('sync state publication', () => {
     ).toBe(false)
     expect(
       sameSyncState(
+        { phase: 'syncing', stage: 'metadata', threadsDone: 4, stageThreadsPerMinute: 120 },
+        { phase: 'syncing', stage: 'metadata', threadsDone: 4, stageThreadsPerMinute: 121 }
+      )
+    ).toBe(false)
+    expect(
+      sameSyncState(
         { phase: 'syncing', stage: 'metadata', threadsDone: 4 },
         { phase: 'syncing', stage: 'bodies', threadsDone: 4 }
       )
@@ -71,6 +77,24 @@ describe('sync state publication', () => {
       sameSyncState(
         { phase: 'indexing', stage: 'lifetime', threadsDone: 50, reason: 'running' },
         { phase: 'indexing', stage: 'lifetime', threadsDone: 51, reason: 'running' }
+      )
+    ).toBe(false)
+    expect(
+      sameSyncState(
+        {
+          phase: 'indexing',
+          stage: 'lifetime',
+          threadsDone: 50,
+          quotaWaitMs: 100,
+          reason: 'running'
+        },
+        {
+          phase: 'indexing',
+          stage: 'lifetime',
+          threadsDone: 50,
+          quotaWaitMs: 101,
+          reason: 'running'
+        }
       )
     ).toBe(false)
     expect(

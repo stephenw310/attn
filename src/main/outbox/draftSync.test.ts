@@ -95,9 +95,13 @@ describe('remote draft parsing', () => {
     const provider = {
       getAttachmentData: vi.fn(async () => Buffer.from('<p>Large body</p>').toString('base64url'))
     }
-    const parsed = await parseRemoteDraft(emptyLookupDb(), 'account', remote, provider, 200)
+    const parsed = await parseRemoteDraft(emptyLookupDb(), 'account', remote, provider, 200, {
+      priority: 'background'
+    })
 
-    expect(provider.getAttachmentData).toHaveBeenCalledWith('message-1', 'body-part')
+    expect(provider.getAttachmentData).toHaveBeenCalledWith('message-1', 'body-part', {
+      priority: 'background'
+    })
     expect(parsed.input.bodyHtml).toBe('<p>Large body</p>')
     expect(parsed.input.bodyText).toBe('Large body')
   })
@@ -500,7 +504,7 @@ describe('draft synchronization identity', () => {
 
     await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(true)
     await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
-    expect(getDraft).toHaveBeenCalledWith('draft-1')
+    expect(getDraft).toHaveBeenCalledWith('draft-1', { priority: 'polling' })
     expect(getDraft).toHaveBeenCalledTimes(1)
     expect(repairBinding).toHaveBeenCalledWith('forward', 'thread-1', 'account', 'local-draft')
     expect(writeRemote.mock.calls[0]?.[4]).toBe('forward')

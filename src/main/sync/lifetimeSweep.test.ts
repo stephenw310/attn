@@ -116,9 +116,15 @@ describe('lifetime header indexing', () => {
       pagePauseMs: 0
     })
 
-    expect(mail.listThreadIds).toHaveBeenCalledWith({ pageToken: undefined })
+    expect(mail.listThreadIds).toHaveBeenCalledWith({
+      pageToken: undefined,
+      priority: 'background'
+    })
     expect(mail.getThread).toHaveBeenCalledOnce()
-    expect(mail.getThread).toHaveBeenCalledWith('old', { format: 'metadata' })
+    expect(mail.getThread).toHaveBeenCalledWith('old', {
+      format: 'metadata',
+      priority: 'background'
+    })
     expect(mocks.persistThread).toHaveBeenCalledWith(
       expect.anything(),
       'test@example.com',
@@ -127,7 +133,7 @@ describe('lifetime header indexing', () => {
     )
     expect(state.cursor).toBe('done')
     expect(state.done).toBe(2)
-    expect(result).toEqual({ threadCount: 2 })
+    expect(result).toMatchObject({ threadCount: 2, quotaWaitMs: 0 })
     expect(events.onError).not.toHaveBeenCalled()
     expect(events.onProgress).toHaveBeenCalledWith(
       expect.objectContaining({ threadsDone: 2, threadsTotal: 2, messagesTotal: 70 })
@@ -147,8 +153,14 @@ describe('lifetime header indexing', () => {
       pagePauseMs: 0
     })
 
-    expect(listThreadIds).toHaveBeenNthCalledWith(1, { pageToken: 'expired' })
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, { pageToken: undefined })
+    expect(listThreadIds).toHaveBeenNthCalledWith(1, {
+      pageToken: 'expired',
+      priority: 'background'
+    })
+    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
+      pageToken: undefined,
+      priority: 'background'
+    })
     expect(state.cursor).toBe('done')
   })
 
@@ -214,8 +226,11 @@ describe('lifetime header indexing', () => {
     await vi.advanceTimersByTimeAsync(999)
     expect(listThreadIds).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(1)
-    await expect(run).resolves.toEqual({ threadCount: 0 })
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, { pageToken: 'page-2' })
+    await expect(run).resolves.toMatchObject({ threadCount: 0, quotaWaitMs: 0 })
+    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
+      pageToken: 'page-2',
+      priority: 'background'
+    })
   })
 
   it('estimates remaining time from durable progress made in the current run', async () => {
@@ -260,8 +275,38 @@ describe('lifetime header indexing', () => {
     )
 
     expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ threadsDone: 1, threadsTotal: 10, etaMs: 9_000 })
+      expect.objectContaining({
+        threadsDone: 1,
+        threadsTotal: 10,
+        etaMs: 9_000,
+        elapsedMs: 1_000,
+        threadsPerMinute: 60
+      })
     )
+  })
+
+  it('reports actual weighted-limiter wait separately from the sweep duty cycle', async () => {
+    let quotaWaitMs = 0
+    const events = callbacks()
+    const mail = provider({
+      listThreadIds: vi.fn(async () => ({ threadIds: ['old'] })),
+      getThread: vi.fn(async (id) => {
+        quotaWaitMs = 250
+        return { id, messages: [] }
+      }),
+      quotaMetrics: () => ({ requests: 2, units: 50, waitMs: quotaWaitMs })
+    })
+
+    const result = await runLifetimeSweep(
+      fakeDb({ cursor: 'lifetime', threadIds: new Set<string>() }),
+      mail,
+      'test@example.com',
+      events,
+      { requestIntervalMs: 0, pagePauseMs: 0 }
+    )
+
+    expect(result).toMatchObject({ threadCount: 1, quotaWaitMs: 250 })
+    expect(events.onProgress).toHaveBeenCalledWith(expect.objectContaining({ quotaWaitMs: 250 }))
   })
 
   it('persists processed listing progress so a resumed page does not restart at zero', async () => {

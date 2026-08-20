@@ -8,7 +8,7 @@ import {
   hasInlinePlainText
 } from '../gmail/parse'
 import { mergeExternalBodies } from './mergeBodies'
-import type { MailProvider } from './provider'
+import type { MailProvider, ProviderRequestOptions } from './provider'
 
 /** Fetch only out-of-line body parts that are not already complete locally. */
 export async function hydrateMissingThreadBodies(
@@ -16,7 +16,8 @@ export async function hydrateMissingThreadBodies(
   provider: MailProvider,
   accountId: string,
   thread: GmailThread,
-  shouldContinue: () => boolean = () => true
+  shouldContinue: () => boolean = () => true,
+  requestOptions?: ProviderRequestOptions
 ): Promise<void> {
   const readBody = db.prepare('SELECT body_text, body_html FROM messages WHERE account_id = ? AND id = ?')
   const writeBody = db.prepare(
@@ -43,7 +44,9 @@ export async function hydrateMissingThreadBodies(
       if (!shouldContinue()) return
       if (part.mimeType === 'text/plain' && plainComplete) continue
       if (part.mimeType === 'text/html' && htmlComplete) continue
-      const data = await provider.getAttachmentData(message.id, part.attachmentId)
+      const data = requestOptions
+        ? await provider.getAttachmentData(message.id, part.attachmentId, requestOptions)
+        : await provider.getAttachmentData(message.id, part.attachmentId)
       if (!shouldContinue()) return
       if (!data) continue
       const raw = decodeBase64Url(data)

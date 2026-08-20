@@ -16,7 +16,7 @@ import {
   parseMessageIds
 } from '../gmail/parse'
 import { mergeExternalBodies } from '../sync/mergeBodies'
-import type { MailProvider, ProviderDraft } from '../sync/provider'
+import type { MailProvider, ProviderDraft, ProviderRequestOptions } from '../sync/provider'
 import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import { draftHtmlBody, mimeFilename } from './draftMime'
 import { splitQuotedTrail } from './quoteSplit'
@@ -160,7 +160,8 @@ export function remoteDraftKind(
 
 async function remoteDraftBodies(
   remote: ProviderDraft,
-  provider: Pick<MailProvider, 'getAttachmentData'> | null
+  provider: Pick<MailProvider, 'getAttachmentData'> | null,
+  requestOptions?: ProviderRequestOptions
 ): Promise<{ bodyHtml: string; bodyText: string }> {
   const payload = remote.message.payload
   const inlineHtml = extractBodyHtml(payload)
@@ -171,7 +172,9 @@ async function remoteDraftBodies(
   const fetchedPlain: string[] = []
   const fetchedHtml: string[] = []
   for (const part of external) {
-    const data = await provider.getAttachmentData(remote.message.id, part.attachmentId)
+    const data = requestOptions
+      ? await provider.getAttachmentData(remote.message.id, part.attachmentId, requestOptions)
+      : await provider.getAttachmentData(remote.message.id, part.attachmentId)
     if (!data) continue
     const raw = decodeBase64Url(data)
     if (!raw) continue
@@ -213,7 +216,8 @@ export async function parseRemoteDraft(
   accountId: string,
   remote: ProviderDraft,
   provider: Pick<MailProvider, 'getAttachmentData'> | null,
-  now: number
+  now: number,
+  requestOptions?: ProviderRequestOptions
 ): Promise<ParsedRemoteDraft> {
   const message = remote.message
   const localHint = db
@@ -231,7 +235,7 @@ export async function parseRemoteDraft(
   // that classification.
   const kind = remoteDraftKind(remote, localHint?.thread_id ? localHint.kind : undefined, !!knownThread)
   const threading = extractThreadingHeaders(message)
-  const bodies = await remoteDraftBodies(remote, provider)
+  const bodies = await remoteDraftBodies(remote, provider, requestOptions)
   const attachments = remoteDraftAttachments(message)
   // Gmail stores a draft as one document, so a reply comes back with its quoted
   // trail merged into the body. Recover the two columns, or the trail lands in
@@ -481,10 +485,11 @@ export async function reconcileRemoteDraft(
   accountId: string,
   value: ProviderDraft,
   provider: Pick<MailProvider, 'getAttachmentData'> | null = null,
-  now = Date.now()
+  now = Date.now(),
+  requestOptions?: ProviderRequestOptions
 ): Promise<DraftConflictDecision> {
   if (claimNonEditableOutboxDraft(db, accountId, value)) return 'local'
-  const remote = await parseRemoteDraft(db, accountId, value, provider, now)
+  const remote = await parseRemoteDraft(db, accountId, value, provider, now, requestOptions)
   const local = findLocalRow(db, accountId, remote)
   if (!local) {
     writeRemoteDraft(db, accountId, remote, undefined)
@@ -572,7 +577,7 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
   let pageToken: string | undefined
   let changed = false
   do {
-    const page = await provider.listDrafts(pageToken)
+    const page = await provider.listDrafts(pageToken, { priority: 'polling' })
     for (const summary of page.drafts) {
       remoteIds.add(summary.id)
       const known = knownDrafts.get(summary.id)
@@ -589,8 +594,10 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
       const decision = await reconcileRemoteDraft(
         db,
         accountId,
-        await provider.getDraft(summary.id),
-        provider
+        await provider.getDraft(summary.id, { priority: 'polling' }),
+        provider,
+        undefined,
+        { priority: 'polling' }
       )
       changed ||= canRepairThreadBinding || decision === 'remote'
     }

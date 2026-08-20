@@ -32,18 +32,22 @@ export class GmailMailProvider implements MailProvider {
   constructor(private readonly client: GmailClient) {}
 
   async modifyThread(threadId: string, add: string[], remove: string[]): Promise<void> {
-    await this.client.post(`/threads/${encodeURIComponent(threadId)}/modify`, {
-      addLabelIds: add,
-      removeLabelIds: remove
-    })
+    await this.client.post(
+      `/threads/${encodeURIComponent(threadId)}/modify`,
+      {
+        addLabelIds: add,
+        removeLabelIds: remove
+      },
+      { priority: 'action' }
+    )
   }
 
   async trashThread(threadId: string): Promise<void> {
-    await this.client.post(`/threads/${encodeURIComponent(threadId)}/trash`, {})
+    await this.client.post(`/threads/${encodeURIComponent(threadId)}/trash`, {}, { priority: 'action' })
   }
 
   async untrashThread(threadId: string): Promise<void> {
-    await this.client.post(`/threads/${encodeURIComponent(threadId)}/untrash`, {})
+    await this.client.post(`/threads/${encodeURIComponent(threadId)}/untrash`, {}, { priority: 'action' })
   }
 
   async saveDraft(
@@ -51,7 +55,11 @@ export class GmailMailProvider implements MailProvider {
     options?: ProviderRequestOptions
   ): Promise<string> {
     const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
-    const requestOptions = { retryTransient: false, signal: options?.signal }
+    const requestOptions = {
+      retryTransient: false,
+      signal: options?.signal,
+      priority: options?.priority ?? 'foreground'
+    }
     const result = draft.id
       ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, requestOptions)
       : await this.client.post<{ id: string }>('/drafts', body, requestOptions)
@@ -65,7 +73,8 @@ export class GmailMailProvider implements MailProvider {
     const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
     const result = await this.client.post<{ id: string }>('/drafts', body, {
       retryTransient: false,
-      signal: options?.signal
+      signal: options?.signal,
+      priority: options?.priority ?? 'send'
     })
     return result.id
   }
@@ -82,7 +91,7 @@ export class GmailMailProvider implements MailProvider {
           endsWithCrlf: true,
           open: draft.mime.open
         },
-        { signal: options?.signal }
+        { signal: options?.signal, priority: options?.priority ?? 'foreground' }
       )
       return result.id
     }
@@ -90,7 +99,8 @@ export class GmailMailProvider implements MailProvider {
     const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
     const result = await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, {
       retryTransient: false,
-      signal: options?.signal
+      signal: options?.signal,
+      priority: options?.priority ?? 'foreground'
     })
     return result.id
   }
@@ -98,7 +108,8 @@ export class GmailMailProvider implements MailProvider {
   async deleteDraft(id: string, options?: ProviderRequestOptions): Promise<void> {
     await this.client.delete(`/drafts/${encodeURIComponent(id)}`, {
       retryTransient: false,
-      signal: options?.signal
+      signal: options?.signal,
+      priority: options?.priority ?? 'foreground'
     })
   }
 
@@ -127,7 +138,8 @@ export class GmailMailProvider implements MailProvider {
       { id },
       {
         retryTransient: false,
-        signal: options?.signal
+        signal: options?.signal,
+        priority: options?.priority ?? 'send'
       }
     )
   }
@@ -205,12 +217,12 @@ export class GmailMailProvider implements MailProvider {
     return findDraftCandidate()
   }
 
-  getProfile(): Promise<ProviderProfile> {
-    return this.client.get('/profile')
+  getProfile(options?: ProviderRequestOptions): Promise<ProviderProfile> {
+    return this.client.get('/profile', undefined, options)
   }
 
-  async listLabels(): Promise<ProviderLabel[]> {
-    const result = await this.client.get<{ labels?: ProviderLabel[] }>('/labels')
+  async listLabels(options?: ProviderRequestOptions): Promise<ProviderLabel[]> {
+    const result = await this.client.get<{ labels?: ProviderLabel[] }>('/labels', undefined, options)
     return result.labels ?? []
   }
 
@@ -224,7 +236,7 @@ export class GmailMailProvider implements MailProvider {
       threads?: { id: string }[]
       nextPageToken?: string
       resultSizeEstimate?: number
-    }>('/threads', params)
+    }>('/threads', params, { priority: options.priority })
     return {
       threadIds: (result.threads ?? []).map((thread) => thread.id),
       nextPageToken: result.nextPageToken,
@@ -240,7 +252,7 @@ export class GmailMailProvider implements MailProvider {
         format,
         ...(format === 'metadata' ? { metadataHeaders: METADATA_HEADERS } : {})
       },
-      { signal: options.signal }
+      { signal: options.signal, priority: options.priority }
     )
   }
 
@@ -254,7 +266,7 @@ export class GmailMailProvider implements MailProvider {
         await this.client.get<{ data?: string }>(
           `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
           undefined,
-          { signal: options?.signal }
+          { signal: options?.signal, priority: options?.priority }
         )
       ).data
     } catch (error) {
@@ -275,11 +287,15 @@ export class GmailMailProvider implements MailProvider {
       history?: HistoryPage['history']
       historyId: string
       nextPageToken?: string
-    }>('/history', params)
+    }>('/history', params, { priority: 'polling' })
     return {
       history: result.history ?? [],
       historyId: result.historyId,
       nextPageToken: result.nextPageToken
     }
+  }
+
+  quotaMetrics(): ReturnType<GmailClient['quotaMetrics']> {
+    return this.client.quotaMetrics()
   }
 }
