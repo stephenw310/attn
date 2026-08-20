@@ -137,37 +137,43 @@ describe('composer HTML fidelity', () => {
     expect(quoted.html).toContain('<div data-attn-opaque=')
   })
 
-  it('keeps a cell inside its table when the cell carries formatting the sanitizer drops', () => {
-    // A `td`/`tr` region cannot stand alone: parsed outside its table the HTML
-    // parser drops the cell and keeps only its text, and a marker put in its
-    // place is foster-parented out of the table. Before the region was lifted to
-    // the enclosing table, `<td bgcolor>` dumped "Cell A" beside the table with
-    // no banner — in the editor and in outgoing mail. The presentational
-    // attribute itself is dropped by the import sanitizer, by design.
-    const shape = (html: string): { cells: string[]; stray: string } => {
-      const body = new DOMParser().parseFromString(html, 'text/html').body
-      const cells = [...body.querySelectorAll('td, th')].map((cell) => cell.textContent ?? '')
-      const stray = [...body.childNodes]
-        .filter((node) => node.nodeType === Node.TEXT_NODE)
-        .map((node) => node.textContent?.trim() ?? '')
-        .join('')
-      return { cells, stray }
-    }
+  it('freezes a table whole when a cell or row carries legacy presentational styling', () => {
+    // SPEC §9 #18a. Two things have to hold at once: the attributes survive
+    // sanitization (they used to be silently stripped), and the table freezes as
+    // one byte-exact region rather than being cut at the `td` — a region cut
+    // there cannot stand alone, because parsed outside its table the HTML parser
+    // drops the cell and keeps only its text, and a marker put in its place is
+    // foster-parented out of the table.
     const cases = [
       '<table><tbody><tr><td bgcolor="#eeeeee">Cell A</td><td>Cell B</td></tr></tbody></table>',
       '<table><tbody><tr bgcolor="#ffffff"><td>Row</td></tr></tbody></table>',
       '<table><tbody><tr><td align="center">Text</td></tr></tbody></table>',
       '<table><tbody><tr><td valign="top" style="padding:4px">Text</td></tr></tbody></table>',
-      '<table><tbody><tr><td style="vertical-align:top;overflow:hidden">Docs cell</td></tr></tbody></table>'
+      '<table border="0" cellpadding="0" cellspacing="0"><tbody><tr><td>Newsletter</td></tr></tbody></table>'
     ]
     for (const html of cases) {
       const prepared = prepareHtmlForEditor(html)
-      const outgoing = restoreOpaqueHtml(sanitizeOutgoingHtml(prepared.html))
-      // Sanitizer-dropped formatting never freezes: the table stays editable.
-      expect(prepared.html, html).not.toContain('data-attn-opaque')
-      expect(shape(prepared.html), html).toEqual({ ...shape(html), stray: '' })
-      expect(shape(outgoing), html).toEqual({ ...shape(html), stray: '' })
+      expect(prepared.issues.length, html).toBeGreaterThan(0)
+      expect(prepared.html, html).toMatch(/^<div data-attn-opaque="[A-Za-z0-9_-]+"><\/div>$/)
+      expect(restoreOpaqueHtml(prepared.html), html).toBe(html)
+      expect(restoreOpaqueHtml(sanitizeOutgoingHtml(prepared.html)), html).toBe(html)
     }
+  })
+
+  it('reports one issue per distinct reason when a table is frozen for its cell', () => {
+    const prepared = prepareHtmlForEditor(
+      '<table><tbody><tr><td bgcolor="#eee">A</td><td bgcolor="#ddd">B</td></tr></tbody></table>'
+    )
+    expect(prepared.issues).toEqual(['td[bgcolor]'])
+  })
+
+  it('leaves a table with no legacy styling fully editable', () => {
+    const html = '<table><tbody><tr><td>Plain</td><td colspan="2">Wide</td></tr></tbody></table>'
+    const prepared = prepareHtmlForEditor(html)
+
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).not.toContain('data-attn-opaque')
+    expect(prepared.html).toContain('<td colspan="2">Wide</td>')
   })
 
   it('freezes the whole table when a cell holds content the editor cannot represent', () => {

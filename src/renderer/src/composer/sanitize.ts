@@ -116,11 +116,39 @@ function installStyleHook(purifier: DOMPurify): void {
 }
 
 const SAFE_URI = /^(?:(?:https?|mailto|cid):|data:image\/(?:png|jpeg|gif|webp);base64,)/i
-const URI_SAFE_ATTRIBUTES = ['width', 'height', 'colspan', 'rowspan', 'start']
+/**
+ * Presentational table attributes real mail still ships (SPEC §9 #18a). They
+ * carry no URL and run nothing, but every legacy mail client honours them, so
+ * dropping them silently repainted a table on open. They are deliberately *not*
+ * in the editor's representable set (`preserve.ts`), so a table carrying them
+ * freezes whole as a byte-exact opaque region rather than being edited lossily.
+ * `background` stays out: its value is a URL and belongs to the image policy.
+ */
+const LEGACY_TABLE_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'border', 'cellpadding', 'cellspacing']
+const TABLE_ELEMENTS = new Set(['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'])
+// Values like `#eeeeee` or `center` are not URIs, and ALLOWED_URI_REGEXP is
+// applied to every attribute value DOMPurify does not know is URI-free — which
+// is exactly how these were being stripped before #18a.
+const URI_SAFE_ATTRIBUTES = ['width', 'height', 'colspan', 'rowspan', 'start', ...LEGACY_TABLE_ATTRIBUTES]
+
+const legacyTableHooked = new WeakSet<DOMPurify>()
+
+/** Keep the legacy attributes scoped to tables; elsewhere they stay dropped. */
+function installLegacyTableAttributeHook(purifier: DOMPurify): void {
+  if (legacyTableHooked.has(purifier)) return
+  legacyTableHooked.add(purifier)
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    const element = node as Element
+    if (typeof element.getAttribute !== 'function') return
+    if (TABLE_ELEMENTS.has(element.tagName.toLowerCase())) return
+    for (const attribute of LEGACY_TABLE_ATTRIBUTES) element.removeAttribute(attribute)
+  })
+}
 
 function purifier(): DOMPurify {
   outgoingPurifier ??= createDOMPurify(window)
   installStyleHook(outgoingPurifier)
+  installLegacyTableAttributeHook(outgoingPurifier)
   if (!outgoingDataHooked.has(outgoingPurifier)) {
     outgoingDataHooked.add(outgoingPurifier)
     outgoingPurifier.addHook('uponSanitizeAttribute', (_node, data) => {
@@ -176,6 +204,7 @@ export function sanitizeOutgoingHtml(html: string): string {
       'colspan',
       'rowspan',
       'start',
+      ...LEGACY_TABLE_ATTRIBUTES,
       'style',
       'data-attn-cid',
       'data-attn-opaque',
@@ -199,6 +228,7 @@ export function sanitizeOutgoingHtml(html: string): string {
 export function sanitizeDraftHtmlForImport(html: string): string {
   importPurifier ??= createDOMPurify(window)
   installStyleHook(importPurifier)
+  installLegacyTableAttributeHook(importPurifier)
   if (!importAttributesHooked.has(importPurifier)) {
     importAttributesHooked.add(importPurifier)
     importPurifier.addHook('uponSanitizeAttribute', (_node, data) => {
