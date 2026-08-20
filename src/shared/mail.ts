@@ -100,7 +100,9 @@ export type SyncState =
   | { phase: 'syncing'; stage: SyncStage; threadsDone: number }
   | {
       phase: 'indexing'
-      stage: 'lifetime'
+      // 'lifetime' walks account headers; 'attachments' is the short ids-only
+      // tail that flags which stored threads carry an attachment (SPEC §9 #18c).
+      stage: 'lifetime' | 'attachments'
       threadsDone: number
       threadsTotal?: number
       messagesTotal?: number

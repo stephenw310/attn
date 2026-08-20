@@ -53,7 +53,7 @@ Parallelization: S1 and S2 are independent of each other and can run side by sid
 
 ## Global rules (carried from M2, still binding)
 
-1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION` (currently 14, after T16's revision 13 and T13A's revision 14). Throwaway profiles may be deleted and re-synced; a real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and **every schema-changing task publishes its exact DDL**.
+1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION` (currently 15, after T16's revision 13, T13A's revision 14, and the attachment-flag cursor's revision 15). Throwaway profiles may be deleted and re-synced; a real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and **every schema-changing task publishes its exact DDL**.
 2. **IPC has three parts** (main handler, preload bridge, typed channel map in `src/shared/`) — all in the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike.
 4. **Select on `data-testid`** in e2e.
@@ -236,4 +236,4 @@ These are the milestone's feature half. They depend on S1–S4 and get planned o
 |---|---|---|
 | Does the utility process own SQLite, or does main? | Reaches most of `src/main/`; two writers is a corruption bug | S1 design |
 | Pathological-mailbox posture — design target (e.g. smooth to 250k messages), then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages; lifetime headers can exceed that | S3, informed by T13A's real-mailbox measurement |
-| ~~Is the lifetime attachment-flag walk (`q=has:attachment`, ids only) worth its ~1% cost?~~ **Decided yes (owner, 2026-08-17, SPEC §9 #18c)** | Makes `has:attachment` trustworthy locally before mail is hydrated | Implement beside the sweep |
+| ~~Is the lifetime attachment-flag walk (`q=has:attachment`, ids only) worth its ~1% cost?~~ **Decided yes (owner, 2026-08-17, SPEC §9 #18c); shipped as `sync/attachmentFlags.ts`** | Makes `has:attachment` trustworthy locally before mail is hydrated | Closed |

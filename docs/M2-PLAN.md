@@ -4,7 +4,7 @@
 **Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through draft PR #38.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Current progress (2026-08-16):** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window), T16 (#45), T17 (#48), T18 (#47), and T19 (#41) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, T14E shipped in #50, and #52 fixed the composer bugs found while dogfooding them. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) shipped in #51; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). **Open for M2 exit:** T21 (the poller's label-catalog refresh, found during that review — not yet implemented), T20 (hardening and sign-off), and the manual real-Gmail evidence items listed in the T20 exit checklist. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
+**Current progress (2026-08-19):** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window), T16 (#45), T17 (#48), T18 (#47), and T19 (#41) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, T14E shipped in #50, and #52 fixed the composer bugs found while dogfooding them. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) shipped in #51; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). T21's poll-cycle label-catalog refresh is implemented with authoritative add/rename/delete semantics and change-only renderer invalidation. **Open for M2 exit:** T20 (hardening and sign-off) and the manual real-Gmail evidence items listed in the T20 exit checklist. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
@@ -276,9 +276,21 @@ them too.
   anything twice, and this task's code did not change when that stage landed. The one thing this sweep can
   never reach is Spam and Trash — unfiltered listings exclude both — which is why those are explicit label
   stages rather than a widening of this walk.
-- **Decided (owner, 2026-08-17, SPEC §9 #18c): run the listing-only `q=has:attachment` walk** (ids only,
-  ~1% of sweep cost) to set the thread-level attachment flag lifetime-wide; header-only threads still gain
-  full attachment metadata on first hydration (F2).
+- **Decided (owner, 2026-08-17, SPEC §9 #18c) and shipped: the listing-only `q=has:attachment` walk** (ids
+  only, ~1% of sweep cost) sets the thread-level attachment flag lifetime-wide; header-only threads still
+  gain full attachment metadata on first hydration (F2). It lives in `src/main/sync/attachmentFlags.ts`
+  with its own resumable cursor, runs as the tail of `startLifetimeSweep` (so it also runs on a launch where
+  the sweep itself has nothing left to do), shares the sweep's yield/cancel posture, and only ever *raises*
+  the flag on threads the store already holds — absence from the listing is not evidence, since the listing
+  excludes Spam/Trash and answers from Gmail's own index. Schema revision 14 → 15; local dogfood upgrade DDL
+  (AGENTS.md procedure):
+
+  ```sql
+  BEGIN IMMEDIATE;
+  ALTER TABLE sync_state ADD COLUMN attachment_cursor TEXT;
+  PRAGMA user_version = 15;
+  COMMIT;
+  ```
 - The saved-Google-Contacts (People API) decision is unchanged from v0.14: different address source,
   additional consent scope, separate opt-in task if ever approved — never silently bundled.
 - **Schema:** add `sweep_cursor`, `sweep_threads_done`, and `sweep_threads_total` to `sync_state`, plus
@@ -875,7 +887,7 @@ The closing pass that turns "features exist" into "this is my mail client":
 
 Status annotations as of 2026-08-16 (a review pass over `main` at #52 — `npm run verify` green: typecheck, lint, 486 unit tests, 109 e2e specs):
 
-- [ ] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites — *every task except **T21** is merged; T21 is the last unimplemented M2 task*
+- [ ] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites — *all planned implementation tasks are complete; T21 still needs to merge with its green verification run before this merge-level checkbox closes*
 - [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links) — *automated coverage exists for composer open, force-quit recovery, undo-send, and no-duplicate-send at unit level; the closing PR still has to cite it*
 - [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates — *manual evidence outstanding*
 - [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data — *not started (T20 items 1–2)*
@@ -944,7 +956,7 @@ coverage proves completion, cancellation, timeout, and view-change reset behavio
 
 ## T21 — Label-catalog refresh in the poller
 
-**Status: not yet implemented (found during the SPEC §9 #17 sync review; still open for M2 exit as of 2026-08-16 — `listLabels()` runs only at backfill start, `src/main/sync/backfill.ts:98`, and `upsertLabels` has no delete semantics).** · **Depends on:** nothing · **Parallel with:** everything · **Spec:** F2 incremental
+**Status: implemented (2026-08-19).** · **Depends on:** nothing · **Parallel with:** everything · **Spec:** F2 incremental
 
 ### Why
 

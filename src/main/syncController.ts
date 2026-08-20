@@ -7,8 +7,10 @@ import { syncRemoteDrafts } from './outbox/draftSync'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
+import { type AttachmentFlagProgress, runAttachmentFlagWalk } from './sync/attachmentFlags'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
+import { syncLabelCatalog } from './sync/labels'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
 import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
@@ -181,7 +183,7 @@ export class SyncController {
     const previous = this.lifetimeProgress
     this.lifetimeProgress = {
       phase: 'indexing',
-      stage: 'lifetime',
+      stage: previous?.stage ?? 'lifetime',
       threadsDone: previous?.threadsDone ?? 0,
       ...(previous?.threadsTotal === undefined ? {} : { threadsTotal: previous.threadsTotal }),
       ...(previous?.messagesTotal === undefined ? {} : { messagesTotal: previous.messagesTotal }),
@@ -356,6 +358,7 @@ export class SyncController {
         this.publishForegroundFailure(error, '[sync] history poll failed')
       },
       wakeThread: (threadId) => this.context.getSnoozeScheduler()?.wakeThread(threadId),
+      syncLabels: () => syncLabelCatalog(this.context.db, accountId, provider),
       syncDrafts: () => syncRemoteDrafts(this.context.db, accountId, provider),
       kickExecutor: () => {
         void this.context.getActionExecutor()?.trigger()
@@ -376,40 +379,71 @@ export class SyncController {
     const lifetimeRunId = ++this.lifetimeRunId
     let failed = false
     console.log(`[sync] lifetime header sweep started for ${accountId}`)
+    const active = (): boolean => generation === this.generation && lifetimeRunId === this.lifetimeRunId
+    // Both passes share one posture: the same cancellation guard, the same
+    // yield-to-foreground rule, and the same retry ladder.
+    const pacing = {
+      shouldContinue: () => !this.stopped && active() && this.context.currentAccountId() === accountId,
+      shouldYield: () => this.shouldYieldLifetime(accountId)
+    }
+    const pause = (error: unknown, prefix: string): void => {
+      failed = true
+      this.lifetimeRunning = false
+      if (this.publishLifetimePause(error, prefix)) {
+        this.scheduleLifetimeRetry(accountId, provider, generation)
+      }
+    }
     void runLifetimeSweep(
       this.context.db,
       provider,
       accountId,
       {
         onProgress: (progress) => {
-          if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
+          if (!active()) return
           this.publishLifetimeProgress(progress)
         },
         onError: (error) => {
-          if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
-          failed = true
-          this.lifetimeRunning = false
-          if (this.publishLifetimePause(error, '[sync] lifetime header sweep failed')) {
-            this.scheduleLifetimeRetry(accountId, provider, generation)
-          }
+          if (!active()) return
+          pause(error, '[sync] lifetime header sweep failed')
         }
       },
-      {
-        shouldContinue: () =>
-          !this.stopped &&
-          generation === this.generation &&
-          lifetimeRunId === this.lifetimeRunId &&
-          this.context.currentAccountId() === accountId,
-        shouldYield: () => this.shouldYieldLifetime(accountId)
-      }
+      pacing
     )
-      .then((result) => {
-        if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
+      .then(async (result) => {
+        if (!active()) return
+        if (!result || failed) {
+          this.lifetimeRunning = false
+          return
+        }
+        console.log(`[sync] lifetime header sweep done: ${result.threadCount} threads for ${accountId}`)
+        // The ids-only attachment tail runs on the sweep's completion, including
+        // the launch where the sweep itself has nothing left to do.
+        const flags = await runAttachmentFlagWalk(
+          this.context.db,
+          provider,
+          accountId,
+          {
+            onProgress: (progress) => {
+              if (!active()) return
+              this.publishAttachmentProgress(progress)
+            },
+            onError: (error) => {
+              if (!active()) return
+              pause(error, '[sync] attachment index failed')
+            }
+          },
+          pacing
+        )
+        if (!active()) return
         this.lifetimeRunning = false
-        if (!result || failed) return
+        if (!flags || failed) return
         this.lifetimeProgress = null
         this.publishSettledState()
-        console.log(`[sync] lifetime header sweep done: ${result.threadCount} threads for ${accountId}`)
+        if (flags.threadsFlagged > 0) {
+          console.log(
+            `[sync] attachment index done: ${flags.threadsFlagged} threads flagged for ${accountId}`
+          )
+        }
       })
       .catch((error) => {
         if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
@@ -429,6 +463,21 @@ export class SyncController {
     // headers and contact projections are queried on demand, so broadcasting a
     // visible-mail refresh here only makes the renderer rebuild its list and
     // reader after every archival page with no possible UI change.
+  }
+
+  private publishAttachmentProgress(progress: AttachmentFlagProgress): void {
+    const { mailChanged, threadsFlagged, ...details } = progress
+    this.lifetimeProgress = {
+      phase: 'indexing',
+      stage: 'attachments',
+      threadsDone: threadsFlagged,
+      ...details
+    }
+    if (!this.running && !this.pollerRunning && !this.foregroundFailure) {
+      this.setState(this.lifetimeProgress)
+    }
+    // Raising the flag repaints attachment chips in the already-rendered list.
+    if (mailChanged) this.context.broadcastMailChanged()
   }
 
   private publishSettledState(): void {

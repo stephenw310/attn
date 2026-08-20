@@ -287,7 +287,7 @@ async function initialize(): Promise<void> {
     const existing = db.prepare('SELECT id FROM accounts ORDER BY created_at LIMIT 1').get() as
       | { id: string }
       | undefined
-    seedAccountId = existing?.id ?? loadSeed(db, seedPath)
+    seedAccountId = existing?.id ?? loadSeed(db, seedPath).accountId
     console.log(`[sync] backfill stages skipped for seeded account ${seedAccountId}`)
   }
   const activeDb = db

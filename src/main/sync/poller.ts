@@ -203,6 +203,7 @@ export interface HistoryPollerOptions {
   onError: (error: unknown) => void
   wakeThread?: (threadId: string) => void
   kickExecutor?: () => void
+  syncLabels?: () => Promise<boolean | undefined>
   syncDrafts?: () => Promise<boolean | undefined>
   runCycle?: typeof runHistoryCycle
   time?: SchedulerTime
@@ -277,6 +278,14 @@ export class HistoryPoller {
           this.recoveryPending = false
         }
       }
+      let labelsChanged = false
+      if (!this.stopped && this.options.syncLabels) {
+        try {
+          labelsChanged = (await this.options.syncLabels()) === true
+        } catch (error) {
+          console.warn(`[sync] label catalog refresh failed: ${errorMessage(error)}`)
+        }
+      }
       let draftsChanged = false
       if (!this.stopped && this.options.syncDrafts) {
         try {
@@ -286,7 +295,9 @@ export class HistoryPoller {
         }
       }
       if (this.stopped) return
-      this.options.onCycleComplete(draftsChanged || plan === null || plan.refetchThreadIds.length > 0)
+      this.options.onCycleComplete(
+        labelsChanged || draftsChanged || plan === null || plan.refetchThreadIds.length > 0
+      )
       this.options.kickExecutor?.()
       if (plan && plan.newMail.length > 0) historyEvents.emit('newMail', plan.newMail)
     } catch (error) {
