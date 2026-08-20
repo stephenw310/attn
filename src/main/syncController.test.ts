@@ -7,6 +7,11 @@ import type { GmailMailProvider } from './gmail/provider'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
 import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
+import type {
+  AttachmentFlagCallbacks,
+  AttachmentFlagOptions,
+  AttachmentFlagResult
+} from './sync/attachmentFlags'
 import type { BackfillCallbacks, BackfillResult } from './sync/backfill'
 import type { LifetimeSweepCallbacks, LifetimeSweepOptions, LifetimeSweepResult } from './sync/lifetimeSweep'
 import type { HistoryPollerOptions } from './sync/poller'
@@ -34,6 +39,7 @@ const mocks = vi.hoisted(() => {
     FakePoller,
     runInboxBackfill: vi.fn(),
     runLifetimeSweep: vi.fn(),
+    runAttachmentFlagWalk: vi.fn(),
     syncLabelCatalog: vi.fn(),
     reconcileInboxMembership: vi.fn(),
     reconcilePurgeableMembership: vi.fn(async () => {})
@@ -56,6 +62,10 @@ vi.mock('./sync/lifetimeSweep', async (importOriginal) => ({
   runLifetimeSweep: mocks.runLifetimeSweep
 }))
 vi.mock('./sync/labels', () => ({ syncLabelCatalog: mocks.syncLabelCatalog }))
+vi.mock('./sync/attachmentFlags', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./sync/attachmentFlags')>()),
+  runAttachmentFlagWalk: mocks.runAttachmentFlagWalk
+}))
 const { SyncController } = await import('./syncController')
 
 interface Deferred<T> {
@@ -99,6 +109,11 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     options: LifetimeSweepOptions
     result: Deferred<LifetimeSweepResult | null>
   }> = []
+  const attachmentWalks: Array<{
+    callbacks: AttachmentFlagCallbacks
+    options: AttachmentFlagOptions
+    result: Deferred<AttachmentFlagResult | null>
+  }> = []
   const trigger = vi.fn(async () => {})
   const mirrorTrigger = vi.fn(async () => {})
   const outboxTrigger = vi.fn(async () => {})
@@ -115,6 +130,14 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     (_db, _provider, _accountId, callbacks: LifetimeSweepCallbacks, sweepOptions: LifetimeSweepOptions) => {
       const result = deferred<LifetimeSweepResult | null>()
       lifetimeSweeps.push({ callbacks, options: sweepOptions, result })
+      return result.promise
+    }
+  )
+
+  mocks.runAttachmentFlagWalk.mockImplementation(
+    (_db, _provider, _accountId, callbacks: AttachmentFlagCallbacks, walkOptions: AttachmentFlagOptions) => {
+      const result = deferred<AttachmentFlagResult | null>()
+      attachmentWalks.push({ callbacks, options: walkOptions, result })
       return result.promise
     }
   )
@@ -155,6 +178,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     states,
     backfills,
     lifetimeSweeps,
+    attachmentWalks,
     trigger,
     mirrorTrigger,
     outboxTrigger,
@@ -168,6 +192,7 @@ beforeEach(() => {
   mocks.FakePoller.instances = []
   mocks.runInboxBackfill.mockReset()
   mocks.runLifetimeSweep.mockReset()
+  mocks.runAttachmentFlagWalk.mockReset()
   mocks.syncLabelCatalog.mockReset()
   mocks.reconcileInboxMembership.mockReset()
   mocks.reconcilePurgeableMembership.mockReset()
@@ -402,7 +427,7 @@ describe('backfill to poller handoff', () => {
   })
 
   it('publishes lifetime progress as live indexing and restores it after a history cycle', async () => {
-    const { controller, lifetimeSweeps, states } = harness({ backfillCursor: 'done' })
+    const { controller, lifetimeSweeps, attachmentWalks, states } = harness({ backfillCursor: 'done' })
     controller.retry()
     const sweep = lifetimeSweeps[0]
 
@@ -460,9 +485,70 @@ describe('backfill to poller handoff', () => {
       waitMs: 250
     })
 
+    // Indexing is not over when the header sweep ends: the ids-only attachment
+    // tail follows it, and only its completion settles the footer.
     sweep.result.resolve({ threadCount: 2_000 })
     await flush()
+    expect(states.at(-1)).not.toEqual({ phase: 'idle' })
+    attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await flush()
     expect(states.at(-1)).toEqual({ phase: 'idle' })
+  })
+
+  it('runs the ids-only attachment index after the sweep, under the same pacing', async () => {
+    const { controller, lifetimeSweeps, attachmentWalks, states, broadcastMailChanged } = harness({
+      backfillCursor: 'done'
+    })
+    controller.onSignIn()
+    expect(attachmentWalks).toHaveLength(0)
+
+    lifetimeSweeps[0].result.resolve({ threadCount: 12 })
+    await flush()
+
+    expect(attachmentWalks).toHaveLength(1)
+    // One posture for both passes: the sweep's cancellation and yield rules.
+    expect(attachmentWalks[0].options.shouldYield).toBe(lifetimeSweeps[0].options.shouldYield)
+
+    attachmentWalks[0].callbacks.onProgress({ threadsFlagged: 3, reason: 'running', mailChanged: true })
+    expect(states.at(-1)).toEqual({
+      phase: 'indexing',
+      stage: 'attachments',
+      threadsDone: 3,
+      reason: 'running'
+    })
+    // Raising the flag has to repaint the chips already on screen.
+    expect(broadcastMailChanged).toHaveBeenCalled()
+
+    attachmentWalks[0].result.resolve({ threadsFlagged: 3 })
+    await flush()
+    expect(states.at(-1)).toEqual({ phase: 'idle' })
+  })
+
+  it('does not start the attachment index when the sweep did not finish', async () => {
+    const { controller, lifetimeSweeps, attachmentWalks } = harness({ backfillCursor: 'done' })
+    controller.onSignIn()
+
+    lifetimeSweeps[0].result.resolve(null)
+    await flush()
+
+    expect(attachmentWalks).toHaveLength(0)
+  })
+
+  it('keeps a paused attachment index reporting its own stage', async () => {
+    const { controller, lifetimeSweeps, attachmentWalks, states } = harness({ backfillCursor: 'done' })
+    controller.onSignIn()
+    lifetimeSweeps[0].result.resolve({ threadCount: 0 })
+    await flush()
+
+    attachmentWalks[0].callbacks.onProgress({ threadsFlagged: 1, reason: 'running', mailChanged: false })
+    attachmentWalks[0].callbacks.onError(new GmailApiError(429, 'quota', true))
+
+    expect(states.at(-1)).toMatchObject({
+      phase: 'indexing',
+      stage: 'attachments',
+      reason: 'retry-wait',
+      threadsDone: 1
+    })
   })
 
   it('makes the sweep yield while mail actions, sends, hydration, or history polling have priority', () => {

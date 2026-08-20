@@ -92,7 +92,9 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
             ? `Indexing paused · retrying soon · ${lifetimeCount}`
             : sync.reason === 'paused'
               ? `Indexing paused · ${lifetimeCount}`
-              : `${lifetimeCount} indexed${lifetimeEta(sync.etaMs)}`
+              : sync.stage === 'attachments'
+                ? `Attachment index · ${lifetimeCount} flagged`
+                : `${lifetimeCount} indexed${lifetimeEta(sync.etaMs)}`
 
   const closeDetails = useCallback(() => {
     setDetailsOpen(false)
