@@ -20,6 +20,11 @@ export interface LabelRow {
   type: string
 }
 
+export interface LabelCatalogPlan {
+  upsert: LabelRow[]
+  removeIds: string[]
+}
+
 /** Idempotently register an account row (account id doubles as the email in v1). */
 export function ensureAccount(db: Db, accountId: string, email: string): void {
   db.prepare('INSERT OR IGNORE INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
@@ -29,13 +34,41 @@ export function ensureAccount(db: Db, accountId: string, email: string): void {
   )
 }
 
-/** Upsert label rows — the one statement both backfill and seeding go through. */
-export function upsertLabels(db: Db, accountId: string, labels: LabelRow[]): void {
+/** Compare a stored catalog with one complete, authoritative provider listing. */
+export function planLabelCatalogUpdate(
+  existing: readonly LabelRow[],
+  authoritative: readonly LabelRow[]
+): LabelCatalogPlan {
+  const existingById = new Map(existing.map((label) => [label.id, label]))
+  const authoritativeById = new Map(authoritative.map((label) => [label.id, label]))
+  return {
+    upsert: [...authoritativeById.values()].filter((label) => {
+      const stored = existingById.get(label.id)
+      return !stored || stored.name !== label.name || stored.type !== label.type
+    }),
+    removeIds: [...existingById.keys()].filter((id) => !authoritativeById.has(id))
+  }
+}
+
+/**
+ * Replace the local catalog with an authoritative provider listing. Label
+ * membership rows deliberately remain: history/reconciliation owns them.
+ */
+export function upsertLabels(db: Db, accountId: string, labels: LabelRow[]): boolean {
+  const selectExisting = db.prepare('SELECT id, name, type FROM labels WHERE account_id = ?')
   const upsert = db.prepare(
     `INSERT INTO labels (account_id, id, name, type) VALUES (?, ?, ?, ?)
      ON CONFLICT(account_id, id) DO UPDATE SET name = excluded.name, type = excluded.type`
   )
-  for (const label of labels) upsert.run(accountId, label.id, label.name, label.type)
+  const remove = db.prepare('DELETE FROM labels WHERE account_id = ? AND id = ?')
+  return db.transaction(() => {
+    const existing = selectExisting.all(accountId) as LabelRow[]
+    const plan = planLabelCatalogUpdate(existing, labels)
+    if (plan.upsert.length === 0 && plan.removeIds.length === 0) return false
+    for (const label of plan.upsert) upsert.run(accountId, label.id, label.name, label.type)
+    for (const id of plan.removeIds) remove.run(accountId, id)
+    return true
+  })()
 }
 
 export interface PersistThreadOptions {

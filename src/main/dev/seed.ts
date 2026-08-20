@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type { Db } from '../db'
 import type { GmailPart, GmailThread } from '../gmail/parse'
-import { ensureAccount, persistThread, upsertLabels } from '../sync/persist'
+import { ensureAccount, type LabelRow, persistThread, upsertLabels } from '../sync/persist'
 
 interface SeedMessage {
   id: string
@@ -42,8 +42,18 @@ interface SeedMessage {
 
 interface SeedFixture {
   account: string
-  labels?: { id: string; name: string; type: string }[]
+  labels?: LabelRow[]
   threads: { id: string; historyId?: string; messages: SeedMessage[] }[]
+}
+
+export interface SeedLoadOptions {
+  /** E2E-only authoritative catalog override; ordinary seeding uses the fixture catalog. */
+  labels?: LabelRow[]
+}
+
+export interface SeedLoadResult {
+  accountId: string
+  labelsChanged: boolean
 }
 
 function readSeedFixture(path: string): SeedFixture {
@@ -141,15 +151,16 @@ export function readSeedThread(path: string, threadId: string, now = Date.now())
   return thread ? gmailThreadFor(thread, now) : null
 }
 
-export function loadSeed(db: Db, path: string): string {
+export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): SeedLoadResult {
   const fixture = readSeedFixture(path)
   const importedAt = Date.now()
+  let labelsChanged = false
 
   db.transaction(() => {
     // Same write path as real sync (persist.ts) — the seam must never grow
     // parallel SQL that can drift from what production writes.
     ensureAccount(db, fixture.account, fixture.account)
-    upsertLabels(db, fixture.account, fixture.labels ?? [])
+    labelsChanged = upsertLabels(db, fixture.account, options.labels ?? fixture.labels ?? [])
     for (const thread of fixture.threads) {
       persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))
     }
@@ -165,5 +176,5 @@ export function loadSeed(db: Db, path: string): string {
   })()
 
   console.log(`[seed] loaded ${fixture.threads.length} threads for ${fixture.account}`)
-  return fixture.account
+  return { accountId: fixture.account, labelsChanged }
 }

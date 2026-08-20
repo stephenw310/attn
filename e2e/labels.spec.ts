@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
@@ -86,6 +87,24 @@ test('shows existing user-label membership without system labels', async ({ page
   await expect(options).toHaveCount(12)
   await expect(options.filter({ hasText: 'receipts' })).toHaveAttribute('data-state', 'all')
   await expect(options.filter({ hasText: 'projects' })).toHaveAttribute('data-state', 'off')
+})
+
+test('refreshes the picker from an authoritative renamed label catalog', async ({ app, page }) => {
+  const error = await app.evaluate(
+    ({ ipcMain }, { channel, labels }) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(channel, {}, labels, resolve)),
+    {
+      channel: TEST_CHANNELS.reloadSeed,
+      labels: [{ id: 'Label_2', name: 'active projects', type: 'user' }]
+    }
+  )
+  if (error) throw new Error(error)
+
+  await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
+  await page.keyboard.press('l')
+  const options = page.getByTestId('label-option')
+  await expect(options).toHaveCount(1)
+  await expect(options).toContainText('active projects')
 })
 
 test('wraps picker navigation at both ends and scrolls the highlight into view', async ({ page }) => {

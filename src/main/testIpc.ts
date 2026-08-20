@@ -17,7 +17,7 @@ import type { GmailThread } from './gmail/parse'
 import { reconcileRemoteDraft } from './outbox/draftSync'
 import { writeSetting } from './settings'
 import { runLifetimeSweep } from './sync/lifetimeSweep'
-import { deleteThread } from './sync/persist'
+import { deleteThread, type LabelRow } from './sync/persist'
 import type { MailProvider } from './sync/provider'
 import type { SyncController } from './syncController'
 
@@ -44,6 +44,20 @@ interface LifetimeSweepRequest {
   offlineAtPageToken?: string
   threadsTotal?: number
   messagesTotal?: number
+}
+
+function isLabelRows(value: unknown): value is LabelRow[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (label) =>
+        typeof label === 'object' &&
+        label !== null &&
+        typeof (label as LabelRow).id === 'string' &&
+        typeof (label as LabelRow).name === 'string' &&
+        typeof (label as LabelRow).type === 'string'
+    )
+  )
 }
 
 export class TestSeams {
@@ -111,20 +125,31 @@ export class TestSeams {
     ipcMain.on(TEST_CHANNELS.setSyncState, (_event, state: SyncState) =>
       this.deps.syncController()?.setStateForTest(state)
     )
-    ipcMain.on(TEST_CHANNELS.reloadSeed, (_event, done: (error?: string) => void) => {
-      // Avoid re-entering better-sqlite3 if the renderer is finishing an IPC read
-      // in the same turn, and let the test wait for the replay to commit.
-      setImmediate(() => {
-        try {
-          const db = this.deps.db()
-          const seedPath = this.deps.seedPath()
-          if (db && seedPath) loadSeed(db, seedPath)
-          done()
-        } catch (error) {
-          done(errorMessage(error))
-        }
-      })
-    })
+    ipcMain.on(
+      TEST_CHANNELS.reloadSeed,
+      (_event, labelsOrDone: unknown, maybeDone?: (error?: string) => void) => {
+        const done =
+          typeof labelsOrDone === 'function' ? (labelsOrDone as (error?: string) => void) : maybeDone
+        const labels = typeof labelsOrDone === 'function' ? undefined : labelsOrDone
+        // Avoid re-entering better-sqlite3 if the renderer is finishing an IPC read
+        // in the same turn, and let the test wait for the replay to commit.
+        setImmediate(() => {
+          try {
+            const db = this.deps.db()
+            const seedPath = this.deps.seedPath()
+            if (!db || !seedPath) throw new Error('seed store unavailable')
+            if (labels !== undefined && !isLabelRows(labels)) {
+              throw new Error('invalid authoritative label catalog')
+            }
+            const result = loadSeed(db, seedPath, labels === undefined ? {} : { labels })
+            if (result.labelsChanged) this.deps.broadcastMailChanged()
+            done?.()
+          } catch (error) {
+            done?.(errorMessage(error))
+          }
+        })
+      }
+    )
     ipcMain.on(TEST_CHANNELS.deleteThread, (_event, threadId: unknown, done?: (error?: string) => void) => {
       // Inspector evaluation can interrupt a renderer-initiated synchronous
       // SQLite read. Defer this test mutation onto the next main-loop turn.

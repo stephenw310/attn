@@ -9,6 +9,7 @@ import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
+import { syncLabelCatalog } from './sync/labels'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
 import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
@@ -356,6 +357,7 @@ export class SyncController {
         this.publishForegroundFailure(error, '[sync] history poll failed')
       },
       wakeThread: (threadId) => this.context.getSnoozeScheduler()?.wakeThread(threadId),
+      syncLabels: () => syncLabelCatalog(this.context.db, accountId, provider),
       syncDrafts: () => syncRemoteDrafts(this.context.db, accountId, provider),
       kickExecutor: () => {
         void this.context.getActionExecutor()?.trigger()

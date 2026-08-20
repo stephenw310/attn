@@ -13,6 +13,7 @@ interface FakeSyncState {
 function fakeDb(state: FakeSyncState | undefined, existingThreadIds = new Set<string>()): Db {
   return {
     prepare: (sql: string) => ({
+      all: () => [],
       get: (...args: unknown[]) => {
         if (sql.startsWith('SELECT backfill_cursor')) return state
         if (sql.startsWith('SELECT 1 FROM threads')) {
