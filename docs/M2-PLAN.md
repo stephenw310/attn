@@ -883,7 +883,7 @@ the memory definition, quota configuration, real-Gmail capture template, and dog
 1. **10k-thread decision (F3):** generate a 10k perf seed locally, measure list render + scroll frame times + memory against §7. If the mounted list misses, implement fixed-height windowing by hand (rows are uniform; ~150 lines, no dependency) and re-measure; if it passes, raise the 300-row query cap to the measured-safe bound and record the evidence. Either way the deviation rows (virtualization, 300-cap) resolve with data, not vibes.
 2. **Composer latency profile:** measure keystroke-to-paint under a 2k store with the profiler, not just the CI ceiling; fix anything over ~8ms median so the 16ms budget has headroom.
 3. **Gmail client weighted token-bucket limiter** (the reworded M1 TODO): pace requests by their per-method quota cost and the OAuth project's actual quota, reserving capacity for sends, queued user actions, and history polling before background backfill. Google's quota model changed in May 2026, so do not fossilize the old “200 units/user/100s” example; keep costs/configuration explicit and link the [authoritative Gmail quota table](https://developers.google.com/workspace/gmail/api/reference/quota). Unit-test scheduling with a fake clock; exponential backoff remains the fallback, not the normal pacing mechanism.
-4. **Bootstrap/backfill evidence:** instrument time to first readable page separately from full index completion. Record per-stage estimated total, processed count, effective threads/minute, and quota-wait time on a typical real mailbox and the 10k seed. M2 may still display the existing stage UI, but the measurements and protocol fields must be ready for M3's background-process move; “N to zero” remains explicitly the unread count, never progress.
+4. **Bootstrap/backfill evidence:** instrument time to first readable page separately from full index completion. Record per-stage listed, fetched, and estimated counts, effective fetched threads/minute, and quota-wait time on a typical real mailbox and the 10k seed. M2 may still display the existing stage UI, but the measurements and protocol fields must be ready for M3's background-process move; “N to zero” remains explicitly the unread count, never progress.
 5. **Dogfood checklist executed and recorded** (the M2 exit evidence): a full week of real use by at least one of us, plus the F6 acceptance list — composer <50ms open, imperceptible typing, force-quit recovery, undo-send reliability, zero duplicate sends across the week, attachment round-trips — and the notification click-through smoke if it is still open.
 6. **Docs:** SPEC status + milestone table updated (M2 shipped state, any new accepted deviations), AGENTS pipeline notes if the harness changed, README "current state" paragraph.
 
@@ -921,11 +921,11 @@ event loop.
    completed send, losing an optimistic action, or allowing two active workers for one account. Keep one
    reducer path and document SQLite write ownership so process isolation does not become writer contention.
 3. **Prioritize foreground intent:** outbox sends, queued user actions, on-demand body hydration, and history
-   polling consume quota before historical metadata/body/Sent indexing. The weighted token bucket exposes an
+   polling consume quota before historical metadata/body/Sent indexing. The weighted quota scheduler exposes an
    explicit `running | quota-wait | offline | error` reason; backoff never masquerades as active progress.
 4. **Separate readiness from completion:** commit and publish the first recent page within the existing
-   fresh-install target, then report `Live · indexing older mail` with stage, processed count, Gmail
-   `resultSizeEstimate` when available, effective rate, and ETA. “N to zero” stays the unread Inbox total.
+   fresh-install target, then report `Live · indexing older mail` with stage, distinct listed/fetched counts,
+   Gmail `resultSizeEstimate` when available, effective rate, and ETA. “N to zero” stays the unread Inbox total.
    Background completion has no universal wall-clock SLA; evidence always includes mailbox size and quota
    regime.
 5. **Reduce duplicate work without silent truncation:** skip Sent-thread metadata already authoritatively

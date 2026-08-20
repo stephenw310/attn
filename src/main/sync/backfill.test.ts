@@ -115,10 +115,12 @@ describe('windowed backfill checkpoints', () => {
     ).toEqual(
       expect.objectContaining({
         stage: 'metadata',
-        stageThreadsDone: 1,
-        stageThreadsTotal: 1,
+        stageThreadsListed: 1,
+        stageThreadsFetched: 1,
+        stageThreadsEstimate: 1,
         firstReadableMs: 500,
-        stageThreadsPerMinute: 200,
+        stageListedPerMinute: 200,
+        stageFetchedPerMinute: 200,
         quotaWaitMs: 27
       })
     )
@@ -126,8 +128,9 @@ describe('windowed backfill checkpoints', () => {
       expect.objectContaining({
         kind: 'stage-complete',
         stage: 'metadata',
-        threadsDone: 1,
-        threadsTotal: 1,
+        threadsListed: 1,
+        threadsFetched: 1,
+        threadsEstimate: 1,
         elapsedMs: 300,
         threadsPerMinute: 200,
         quotaWaitMs: 25,
@@ -136,7 +139,12 @@ describe('windowed backfill checkpoints', () => {
       })
     )
     expect(onMetric).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'stage-complete', stage: 'reconcile', threadsDone: 1 })
+      expect.objectContaining({
+        kind: 'stage-complete',
+        stage: 'reconcile',
+        threadsListed: 1,
+        threadsFetched: 0
+      })
     )
     expect(onMetric).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -248,9 +256,10 @@ describe('windowed backfill checkpoints', () => {
 
   it('skips threads already stored during the overlapping stages', async () => {
     const provider = emptyProvider()
+    const onMetric = vi.fn()
     vi.mocked(provider.listThreadIds).mockImplementation(async (options): Promise<ThreadIdPage> => {
       if (options?.q === ALL_MAIL_WINDOW && !options.labelIds) {
-        return { threadIds: ['known', 'fresh'] }
+        return { threadIds: ['known', 'fresh'], resultSizeEstimate: 2 }
       }
       return { threadIds: [] }
     })
@@ -258,7 +267,7 @@ describe('windowed backfill checkpoints', () => {
     await runInboxBackfill(
       fakeDb({ backfill_cursor: 'all-mail', last_history_id: '88' }, new Set(['known'])),
       provider,
-      callbacks
+      { ...callbacks, onMetric }
     )
 
     expect(provider.getThread).toHaveBeenCalledTimes(1)
@@ -266,6 +275,15 @@ describe('windowed backfill checkpoints', () => {
       format: 'metadata',
       priority: 'background'
     })
+    expect(onMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'stage-complete',
+        stage: 'all-mail',
+        threadsListed: 2,
+        threadsFetched: 1,
+        threadsEstimate: 2
+      })
+    )
   })
 
   it('resumes directly at per-label reconciliation after the junk stages complete', async () => {

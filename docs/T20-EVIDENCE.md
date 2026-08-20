@@ -32,28 +32,37 @@ footprint.
 
 Decision: Inbox and Snoozed queries now return at most 10,000 rows, and the renderer uses fixed-height
 windowing at 500 rows or more with twelve-row overscan. The old 300-row product cap and perf-only override are
-removed. Selection-follow scrolling and 100-thread bulk archive/undo are covered in the 10k run.
+removed. Each list is returned by one static SQL statement rather than a 10,000-placeholder label query, and
+renderer refresh events coalesce behind one in-flight local snapshot read. Selection-follow scrolling,
+full-snapshot refresh, and 100-thread bulk archive/undo are covered in the 10k run.
+
+Follow-up review-fix run on 2026-08-20 (`npm run e2e:perf`, hidden macOS arm64 app): all seven cases passed.
+The new full local snapshot refresh measured 30 ms median / 33 ms p95; list render measured 337 ms median /
+445 ms p95, scroll pacing 8 ms median / 9 ms p95, and application-owned memory 306 MB.
 
 ## Quota and bootstrap instrumentation
 
-Gmail requests share one per-auth-session weighted token bucket. Method costs match Google's post-1-May-2026
-quota table; the default per-user project limit is 6,000 units/minute and can be overridden with
-`quota_units_per_minute` in `oauth.config.json`. Priority is send → queued action → history polling →
-foreground read/draft → background indexing. Exponential backoff remains the fallback for server-side
-403/429/5xx responses.
+Gmail requests share one per-account weighted scheduler across authentication generations. A short burst bucket
+preserves interaction priority, while a rolling-minute ledger prevents burst plus refill from exceeding the
+configured limit. Method costs match Google's post-1-May-2026 quota table; the default per-user project limit is
+6,000 units/minute and can be overridden with `quota_units_per_minute` in `oauth.config.json`. Priority is send
+→ queued action → history polling → foreground read/draft → background indexing; each priority band is FIFO so
+cheap later requests cannot starve an older expensive one. Exponential backoff remains the fallback for
+server-side 403/429/5xx responses.
 
 The staged backfill now emits `[sync:metric]` JSON records for each completed stage and for the whole bounded
 run. Protocol/state fields distinguish first-readable and interactive-ready elapsed time from full completion,
-and include stage/cumulative processed counts, Gmail estimates when supplied, elapsed time, effective
-threads/minute, and actual token-bucket wait time. The lifetime sweep reports the same cumulative quota wait.
-Fake-clock unit tests cover weighted pacing, priority overtaking, cancellation, and stage telemetry.
+and report stage-listed, stage-fetched, and Gmail-estimated counts separately, alongside cumulative fetched
+work, elapsed time, effective threads/minute, and actual quota-scheduler wait time. The lifetime sweep reports
+the same cumulative quota wait. Fake-clock unit tests cover the rolling-minute ceiling, weighted pacing,
+priority overtaking and FIFO fairness, disposal/cancellation, and stage telemetry.
 
 ## Real-Gmail bootstrap run — required before M2 sign-off
 
 Run a fresh profile against a typical long-lived mailbox and retain the `[sync:metric]` log. Do not record the
 top-bar unread count as sync progress.
 
-| Stage | Processed / estimate | Elapsed | Threads/min | Quota wait |
+| Stage | Listed / fetched / estimate | Elapsed | Fetched threads/min | Quota wait |
 |---|---:|---:|---:|---:|
 | First readable page | pending | pending | — | pending |
 | Inbox metadata / interactive-ready | pending | pending | pending | pending |

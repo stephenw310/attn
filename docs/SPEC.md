@@ -180,7 +180,7 @@ Backfill has two distinct completion points:
    must never make an already-usable inbox look unavailable.
 
 After interactive readiness, the footer reports **Live · indexing older mail** rather than a blocking
-“Syncing” state. It exposes stage, processed count, estimated total/ETA when Gmail supplies one, and an
+“Syncing” state. It exposes stage, listed and fetched counts, estimated total/ETA when Gmail supplies one, and an
 explicit quota-wait state instead of appearing stuck during backoff. The top-bar “N to zero” value is the
 total unread Inbox count, not sync progress, and may exceed the current rendered-list window.
 

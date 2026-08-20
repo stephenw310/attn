@@ -103,12 +103,14 @@ export type SyncState =
       /** Cumulative work across the staged bootstrap. */
       threadsDone: number
       /** Measurement fields consumed by the future utility-process protocol. */
-      stageThreadsDone?: number
-      stageThreadsTotal?: number
+      stageThreadsListed?: number
+      stageThreadsFetched?: number
+      stageThreadsEstimate?: number
       elapsedMs?: number
       stageElapsedMs?: number
       threadsPerMinute?: number
-      stageThreadsPerMinute?: number
+      stageListedPerMinute?: number
+      stageFetchedPerMinute?: number
       quotaWaitMs?: number
       firstReadableMs?: number
       interactiveReadyMs?: number

@@ -96,7 +96,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
                 ? `Attachment index · ${lifetimeCount} flagged`
                 : `${lifetimeCount} indexed${lifetimeEta(sync.etaMs)}`
   const quotaEvidence =
-    sync.phase === 'indexing' && sync.quotaWaitMs
+    sync.phase === 'indexing' && sync.quotaWaitMs !== undefined && sync.quotaWaitMs >= 1_000
       ? ` · ${Math.round(sync.quotaWaitMs / 1000).toLocaleString()}s quota wait`
       : ''
 

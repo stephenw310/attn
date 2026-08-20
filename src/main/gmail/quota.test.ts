@@ -76,7 +76,7 @@ describe('Gmail weighted quota scheduling', () => {
     })
     expect(released).toBe(false)
 
-    time.advance(40_000)
+    time.advance(60_000)
     await waiting
     expect(released).toBe(true)
   })
@@ -132,6 +132,75 @@ describe('Gmail weighted quota scheduling', () => {
     expect(order).toEqual(['action', 'send', 'background'])
   })
 
+  it('never admits more than the configured units inside a rolling minute', async () => {
+    const time = new ManualTime()
+    const limiter = new GmailQuotaLimiter(
+      { unitsPerMinute: 600, capacity: 120, reservedUnits: { send: 0 } },
+      { time }
+    )
+
+    await limiter.acquire(120, 'send')
+    for (let index = 0; index < 4; index++) {
+      time.advance(12_000)
+      await limiter.acquire(120, 'send')
+    }
+
+    let released = false
+    const waiting = limiter.acquire(120, 'send').then(() => {
+      released = true
+    })
+    time.advance(11_999)
+    await Promise.resolve()
+    expect(released).toBe(false)
+
+    time.advance(1)
+    await waiting
+    expect(released).toBe(true)
+    expect(limiter.snapshot()).toEqual({ requests: 6, units: 720, waitMs: 12_000 })
+  })
+
+  it('uses a bounded default burst instead of starting with a full minute of quota', async () => {
+    const time = new ManualTime()
+    const limiter = new GmailQuotaLimiter({ unitsPerMinute: 6_000, reservedUnits: { send: 0 } }, { time })
+    for (let index = 0; index < 6; index++) await limiter.acquire(100, 'send')
+
+    let released = false
+    const waiting = limiter.acquire(100, 'send').then(() => {
+      released = true
+    })
+    await Promise.resolve()
+    expect(released).toBe(false)
+
+    time.advance(1_000)
+    await waiting
+    expect(released).toBe(true)
+  })
+
+  it('keeps FIFO order inside one priority band when request costs differ', async () => {
+    const time = new ManualTime()
+    const limiter = new GmailQuotaLimiter(
+      { unitsPerMinute: 600, capacity: 100, reservedUnits: { foreground: 0 } },
+      { time }
+    )
+    await limiter.acquire(100, 'foreground')
+
+    const order: string[] = []
+    const expensive = limiter.acquire(80, 'foreground').then(() => order.push('expensive'))
+    const cheap = limiter.acquire(10, 'foreground').then(() => order.push('cheap'))
+
+    time.advance(1_000)
+    await Promise.resolve()
+    expect(order).toEqual([])
+
+    time.advance(7_000)
+    await expensive
+    expect(order).toEqual(['expensive'])
+
+    time.advance(1_000)
+    await cheap
+    expect(order).toEqual(['expensive', 'cheap'])
+  })
+
   it('removes an aborted waiter without consuming quota', async () => {
     const time = new ManualTime()
     const limiter = new GmailQuotaLimiter(
@@ -149,6 +218,23 @@ describe('Gmail weighted quota scheduling', () => {
 
     await expect(waiting).rejects.toThrow('shutdown')
     expect(limiter.snapshot()).toEqual({ requests: 1, units: 50, waitMs: 0 })
+    expect(time.nextDelay()).toBeUndefined()
+  })
+
+  it('clears its timer and rejects queued and future work when disposed', async () => {
+    const time = new ManualTime()
+    const limiter = new GmailQuotaLimiter(
+      { unitsPerMinute: 600, capacity: 100, reservedUnits: { background: 50 } },
+      { time }
+    )
+    await limiter.acquire(50, 'background')
+    const waiting = limiter.acquire(50, 'background')
+    expect(time.nextDelay()).toBe(5_000)
+
+    limiter.dispose(new Error('shutdown'))
+
+    await expect(waiting).rejects.toThrow('shutdown')
+    await expect(limiter.acquire(1, 'send')).rejects.toThrow('disposed')
     expect(time.nextDelay()).toBeUndefined()
   })
 })

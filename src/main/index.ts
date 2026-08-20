@@ -65,7 +65,7 @@ let pendingFocus: PendingFocus | null = null
 let signInInFlight = false
 let teardownPromise: Promise<void> | null = null
 const foregroundProviderWork = new Map<string, number>()
-const gmailQuotaLimiters = new Map<number, GmailQuotaLimiter>()
+const gmailQuotaLimiters = new Map<string, GmailQuotaLimiter>()
 const actionRevertNotices = new ActionRevertNotices()
 // All attn:test:* seams live in testIpc.ts; inert (and never registered) in
 // production, where the deps below are read lazily so boot order is unchanged.
@@ -154,13 +154,13 @@ function makeClient(generation: number): GmailClient | null {
   const config = loadOAuthConfig(oauthSearchDirs())
   const tokens = loadTokens(app.getPath('userData'))
   if (!config || !tokens) return null
-  let quotaLimiter = gmailQuotaLimiters.get(generation)
+  const quotaAccount = tokens.email ?? 'unknown-account'
+  let quotaLimiter = gmailQuotaLimiters.get(quotaAccount)
   if (!quotaLimiter) {
     quotaLimiter = new GmailQuotaLimiter({
       unitsPerMinute: config.quota_units_per_minute ?? DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE
     })
-    gmailQuotaLimiters.clear()
-    gmailQuotaLimiters.set(generation, quotaLimiter)
+    gmailQuotaLimiters.set(quotaAccount, quotaLimiter)
   }
   return new GmailClient(
     config,
@@ -188,6 +188,11 @@ function makeProvider(generation: number): GmailMailProvider | null {
 function makeCurrentProvider(): GmailMailProvider | null {
   const controller = syncController
   return controller ? makeProvider(controller.getGeneration()) : null
+}
+
+function disposeGmailQuotaLimiters(reason: Error): void {
+  for (const limiter of gmailQuotaLimiters.values()) limiter.dispose(reason)
+  gmailQuotaLimiters.clear()
 }
 
 function makeCurrentActionProvider(): ActionRecoveryProvider | null {
@@ -226,6 +231,7 @@ function signOut(): AuthStatus {
   const account = currentAccountId()
   cancelActiveSignIn()
   syncController?.onSignOut()
+  disposeGmailQuotaLimiters(new Error('signed out'))
   seedAccountId = null
   clearTokens(app.getPath('userData'))
   pendingFocus = null
@@ -426,6 +432,7 @@ async function teardownOwnedResources(): Promise<void> {
   }
   draftMirrorExecutor = null
   outboxSender = null
+  disposeGmailQuotaLimiters(new Error('application shutting down'))
   db?.close()
   db = null
 }

@@ -98,12 +98,14 @@ interface VirtualThreadEntry {
 
 function virtualLayout(threads: readonly DisplayThread[], view: 'inbox' | 'snoozed'): VirtualThreadEntry[] {
   let top = 0
+  let previousGroup: ReturnType<typeof dateGroup> | undefined
   return threads.map((thread, index) => {
     const group = dateGroup(thread)
-    const showGroup = view === 'inbox' && (index === 0 || dateGroup(threads[index - 1]) !== group)
+    const showGroup = view === 'inbox' && group !== previousGroup
     const height = VIRTUAL_ROW_HEIGHT + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
     const entry = { index, top, height, group, showGroup }
     top += height
+    previousGroup = group
     return entry
   })
 }
@@ -148,20 +150,18 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     onOpen
   } = props
   const listRef = useRef<HTMLElement | null>(null)
+  const virtualContentRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef<number | null>(null)
   const pendingScrollTopRef = useRef(0)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(800)
   const virtualized = threads.length >= VIRTUALIZE_AT
-  const layout = useMemo(
-    () => (virtualized ? virtualLayout(threads, view) : []),
-    [threads, view, virtualized]
-  )
+  const layout = useMemo(() => virtualLayout(threads, view), [threads, view])
   const virtualHeight =
     layout.length > 0 ? layout[layout.length - 1].top + layout[layout.length - 1].height : 0
   const mountedEntries = useMemo(
-    () => visibleEntries(layout, scrollTop, viewportHeight),
-    [layout, scrollTop, viewportHeight]
+    () => (virtualized ? visibleEntries(layout, scrollTop, viewportHeight) : []),
+    [layout, scrollTop, viewportHeight, virtualized]
   )
 
   useEffect(() => {
@@ -177,18 +177,19 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
 
   useLayoutEffect(() => {
     const list = listRef.current
+    const contentTop = virtualContentRef.current?.offsetTop ?? 0
     const selected = layout[selectedIndex]
     if (!list || !selected || !virtualized || readerOpen) return
 
-    const visibleTop = list.scrollTop
+    const visibleTop = Math.max(0, list.scrollTop - contentTop)
     const visibleBottom = visibleTop + viewportHeight
-    let nextScrollTop = visibleTop
-    if (selected.top < visibleTop) nextScrollTop = selected.top
+    let nextScrollTop = list.scrollTop
+    if (selected.top < visibleTop) nextScrollTop = contentTop + selected.top
     else if (selected.top + selected.height > visibleBottom) {
-      nextScrollTop = selected.top + selected.height - viewportHeight
+      nextScrollTop = contentTop + selected.top + selected.height - viewportHeight
     }
     nextScrollTop = Math.max(0, nextScrollTop)
-    if (nextScrollTop === visibleTop) return
+    if (nextScrollTop === list.scrollTop) return
     list.scrollTop = nextScrollTop
     pendingScrollTopRef.current = nextScrollTop
     setScrollTop(nextScrollTop)
@@ -328,20 +329,11 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         </div>
       )}
       {virtualized ? (
-        <div className="relative" style={{ height: virtualHeight }}>
+        <div ref={virtualContentRef} className="relative" style={{ height: virtualHeight }}>
           {mountedEntries.map(renderThread)}
         </div>
       ) : (
-        threads.map((thread, index) =>
-          renderThread({
-            index,
-            top: 0,
-            height: 0,
-            group: dateGroup(thread),
-            showGroup:
-              view === 'inbox' && (index === 0 || dateGroup(threads[index - 1]) !== dateGroup(thread))
-          })
-        )
+        layout.map(renderThread)
       )}
     </main>
   )

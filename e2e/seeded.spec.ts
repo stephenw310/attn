@@ -156,6 +156,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
     threadsTotal: 2_000,
     messagesTotal: 3_200,
     etaMs: 12 * 60_000,
+    quotaWaitMs: 500,
     reason: 'running'
   })
   await expect(status).toContainText('Live · indexing older mail')

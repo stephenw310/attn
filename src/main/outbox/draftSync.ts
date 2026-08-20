@@ -172,9 +172,7 @@ async function remoteDraftBodies(
   const fetchedPlain: string[] = []
   const fetchedHtml: string[] = []
   for (const part of external) {
-    const data = requestOptions
-      ? await provider.getAttachmentData(remote.message.id, part.attachmentId, requestOptions)
-      : await provider.getAttachmentData(remote.message.id, part.attachmentId)
+    const data = await provider.getAttachmentData(remote.message.id, part.attachmentId, requestOptions)
     if (!data) continue
     const raw = decodeBase64Url(data)
     if (!raw) continue

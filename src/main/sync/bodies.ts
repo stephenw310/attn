@@ -44,9 +44,7 @@ export async function hydrateMissingThreadBodies(
       if (!shouldContinue()) return
       if (part.mimeType === 'text/plain' && plainComplete) continue
       if (part.mimeType === 'text/html' && htmlComplete) continue
-      const data = requestOptions
-        ? await provider.getAttachmentData(message.id, part.attachmentId, requestOptions)
-        : await provider.getAttachmentData(message.id, part.attachmentId)
+      const data = await provider.getAttachmentData(message.id, part.attachmentId, requestOptions)
       if (!shouldContinue()) return
       if (!data) continue
       const raw = decodeBase64Url(data)

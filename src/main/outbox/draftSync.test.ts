@@ -750,6 +750,6 @@ describe('draft synchronization identity', () => {
       { getAttachmentData } as unknown as MailActionProvider,
       null
     )
-    expect(getAttachmentData).toHaveBeenCalledWith('message-new', 'attachment-new')
+    expect(getAttachmentData).toHaveBeenCalledWith('message-new', 'attachment-new', undefined)
   })
 })

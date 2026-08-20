@@ -7,13 +7,9 @@ export function sameSyncState(left: SyncState, right: SyncState): boolean {
     return (
       left.stage === right.stage &&
       left.threadsDone === right.threadsDone &&
-      left.stageThreadsDone === right.stageThreadsDone &&
-      left.stageThreadsTotal === right.stageThreadsTotal &&
-      left.elapsedMs === right.elapsedMs &&
-      left.stageElapsedMs === right.stageElapsedMs &&
-      left.threadsPerMinute === right.threadsPerMinute &&
-      left.stageThreadsPerMinute === right.stageThreadsPerMinute &&
-      left.quotaWaitMs === right.quotaWaitMs &&
+      left.stageThreadsListed === right.stageThreadsListed &&
+      left.stageThreadsFetched === right.stageThreadsFetched &&
+      left.stageThreadsEstimate === right.stageThreadsEstimate &&
       left.firstReadableMs === right.firstReadableMs &&
       left.interactiveReadyMs === right.interactiveReadyMs
     )
@@ -24,10 +20,6 @@ export function sameSyncState(left: SyncState, right: SyncState): boolean {
       left.threadsDone === right.threadsDone &&
       left.threadsTotal === right.threadsTotal &&
       left.messagesTotal === right.messagesTotal &&
-      left.etaMs === right.etaMs &&
-      left.elapsedMs === right.elapsedMs &&
-      left.threadsPerMinute === right.threadsPerMinute &&
-      left.quotaWaitMs === right.quotaWaitMs &&
       left.reason === right.reason &&
       left.waitMs === right.waitMs &&
       left.message === right.message

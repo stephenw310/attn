@@ -649,7 +649,7 @@ Important/Other is a split of Inbox, not a general mailbox navigator. M3 adds In
 | ~~List virtualization deferred~~ | — | **Resolved by M2 T20:** fixed-height windowing starts at 500 rows; the 10k run mounts fewer than 100 rows and holds p95 scroll frames to 10 ms ([evidence](T20-EVIDENCE.md)) |
 | ~~Inbox and Snoozed list queries cap at 300 rows~~ | T3 | **Resolved by M2 T20:** production and perf both use the measured-safe 10,000-row bound; the test-only override is gone |
 | SPEC §5 conversation keys `N`/`P` (message navigation) and `O` (expand/collapse) are unbound; older-message expand/collapse is pointer-only | T12A | **Decided 2026-08-17: bind (SPEC §9 #18d)** — the M3 registry-completeness assertion enforces it |
-| ~~Gmail 403/429 quota handling is per-request backoff only; no client-side token-bucket limiter~~ | T3/T7 | **Resolved by M2 T20:** a shared weighted token bucket uses explicit current method costs/project quota and reserves capacity by request priority; backoff remains the fallback |
+| ~~Gmail 403/429 quota handling is per-request backoff only; no client-side quota scheduler~~ | T3/T7 | **Resolved by M2 T20:** a shared weighted scheduler uses explicit current method costs/project quota, enforces a rolling-minute ceiling, and reserves capacity by request priority; backoff remains the fallback |
 | With a multi-selection active, the label picker's first toggle bulk-applies and clears the selection, but its checkstates reflect only the focused row; later toggles in the same picker session target the focused thread alone | T5 | M3 palette/picker polish — don't copy this pattern into the composer |
 
 ---

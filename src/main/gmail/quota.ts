@@ -38,7 +38,7 @@ export const DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE = 6_000
 export interface GmailQuotaConfig {
   /** The actual per-minute, per-user quota configured for this OAuth project. */
   unitsPerMinute: number
-  /** Maximum burst. Defaults to one minute or the largest Gmail call, whichever is larger. */
+  /** Maximum short burst inside the rolling-minute limit. Defaults to at most six seconds. */
   capacity?: number
   /**
    * Tokens that lower-priority work cannot spend. These are cumulative floors:
@@ -69,6 +69,11 @@ interface Waiter {
   abort?: () => void
 }
 
+interface Admission {
+  at: number
+  cost: number
+}
+
 const DEFAULT_RESERVED_UNITS: Record<GmailRequestPriority, number> = {
   send: 0,
   action: 200,
@@ -77,18 +82,24 @@ const DEFAULT_RESERVED_UNITS: Record<GmailRequestPriority, number> = {
   background: 500
 }
 const MAX_REQUEST_COST = Math.max(...Object.values(GMAIL_QUOTA_UNITS))
+const QUOTA_WINDOW_MS = 60_000
+const DEFAULT_BURST_SECONDS = 6
 
-/** A priority queue over one continuously-refilled, weighted token bucket. */
+/** A priority queue over a burst bucket guarded by a strict rolling-minute budget. */
 export class GmailQuotaLimiter {
   private readonly time: SchedulerTime
   private readonly capacity: number
+  private readonly rollingLimit: number
   private readonly refillPerMs: number
   private readonly reservedUnits: Record<GmailRequestPriority, number>
   private tokens: number
   private refilledAt: number
   private nextWaiterId = 1
   private waiters: Waiter[] = []
+  private admissions: Admission[] = []
+  private admittedUnits = 0
   private timer: TimerHandle | null = null
+  private disposed = false
   private metrics: GmailQuotaMetrics = { requests: 0, units: 0, waitMs: 0 }
 
   constructor(config: GmailQuotaConfig, options: GmailQuotaLimiterOptions = {}) {
@@ -96,11 +107,20 @@ export class GmailQuotaLimiter {
       throw new Error('Gmail quota units per minute must be positive')
     }
     this.time = options.time ?? systemTime
-    this.capacity = config.capacity ?? Math.max(config.unitsPerMinute, MAX_REQUEST_COST)
+    this.rollingLimit = config.unitsPerMinute
+    this.capacity =
+      config.capacity ??
+      Math.min(
+        config.unitsPerMinute,
+        Math.max(MAX_REQUEST_COST, (config.unitsPerMinute * DEFAULT_BURST_SECONDS) / 60)
+      )
     if (!Number.isFinite(this.capacity) || this.capacity <= 0) {
       throw new Error('Gmail quota capacity must be positive')
     }
-    this.refillPerMs = config.unitsPerMinute / 60_000
+    if (this.capacity > config.unitsPerMinute) {
+      throw new Error('Gmail quota capacity cannot exceed the rolling-minute limit')
+    }
+    this.refillPerMs = config.unitsPerMinute / QUOTA_WINDOW_MS
     this.reservedUnits = { ...DEFAULT_RESERVED_UNITS, ...config.reservedUnits }
     for (const priority of PRIORITIES) {
       this.reservedUnits[priority] = Math.min(this.capacity, this.reservedUnits[priority])
@@ -110,6 +130,7 @@ export class GmailQuotaLimiter {
   }
 
   acquire(cost: number, priority: GmailRequestPriority, signal?: AbortSignal): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error('Gmail quota limiter disposed'))
     if (!Number.isFinite(cost) || cost <= 0 || cost > this.capacity) {
       return Promise.reject(new Error(`Gmail request cost ${cost} exceeds limiter capacity`))
     }
@@ -144,7 +165,23 @@ export class GmailQuotaLimiter {
     return { ...this.metrics }
   }
 
+  dispose(reason: unknown = new Error('Gmail quota limiter disposed')): void {
+    if (this.disposed) return
+    this.disposed = true
+    if (this.timer !== null) {
+      this.time.timers.clearTimeout(this.timer)
+      this.timer = null
+    }
+    const waiters = this.waiters
+    this.waiters = []
+    for (const waiter of waiters) {
+      waiter.signal?.removeEventListener('abort', waiter.abort as () => void)
+      waiter.reject(reason)
+    }
+  }
+
   private reschedule(): void {
+    if (this.disposed) return
     if (this.timer !== null) {
       this.time.timers.clearTimeout(this.timer)
       this.timer = null
@@ -157,6 +194,8 @@ export class GmailQuotaLimiter {
       const index = this.waiters.indexOf(waiter)
       this.waiters.splice(index, 1)
       this.tokens -= waiter.cost
+      this.admissions.push({ at: this.time.now(), cost: waiter.cost })
+      this.admittedUnits += waiter.cost
       waiter.signal?.removeEventListener('abort', waiter.abort as () => void)
       this.metrics = {
         requests: this.metrics.requests + 1,
@@ -167,7 +206,7 @@ export class GmailQuotaLimiter {
     }
 
     if (this.waiters.length === 0) return
-    const delayMs = Math.min(...this.waiters.map((waiter) => this.delayFor(waiter)))
+    const delayMs = Math.min(...this.priorityHeads().map((waiter) => this.delayFor(waiter)))
     this.timer = this.time.timers.setTimeout(
       () => {
         this.timer = null
@@ -182,28 +221,61 @@ export class GmailQuotaLimiter {
     const elapsed = Math.max(0, now - this.refilledAt)
     this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.refillPerMs)
     this.refilledAt = now
+    while (this.admissions[0]?.at <= now - QUOTA_WINDOW_MS) {
+      this.admittedUnits -= this.admissions.shift()?.cost ?? 0
+    }
   }
 
   private nextEligibleWaiter(): Waiter | undefined {
     for (const priority of PRIORITIES) {
-      const waiter = this.waiters.find(
-        (candidate) =>
-          candidate.priority === priority && this.tokens - candidate.cost >= this.reserveFor(candidate)
-      )
-      if (waiter) return waiter
+      const waiter = this.waiters.find((candidate) => candidate.priority === priority)
+      if (waiter && this.isEligible(waiter)) return waiter
     }
     return undefined
   }
 
   private delayFor(waiter: Waiter): number {
-    const required = waiter.cost + this.reserveFor(waiter)
-    return Math.ceil(Math.max(0, required - this.tokens) / this.refillPerMs)
+    const tokenRequired = waiter.cost + this.reserveFor(waiter)
+    const tokenDelay = Math.ceil(Math.max(0, tokenRequired - this.tokens) / this.refillPerMs)
+    const rollingRequired = waiter.cost + this.rollingReserveFor(waiter)
+    const unitsToRelease = Math.max(0, this.admittedUnits + rollingRequired - this.rollingLimit)
+    if (unitsToRelease === 0) return tokenDelay
+
+    let released = 0
+    const now = this.time.now()
+    for (const admission of this.admissions) {
+      released += admission.cost
+      if (released >= unitsToRelease) {
+        return Math.max(tokenDelay, Math.max(0, admission.at + QUOTA_WINDOW_MS - now))
+      }
+    }
+    return Number.POSITIVE_INFINITY
+  }
+
+  private isEligible(waiter: Waiter): boolean {
+    return (
+      this.tokens - waiter.cost >= this.reserveFor(waiter) &&
+      this.rollingLimit - this.admittedUnits - waiter.cost >= this.rollingReserveFor(waiter)
+    )
+  }
+
+  private priorityHeads(): Waiter[] {
+    const heads: Waiter[] = []
+    for (const priority of PRIORITIES) {
+      const waiter = this.waiters.find((candidate) => candidate.priority === priority)
+      if (waiter) heads.push(waiter)
+    }
+    return heads
   }
 
   private reserveFor(waiter: Waiter): number {
     // A deliberately low project quota must slow background work, not deadlock
     // it because the default reserve is larger than the whole bucket.
     return Math.min(this.reservedUnits[waiter.priority], this.capacity - waiter.cost)
+  }
+
+  private rollingReserveFor(waiter: Waiter): number {
+    return Math.min(this.reservedUnits[waiter.priority], this.rollingLimit - waiter.cost)
   }
 }
 

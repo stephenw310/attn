@@ -5,6 +5,7 @@ const SAMPLE_COUNT = 5
 const THREAD_COUNT = 10_000
 const PERF_TEST_TIMEOUT_MS = 120_000
 const LIST_RENDER_CEILING_MS = 2_000
+const LOCAL_REFRESH_CEILING_MS = 2_000
 const CONVERSATION_OPEN_CEILING_MS = 50
 const TRIAGE_FEEDBACK_CEILING_MS = 16
 const SCROLL_FRAME_P95_CEILING_MS = 20
@@ -73,6 +74,23 @@ async function measureListRender(page: Page): Promise<number> {
       })
       observer.observe(document.body, { childList: true, subtree: true })
     })
+  })
+}
+
+async function measureLocalMailRefresh(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const started = performance.now()
+    await Promise.all([
+      window.attn.mail.listThreads(),
+      window.attn.mail.listSnoozed(),
+      window.attn.draft.list(),
+      window.attn.outbox.listPending(),
+      window.attn.mail.listLabels(),
+      window.attn.mail.getUnreadCount(),
+      window.attn.mail.getPendingActionCount(),
+      window.attn.mail.getActionQueueStatus()
+    ])
+    return performance.now() - started
   })
 }
 
@@ -266,6 +284,18 @@ test.describe('@perf 10,000-thread inbox', () => {
     expect(medianMs, 'median Enter to conversation content mounted').toBeLessThan(
       CONVERSATION_OPEN_CEILING_MS
     )
+  })
+
+  test('refreshes the 10k local mail snapshot within the CI-safe ceiling', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    const samples: number[] = []
+    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
+      samples.push(await measureLocalMailRefresh(page))
+    }
+
+    const medianMs = median(samples)
+    await reportMetric(testInfo, 'local-mail-refresh', samples, medianMs)
+    expect(medianMs, 'median full local snapshot refresh').toBeLessThan(LOCAL_REFRESH_CEILING_MS)
   })
 
   test('removes triaged rows within the CI-safe ceiling', async ({ page }, testInfo) => {
