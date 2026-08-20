@@ -54,7 +54,7 @@ Violating these is a correctness bug, not a style preference:
   DOMPurify and render only in the scriptless sandbox used by `MessageBody`; never add `allow-scripts`
   or use `dangerouslySetInnerHTML` (SPEC §6). Stored attachment `inlineData` is omitted from
   `ConversationMsg`, but CID rendering deliberately returns an allowlisted image as a base64 `dataUrl`
-  through the typed `mail:getInlineImage` bridge (maximum 10 MB) and assigns it inside that iframe.
+  through the typed `mail:getInlineImage` bridge (maximum 25 MB) and assigns it inside that iframe.
   Treat the bridged value as untrusted attachment content; it is not confined to the main process.
 - **Local-first:** reads and writes hit the local SQLite store and apply optimistically. Never block the UI on the network.
 - **`action_queue` stores only user mail intents keyed by Gmail thread id.** Draft checkpoint/retry/delete work derives from `outbox` revisions and runs through `DraftMirrorExecutor`; never overload `action_queue.thread_id` with an outbox UUID or let best-effort draft backoff block triage.

@@ -53,6 +53,7 @@ import {
 } from './db/queries'
 import type { GmailClient } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
+import { inlineImageIsTooLarge } from './inlineImageLimit'
 import type { PendingFocus } from './notify'
 import { takePendingFocus } from './notify'
 import { parseStoredDraftAttachments, type StoredDraftAttachment } from './outbox/draftAttachments'
@@ -484,7 +485,7 @@ export function registerIpc(context: IpcContext): () => void {
         if (!result.data) return { error: 'Inline image unavailable' }
         data = Buffer.from(result.data, 'base64url')
       } else return { error: 'Inline image unavailable' }
-      if (data.byteLength > 10 * 1024 * 1024) return { error: 'Inline image was too large' }
+      if (inlineImageIsTooLarge(data.byteLength)) return { error: 'Inline image was too large' }
       return { dataUrl: `data:${attachment.mimeType};base64,${data.toString('base64')}` }
     } catch {
       return { error: 'Inline image unavailable' }
@@ -636,7 +637,7 @@ export function registerIpc(context: IpcContext): () => void {
       const resolved = await resolveAttachmentData(context, request)
       if (resolved.kind !== 'available') return { error: 'Inline image data was unavailable' }
       const bytes = Buffer.from(resolved.data, 'base64url')
-      if (bytes.byteLength > 10 * 1024 * 1024) return { error: 'Inline image was too large' }
+      if (inlineImageIsTooLarge(bytes.byteLength)) return { error: 'Inline image was too large' }
       return {
         dataUrl: `data:${request.mimeType.toLowerCase()};base64,${bytes.toString('base64')}`
       }
