@@ -177,10 +177,17 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
 
   useLayoutEffect(() => {
     const list = listRef.current
-    const contentTop = virtualContentRef.current?.offsetTop ?? 0
     const selected = layout[selectedIndex]
     if (!list || !selected || !virtualized || readerOpen) return
 
+    // The sizer starts inside the list's own padding box. `offsetTop` would
+    // measure from the nearest positioned ancestor — <main> is static, so that
+    // is <body>, which folds the whole header height into the scroll math.
+    // Measure against the list itself so this stays a pure in-content offset.
+    const content = virtualContentRef.current
+    const contentTop = content
+      ? content.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+      : 0
     const visibleTop = Math.max(0, list.scrollTop - contentTop)
     const visibleBottom = visibleTop + viewportHeight
     let nextScrollTop = list.scrollTop

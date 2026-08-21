@@ -33,8 +33,13 @@ footprint.
 Decision: Inbox and Snoozed queries now return at most 10,000 rows, and the renderer uses fixed-height
 windowing at 500 rows or more with twelve-row overscan. The old 300-row product cap and perf-only override are
 removed. Each list is returned by one static SQL statement rather than a 10,000-placeholder label query, and
-renderer refresh events coalesce behind one in-flight local snapshot read. Selection-follow scrolling,
-full-snapshot refresh, and 100-thread bulk archive/undo are covered in the 10k run.
+renderer refresh events coalesce behind one in-flight local snapshot read. Full-snapshot refresh and
+100-thread bulk archive/undo are timed in the 10k run; selection-follow scrolling is asserted there as
+geometry rather than latency, because its failure mode is a fixed layout offset that no timing budget sees.
+That case walks the keyboard selection past the fold and back to the first row, requiring the selected row to
+stay inside the list viewport and to sit against the bottom edge it was scrolled to. The virtual sizer is
+measured against the list itself: `offsetTop` resolves to `<body>`, since the list element is statically
+positioned, which would fold the header height into every follow scroll.
 
 Follow-up review-fix run on 2026-08-20 (`npm run e2e:perf`, hidden macOS arm64 app): all seven cases passed.
 The new full local snapshot refresh measured 30 ms median / 33 ms p95; list render measured 337 ms median /

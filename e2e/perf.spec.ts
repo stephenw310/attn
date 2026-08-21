@@ -14,6 +14,12 @@ const COMPOSER_OPEN_CEILING_MS = 50
 const COMPOSER_MUTATION_CEILING_MS = 8
 const COMPOSER_PAINT_P95_CEILING_MS = 20
 const MEMORY_CEILING_MB = 500
+// Sub-pixel rounding only; anything larger is a real clipped row.
+const SELECTION_EDGE_TOLERANCE_PX = 1
+// A row scrolled to the bottom edge settles one padding step (8px) away. The
+// regression this guards against parks it a header height (~57px) away, so the
+// ceiling sits well clear of both.
+const SELECTION_SLACK_CEILING_PX = 24
 
 test.use({ seed: '.artifacts/perf-seed.json' })
 // GitHub's Linux runner can spend close to the ordinary 30-second test timeout
@@ -92,6 +98,35 @@ async function measureLocalMailRefresh(page: Page): Promise<number> {
     ])
     return performance.now() - started
   })
+}
+
+async function selectionGeometry(page: Page): Promise<{
+  gapAbove: number
+  gapBelow: number
+  index: number
+}> {
+  return page.evaluate(() => {
+    const list = document.querySelector<HTMLElement>('[data-testid="thread-list"]')
+    if (!list) throw new Error('missing thread list')
+    const selected = document.querySelector<HTMLElement>('[data-testid="thread-row"][data-selected="true"]')
+    if (!selected) throw new Error('selected row is not mounted')
+    const listRect = list.getBoundingClientRect()
+    const rowRect = selected.getBoundingClientRect()
+    return {
+      gapAbove: rowRect.top - listRect.top,
+      gapBelow: listRect.bottom - rowRect.bottom,
+      index: Number(selected.getAttribute('data-thread-index'))
+    }
+  })
+}
+
+async function pressRepeatedly(page: Page, key: string, times: number): Promise<void> {
+  for (let iteration = 0; iteration < times; iteration++) {
+    await page.evaluate((pressed) => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: pressed, bubbles: true }))
+    }, key)
+  }
+  await page.evaluate(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
 }
 
 async function measureConversationOpen(page: Page): Promise<number> {
@@ -296,6 +331,35 @@ test.describe('@perf 10,000-thread inbox', () => {
     const medianMs = median(samples)
     await reportMetric(testInfo, 'local-mail-refresh', samples, medianMs)
     expect(medianMs, 'median full local snapshot refresh').toBeLessThan(LOCAL_REFRESH_CEILING_MS)
+  })
+
+  test('keeps a keyboard selection fully visible while scrolling the 10k list', async ({ page }) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+
+    // Step past the fold so the list has to scroll, then keep stepping: the
+    // follow scroll must converge rather than leaving a constant offset behind.
+    await pressRepeatedly(page, 'j', 40)
+    for (let iteration = 0; iteration < 5; iteration++) {
+      await pressRepeatedly(page, 'j', 1)
+      const { gapAbove, gapBelow, index } = await selectionGeometry(page)
+      expect(gapAbove, `row ${index} clipped at the top of the list`).toBeGreaterThanOrEqual(
+        -SELECTION_EDGE_TOLERANCE_PX
+      )
+      expect(gapBelow, `row ${index} clipped at the bottom of the list`).toBeGreaterThanOrEqual(
+        -SELECTION_EDGE_TOLERANCE_PX
+      )
+      // A row pulled to the bottom edge should sit against it. A larger gap
+      // means the follow scroll overshot by some fixed layout offset.
+      expect(gapBelow, `row ${index} overshot the bottom edge`).toBeLessThan(SELECTION_SLACK_CEILING_PX)
+    }
+
+    // Walking back to the top must land the first row fully inside the viewport.
+    await pressRepeatedly(page, 'k', 60)
+    const atTop = await selectionGeometry(page)
+    expect(atTop.index, 'k should walk back to the first row').toBe(0)
+    expect(atTop.gapAbove, 'first row clipped at the top of the list').toBeGreaterThanOrEqual(
+      -SELECTION_EDGE_TOLERANCE_PX
+    )
   })
 
   test('removes triaged rows within the CI-safe ceiling', async ({ page }, testInfo) => {

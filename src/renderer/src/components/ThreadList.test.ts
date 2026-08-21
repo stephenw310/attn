@@ -116,22 +116,44 @@ it('windows large lists while keeping an offscreen keyboard selection mounted', 
   }
 })
 
-it('includes list padding when scrolling a keyboard selection fully into view', async () => {
+// jsdom has no layout, so model the real geometry the effect measures: the list
+// sits below a header, and the virtual sizer starts one padding step into the
+// list's scroll content. Measuring the sizer against anything but the list --
+// `offsetTop` resolves to <body>, because <main> is statically positioned --
+// folds LIST_VIEWPORT_TOP into the scroll math and fails this test.
+const LIST_VIEWPORT_TOP = 57
+const LIST_PADDING_TOP = 8
+const LIST_CLIENT_HEIGHT = 100
+
+it('measures the sizer against the list when scrolling a selection into view', async () => {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
   const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+  const rectDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'getBoundingClientRect')
   const offsetTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetTop')
   actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
   Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
     configurable: true,
     get() {
-      return this.getAttribute('data-testid') === 'thread-list' ? 100 : 0
+      return this.getAttribute('data-testid') === 'thread-list' ? LIST_CLIENT_HEIGHT : 0
     }
   })
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+    configurable: true,
+    value(this: HTMLElement) {
+      if (this.getAttribute('data-testid') === 'thread-list') return { top: LIST_VIEWPORT_TOP } as DOMRect
+      if (this.classList.contains('relative')) {
+        const scrollTop = this.closest<HTMLElement>('[data-testid="thread-list"]')?.scrollTop ?? 0
+        return { top: LIST_VIEWPORT_TOP + LIST_PADDING_TOP - scrollTop } as DOMRect
+      }
+      return { top: 0 } as DOMRect
+    }
+  })
+  // Absolute document offsets must not be what the effect reads.
   Object.defineProperty(HTMLElement.prototype, 'offsetTop', {
     configurable: true,
     get() {
-      return this.classList.contains('relative') ? 8 : 0
+      return this.classList.contains('relative') ? LIST_VIEWPORT_TOP + LIST_PADDING_TOP : LIST_VIEWPORT_TOP
     }
   })
   const todayAtNoon = new Date()
@@ -169,13 +191,19 @@ it('includes list padding when scrolling a keyboard selection fully into view', 
     await act(async () => root.render(createElement(ThreadList, { ...baseProps, selectedIndex: 0 })))
     await act(async () => root.render(createElement(ThreadList, { ...baseProps, selectedIndex: 3 })))
 
+    // Row 3 sits at 182 in layout coordinates and is 46 tall, so pulling its
+    // bottom to the viewport floor lands at 8 + 182 + 46 - 100. Reading the
+    // sizer's document offset instead would scroll a header-height too far.
     const list = container.querySelector<HTMLElement>('[data-testid="thread-list"]')
-    expect(list?.scrollTop).toBe(136)
+    expect(list?.scrollTop).toBe(LIST_PADDING_TOP + 182 + 46 - LIST_CLIENT_HEIGHT)
   } finally {
     await act(async () => root.unmount())
     if (clientHeightDescriptor) {
       Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightDescriptor)
     } else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+    if (rectDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', rectDescriptor)
+    } else Reflect.deleteProperty(HTMLElement.prototype, 'getBoundingClientRect')
     if (offsetTopDescriptor) Object.defineProperty(HTMLElement.prototype, 'offsetTop', offsetTopDescriptor)
     else Reflect.deleteProperty(HTMLElement.prototype, 'offsetTop')
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
