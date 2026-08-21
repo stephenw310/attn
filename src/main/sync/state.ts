@@ -4,7 +4,15 @@ import type { SyncState } from '../../shared/mail'
 export function sameSyncState(left: SyncState, right: SyncState): boolean {
   if (left.phase !== right.phase) return false
   if (left.phase === 'syncing' && right.phase === 'syncing') {
-    return left.stage === right.stage && left.threadsDone === right.threadsDone
+    return (
+      left.stage === right.stage &&
+      left.threadsDone === right.threadsDone &&
+      left.stageThreadsListed === right.stageThreadsListed &&
+      left.stageThreadsFetched === right.stageThreadsFetched &&
+      left.stageThreadsEstimate === right.stageThreadsEstimate &&
+      left.firstReadableMs === right.firstReadableMs &&
+      left.interactiveReadyMs === right.interactiveReadyMs
+    )
   }
   if (left.phase === 'indexing' && right.phase === 'indexing') {
     return (
@@ -12,7 +20,6 @@ export function sameSyncState(left: SyncState, right: SyncState): boolean {
       left.threadsDone === right.threadsDone &&
       left.threadsTotal === right.threadsTotal &&
       left.messagesTotal === right.messagesTotal &&
-      left.etaMs === right.etaMs &&
       left.reason === right.reason &&
       left.waitMs === right.waitMs &&
       left.message === right.message

@@ -438,11 +438,11 @@ export async function prepareDraftMimeAttachments(
           attachment.remoteAttachmentId &&
           provider.getAttachmentData
         ) {
-          const data = signal
-            ? await provider.getAttachmentData(attachment.remoteMessageId, attachment.remoteAttachmentId, {
-                signal
-              })
-            : await provider.getAttachmentData(attachment.remoteMessageId, attachment.remoteAttachmentId)
+          const data = await provider.getAttachmentData(
+            attachment.remoteMessageId,
+            attachment.remoteAttachmentId,
+            signal ? { signal } : undefined
+          )
           if (!data) {
             throw new DraftAttachmentSourceError(
               `remote attachment unavailable: ${attachment.filename}`,

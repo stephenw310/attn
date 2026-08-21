@@ -97,7 +97,24 @@ export type SyncState =
   | { phase: 'idle' }
   // An incremental history poll, not a staged backfill: no stage, no progress.
   | { phase: 'checking' }
-  | { phase: 'syncing'; stage: SyncStage; threadsDone: number }
+  | {
+      phase: 'syncing'
+      stage: SyncStage
+      /** Cumulative work across the staged bootstrap. */
+      threadsDone: number
+      /** Measurement fields consumed by the future utility-process protocol. */
+      stageThreadsListed?: number
+      stageThreadsFetched?: number
+      stageThreadsEstimate?: number
+      elapsedMs?: number
+      stageElapsedMs?: number
+      threadsPerMinute?: number
+      stageListedPerMinute?: number
+      stageFetchedPerMinute?: number
+      quotaWaitMs?: number
+      firstReadableMs?: number
+      interactiveReadyMs?: number
+    }
   | {
       phase: 'indexing'
       // 'lifetime' walks account headers; 'attachments' is the short ids-only
@@ -107,6 +124,9 @@ export type SyncState =
       threadsTotal?: number
       messagesTotal?: number
       etaMs?: number
+      elapsedMs?: number
+      threadsPerMinute?: number
+      quotaWaitMs?: number
       reason: 'running' | 'quota-wait' | 'foreground-yield' | 'retry-wait' | 'paused'
       waitMs?: number
       message?: string

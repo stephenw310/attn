@@ -4,7 +4,7 @@
 **Basis:** SPEC §8 M2, F6 (compose/send/undo send), F3 (reader the composer opens from), the M1 deviations table, and the codebase through draft PR #38.
 **Goal:** M2 ends at the **daily-drivable bar** — one of us runs Attn as their only mail client. That requires both the new mail-out surface and the hardening pass (T20) that closes the M1 deviations assigned to M2.
 
-**Current progress (2026-08-19):** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window), T16 (#45), T17 (#48), T18 (#47), and T19 (#41) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, T14E shipped in #50, and #52 fixed the composer bugs found while dogfooding them. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) shipped in #51; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). T21's poll-cycle label-catalog refresh is implemented with authoritative add/rename/delete semantics and change-only renderer invalidation. **Open for M2 exit:** T20 (hardening and sign-off) and the manual real-Gmail evidence items listed in the T20 exit checklist. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
+**Current progress (2026-08-19):** R1 (#31), R2 (#30), R3 (#37), T13 (#32), T15 (#39), T14 (#38, full-window), T16 (#45), T17 (#48), T18 (#47), and T19 (#41) are shipped. Dogfood of the shipped composer produced revision tasks T14A–T14E, covering drafts as first-class objects, reply/forward entry points, rich content with a zero-loss invariant, two-way Gmail Drafts sync, and inline thread drafting; T14A–T14D shipped in #43, with draft-mirror reconciliation fixed in #44, T14E shipped in #50, and #52 fixed the composer bugs found while dogfooding them. T14C reverses the composer's narrow-schema decision (SPEC §9 #16) and expands M2 beyond composer-and-send; that cost is accepted knowingly. T13A's whole-account lifetime header sweep (SPEC §9 #17) shipped in #51; its real-mailbox quota/timing run remains sign-off evidence. The bounded stage restructure planned as M3's S3 and S4's membership half — the all-mail, spam, and trash stages, the retired `sent` stage, and per-label reconciliation with purge verification — shipped alongside it in the same PR by owner decision (see docs/M3-PLAN.md statuses). T21's poll-cycle label-catalog refresh is implemented with authoritative add/rename/delete semantics and change-only renderer invalidation. T20's engineering items are implemented: fixed-height 10k windowing, composer and bulk-action profiling, the production 10k query bound, weighted Gmail quota scheduling, and structured bootstrap telemetry are recorded in [T20-EVIDENCE.md](T20-EVIDENCE.md). **Open for M2 exit:** the manual real-Gmail evidence and one-week dogfood items listed in the T20 exit checklist. The only remaining M1 evidence item is the real-OS notification click-through smoke; it must be recorded before M2 sign-off but does not block implementation.
 
 ---
 
@@ -215,7 +215,7 @@ SELECT name, email,
 - Unit: header extraction (angle-bracket forms, folded References), contact ranking (recency decay, prefix beats infix, self-exclusion), cursor routing (fresh, mid-backfill, completed, history-recovery restart).
 - **E2e regression for the idempotency finding:** persist the same seeded thread twice (a refetch is one `relaunch()` plus a poll, or drive `persistThread` through the test seam) and assert the contact aggregate is unchanged. Then delete the source thread and assert its unique contact disappears while contacts with other contributions survive. Without this, overcounting or stale projection rows reappear when sync paths change.
 - E2e (seeded): seeded fixture exposes headers through `getConversation`; `contacts:search` returns seed senders ranked; boot log shows the sent stage skipped when seeded.
-- Manual smoke (signed in): fresh sign-in runs metadata → bodies → sent → reconcile; contacts populate from real history. Record time to first readable page separately from full completion, plus per-stage thread totals/durations and any quota-wait intervals. A large-mailbox run is expected to remain usable while background completion continues; a five-minute full-sync target is not implied.
+- Manual smoke (signed in): fresh sign-in runs metadata → bodies → drafts → all-mail → spam → trash → reconcile, then lifetime indexing; contacts populate from real history. Record time to first readable page separately from full completion, plus per-stage thread totals/durations and any quota-wait intervals. A large-mailbox run is expected to remain usable while background completion continues; a five-minute full-sync target is not implied.
 
 ### Done when
 
@@ -251,11 +251,11 @@ them too.
   authoritative for threads that are fetched.
 - The sweep persists its own cursor in `sync_state` (same `phase:pageToken` grammar and `'done'` sentinel
   as `backfill_cursor`) and resumes on every launch until done. Foreground sends, action replay, history
-  polling, body hydration, and the interactive backfill all outrank it: self-throttle well below Gmail's
-  ~250 units/user/sec so interactive calls never queue behind it, and set the duty-cycle constants from the
-  real-mailbox measurement below, not guesses.
-  The implemented conservative starting posture is one request at a time, a 100 ms inter-request floor
-  (~100 units/sec for metadata gets), and a one-second page-boundary pause. Active user-action replays,
+  polling, body hydration, and the interactive backfill all outrank it. The shared weighted limiter enforces
+  the configured project quota (6,000 units/user/minute by default) and retains an explicit foreground
+  reserve; the sweep also keeps a conservative duty cycle so interactive calls do not queue behind it.
+  The implemented starting posture is one request at a time, a 100 ms inter-request floor, and a one-second
+  page-boundary pause; the weighted 40-unit metadata gets are paced further whenever the bucket requires it. Active user-action replays,
   draft mirrors, outbox sends, body/attachment hydration, and history cycles make the sweep yield in 250 ms
   slices. The real-mailbox run may tune these constants before sign-off; it must preserve that priority
   ordering.
@@ -876,29 +876,33 @@ Old threads read like new ones when signed in; opens never block; verify green; 
 
 The closing pass that turns "features exist" into "this is my mail client":
 
+**Engineering status (2026-08-19): implemented and profiled; manual sign-off remains.** Automated measurements,
+the memory definition, quota configuration, real-Gmail capture template, and dogfood checklist live in
+[T20-EVIDENCE.md](T20-EVIDENCE.md).
+
 1. **10k-thread decision (F3):** generate a 10k perf seed locally, measure list render + scroll frame times + memory against §7. If the mounted list misses, implement fixed-height windowing by hand (rows are uniform; ~150 lines, no dependency) and re-measure; if it passes, raise the 300-row query cap to the measured-safe bound and record the evidence. Either way the deviation rows (virtualization, 300-cap) resolve with data, not vibes.
 2. **Composer latency profile:** measure keystroke-to-paint under a 2k store with the profiler, not just the CI ceiling; fix anything over ~8ms median so the 16ms budget has headroom.
 3. **Gmail client weighted token-bucket limiter** (the reworded M1 TODO): pace requests by their per-method quota cost and the OAuth project's actual quota, reserving capacity for sends, queued user actions, and history polling before background backfill. Google's quota model changed in May 2026, so do not fossilize the old “200 units/user/100s” example; keep costs/configuration explicit and link the [authoritative Gmail quota table](https://developers.google.com/workspace/gmail/api/reference/quota). Unit-test scheduling with a fake clock; exponential backoff remains the fallback, not the normal pacing mechanism.
-4. **Bootstrap/backfill evidence:** instrument time to first readable page separately from full index completion. Record per-stage estimated total, processed count, effective threads/minute, and quota-wait time on a typical real mailbox and the 10k seed. M2 may still display the existing stage UI, but the measurements and protocol fields must be ready for M3's background-process move; “N to zero” remains explicitly the unread count, never progress.
+4. **Bootstrap/backfill evidence:** instrument time to first readable page separately from full index completion. Record per-stage listed, fetched, and estimated counts, effective fetched threads/minute, and quota-wait time on a typical real mailbox and the 10k seed. M2 may still display the existing stage UI, but the measurements and protocol fields must be ready for M3's background-process move; “N to zero” remains explicitly the unread count, never progress.
 5. **Dogfood checklist executed and recorded** (the M2 exit evidence): a full week of real use by at least one of us, plus the F6 acceptance list — composer <50ms open, imperceptible typing, force-quit recovery, undo-send reliability, zero duplicate sends across the week, attachment round-trips — and the notification click-through smoke if it is still open.
 6. **Docs:** SPEC status + milestone table updated (M2 shipped state, any new accepted deviations), AGENTS pipeline notes if the harness changed, README "current state" paragraph.
 
 ### Done when — the M2 exit checklist
 
-Status annotations as of 2026-08-16 (a review pass over `main` at #52 — `npm run verify` green: typecheck, lint, 486 unit tests, 109 e2e specs):
+Status annotations as of 2026-08-19 (T20 engineering pass; manual evidence remains):
 
 - [ ] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites — *all planned implementation tasks are complete; T21 still needs to merge with its green verification run before this merge-level checkbox closes*
 - [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links) — *automated coverage exists for composer open, force-quit recovery, undo-send, and no-duplicate-send at unit level; the closing PR still has to cite it*
 - [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates — *manual evidence outstanding*
-- [ ] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data — *not started (T20 items 1–2)*
+- [x] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data — *fixed-height windowing at 500+, production cap 10,000; see [T20-EVIDENCE.md](T20-EVIDENCE.md)*
 - [ ] Initial-sync evidence separates first-readable-page latency from full background completion and records
-      per-stage totals, effective rate, and quota-wait time — *not started (T20 item 4); T13A's real-mailbox run doubles as this evidence*
+      per-stage totals, effective rate, and quota-wait time — *protocol fields, structured logs, and fake-clock tests implemented; T13A's real-mailbox capture remains outstanding in [T20-EVIDENCE.md](T20-EVIDENCE.md)*
 - [ ] Lifetime whole-account header indexing finds contacts outside the mail window and creates header rows
       without downloading old body bytes; saved-Google-Contacts scope decision recorded — *implemented and e2e-covered (#51); real-mailbox wall-clock/quota run outstanding; People-API decision recorded in T13A*
 - [x] Failed triage actions self-heal to server truth with an explanatory toast; auth re-pend shipped; no silent queue states remain — *T18 (#47), unit + e2e covered*
 - [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts — *T19 (#41) shipped; signed-in manual smoke outstanding*
 - [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input) — *outstanding; #52 is the first batch of dogfood fixes*
-- [ ] SPEC/README/AGENTS/M1-plan deviation rows updated to the shipped reality — *status paragraphs, risk register, and artifact lists refreshed 2026-08-16; the virtualization/300-cap deviation rows in docs/M1-PLAN.md stay open until T20 item 1 resolves them with data*
+- [x] SPEC/README/AGENTS/M1-plan deviation rows updated to the shipped reality — *T20 code-owned documentation refreshed 2026-08-19; the still-open manual evidence remains explicit rather than being marked shipped*
 
 Then M3 (search, system mailboxes, splits, palette, themes) starts with the utility-process task below. It is deliberately **not** done in M2: moving the process boundary while building the outbox would risk the exactly-once invariant for a jank win whose real driver is M3's FTS indexing.
 
@@ -917,11 +921,11 @@ event loop.
    completed send, losing an optimistic action, or allowing two active workers for one account. Keep one
    reducer path and document SQLite write ownership so process isolation does not become writer contention.
 3. **Prioritize foreground intent:** outbox sends, queued user actions, on-demand body hydration, and history
-   polling consume quota before historical metadata/body/Sent indexing. The weighted token bucket exposes an
+   polling consume quota before historical metadata/body/Sent indexing. The weighted quota scheduler exposes an
    explicit `running | quota-wait | offline | error` reason; backoff never masquerades as active progress.
 4. **Separate readiness from completion:** commit and publish the first recent page within the existing
-   fresh-install target, then report `Live · indexing older mail` with stage, processed count, Gmail
-   `resultSizeEstimate` when available, effective rate, and ETA. “N to zero” stays the unread Inbox total.
+   fresh-install target, then report `Live · indexing older mail` with stage, distinct listed/fetched counts,
+   Gmail `resultSizeEstimate` when available, effective rate, and ETA. “N to zero” stays the unread Inbox total.
    Background completion has no universal wall-clock SLA; evidence always includes mailbox size and quota
    regime.
 5. **Reduce duplicate work without silent truncation:** skip Sent-thread metadata already authoritatively

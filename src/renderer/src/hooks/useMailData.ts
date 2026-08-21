@@ -95,13 +95,21 @@ export function useMailData(
     let cancelled = false
     let deferredRefreshTimer: number | null = null
     let mailChangedPending = false
+    let refreshInFlight = false
+    let refreshQueued = false
     const refresh = (): void => {
+      if (cancelled) return
       const delay = deferRefreshUntilRef.current - Date.now()
       if (delay > 0) {
         if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
         deferredRefreshTimer = window.setTimeout(refresh, delay)
         return
       }
+      if (refreshInFlight) {
+        refreshQueued = true
+        return
+      }
+      refreshInFlight = true
       // Past the defer gate, so conversation caches age out with the thread list
       // rather than once per raw event: a burst during backfill, or an archive
       // animation holding the refresh, invalidates once instead of per event.
@@ -153,6 +161,12 @@ export function useMailData(
           setPausedActionCount(actionStatus.paused)
         })
         .catch(() => {})
+        .finally(() => {
+          refreshInFlight = false
+          if (!refreshQueued || cancelled) return
+          refreshQueued = false
+          refresh()
+        })
     }
     refresh()
     const offMail = bridge.mail.onChanged(() => {

@@ -488,7 +488,7 @@ describe('backfill to poller handoff', () => {
 
     // Indexing is not over when the header sweep ends: the ids-only attachment
     // tail follows it, and only its completion settles the footer.
-    sweep.result.resolve({ threadCount: 2_000 })
+    sweep.result.resolve({ threadCount: 2_000, elapsedMs: 60_000, quotaWaitMs: 500 })
     await flush()
     expect(states.at(-1)).not.toEqual({ phase: 'idle' })
     attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
@@ -503,7 +503,7 @@ describe('backfill to poller handoff', () => {
     controller.onSignIn()
     expect(attachmentWalks).toHaveLength(0)
 
-    lifetimeSweeps[0].result.resolve({ threadCount: 12 })
+    lifetimeSweeps[0].result.resolve({ threadCount: 12, elapsedMs: 1_000, quotaWaitMs: 0 })
     await flush()
 
     expect(attachmentWalks).toHaveLength(1)
@@ -538,7 +538,7 @@ describe('backfill to poller handoff', () => {
   it('keeps a paused attachment index reporting its own stage', async () => {
     const { controller, lifetimeSweeps, attachmentWalks, states } = harness({ backfillCursor: 'done' })
     controller.onSignIn()
-    lifetimeSweeps[0].result.resolve({ threadCount: 0 })
+    lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
     await flush()
 
     attachmentWalks[0].callbacks.onProgress({ threadsFlagged: 1, reason: 'running', mailChanged: false })

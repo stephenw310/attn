@@ -4,6 +4,17 @@
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
+import { type SchedulerTime, systemTime } from '../time'
+import {
+  DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE,
+  GMAIL_QUOTA_UNITS,
+  type GmailQuotaConfig,
+  type GmailQuotaLimiter,
+  type GmailQuotaMetrics,
+  type GmailRequestPriority,
+  quotaMethod,
+  GmailQuotaLimiter as WeightedQuotaLimiter
+} from './quota'
 
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
 const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
@@ -26,6 +37,14 @@ interface RequestOptions {
   body?: unknown
   retryTransient?: boolean
   signal?: AbortSignal
+  priority?: GmailRequestPriority
+}
+
+export interface GmailClientOptions {
+  time?: SchedulerTime
+  random?: () => number
+  quota?: GmailQuotaConfig
+  quotaLimiter?: GmailQuotaLimiter
 }
 
 interface MultipartMedia {
@@ -46,14 +65,31 @@ async function* multipartUploadBody(
 }
 
 export class GmailClient {
+  private readonly time: SchedulerTime
+  private readonly random: () => number
+  private readonly quotaLimiter: GmailQuotaLimiter
+
   constructor(
     private readonly config: OAuthConfig,
     private tokens: TokenSet,
-    private readonly persist: (t: TokenSet) => void
-  ) {}
+    private readonly persist: (t: TokenSet) => void,
+    options: GmailClientOptions = {}
+  ) {
+    this.time = options.time ?? systemTime
+    this.random = options.random ?? Math.random
+    this.quotaLimiter =
+      options.quotaLimiter ??
+      new WeightedQuotaLimiter(options.quota ?? { unitsPerMinute: DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE }, {
+        time: this.time
+      })
+  }
+
+  quotaMetrics(): GmailQuotaMetrics {
+    return this.quotaLimiter.snapshot()
+  }
 
   private async ensureAccessToken(signal?: AbortSignal): Promise<string> {
-    if (Date.now() < this.tokens.expires_at - 60_000) return this.tokens.access_token
+    if (this.time.now() < this.tokens.expires_at - 60_000) return this.tokens.access_token
     return this.refresh(signal)
   }
 
@@ -83,7 +119,7 @@ export class GmailClient {
     this.tokens = {
       ...this.tokens,
       access_token: json.access_token,
-      expires_at: Date.now() + json.expires_in * 1000
+      expires_at: this.time.now() + json.expires_in * 1000
     }
     this.persist(this.tokens)
     return this.tokens.access_token
@@ -92,32 +128,38 @@ export class GmailClient {
   async get<T>(
     path: string,
     params?: Record<string, string | string[]>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; priority?: GmailRequestPriority }
   ): Promise<T> {
-    return this.request('GET', path, { params, signal: options?.signal })
+    return this.request('GET', path, {
+      params,
+      signal: options?.signal,
+      priority: options?.priority
+    })
   }
 
   async post<T>(
     path: string,
     body: unknown,
-    options?: { retryTransient?: boolean; signal?: AbortSignal }
+    options?: { retryTransient?: boolean; signal?: AbortSignal; priority?: GmailRequestPriority }
   ): Promise<T> {
     return this.request('POST', path, {
       body,
       retryTransient: options?.retryTransient,
-      signal: options?.signal
+      signal: options?.signal,
+      priority: options?.priority
     })
   }
 
   async put<T>(
     path: string,
     body: unknown,
-    options?: { retryTransient?: boolean; signal?: AbortSignal }
+    options?: { retryTransient?: boolean; signal?: AbortSignal; priority?: GmailRequestPriority }
   ): Promise<T> {
     return this.request('PUT', path, {
       body,
       retryTransient: options?.retryTransient,
-      signal: options?.signal
+      signal: options?.signal,
+      priority: options?.priority
     })
   }
 
@@ -126,7 +168,7 @@ export class GmailClient {
     path: string,
     metadata: unknown,
     media: MultipartMedia,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; priority?: GmailRequestPriority }
   ): Promise<T> {
     const url = new URL(UPLOAD_BASE + path)
     url.searchParams.set('uploadType', 'multipart')
@@ -143,6 +185,7 @@ export class GmailClient {
     let attempt = 0
     for (;;) {
       const token = await this.ensureAccessToken(options?.signal)
+      await this.acquireQuota(method, path, options?.priority, options?.signal)
       const init = {
         method,
         headers: {
@@ -174,10 +217,14 @@ export class GmailClient {
     }
   }
 
-  async delete(path: string, options?: { retryTransient?: boolean; signal?: AbortSignal }): Promise<void> {
+  async delete(
+    path: string,
+    options?: { retryTransient?: boolean; signal?: AbortSignal; priority?: GmailRequestPriority }
+  ): Promise<void> {
     await this.request('DELETE', path, {
       retryTransient: options?.retryTransient,
-      signal: options?.signal
+      signal: options?.signal,
+      priority: options?.priority
     })
   }
 
@@ -199,6 +246,7 @@ export class GmailClient {
     let attempt = 0
     for (;;) {
       const token = await this.ensureAccessToken(options.signal)
+      await this.acquireQuota(method, path, options.priority, options.signal)
       const res = await fetch(url, {
         method,
         headers: {
@@ -218,9 +266,9 @@ export class GmailClient {
         await this.refresh(options.signal)
         continue
       }
-      // Gmail reports per-user rate/quota limits as 403, not 429. Per-MINUTE
-      // quota windows need long backoff — wait into the next window. A proper
-      // token-bucket limiter is deferred M2 hardening (docs/M2-PLAN.md).
+      // Gmail reports some rate/quota limits as 403 rather than 429. The
+      // weighted limiter handles normal pacing; backoff remains the fallback
+      // for server-side contention and quota state this client cannot observe.
       const quotaHit = res.status === 403 && /quota|rate ?limit/i.test(text)
       if (
         options.retryTransient !== false &&
@@ -228,7 +276,7 @@ export class GmailClient {
         attempt < 7
       ) {
         attempt++
-        await sleep(Math.min(65_000, 1000 * 2 ** attempt) + Math.random() * 1000, options.signal)
+        await sleep(Math.min(65_000, 1000 * 2 ** attempt) + this.random() * 1000, this.time, options.signal)
         continue
       }
       throw new GmailApiError(
@@ -238,17 +286,27 @@ export class GmailClient {
       )
     }
   }
+
+  private acquireQuota(
+    method: string,
+    path: string,
+    priority: GmailRequestPriority = 'foreground',
+    signal?: AbortSignal
+  ): Promise<void> {
+    const quota = quotaMethod(method, path)
+    return this.quotaLimiter.acquire(GMAIL_QUOTA_UNITS[quota], priority, signal)
+  }
 }
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+function sleep(ms: number, time: SchedulerTime, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('request aborted'))
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const timer = time.timers.setTimeout(() => {
       signal?.removeEventListener('abort', abort)
       resolve()
     }, ms)
     const abort = (): void => {
-      clearTimeout(timer)
+      time.timers.clearTimeout(timer)
       reject(signal?.reason ?? new Error('request aborted'))
     }
     signal?.addEventListener('abort', abort, { once: true })

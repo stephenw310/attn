@@ -107,7 +107,11 @@ describe('attachment flag walk', () => {
     // store has never seen is not invented here.
     expect(flags(db)).toEqual({ t1: 1, t2: 1, t3: 0 })
     expect(getThread).not.toHaveBeenCalled()
-    expect(listThreadIds).toHaveBeenCalledWith({ q: 'has:attachment', pageToken: undefined })
+    expect(listThreadIds).toHaveBeenCalledWith({
+      q: 'has:attachment',
+      pageToken: undefined,
+      priority: 'background'
+    })
     expect(cursor(db)).toBe('done')
     expect(events.onProgress).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'running', threadsFlagged: 1, mailChanged: true })
@@ -156,8 +160,16 @@ describe('attachment flag walk', () => {
       runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
     ).resolves.toEqual({ threadsFlagged: 2 })
 
-    expect(listThreadIds).toHaveBeenNthCalledWith(1, { q: 'has:attachment', pageToken: 'page-2' })
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, { q: 'has:attachment', pageToken: 'page-3' })
+    expect(listThreadIds).toHaveBeenNthCalledWith(1, {
+      q: 'has:attachment',
+      pageToken: 'page-2',
+      priority: 'background'
+    })
+    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
+      q: 'has:attachment',
+      pageToken: 'page-3',
+      priority: 'background'
+    })
     expect(flags(db)).toEqual({ t1: 1, t2: 1 })
     expect(cursor(db)).toBe('done')
   })
@@ -174,7 +186,11 @@ describe('attachment flag walk', () => {
       runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
     ).resolves.toEqual({ threadsFlagged: 1 })
 
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, { q: 'has:attachment', pageToken: undefined })
+    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
+      q: 'has:attachment',
+      pageToken: undefined,
+      priority: 'background'
+    })
     expect(events.onError).not.toHaveBeenCalled()
     expect(cursor(db)).toBe('done')
   })

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const output = join(ROOT, 'e2e/.artifacts/perf-seed.json')
-const threadCount = 2_000
+const threadCount = 10_000
 const baseDate = Date.UTC(2026, 0, 1)
 
 const threads = Array.from({ length: threadCount }, (_, index) => {

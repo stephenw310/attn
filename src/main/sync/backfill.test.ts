@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
+import type { SchedulerTime, TimerHandle } from '../time'
 import { planBackfillStart, runInboxBackfill } from './backfill'
 import type { MailProvider, ThreadIdPage } from './provider'
 import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './windows'
@@ -60,6 +61,101 @@ beforeEach(() => {
 })
 
 describe('windowed backfill checkpoints', () => {
+  it('reports first-readable, per-stage rate, processed count, and real quota-wait deltas', async () => {
+    let now = 0
+    let quotaWaitMs = 0
+    const advance = (elapsedMs: number, waitedMs = 0): void => {
+      now += elapsedMs
+      quotaWaitMs += waitedMs
+    }
+    const time: SchedulerTime = {
+      now: () => now,
+      timers: {
+        setTimeout: () => 1 as unknown as TimerHandle,
+        clearTimeout: () => {}
+      }
+    }
+    const provider = emptyProvider()
+    vi.mocked(provider.getProfile).mockImplementation(async () => {
+      advance(100, 1)
+      return { emailAddress: 'test@example.com', historyId: '101' }
+    })
+    vi.mocked(provider.listLabels).mockImplementation(async () => {
+      advance(100, 1)
+      return []
+    })
+    vi.mocked(provider.listThreadIds).mockImplementation(async (options) => {
+      advance(100, 5)
+      if (options?.q === INBOX_METADATA_WINDOW && options.labelIds?.[0] === 'INBOX') {
+        return { threadIds: ['new'], resultSizeEstimate: 1 }
+      }
+      if (options?.labelIds?.[0] === 'INBOX' && options.q === undefined) {
+        return { threadIds: ['new'], resultSizeEstimate: 1 }
+      }
+      return { threadIds: [], resultSizeEstimate: 0 }
+    })
+    vi.mocked(provider.getThread).mockImplementation(async (id) => {
+      advance(200, 20)
+      return { id, messages: [] }
+    })
+    provider.quotaMetrics = () => ({ requests: 0, units: 0, waitMs: quotaWaitMs })
+    const onProgress = vi.fn()
+    const onMetric = vi.fn()
+
+    const result = await runInboxBackfill(
+      fakeDb(undefined),
+      provider,
+      { onProgress, onError: vi.fn(), onMetric },
+      { time }
+    )
+
+    expect(result?.threadCount).toBe(1)
+    expect(
+      onProgress.mock.calls.map(([progress]) => progress).find((progress) => progress.firstReadableMs)
+    ).toEqual(
+      expect.objectContaining({
+        stage: 'metadata',
+        stageThreadsListed: 1,
+        stageThreadsFetched: 1,
+        stageThreadsEstimate: 1,
+        firstReadableMs: 500,
+        stageListedPerMinute: 200,
+        stageFetchedPerMinute: 200,
+        quotaWaitMs: 27
+      })
+    )
+    expect(onMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'stage-complete',
+        stage: 'metadata',
+        threadsListed: 1,
+        threadsFetched: 1,
+        threadsEstimate: 1,
+        elapsedMs: 300,
+        threadsPerMinute: 200,
+        quotaWaitMs: 25,
+        firstReadableMs: 500,
+        interactiveReadyMs: 500
+      })
+    )
+    expect(onMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'stage-complete',
+        stage: 'reconcile',
+        threadsListed: 1,
+        threadsFetched: 0
+      })
+    )
+    expect(onMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'complete',
+        threadsDone: 1,
+        firstReadableMs: 500,
+        interactiveReadyMs: 500
+      })
+    )
+  })
+
   it('runs inbox stages, then all-mail, spam, trash, and per-label reconciliation', async () => {
     const provider = emptyProvider()
     const result = await runInboxBackfill(fakeDb(undefined), provider, callbacks)
@@ -67,44 +163,58 @@ describe('windowed backfill checkpoints', () => {
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
       q: INBOX_METADATA_WINDOW,
       labelIds: ['INBOX'],
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'foreground'
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, {
       q: INBOX_BODIES_WINDOW,
       labelIds: ['INBOX'],
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'background'
     })
     // No label filter: the all-mail stage subsumes the retired SENT stage.
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(3, {
       q: ALL_MAIL_WINDOW,
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'background'
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(4, {
       labelIds: ['SPAM'],
       includeSpamTrash: true,
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'background'
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(5, {
       labelIds: ['TRASH'],
       includeSpamTrash: true,
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'background'
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(6, {
       labelIds: ['INBOX'],
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'background'
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(7, {
       labelIds: ['SPAM'],
       includeSpamTrash: true,
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'background'
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(8, {
       labelIds: ['TRASH'],
       includeSpamTrash: true,
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'background'
     })
     expect(result).toEqual(emptyResult)
-    expect(callbacks.onProgress.mock.calls.map(([progress]) => progress)).toEqual([
+    expect(
+      callbacks.onProgress.mock.calls.map(([progress]) => ({
+        stage: progress.stage,
+        threadsDone: progress.threadsDone,
+        mailChanged: progress.mailChanged
+      }))
+    ).toEqual([
       { stage: 'metadata', threadsDone: 0, mailChanged: false },
       { stage: 'bodies', threadsDone: 0, mailChanged: false },
       { stage: 'drafts', threadsDone: 0, mailChanged: false },
@@ -126,17 +236,30 @@ describe('windowed backfill checkpoints', () => {
 
     await runInboxBackfill(fakeDb(undefined), provider, callbacks)
 
-    expect(provider.getThread).toHaveBeenNthCalledWith(1, 'old', { format: 'metadata' })
-    expect(provider.getThread).toHaveBeenNthCalledWith(2, 'recent', { format: 'full' })
-    expect(provider.getThread).toHaveBeenNthCalledWith(3, 'archived', { format: 'metadata' })
-    expect(provider.getThread).toHaveBeenNthCalledWith(4, 'junk', { format: 'metadata' })
+    expect(provider.getThread).toHaveBeenNthCalledWith(1, 'old', {
+      format: 'metadata',
+      priority: 'foreground'
+    })
+    expect(provider.getThread).toHaveBeenNthCalledWith(2, 'recent', {
+      format: 'full',
+      priority: 'background'
+    })
+    expect(provider.getThread).toHaveBeenNthCalledWith(3, 'archived', {
+      format: 'metadata',
+      priority: 'background'
+    })
+    expect(provider.getThread).toHaveBeenNthCalledWith(4, 'junk', {
+      format: 'metadata',
+      priority: 'background'
+    })
   })
 
   it('skips threads already stored during the overlapping stages', async () => {
     const provider = emptyProvider()
+    const onMetric = vi.fn()
     vi.mocked(provider.listThreadIds).mockImplementation(async (options): Promise<ThreadIdPage> => {
       if (options?.q === ALL_MAIL_WINDOW && !options.labelIds) {
-        return { threadIds: ['known', 'fresh'] }
+        return { threadIds: ['known', 'fresh'], resultSizeEstimate: 2 }
       }
       return { threadIds: [] }
     })
@@ -144,11 +267,23 @@ describe('windowed backfill checkpoints', () => {
     await runInboxBackfill(
       fakeDb({ backfill_cursor: 'all-mail', last_history_id: '88' }, new Set(['known'])),
       provider,
-      callbacks
+      { ...callbacks, onMetric }
     )
 
     expect(provider.getThread).toHaveBeenCalledTimes(1)
-    expect(provider.getThread).toHaveBeenCalledWith('fresh', { format: 'metadata' })
+    expect(provider.getThread).toHaveBeenCalledWith('fresh', {
+      format: 'metadata',
+      priority: 'background'
+    })
+    expect(onMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'stage-complete',
+        stage: 'all-mail',
+        threadsListed: 2,
+        threadsFetched: 1,
+        threadsEstimate: 2
+      })
+    )
   })
 
   it('resumes directly at per-label reconciliation after the junk stages complete', async () => {
@@ -172,10 +307,11 @@ describe('windowed backfill checkpoints', () => {
       callbacks
     )
 
-    expect(provider.listDrafts).toHaveBeenCalledWith('page-2')
+    expect(provider.listDrafts).toHaveBeenCalledWith('page-2', { priority: 'background' })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
       q: ALL_MAIL_WINDOW,
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'background'
     })
     expect(result).not.toBeNull()
   })
@@ -196,12 +332,14 @@ describe('windowed backfill checkpoints', () => {
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
       q: INBOX_METADATA_WINDOW,
       labelIds: ['INBOX'],
-      pageToken: 'expired'
+      pageToken: 'expired',
+      priority: 'foreground'
     })
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(2, {
       q: INBOX_METADATA_WINDOW,
       labelIds: ['INBOX'],
-      pageToken: undefined
+      pageToken: undefined,
+      priority: 'foreground'
     })
     expect(result).not.toBeNull()
     expect(callbacks.onError).not.toHaveBeenCalled()

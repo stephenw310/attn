@@ -14,12 +14,16 @@ describe('GmailMailProvider.listThreadIds', () => {
       nextPageToken: undefined,
       resultSizeEstimate: 42
     })
-    expect(get).toHaveBeenCalledWith('/threads', {
-      maxResults: '100',
-      q: 'newer_than:12m',
-      labelIds: ['SENT'],
-      pageToken: 'next'
-    })
+    expect(get).toHaveBeenCalledWith(
+      '/threads',
+      {
+        maxResults: '100',
+        q: 'newer_than:12m',
+        labelIds: ['SENT'],
+        pageToken: 'next'
+      },
+      { priority: undefined }
+    )
   })
 
   it('requests Spam/Trash inclusion only when asked', async () => {
@@ -27,14 +31,18 @@ describe('GmailMailProvider.listThreadIds', () => {
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
 
     await provider.listThreadIds({ labelIds: ['SPAM'], includeSpamTrash: true })
-    expect(get).toHaveBeenCalledWith('/threads', {
-      maxResults: '100',
-      labelIds: ['SPAM'],
-      includeSpamTrash: 'true'
-    })
+    expect(get).toHaveBeenCalledWith(
+      '/threads',
+      {
+        maxResults: '100',
+        labelIds: ['SPAM'],
+        includeSpamTrash: 'true'
+      },
+      { priority: undefined }
+    )
 
     await provider.listThreadIds({})
-    expect(get).toHaveBeenLastCalledWith('/threads', { maxResults: '100' })
+    expect(get).toHaveBeenLastCalledWith('/threads', { maxResults: '100' }, { priority: undefined })
   })
 })
 
@@ -47,7 +55,7 @@ describe('GmailMailProvider.saveDraft', () => {
     expect(post).toHaveBeenCalledWith(
       '/drafts',
       { message: { raw: 'cmF3' } },
-      { retryTransient: false, signal: undefined }
+      { retryTransient: false, signal: undefined, priority: 'foreground' }
     )
   })
 
@@ -59,7 +67,7 @@ describe('GmailMailProvider.saveDraft', () => {
     expect(put).toHaveBeenCalledWith(
       '/drafts/gmail-draft-1',
       { message: { raw: 'bmV4dA' } },
-      { retryTransient: false, signal: undefined }
+      { retryTransient: false, signal: undefined, priority: 'foreground' }
     )
   })
 
@@ -71,7 +79,7 @@ describe('GmailMailProvider.saveDraft', () => {
     expect(post).toHaveBeenCalledWith(
       '/drafts',
       { message: { raw: 'cmF3', threadId: 'thread-1' } },
-      { retryTransient: false, signal: undefined }
+      { retryTransient: false, signal: undefined, priority: 'foreground' }
     )
   })
 
@@ -82,7 +90,8 @@ describe('GmailMailProvider.saveDraft', () => {
     await expect(provider.deleteDraft('gmail/draft 1')).resolves.toBeUndefined()
     expect(deleteRequest).toHaveBeenCalledWith('/drafts/gmail%2Fdraft%201', {
       retryTransient: false,
-      signal: undefined
+      signal: undefined,
+      priority: 'foreground'
     })
   })
 })
@@ -98,7 +107,7 @@ describe('GmailMailProvider.saveDraft', () => {
     expect(post).toHaveBeenCalledWith(
       '/drafts',
       { message: { raw: 'cmF3' } },
-      { retryTransient: false, signal: controller.signal }
+      { retryTransient: false, signal: controller.signal, priority: 'foreground' }
     )
   })
 })
@@ -113,7 +122,8 @@ describe('GmailMailProvider.getAttachmentData', () => {
       provider.getAttachmentData('message/1', 'attachment/1', { signal: controller.signal })
     ).resolves.toBe('cmVtb3Rl')
     expect(get).toHaveBeenCalledWith('/messages/message%2F1/attachments/attachment%2F1', undefined, {
-      signal: controller.signal
+      signal: controller.signal,
+      priority: undefined
     })
   })
 })
@@ -128,7 +138,7 @@ describe('GmailMailProvider outbox operations', () => {
     expect(post).toHaveBeenCalledWith(
       '/drafts',
       { message: { raw: 'cmF3', threadId: 'thread-1' } },
-      { retryTransient: false, signal: undefined }
+      { retryTransient: false, signal: undefined, priority: 'send' }
     )
     await expect(provider.updateDraft({ id: 'draft-1', raw: 'bmV4dA' })).resolves.toBe('draft-1')
     expect(put).toHaveBeenCalledWith(
@@ -136,7 +146,8 @@ describe('GmailMailProvider outbox operations', () => {
       { message: { raw: 'bmV4dA' } },
       {
         retryTransient: false,
-        signal: undefined
+        signal: undefined,
+        priority: 'foreground'
       }
     )
   })
@@ -156,7 +167,7 @@ describe('GmailMailProvider outbox operations', () => {
       '/drafts/draft-1',
       { message: { threadId: 'thread-1' } },
       { mimeType: 'message/rfc822', sizeBytes: 8, endsWithCrlf: true, open },
-      { signal: undefined }
+      { signal: undefined, priority: 'foreground' }
     )
   })
 
@@ -173,7 +184,8 @@ describe('GmailMailProvider outbox operations', () => {
       { id: 'draft/1' },
       {
         retryTransient: false,
-        signal: undefined
+        signal: undefined,
+        priority: 'send'
       }
     )
   })

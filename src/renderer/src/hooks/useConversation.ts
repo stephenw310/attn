@@ -7,6 +7,8 @@ interface UseConversationOptions {
   selectedIndex: number
   threads: DisplayThread[]
   readerOpen: boolean
+  /** Pause speculative reads while a bulk selection is active. */
+  prefetch: boolean
   online: boolean
   account: string | null
   mailRevision: number
@@ -18,7 +20,7 @@ interface ConversationState {
 }
 
 export function useConversation(options: UseConversationOptions): ConversationState {
-  const { selected, selectedIndex, threads, readerOpen, online, account, mailRevision } = options
+  const { selected, selectedIndex, threads, readerOpen, prefetch, online, account, mailRevision } = options
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const cache = useRef(new Map<string, DisplayConversation>())
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -60,6 +62,10 @@ export function useConversation(options: UseConversationOptions): ConversationSt
       setConversation(null)
       return
     }
+    if (!readerOpen && !prefetch) {
+      hydrationTargetRef.current = null
+      return
+    }
     setConversation((current) => (current?.threadId === selectedId ? current : null))
     const hydrationDecision = hydrationAttemptDecision(hydrationTargetRef.current, {
       account,
@@ -94,10 +100,10 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     return () => {
       cancelled = true
     }
-  }, [account, mailRevision, online, readerOpen, selectedId])
+  }, [account, mailRevision, online, prefetch, readerOpen, selectedId])
 
   useEffect(() => {
-    if (!window.attn) return
+    if (!window.attn || !prefetch) return
     let cancelled = false
     const requestedRevision = mailRevision
     for (const index of [selectedIndex - 1, selectedIndex + 1]) {
@@ -116,7 +122,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     return () => {
       cancelled = true
     }
-  }, [mailRevision, selectedIndex, threads])
+  }, [mailRevision, prefetch, selectedIndex, threads])
 
   useEffect(() => {
     if (!readerOpen) {

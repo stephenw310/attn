@@ -80,7 +80,7 @@ describe('external body hydration', () => {
       'test@example.com',
       externalThread()
     )
-    expect(mail.getAttachmentData).toHaveBeenCalledWith('m1', 'body-1')
+    expect(mail.getAttachmentData).toHaveBeenCalledWith('m1', 'body-1', undefined)
     expect(write).toHaveBeenCalledWith('fetched body', null, 'test@example.com', 'm1')
   })
 

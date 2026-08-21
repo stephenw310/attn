@@ -130,7 +130,10 @@ export async function reconcilePurgeableMembership(
 ): Promise<void> {
   for (const threadId of reconcileLabelMembership(db, accountId, labelId, serverThreadIds)) {
     try {
-      const thread = await provider.getThread(threadId, { format: 'metadata' })
+      const thread = await provider.getThread(threadId, {
+        format: 'metadata',
+        priority: 'background'
+      })
       if (effects.persist) await effects.persist(thread)
       else persistThread(db, accountId, thread, { metadataOnly: true })
     } catch (error) {
@@ -165,13 +168,15 @@ export async function runHistoryCycle(
   const promoteInbox = new Set(plan.promoteInboxThreadIds)
   for (const threadId of plan.refetchThreadIds) {
     try {
-      const thread = await provider.getThread(threadId, { format: 'full' })
+      const thread = await provider.getThread(threadId, { format: 'full', priority: 'polling' })
       if (effects.persist) await effects.persist(thread)
       else {
         persistThread(db, accountId, thread, {
           inboxVisibility: promoteInbox.has(threadId) ? 'show' : 'preserve'
         })
-        await hydrateMissingThreadBodies(db, provider, accountId, thread)
+        await hydrateMissingThreadBodies(db, provider, accountId, thread, undefined, {
+          priority: 'polling'
+        })
       }
     } catch (error) {
       if (error instanceof GmailApiError && error.status === 404) {

@@ -2,7 +2,7 @@
 
 Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
 
-**Current state: M1 feature work is complete; M2 (mail out) feature work has shipped and its hardening/sign-off pass is open.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with label-catalog refresh and a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. M2 added the full-window composer with crash-safe local drafts, inline reply/reply-all/forward drafting, rich content with a zero-formatting-loss invariant, two-way Gmail Drafts sync, attachments (spooled locally, mirrored to Gmail), send with undo send behind an exactly-once outbox, self-healing failed triage actions, on-demand body hydration, and a lifetime header sweep with the full staged backfill (inbox → bodies → drafts → all-mail → spam → trash → reconcile). Still open before M2 sign-off: the T20 hardening pass (10k-list decision, composer latency profile, token-bucket limiter, backfill evidence, a dogfood week) and the manual real-Gmail evidence items — see the M2 plan. The only open M1 evidence item is a real-OS notification click-through smoke (see the M1 plan).
+**Current state: M1 feature work is complete; M2 (mail out) feature work and its engineering hardening pass are complete, with manual sign-off evidence still open.** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with label-catalog refresh and a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. M2 added the full-window composer with crash-safe local drafts, inline reply/reply-all/forward drafting, rich content with a zero-formatting-loss invariant, two-way Gmail Drafts sync, attachments (spooled locally, mirrored to Gmail), send with undo send behind an exactly-once outbox, self-healing failed triage actions, on-demand body hydration, and a lifetime header sweep with the full staged backfill (inbox → bodies → drafts → all-mail → spam → trash → reconcile). T20 adds a windowed 10k inbox, checked interaction/memory budgets, weighted Gmail quota pacing, and structured bootstrap telemetry. Still open before M2 sign-off: the real-Gmail evidence matrix, a one-week sole-client dogfood run, and the real-OS notification click-through smoke — see [the evidence ledger](docs/T20-EVIDENCE.md).
 
 - **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.15)
 - **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist
@@ -45,6 +45,7 @@ Typecheck → lint/format → unit tests → production build → Playwright end
 | `npm run test:unit` | Pure main/renderer module tests |
 | `npm run e2e` | Build + end-to-end tests |
 | `npm run e2e:only` | End-to-end tests without rebuilding (only when `out/` is current) |
+| `npm run e2e:perf` | Build, generate the 10,000-thread seed, and enforce list/composer budgets |
 | `npm run typecheck` · `npm run lint` | Fast static passes |
 | `npm run build` | Production bundles into `out/` |
 | `npm run toolchain` | Repair the Electron binary / native-module setup |
@@ -92,7 +93,7 @@ In the [Google Cloud Console](https://console.cloud.google.com), accomplish thes
 2. **Enable the Gmail API** for that project.
 3. Configure the **OAuth consent screen**: External user type, leave the app in **Testing** mode, and add your own Gmail address as a **test user**.
 4. Create an **OAuth client ID** of type **Desktop app**. Copy the Client ID and Client Secret.
-5. In the project root: `cp oauth.config.example.json oauth.config.json`, then paste both values in. That file is gitignored — never commit it.
+5. In the project root: `cp oauth.config.example.json oauth.config.json`, then paste both values in. That file is gitignored — never commit it. The example's `quota_units_per_minute` is Google's post-1-May-2026 per-user project limit (6,000); set it to the actual limit shown for your project if you have customized it. Attn's weighted scheduler uses the [authoritative Gmail quota costs and limits](https://developers.google.com/workspace/gmail/api/reference/quota).
 
 Restart the app and click **Sign in with Google**. The browser will show Google's "unverified app" screen — expected in dev-mode; proceed via the advanced/continue path. Tokens are encrypted through the OS keychain (Electron `safeStorage`), never stored in plaintext.
 

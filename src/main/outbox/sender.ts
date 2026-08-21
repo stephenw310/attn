@@ -114,7 +114,7 @@ export async function verifyKnownDraft(
   signal?: AbortSignal
 ): Promise<DraftPresence> {
   try {
-    await provider.getDraft(id, { signal })
+    await provider.getDraft(id, { signal, priority: 'send' })
     return 'present'
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return 'consumed'
@@ -152,7 +152,10 @@ export async function executeDraftSendProtocol(
   let gmailDraftId = input.gmailDraftId
   if (!gmailDraftId) {
     try {
-      gmailDraftId = await provider.createDraft({ raw: input.raw, threadId: input.threadId }, { signal })
+      gmailDraftId = await provider.createDraft(
+        { raw: input.raw, threadId: input.threadId },
+        { signal, priority: 'send' }
+      )
     } catch (error) {
       // A normal 4xx is a definitive rejection, but 408 specifically means the
       // request outcome is unknown and must enter Message-ID verification.
@@ -179,14 +182,14 @@ export async function executeDraftSendProtocol(
       input.updateMime
         ? { id: gmailDraftId, mime: input.updateMime, threadId: input.threadId }
         : { id: gmailDraftId, raw: input.raw, threadId: input.threadId },
-      { signal }
+      { signal, priority: 'send' }
     )
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return { kind: 'missing-before-send' }
     throw error
   }
   try {
-    const sent = await provider.sendDraft(gmailDraftId, { signal })
+    const sent = await provider.sendDraft(gmailDraftId, { signal, priority: 'send' })
     return { kind: 'sent', threadId: sent.threadId }
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return { kind: 'consumed' }
@@ -458,7 +461,7 @@ export class OutboxSender {
 
   private async verifySecondary(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<boolean> {
     if (!provider.findByRfcId) throw new Error('Gmail Message-ID verification is unavailable')
-    const match = await provider.findByRfcId(row.rfc_message_id, { signal })
+    const match = await provider.findByRfcId(row.rfc_message_id, { signal, priority: 'send' })
     if (match?.kind === 'message') {
       await this.markSent(row, provider, match.threadId ?? row.thread_id, signal)
       return false
@@ -749,7 +752,7 @@ export class OutboxSender {
     // account switch wait on the best-effort post-send conversation refresh.
     if (!threadId || this.stopping || this.accountId() !== row.account_id) return
     try {
-      const thread = await provider.getThread(threadId, { format: 'full', signal })
+      const thread = await provider.getThread(threadId, { format: 'full', signal, priority: 'send' })
       persistThread(this.db, row.account_id, thread)
       this.notify({ kind: 'changed' })
     } catch (error) {

@@ -16,6 +16,8 @@ const FLOW_TIMEOUT_MS = 5 * 60 * 1000
 export interface OAuthConfig {
   client_id: string
   client_secret: string
+  /** Actual Gmail per-user quota for this Cloud project; defaults to Google's post-2026-05 limit. */
+  quota_units_per_minute?: number
 }
 
 export interface TokenSet {
@@ -39,7 +41,14 @@ export function loadOAuthConfig(searchDirs: string[]): OAuthConfig | null {
       const raw = readFileSync(join(dir, 'oauth.config.json'), 'utf8')
       const parsed = JSON.parse(raw) as Partial<OAuthConfig>
       if (parsed.client_id && parsed.client_secret) {
-        return { client_id: parsed.client_id, client_secret: parsed.client_secret }
+        const quota = parsed.quota_units_per_minute
+        return {
+          client_id: parsed.client_id,
+          client_secret: parsed.client_secret,
+          ...(typeof quota === 'number' && Number.isFinite(quota) && quota > 0
+            ? { quota_units_per_minute: quota }
+            : {})
+        }
       }
     } catch {
       // missing or malformed in this dir — keep looking

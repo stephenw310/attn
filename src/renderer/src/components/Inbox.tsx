@@ -281,6 +281,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex: conversationSelectedIndex,
     threads: conversationThreads,
     readerOpen,
+    prefetch: selectedIds.size === 0,
     online,
     account: activeAccount,
     mailRevision

@@ -12,6 +12,46 @@ describe('sync state publication', () => {
     ).toBe(true)
     expect(
       sameSyncState(
+        {
+          phase: 'syncing',
+          stage: 'metadata',
+          threadsDone: 4,
+          elapsedMs: 100,
+          stageFetchedPerMinute: 120,
+          quotaWaitMs: 20
+        },
+        {
+          phase: 'syncing',
+          stage: 'metadata',
+          threadsDone: 4,
+          elapsedMs: 200,
+          stageFetchedPerMinute: 121,
+          quotaWaitMs: 30
+        }
+      )
+    ).toBe(true)
+    expect(
+      sameSyncState(
+        {
+          phase: 'indexing',
+          stage: 'lifetime',
+          threadsDone: 50,
+          etaMs: 100,
+          quotaWaitMs: 100,
+          reason: 'running'
+        },
+        {
+          phase: 'indexing',
+          stage: 'lifetime',
+          threadsDone: 50,
+          etaMs: 200,
+          quotaWaitMs: 101,
+          reason: 'running'
+        }
+      )
+    ).toBe(true)
+    expect(
+      sameSyncState(
         { phase: 'offline', message: 'fetch failed' },
         { phase: 'offline', message: 'fetch failed' }
       )
@@ -52,6 +92,12 @@ describe('sync state publication', () => {
       sameSyncState(
         { phase: 'syncing', stage: 'metadata', threadsDone: 4 },
         { phase: 'syncing', stage: 'metadata', threadsDone: 5 }
+      )
+    ).toBe(false)
+    expect(
+      sameSyncState(
+        { phase: 'syncing', stage: 'metadata', threadsDone: 4, stageThreadsListed: 4 },
+        { phase: 'syncing', stage: 'metadata', threadsDone: 4, stageThreadsListed: 5 }
       )
     ).toBe(false)
     expect(

@@ -125,7 +125,11 @@ export async function runAttachmentFlagWalk(
       if (!(await waitForRequestSlot())) return null
       let page: ThreadIdPage
       try {
-        page = await provider.listThreadIds({ q: ATTACHMENT_FLAG_QUERY, pageToken })
+        page = await provider.listThreadIds({
+          q: ATTACHMENT_FLAG_QUERY,
+          pageToken,
+          priority: 'background'
+        })
       } catch (error) {
         if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
         pageToken = undefined

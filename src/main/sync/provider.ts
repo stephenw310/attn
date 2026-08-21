@@ -50,6 +50,7 @@ export interface ListThreadIdsOptions {
   pageToken?: string
   /** Gmail excludes SPAM/TRASH from listings unless asked, even when labelIds targets them. */
   includeSpamTrash?: boolean
+  priority?: ProviderRequestPriority
 }
 
 export interface HistoryMessageEvent {
@@ -75,10 +76,20 @@ export interface HistoryPage {
 export interface GetThreadOptions {
   format?: 'full' | 'metadata'
   signal?: AbortSignal
+  priority?: ProviderRequestPriority
 }
+
+export type ProviderRequestPriority = 'send' | 'action' | 'polling' | 'foreground' | 'background'
 
 export interface ProviderRequestOptions {
   signal?: AbortSignal
+  priority?: ProviderRequestPriority
+}
+
+export interface ProviderQuotaMetrics {
+  requests: number
+  units: number
+  waitMs: number
 }
 
 export interface ProviderMimeUpload {
@@ -126,8 +137,8 @@ export interface MailActionProvider {
 }
 
 export interface MailProvider extends MailActionProvider {
-  getProfile(): Promise<ProviderProfile>
-  listLabels(): Promise<ProviderLabel[]>
+  getProfile(options?: ProviderRequestOptions): Promise<ProviderProfile>
+  listLabels(options?: ProviderRequestOptions): Promise<ProviderLabel[]>
   listThreadIds(options?: ListThreadIdsOptions): Promise<ThreadIdPage>
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
   getAttachmentData(
@@ -141,4 +152,6 @@ export interface MailProvider extends MailActionProvider {
   /** Optional only for narrow test providers; production Gmail implements both. */
   sendDraft?(id: string, options?: ProviderRequestOptions): Promise<ProviderSendResult>
   findByRfcId?(rfcMessageId: string, options?: ProviderRequestOptions): Promise<RfcMessageMatch | null>
+  /** Optional on narrow test providers; production exposes limiter evidence. */
+  quotaMetrics?(): ProviderQuotaMetrics
 }

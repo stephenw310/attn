@@ -95,6 +95,10 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
               : sync.stage === 'attachments'
                 ? `Attachment index · ${lifetimeCount} flagged`
                 : `${lifetimeCount} indexed${lifetimeEta(sync.etaMs)}`
+  const quotaEvidence =
+    sync.phase === 'indexing' && sync.quotaWaitMs !== undefined && sync.quotaWaitMs >= 1_000
+      ? ` · ${Math.round(sync.quotaWaitMs / 1000).toLocaleString()}s quota wait`
+      : ''
 
   const closeDetails = useCallback(() => {
     setDetailsOpen(false)
@@ -157,7 +161,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
         : displayState === 'syncing' && sync.phase === 'syncing'
           ? `${label} — ${sync.threadsDone} processed`
           : displayState === 'indexing' && sync.phase === 'indexing'
-            ? `${label} — ${lifetimeDetail}${
+            ? `${label} — ${lifetimeDetail}${quotaEvidence}${
                 sync.messagesTotal === undefined
                   ? ''
                   : ` · ${sync.messagesTotal.toLocaleString()} messages in account`

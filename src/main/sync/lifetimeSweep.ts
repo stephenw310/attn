@@ -16,6 +16,9 @@ export interface LifetimeSweepProgress {
   threadsTotal?: number
   messagesTotal?: number
   etaMs?: number
+  elapsedMs?: number
+  threadsPerMinute?: number
+  quotaWaitMs?: number
   reason: 'running' | 'quota-wait' | 'foreground-yield'
   waitMs?: number
 }
@@ -38,6 +41,9 @@ export interface LifetimeSweepOptions {
 
 export interface LifetimeSweepResult {
   threadCount: number
+  elapsedMs: number
+  threadsPerMinute?: number
+  quotaWaitMs: number
 }
 
 export type LifetimeSweepStartPlan =
@@ -83,6 +89,10 @@ export async function runLifetimeSweep(
   const foregroundYieldMs = options.foregroundYieldMs ?? LIFETIME_FOREGROUND_YIELD_MS
   let lastRequestAt: number | null = null
   let activeElapsedMs = 0
+  const startedAt = time.now()
+  const quotaWaitStartedAt = provider.quotaMetrics?.().waitMs ?? 0
+  const quotaWaitMs = (): number =>
+    Math.max(0, (provider.quotaMetrics?.().waitMs ?? quotaWaitStartedAt) - quotaWaitStartedAt)
 
   const wait = async (delayMs: number): Promise<boolean> => {
     if (delayMs <= 0) return shouldContinue()
@@ -98,7 +108,9 @@ export async function runLifetimeSweep(
       )
       .get(accountId) as StoredSweepState | undefined
     const plan = planLifetimeSweepStart(state?.sweep_cursor)
-    if (plan.kind === 'skip') return { threadCount: state?.sweep_threads_done ?? 0 }
+    if (plan.kind === 'skip') {
+      return { threadCount: state?.sweep_threads_done ?? 0, elapsedMs: 0, quotaWaitMs: 0 }
+    }
 
     const checkpoint = db.prepare(
       `UPDATE sync_state
@@ -115,6 +127,18 @@ export async function runLifetimeSweep(
       checkpoint.run('lifetime', 0, null, accountId)
     }
 
+    const runMetrics = (): Pick<LifetimeSweepResult, 'elapsedMs' | 'threadsPerMinute' | 'quotaWaitMs'> => {
+      const elapsedMs = Math.max(0, time.now() - startedAt)
+      const processedThisRun = Math.max(0, threadsDone - startingThreadsDone)
+      return {
+        elapsedMs,
+        ...(processedThisRun > 0 && elapsedMs > 0
+          ? { threadsPerMinute: Math.round((processedThisRun * 60_000) / elapsedMs) }
+          : {}),
+        quotaWaitMs: quotaWaitMs()
+      }
+    }
+
     let messagesTotal: number | undefined
     const progress = (reason: LifetimeSweepProgress['reason'], waitMs?: number): void => {
       const etaMs = estimateRemainingMs(threadsDone, threadsTotal, startingThreadsDone, activeElapsedMs)
@@ -123,6 +147,7 @@ export async function runLifetimeSweep(
         ...(threadsTotal === undefined ? {} : { threadsTotal }),
         ...(messagesTotal === undefined ? {} : { messagesTotal }),
         ...(etaMs === undefined ? {} : { etaMs }),
+        ...runMetrics(),
         reason,
         ...(waitMs === undefined ? {} : { waitMs })
       })
@@ -156,7 +181,7 @@ export async function runLifetimeSweep(
     }
 
     if (!(await waitForRequestSlot())) return null
-    const profile = await activeRequest(() => provider.getProfile())
+    const profile = await activeRequest(() => provider.getProfile({ priority: 'background' }))
     if (!shouldContinue()) return null
     messagesTotal = profile.messagesTotal
     progress('running')
@@ -171,7 +196,7 @@ export async function runLifetimeSweep(
       try {
         // Deliberately empty: Gmail's default listing covers the whole account
         // except Spam and Trash, which become explicit stages in M3.
-        page = await activeRequest(() => provider.listThreadIds({ pageToken }))
+        page = await activeRequest(() => provider.listThreadIds({ pageToken, priority: 'background' }))
       } catch (error) {
         if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
         pageToken = undefined
@@ -196,7 +221,9 @@ export async function runLifetimeSweep(
         }
         if (!(await waitForRequestSlot())) return null
         try {
-          const thread = await activeRequest(() => provider.getThread(threadId, { format: 'metadata' }))
+          const thread = await activeRequest(() =>
+            provider.getThread(threadId, { format: 'metadata', priority: 'background' })
+          )
           if (!shouldContinue()) return null
           persistThread(db, accountId, thread, {
             metadataOnly: true,
@@ -213,7 +240,7 @@ export async function runLifetimeSweep(
       if (!pageToken) threadsTotal = threadsDone
       checkpoint.run(pageToken ? `lifetime:${pageToken}` : 'done', threadsDone, threadsTotal, accountId)
       progress('running')
-      if (!pageToken) return { threadCount: threadsDone }
+      if (!pageToken) return { threadCount: threadsDone, ...runMetrics() }
 
       progress('quota-wait', pagePauseMs)
       if (!(await wait(pagePauseMs))) return null

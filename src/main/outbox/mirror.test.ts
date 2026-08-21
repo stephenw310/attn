@@ -307,7 +307,7 @@ describe('draft mirror selection', () => {
     } as unknown as MailActionProvider)
 
     expect(getDraft).toHaveBeenCalledWith('gmail-1', { signal: undefined })
-    expect(getAttachmentData).toHaveBeenCalledWith('new-message', 'new-attachment')
+    expect(getAttachmentData).toHaveBeenCalledWith('new-message', 'new-attachment', undefined)
     expect(getAttachmentData).not.toHaveBeenCalledWith('old-message', 'old-attachment')
     expect(saveDraft).toHaveBeenCalledOnce()
   })
