@@ -17,11 +17,11 @@ function syncStageLabel(stage: SyncStage): string {
 function lifetimeEta(etaMs: number | undefined): string {
   if (etaMs === undefined) return ''
   const minutes = Math.max(1, Math.ceil(etaMs / 60_000))
-  if (minutes < 60) return ` · ~${minutes} min left`
+  if (minutes < 60) return ` · ${minutes} min remaining`
   const hours = Math.ceil(minutes / 60)
-  if (hours < 24) return ` · ~${hours} hr left`
+  if (hours < 24) return ` · ${hours} hr remaining`
   const days = Math.ceil(hours / 24)
-  return ` · ~${days} day${days === 1 ? '' : 's'} left`
+  return ` · ${days} day${days === 1 ? '' : 's'} remaining`
 }
 
 function SyncProgress({ stage }: { stage: SyncStage }): React.JSX.Element {
@@ -75,26 +75,34 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
               ? 'indexing'
               : 'syncing'
   const syncingStage = sync.phase === 'syncing' ? sync.stage : 'metadata'
+  const lifetimeTotal =
+    sync.phase === 'indexing' &&
+    sync.stage === 'lifetime' &&
+    sync.threadsTotal !== undefined &&
+    sync.threadsTotal >= sync.threadsDone
+      ? sync.threadsTotal
+      : undefined
   const lifetimeCount =
     sync.phase === 'indexing'
       ? `${sync.threadsDone.toLocaleString()}${
-          sync.threadsTotal === undefined ? '' : ` of ${sync.threadsTotal.toLocaleString()}`
+          lifetimeTotal === undefined ? '' : ` of ${lifetimeTotal.toLocaleString()}`
         } threads`
       : ''
+  const indexedLifetimeCount = `${lifetimeCount} indexed`
   const lifetimeDetail =
     sync.phase !== 'indexing'
       ? ''
       : sync.reason === 'quota-wait'
-        ? `Quota pacing · ${lifetimeCount}${lifetimeEta(sync.etaMs)}`
+        ? `Quota pacing · ${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
         : sync.reason === 'foreground-yield'
-          ? `Foreground work first · ${lifetimeCount}${lifetimeEta(sync.etaMs)}`
+          ? `Foreground work first · ${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
           : sync.reason === 'retry-wait'
-            ? `Indexing paused · retrying soon · ${lifetimeCount}`
+            ? `Indexing paused · retrying soon · ${indexedLifetimeCount}`
             : sync.reason === 'paused'
-              ? `Indexing paused · ${lifetimeCount}`
+              ? `Indexing paused · ${indexedLifetimeCount}`
               : sync.stage === 'attachments'
                 ? `Attachment index · ${lifetimeCount} flagged`
-                : `${lifetimeCount} indexed${lifetimeEta(sync.etaMs)}`
+                : `${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
   const quotaEvidence =
     sync.phase === 'indexing' && sync.quotaWaitMs !== undefined && sync.quotaWaitMs >= 1_000
       ? ` · ${Math.round(sync.quotaWaitMs / 1000).toLocaleString()}s quota wait`
@@ -194,12 +202,12 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           role="progressbar"
           aria-label={`Lifetime header index: ${lifetimeDetail}`}
           aria-valuetext={lifetimeDetail}
-          {...(sync.threadsTotal === undefined
+          {...(lifetimeTotal === undefined
             ? {}
             : {
                 'aria-valuemin': 0,
-                'aria-valuemax': sync.threadsTotal,
-                'aria-valuenow': Math.min(sync.threadsDone, sync.threadsTotal)
+                'aria-valuemax': lifetimeTotal,
+                'aria-valuenow': sync.threadsDone
               })}
           className="col-start-2 row-start-2 max-w-[174px] overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] leading-[10px] text-ink-faint"
         >
