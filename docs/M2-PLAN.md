@@ -263,12 +263,12 @@ them too.
   idempotent with T13's bootstrap contributions. Two hygiene rules land here: messages labeled `SPAM` or
   `TRASH` never contribute contact rows (the poller already trickles spam threads in; a deliberate sweep
   must not bulk-import spammers), and legacy Hangouts `CHAT` rows are skipped defensively.
-- Progress reports the "estimated total/ETA when Gmail supplies one" that F2's footer language promises.
-  The implementation uses the unfiltered
-  `threads.list` response's listing-scoped `resultSizeEstimate` for thread progress, persists processed and
-  estimated counts beside the page cursor, and snaps the total to the exact count when listing is exhausted;
-  `getProfile().messagesTotal` remains contextual account-wide message count. Footer state: **Live · indexing
-  older mail** with processed/estimated counts and explicit quota-wait/retry-wait states; quitting or losing
+- Progress reports the account total/ETA that F2's footer language promises. The implementation counts
+  unique locally stored threads from every completed stage against `getProfile().threadsTotal`; the
+  listing's processed count remains durable cursor bookkeeping, and its page-level `resultSizeEstimate` is
+  never presented as a mailbox total. `getProfile().messagesTotal` remains contextual account-wide message
+  count. Footer state: **Live · indexing older mail** with **X of Y threads indexed · time remaining** and explicit
+  quota-wait/retry-wait states; quitting or losing
   connectivity resumes from the last durable page without making the live Inbox appear offline.
 - **Relationship to the bounded all-mail stage.** This sweep has no date bound, so before the all-mail
   backfill stage existed it was the only path to archived mail of *any* age. The bounded stage fetches the
@@ -926,8 +926,8 @@ event loop.
    polling consume quota before historical metadata/body/Sent indexing. The weighted quota scheduler exposes an
    explicit `running | quota-wait | offline | error` reason; backoff never masquerades as active progress.
 4. **Separate readiness from completion:** commit and publish the first recent page within the existing
-   fresh-install target, then report `Live · indexing older mail` with stage, distinct listed/fetched counts,
-   Gmail `resultSizeEstimate` when available, effective rate, and ETA. “N to zero” stays the unread Inbox total.
+   fresh-install target, then report `Live · indexing older mail` with the unique locally indexed thread
+   count, `getProfile().threadsTotal`, effective rate, and ETA. “N to zero” stays the unread Inbox total.
    Background completion has no universal wall-clock SLA; evidence always includes mailbox size and quota
    regime.
 5. **Reduce duplicate work without silent truncation:** skip Sent-thread metadata already authoritatively

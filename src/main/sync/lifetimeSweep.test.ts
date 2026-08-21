@@ -17,8 +17,10 @@ interface FakeDbState {
   total?: number | null
 }
 
+const fakeDbStates = new WeakMap<Db, FakeDbState>()
+
 function fakeDb(state: FakeDbState): Db {
-  return {
+  const db = {
     prepare: (sql: string) => ({
       get: (...args: unknown[]) => {
         if (sql.startsWith('SELECT sweep_cursor')) {
@@ -27,6 +29,9 @@ function fakeDb(state: FakeDbState): Db {
             sweep_threads_done: state.done ?? 0,
             sweep_threads_total: state.total ?? null
           }
+        }
+        if (sql.startsWith('SELECT COUNT(*) AS count FROM threads')) {
+          return { count: state.threadIds.size }
         }
         if (sql.startsWith('SELECT 1 FROM threads')) {
           return state.threadIds.has(args[1] as string) ? { 1: 1 } : undefined
@@ -43,6 +48,8 @@ function fakeDb(state: FakeDbState): Db {
       }
     })
   } as unknown as Db
+  fakeDbStates.set(db, state)
+  return db
 }
 
 function provider(overrides: Partial<MailProvider> = {}): MailProvider {
@@ -85,7 +92,10 @@ afterEach(() => {
 })
 
 beforeEach(() => {
-  mocks.persistThread.mockReturnValue(true)
+  mocks.persistThread.mockImplementation((db: Db, _accountId: string, thread: GmailThread) => {
+    fakeDbStates.get(db)?.threadIds.add(thread.id)
+    return true
+  })
 })
 
 describe('lifetime sweep cursor routing', () => {
@@ -136,7 +146,7 @@ describe('lifetime header indexing', () => {
     expect(result).toMatchObject({ threadCount: 2, quotaWaitMs: 0 })
     expect(events.onError).not.toHaveBeenCalled()
     expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ threadsDone: 2, threadsTotal: 2, messagesTotal: 70 })
+      expect.objectContaining({ threadsDone: 2, threadsTotal: 50, messagesTotal: 70 })
     )
   })
 
@@ -233,7 +243,7 @@ describe('lifetime header indexing', () => {
     })
   })
 
-  it('estimates remaining time from durable progress made in the current run', async () => {
+  it('estimates remaining time from metadata indexing, excluding listing work', async () => {
     let now = 0
     const state = { cursor: 'lifetime', threadIds: new Set<string>() }
     mocks.persistThread.mockImplementation((_db, _accountId, thread: GmailThread) => {
@@ -278,7 +288,7 @@ describe('lifetime header indexing', () => {
       expect.objectContaining({
         threadsDone: 1,
         threadsTotal: 10,
-        etaMs: 9_000,
+        etaMs: 7_200,
         elapsedMs: 1_000,
         threadsPerMinute: 60
       })
@@ -309,10 +319,50 @@ describe('lifetime header indexing', () => {
     expect(events.onProgress).toHaveBeenCalledWith(expect.objectContaining({ quotaWaitMs: 250 }))
   })
 
+  it('does not count a foreground write that lands during a metadata request as sweep throughput', async () => {
+    const state = { cursor: 'lifetime', threadIds: new Set<string>() }
+    let resolveThread: ((thread: GmailThread) => void) | undefined
+    const getThread = vi.fn(
+      () =>
+        new Promise<GmailThread>((resolve) => {
+          resolveThread = resolve
+        })
+    )
+    const events = callbacks()
+
+    const run = runLifetimeSweep(
+      fakeDb(state),
+      provider({
+        getProfile: vi.fn(async () => ({
+          emailAddress: 'test@example.com',
+          historyId: '101',
+          threadsTotal: 10
+        })),
+        listThreadIds: vi.fn(async () => ({ threadIds: ['old'] })),
+        getThread
+      }),
+      'test@example.com',
+      events,
+      { requestIntervalMs: 0, pagePauseMs: 0 }
+    )
+
+    await vi.waitFor(() => expect(getThread).toHaveBeenCalledOnce())
+    state.threadIds.add('old')
+    resolveThread?.({ id: 'old', messages: [] })
+
+    await expect(run).resolves.toMatchObject({ threadCount: 1 })
+    expect(mocks.persistThread).not.toHaveBeenCalled()
+    expect(events.onProgress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ threadsDone: 1, threadsTotal: 10 })
+    )
+    expect(events.onProgress.mock.calls.every(([event]) => event.etaMs === undefined)).toBe(true)
+  })
+
   it('persists processed listing progress so a resumed page does not restart at zero', async () => {
+    const existingIds = Array.from({ length: 500 }, (_, index) => `stored-${index}`)
     const state = {
       cursor: 'lifetime:page-2',
-      threadIds: new Set<string>(),
+      threadIds: new Set(existingIds),
       done: 500,
       total: 1_000 as number | null
     }
@@ -321,6 +371,11 @@ describe('lifetime header indexing', () => {
     await runLifetimeSweep(
       fakeDb(state),
       provider({
+        getProfile: vi.fn(async () => ({
+          emailAddress: 'test@example.com',
+          historyId: '101',
+          threadsTotal: 1_000
+        })),
         listThreadIds: vi
           .fn()
           .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-3' })
@@ -338,11 +393,12 @@ describe('lifetime header indexing', () => {
     expect(state.done).toBe(500)
   })
 
-  it('does not use the account-wide profile total for an unfiltered listing estimate', async () => {
+  it('uses the account total and unique local rows instead of a page result estimate', async () => {
     const events = callbacks()
+    const threadIds = new Set(['stage-one', 'all-mail', 'spam'])
 
     await runLifetimeSweep(
-      fakeDb({ cursor: 'lifetime', threadIds: new Set<string>() }),
+      fakeDb({ cursor: 'lifetime', threadIds }),
       provider({
         getProfile: vi.fn(async () => ({
           emailAddress: 'test@example.com',
@@ -351,7 +407,11 @@ describe('lifetime header indexing', () => {
         })),
         listThreadIds: vi
           .fn()
-          .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-2' })
+          .mockResolvedValueOnce({
+            threadIds: [],
+            nextPageToken: 'page-2',
+            resultSizeEstimate: 201
+          })
           .mockResolvedValueOnce({ threadIds: [] })
       }),
       'test@example.com',
@@ -360,10 +420,37 @@ describe('lifetime header indexing', () => {
     )
 
     expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ threadsDone: 0, reason: 'quota-wait' })
+      expect.objectContaining({
+        threadsDone: 3,
+        threadsTotal: 50_000,
+        reason: 'quota-wait'
+      })
     )
     const waiting = events.onProgress.mock.calls.find(([event]) => event.reason === 'quota-wait')?.[0]
-    expect(waiting).not.toHaveProperty('threadsTotal')
+    expect(waiting.threadsTotal).not.toBe(201)
+  })
+
+  it('keeps progress indeterminate when the account profile omits its thread total', async () => {
+    const events = callbacks()
+
+    await runLifetimeSweep(
+      fakeDb({ cursor: 'lifetime', threadIds: new Set(['stored']) }),
+      provider({
+        getProfile: vi.fn(async () => ({
+          emailAddress: 'test@example.com',
+          historyId: '101'
+        })),
+        listThreadIds: vi.fn(async () => ({ threadIds: [], resultSizeEstimate: 201 }))
+      }),
+      'test@example.com',
+      events,
+      { requestIntervalMs: 0, pagePauseMs: 0 }
+    )
+
+    expect(events.onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ threadsDone: 1, reason: 'running' })
+    )
+    expect(events.onProgress.mock.calls.every(([event]) => !('threadsTotal' in event))).toBe(true)
   })
 
   it('does not expose hidden persistence as a visible-mail change signal', async () => {

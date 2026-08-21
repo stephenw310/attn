@@ -53,7 +53,10 @@ export type LifetimeSweepStartPlan =
 interface StoredSweepState {
   sweep_cursor: string | null
   sweep_threads_done: number
-  sweep_threads_total: number | null
+}
+
+interface IndexedThreadCount {
+  count: number
 }
 
 export function planLifetimeSweepStart(rawCursor: string | null | undefined): LifetimeSweepStartPlan {
@@ -88,7 +91,8 @@ export async function runLifetimeSweep(
   const pagePauseMs = options.pagePauseMs ?? LIFETIME_PAGE_PAUSE_MS
   const foregroundYieldMs = options.foregroundYieldMs ?? LIFETIME_FOREGROUND_YIELD_MS
   let lastRequestAt: number | null = null
-  let activeElapsedMs = 0
+  let threadsIndexedBySweep = 0
+  let indexingElapsedMs = 0
   const startedAt = time.now()
   const quotaWaitStartedAt = provider.quotaMetrics?.().waitMs ?? 0
   const quotaWaitMs = (): number =>
@@ -103,7 +107,7 @@ export async function runLifetimeSweep(
   try {
     const state = db
       .prepare(
-        `SELECT sweep_cursor, sweep_threads_done, sweep_threads_total
+        `SELECT sweep_cursor, sweep_threads_done
          FROM sync_state WHERE account_id = ?`
       )
       .get(accountId) as StoredSweepState | undefined
@@ -117,19 +121,24 @@ export async function runLifetimeSweep(
        SET sweep_cursor = ?, sweep_threads_done = ?, sweep_threads_total = ?
        WHERE account_id = ?`
     )
-    let threadsDone = state?.sweep_threads_done ?? 0
-    let threadsTotal = state?.sweep_threads_total ?? undefined
-    let startingThreadsDone = threadsDone
+    // The durable count belongs to the listing cursor: it says how many ids the
+    // sweep has walked, including rows that an earlier stage already stored.
+    // User-visible progress has a different numerator — unique thread metadata
+    // currently present in the local account store.
+    let listedThreadsDone = state?.sweep_threads_done ?? 0
+    let startingListedThreadsDone = listedThreadsDone
+    // Never publish the saved total before refreshing the Gmail profile: old
+    // builds stored `resultSizeEstimate` here, including impossible values.
+    let threadsTotal: number | undefined
     if (plan.initialize) {
-      threadsDone = 0
-      threadsTotal = undefined
-      startingThreadsDone = 0
+      listedThreadsDone = 0
+      startingListedThreadsDone = 0
       checkpoint.run('lifetime', 0, null, accountId)
     }
 
     const runMetrics = (): Pick<LifetimeSweepResult, 'elapsedMs' | 'threadsPerMinute' | 'quotaWaitMs'> => {
       const elapsedMs = Math.max(0, time.now() - startedAt)
-      const processedThisRun = Math.max(0, threadsDone - startingThreadsDone)
+      const processedThisRun = Math.max(0, listedThreadsDone - startingListedThreadsDone)
       return {
         elapsedMs,
         ...(processedThisRun > 0 && elapsedMs > 0
@@ -139,11 +148,24 @@ export async function runLifetimeSweep(
       }
     }
 
+    const indexedThreadCount = db.prepare('SELECT COUNT(*) AS count FROM threads WHERE account_id = ?')
+    const countIndexedThreads = (): number => (indexedThreadCount.get(accountId) as IndexedThreadCount).count
+    let threadsIndexed = countIndexedThreads()
+
     let messagesTotal: number | undefined
     const progress = (reason: LifetimeSweepProgress['reason'], waitMs?: number): void => {
-      const etaMs = estimateRemainingMs(threadsDone, threadsTotal, startingThreadsDone, activeElapsedMs)
+      // Foreground history work can add a thread while this low-priority pass
+      // yields, so read the indexed count rather than deriving it from this
+      // sweep's listing position.
+      threadsIndexed = countIndexedThreads()
+      const etaMs = estimateRemainingMs(
+        threadsIndexed,
+        threadsTotal,
+        threadsIndexedBySweep,
+        indexingElapsedMs
+      )
       callbacks.onProgress({
-        threadsDone,
+        threadsDone: threadsIndexed,
         ...(threadsTotal === undefined ? {} : { threadsTotal }),
         ...(messagesTotal === undefined ? {} : { messagesTotal }),
         ...(etaMs === undefined ? {} : { etaMs }),
@@ -171,19 +193,16 @@ export async function runLifetimeSweep(
       return shouldContinue()
     }
 
-    const activeRequest = async <T>(request: () => Promise<T>): Promise<T> => {
-      const requestStartedAt = time.now()
-      try {
-        return await request()
-      } finally {
-        activeElapsedMs += Math.max(0, time.now() - requestStartedAt)
-      }
-    }
-
     if (!(await waitForRequestSlot())) return null
-    const profile = await activeRequest(() => provider.getProfile({ priority: 'background' }))
+    const profile = await provider.getProfile({ priority: 'background' })
     if (!shouldContinue()) return null
     messagesTotal = profile.messagesTotal
+    // `users.getProfile` and the local store are both account-wide, so this
+    // denominator includes Spam/Trash and the metadata already written by the
+    // priority backfill stages. A page's `resultSizeEstimate` is deliberately
+    // not used: Gmail can return small listing estimates such as 201 even deep
+    // into a much larger mailbox.
+    threadsTotal = profile.threadsTotal
     progress('running')
 
     const exists = db.prepare('SELECT 1 FROM threads WHERE account_id = ? AND id = ?')
@@ -196,51 +215,64 @@ export async function runLifetimeSweep(
       try {
         // Deliberately empty: Gmail's default listing covers the whole account
         // except Spam and Trash, which become explicit stages in M3.
-        page = await activeRequest(() => provider.listThreadIds({ pageToken, priority: 'background' }))
+        page = await provider.listThreadIds({ pageToken, priority: 'background' })
       } catch (error) {
         if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
         pageToken = undefined
         resetExpiredCursor = true
-        threadsDone = 0
-        threadsTotal = undefined
-        startingThreadsDone = 0
-        activeElapsedMs = 0
-        checkpoint.run('lifetime', 0, null, accountId)
+        listedThreadsDone = 0
+        startingListedThreadsDone = 0
+        threadsIndexed = countIndexedThreads()
+        threadsIndexedBySweep = 0
+        indexingElapsedMs = 0
+        checkpoint.run('lifetime', 0, threadsTotal ?? null, accountId)
         continue
       }
       if (!shouldContinue()) return null
-      // The profile total includes Spam and Trash, which this listing excludes.
-      // Keep progress indeterminate when Gmail omits the listing-scoped estimate.
-      threadsTotal ??= page.resultSizeEstimate
 
       for (const threadId of page.threadIds) {
         if (!shouldContinue()) return null
         if (exists.get(accountId, threadId)) {
-          threadsDone++
+          listedThreadsDone++
           continue
         }
         if (!(await waitForRequestSlot())) return null
+        const indexingStartedAt = time.now()
         try {
-          const thread = await activeRequest(() =>
-            provider.getThread(threadId, { format: 'metadata', priority: 'background' })
-          )
-          if (!shouldContinue()) return null
-          persistThread(db, accountId, thread, {
-            metadataOnly: true,
-            inboxVisibility: 'hide'
+          const thread = await provider.getThread(threadId, {
+            format: 'metadata',
+            priority: 'background'
           })
+          if (!shouldContinue()) return null
+          // Foreground history work may have indexed this thread while the
+          // metadata request was in flight. Do not overwrite it or treat that
+          // unrelated write as lifetime-sweep throughput.
+          if (!exists.get(accountId, threadId)) {
+            const persisted = persistThread(db, accountId, thread, {
+              metadataOnly: true,
+              inboxVisibility: 'hide'
+            })
+            if (persisted) {
+              threadsIndexedBySweep++
+              indexingElapsedMs += Math.max(0, time.now() - indexingStartedAt)
+            }
+          }
         } catch (error) {
           // A moving mailbox can drop a listed thread before its metadata fetch.
           if (!(error instanceof GmailApiError) || error.status !== 404) throw error
         }
-        threadsDone++
+        listedThreadsDone++
       }
 
       pageToken = page.nextPageToken
-      if (!pageToken) threadsTotal = threadsDone
-      checkpoint.run(pageToken ? `lifetime:${pageToken}` : 'done', threadsDone, threadsTotal, accountId)
+      checkpoint.run(
+        pageToken ? `lifetime:${pageToken}` : 'done',
+        listedThreadsDone,
+        threadsTotal ?? null,
+        accountId
+      )
       progress('running')
-      if (!pageToken) return { threadCount: threadsDone, ...runMetrics() }
+      if (!pageToken) return { threadCount: listedThreadsDone, ...runMetrics() }
 
       progress('quota-wait', pagePauseMs)
       if (!(await wait(pagePauseMs))) return null
@@ -255,13 +287,18 @@ export async function runLifetimeSweep(
 function estimateRemainingMs(
   threadsDone: number,
   threadsTotal: number | undefined,
-  startingThreadsDone: number,
-  activeElapsedMs: number
+  threadsIndexedBySweep: number,
+  indexingElapsedMs: number
 ): number | undefined {
-  if (threadsTotal === undefined || threadsDone >= threadsTotal || activeElapsedMs <= 0) return undefined
-  const completedThisRun = threadsDone - startingThreadsDone
-  if (completedThisRun <= 0) return undefined
-  return Math.ceil(((threadsTotal - threadsDone) * activeElapsedMs) / completedThisRun)
+  if (
+    threadsTotal === undefined ||
+    threadsDone >= threadsTotal ||
+    threadsIndexedBySweep <= 0 ||
+    indexingElapsedMs <= 0
+  ) {
+    return undefined
+  }
+  return Math.ceil(((threadsTotal - threadsDone) * indexingElapsedMs) / threadsIndexedBySweep)
 }
 
 function isExpiredPageToken(error: unknown): boolean {

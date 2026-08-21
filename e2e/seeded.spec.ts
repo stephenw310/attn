@@ -160,15 +160,31 @@ test('shows phased sync progress and keeps error details behind an accessible co
     reason: 'running'
   })
   await expect(status).toContainText('Live · indexing older mail')
-  await expect(status).toContainText('750 of 2,000 threads indexed · ~12 min left')
+  await expect(status).toContainText('750 of 2,000 threads indexed · 12 min remaining')
   await expect(status).toHaveAttribute('data-status', 'indexing')
   const lifetimeProgress = page.getByTestId('lifetime-progress')
   await expect(lifetimeProgress).toHaveAttribute('aria-valuenow', '750')
   await expect(lifetimeProgress).toHaveAttribute('aria-valuemax', '2000')
+  // Text assertions still pass when CSS clips the ETA. Pin the rendered line too.
+  expect(await lifetimeProgress.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect(status).toHaveAttribute(
     'title',
-    'Live · indexing older mail — 750 of 2,000 threads indexed · ~12 min left · 3,200 messages in account'
+    'Live · indexing older mail — 750 of 2,000 threads indexed · 12 min remaining · 3,200 messages in account'
   )
+
+  // Never present a stale or corrupt denominator as meaningful progress. Old
+  // builds could persist Gmail's page-level estimate and render nonsense such
+  // as "86,200 of 201" after a resumed sweep.
+  await setSyncState(app, {
+    phase: 'indexing',
+    stage: 'lifetime',
+    threadsDone: 86_200,
+    threadsTotal: 201,
+    reason: 'running'
+  })
+  await expect(status).toContainText('86,200 threads indexed')
+  await expect(status).not.toContainText('of 201')
+  await expect(lifetimeProgress).not.toHaveAttribute('aria-valuemax')
 
   await setSyncState(app, {
     phase: 'indexing',
@@ -178,7 +194,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
     reason: 'quota-wait',
     waitMs: 1_000
   })
-  await expect(status).toContainText('Quota pacing · 750 of 2,000 threads')
+  await expect(status).toContainText('Quota pacing · 750 of 2,000 threads indexed')
 
   await setSyncState(app, {
     phase: 'indexing',
@@ -188,12 +204,12 @@ test('shows phased sync progress and keeps error details behind an accessible co
     waitMs: 15_000,
     message: 'rate limited'
   })
-  await expect(status).toContainText('Indexing paused · retrying soon · 2,400 threads')
+  await expect(status).toContainText('Indexing paused · retrying soon · 2,400 threads indexed')
   await expect(lifetimeProgress).not.toHaveAttribute('aria-valuenow')
   await expect(lifetimeProgress).not.toHaveAttribute('aria-valuemax')
   await expect(lifetimeProgress).toHaveAttribute(
     'aria-valuetext',
-    'Indexing paused · retrying soon · 2,400 threads'
+    'Indexing paused · retrying soon · 2,400 threads indexed'
   )
 
   // An incremental poll is not a backfill phase: no stage label, no progress bar.
