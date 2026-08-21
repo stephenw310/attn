@@ -161,9 +161,11 @@ the remaining window continues in the background or is available on demand.
 **Lifetime header sweep (T13A as revised by §9 #17; supersedes the Sent-only pass of §9 #15):** after
 interactive readiness, a resumable low-priority pass walks lifetime message headers across the whole account
 (no label filter, newest first), skipping threads already stored. It persists its own cursor, reports
-thread progress against the unfiltered listing's `resultSizeEstimate` (and exact exhausted count), reports
-message context from `getProfile().messagesTotal`, and never downloads old bodies or attachments. Contact
-statistics derive from the same header stream — recipients of Sent mail, senders of
+unique locally indexed threads—including metadata written by every earlier stage—against
+`getProfile().threadsTotal`, reports message context from `getProfile().messagesTotal`, and never downloads
+old bodies or attachments. The durable listing count remains cursor bookkeeping rather than user-visible
+progress; page-level `resultSizeEstimate` is not a mailbox total and must never be used as the denominator.
+Contact statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
 never contribute to contacts. While the pass runs, sync status reads **Live · indexing older mail** with
 progress and quota-wait detail. Importing a user's saved Google Contacts through the People API remains a
@@ -180,7 +182,8 @@ Backfill has two distinct completion points:
    must never make an already-usable inbox look unavailable.
 
 After interactive readiness, the footer reports **Live · indexing older mail** rather than a blocking
-“Syncing” state. It exposes stage, listed and fetched counts, estimated total/ETA when Gmail supplies one, and an
+“Syncing” state. The lifetime line reads **X of Y threads indexed · time remaining**, where X is the account's
+unique local thread count and Y is the current profile thread total; it also exposes an
 explicit quota-wait state instead of appearing stuck during backoff. The top-bar “N to zero” value is the
 total unread Inbox count, not sync progress, and may exceed the current rendered-list window.
 
