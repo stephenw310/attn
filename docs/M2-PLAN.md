@@ -872,7 +872,9 @@ Old threads read like new ones when signed in; opens never block; verify green; 
 
 ## T20 — Daily-drivable hardening and M2 sign-off
 
-**Depends on:** T13A, T16, T17, T18, T19 · **Spec:** §7 budgets, §8 M2 bar, M1 deviations
+**Status: engineering pass shipped in PR #60; the manual sign-off evidence it defines is tracked in
+[T20-EVIDENCE.md](T20-EVIDENCE.md).** · **Depends on:** T13A, T16, T17, T18, T19 · **Spec:** §7 budgets,
+§8 M2 bar, M1 deviations
 
 The closing pass that turns "features exist" into "this is my mail client":
 
@@ -891,7 +893,7 @@ the memory definition, quota configuration, real-Gmail capture template, and dog
 
 Status annotations as of 2026-08-19 (T20 engineering pass; manual evidence remains):
 
-- [ ] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites — *all planned implementation tasks are complete; T21 still needs to merge with its green verification run before this merge-level checkbox closes*
+- [x] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites — *every R and T task is merged, T21 included (#54); T20's hardening pass closed it out (#60)*
 - [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links) — *automated coverage exists for composer open, force-quit recovery, undo-send, and no-duplicate-send at unit level; the closing PR still has to cite it*
 - [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates — *manual evidence outstanding*
 - [x] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data — *fixed-height windowing at 500+, production cap 10,000; see [T20-EVIDENCE.md](T20-EVIDENCE.md)*
