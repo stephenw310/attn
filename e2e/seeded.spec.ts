@@ -165,6 +165,8 @@ test('shows phased sync progress and keeps error details behind an accessible co
   const lifetimeProgress = page.getByTestId('lifetime-progress')
   await expect(lifetimeProgress).toHaveAttribute('aria-valuenow', '750')
   await expect(lifetimeProgress).toHaveAttribute('aria-valuemax', '2000')
+  // Text assertions still pass when CSS clips the ETA. Pin the rendered line too.
+  expect(await lifetimeProgress.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect(status).toHaveAttribute(
     'title',
     'Live · indexing older mail — 750 of 2,000 threads indexed · 12 min remaining · 3,200 messages in account'

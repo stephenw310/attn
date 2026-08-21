@@ -209,7 +209,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
                 'aria-valuemax': lifetimeTotal,
                 'aria-valuenow': sync.threadsDone
               })}
-          className="col-start-2 row-start-2 max-w-[174px] overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] leading-[10px] text-ink-faint"
+          className="col-start-2 row-start-2 whitespace-nowrap text-[9.5px] leading-[10px] text-ink-faint"
         >
           {detail}
         </span>
@@ -224,7 +224,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       ref={wrapRef}
       data-testid="status-note"
       data-status={displayState}
-      className="relative ml-auto flex w-[196px] flex-none justify-end"
+      className="relative ml-auto flex min-w-[196px] flex-none justify-end"
       title={title}
     >
       <span className="sr-only" aria-live="polite">
