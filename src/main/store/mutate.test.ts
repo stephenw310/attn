@@ -46,4 +46,39 @@ describe('thread label deltas', () => {
       db.close()
     }
   })
+
+  it('keeps hidden junk labels out of optimistic normal-reader flags', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare(
+        `INSERT INTO threads (account_id, id, subject, last_msg_at)
+         VALUES ('account', 'thread', 'Roadmap', 100)`
+      ).run()
+      const insertLabel = db.prepare(
+        `INSERT INTO thread_labels (account_id, thread_id, label_id)
+         VALUES ('account', 'thread', ?)`
+      )
+      for (const label of ['INBOX', 'TRASH', 'UNREAD']) insertLabel.run(label)
+      const insertMessage = db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, labels_json)
+         VALUES ('account', ?, 'thread', ?)`
+      )
+      insertMessage.run('visible', '["INBOX"]')
+      insertMessage.run('trashed', '["TRASH","UNREAD"]')
+
+      applyThreadDelta(db, 'account', {
+        threadId: 'thread',
+        add: ['Label_1'],
+        remove: []
+      })
+
+      expect(
+        db
+          .prepare('SELECT is_unread, is_starred FROM threads WHERE account_id = ? AND id = ?')
+          .get('account', 'thread')
+      ).toEqual({ is_unread: 0, is_starred: 0 })
+    } finally {
+      db.close()
+    }
+  })
 })

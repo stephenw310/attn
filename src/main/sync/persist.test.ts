@@ -163,6 +163,110 @@ describe('thread snapshot persistence', () => {
     }
   })
 
+  it('summarizes the messages shown by the normal reader instead of newer junk', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'visible',
+            threadId: 'thread',
+            labelIds: ['INBOX'],
+            internalDate: '200',
+            snippet: 'Visible reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Maya <maya@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          },
+          {
+            id: 'trashed',
+            threadId: 'thread',
+            labelIds: ['TRASH', 'UNREAD', 'STARRED'],
+            internalDate: '300',
+            snippet: 'Hidden deleted reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Deleted <deleted@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ],
+              parts: [
+                {
+                  mimeType: 'application/pdf',
+                  filename: 'deleted.pdf',
+                  body: { attachmentId: 'deleted-attachment', size: 42 }
+                }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        db
+          .prepare(
+            `SELECT subject, snippet, last_msg_at, from_display, is_unread, is_starred, has_attachment
+             FROM threads WHERE account_id = ? AND id = ?`
+          )
+          .get('account', 'thread')
+      ).toEqual({
+        subject: 'Roadmap',
+        snippet: 'Visible reply',
+        last_msg_at: 200,
+        from_display: 'Maya',
+        is_unread: 0,
+        is_starred: 0,
+        has_attachment: 0
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('keeps a useful summary when every stored message is junk', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'trashed',
+            threadId: 'thread',
+            labelIds: ['TRASH', 'UNREAD'],
+            internalDate: '300',
+            snippet: 'Deleted reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Maya <maya@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        db
+          .prepare(
+            `SELECT subject, snippet, last_msg_at, from_display, is_unread
+             FROM threads WHERE account_id = ? AND id = ?`
+          )
+          .get('account', 'thread')
+      ).toEqual({
+        subject: 'Roadmap',
+        snippet: 'Deleted reply',
+        last_msg_at: 300,
+        from_display: 'Maya',
+        is_unread: 1
+      })
+    } finally {
+      db.close()
+    }
+  })
+
   it('prunes stale ordinary mail when the authoritative snapshot contains only a draft', () => {
     const db = openDatabase(':memory:')
     try {

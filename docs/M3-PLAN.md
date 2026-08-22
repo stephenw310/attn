@@ -201,10 +201,13 @@ S4 tombstone pass. Handle that pruning here, where the message loop is being rew
   legacy Chat rows stay hidden in every reader.
 - Optimistic thread deltas update both `thread_labels` and known message label arrays. Pending actions replay
   through that same path after a server snapshot, so the list and reader agree before Gmail confirms a change.
+- Normal thread summaries use the newest non-junk message and derive unread, starred, and attachment flags from
+  messages that reader can show. Junk-only threads retain a useful summary for their own mailbox.
 - The write-time draft filter remains. An authoritative snapshot containing only drafts or Chat rows now
   deletes stale ordinary thread data, closing review finding B4.
-- Existing `NULL` message labels use the thread-level projection until an ordinary refetch fills them. A
-  mixed-label thread therefore retains the old thread-level behavior until that refetch.
+- Existing `NULL` message labels use thread-level membership until an ordinary refetch fills them. The normal
+  reader preserves pre-S2 behavior and shows those legacy rows because the thread union cannot identify which
+  row carries junk; matching Spam and Trash readers show the whole legacy thread for the same reason.
 
 The schema is version 16. A stopped local dogfood profile can use this exact additive DDL through the manual
 procedure in `AGENTS.md`:
@@ -218,10 +221,10 @@ COMMIT;
 
 ### Testing and done condition
 
-Unit coverage proves full and metadata persistence, optimistic replay, the three mailbox membership rules,
-reader subsets, legacy `NULL` fallback, draft exclusion, and draft-only pruning. A seeded Electron test keeps
-one partially trashed thread in both All Mail and Trash while the normal reader hides its trashed and draft
-messages.
+Unit coverage proves full and metadata persistence, optimistic replay, indexed sparse-mailbox membership, the
+three mailbox rules, reader subsets, legacy `NULL` fallback, junk-free normal summaries, draft exclusion, and
+draft-only pruning. A seeded Electron test keeps one partially trashed thread in both All Mail and Trash while
+the normal list and reader summarize and show only its live messages.
 
 ---
 

@@ -26,7 +26,10 @@ test('keeps a partially trashed thread in All Mail and Trash while the normal re
   expect(await mailboxThreadIds(app, 'trash')).toContain('t-roadmap')
   expect(await mailboxThreadIds(app, 'spam')).not.toContain('t-roadmap')
 
-  await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).click()
+  const roadmapRow = page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' })
+  await expect(roadmapRow.getByTestId('thread-snippet')).toContainText('I added the launch milestones.')
+  await expect(roadmapRow).not.toContainText('This deleted reply belongs only in Trash.')
+  await roadmapRow.click()
   await expect(page.getByTestId('message-card')).toHaveCount(2)
   await expect(page.getByTestId('conversation-content')).not.toContainText(
     'This deleted reply belongs only in Trash.'

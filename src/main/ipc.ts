@@ -330,7 +330,7 @@ export function registerIpc(context: IpcContext): () => void {
     if (existing && !shouldUpgradeReplyAll) return existing
     await context.waitForConversation(threadId)
     let conversation = getConversation(context.db, account, threadId, 'unavailable')
-    if (!conversation) return existing
+    if (!conversation || conversation.messages.length === 0) return existing
     if (existing) {
       // Recipient headers are available even when a message body is not. The
       // reused reply already owns its quote, so Reply-All stays local-first and
@@ -347,7 +347,11 @@ export function registerIpc(context: IpcContext): () => void {
         conversation = getConversation(context.db, account, threadId, 'unavailable')
       }
     }
-    if (!conversation || conversation.messages.some((message) => message.bodyState !== 'complete')) {
+    if (
+      !conversation ||
+      conversation.messages.length === 0 ||
+      conversation.messages.some((message) => message.bodyState !== 'complete')
+    ) {
       return null
     }
     const plan = planReply(kind, conversation, account)

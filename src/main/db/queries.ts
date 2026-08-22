@@ -22,6 +22,7 @@ import type {
   SnoozedThreadRow,
   ThreadRow
 } from '../../shared/mail'
+import { messageLabelsMatchMailbox } from '../../shared/mail'
 import { needsBodyHydration } from '../sync/bodyHydration'
 import type { Db } from './index'
 
@@ -45,36 +46,30 @@ function labelIds(value: string): string[] {
   return value ? value.split('\u001f') : []
 }
 
-function mailboxMembershipSql(mailbox: MessageMailbox): string {
-  const fallbackLabel = (label: string): string => `
-    EXISTS (SELECT 1 FROM thread_labels fallback
-            WHERE fallback.account_id = t.account_id AND fallback.thread_id = t.id
-              AND fallback.label_id = '${label}')`
+function allMailMembershipSql(): string {
+  const threadLabel = (label: string): string => `
+    EXISTS (SELECT 1 FROM thread_labels tl
+            WHERE tl.account_id = t.account_id AND tl.thread_id = t.id
+              AND tl.label_id = '${label}')`
   const storedLabel = (label: string): string => `
     EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = '${label}')`
 
-  if (mailbox === 'spam' || mailbox === 'trash') {
-    const label = mailbox.toUpperCase()
-    return `EXISTS (
-      SELECT 1 FROM messages m
-      WHERE m.account_id = t.account_id AND m.thread_id = t.id
-        AND ((m.labels_json IS NOT NULL AND ${storedLabel(label)})
-             OR (m.labels_json IS NULL AND ${fallbackLabel(label)}))
-    )`
-  }
-
+  const junkThreadLabels = ['SPAM', 'TRASH'].map((label) => threadLabel(label)).join(' OR ')
   const hiddenStoredLabels = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
     .map((label) => storedLabel(label))
     .join(' OR ')
   const hiddenFallbackLabels = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
-    .map((label) => fallbackLabel(label))
+    .map((label) => threadLabel(label))
     .join(' OR ')
-  return `EXISTS (
-    SELECT 1 FROM messages m
-    WHERE m.account_id = t.account_id AND m.thread_id = t.id
-      AND ((m.labels_json IS NOT NULL AND NOT (${hiddenStoredLabels}))
-           OR (m.labels_json IS NULL AND NOT (${hiddenFallbackLabels})))
-  )`
+  return `(NOT (${junkThreadLabels}) AND EXISTS (
+      SELECT 1 FROM messages m
+      WHERE m.account_id = t.account_id AND m.thread_id = t.id
+    )) OR EXISTS (
+      SELECT 1 FROM messages m
+      WHERE m.account_id = t.account_id AND m.thread_id = t.id
+        AND ((m.labels_json IS NOT NULL AND NOT (${hiddenStoredLabels}))
+             OR (m.labels_json IS NULL AND NOT (${hiddenFallbackLabels})))
+    )`
 }
 
 /** One membership rule for the future All Mail, Spam, and Trash list surfaces. */
@@ -84,11 +79,25 @@ export function listMailboxThreadIds(
   mailbox: MessageMailbox,
   limit = THREAD_LIST_LIMIT
 ): string[] {
+  if (mailbox === 'spam' || mailbox === 'trash') {
+    return (
+      db
+        .prepare(
+          `SELECT t.id
+           FROM thread_labels mailbox
+           JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+           WHERE mailbox.account_id = ? AND mailbox.label_id = ?
+           ORDER BY t.last_msg_at DESC, t.id
+           LIMIT ?`
+        )
+        .all(accountId, mailbox.toUpperCase(), limit) as { id: string }[]
+    ).map((row) => row.id)
+  }
   return (
     db
       .prepare(
         `SELECT t.id FROM threads t
-         WHERE t.account_id = ? AND ${mailboxMembershipSql(mailbox)}
+         WHERE t.account_id = ? AND ${allMailMembershipSql()}
          ORDER BY t.last_msg_at DESC, t.id
          LIMIT ?`
       )
@@ -607,11 +616,14 @@ function messageVisibleInMailbox(
   fallbackLabels: ReadonlySet<string>,
   mailbox: ConversationMailbox
 ): boolean {
-  const labels = labelsJson === null ? fallbackLabels : new Set(parseJson(labelsJson, [] as string[]))
-  if (labels.has('DRAFT') || labels.has('CHAT')) return false
-  if (mailbox === 'spam') return labels.has('SPAM')
-  if (mailbox === 'trash') return labels.has('TRASH')
-  return !labels.has('SPAM') && !labels.has('TRASH')
+  if (labelsJson === null) {
+    // A thread-level union cannot identify which legacy row carries junk. Keep
+    // pre-S2 normal-reader behavior and show the whole thread in a matching
+    // junk mailbox until an authoritative refetch fills labels_json.
+    if (mailbox === 'normal' || mailbox === 'all-mail') return true
+    return fallbackLabels.has(mailbox.toUpperCase())
+  }
+  return messageLabelsMatchMailbox(new Set(parseJson(labelsJson, [] as string[])), mailbox)
 }
 
 function parseJson<T>(value: string | null, fallback: T): T {

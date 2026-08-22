@@ -1,4 +1,5 @@
 import { foldForSearch } from '../../shared/contacts'
+import { messageLabelsMatchMailbox } from '../../shared/mail'
 import type { Db } from '../db'
 import {
   collectAttachments,
@@ -104,6 +105,14 @@ export function persistThread(
     deleteThread(db, accountId, thread.id)
     return false
   }
+  const normalMessages = messages.filter((message) =>
+    messageLabelsMatchMailbox(new Set(message.labelIds ?? []), 'normal')
+  )
+  // Junk-only threads still need a useful summary for their future mailbox.
+  // Mixed threads summarize the messages the normal reader can actually show.
+  const summaryMessageIds = new Set(
+    (normalMessages.length > 0 ? normalMessages : messages).map((message) => message.id)
+  )
 
   const upsertMsg = db.prepare(
     `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
@@ -222,6 +231,7 @@ export function persistThread(
       }
 
       for (const label of msg.labelIds ?? []) labelUnion.add(label)
+      if (!summaryMessageIds.has(msg.id)) continue
       if (!subject) subject = header(msg, 'Subject')
       if (at >= lastMsgAt) {
         lastMsgAt = at
