@@ -104,4 +104,97 @@ describe('thread snapshot persistence', () => {
       params: ['account', 'old@test']
     })
   })
+
+  it('stores message labels from full and metadata snapshots without losing attachments', () => {
+    const db = openDatabase(':memory:')
+    try {
+      const message = {
+        id: 'message',
+        threadId: 'thread',
+        labelIds: ['INBOX', 'TRASH'],
+        internalDate: '100',
+        snippet: 'Full snapshot',
+        payload: {
+          headers: [
+            { name: 'From', value: 'Maya <maya@example.com>' },
+            { name: 'Subject', value: 'Roadmap' }
+          ],
+          parts: [
+            {
+              mimeType: 'application/pdf',
+              filename: 'notes.pdf',
+              body: { attachmentId: 'attachment', size: 42 }
+            }
+          ]
+        }
+      }
+      persistThread(db, 'account', { id: 'thread', messages: [message] })
+      const full = db
+        .prepare('SELECT labels_json, attachments_json FROM messages WHERE account_id = ? AND id = ?')
+        .get('account', 'message') as { labels_json: string; attachments_json: string }
+      expect(JSON.parse(full.labels_json)).toEqual(['INBOX', 'TRASH'])
+      expect(JSON.parse(full.attachments_json)).toEqual([
+        expect.objectContaining({ attachmentId: 'attachment', filename: 'notes.pdf', sizeBytes: 42 })
+      ])
+
+      persistThread(
+        db,
+        'account',
+        {
+          id: 'thread',
+          messages: [
+            {
+              ...message,
+              labelIds: ['INBOX', 'STARRED'],
+              snippet: 'Metadata snapshot',
+              payload: { headers: message.payload.headers }
+            }
+          ]
+        },
+        { metadataOnly: true }
+      )
+      const metadata = db
+        .prepare('SELECT labels_json, attachments_json FROM messages WHERE account_id = ? AND id = ?')
+        .get('account', 'message') as { labels_json: string; attachments_json: string }
+      expect(JSON.parse(metadata.labels_json)).toEqual(['INBOX', 'STARRED'])
+      expect(metadata.attachments_json).toBe(full.attachments_json)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('prunes stale ordinary mail when the authoritative snapshot contains only a draft', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'sent',
+            threadId: 'thread',
+            labelIds: ['INBOX'],
+            internalDate: '100',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Maya <maya@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        persistThread(db, 'account', {
+          id: 'thread',
+          messages: [{ id: 'draft', threadId: 'thread', labelIds: ['DRAFT'] }]
+        })
+      ).toBe(false)
+      expect(db.prepare('SELECT id FROM threads WHERE account_id = ?').all('account')).toEqual([])
+      expect(db.prepare('SELECT id FROM messages WHERE account_id = ?').all('account')).toEqual([])
+      expect(db.prepare('SELECT email FROM contacts WHERE account_id = ?').all('account')).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
 })

@@ -12,10 +12,12 @@ import {
 } from '../../shared/contacts'
 import type {
   Conversation,
+  ConversationMailbox,
   ConversationMsg,
   MailLabel,
   MessageAttachment,
   MessageBodyState,
+  MessageMailbox,
   MessageRecipients,
   SnoozedThreadRow,
   ThreadRow
@@ -41,6 +43,57 @@ export const THREAD_LIST_LIMIT = 10_000
 
 function labelIds(value: string): string[] {
   return value ? value.split('\u001f') : []
+}
+
+function mailboxMembershipSql(mailbox: MessageMailbox): string {
+  const fallbackLabel = (label: string): string => `
+    EXISTS (SELECT 1 FROM thread_labels fallback
+            WHERE fallback.account_id = t.account_id AND fallback.thread_id = t.id
+              AND fallback.label_id = '${label}')`
+  const storedLabel = (label: string): string => `
+    EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = '${label}')`
+
+  if (mailbox === 'spam' || mailbox === 'trash') {
+    const label = mailbox.toUpperCase()
+    return `EXISTS (
+      SELECT 1 FROM messages m
+      WHERE m.account_id = t.account_id AND m.thread_id = t.id
+        AND ((m.labels_json IS NOT NULL AND ${storedLabel(label)})
+             OR (m.labels_json IS NULL AND ${fallbackLabel(label)}))
+    )`
+  }
+
+  const hiddenStoredLabels = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
+    .map((label) => storedLabel(label))
+    .join(' OR ')
+  const hiddenFallbackLabels = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
+    .map((label) => fallbackLabel(label))
+    .join(' OR ')
+  return `EXISTS (
+    SELECT 1 FROM messages m
+    WHERE m.account_id = t.account_id AND m.thread_id = t.id
+      AND ((m.labels_json IS NOT NULL AND NOT (${hiddenStoredLabels}))
+           OR (m.labels_json IS NULL AND NOT (${hiddenFallbackLabels})))
+  )`
+}
+
+/** One membership rule for the future All Mail, Spam, and Trash list surfaces. */
+export function listMailboxThreadIds(
+  db: Db,
+  accountId: string,
+  mailbox: MessageMailbox,
+  limit = THREAD_LIST_LIMIT
+): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT t.id FROM threads t
+         WHERE t.account_id = ? AND ${mailboxMembershipSql(mailbox)}
+         ORDER BY t.last_msg_at DESC, t.id
+         LIMIT ?`
+      )
+      .all(accountId, limit) as { id: string }[]
+  ).map((row) => row.id)
 }
 
 export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_LIMIT): ThreadRow[] {
@@ -182,17 +235,25 @@ export function getConversation(
   db: Db,
   accountId: string,
   threadId: string,
-  missingBodyState: Exclude<MessageBodyState, 'complete'>
+  missingBodyState: Exclude<MessageBodyState, 'complete'>,
+  mailbox: ConversationMailbox = 'normal'
 ): Conversation | null {
   const thread = db
     .prepare('SELECT subject FROM threads WHERE account_id = ? AND id = ?')
     .get(accountId, threadId) as { subject: string | null } | undefined
   if (!thread) return null
 
+  const fallbackLabels = new Set(
+    (
+      db
+        .prepare('SELECT label_id FROM thread_labels WHERE account_id = ? AND thread_id = ?')
+        .all(accountId, threadId) as { label_id: string }[]
+    ).map((row) => row.label_id)
+  )
   const rows = db
     .prepare(
       `SELECT id, from_name, from_email, internal_date, body_text, body_html, recipients_json,
-              attachments_json, snippet, rfc_message_id, references_json
+              attachments_json, labels_json, snippet, rfc_message_id, references_json
        FROM messages WHERE account_id = ? AND thread_id = ?
        ORDER BY internal_date ASC`
     )
@@ -205,28 +266,31 @@ export function getConversation(
     body_html: string | null
     recipients_json: string | null
     attachments_json: string | null
+    labels_json: string | null
     snippet: string | null
     rfc_message_id: string | null
     references_json: string | null
   }[]
 
-  const messages: ConversationMsg[] = rows.map((r) => ({
-    id: r.id,
-    rfcMessageId: r.rfc_message_id,
-    references: parseJson(r.references_json, []),
-    fromName: r.from_name ?? '',
-    fromEmail: r.from_email ?? '',
-    at: r.internal_date ?? 0,
-    recipients: parseJson(r.recipients_json, EMPTY_RECIPIENTS),
-    attachments: parseJson<StoredAttachment[]>(r.attachments_json, []).map(
-      ({ inlineData: _inlineData, ...attachment }) => attachment
-    ),
-    bodyText: r.body_text || r.snippet || '',
-    bodyHtml: r.body_html,
-    bodyState: needsBodyHydration({ bodyText: r.body_text, bodyHtml: r.body_html })
-      ? missingBodyState
-      : 'complete'
-  }))
+  const messages: ConversationMsg[] = rows
+    .filter((row) => messageVisibleInMailbox(row.labels_json, fallbackLabels, mailbox))
+    .map((r) => ({
+      id: r.id,
+      rfcMessageId: r.rfc_message_id,
+      references: parseJson(r.references_json, []),
+      fromName: r.from_name ?? '',
+      fromEmail: r.from_email ?? '',
+      at: r.internal_date ?? 0,
+      recipients: parseJson(r.recipients_json, EMPTY_RECIPIENTS),
+      attachments: parseJson<StoredAttachment[]>(r.attachments_json, []).map(
+        ({ inlineData: _inlineData, ...attachment }) => attachment
+      ),
+      bodyText: r.body_text || r.snippet || '',
+      bodyHtml: r.body_html,
+      bodyState: needsBodyHydration({ bodyText: r.body_text, bodyHtml: r.body_html })
+        ? missingBodyState
+        : 'complete'
+    }))
 
   return { threadId, subject: thread.subject ?? '(no subject)', messages }
 }
@@ -270,10 +334,12 @@ export function getConversationForDisplay(
   db: Db,
   accountId: string,
   threadId: string,
-  missingBodyState: Exclude<MessageBodyState, 'complete'>
+  missingBodyState: Exclude<MessageBodyState, 'complete'>,
+  mailbox: ConversationMailbox = 'normal'
 ): Conversation | null {
-  const conversation = getConversation(db, accountId, threadId, missingBodyState)
+  const conversation = getConversation(db, accountId, threadId, missingBodyState, mailbox)
   if (!conversation) return null
+  if (mailbox === 'spam' || mailbox === 'trash') return conversation
 
   const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
     | { email: string }
@@ -535,6 +601,18 @@ export function getInlineAttachmentData(
 }
 
 const EMPTY_RECIPIENTS: MessageRecipients = { to: [], cc: [], bcc: [], replyTo: [] }
+
+function messageVisibleInMailbox(
+  labelsJson: string | null,
+  fallbackLabels: ReadonlySet<string>,
+  mailbox: ConversationMailbox
+): boolean {
+  const labels = labelsJson === null ? fallbackLabels : new Set(parseJson(labelsJson, [] as string[]))
+  if (labels.has('DRAFT') || labels.has('CHAT')) return false
+  if (mailbox === 'spam') return labels.has('SPAM')
+  if (mailbox === 'trash') return labels.has('TRASH')
+  return !labels.has('SPAM') && !labels.has('TRASH')
+}
 
 function parseJson<T>(value: string | null, fallback: T): T {
   return value === null ? fallback : (JSON.parse(value) as T)

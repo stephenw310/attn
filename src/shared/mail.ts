@@ -73,6 +73,12 @@ export interface Conversation {
   messages: ConversationMsg[]
 }
 
+/** Mailboxes whose membership and reader contents depend on per-message labels. */
+export type MessageMailbox = 'all-mail' | 'spam' | 'trash'
+
+/** The ordinary reader hides junk; mailbox readers show only their matching messages. */
+export type ConversationMailbox = 'normal' | MessageMailbox
+
 export interface DownloadAttachmentRequest {
   messageId: string
   attachmentId: string

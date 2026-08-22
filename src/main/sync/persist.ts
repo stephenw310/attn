@@ -98,15 +98,20 @@ export function persistThread(
   // render unsent text as an ordinary conversation message once a threaded
   // Gmail draft appears in a thread snapshot.
   const messages = nonDraftMessages(thread.messages ?? [])
-  if (messages.length === 0) return false
+  if (messages.length === 0) {
+    // An all-draft or legacy-Chat snapshot is still authoritative. Remove any
+    // stale ordinary messages left behind when Gmail deleted the real mail.
+    deleteThread(db, accountId, thread.id)
+    return false
+  }
 
   const upsertMsg = db.prepare(
     `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
-                           body_text, body_html, recipients_json, attachments_json, rfc_message_id,
-                           references_json)
+                           body_text, body_html, recipients_json, attachments_json, labels_json,
+                           rfc_message_id, references_json)
      VALUES (@account_id, @id, @thread_id, @from_name, @from_email, @snippet, @internal_date,
              @body_text, @body_html, @recipients_json,
-             @attachments_json, @rfc_message_id, @references_json)
+             @attachments_json, @labels_json, @rfc_message_id, @references_json)
      ON CONFLICT(account_id, id) DO UPDATE SET
        snippet = excluded.snippet,
        body_text = CASE WHEN messages.body_text IS NULL OR messages.body_text = ''
@@ -116,6 +121,7 @@ export function persistThread(
        recipients_json = excluded.recipients_json,
        attachments_json = CASE WHEN @metadata_only = 1
                                THEN messages.attachments_json ELSE excluded.attachments_json END,
+       labels_json = excluded.labels_json,
        rfc_message_id = excluded.rfc_message_id,
        references_json = excluded.references_json`
   )
@@ -187,6 +193,7 @@ export function persistThread(
         body_html: extractBodyHtml(msg.payload) || null,
         recipients_json: JSON.stringify(recipients),
         attachments_json: JSON.stringify(attachments),
+        labels_json: JSON.stringify(msg.labelIds ?? []),
         rfc_message_id: threading.rfcMessageId,
         references_json: JSON.stringify(threading.references),
         metadata_only: options.metadataOnly ? 1 : 0

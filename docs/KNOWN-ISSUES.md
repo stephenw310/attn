@@ -22,8 +22,7 @@ tag, because the review's `S1` and `S2` security tags collide with the `S1` thro
 M3-PLAN.
 
 A finding already attached to a planned task stays with that task instead of moving here. The review's B4
-pruning edge lives in M3-PLAN's S2 section, where the message loop is being reworked, and that is the
-pattern to follow.
+pruning edge shipped with M3 S2 on 2026-08-22. M3-PLAN records its coverage and keeps the status current.
 
 Milestone and task status stays in [SPEC.md](SPEC.md) §8 and the plan docs, per [AGENTS.md](../AGENTS.md).
 Manual sign-off evidence is ticked in [T20-EVIDENCE.md](T20-EVIDENCE.md). Nothing here is a milestone gate
