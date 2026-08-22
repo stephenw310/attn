@@ -9,6 +9,7 @@ Keyboard-first, local-first desktop email client for macOS and Windows, modeled 
 - **[docs/M2-PLAN.md](docs/M2-PLAN.md)** — M2 implementation plan: pre-M2 refactors, composer, drafts, send + undo send, exactly-once outbox, and the M2 exit checklist
 - **[docs/M3-PLAN.md](docs/M3-PLAN.md)** — M3 opening block: utility-process sync, per-message labels, expiry-recovery tombstones; feature tasks (search, mailboxes, splits, themes, palette) still to be planned
 - **[docs/T20-EVIDENCE.md](docs/T20-EVIDENCE.md)** — M2 sign-off evidence: the recorded 10k list and composer measurements, quota/bootstrap instrumentation, and the manual real-Gmail and dogfood items still outstanding
+- **[docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)** — the live triage list: open bugs, security hardening, test-coverage gaps, and refactor proposals, each verified against `main` with a `file:line` anchor
 - **[docs/REVIEW-2026-08-16.md](docs/REVIEW-2026-08-16.md)** — review of `main` at the end of M2 feature work: verified invariants, bugs (fixed and open), doc corrections, refactor proposals, and the M2 close-out / M3 start checklist, with its test-coverage map in **[docs/REVIEW-2026-08-16-coverage.md](docs/REVIEW-2026-08-16-coverage.md)**
 - **[AGENTS.md](AGENTS.md)** — working agreement for coding agents (verification contract, test harness, conventions). `.claude/CLAUDE.md` imports it, so Claude Code picks it up automatically; other tools read it directly.
 
