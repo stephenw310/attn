@@ -21,7 +21,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run e2e` | Build + e2e only |
 | `npm run e2e:only` | E2e without rebuilding — **only** when `out/` already matches `src/` |
 | `npm run e2e:only -- --grep <pattern>` | One test while iterating |
-| `npm run e2e:perf` | Build + generated 10,000-thread Electron profile (windowing, memory, list/conversation/bulk/composer budgets) |
+| `npm run e2e:perf` | Build + generated 10,000-thread Electron profile (windowing, main private + utility heap/external/SQLite-cache memory, list/conversation/bulk/composer budgets) |
 | `npm run typecheck` / `npm run lint` | Fast static passes |
 | `npm run toolchain` | Repair Electron binary / native-module ABI (also runs as postinstall) |
 | `npm run package:dir` | Build and verify an unpacked app for the current platform |

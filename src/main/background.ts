@@ -1,8 +1,6 @@
 import { app, BrowserWindow, Menu, Tray } from 'electron'
 import trayIcon from '../../resources/tray.png?asset'
-import type { Db } from './db'
-import { oneHourFrom, setNotificationPausedUntil, tomorrowStart } from './notify'
-import { readSetting, settingEnabled, writeSetting } from './settings'
+import { oneHourFrom, tomorrowStart } from './notify'
 
 type CreateWindow = (options?: { show?: boolean }) => BrowserWindow
 
@@ -16,21 +14,31 @@ function hiddenLoginLaunch(): boolean {
   return process.platform === 'darwin' && app.isPackaged && app.getLoginItemSettings().wasOpenedAtLogin
 }
 
-function installLoginItem(db: Db): void {
+export interface BackgroundSettings {
+  launchAtLogin: boolean
+  loginItemRegistered: boolean
+}
+
+export interface BackgroundEffects {
+  markLoginItemRegistered: () => void
+  setNotificationPausedUntil: (pausedUntil: number | null) => void
+}
+
+function installLoginItem(settings: BackgroundSettings, effects: BackgroundEffects): void {
   if (!app.isPackaged) return
   // Register once. After that the OS-level toggle (Task Manager, System
   // Settings) belongs to the user — re-asserting on every boot would silently
   // undo a disable made there. The in-app setting re-runs this when it lands.
-  if (readSetting(db, 'loginItemRegistered') !== undefined) return
-  const openAtLogin = settingEnabled(db, 'launchAtLogin', true)
+  if (settings.loginItemRegistered) return
+  const openAtLogin = settings.launchAtLogin
   app.setLoginItemSettings({
     openAtLogin,
     args: process.platform === 'win32' && openAtLogin ? ['--hidden'] : []
   })
-  writeSetting(db, 'loginItemRegistered', 'true')
+  effects.markLoginItemRegistered()
 }
 
-function installTray(db: Db): void {
+function installTray(effects: BackgroundEffects): void {
   if (process.platform !== 'win32' || tray) return
   tray = new Tray(trayIcon)
   tray.setToolTip('Attn')
@@ -44,14 +52,14 @@ function installTray(db: Db): void {
         submenu: [
           {
             label: 'For 1 hour',
-            click: () => setNotificationPausedUntil(db, oneHourFrom())
+            click: () => effects.setNotificationPausedUntil(oneHourFrom())
           },
           {
             label: 'Until tomorrow',
-            click: () => setNotificationPausedUntil(db, tomorrowStart())
+            click: () => effects.setNotificationPausedUntil(tomorrowStart())
           },
           { type: 'separator' },
-          { label: 'Resume notifications', click: () => setNotificationPausedUntil(db, null) }
+          { label: 'Resume notifications', click: () => effects.setNotificationPausedUntil(null) }
         ]
       },
       { type: 'separator' },
@@ -88,10 +96,14 @@ export function showMainWindow(): BrowserWindow | null {
   return win
 }
 
-export function initializeBackground(db: Db, createWindow: CreateWindow): { startHidden: boolean } {
+export function initializeBackground(
+  settings: BackgroundSettings,
+  effects: BackgroundEffects,
+  createWindow: CreateWindow
+): { startHidden: boolean } {
   createMainWindow = createWindow
-  installLoginItem(db)
-  installTray(db)
+  installLoginItem(settings, effects)
+  installTray(effects)
   const startHidden = hiddenLoginLaunch() && !showOnInitialize
   showOnInitialize = false
   return { startHidden }

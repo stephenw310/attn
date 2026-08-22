@@ -18,14 +18,14 @@ What remains:
 
 | Task | State | Blocks |
 |---|---|---|
-| S1 utility process | **open**, not started | F10's indexing |
+| S1 utility process | **done** | F10's indexing |
 | S2 per-message labels | **done**, completed 2026-08-22 | nothing; F3 and S4 are unblocked |
 | S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
 | S4 reconcile and expiry recovery | **part done**: membership shipped in #51, tombstone pass open | trustworthy mailbox views |
 | Feature half | **open**, not planned | nothing yet |
 
-One and a half sync tasks remain: S1 and S4's tombstone pass. S2 settled the store shape needed to plan F3
-mailbox views and finish S4.
+Only S4's tombstone pass remains. S2 settled the store shape needed to plan F3 mailbox views and finish S4,
+and S1 moved that store into the utility process. The feature tasks get written up from here.
 
 Every task section below opens with the same **Status** line, so you never have to infer state from whether a
 section looks long.
@@ -113,7 +113,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 
 ## S1: move sync work into an Electron utility process
 
-**Status: open, not started.**
+**Status: done.** The boundary design is recorded in [S1-DESIGN.md](S1-DESIGN.md).
 
 **Depends on:** nothing · **Unblocks:** F10's FTS indexing · **Spec:** §6 architecture
 
@@ -161,6 +161,13 @@ Existing unit and e2e coverage passes with the boundary moved. Add a supervisor 
 process mid-backfill and asserts the next cycle resumes from the persisted cursor with no duplicate rows. Done
 when sync runs off the main thread, the §7 interaction budgets are unchanged or better, and no invariant has a
 second implementation.
+
+**Shipped shape:** `ServiceSupervisor` owns the Electron utility lifecycle and typed request protocol. The
+utility runtime owns SQLite, sync, action replay, snooze scheduling, draft mirroring, outbox sending, local
+reads, and seeded test mutations. Main retains OAuth/keychain access and native effects. The crash e2e kills
+the utility during a lifetime page walk, waits for the supervisor restart, resumes from `sweep_cursor`, and
+asserts one thread and message row per fixture. The 10,000-thread profile kept cached conversation open at
+5 ms p95, local mail refresh at 37 ms p95, and application-owned steady-state memory at 130 MB.
 
 ---
 

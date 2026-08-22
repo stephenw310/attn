@@ -98,6 +98,8 @@ export const TEST_CHANNELS = {
   failOutbox: 'attn:test:failOutbox',
   remoteDraft: 'attn:test:remoteDraft',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
+  utilityState: 'attn:test:utilityState',
+  crashUtility: 'attn:test:crashUtility',
   listMailboxThreadIds: 'attn:test:listMailboxThreadIds'
 } as const
 
@@ -196,3 +198,21 @@ export interface BroadcastChannels {
 
 export type InvokeChannel = keyof InvokeChannels
 export type BroadcastChannel = keyof BroadcastChannels
+
+const BROADCAST_CHANNELS = {
+  [IPC_CHANNELS.outboxChanged]: true,
+  [IPC_CHANNELS.outboxProgress]: true,
+  [IPC_CHANNELS.mailChanged]: true,
+  [IPC_CHANNELS.mailActionsReverted]: true,
+  [IPC_CHANNELS.mailBodyHydrationFailed]: true,
+  [IPC_CHANNELS.mailFocusThreadAvailable]: true,
+  [IPC_CHANNELS.syncState]: true
+} satisfies Record<BroadcastChannel, true>
+
+function isBroadcastChannel(channel: string): channel is BroadcastChannel {
+  return channel in BROADCAST_CHANNELS
+}
+
+export const INVOKE_CHANNEL_NAMES = Object.values(IPC_CHANNELS).filter(
+  (channel): channel is InvokeChannel => !isBroadcastChannel(channel)
+)

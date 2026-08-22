@@ -1,20 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import type { Db } from './db'
-import type { NotificationCandidate } from './notify'
 import {
   applyUnreadBadge,
+  applyUnreadBadgeToWindow,
   BoundedRetainer,
-  candidatesFor,
   isolateNotificationFailure,
-  notificationPausedUntil,
   notificationTarget,
   oneHourFrom,
   PENDING_FOCUS_TTL_MS,
   planNotifications,
-  setNotificationPausedUntil,
   takePendingFocus,
   tomorrowStart
 } from './notify'
+import {
+  candidatesFor,
+  type NotificationCandidate,
+  notificationPausedUntil,
+  setNotificationPausedUntil
+} from './service/notificationQueries'
 
 function mail(threadId: string, overrides: Partial<NotificationCandidate> = {}): NotificationCandidate {
   return {
@@ -117,7 +120,14 @@ describe('badge effects', () => {
     applyUnreadBadge('darwin', 4, effects)
     applyUnreadBadge('win32', 4, effects)
     applyUnreadBadge('win32', 0, effects)
-    expect(calls).toEqual(['mac:4', 'windows:true:4 unread conversations', 'windows:false:'])
+    applyUnreadBadgeToWindow('linux', 7, effects.setWindowsOverlay)
+    applyUnreadBadgeToWindow('win32', 7, effects.setWindowsOverlay)
+    expect(calls).toEqual([
+      'mac:4',
+      'windows:true:4 unread conversations',
+      'windows:false:',
+      'windows:true:7 unread conversations'
+    ])
   })
 })
 
