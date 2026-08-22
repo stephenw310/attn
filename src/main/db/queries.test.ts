@@ -156,8 +156,10 @@ describe('display conversation queries', () => {
     expect(confirmed?.messages.some((message) => message.pending)).toBe(false)
   })
 
-  it('heals sent projections created before Gmail message ids were retained', () => {
-    db.prepare("UPDATE outbox SET state = 'sent' WHERE id = 'reply-1'").run()
+  it('heals a stale draft message id without appending the old projection after newer mail', () => {
+    db.prepare(
+      "UPDATE outbox SET state = 'sent', gmail_message_id = 'stale-draft-message' WHERE id = 'reply-1'"
+    ).run()
     db.prepare(
       `INSERT INTO messages
        (account_id, id, thread_id, from_name, from_email, internal_date, body_text,
@@ -167,9 +169,21 @@ describe('display conversation queries', () => {
                '{"to":[],"cc":[],"bcc":[],"replyTo":[]}', '[]', '<gmail-rewritten@example.com>',
                '["<initial@example.com>"]')`
     ).run()
+    db.prepare(
+      `INSERT INTO messages
+       (account_id, id, thread_id, from_name, from_email, internal_date, body_text,
+        recipients_json, attachments_json, rfc_message_id, references_json)
+       VALUES ('account', 'message-later', 'thread-1', 'Maya', 'maya@example.com', 300,
+               'A later reply', '{"to":[],"cc":[],"bcc":[],"replyTo":[]}', '[]',
+               '<later@example.com>', '["<gmail-rewritten@example.com>"]')`
+    ).run()
 
     const confirmed = getConversationForDisplay(db, 'account', 'thread-1', 'unavailable')
-    expect(confirmed?.messages.map((message) => message.id)).toEqual(['message-1', 'message-legacy'])
+    expect(confirmed?.messages.map((message) => message.id)).toEqual([
+      'message-1',
+      'message-legacy',
+      'message-later'
+    ])
     expect(confirmed?.messages.some((message) => message.pending)).toBe(false)
   })
 })

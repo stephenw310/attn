@@ -309,10 +309,11 @@ export function getConversationForDisplay(
     }
     const bodyText = combinedBody(row.body_text, row.quote_text, '\n\n')
     // Older Attn builds did not retain the definitive Gmail message id returned
-    // by drafts.send, and Gmail may rewrite our RFC Message-ID. Match those
-    // already-sent projections once by author, body, and the narrow send-time
-    // window so existing conversations heal without hiding queued mail.
-    if (row.state === 'sent' && row.gmail_message_id === null && account) {
+    // by drafts.send: the field can be empty or still contain the obsolete draft
+    // message id. Gmail may also rewrite our RFC Message-ID. Match those sent
+    // projections once by author, body, and the narrow send-time window so
+    // existing conversations heal without hiding queued mail.
+    if (row.state === 'sent' && account) {
       const canonicalBody = canonicalSentBody(bodyText)
       const legacyMatch = conversation.messages
         .filter(
