@@ -91,7 +91,7 @@ it('windows large lists while keeping an offscreen keyboard selection mounted', 
     selectedIds: new Set<string>(),
     exitingThreadIds: new Set<string>(),
     labelsById: new Map(),
-    selectedRowRef: { current: null },
+    selectedRowRef: { current: null as HTMLDivElement | null },
     onExtendSelection: (): void => {},
     onOpen: (): void => {}
   }
@@ -109,6 +109,7 @@ it('windows large lists while keeping an offscreen keyboard selection mounted', 
         .querySelector('[data-testid="thread-row"][data-thread-index="900"]')
         ?.getAttribute('data-selected')
     ).toBe('true')
+    expect(baseProps.selectedRowRef.current?.dataset.threadIndex).toBe('900')
     expect(container.querySelectorAll('[data-testid="thread-row"]').length).toBeLessThan(100)
   } finally {
     await act(async () => root.unmount())

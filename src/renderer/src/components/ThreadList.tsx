@@ -283,9 +283,10 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       // biome-ignore lint/a11y/noStaticElementInteractions: keyboard access is global
       <div
         key="row"
-        ref={selected && !virtualized ? selectedRowRef : null}
+        ref={selected ? selectedRowRef : null}
         data-testid="thread-row"
         data-thread-index={index}
+        data-thread-id={thread.id}
         data-selected={selected || undefined}
         data-checked={checked || undefined}
         data-unread={thread.unread || undefined}
@@ -393,7 +394,13 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     return [
       <div key={thread.id} className="overflow-x-clip">
         {!collapseGroup && groupHeader}
-        <div className={exiting ? 'app-thread-exit-shell' : undefined}>
+        <div
+          className={
+            exiting
+              ? `app-thread-exit-shell ${collapseGroup ? 'app-thread-exit-shell-with-group' : ''}`
+              : undefined
+          }
+        >
           <div className={exiting ? 'app-thread-exit-content' : undefined}>
             {collapseGroup && groupHeader}
             {row}

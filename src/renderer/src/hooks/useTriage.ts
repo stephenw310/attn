@@ -10,6 +10,7 @@ interface Options {
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
   selectedThreadIdRef: React.RefObject<string | null>
+  selectedRowRef: React.RefObject<HTMLDivElement | null>
   clearSelection: () => void
   showToast: (message: string) => void
   setExitingThreadIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>
@@ -26,6 +27,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef,
     selectedThreadIdRef,
+    selectedRowRef,
     clearSelection,
     showToast,
     setExitingThreadIds,
@@ -40,6 +42,15 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       let selectionRollback: { fromId: string; toId: string | null } | null = null
       if (isBulk) clearSelection()
       if (action.kind === 'archive' && view === 'inbox' && !readerOpen) {
+        // Give the focused row feedback before React projects the surviving
+        // layout. That projection is deliberately comprehensive for bulk
+        // actions and can take more than one frame in a 10,000-thread inbox.
+        // The state update below immediately makes this DOM hint declarative.
+        const selectedRow = selectedRowRef.current
+        if (selectedRow && targetedAction.threadIds.includes(selectedRow.dataset.threadId ?? '')) {
+          selectedRow.dataset.exiting = 'true'
+          selectedRow.classList.add('app-thread-exit')
+        }
         setExitingThreadIds((current) => new Set([...current, ...targetedAction.threadIds]))
         const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 550
         deferRefreshUntilRef.current = Math.max(deferRefreshUntilRef.current, Date.now() + duration)
@@ -83,6 +94,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       readerOpen,
       selectedIds,
       selectedIndex,
+      selectedRowRef,
       selectedThreadIdRef,
       setExitingThreadIds,
       setSelectedIndex,

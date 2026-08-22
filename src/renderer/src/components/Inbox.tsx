@@ -401,6 +401,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef,
     selectedThreadIdRef,
+    selectedRowRef,
     clearSelection,
     showToast,
     setExitingThreadIds,
