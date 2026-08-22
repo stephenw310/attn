@@ -202,7 +202,8 @@ S4 tombstone pass. Handle that pruning here, where the message loop is being rew
 - Optimistic thread deltas update both `thread_labels` and known message label arrays. Pending actions replay
   through that same path after a server snapshot, so the list and reader agree before Gmail confirms a change.
 - Normal thread summaries use the newest non-junk message and derive unread, starred, and attachment flags from
-  messages that reader can show. Junk-only threads retain a useful summary for their own mailbox.
+  messages that reader can show. Junk-only threads retain a useful summary for their own mailbox; Spam and
+  Trash membership sorts mixed threads by their newest matching message rather than this normal summary.
 - The write-time draft filter remains. An authoritative snapshot containing only drafts or Chat rows now
   deletes stale ordinary thread data, closing review finding B4.
 - Existing `NULL` message labels use thread-level membership until an ordinary refetch fills them. The normal

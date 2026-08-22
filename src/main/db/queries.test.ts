@@ -89,7 +89,7 @@ describe('thread list queries', () => {
     )
     insertThread.run('mixed', 'Mixed', 500)
     insertMessage.run('mixed-live', 'mixed', 500, '["INBOX"]')
-    insertMessage.run('mixed-trash', 'mixed', 490, '["TRASH"]')
+    insertMessage.run('mixed-trash', 'mixed', 300, '["TRASH"]')
     insertThread.run('only-trash', 'Only trash', 400)
     insertMessage.run('only-trash-message', 'only-trash', 400, '["TRASH"]')
     insertThread.run('only-spam', 'Only spam', 350)
@@ -107,31 +107,63 @@ describe('thread list queries', () => {
     insertThreadLabel.run('legacy-trash', 'TRASH')
 
     expect(listMailboxThreadIds(db, 'account', 'all-mail')).toEqual(['mixed'])
-    expect(listMailboxThreadIds(db, 'account', 'trash')).toEqual(['mixed', 'only-trash', 'legacy-trash'])
+    expect(listMailboxThreadIds(db, 'account', 'trash')).toEqual(['only-trash', 'legacy-trash', 'mixed'])
     expect(listMailboxThreadIds(db, 'account', 'spam')).toEqual(['only-spam'])
   })
 
-  it('answers sparse Spam and Trash membership from the indexed thread-label union', () => {
-    const capturedSql: string[] = []
-    const queryDb = {
-      prepare: (sql: string) => {
-        capturedSql.push(sql)
-        return { all: () => [] }
-      }
-    } as unknown as Db
+  it('keeps All Mail scoped to its account when another account needs the slow path', () => {
+    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+      'other-account',
+      'other@example.com',
+      0
+    )
+    db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at)
+       VALUES ('other-account', 'other-mixed', 'Other account', 1000)`
+    ).run()
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+       VALUES ('other-account', ?, 'other-mixed', ?, ?)`
+    )
+    insertMessage.run('other-live', 1000, '["INBOX"]')
+    insertMessage.run('other-trash', 900, '["TRASH"]')
+    const insertThreadLabel = db.prepare(
+      `INSERT INTO thread_labels (account_id, thread_id, label_id)
+       VALUES ('other-account', 'other-mixed', ?)`
+    )
+    insertThreadLabel.run('INBOX')
+    insertThreadLabel.run('TRASH')
 
-    listMailboxThreadIds(queryDb, 'account', 'spam')
-    listMailboxThreadIds(queryDb, 'account', 'trash')
-    listMailboxThreadIds(queryDb, 'account', 'all-mail')
+    expect(listMailboxThreadIds(db, 'account', 'all-mail')).not.toContain('other-mixed')
+    expect(listMailboxThreadIds(db, 'other-account', 'all-mail')).toEqual(['other-mixed'])
+  })
 
-    expect(capturedSql[0]).not.toContain('json_each')
-    expect(capturedSql[0]).not.toContain('FROM messages m')
-    expect(capturedSql[0]).toContain('FROM thread_labels mailbox')
-    expect(capturedSql[1]).not.toContain('json_each')
-    expect(capturedSql[1]).not.toContain('FROM messages m')
-    expect(capturedSql[1]).toContain('FROM thread_labels mailbox')
-    expect(capturedSql[2]).toContain('NOT (')
-    expect(capturedSql[2]).toContain('json_each')
+  it('uses SQLite indexes for sparse Spam and Trash membership', () => {
+    const explain = (mailbox: 'spam' | 'trash'): string[] => {
+      let details: string[] = []
+      const queryDb = {
+        prepare: (sql: string) => {
+          const statement = db.prepare(sql)
+          return {
+            all: (...params: unknown[]) => {
+              details = (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map(
+                (row) => row.detail
+              )
+              return statement.all(...params)
+            }
+          }
+        }
+      } as unknown as Db
+
+      listMailboxThreadIds(queryDb, 'account', mailbox)
+      return details
+    }
+
+    for (const mailbox of ['spam', 'trash'] as const) {
+      const details = explain(mailbox)
+      expect(details.some((detail) => detail.includes('idx_thread_labels_label'))).toBe(true)
+      expect(details.some((detail) => detail.includes('idx_messages_thread'))).toBe(true)
+    }
   })
 })
 

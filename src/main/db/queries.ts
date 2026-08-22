@@ -83,11 +83,20 @@ export function listMailboxThreadIds(
     return (
       db
         .prepare(
-          `SELECT t.id
-           FROM thread_labels mailbox
+          `SELECT t.id,
+                  COALESCE((
+                    SELECT MAX(m.internal_date)
+                    FROM messages m
+                    WHERE m.account_id = t.account_id AND m.thread_id = t.id
+                      AND (m.labels_json IS NULL OR EXISTS (
+                        SELECT 1 FROM json_each(m.labels_json) stored
+                        WHERE stored.value = mailbox.label_id
+                      ))
+                  ), t.last_msg_at, 0) AS mailbox_last_msg_at
+           FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
            JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
            WHERE mailbox.account_id = ? AND mailbox.label_id = ?
-           ORDER BY t.last_msg_at DESC, t.id
+           ORDER BY mailbox_last_msg_at DESC, t.id
            LIMIT ?`
         )
         .all(accountId, mailbox.toUpperCase(), limit) as { id: string }[]
@@ -97,7 +106,7 @@ export function listMailboxThreadIds(
     db
       .prepare(
         `SELECT t.id FROM threads t
-         WHERE t.account_id = ? AND ${allMailMembershipSql()}
+         WHERE t.account_id = ? AND (${allMailMembershipSql()})
          ORDER BY t.last_msg_at DESC, t.id
          LIMIT ?`
       )
