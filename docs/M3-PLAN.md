@@ -319,7 +319,10 @@ store's shape is settled.
   on-demand thread fetch it implies. Fetching and persisting an arbitrary thread id is a primitive the app
   does not have today, and it is useful beyond search.
 - **F3, system mailbox navigation** (Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash) with `G`
-  chords and palette entries. List virtualization stops being conditional at All Mail scale.
+  chords and palette entries. List virtualization stops being conditional at All Mail scale. F3 also keeps a
+  chronological marker for each trashed message hidden inside a normal or All Mail conversation. Its
+  `Show message` action reveals the message locally without restoring it. This is reader behavior, not a new
+  message-level trash action.
 - **F11, split inbox and rules.**
 - **Inbox-zero states, F14 themes, and palette hardening**, with every command registered and asserted.
 - **§9 #14, the contextual chord guide** in the shortcut footer, deferred from M2.
