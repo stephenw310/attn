@@ -74,10 +74,34 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
 test('animates a marked-done row before removing it', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
+  const nextRow = rows.filter({ hasText: 'Northstar Books' })
+  const nextRowStart = await nextRow.evaluate((element) => element.getBoundingClientRect().y)
 
   await page.keyboard.press('e')
   await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
   await expect(rows.first()).toHaveClass(/app-thread-exit/)
+  await expect(nextRow).toHaveAttribute('data-selected', 'true')
+  const motion = await nextRow.evaluate(
+    (element) =>
+      new Promise<Array<{ elapsed: number; selected: boolean; y: number }>>((resolve) => {
+        const frames: Array<{ elapsed: number; selected: boolean; y: number }> = []
+        const startedAt = performance.now()
+        const sample = (): void => {
+          const elapsed = performance.now() - startedAt
+          frames.push({
+            elapsed,
+            selected: element.getAttribute('data-selected') === 'true',
+            y: element.getBoundingClientRect().y
+          })
+          if (elapsed < 600) requestAnimationFrame(sample)
+          else resolve(frames)
+        }
+        requestAnimationFrame(sample)
+      })
+  )
+  expect(motion.every(({ selected }) => selected)).toBe(true)
+  expect(motion.some(({ elapsed, y }) => elapsed < 260 && y < nextRowStart - 2)).toBe(true)
+  expect(motion.at(-1)?.y).toBeLessThan(nextRowStart - 20)
   await expect(rows).toHaveCount(7)
   const firstToastId = await page.getByTestId('toast').getAttribute('data-toast-id')
 

@@ -55,7 +55,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex: 0,
     readerOpen: false
   })
-  const earliestExitIndexRef = useRef<number | null>(null)
   const resetAccountRef = useRef<string | null | undefined>(undefined)
   const composerOpeningRef = useRef(false)
   const draftOpenRequestRef = useRef(0)
@@ -395,12 +394,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const triage = useTriage({
     selectedIds,
     selectedIndex,
-    threadCount: threads.length,
+    threads,
     readerOpen,
     view: view === 'snoozed' ? 'snoozed' : 'inbox',
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef,
-    earliestExitIndexRef,
+    selectedThreadIdRef,
     clearSelection,
     showToast,
     setExitingThreadIds,

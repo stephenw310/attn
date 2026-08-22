@@ -2,11 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { emptyDraftInput } from '../../shared/drafts'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
-import type { Db } from '../db'
+import { type Db, openDatabase } from '../db'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
 import type { SchedulerTime, TimerHandle } from '../time'
+import { saveDraft } from './drafts'
 import {
   executeDraftSendProtocol,
   isRetryableOutboxPreflightError,
@@ -431,6 +433,7 @@ function effectSender(
     clean?: (id: string) => void
     spoolRoot?: string | null
     progress?: (progress: OutboxProgress | null) => void
+    mailChanged?: () => void
   } = {}
 ): OutboxSender {
   return new OutboxSender(
@@ -443,7 +446,8 @@ function effectSender(
       time: options.time ?? new ManualTime(),
       spoolRoot: options.spoolRoot ?? null,
       cleanSpool: options.clean,
-      progress: options.progress
+      progress: options.progress,
+      mailChanged: options.mailChanged
     }
   )
 }
@@ -480,6 +484,82 @@ describe('OutboxSender effect layer', () => {
     expect(updateDraft).toHaveBeenCalledWith(expect.objectContaining({ id: 'draft-1' }), expect.anything())
     expect(sendDraft).toHaveBeenCalledWith('draft-1', expect.anything())
     expect(clean).toHaveBeenCalledWith('outbox-1')
+  })
+
+  it('invalidates mail after persisting the confirmed sent conversation', async () => {
+    const db = openDatabase(':memory:')
+    const mailChanged = vi.fn()
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+        'me@example.com',
+        'me@example.com',
+        NOW
+      )
+      const id = saveDraft(
+        db,
+        'me@example.com',
+        {
+          ...emptyDraftInput(),
+          kind: 'reply',
+          to: [{ name: '', email: 'you@example.com' }],
+          subject: 'Re: Immediate refresh',
+          bodyHtml: '<p>Fresh reply</p>',
+          bodyText: 'Fresh reply',
+          threadId: 'thread-1'
+        },
+        NOW
+      )
+      db.prepare("UPDATE outbox SET state = 'queued', rfc_message_id = ?, send_at = ? WHERE id = ?").run(
+        '<fresh@example.com>',
+        NOW,
+        id
+      )
+      const remote = provider({
+        sendDraft: vi.fn(async () => ({ id: 'sent-message', threadId: 'thread-1' })),
+        getThread: vi.fn(async () => ({
+          id: 'thread-1',
+          messages: [
+            {
+              id: 'sent-message',
+              threadId: 'thread-1',
+              labelIds: ['SENT'],
+              snippet: 'Fresh reply',
+              internalDate: String(NOW),
+              payload: {
+                mimeType: 'text/plain',
+                headers: [
+                  { name: 'From', value: 'Me <me@example.com>' },
+                  { name: 'To', value: 'you@example.com' },
+                  { name: 'Subject', value: 'Re: Immediate refresh' },
+                  { name: 'Message-ID', value: '<fresh@example.com>' }
+                ],
+                body: { data: Buffer.from('Fresh reply').toString('base64url') }
+              }
+            }
+          ]
+        }))
+      })
+      const sender = new OutboxSender(
+        db,
+        () => 'me@example.com',
+        () => remote,
+        vi.fn(),
+        {
+          time: new ManualTime(),
+          mailChanged
+        }
+      )
+
+      await sender.trigger()
+
+      expect(db.prepare('SELECT state FROM outbox WHERE id = ?').get(id)).toEqual({ state: 'sent' })
+      expect(db.prepare('SELECT body_text FROM messages WHERE id = ?').get('sent-message')).toEqual({
+        body_text: 'Fresh reply'
+      })
+      expect(mailChanged).toHaveBeenCalledOnce()
+    } finally {
+      db.close()
+    }
   })
 
   it('uploads attachment MIME once through the final update and reports per-file progress', async () => {

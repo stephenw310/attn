@@ -157,12 +157,39 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
   const [viewportHeight, setViewportHeight] = useState(800)
   const virtualized = threads.length >= VIRTUALIZE_AT
   const layout = useMemo(() => virtualLayout(threads, view), [threads, view])
+  const projected = useMemo(() => {
+    if (!virtualized || exitingThreadIds.size === 0) return null
+    const survivingThreads = threads.filter((thread) => !exitingThreadIds.has(thread.id))
+    const projectedLayout = virtualLayout(survivingThreads, view)
+    const byThreadId = new Map<string, VirtualThreadEntry>()
+    for (const entry of projectedLayout) byThreadId.set(survivingThreads[entry.index].id, entry)
+    return { threads: survivingThreads, layout: projectedLayout, byThreadId }
+  }, [exitingThreadIds, threads, view, virtualized])
+  const layoutByThreadId = useMemo(() => {
+    const byThreadId = new Map<string, VirtualThreadEntry>()
+    for (const entry of layout) byThreadId.set(threads[entry.index].id, entry)
+    return byThreadId
+  }, [layout, threads])
   const virtualHeight =
     layout.length > 0 ? layout[layout.length - 1].top + layout[layout.length - 1].height : 0
-  const mountedEntries = useMemo(
-    () => (virtualized ? visibleEntries(layout, scrollTop, viewportHeight) : []),
-    [layout, scrollTop, viewportHeight, virtualized]
-  )
+  const projectedLastEntry = projected?.layout.at(-1)
+  const projectedVirtualHeight = projected
+    ? projectedLastEntry
+      ? projectedLastEntry.top + projectedLastEntry.height
+      : 0
+    : virtualHeight
+  const mountedEntries = useMemo(() => {
+    if (!virtualized) return []
+    const current = visibleEntries(layout, scrollTop, viewportHeight)
+    if (!projected) return current
+    const mountedByIndex = new Map(current.map((entry) => [entry.index, entry]))
+    for (const entry of visibleEntries(projected.layout, scrollTop, viewportHeight)) {
+      const thread = projected.threads[entry.index]
+      const currentEntry = layoutByThreadId.get(thread.id)
+      if (currentEntry) mountedByIndex.set(currentEntry.index, currentEntry)
+    }
+    return [...mountedByIndex.values()].sort((left, right) => left.index - right.index)
+  }, [layout, layoutByThreadId, projected, scrollTop, viewportHeight, virtualized])
 
   useEffect(() => {
     const list = listRef.current
@@ -177,7 +204,9 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
 
   useLayoutEffect(() => {
     const list = listRef.current
-    const selected = layout[selectedIndex]
+    const selectedThread = threads[selectedIndex]
+    const selected =
+      (selectedThread ? projected?.byThreadId.get(selectedThread.id) : undefined) ?? layout[selectedIndex]
     if (!list || !selected || !virtualized || readerOpen) return
 
     // The sizer starts inside the list's own padding box. `offsetTop` would
@@ -200,7 +229,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     list.scrollTop = nextScrollTop
     pendingScrollTopRef.current = nextScrollTop
     setScrollTop(nextScrollTop)
-  }, [layout, readerOpen, selectedIndex, viewportHeight, virtualized])
+  }, [layout, projected, readerOpen, selectedIndex, threads, viewportHeight, virtualized])
 
   useEffect(
     () => () => {
@@ -214,96 +243,130 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     const thread = threads[index]
     const selected = index === selectedIndex
     const checked = selectedIds.has(thread.id)
+    const exiting = exitingThreadIds.has(thread.id)
+    const projectedEntry = projected?.byThreadId.get(thread.id)
+    const projectedTop =
+      projectedEntry && !showGroup && projectedEntry.showGroup
+        ? projectedEntry.top + VIRTUAL_GROUP_HEIGHT
+        : projectedEntry?.top
+    let groupSurvives = false
+    if (exiting && showGroup) {
+      for (let nextIndex = index + 1; nextIndex < threads.length; nextIndex++) {
+        if (dateGroup(threads[nextIndex]) !== group) break
+        if (!exitingThreadIds.has(threads[nextIndex].id)) {
+          groupSurvives = true
+          break
+        }
+      }
+    }
+    const collapseGroup = exiting && showGroup && !groupSurvives
+    const groupHeader = showGroup ? (
+      <div
+        key="group"
+        data-testid="thread-date-group"
+        className={`select-none px-8 text-xs font-semibold text-ink-faint ${
+          virtualized ? 'h-[44px] pt-5 pb-2' : 'pt-5 pb-2'
+        }`}
+      >
+        {group}
+      </div>
+    ) : null
+    const row = (
+      // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global
+      // biome-ignore lint/a11y/noStaticElementInteractions: keyboard access is global
+      <div
+        key="row"
+        ref={selected && !virtualized ? selectedRowRef : null}
+        data-testid="thread-row"
+        data-thread-index={index}
+        data-selected={selected || undefined}
+        data-checked={checked || undefined}
+        data-unread={thread.unread || undefined}
+        data-exiting={exiting || undefined}
+        className={`flex cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
+          virtualized ? 'h-[46px]' : 'py-[11px]'
+        } ${selected ? 'border-l-accent' : 'border-l-transparent'} ${
+          checked ? 'bg-accent/[0.12]' : selected ? 'bg-accent/[0.07]' : ''
+        } ${exiting ? 'app-thread-exit' : ''}`}
+        onClick={(event) => (event.shiftKey ? onExtendSelection(index) : onOpen(index))}
+      >
+        <span className="flex size-4 flex-none items-center justify-center self-center" aria-hidden>
+          {checked ? (
+            <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
+              ✓
+            </span>
+          ) : (
+            <span
+              className={`size-1.5 rounded-full ${
+                thread.unread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
+              }`}
+            />
+          )}
+        </span>
+        <span
+          data-testid="thread-sender"
+          className={`w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap ${
+            thread.unread ? 'font-semibold text-ink' : 'text-ink-dim'
+          }`}
+        >
+          {thread.from}
+        </span>
+        <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
+          {thread.hasDraft && (
+            <span
+              data-testid="chip-draft"
+              className="flex-none rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent"
+            >
+              Draft
+            </span>
+          )}
+          <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} />
+          {thread.starred && (
+            <span className="flex-none text-star" title="Starred">
+              ★
+            </span>
+          )}
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+            <span
+              data-testid="thread-subject"
+              className={thread.unread ? 'font-semibold text-ink' : 'text-ink-dim'}
+            >
+              {thread.subject}
+            </span>
+            <span data-testid="thread-snippet"> — {thread.snippet}</span>
+          </span>
+        </span>
+        <span className="flex flex-none items-center gap-2.5 text-xs">
+          <ThreadStatusChips thread={thread} />
+          {thread.hasAttachment && <span title="Has attachment">📎</span>}
+          <span
+            className={`min-w-[70px] text-right tabular-nums ${
+              thread.unread ? 'font-medium text-accent' : 'text-ink-faint'
+            }`}
+          >
+            {thread.at}
+          </span>
+        </span>
+      </div>
+    )
     return (
       <div
         key={thread.id}
-        className={`overflow-x-clip ${virtualized ? 'absolute right-0 left-0' : ''}`}
-        style={virtualized ? { top: entry.top, height: entry.height } : undefined}
+        className={`overflow-x-clip ${virtualized ? 'absolute right-0 left-0' : ''} ${
+          virtualized && projectedEntry ? 'app-thread-position-shift' : ''
+        }`}
+        style={
+          virtualized
+            ? { top: exiting ? entry.top : (projectedTop ?? entry.top), height: entry.height }
+            : undefined
+        }
       >
-        {showGroup && (
-          <div
-            data-testid="thread-date-group"
-            className={`select-none px-8 text-xs font-semibold text-ink-faint ${
-              virtualized ? 'h-[44px] pt-5 pb-2' : 'pt-5 pb-2'
-            }`}
-          >
-            {group}
+        {!collapseGroup && groupHeader}
+        <div className={exiting ? 'app-thread-exit-shell' : undefined}>
+          <div className={exiting ? 'app-thread-exit-content' : undefined}>
+            {collapseGroup && groupHeader}
+            {row}
           </div>
-        )}
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: keyboard access is global */}
-        <div
-          ref={selected && !virtualized ? selectedRowRef : null}
-          data-testid="thread-row"
-          data-thread-index={index}
-          data-selected={selected || undefined}
-          data-checked={checked || undefined}
-          data-unread={thread.unread || undefined}
-          data-exiting={exitingThreadIds.has(thread.id) || undefined}
-          className={`flex cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
-            virtualized ? 'h-[46px]' : 'py-[11px]'
-          } ${selected ? 'border-l-accent' : 'border-l-transparent'} ${
-            checked ? 'bg-accent/[0.12]' : selected ? 'bg-accent/[0.07]' : ''
-          } ${exitingThreadIds.has(thread.id) ? 'app-thread-exit' : ''}`}
-          onClick={(event) => (event.shiftKey ? onExtendSelection(index) : onOpen(index))}
-        >
-          <span className="flex size-4 flex-none items-center justify-center self-center" aria-hidden>
-            {checked ? (
-              <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
-                ✓
-              </span>
-            ) : (
-              <span
-                className={`size-1.5 rounded-full ${
-                  thread.unread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
-                }`}
-              />
-            )}
-          </span>
-          <span
-            data-testid="thread-sender"
-            className={`w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap ${
-              thread.unread ? 'font-semibold text-ink' : 'text-ink-dim'
-            }`}
-          >
-            {thread.from}
-          </span>
-          <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
-            {thread.hasDraft && (
-              <span
-                data-testid="chip-draft"
-                className="flex-none rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent"
-              >
-                Draft
-              </span>
-            )}
-            <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} />
-            {thread.starred && (
-              <span className="flex-none text-star" title="Starred">
-                ★
-              </span>
-            )}
-            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-              <span
-                data-testid="thread-subject"
-                className={thread.unread ? 'font-semibold text-ink' : 'text-ink-dim'}
-              >
-                {thread.subject}
-              </span>
-              <span data-testid="thread-snippet"> — {thread.snippet}</span>
-            </span>
-          </span>
-          <span className="flex flex-none items-center gap-2.5 text-xs">
-            <ThreadStatusChips thread={thread} />
-            {thread.hasAttachment && <span title="Has attachment">📎</span>}
-            <span
-              className={`min-w-[70px] text-right tabular-nums ${
-                thread.unread ? 'font-medium text-accent' : 'text-ink-faint'
-              }`}
-            >
-              {thread.at}
-            </span>
-          </span>
         </div>
       </div>
     )
@@ -336,7 +399,11 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         </div>
       )}
       {virtualized ? (
-        <div ref={virtualContentRef} className="relative" style={{ height: virtualHeight }}>
+        <div
+          ref={virtualContentRef}
+          className={`relative ${projected ? 'app-thread-virtual-collapse' : ''}`}
+          style={{ height: projectedVirtualHeight }}
+        >
           {mountedEntries.map(renderThread)}
         </div>
       ) : (

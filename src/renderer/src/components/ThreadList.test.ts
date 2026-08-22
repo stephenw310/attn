@@ -116,6 +116,80 @@ it('windows large lists while keeping an offscreen keyboard selection mounted', 
   }
 })
 
+it('projects virtual rows into the space left by an exiting row without moving the cursor', async () => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const now = Date.now()
+  const threads: DisplayThread[] = Array.from({ length: 500 }, (_, index) => ({
+    id: `thread-${index}`,
+    from: `Sender ${index}`,
+    subject: `Subject ${index}`,
+    snippet: 'Windowed row',
+    at: '9:30 AM',
+    unread: false,
+    starred: false,
+    hasAttachment: false,
+    returned: false,
+    hasDraft: false,
+    labelIds: [],
+    lastMsgAt: now - index * 1_000
+  }))
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  const baseProps = {
+    threads,
+    view: 'inbox' as const,
+    syncing: false,
+    readerOpen: false,
+    selectedIds: new Set<string>(),
+    labelsById: new Map(),
+    selectedRowRef: { current: null },
+    onExtendSelection: (): void => {},
+    onOpen: (): void => {}
+  }
+
+  try {
+    await act(async () =>
+      root.render(
+        createElement(ThreadList, {
+          ...baseProps,
+          selectedIndex: 0,
+          exitingThreadIds: new Set<string>()
+        })
+      )
+    )
+    const secondRow = container.querySelector<HTMLElement>(
+      '[data-testid="thread-row"][data-thread-index="1"]'
+    )
+    const firstRow = container.querySelector<HTMLElement>('[data-testid="thread-row"][data-thread-index="0"]')
+    expect(secondRow?.closest<HTMLElement>('.absolute')?.style.top).toBe('90px')
+
+    await act(async () =>
+      root.render(
+        createElement(ThreadList, {
+          ...baseProps,
+          selectedIndex: 1,
+          exitingThreadIds: new Set(['thread-0'])
+        })
+      )
+    )
+    const projectedSecondRow = container.querySelector<HTMLElement>(
+      '[data-testid="thread-row"][data-thread-index="1"]'
+    )
+    expect(container.querySelector('[data-testid="thread-row"][data-thread-index="0"]')).toBe(firstRow)
+    expect(firstRow?.getAttribute('data-exiting')).toBe('true')
+    expect(projectedSecondRow?.getAttribute('data-selected')).toBe('true')
+    expect(projectedSecondRow?.closest<HTMLElement>('.absolute')?.style.top).toBe('44px')
+    expect(
+      projectedSecondRow?.closest<HTMLElement>('.absolute')?.classList.contains('app-thread-position-shift')
+    ).toBe(true)
+  } finally {
+    await act(async () => root.unmount())
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+  }
+})
+
 // jsdom has no layout, so model the real geometry the effect measures: the list
 // sits below a header, and the virtual sizer starts one padding step into the
 // list's scroll content. Measuring the sizer against anything but the list --

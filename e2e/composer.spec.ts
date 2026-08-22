@@ -337,8 +337,9 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
       countdownAnimation: countdown ? getComputedStyle(countdown).animationName : ''
     }
   })
-  expect(timing.durationMs).toBeGreaterThan(6_000)
-  expect(timing.expiresAt).toBeGreaterThan(Date.now() + 6_000)
+  expect(timing.durationMs).toBeGreaterThan(3_500)
+  expect(timing.durationMs).toBeLessThanOrEqual(5_000)
+  expect(timing.expiresAt).toBeGreaterThan(Date.now() + 3_500)
   expect(Math.abs(timing.shellDurationMs - timing.durationMs)).toBeLessThan(50)
   expect(Math.abs(timing.countdownDurationMs - timing.durationMs)).toBeLessThan(50)
   expect(timing.countdownAnimation).toBe('toast-countdown')

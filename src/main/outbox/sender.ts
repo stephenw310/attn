@@ -203,6 +203,7 @@ export interface OutboxSenderOptions {
   spoolRoot?: string | null
   cleanSpool?: (id: string) => void
   progress?: (progress: OutboxProgress | null) => void
+  mailChanged?: () => void
 }
 
 /** The sole production chokepoint that may call Gmail drafts.send. */
@@ -218,6 +219,7 @@ export class OutboxSender {
   private readonly spoolRoot: string | null
   private readonly cleanSpool: (id: string) => void
   private readonly progress: (progress: OutboxProgress | null) => void
+  private readonly mailChanged: () => void
 
   constructor(
     private readonly db: Db,
@@ -231,6 +233,7 @@ export class OutboxSender {
     this.spoolRoot = options.spoolRoot ?? null
     this.cleanSpool = options.cleanSpool ?? (() => {})
     this.progress = options.progress ?? (() => {})
+    this.mailChanged = options.mailChanged ?? (() => {})
   }
 
   start(): void {
@@ -753,7 +756,7 @@ export class OutboxSender {
     if (!threadId || this.stopping || this.accountId() !== row.account_id) return
     try {
       const thread = await provider.getThread(threadId, { format: 'full', signal, priority: 'send' })
-      persistThread(this.db, row.account_id, thread)
+      if (persistThread(this.db, row.account_id, thread)) this.mailChanged()
       this.notify({ kind: 'changed' })
     } catch (error) {
       console.warn(`[outbox] sent ${row.id}, but refresh failed: ${errorMessage(error)}`)
