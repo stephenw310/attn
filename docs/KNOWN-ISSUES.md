@@ -77,25 +77,41 @@ the picker stays open across a bulk apply. Add the missing e2e.
 
 ## Security hardening
 
-Neither entry is a known exploit path. In both, an invariant holds by accident rather than by construction.
+### SEC-1: crafted clipboard JSON puts unsanitized HTML into outgoing mail *(review S1)*
 
-### SEC-1: Lexical's clipboard JSON path can mint an unsanitized opaque region *(review S1)*
-
-**Verified:** 2026-08-21
+**Verified:** 2026-08-22 · **Severity:** medium, sanitizer bypass
 
 `OpaqueHtmlNode.importJSON` (`nodes/OpaqueHtmlNode.tsx:133-134`) constructs the node straight from
-`serialized.html`. Every other route into an opaque region passes the composer's import sanitizer first. Lexical
-writes its own JSON to the clipboard, so a paste carrying crafted `application/x-lexical-editor` data reaches
-this constructor without that gate.
+`serialized.html`. Every other route into an opaque region passes the composer's import sanitizer first.
 
-The outgoing sanitizer still runs before send, so this is defense in depth rather than a live hole.
+Three things line up to make that reach the wire:
 
-**Fix direction:** sanitize in `importJSON` itself, so the node type cannot hold unsanitized HTML regardless of
-how it was built.
+1. The composer's paste handler (`Composer.tsx:364`) calls `preventDefault` only when the clipboard carries
+   image files. Anything else falls through to Lexical's default importer, which reads
+   `application/x-lexical-editor` and calls `importJSON`. The only gate is the editor namespace, and that is
+   the fixed public string `attn-composer` (`editorConfig.ts:13`).
+2. `serializeEditorState` (`serialize.ts:92-94`) runs `restoreOpaqueHtml` **after** `sanitizeOutgoingHtml`, by
+   design. While the sanitizer runs, the payload sits base64url-encoded inside `data-attn-opaque`, which
+   `sanitize.ts:210` explicitly allows through untouched.
+3. `restoreOpaqueHtml` (`preserve.ts:415-417`) is a raw string replace. It decodes the payload back into the
+   body with no sanitization.
+
+Confirmed by probe on 2026-08-22: feeding `<script>alert(1)</script><img src=x onerror=alert(2)>` through
+`restoreOpaqueHtml(sanitizeOutgoingHtml(...))` returns it intact. So this is an outgoing-mail sanitizer bypass,
+not defense in depth. The harm lands on the recipient's mail client, not locally, because the reader is a
+scriptless sandbox under CSP. Exploitability depends on Chromium carrying a custom MIME type across
+applications on the clipboard, which is plausible but untested.
+
+`ImageNode.importJSON` (`nodes/ImageNode.tsx:50-53`) takes `serialized.src` raw by the same route.
+
+**Fix direction:** decode, run `sanitizeDraftHtmlForImport`, then re-encode inside `OpaqueHtmlNode.importJSON`
+and `importDOM`, so the node type cannot hold unsanitized HTML however it was built. Sanitizing at the restore
+step instead would also close it, and would cover any future path into an opaque region. Give the sibling nodes
+the same treatment for raw `style` and `src`.
 
 ### SEC-2: the quote CSS filter misses several flow-escaping properties *(review S2)*
 
-**Verified:** 2026-08-21
+**Verified:** 2026-08-21 · **Severity:** low, recipient-side cosmetics only
 
 `FLOW_ESCAPING_PROPERTY` (`shared/mailSanitizer.ts:49`) matches
 `position|z-index|inset|top|right|bottom|left|transform`. It does not match the standalone `translate`,
