@@ -18,13 +18,17 @@ whole stage pipeline at once rather than split it across milestones. What remain
 
 | Task | State | Blocks |
 |---|---|---|
-| S1 utility process | not started | F10's indexing |
-| S2 per-message labels | not started | F3 mailbox views, S4's tombstone pass |
-| S4 tombstone pass | membership half shipped; existence sweep open | trustworthy mailbox views |
-| Feature half | not planned | nothing yet |
+| S1 utility process | **open**, not started | F10's indexing |
+| S2 per-message labels | **open**, not started | F3 mailbox views, S4's tombstone pass |
+| S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
+| S4 reconcile and expiry recovery | **part done**: membership shipped in #51, tombstone pass open | trustworthy mailbox views |
+| Feature half | **open**, not planned | nothing yet |
 
-S1 and S2 are independent and can run side by side. The feature tasks get written up once the store's shape
-is settled.
+So two and a half tasks are left: S1, S2, and S4's tombstone pass. S1 and S2 are independent and can run side
+by side. The feature tasks get written up once the store's shape is settled.
+
+Every task section below opens with the same **Status** line, so you never have to infer state from whether a
+section looks long.
 
 ---
 
@@ -109,6 +113,8 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 
 ## S1: move sync work into an Electron utility process
 
+**Status: open, not started.**
+
 **Depends on:** nothing · **Unblocks:** F10's FTS indexing · **Parallel with:** S2 · **Spec:** §6 architecture
 
 ### Why
@@ -131,10 +137,22 @@ The full design is this task's first deliverable. These bound it:
   exactly-once send. Neither may acquire a second implementation across the process boundary.
 - **Durable checkpoints survive a crash of the utility process**, and the supervisor restarts it without
   restarting the app or losing the action queue. All three cursors resume.
-- **The SQLite connection has exactly one owner.** Decide explicitly. Either the utility process owns the
-  database and the main process asks it for reads, or the database stays in main and the utility process ships
-  parsed results back. Two writers is a corruption bug. The current `Db` handle is passed straight into
-  queries, IPC handlers, and executors, so this decision reaches most of `src/main/`.
+- **The utility process owns the SQLite connection.** Decided by the owner on 2026-08-22, recorded in SPEC §9
+  #19. It holds the only handle and is the only writer. The main process asks it for reads. Two writers is a
+  corruption bug, so there is no fallback path where main writes "just this once".
+
+  This is the expensive half of S1, so scope it before starting. The main process runs raw SQL at **81 sites
+  across 20 files** today. They split three ways, and each group needs its own answer in the design:
+
+  1. **Moves wholesale.** `sync/` (`backfill`, `bodies`, `lifetimeSweep`, `persist`, `poller`,
+     `attachmentFlags`) and `store/mutate.ts`. This code is the reason for the move.
+  2. **Becomes a request across the boundary.** `db/queries.ts` serves every renderer read. Those now travel
+     renderer to main to utility and back, so the §7 budgets have to be re-proved rather than assumed. A
+     conversation open at 50 ms is the tightest of them.
+  3. **Needs an explicit home.** `outbox/` and `actions/executor.ts` write on the user's behalf and carry the
+     exactly-once invariant. Putting them behind an IPC hop introduces a failure mode M2 does not have, where
+     the caller cannot tell a lost reply from a lost write. Decide where they live and prove the invariant
+     holds there before moving anything else.
 - **`SchedulerTime` injection stays** (`src/main/time.ts`) so tests never wait on wall-clock time.
 
 ### Testing and done condition
@@ -147,6 +165,8 @@ second implementation.
 ---
 
 ## S2: per-message label storage
+
+**Status: open, not started.**
 
 **Depends on:** nothing · **Unblocks:** F3 mailbox views, S4's tombstone pass · **Parallel with:** S1 ·
 **Spec:** §9 #17, F3
@@ -205,12 +225,15 @@ discoverable in Trash and alive in All Mail, and the reader never shows a draft 
 
 ## S3: all-mail and spam/trash backfill stages
 
-**Shipped in #51**, pulled forward from M3 by owner decision, ahead of S1 and S2. The stage rewrite therefore
-landed in the main process and moves with S1 later.
+**Status: done. Shipped in #51. Nothing in this section is work.**
 
-What it delivered: the unfiltered 12-month `all-mail` stage at normal background priority, explicit `spam` and
+It was pulled forward from M3 by owner decision, ahead of S1 and S2, so the stage rewrite landed in the main
+process and moves with S1 later. The section is kept because it explains why the pipeline has the shape S1 is
+about to relocate.
+
+It delivered the unfiltered 12-month `all-mail` stage at normal background priority, explicit `spam` and
 `trash` label stages, and the retirement of the dedicated `sent` stage. The pipeline and the contracts it
-established are recorded under [Where sync stands today](#where-sync-stands-today). Nothing here is open.
+established are recorded under [Where sync stands today](#where-sync-stands-today).
 
 Two facts worth keeping, because they explain the shape rather than the implementation:
 
@@ -228,14 +251,14 @@ and continues into older mail. Neither fetches a thread the other already stored
 
 ## S4: generalized reconcile and expiry recovery
 
-**Membership half shipped in #51.** `reconcileLabelMembership` (`src/main/sync/poller.ts`) generalizes the
+**Status: part done. The membership half shipped in #51. The tombstone pass is open and is the work here.**
+
+The shipped half: `reconcileLabelMembership` (`src/main/sync/poller.ts`) generalizes the
 INBOX-only helper, the backfill's reconcile phase re-lists INBOX, SPAM, and TRASH, and
 `reconcilePurgeableMembership` verifies Spam and Trash candidates thread by thread, where a refetch persists
 truth and only a 404 deletes. Both the backfill completion path and
 `SyncController.recoverExpiredHistory` call the same helpers, so there are two callers and one behavior. Keep
 it that way.
-
-**Open:** the existence-sweep tombstone pass.
 
 **Depends on:** S2, for per-message TRASH and SPAM truth · **Unblocks:** trustworthy mailbox views ·
 **Spec:** F2 incremental, §9 #17
@@ -301,9 +324,11 @@ store's shape is settled.
 
 ## Open questions
 
+**Decided 2026-08-22:** the utility process owns SQLite (SPEC §9 #19). S1's design constraints carry the
+consequences.
+
 | Question | Why it matters | Decide by |
 |---|---|---|
-| Does the utility process own SQLite, or does main? | Reaches most of `src/main/`; two writers is a corruption bug | S1 design |
 | Pathological-mailbox posture: pick a design target such as smooth to 250k messages, then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages, and lifetime headers can exceed that | E7's real-mailbox capture in [T20-EVIDENCE.md](T20-EVIDENCE.md) |
 | Does S1 run before or after the M2 dogfood week, and does S1 or S2 go first? | S1 moves the process boundary across most of `src/main/`, which is disruptive under a daily driver; S2 bumps the schema, which costs a manual DDL on the dogfood profile | Before either task starts |
 
