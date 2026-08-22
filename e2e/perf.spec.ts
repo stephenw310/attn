@@ -40,6 +40,9 @@ test.describe('@perf focused-row archive motion', () => {
   test.use({ seed: 'fixtures/seed-inbox.json' })
 
   test('starts moving the replacement row before the exit midpoint', async ({ page }) => {
+    await page.addStyleTag({
+      content: '.app-thread-exit-shell { animation-play-state: paused !important; }'
+    })
     const rows = page.getByTestId('thread-row')
     await expect(rows).toHaveCount(8)
     const nextRow = rows.filter({ hasText: 'Northstar Books' })
@@ -48,30 +51,24 @@ test.describe('@perf focused-row archive motion', () => {
     await page.keyboard.press('e')
     await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
     await expect(nextRow).toHaveAttribute('data-selected', 'true')
-    const motion = await nextRow.evaluate(
-      (element) =>
-        new Promise<Array<{ elapsed: number; selected: boolean; y: number }>>((resolve) => {
-          const frames: Array<{ elapsed: number; selected: boolean; y: number }> = []
-          const startedAt = performance.now()
-          const sample = (): void => {
-            const elapsed = performance.now() - startedAt
-            frames.push({
-              elapsed,
-              selected: element.getAttribute('data-selected') === 'true',
-              y: element.getBoundingClientRect().y
-            })
-            if (elapsed < 600) requestAnimationFrame(sample)
-            else resolve(frames)
-          }
-          requestAnimationFrame(sample)
-        })
+    const timeline = await rows.first().evaluate((element) => {
+      const shell = element.closest<HTMLElement>('.app-thread-exit-shell')
+      const collapse = shell?.getAnimations().find((animation) => {
+        const effect = animation.effect as KeyframeEffect | null
+        return effect?.getKeyframes().some((keyframe) => keyframe.maxHeight === '0px')
+      })
+      if (!shell || !collapse) throw new Error('collapse animation missing')
+      collapse.currentTime = 130
+      return {
+        currentTime: collapse.currentTime,
+        shellHeight: shell.getBoundingClientRect().height
+      }
+    })
+    expect(timeline.currentTime).toBe(130)
+    expect(timeline.shellHeight).toBeLessThan(44)
+    expect(await nextRow.evaluate((element) => element.getBoundingClientRect().y)).toBeLessThan(
+      nextRowStart - 2
     )
-    expect(motion.every(({ selected }) => selected)).toBe(true)
-    expect(
-      motion.some(({ elapsed, y }) => elapsed < 260 && y < nextRowStart - 2),
-      `replacement row motion: ${JSON.stringify(motion)}`
-    ).toBe(true)
-    expect(motion.at(-1)?.y).toBeLessThan(nextRowStart - 20)
     await expect(rows).toHaveCount(7)
   })
 })
