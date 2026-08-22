@@ -17,8 +17,13 @@ for their reasoning. This file is the part that stays current. Each entry cross-
 tag, because the review's `S1` and `S2` security tags collide with the `S1` through `S4` task names in
 M3-PLAN.
 
+A finding already attached to a planned task stays with that task instead of moving here. The review's B4
+pruning edge lives in M3-PLAN's S2 section, where the message loop is being reworked, and that is the
+pattern to follow.
+
 Milestone and task status stays in [SPEC.md](SPEC.md) §8 and the plan docs, per [AGENTS.md](../AGENTS.md).
-Nothing here is a milestone gate unless a plan doc says so.
+Manual sign-off evidence is ticked in [T20-EVIDENCE.md](T20-EVIDENCE.md). Nothing here is a milestone gate
+unless a plan doc says so.
 
 ---
 

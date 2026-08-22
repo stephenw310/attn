@@ -64,7 +64,10 @@ priority overtaking and FIFO fairness, disposal/cancellation, and stage telemetr
 
 ## Real-Gmail bootstrap run — required before M2 sign-off
 
-Run a fresh profile against a typical long-lived mailbox and retain the `[sync:metric]` log. Do not record the
+**This file owns the tick for every manual sign-off item.** M1-PLAN and M2-PLAN point at the IDs below rather
+than restating the items, so a run is recorded once. Cite the ID when you record a result.
+
+**E7 — bootstrap capture.** Run a fresh profile against a typical long-lived mailbox and retain the `[sync:metric]` log. Do not record the
 top-bar unread count as sync progress.
 
 | Stage | Listed / fetched / estimate | Elapsed | Fetched threads/min | Quota wait |
@@ -86,9 +89,14 @@ bounded window autocompletes, and that lifetime rows remain header-only until op
 
 Owner/week: **pending**
 
-- [ ] Attn used as the only mail client for seven consecutive days; friction list filed for M3.
-- [ ] Force-quit draft recovery and offline relaunch.
-- [ ] Undo-send at multiple delays; forced crashes around remote create/send; zero duplicates.
-- [ ] Incoming and outgoing attachment round-trips, including inline images.
-- [ ] Signed-in metadata-only body hydration, persistence, and connectivity retry.
-- [ ] Real-OS notification click opens the intended thread.
+- [ ] **E1** Attn used as the only mail client for seven consecutive days; friction list filed for M3.
+- [ ] **E2** Force-quit draft recovery and offline relaunch.
+- [ ] **E3** Undo-send at multiple delays; forced crashes around remote create/send; zero duplicates.
+- [ ] **E4** Incoming and outgoing attachment round-trips, including inline images.
+- [ ] **E5** Signed-in metadata-only body hydration, persistence, and connectivity retry.
+- [ ] **E6** Real-OS notification click opens the intended thread. Owed since M1; see M1-PLAN's T9 box for the
+      defect the first run found and the fix awaiting re-test.
+- [ ] **E7** Real-Gmail bootstrap capture: the stage table above, filled in from one fresh-profile run. Covers
+      both the initial-sync evidence and the lifetime-sweep wall-clock and quota numbers.
+
+E7 is cheapest on the first day of the E1 dogfood week, because it needs a from-scratch backfill anyway.

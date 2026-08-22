@@ -891,19 +891,22 @@ the memory definition, quota configuration, real-Gmail capture template, and dog
 
 ### Done when — the M2 exit checklist
 
-Status annotations as of 2026-08-19 (T20 engineering pass; manual evidence remains):
+Status annotations as of 2026-08-19 (T20 engineering pass; manual evidence remains). Every manual
+observation below is ticked in [T20-EVIDENCE.md](T20-EVIDENCE.md) under an `E` id, so a run is recorded
+once. The F6 citation box is the only one this file owns outright, because it is a writing task rather
+than an observation. [KNOWN-ISSUES.md](KNOWN-ISSUES.md) holds open defects; nothing here is a defect.
 
 - [x] All R and T tasks above merged; `npm run verify` green including the new composer/outbox suites — *every R and T task is merged, T21 included (#54); T20's hardening pass closed it out (#60)*
 - [ ] F6 acceptance criteria each demonstrably pass (list them in the closing PR with evidence links) — *automated coverage exists for composer open, force-quit recovery, undo-send, and no-duplicate-send at unit level; the closing PR still has to cite it*
-- [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates — *manual evidence outstanding*
+- [ ] Exactly-once manual matrix executed on real Gmail, including forced crashes — zero duplicates — *tracked as E3 in [T20-EVIDENCE.md](T20-EVIDENCE.md); tick it there, not here*
 - [x] 10k list + composer latency measurements recorded; virtualization/cap deviation resolved with data — *fixed-height windowing at 500+, production cap 10,000; see [T20-EVIDENCE.md](T20-EVIDENCE.md)*
 - [ ] Initial-sync evidence separates first-readable-page latency from full background completion and records
-      per-stage totals, effective rate, and quota-wait time — *protocol fields, structured logs, and fake-clock tests implemented; T13A's real-mailbox capture remains outstanding in [T20-EVIDENCE.md](T20-EVIDENCE.md)*
+      per-stage totals, effective rate, and quota-wait time — *protocol fields, structured logs, and fake-clock tests implemented; the real-mailbox capture is E7 in [T20-EVIDENCE.md](T20-EVIDENCE.md); tick it there, not here*
 - [ ] Lifetime whole-account header indexing finds contacts outside the mail window and creates header rows
-      without downloading old body bytes; saved-Google-Contacts scope decision recorded — *implemented and e2e-covered (#51); real-mailbox wall-clock/quota run outstanding; People-API decision recorded in T13A*
+      without downloading old body bytes; saved-Google-Contacts scope decision recorded — *implemented and e2e-covered (#51); People-API decision recorded in T13A; the real-mailbox wall-clock and quota run is E7 in [T20-EVIDENCE.md](T20-EVIDENCE.md); tick it there, not here*
 - [x] Failed triage actions self-heal to server truth with an explanatory toast; auth re-pend shipped; no silent queue states remain — *T18 (#47), unit + e2e covered*
-- [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts — *T19 (#41) shipped; signed-in manual smoke outstanding*
-- [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input) — *outstanding; #52 is the first batch of dogfood fixes*
+- [ ] On-demand hydration shipped; no permanently body-less threads for signed-in accounts — *T19 (#41) shipped; the signed-in manual smoke is E5 in [T20-EVIDENCE.md](T20-EVIDENCE.md); tick it there, not here*
+- [ ] One maintainer has used Attn as their only mail client for a week and filed the friction list (it becomes M3 input) — *tracked as E1 in [T20-EVIDENCE.md](T20-EVIDENCE.md); tick it there, not here. #52 is the first batch of dogfood fixes*
 - [x] SPEC/README/AGENTS/M1-plan deviation rows updated to the shipped reality — *T20 code-owned documentation refreshed 2026-08-19; the still-open manual evidence remains explicit rather than being marked shipped*
 
 Then M3 (search, system mailboxes, splits, palette, themes) starts with the utility-process task below. It is deliberately **not** done in M2: moving the process boundary while building the outbox would risk the exactly-once invariant for a jank win whose real driver is M3's FTS indexing.
