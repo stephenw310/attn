@@ -61,7 +61,7 @@ test('keeps picker typing isolated and opens it over a conversation', async ({ p
 
   const search = page.getByTestId('label-search')
   await search.fill('s')
-  await expect(first.getByTitle('Starred')).toHaveCount(0)
+  await expect(first.getByTitle('Starred')).toBeHidden()
   await expect(page.getByTestId('pending-count')).toContainText('1 pending')
 
   const dir = join(__dirname, '.artifacts')

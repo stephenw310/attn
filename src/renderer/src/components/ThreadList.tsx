@@ -290,6 +290,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         data-selected={selected || undefined}
         data-checked={checked || undefined}
         data-unread={thread.unread || undefined}
+        data-starred={thread.starred || undefined}
         data-exiting={exiting || undefined}
         className={`flex cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
           virtualized ? 'h-[46px]' : 'py-[11px]'
@@ -304,18 +305,12 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
               ✓
             </span>
           ) : (
-            <span
-              className={`size-1.5 rounded-full ${
-                thread.unread ? 'bg-accent shadow-[0_0_6px_rgba(255,178,36,0.45)]' : 'bg-transparent'
-              }`}
-            />
+            <span className="app-thread-unread-dot size-1.5 rounded-full" />
           )}
         </span>
         <span
           data-testid="thread-sender"
-          className={`w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap ${
-            thread.unread ? 'font-semibold text-ink' : 'text-ink-dim'
-          }`}
+          className="app-thread-sender w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap"
         >
           {thread.from}
         </span>
@@ -329,16 +324,11 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
             </span>
           )}
           <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} />
-          {thread.starred && (
-            <span className="flex-none text-star" title="Starred">
-              ★
-            </span>
-          )}
+          <span className="app-thread-star flex-none text-star" title="Starred">
+            ★
+          </span>
           <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-            <span
-              data-testid="thread-subject"
-              className={thread.unread ? 'font-semibold text-ink' : 'text-ink-dim'}
-            >
+            <span data-testid="thread-subject" className="app-thread-subject">
               {thread.subject}
             </span>
             <span data-testid="thread-snippet"> — {thread.snippet}</span>
@@ -347,13 +337,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         <span className="flex flex-none items-center gap-2.5 text-xs">
           <ThreadStatusChips thread={thread} />
           {thread.hasAttachment && <span title="Has attachment">📎</span>}
-          <span
-            className={`min-w-[70px] text-right tabular-nums ${
-              thread.unread ? 'font-medium text-accent' : 'text-ink-faint'
-            }`}
-          >
-            {thread.at}
-          </span>
+          <span className="app-thread-time min-w-[70px] text-right tabular-nums">{thread.at}</span>
         </span>
       </div>
     )

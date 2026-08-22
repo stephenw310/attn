@@ -305,7 +305,7 @@ test('derives bulk star and unread direction from the selected rows', async ({ p
   await page.keyboard.press('k')
   await page.keyboard.press('k')
   await page.keyboard.press('s')
-  await expect(rows.nth(2).getByTitle('Starred')).toHaveCount(0)
+  await expect(rows.nth(2).getByTitle('Starred')).toBeHidden()
 
   await page.keyboard.press('j')
   await expect(rows.nth(1)).not.toHaveAttribute('data-unread')
