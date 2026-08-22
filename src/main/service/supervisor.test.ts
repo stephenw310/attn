@@ -167,6 +167,8 @@ describe('ServiceSupervisor', () => {
       restartFailureWindowMs: 1_000,
       maxRestartFailures: 3
     })
+    const events = vi.fn()
+    supervisor.onEvent(events)
     const started = supervisor.start()
     children[0].ready()
     await started
@@ -183,7 +185,46 @@ describe('ServiceSupervisor', () => {
     children[2].exit(1)
 
     await expect(waitingInvoke).rejects.toThrow('3 crashes within 1000 ms')
+    await expect(supervisor.invoke(IPC_CHANNELS.mailListThreads)).rejects.toThrow('3 crashes within 1000 ms')
+    expect(events).toHaveBeenCalledWith({
+      kind: 'sync-state',
+      payload: {
+        phase: 'error',
+        message: 'Mail service stopped after repeated crashes. Restart Attn.'
+      }
+    })
     await vi.advanceTimersByTimeAsync(1_000)
+    expect(nextChild).toBe(3)
+  })
+
+  it('counts crashes after successful restarts toward the rolling-window breaker', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const children = [new FakeChild(), new FakeChild(), new FakeChild()]
+    let nextChild = 0
+    const supervisor = new ServiceSupervisor('/utility.js', initialization(), {
+      fork: () => children[nextChild++],
+      restartDelayMs: 10,
+      restartFailureWindowMs: 1_000,
+      maxRestartFailures: 3
+    })
+    const started = supervisor.start()
+    children[0].ready()
+    await started
+
+    children[0].exit(1)
+    await vi.advanceTimersByTimeAsync(10)
+    children[1].ready()
+    await expect(supervisor.start()).resolves.toEqual(READY)
+
+    children[1].exit(1)
+    await vi.advanceTimersByTimeAsync(20)
+    children[2].ready()
+    await expect(supervisor.start()).resolves.toEqual(READY)
+
+    children[2].exit(1)
+    await expect(supervisor.start()).rejects.toThrow('3 crashes within 1000 ms')
     expect(nextChild).toBe(3)
   })
 

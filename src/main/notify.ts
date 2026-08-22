@@ -94,9 +94,7 @@ export function applyUnreadBadge(
   effects: BadgeEffects
 ): void {
   if (platform === 'darwin') effects.setMacBadge(unreadCount)
-  else if (platform === 'win32') {
-    effects.setWindowsOverlay(unreadCount > 0, unreadCount > 0 ? `${unreadCount} unread conversations` : '')
-  }
+  else applyUnreadBadgeToWindow(platform, unreadCount, effects.setWindowsOverlay)
 }
 
 export function applyUnreadBadgeToWindow(

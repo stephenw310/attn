@@ -137,7 +137,6 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       nodeIntegration: false
     }
   })
-  mailNotifier?.attachWindow(win)
   win.webContents.session.webRequest.onHeadersReceived(
     { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
     (details, callback) => {
@@ -156,6 +155,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     }
   )
   win.on('ready-to-show', () => {
+    mailNotifier?.attachWindow(win)
     if (shouldShow) win.show()
   })
   win.on('focus', publishFocus)

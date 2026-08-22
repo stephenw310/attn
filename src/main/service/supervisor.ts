@@ -70,6 +70,7 @@ export class ServiceSupervisor {
   private pending = new Map<number, PendingRequest>()
   private nextRequestId = 1
   private stopping = false
+  private terminalError: Error | null = null
   private hasEverBeenReady = false
   private initialStartFailures = 0
   private restartFailures: number[] = []
@@ -107,6 +108,7 @@ export class ServiceSupervisor {
   }
 
   start(): Promise<ServiceReady> {
+    if (this.terminalError) return Promise.reject(this.terminalError)
     if (this.stopping) return Promise.reject(new Error('Attn service is stopping'))
     if (!this.child) this.spawn()
     return this.waitUntilReady()
@@ -245,13 +247,7 @@ export class ServiceSupervisor {
       return
     }
     if (message.type === 'event') {
-      try {
-        this.eventSink(message.payload)
-      } catch (error) {
-        console.error(
-          `[utility] event handler failed: ${error instanceof Error ? error.message : String(error)}`
-        )
-      }
+      this.dispatchEvent(message.payload)
       return
     }
     if (message.type === 'stopped') this.stoppedAck?.()
@@ -272,13 +268,15 @@ export class ServiceSupervisor {
         const error = new Error(
           `Attn service failed to start after ${this.initialStartFailures} attempts (last exit ${code})`
         )
-        this.stopping = true
+        this.terminalError = error
         this.rejectReadyWaiters(error)
         console.error(`[utility] ${error.message}`)
         return
       }
     } else {
       const now = this.time.now()
+      // Do not reset this on ready. A utility that repeatedly recovers and crashes
+      // still churns sync state and Gmail quota, so every crash in the window counts.
       this.restartFailures = this.restartFailures.filter(
         (failedAt) => now - failedAt <= this.restartFailureWindowMs
       )
@@ -287,7 +285,14 @@ export class ServiceSupervisor {
         const error = new Error(
           `Attn service stopped after ${this.restartFailures.length} crashes within ${this.restartFailureWindowMs} ms (last exit ${code})`
         )
-        this.stopping = true
+        this.terminalError = error
+        this.dispatchEvent({
+          kind: 'sync-state',
+          payload: {
+            phase: 'error',
+            message: 'Mail service stopped after repeated crashes. Restart Attn.'
+          }
+        })
         this.rejectReadyWaiters(error)
         console.error(`[utility] ${error.message}`)
         return
@@ -300,11 +305,12 @@ export class ServiceSupervisor {
     )
     console.error(`[utility] exited (${code}); restarting in ${restartDelay} ms`)
     this.time.timers.setTimeout(() => {
-      if (!this.stopping && !this.child) this.spawn()
+      if (!this.stopping && !this.terminalError && !this.child) this.spawn()
     }, restartDelay)
   }
 
   private waitUntilReady(requireNext = false): Promise<ServiceReady> {
+    if (this.terminalError) return Promise.reject(this.terminalError)
     if (this.stopping) return Promise.reject(new Error('Attn service is stopping'))
     if (!requireNext && this.readyState) return Promise.resolve(this.readyState)
     return new Promise<ServiceReady>((resolve, reject) => this.readyWaiters.push({ resolve, reject }))
@@ -337,6 +343,16 @@ export class ServiceSupervisor {
   private rejectReadyWaiters(error: Error): void {
     const waiters = this.readyWaiters.splice(0)
     for (const waiter of waiters) waiter.reject(error)
+  }
+
+  private dispatchEvent(event: ServiceEvent): void {
+    try {
+      this.eventSink(event)
+    } catch (error) {
+      console.error(
+        `[utility] event handler failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
   }
 
   private queueControl(payload: ServiceControl): void {
