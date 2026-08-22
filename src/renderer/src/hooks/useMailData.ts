@@ -23,6 +23,7 @@ interface MailDataState {
   pendingActionCount: number
   pausedActionCount: number
   mailRevision: number
+  invalidateConversations: () => void
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
 }
@@ -47,6 +48,7 @@ export function useMailData(
   const [pendingActionCount, setPendingActionCount] = useState(0)
   const [pausedActionCount, setPausedActionCount] = useState(0)
   const [mailRevision, setMailRevision] = useState(0)
+  const invalidateConversations = useCallback(() => setMailRevision((revision) => revision + 1), [])
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
   const deferGateRef = useRef<Promise<void> | null>(null)
@@ -268,6 +270,7 @@ export function useMailData(
     pendingActionCount,
     pausedActionCount,
     mailRevision,
+    invalidateConversations,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
   }

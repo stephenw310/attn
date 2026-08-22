@@ -165,6 +165,13 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     for (const entry of projectedLayout) byThreadId.set(survivingThreads[entry.index].id, entry)
     return { threads: survivingThreads, layout: projectedLayout, byThreadId }
   }, [exitingThreadIds, threads, view, virtualized])
+  const projectedGroupTops = useMemo(() => {
+    const tops = new Map<VirtualThreadEntry['group'], number>()
+    for (const entry of projected?.layout ?? []) {
+      if (entry.showGroup) tops.set(entry.group, entry.top)
+    }
+    return tops
+  }, [projected])
   const layoutByThreadId = useMemo(() => {
     const byThreadId = new Map<string, VirtualThreadEntry>()
     for (const entry of layout) byThreadId.set(threads[entry.index].id, entry)
@@ -238,17 +245,17 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     []
   )
 
-  const renderThread = (entry: VirtualThreadEntry): React.JSX.Element => {
+  const renderThread = (entry: VirtualThreadEntry): React.JSX.Element[] => {
     const { index, group, showGroup } = entry
     const thread = threads[index]
     const selected = index === selectedIndex
     const checked = selectedIds.has(thread.id)
     const exiting = exitingThreadIds.has(thread.id)
     const projectedEntry = projected?.byThreadId.get(thread.id)
-    const projectedTop =
-      projectedEntry && !showGroup && projectedEntry.showGroup
-        ? projectedEntry.top + VIRTUAL_GROUP_HEIGHT
-        : projectedEntry?.top
+    const currentRowTop = entry.top + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
+    const projectedRowTop = projectedEntry
+      ? projectedEntry.top + (projectedEntry.showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
+      : undefined
     let groupSurvives = false
     if (exiting && showGroup) {
       for (let nextIndex = index + 1; nextIndex < threads.length; nextIndex++) {
@@ -349,18 +356,42 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         </span>
       </div>
     )
-    return (
-      <div
-        key={thread.id}
-        className={`overflow-x-clip ${virtualized ? 'absolute right-0 left-0' : ''} ${
-          virtualized && projectedEntry ? 'app-thread-position-shift' : ''
-        }`}
-        style={
-          virtualized
-            ? { top: exiting ? entry.top : (projectedTop ?? entry.top), height: entry.height }
-            : undefined
-        }
-      >
+    if (virtualized) {
+      const projectedGroupTop = projectedGroupTops.get(group)
+      const groupRemoved = projected !== null && projectedGroupTop === undefined
+      const parts: React.JSX.Element[] = []
+      if (showGroup) {
+        parts.push(
+          <div
+            key={`group:${group}`}
+            data-testid="thread-date-group"
+            className={`absolute right-0 left-0 h-[44px] px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint ${
+              projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''
+            } ${groupRemoved ? 'app-thread-exit' : ''}`}
+            style={{ top: projectedGroupTop ?? entry.top }}
+          >
+            {group}
+          </div>
+        )
+      }
+      parts.push(
+        <div
+          key={`thread:${thread.id}`}
+          className={`absolute right-0 left-0 overflow-x-clip ${
+            projectedEntry ? 'app-thread-position-shift' : ''
+          } ${exiting ? 'z-10' : ''}`}
+          style={{
+            top: exiting ? currentRowTop : (projectedRowTop ?? currentRowTop),
+            height: VIRTUAL_ROW_HEIGHT
+          }}
+        >
+          {row}
+        </div>
+      )
+      return parts
+    }
+    return [
+      <div key={thread.id} className="overflow-x-clip">
         {!collapseGroup && groupHeader}
         <div className={exiting ? 'app-thread-exit-shell' : undefined}>
           <div className={exiting ? 'app-thread-exit-content' : undefined}>
@@ -369,7 +400,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           </div>
         </div>
       </div>
-    )
+    ]
   }
 
   return (
@@ -404,10 +435,10 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           className={`relative ${projected ? 'app-thread-virtual-collapse' : ''}`}
           style={{ height: projectedVirtualHeight }}
         >
-          {mountedEntries.map(renderThread)}
+          {mountedEntries.flatMap(renderThread)}
         </div>
       ) : (
-        layout.map(renderThread)
+        layout.flatMap(renderThread)
       )}
     </main>
   )

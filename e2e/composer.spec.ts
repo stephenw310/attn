@@ -381,6 +381,7 @@ for (const scenario of [
     const optimistic = cards.last()
     await expect(optimistic).toHaveAttribute('data-pending', 'true')
     await expect(optimistic).toHaveAttribute('data-collapsed', 'false')
+    await expect(page.getByTestId('conversation-scroll')).toBeFocused()
     await expect(optimistic.getByTestId('html-body-frame').contentFrame().locator('body')).toContainText(body)
 
     await page.keyboard.press('z')

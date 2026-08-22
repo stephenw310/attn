@@ -121,7 +121,7 @@ it('projects virtual rows into the space left by an exiting row without moving t
   const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
   actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
   const now = Date.now()
-  const threads: DisplayThread[] = Array.from({ length: 500 }, (_, index) => ({
+  const threads: DisplayThread[] = Array.from({ length: 501 }, (_, index) => ({
     id: `thread-${index}`,
     from: `Sender ${index}`,
     subject: `Subject ${index}`,
@@ -163,6 +163,7 @@ it('projects virtual rows into the space left by an exiting row without moving t
       '[data-testid="thread-row"][data-thread-index="1"]'
     )
     const firstRow = container.querySelector<HTMLElement>('[data-testid="thread-row"][data-thread-index="0"]')
+    const groupHeader = container.querySelector<HTMLElement>('[data-testid="thread-date-group"]')
     expect(secondRow?.closest<HTMLElement>('.absolute')?.style.top).toBe('90px')
 
     await act(async () =>
@@ -184,6 +185,40 @@ it('projects virtual rows into the space left by an exiting row without moving t
     expect(
       projectedSecondRow?.closest<HTMLElement>('.absolute')?.classList.contains('app-thread-position-shift')
     ).toBe(true)
+
+    // The provider refresh commits the optimistic list after the transition.
+    // Keep both the promoted row and its date header mounted through that
+    // handoff so Electron never has a blank raster frame to flash.
+    await act(async () =>
+      root.render(
+        createElement(ThreadList, {
+          ...baseProps,
+          threads: threads.slice(1),
+          selectedIndex: 0,
+          exitingThreadIds: new Set(['thread-0'])
+        })
+      )
+    )
+    const committedSecondRow = container.querySelector<HTMLElement>(
+      '[data-testid="thread-row"][data-thread-index="0"]'
+    )
+    expect(committedSecondRow).toBe(projectedSecondRow)
+    expect(container.querySelector('[data-testid="thread-date-group"]')).toBe(groupHeader)
+
+    await act(async () =>
+      root.render(
+        createElement(ThreadList, {
+          ...baseProps,
+          threads: threads.slice(1),
+          selectedIndex: 0,
+          exitingThreadIds: new Set<string>()
+        })
+      )
+    )
+    expect(container.querySelector('[data-testid="thread-row"][data-thread-index="0"]')).toBe(
+      projectedSecondRow
+    )
+    expect(container.querySelector('[data-testid="thread-date-group"]')).toBe(groupHeader)
   } finally {
     await act(async () => root.unmount())
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment

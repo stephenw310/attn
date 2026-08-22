@@ -122,6 +122,8 @@ export const ConversationView = memo(function ConversationView(
 
   const conversationThreadId = conversation?.threadId ?? (inlineComposer ? selected.id : null)
   const newestMessageId = conversation?.messages.at(-1)?.id ?? null
+  const newestMessagePending = conversation?.messages.at(-1)?.pending === true
+  const pendingFocusMessageId = newestMessagePending && inlineComposer === null ? newestMessageId : null
   const messageCount = conversation?.messages.length ?? 0
   const latestTargetKey = conversationThreadId
     ? `${conversationThreadId}:${messageCount}:${newestMessageId ?? ''}:${inlineComposerDraftId ?? ''}`
@@ -171,6 +173,15 @@ export const ConversationView = memo(function ConversationView(
       window.removeEventListener('keydown', stopTracking)
     }
   }, [latestTargetKey, scrollRef])
+
+  // The editor owned keyboard focus until the queued send unmounted it. Give
+  // that focus back to the reader as soon as the optimistic message appears so
+  // its expanded card is both visible and the active keyboard context during
+  // the undo window.
+  useLayoutEffect(() => {
+    if (!pendingFocusMessageId) return
+    scrollRef.current?.focus({ preventScroll: true })
+  }, [pendingFocusMessageId, scrollRef])
 
   return (
     <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">

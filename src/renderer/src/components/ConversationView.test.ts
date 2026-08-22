@@ -46,6 +46,7 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     onToast
   }
   const container = document.createElement('div')
+  document.body.append(container)
   const root = createRoot(container)
 
   try {
@@ -57,6 +58,7 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     expect(subjectReads).toBe(readsAfterFirstRender)
   } finally {
     await act(async () => root.unmount())
+    container.remove()
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
   }
 })
@@ -122,6 +124,7 @@ it('opens a message appended to the current conversation by default', async () =
     onToast: (): void => {}
   }
   const container = document.createElement('div')
+  document.body.append(container)
   const root = createRoot(container)
 
   try {
@@ -154,8 +157,10 @@ it('opens a message appended to the current conversation by default', async () =
     expect(appendedCards).toHaveLength(3)
     expect(appendedCards[2]?.getAttribute('data-pending')).toBe('true')
     expect(appendedCards[2]?.getAttribute('data-collapsed')).toBe('false')
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('conversation-scroll')
   } finally {
     await act(async () => root.unmount())
+    container.remove()
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
     actEnvironment.ResizeObserver = previousResizeObserver
   }

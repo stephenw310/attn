@@ -81,6 +81,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     pendingActionCount,
     pausedActionCount,
     mailRevision,
+    invalidateConversations,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
   } = useMailData(activeAccount, activeViewRef, selectedThreadIdRef, selectedDraftIdRef, setSelectedIndex)
@@ -559,11 +560,16 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const closeComposer = useCallback(() => {
     activeComposerDraftIdRef.current = null
+    // Closing is the local handoff from an inline composer back to its
+    // conversation. Invalidate directly instead of relying on the outbox event
+    // racing the IPC response, so a queued reply/forward is fetched in the same
+    // render turn that removes the composer.
+    invalidateConversations()
     setComposerDraft(null)
     void refreshMailRows().catch(() => {
       void refreshDrafts().catch(() => {})
     })
-  }, [refreshDrafts, refreshMailRows])
+  }, [invalidateConversations, refreshDrafts, refreshMailRows])
   const closeComposerAndReader = useCallback(() => {
     closeComposer()
     finishReaderClose()
