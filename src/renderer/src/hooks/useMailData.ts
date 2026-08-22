@@ -175,6 +175,9 @@ export function useMailData(
     })
     const offOutbox = bridge.outbox.onChanged((change) => {
       if (change.kind === 'failed') setOutboxFailure(change)
+      // Reply/forward rows are projected into the open conversation while
+      // queued, so outbox transitions invalidate that cache as well as lists.
+      mailChangedPending = true
       refresh()
     })
     const offProgress = bridge.outbox.onProgress(setOutboxProgress)

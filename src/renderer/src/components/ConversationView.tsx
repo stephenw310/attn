@@ -16,11 +16,24 @@ interface ConversationMessagesProps {
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
   const { conversation, account, online, markNewest, onToast } = props
   const newestIndex = conversation.messages.length - 1
+  const newestMessageId = conversation.messages[newestIndex]?.id
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
-    const newestMessage = conversation.messages[newestIndex]
-    return new Set(newestMessage ? [newestMessage.id] : [])
+    return new Set(newestMessageId ? [newestMessageId] : [])
   })
   const [expandedTrimIds, setExpandedTrimIds] = useState<Set<string>>(() => new Set())
+
+  // This component stays mounted while local outbox and sync updates append to
+  // the same thread. Every newly newest message starts open, just like the
+  // initial newest message, instead of inheriting the older collapsed default.
+  useLayoutEffect(() => {
+    if (!newestMessageId) return
+    setExpandedMessageIds((current) => {
+      if (current.has(newestMessageId)) return current
+      const next = new Set(current)
+      next.add(newestMessageId)
+      return next
+    })
+  }, [newestMessageId])
 
   const toggleMessage = useCallback((messageId: string) => {
     setExpandedMessageIds((current) => {
