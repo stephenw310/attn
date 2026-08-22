@@ -79,6 +79,14 @@ export class TestSeams {
         .then((result) => done?.(result))
         .catch((error) => done?.({ error: errorMessage(error) }))
     })
+    ipcMain.on(
+      TEST_CHANNELS.listMailboxThreadIds,
+      (_event, mailbox: unknown, done?: (threadIds: string[], error?: string) => void) => {
+        void this.forward(TEST_CHANNELS.listMailboxThreadIds, [mailbox])
+          .then((result) => done?.(result as string[]))
+          .catch((error) => done?.([], errorMessage(error)))
+      }
+    )
     ipcMain.on(TEST_CHANNELS.crashUtility, (_event, done?: (error?: string) => void) => {
       void this.deps
         .service()

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from '.'
-import { getConversationForDisplay, listInboxThreads, listSnoozedThreads } from './queries'
+import {
+  getConversation,
+  getConversationForDisplay,
+  listInboxThreads,
+  listMailboxThreadIds,
+  listSnoozedThreads
+} from './queries'
 
 describe('thread list queries', () => {
   let db: Db
@@ -70,6 +76,94 @@ describe('thread list queries', () => {
         labelIds: ['Label_A']
       })
     ])
+  })
+
+  it('uses per-message truth for All Mail, Spam, and Trash membership', () => {
+    const insertThread = db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at)
+       VALUES ('account', ?, ?, ?)`
+    )
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+       VALUES ('account', ?, ?, ?, ?)`
+    )
+    insertThread.run('mixed', 'Mixed', 500)
+    insertMessage.run('mixed-live', 'mixed', 500, '["INBOX"]')
+    insertMessage.run('mixed-trash', 'mixed', 300, '["TRASH"]')
+    insertThread.run('only-trash', 'Only trash', 400)
+    insertMessage.run('only-trash-message', 'only-trash', 400, '["TRASH"]')
+    insertThread.run('only-spam', 'Only spam', 350)
+    insertMessage.run('only-spam-message', 'only-spam', 350, '["SPAM"]')
+    insertThread.run('legacy-trash', 'Legacy trash', 325)
+    insertMessage.run('legacy-trash-message', 'legacy-trash', 325, null)
+    const insertThreadLabel = db.prepare(
+      `INSERT INTO thread_labels (account_id, thread_id, label_id)
+       VALUES ('account', ?, ?)`
+    )
+    insertThreadLabel.run('mixed', 'INBOX')
+    insertThreadLabel.run('mixed', 'TRASH')
+    insertThreadLabel.run('only-trash', 'TRASH')
+    insertThreadLabel.run('only-spam', 'SPAM')
+    insertThreadLabel.run('legacy-trash', 'TRASH')
+
+    expect(listMailboxThreadIds(db, 'account', 'all-mail')).toEqual(['mixed'])
+    expect(listMailboxThreadIds(db, 'account', 'trash')).toEqual(['only-trash', 'legacy-trash', 'mixed'])
+    expect(listMailboxThreadIds(db, 'account', 'spam')).toEqual(['only-spam'])
+  })
+
+  it('keeps All Mail scoped to its account when another account needs the slow path', () => {
+    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+      'other-account',
+      'other@example.com',
+      0
+    )
+    db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at)
+       VALUES ('other-account', 'other-mixed', 'Other account', 1000)`
+    ).run()
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+       VALUES ('other-account', ?, 'other-mixed', ?, ?)`
+    )
+    insertMessage.run('other-live', 1000, '["INBOX"]')
+    insertMessage.run('other-trash', 900, '["TRASH"]')
+    const insertThreadLabel = db.prepare(
+      `INSERT INTO thread_labels (account_id, thread_id, label_id)
+       VALUES ('other-account', 'other-mixed', ?)`
+    )
+    insertThreadLabel.run('INBOX')
+    insertThreadLabel.run('TRASH')
+
+    expect(listMailboxThreadIds(db, 'account', 'all-mail')).not.toContain('other-mixed')
+    expect(listMailboxThreadIds(db, 'other-account', 'all-mail')).toEqual(['other-mixed'])
+  })
+
+  it('uses SQLite indexes for sparse Spam and Trash membership', () => {
+    const explain = (mailbox: 'spam' | 'trash'): string[] => {
+      let details: string[] = []
+      const queryDb = {
+        prepare: (sql: string) => {
+          const statement = db.prepare(sql)
+          return {
+            all: (...params: unknown[]) => {
+              details = (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map(
+                (row) => row.detail
+              )
+              return statement.all(...params)
+            }
+          }
+        }
+      } as unknown as Db
+
+      listMailboxThreadIds(queryDb, 'account', mailbox)
+      return details
+    }
+
+    for (const mailbox of ['spam', 'trash'] as const) {
+      const details = explain(mailbox)
+      expect(details.some((detail) => detail.includes('idx_thread_labels_label'))).toBe(true)
+      expect(details.some((detail) => detail.includes('idx_messages_thread'))).toBe(true)
+    }
   })
 })
 
@@ -185,5 +279,51 @@ describe('display conversation queries', () => {
       'message-later'
     ])
     expect(confirmed?.messages.some((message) => message.pending)).toBe(false)
+  })
+
+  it('renders the message subset that belongs to the active mailbox', () => {
+    const insert = db.prepare(
+      `INSERT INTO messages
+       (account_id, id, thread_id, internal_date, body_text, labels_json)
+       VALUES ('account', ?, 'thread-1', ?, ?, ?)`
+    )
+    db.prepare("UPDATE messages SET labels_json = '[\"INBOX\"]' WHERE id = 'message-1'").run()
+    insert.run('message-trash', 110, 'Deleted copy', '["TRASH"]')
+    insert.run('message-spam', 120, 'Spam copy', '["SPAM"]')
+    insert.run('message-draft', 130, 'Unsent copy', '["DRAFT"]')
+
+    const ids = (mailbox: 'normal' | 'all-mail' | 'spam' | 'trash'): string[] =>
+      getConversation(db, 'account', 'thread-1', 'unavailable', mailbox)?.messages.map(
+        (message) => message.id
+      ) ?? []
+    expect(ids('normal')).toEqual(['message-1'])
+    expect(ids('all-mail')).toEqual(['message-1'])
+    expect(ids('trash')).toEqual(['message-trash'])
+    expect(ids('spam')).toEqual(['message-spam'])
+    expect(
+      getConversationForDisplay(db, 'account', 'thread-1', 'unavailable', 'trash')?.messages.map(
+        (message) => message.id
+      )
+    ).toEqual(['message-trash'])
+  })
+
+  it('keeps legacy mixed-label messages readable until an authoritative refetch', () => {
+    db.prepare(
+      `INSERT INTO thread_labels (account_id, thread_id, label_id)
+       VALUES ('account', 'thread-1', 'INBOX'), ('account', 'thread-1', 'TRASH')`
+    ).run()
+    db.prepare(
+      `INSERT INTO messages
+       (account_id, id, thread_id, internal_date, body_text, labels_json)
+       VALUES ('account', 'message-legacy-2', 'thread-1', 110, 'Second legacy message', NULL)`
+    ).run()
+
+    const ids = (mailbox: 'normal' | 'all-mail' | 'trash'): string[] =>
+      getConversation(db, 'account', 'thread-1', 'unavailable', mailbox)?.messages.map(
+        (message) => message.id
+      ) ?? []
+    expect(ids('normal')).toEqual(['message-1', 'message-legacy-2'])
+    expect(ids('all-mail')).toEqual(['message-1', 'message-legacy-2'])
+    expect(ids('trash')).toEqual(['message-1', 'message-legacy-2'])
   })
 })

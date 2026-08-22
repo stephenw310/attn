@@ -1,13 +1,13 @@
 import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
 import { type InvokeChannel, TEST_CHANNELS } from '../../shared/ipc'
-import type { SyncState } from '../../shared/mail'
+import type { MessageMailbox, SyncState } from '../../shared/mail'
 import { clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
 import type { TokenSet } from '../auth/googleAuth'
 import { type Db, openDatabase, schemaVersion } from '../db'
-import { countInboxUnread } from '../db/queries'
+import { countInboxUnread, listMailboxThreadIds } from '../db/queries'
 import { loadSeed, readSeedThread } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
@@ -464,6 +464,11 @@ export class ServiceRuntime {
       this.broadcastMailChanged()
       return undefined
     }
+    if (channel === TEST_CHANNELS.listMailboxThreadIds) {
+      const mailbox = args[0]
+      if (!accountId || !isMessageMailbox(mailbox)) throw new Error('mailbox query unavailable')
+      return listMailboxThreadIds(this.db, accountId, mailbox)
+    }
     if (channel === TEST_CHANNELS.runLifetimeSweep) return this.runTestLifetimeSweep(args[0])
     if (channel === TEST_CHANNELS.utilityState) {
       const ids = args[0]
@@ -623,6 +628,10 @@ interface LifetimeSweepRequest {
   pauseAtPageToken?: string
   threadsTotal?: number
   messagesTotal?: number
+}
+
+function isMessageMailbox(value: unknown): value is MessageMailbox {
+  return value === 'all-mail' || value === 'spam' || value === 'trash'
 }
 
 function validDelay(value: unknown): number {

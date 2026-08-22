@@ -99,7 +99,8 @@ export const TEST_CHANNELS = {
   remoteDraft: 'attn:test:remoteDraft',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
   utilityState: 'attn:test:utilityState',
-  crashUtility: 'attn:test:crashUtility'
+  crashUtility: 'attn:test:crashUtility',
+  listMailboxThreadIds: 'attn:test:listMailboxThreadIds'
 } as const
 
 export interface InvokeChannels {

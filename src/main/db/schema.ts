@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 15
+export const CURRENT_SCHEMA_VERSION = 16
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -45,6 +45,7 @@ CREATE TABLE messages (
   body_html        TEXT,
   recipients_json  TEXT,
   attachments_json TEXT,
+  labels_json      TEXT,
   rfc_message_id   TEXT,
   references_json  TEXT,
   PRIMARY KEY (account_id, id)

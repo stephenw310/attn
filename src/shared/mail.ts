@@ -73,6 +73,23 @@ export interface Conversation {
   messages: ConversationMsg[]
 }
 
+/** Mailboxes whose membership and reader contents depend on per-message labels. */
+export type MessageMailbox = 'all-mail' | 'spam' | 'trash'
+
+/** The ordinary reader hides junk; mailbox readers show only their matching messages. */
+export type ConversationMailbox = 'normal' | MessageMailbox
+
+/** The per-message visibility rule shared by readers and stored thread summaries. */
+export function messageLabelsMatchMailbox(
+  labels: ReadonlySet<string>,
+  mailbox: ConversationMailbox
+): boolean {
+  if (labels.has('DRAFT') || labels.has('CHAT')) return false
+  if (mailbox === 'spam') return labels.has('SPAM')
+  if (mailbox === 'trash') return labels.has('TRASH')
+  return !labels.has('SPAM') && !labels.has('TRASH')
+}
+
 export interface DownloadAttachmentRequest {
   messageId: string
   attachmentId: string

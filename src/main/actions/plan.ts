@@ -14,9 +14,9 @@ export function planAction(action: TriageAction): ThreadActionPlan {
     case 'unsnooze':
       return { add: ['INBOX'], remove: [], queueKind: 'modifyLabels' }
     case 'trash':
-      return { add: [], remove: ['INBOX'], queueKind: 'trash' }
+      return { add: ['TRASH'], remove: ['INBOX'], queueKind: 'trash' }
     case 'untrash':
-      return { add: ['INBOX'], remove: [], queueKind: 'untrash' }
+      return { add: ['INBOX'], remove: ['TRASH'], queueKind: 'untrash' }
     case 'spam':
       return { add: ['SPAM'], remove: ['INBOX'], queueKind: 'modifyLabels' }
     case 'star':

@@ -13,19 +13,19 @@ than with search.
 
 ## What is left
 
-S3 and S4's membership half shipped early, inside the T13A sync-stage PR (#51). The owner chose to land the
-whole stage pipeline at once rather than split it across milestones. What remains:
+S3 and S4's membership half shipped early, inside the T13A sync-stage PR (#51). S2 followed on 2026-08-22.
+What remains:
 
 | Task | State | Blocks |
 |---|---|---|
 | S1 utility process | **done** | F10's indexing |
-| S2 per-message labels | **open**, not started | F3 mailbox views, S4's tombstone pass |
+| S2 per-message labels | **done**, completed 2026-08-22 | nothing; F3 and S4 are unblocked |
 | S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
 | S4 reconcile and expiry recovery | **part done**: membership shipped in #51, tombstone pass open | trustworthy mailbox views |
 | Feature half | **open**, not planned | nothing yet |
 
-So one and a half storage tasks are left: S2 and S4's tombstone pass. The feature tasks get written up once
-the store's shape is settled.
+Only S4's tombstone pass remains. S2 settled the store shape needed to plan F3 mailbox views and finish S4,
+and S1 moved that store into the utility process. The feature tasks get written up from here.
 
 Every task section below opens with the same **Status** line, so you never have to infer state from whether a
 section looks long.
@@ -94,7 +94,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 ## Global rules (carried from M2, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative
-   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 15. Throwaway profiles may be
+   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 16. Throwaway profiles may be
    deleted and re-synced. A real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and every
    schema-changing task publishes its exact DDL.
 2. **IPC has three parts**: main handler, preload bridge, and the typed channel map in `src/shared/`. All in
@@ -115,7 +115,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 
 **Status: done.** The boundary design is recorded in [S1-DESIGN.md](S1-DESIGN.md).
 
-**Depends on:** nothing · **Unblocks:** F10's FTS indexing · **Parallel with:** S2 · **Spec:** §6 architecture
+**Depends on:** nothing · **Unblocks:** F10's FTS indexing · **Spec:** §6 architecture
 
 ### Why
 
@@ -173,7 +173,7 @@ asserts one thread and message row per fixture. The 10,000-thread profile kept c
 
 ## S2: per-message label storage
 
-**Status: open, not started.**
+**Status: done, completed 2026-08-22.**
 
 **Depends on:** nothing · **Unblocks:** F3 mailbox views, S4's tombstone pass · **Parallel with:** S1 ·
 **Spec:** §9 #17, F3
@@ -198,35 +198,41 @@ authoritative snapshot is a draft, `persistThread` returns early and never prune
 rows. A thread whose real messages were permanently deleted while a draft remains keeps them locally until the
 S4 tombstone pass. Handle that pruning here, where the message loop is being reworked anyway.
 
-### Design and implementation
+### What shipped
 
-- Add `labels_json TEXT` to `messages`, written from `msg.labelIds` in the same loop that builds `labelUnion`.
-  Keep `thread_labels` as the thread-level projection so mailbox list queries stay fast, but let per-message
-  queries read the new column: conversation rendering, Trash and Spam membership, and draft exclusion.
-- **Metadata-only refetches must not clobber it.** `persistThread`'s upsert already guards `attachments_json`
-  behind `@metadata_only`. Label ids are present on metadata-format fetches, so `labels_json` can be written
-  unconditionally. Assert that in a test rather than assuming it.
-- Decide and document the view rules, following Gmail's own semantics. **Trash and Spam list any thread with
-  at least one message carrying that label**, so a single deleted message stays findable in Trash even though
-  its conversation lives on. **All Mail lists any thread with at least one message outside SPAM and TRASH.** A
-  mixed thread therefore appears in both, and each view renders the mailbox-appropriate message subset: normal
-  reading contexts exclude trashed and spammed messages, while the Trash and Spam reader surfaces them. Encode
-  membership in one query helper, not per call site.
-- Keep the reader free of `DRAFT` labelled messages. Today that holds because the write path never stores
-  them. Once per-message labels exist, decide whether the filter stays at write time or moves to the query
-  layer, and keep the T14B unit test green either way.
-- **Schema:** bump `CURRENT_SCHEMA_VERSION`. The local dogfood DDL is
-  `ALTER TABLE messages ADD COLUMN labels_json TEXT;` plus the `PRAGMA user_version` bump, both in the same
-  `BEGIN IMMEDIATE … COMMIT`. Existing rows read as `NULL` and repopulate through ordinary refetches. Note in
-  the PR that a mixed-label thread stays thread-level-only until its next fetch.
+- `messages.labels_json` stores every authoritative message's label ids. Full and metadata fetches both update
+  it, while metadata fetches continue to preserve the stored attachment projection.
+- `listMailboxThreadIds` owns the per-message membership rules. Trash and Spam include a thread when any
+  message has the matching label. All Mail includes it when any message is outside Spam and Trash. Normal and
+  All Mail readers hide junk messages; Spam and Trash readers show only their matching messages. Draft and
+  legacy Chat rows stay hidden in every reader.
+- Optimistic thread deltas update both `thread_labels` and known message label arrays. Pending actions replay
+  through that same path after a server snapshot, so the list and reader agree before Gmail confirms a change.
+- Normal thread summaries use the newest non-junk message and derive unread, starred, and attachment flags from
+  messages that reader can show. Junk-only threads retain a useful summary for their own mailbox; Spam and
+  Trash membership sorts mixed threads by their newest matching message rather than this normal summary.
+- The write-time draft filter remains. An authoritative snapshot containing only drafts or Chat rows now
+  deletes stale ordinary thread data, closing review finding B4.
+- Existing `NULL` message labels use thread-level membership until an ordinary refetch fills them. The normal
+  reader preserves pre-S2 behavior and shows those legacy rows because the thread union cannot identify which
+  row carries junk; matching Spam and Trash readers show the whole legacy thread for the same reason.
+
+The schema is version 16. A stopped local dogfood profile can use this exact additive DDL through the manual
+procedure in `AGENTS.md`:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE messages ADD COLUMN labels_json TEXT;
+PRAGMA user_version = 16;
+COMMIT;
+```
 
 ### Testing and done condition
 
-Unit: the persist path stores per-message labels from both `full` and `metadata` fetches; the any-message
-membership rule for Trash and Spam; the outside-SPAM/TRASH rule for All Mail; draft exclusion. E2e: a seeded
-fixture thread with one TRASH message appears in both the All Mail and Trash membership queries, and normal
-reading contexts render its conversation without the trashed message. Done when a partially trashed thread is
-discoverable in Trash and alive in All Mail, and the reader never shows a draft as sent mail.
+Unit coverage proves full and metadata persistence, optimistic replay, indexed sparse-mailbox membership, the
+three mailbox rules, reader subsets, legacy `NULL` fallback, junk-free normal summaries, draft exclusion, and
+draft-only pruning. A seeded Electron test keeps one partially trashed thread in both All Mail and Trash while
+the normal list and reader summarize and show only its live messages.
 
 ---
 
@@ -267,7 +273,7 @@ truth and only a 404 deletes. Both the backfill completion path and
 `SyncController.recoverExpiredHistory` call the same helpers, so there are two callers and one behavior. Keep
 it that way.
 
-**Depends on:** S2, for per-message TRASH and SPAM truth · **Unblocks:** trustworthy mailbox views ·
+**Depends on:** S2, now complete · **Unblocks:** trustworthy mailbox views ·
 **Spec:** F2 incremental, §9 #17
 
 ### Why the remaining half is hard
@@ -290,8 +296,8 @@ Membership reconciliation therefore never deletes. The tombstone pass runs only 
 in hand, which expiry recovery or a lifetime re-walk can supply, or it verifies each candidate individually and
 deletes on 404 alone. Partial pages prove nothing. A network truncation must never delete real mail.
 
-This is why S4's remaining half waits on S2: without per-message labels it cannot tell a partially trashed
-live thread from a purged one.
+S2 now provides the per-message truth S4 needs to distinguish a partially trashed live thread from a purged
+one.
 
 ### Design and implementation
 
@@ -320,7 +326,10 @@ store's shape is settled.
   on-demand thread fetch it implies. Fetching and persisting an arbitrary thread id is a primitive the app
   does not have today, and it is useful beyond search.
 - **F3, system mailbox navigation** (Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash) with `G`
-  chords and palette entries. List virtualization stops being conditional at All Mail scale.
+  chords and palette entries. List virtualization stops being conditional at All Mail scale. F3 also keeps a
+  chronological marker for each trashed message hidden inside a normal or All Mail conversation. Its
+  `Show message` action reveals the message locally without restoring it. This is reader behavior, not a new
+  message-level trash action.
 - **F11, split inbox and rules.**
 - **Inbox-zero states, F14 themes, and palette hardening**, with every command registered and asserted.
 - **§9 #14, the contextual chord guide** in the shortcut footer, deferred from M2.
@@ -331,8 +340,8 @@ store's shape is settled.
 
 ## Open questions
 
-**Decided 2026-08-22:** the utility process owns SQLite (SPEC §9 #19). S1's design constraints carry the
-consequences.
+**Decided 2026-08-22:** the utility process owns SQLite (SPEC §9 #19), and S2 landed before S1. S1's design
+constraints carry the consequences.
 
 | Question | Why it matters | Decide by |
 |---|---|---|
