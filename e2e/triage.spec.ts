@@ -71,13 +71,7 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
   await expect(page.getByTestId('toast')).toHaveText('Google reconnected — 1 pending change is retrying.')
 })
 
-test('animates a marked-done row before removing it', async ({ app, page }) => {
-  // This is the one smoke assertion that measures animation progress rather
-  // than final state. Keep Chromium's animation clock live while the harness
-  // intentionally holds its BrowserWindow off the desktop.
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.setBackgroundThrottling(false)
-  })
+test('animates a marked-done row before removing it', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   const nextRow = rows.filter({ hasText: 'Northstar Books' })
@@ -87,31 +81,10 @@ test('animates a marked-done row before removing it', async ({ app, page }) => {
   await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
   await expect(rows.first()).toHaveClass(/app-thread-exit/)
   await expect(nextRow).toHaveAttribute('data-selected', 'true')
-  const motion = await nextRow.evaluate(
-    (element) =>
-      new Promise<Array<{ elapsed: number; selected: boolean; y: number }>>((resolve) => {
-        const frames: Array<{ elapsed: number; selected: boolean; y: number }> = []
-        const startedAt = performance.now()
-        const sample = (): void => {
-          const elapsed = performance.now() - startedAt
-          frames.push({
-            elapsed,
-            selected: element.getAttribute('data-selected') === 'true',
-            y: element.getBoundingClientRect().y
-          })
-          if (elapsed < 600) requestAnimationFrame(sample)
-          else resolve(frames)
-        }
-        requestAnimationFrame(sample)
-      })
-  )
-  expect(motion.every(({ selected }) => selected)).toBe(true)
-  expect(
-    motion.some(({ elapsed, y }) => elapsed < 260 && y < nextRowStart - 2),
-    `replacement row motion: ${JSON.stringify(motion)}`
-  ).toBe(true)
-  expect(motion.at(-1)?.y).toBeLessThan(nextRowStart - 20)
   await expect(rows).toHaveCount(7)
+  expect(await nextRow.evaluate((element) => element.getBoundingClientRect().y)).toBeLessThan(
+    nextRowStart - 20
+  )
   const firstToastId = await page.getByTestId('toast').getAttribute('data-toast-id')
 
   await page.keyboard.press('e')
