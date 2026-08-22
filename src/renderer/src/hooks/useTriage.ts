@@ -5,6 +5,7 @@ import {
   applyThreadFlag,
   applyThreadFlagToElement,
   rollbackThreadFlag,
+  type ThreadFlagSnapshot,
   threadFlagSnapshot
 } from '../optimisticTriage'
 
@@ -24,6 +25,10 @@ interface Options {
   showToast: (message: string) => void
   setExitingThreadIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
+}
+
+function flagOwnerKey(threadId: string, field: ThreadFlagSnapshot['field']): string {
+  return `${threadId}\0${field}`
 }
 
 export function useTriage(options: Options): (action: TriageAction) => void {
@@ -54,7 +59,9 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       const flagSnapshot = threadFlagSnapshot(targetedAction, threads)
       const flagOwner = flagSnapshot ? Symbol('thread-flag-action') : null
       if (flagSnapshot && flagOwner) {
-        for (const id of flagSnapshot.before.keys()) flagOwnersRef.current.set(id, flagOwner)
+        for (const id of flagSnapshot.before.keys()) {
+          flagOwnersRef.current.set(flagOwnerKey(id, flagSnapshot.field), flagOwner)
+        }
         // The focused row changes in the same keydown turn. State keeps that
         // feedback declarative for every targeted row while SQLite catches up.
         applyThreadFlagToElement(selectedRowRef.current, flagSnapshot)
@@ -65,9 +72,10 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         if (!flagSnapshot || !flagOwner) return
         const ownedBefore = new Map<string, boolean>()
         for (const [id, before] of flagSnapshot.before) {
-          if (flagOwnersRef.current.get(id) !== flagOwner) continue
+          const ownerKey = flagOwnerKey(id, flagSnapshot.field)
+          if (flagOwnersRef.current.get(ownerKey) !== flagOwner) continue
           ownedBefore.set(id, before)
-          flagOwnersRef.current.delete(id)
+          flagOwnersRef.current.delete(ownerKey)
         }
         if (!rollback || ownedBefore.size === 0) return
         const ownedSnapshot = { ...flagSnapshot, before: ownedBefore }
