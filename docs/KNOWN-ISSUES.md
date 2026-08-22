@@ -1,11 +1,11 @@
 # Known issues
 
-Live defects and gaps on `main`. This file is the triage list: every entry here is unfixed as of its
+This file lists live defects and gaps on `main`. It is the triage list. Every entry here is unfixed as of its
 **Verified** date, and each one carries the evidence needed to pick it up cold.
 
-**This is not a status archive.** Delete an entry in the PR that fixes it — do not mark it done, strike it
-through, or move it to a "fixed" section. A file that accumulates closed items stops being read, and an entry
-nobody trusts is worse than no entry. The PR that removes a line is the record that it closed.
+**This is not a status archive.** Delete an entry in the PR that fixes it. Do not mark it done, strike it
+through, or move it to a "fixed" section. A file that accumulates closed items stops being read. The PR that
+removes a line is the record that it closed.
 
 **Adding an entry.** Give it the next free ID in its section, a one-line symptom, a `file:line` anchor, the
 concrete failure it produces, and a fix direction. Verify the anchor against `main` before you write it and
@@ -13,8 +13,9 @@ stamp the date. IDs are never reused.
 
 Sources so far: the 2026-08-16 review of `main` @ #52 ([REVIEW-2026-08-16.md](REVIEW-2026-08-16.md)) and its
 coverage map ([REVIEW-2026-08-16-coverage.md](REVIEW-2026-08-16-coverage.md)). Both are frozen snapshots kept
-for their reasoning; this file is the part that stays current. Original review tags are cross-referenced per
-entry, because the review's `S1`/`S2` security tags collide with M3-PLAN's `S1`–`S4` task names.
+for their reasoning. This file is the part that stays current. Each entry cross-references its original review
+tag, because the review's `S1` and `S2` security tags collide with the `S1` through `S4` task names in
+M3-PLAN.
 
 Milestone and task status stays in [SPEC.md](SPEC.md) §8 and the plan docs, per [AGENTS.md](../AGENTS.md).
 Nothing here is a milestone gate unless a plan doc says so.
@@ -23,7 +24,7 @@ Nothing here is a milestone gate unless a plan doc says so.
 
 ## Bugs
 
-### BUG-1 — a non-retryable mirror failure stalls every later draft *(review B3)*
+### BUG-1: a non-retryable mirror failure stalls every later draft *(review B3)*
 
 **Verified:** 2026-08-21 · **Severity:** medium · **Pairs with:** REF-2
 
@@ -31,34 +32,35 @@ Nothing here is a milestone gate unless a plan doc says so.
 `drainDraftMirrors` orders by `updated_at` (`mirror.ts:56`), so the same rejected row is selected first on every
 trigger. Newer drafts never mirror, and Gmail receives one rejected request per poll cycle, indefinitely.
 
-The failure is silent: nothing surfaces in the UI, so a week of drafts can fail to mirror without a visible
-symptom. That makes it a poor thing to carry into a dogfood run.
+Nothing surfaces in the UI, so a week of drafts can fail to mirror with no visible symptom. That makes it a poor
+thing to carry into a dogfood run.
 
-**Fix direction:** an in-memory `nextAttemptAt` map keyed by row id is enough — no schema change. Or continue to
-the next row instead of returning. Doing this closes REF-2 in the same change.
+**Fix direction:** an in-memory `nextAttemptAt` map keyed by row id is enough, and needs no schema change. The
+alternative is to continue to the next row instead of returning. Either one closes REF-2 in the same change.
 
-### BUG-2 — leaving a conversation mid-reply drops the draft *(review B6)*
+### BUG-2: leaving a conversation mid-reply drops the draft *(review B6)*
 
 **Verified:** 2026-08-21 · **Severity:** medium, data loss
 
 `Inbox.tsx` derives the inline composer from `readerOpen && selected.id === composerDraft.threadId`.
 `closeReader` routes through `inlineComposerRef.current.exitConversation()` (`Inbox.tsx:489`), but `switchView`
-(`:340`) and `openOutbox` (`:352`) do not. They set `readerOpen = false` and leave `composerDraft` intact, so
-the keyed inline `<Composer>` unmounts and a full-window one mounts from the object captured at open.
+(`Inbox.tsx:340`) and `openOutbox` (`Inbox.tsx:352`) do not. They set `readerOpen = false` and leave
+`composerDraft` intact, so the keyed inline `<Composer>` unmounts and a full-window one mounts from the object
+captured at open.
 
-`useComposerDraft`'s unmount clears timers without flushing. So edits inside the 5 second checkpoint window are
-lost outright, and edits that did checkpoint disappear from the editor and are overwritten in SQLite on the next
+`useComposerDraft`'s unmount clears timers without flushing. Edits inside the 5 second checkpoint window are
+lost outright. Edits that did checkpoint disappear from the editor and are overwritten in SQLite on the next
 keystroke. The header nav and the Outbox button stay enabled during inline compose, and `composer.spec.ts:857`
-pins that they do, so the user has no protection from hitting this.
+pins that they do, so nothing stops a user from hitting this.
 
 **Fix direction:** route both transitions through `exitConversation()` the way `closeReader` does. Add an e2e
 that clicks "Drafts" mid-reply and asserts the draft body survives.
 
-### BUG-3 — bulk labelling shows one thread's state and applies it to all *(review B7)*
+### BUG-3: bulk labelling shows one thread's state and applies it to all *(review B7)*
 
 **Verified:** 2026-08-21 · **Severity:** low-medium
 
-`Inbox.tsx:792` passes `targets={[{ id: labelTarget.id, ... }]}` — the focused thread only — while
+`Inbox.tsx:792` passes `targets={[{ id: labelTarget.id, ... }]}`, which is the focused thread alone, while
 `useTriage.ts:39` rewrites `threadIds` to the whole selection and then calls `clearSelection()`.
 
 Select three threads, press `l`, and toggle a label the focused row already carries. The picker offers "remove"
@@ -66,7 +68,7 @@ based on that one row, then removes the label from all three, including the two 
 selection is cleared on the first action, the next toggle in the still-open picker applies to the focused thread
 alone. `LabelPicker` already renders multi-target `some` states, so the component is not the blocker.
 
-No e2e covers bulk labelling at all.
+No e2e covers bulk labelling.
 
 **Fix direction:** pass the real selection as `targets` when a selection exists, and decide explicitly whether
 the picker stays open across a bulk apply. Add the missing e2e.
@@ -75,10 +77,9 @@ the picker stays open across a bulk apply. Add the missing e2e.
 
 ## Security hardening
 
-Neither entry is a known exploit path. Both are places where an invariant holds by accident rather than by
-construction.
+Neither entry is a known exploit path. In both, an invariant holds by accident rather than by construction.
 
-### SEC-1 — Lexical's clipboard JSON path can mint an unsanitized opaque region *(review S1)*
+### SEC-1: Lexical's clipboard JSON path can mint an unsanitized opaque region *(review S1)*
 
 **Verified:** 2026-08-21
 
@@ -87,12 +88,12 @@ construction.
 writes its own JSON to the clipboard, so a paste carrying crafted `application/x-lexical-editor` data reaches
 this constructor without that gate.
 
-Today the outgoing sanitizer still runs before send, so this is defence in depth rather than a live hole.
+The outgoing sanitizer still runs before send, so this is defense in depth rather than a live hole.
 
 **Fix direction:** sanitize in `importJSON` itself, so the node type cannot hold unsanitized HTML regardless of
 how it was built.
 
-### SEC-2 — the quote CSS filter misses several flow-escaping properties *(review S2)*
+### SEC-2: the quote CSS filter misses several flow-escaping properties *(review S2)*
 
 **Verified:** 2026-08-21
 
@@ -100,11 +101,11 @@ how it was built.
 `position|z-index|inset|top|right|bottom|left|transform`. It does not match the standalone `translate`,
 `rotate`, and `scale` properties, `offset-*`, or `text-indent`.
 
-Custom-property indirection also slips the negative-margin check: `NEGATIVE_LENGTH` tests the literal value, so
+Custom-property indirection also slips the negative-margin check. `NEGATIVE_LENGTH` tests the literal value, so
 `--m: -600px; margin: var(--m)` passes because `var(--m)` contains no digit.
 
-The consequence is the one the filter exists to prevent: quoted content leaving normal flow and landing on top
-of the reply the user wrote.
+Either gap lets quoted content leave normal flow and land on top of the reply the user wrote, which is what the
+filter exists to prevent.
 
 **Fix direction:** extend the property list, and either resolve custom properties before the value check or drop
 declarations whose value references `var(`.
@@ -115,17 +116,17 @@ declarations whose value references `var(`.
 
 Each was verified against the acceptance criteria in SPEC §4 and the plan docs' Testing bullets.
 
-### GAP-1 — "a reply during snooze wakes it" is asserted nowhere
+### GAP-1: "a reply during snooze wakes it" is asserted nowhere
 
 **Verified:** 2026-08-21 · **Criterion:** F4
 
 Implemented at `poller.ts:184-186` calling `SnoozeScheduler.wakeThread`. In tests, `wakeThread` appears only as a
-`vi.fn()` on a fake scheduler (`syncController.test.ts:120,171`), so nothing asserts the real behaviour.
+`vi.fn()` on a fake scheduler (`syncController.test.ts:120,171`), so nothing asserts the real behavior.
 
 **Wanted:** a poller unit test that an inbound message triggers `wakeThread`; a scheduler unit test that it
 returns the pending reminder; an e2e that snoozes `t-roadmap`, injects inbound mail, and expects the chip.
 
-### GAP-2 — `outbox/drafts.ts` CRUD has no unit tests
+### GAP-2: `outbox/drafts.ts` CRUD has no unit tests
 
 **Verified:** 2026-08-21 · **Owed by:** T14A's Testing bullets
 
@@ -133,24 +134,24 @@ returns the pending reminder; an e2e that snoozes `t-roadmap`, injects inbound m
 `takeRecoveredDraft`, and `upgradeReplyToReplyAll` are untested. `drafts.test.ts` exists but covers the
 attachment trust boundary and lifecycle guards, not these five.
 
-The original reason was a belief that SQLite cannot load under vitest. It can: `openDatabase(':memory:')` works,
+The original reason was a belief that SQLite cannot load under vitest. It can. `openDatabase(':memory:')` works,
 as `outbox/{spool,queue,inlineImages}.test.ts` show.
 
-### GAP-3 — no assertion that a DRAFT never drives the thread snippet
+### GAP-3: no assertion that a DRAFT never drives the thread snippet
 
 **Verified:** 2026-08-21 · **Owed by:** T14B
 
 Only the `nonDraftMessages` filter is unit-tested. The `t-roadmap` fixture's newest message is a DRAFT, which
 makes it the natural place to assert the row's snippet and `last_msg_at`, but no test does.
 
-### GAP-4 — offline bulk replay runs at N=3, not N=20
+### GAP-4: offline bulk replay runs at N=3, not N=20
 
 **Verified:** 2026-08-21 · **Criterion:** F2 "airplane mode: 20 archives"
 
-`triage.spec.ts:338` loops three times. The perf suite now covers the F4 side of scale (a 100-thread archive and
-undo at 10,000 threads, `perf.spec.ts:394`), so this is the remaining scale gap.
+`triage.spec.ts:338` loops three times. The perf suite now covers the F4 side of scale, with a 100-thread
+archive and undo at 10,000 threads (`perf.spec.ts:394`), so this is the remaining scale gap.
 
-### GAP-5 — crash recovery is tested with a graceful quit
+### GAP-5: crash recovery is tested with a graceful quit
 
 **Verified:** 2026-08-21
 
@@ -158,51 +159,50 @@ undo at 10,000 threads, `perf.spec.ts:394`), so this is the remaining scale gap.
 A SIGKILL variant would make the continuous-typing and queued-row cases real force-kills rather than clean
 shutdowns.
 
-### GAP-6 — the T18 auth-pause e2e injects a 401, not `invalid_grant`
+### GAP-6: the T18 auth-pause e2e injects a 401, not `invalid_grant`
 
 **Verified:** 2026-08-21
 
 `testIpc.ts:219` installs an action failure with status 401. The promised case is a failed token refresh. That
-path is unit-covered (`client.test.ts:22-26`, `executor.test.ts:239,278`), so this is a fidelity gap in the e2e
-rather than an untested path.
+path is unit-covered (`client.test.ts:22-26`, `executor.test.ts:239,278`), so the e2e is a fidelity gap rather
+than an untested path.
 
 ---
 
 ## Refactors
 
-Proposals, not defects. Nothing here is required for a milestone. Each one is recorded because it was found and
-verified, not because it is scheduled.
+These are proposals, not defects. Nothing here is required for a milestone. Each one is recorded because
+somebody found and verified it, not because it is scheduled.
 
-### REF-1 — two components far exceed the ~350-line bar *(review R3)*
+### REF-1: two components far exceed the ~350-line bar *(review R3)*
 
 **Verified:** 2026-08-21
 
 `Composer.tsx` is 1,044 lines and `Inbox.tsx` is 823, against the bar R1 set at roughly 350. Clean seams exist:
-`InlineQuote` plus `quoteSrcDoc` out of the composer, and the label/snooze picker wiring out of `Inbox`.
+`InlineQuote` plus `quoteSrcDoc` out of the composer, and the label and snooze picker wiring out of `Inbox`.
 
-### REF-2 — per-row mirror backoff *(review R4)*
+### REF-2: per-row mirror backoff *(review R4)*
 
 **Verified:** 2026-08-21 · **Same change as:** BUG-1
 
 Give `drainDraftMirrors` a `skip` predicate and let the executor own per-row backoff, matching the action
 executor's shape. This is BUG-1's fix seen as a simplification.
 
-### REF-3 — two MIME builders with subtly different header rules *(review R6)*
+### REF-3: two MIME builders with subtly different header rules *(review R6)*
 
 **Verified:** 2026-08-21
 
 `outbox/mime.ts` (464 lines, send) and `outbox/draftMime.ts` (319 lines, draft mirror) each implement CRLF and
-RFC 2047 encoding separately. Two encoders that must agree, and no test that asserts they do.
+RFC 2047 encoding separately. The two encoders must agree, and no test asserts that they do.
 
-### REF-4 — outbox row deserialization is hand-rolled at eight sites *(review R7)*
+### REF-4: outbox row deserialization is hand-rolled at eight sites *(review R7)*
 
 **Verified:** 2026-08-21
 
 `outbox/drafts.ts`, `outbox/mirror.ts`, `outbox/queue.ts`, `outbox/sender.ts`, and `outbox/draftSync.ts` all
-parse rows inline; `draftSync.ts` alone
-does it four times. No shared row-to-object helper exists.
+parse rows inline, and `draftSync.ts` alone does it four times. No shared row-to-object helper exists.
 
-### REF-5 — `outbox.remote_updated_at` is written and never read *(review R10)*
+### REF-5: `outbox.remote_updated_at` is written and never read *(review R10)*
 
 **Verified:** 2026-08-21
 
