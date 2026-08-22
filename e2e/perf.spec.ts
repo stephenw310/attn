@@ -222,6 +222,39 @@ async function measureTriageFeedback(page: Page): Promise<number> {
   })
 }
 
+async function measureThreadFlagFeedback(
+  page: Page,
+  key: 's' | 'u',
+  attribute: 'data-starred' | 'data-unread'
+): Promise<number> {
+  return page.evaluate(
+    async ({ pressed, watchedAttribute }) => {
+      const selected = document.querySelector<HTMLElement>('[data-testid="thread-row"][data-selected="true"]')
+      if (!selected) throw new Error('missing selected thread')
+      const startedOn = selected.getAttribute(watchedAttribute) === 'true'
+      const feedbackLanded = (): boolean => (selected.getAttribute(watchedAttribute) === 'true') !== startedOn
+      const started = performance.now()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: pressed, bubbles: true }))
+      if (feedbackLanded()) return performance.now() - started
+
+      return new Promise<number>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          observer.disconnect()
+          reject(new Error(`Timed out waiting for ${watchedAttribute} feedback`))
+        }, 10_000)
+        const observer = new MutationObserver(() => {
+          if (!feedbackLanded()) return
+          window.clearTimeout(timeout)
+          observer.disconnect()
+          resolve(performance.now() - started)
+        })
+        observer.observe(selected, { attributes: true, attributeFilter: [watchedAttribute] })
+      })
+    },
+    { pressed: key, watchedAttribute: attribute }
+  )
+}
+
 async function measureComposerOpen(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const started = performance.now()
@@ -426,6 +459,17 @@ test.describe('@perf 10,000-thread inbox', () => {
       'data-thread-count',
       String(THREAD_COUNT - SAMPLE_COUNT)
     )
+  })
+
+  test('shows star and unread feedback within the CI-safe ceiling', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    const samples = [
+      await measureThreadFlagFeedback(page, 's', 'data-starred'),
+      await measureThreadFlagFeedback(page, 'u', 'data-unread')
+    ]
+    const medianMs = median(samples)
+    await reportMetric(testInfo, 'thread-flag-feedback', samples, medianMs)
+    expect(medianMs, 'median S/U keydown to focused-row feedback').toBeLessThan(TRIAGE_FEEDBACK_CEILING_MS)
   })
 
   test('archives and reverses a 100-thread selection without missing the feedback budget', async ({

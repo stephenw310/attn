@@ -1,16 +1,25 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import type { TriageAction } from '../../../shared/actions'
+import type { SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
+import {
+  applyThreadFlag,
+  applyThreadFlagToElement,
+  rollbackThreadFlag,
+  threadFlagSnapshot
+} from '../optimisticTriage'
 
 interface Options {
   selectedIds: ReadonlySet<string>
   selectedIndex: number
-  threads: readonly { id: string }[]
+  threads: readonly { id: string; starred: boolean; unread: boolean }[]
   readerOpen: boolean
   view: 'inbox' | 'snoozed'
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
   selectedThreadIdRef: React.RefObject<string | null>
   selectedRowRef: React.RefObject<HTMLDivElement | null>
+  setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
+  setRealSnoozedThreads: React.Dispatch<React.SetStateAction<SnoozedThreadRow[] | null>>
   clearSelection: () => void
   showToast: (message: string) => void
   setExitingThreadIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>
@@ -28,17 +37,44 @@ export function useTriage(options: Options): (action: TriageAction) => void {
     deferRefreshUntilRef,
     selectedThreadIdRef,
     selectedRowRef,
+    setRealThreads,
+    setRealSnoozedThreads,
     clearSelection,
     showToast,
     setExitingThreadIds,
     setSelectedIndex
   } = options
+  const flagOwnersRef = useRef(new Map<string, symbol>())
   return useCallback(
     (action: TriageAction) => {
       if (!window.attn) return
       preserveSelectionOnRefreshRef.current = false
       const isBulk = selectedIds.size > 0
       const targetedAction = { ...action, threadIds: isBulk ? [...selectedIds] : action.threadIds }
+      const flagSnapshot = threadFlagSnapshot(targetedAction, threads)
+      const flagOwner = flagSnapshot ? Symbol('thread-flag-action') : null
+      if (flagSnapshot && flagOwner) {
+        for (const id of flagSnapshot.before.keys()) flagOwnersRef.current.set(id, flagOwner)
+        // The focused row changes in the same keydown turn. State keeps that
+        // feedback declarative for every targeted row while SQLite catches up.
+        applyThreadFlagToElement(selectedRowRef.current, flagSnapshot)
+        setRealThreads((current) => applyThreadFlag(current, flagSnapshot))
+        setRealSnoozedThreads((current) => applyThreadFlag(current, flagSnapshot))
+      }
+      const settleFlag = (rollback: boolean): void => {
+        if (!flagSnapshot || !flagOwner) return
+        const ownedBefore = new Map<string, boolean>()
+        for (const [id, before] of flagSnapshot.before) {
+          if (flagOwnersRef.current.get(id) !== flagOwner) continue
+          ownedBefore.set(id, before)
+          flagOwnersRef.current.delete(id)
+        }
+        if (!rollback || ownedBefore.size === 0) return
+        const ownedSnapshot = { ...flagSnapshot, before: ownedBefore }
+        applyThreadFlagToElement(selectedRowRef.current, ownedSnapshot, true)
+        setRealThreads((current) => rollbackThreadFlag(current, ownedSnapshot))
+        setRealSnoozedThreads((current) => rollbackThreadFlag(current, ownedSnapshot))
+      }
       let selectionRollback: { fromId: string; toId: string | null } | null = null
       if (isBulk) clearSelection()
       if (action.kind === 'archive' && view === 'inbox' && !readerOpen) {
@@ -70,8 +106,12 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       }
       void window.attn.mail
         .triage(targetedAction)
-        .then((result) => showToast(result.label))
+        .then((result) => {
+          settleFlag(false)
+          showToast(result.label)
+        })
         .catch(() => {
+          settleFlag(true)
           preserveSelectionOnRefreshRef.current = true
           if (selectionRollback && selectedThreadIdRef.current === selectionRollback.toId) {
             const rollbackIndex = threads.findIndex((thread) => thread.id === selectionRollback.fromId)
@@ -97,6 +137,8 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       selectedRowRef,
       selectedThreadIdRef,
       setExitingThreadIds,
+      setRealSnoozedThreads,
+      setRealThreads,
       setSelectedIndex,
       showToast,
       threads,

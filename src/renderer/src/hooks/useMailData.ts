@@ -11,6 +11,7 @@ interface MailDataState {
   realThreads: ThreadRow[] | null
   setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
   realSnoozedThreads: SnoozedThreadRow[] | null
+  setRealSnoozedThreads: React.Dispatch<React.SetStateAction<SnoozedThreadRow[] | null>>
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
   outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
@@ -258,6 +259,7 @@ export function useMailData(
     realThreads,
     setRealThreads,
     realSnoozedThreads,
+    setRealSnoozedThreads,
     realDrafts,
     realOutbox,
     outboxFailure,

@@ -141,6 +141,45 @@
   pointer-events: none;
 }
 
+/* Row flags key off data attributes so keyboard feedback can land in the same
+   event turn, before the local SQLite round-trip confirms the React state. */
+.app-thread-unread-dot {
+  background: transparent;
+}
+
+.app-thread-sender,
+.app-thread-subject {
+  color: var(--color-ink-dim);
+}
+
+.app-thread-time {
+  color: var(--color-ink-faint);
+}
+
+.app-thread-star {
+  display: none;
+}
+
+[data-unread="true"] .app-thread-unread-dot {
+  background: var(--color-accent);
+  box-shadow: 0 0 6px rgb(255 178 36 / 45%);
+}
+
+[data-unread="true"] .app-thread-sender,
+[data-unread="true"] .app-thread-subject {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+[data-unread="true"] .app-thread-time {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+[data-starred="true"] .app-thread-star {
+  display: inline;
+}
+
 .app-composer-paragraph {
   min-height: 1.5rem;
   margin: 0 0 0.35rem;
