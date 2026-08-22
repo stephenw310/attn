@@ -18,13 +18,17 @@ whole stage pipeline at once rather than split it across milestones. What remain
 
 | Task | State | Blocks |
 |---|---|---|
-| S1 utility process | not started | F10's indexing |
-| S2 per-message labels | not started | F3 mailbox views, S4's tombstone pass |
-| S4 tombstone pass | membership half shipped; existence sweep open | trustworthy mailbox views |
-| Feature half | not planned | nothing yet |
+| S1 utility process | **open**, not started | F10's indexing |
+| S2 per-message labels | **open**, not started | F3 mailbox views, S4's tombstone pass |
+| S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
+| S4 reconcile and expiry recovery | **part done**: membership shipped in #51, tombstone pass open | trustworthy mailbox views |
+| Feature half | **open**, not planned | nothing yet |
 
-S1 and S2 are independent and can run side by side. The feature tasks get written up once the store's shape
-is settled.
+So two and a half tasks are left: S1, S2, and S4's tombstone pass. S1 and S2 are independent and can run side
+by side. The feature tasks get written up once the store's shape is settled.
+
+Every task section below opens with the same **Status** line, so you never have to infer state from whether a
+section looks long.
 
 ---
 
@@ -109,6 +113,8 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 
 ## S1: move sync work into an Electron utility process
 
+**Status: open, not started.**
+
 **Depends on:** nothing · **Unblocks:** F10's FTS indexing · **Parallel with:** S2 · **Spec:** §6 architecture
 
 ### Why
@@ -147,6 +153,8 @@ second implementation.
 ---
 
 ## S2: per-message label storage
+
+**Status: open, not started.**
 
 **Depends on:** nothing · **Unblocks:** F3 mailbox views, S4's tombstone pass · **Parallel with:** S1 ·
 **Spec:** §9 #17, F3
@@ -205,12 +213,15 @@ discoverable in Trash and alive in All Mail, and the reader never shows a draft 
 
 ## S3: all-mail and spam/trash backfill stages
 
-**Shipped in #51**, pulled forward from M3 by owner decision, ahead of S1 and S2. The stage rewrite therefore
-landed in the main process and moves with S1 later.
+**Status: done. Shipped in #51. Nothing in this section is work.**
 
-What it delivered: the unfiltered 12-month `all-mail` stage at normal background priority, explicit `spam` and
+It was pulled forward from M3 by owner decision, ahead of S1 and S2, so the stage rewrite landed in the main
+process and moves with S1 later. The section is kept because it explains why the pipeline has the shape S1 is
+about to relocate.
+
+It delivered the unfiltered 12-month `all-mail` stage at normal background priority, explicit `spam` and
 `trash` label stages, and the retirement of the dedicated `sent` stage. The pipeline and the contracts it
-established are recorded under [Where sync stands today](#where-sync-stands-today). Nothing here is open.
+established are recorded under [Where sync stands today](#where-sync-stands-today).
 
 Two facts worth keeping, because they explain the shape rather than the implementation:
 
@@ -228,14 +239,14 @@ and continues into older mail. Neither fetches a thread the other already stored
 
 ## S4: generalized reconcile and expiry recovery
 
-**Membership half shipped in #51.** `reconcileLabelMembership` (`src/main/sync/poller.ts`) generalizes the
+**Status: part done. The membership half shipped in #51. The tombstone pass is open and is the work here.**
+
+The shipped half: `reconcileLabelMembership` (`src/main/sync/poller.ts`) generalizes the
 INBOX-only helper, the backfill's reconcile phase re-lists INBOX, SPAM, and TRASH, and
 `reconcilePurgeableMembership` verifies Spam and Trash candidates thread by thread, where a refetch persists
 truth and only a 404 deletes. Both the backfill completion path and
 `SyncController.recoverExpiredHistory` call the same helpers, so there are two callers and one behavior. Keep
 it that way.
-
-**Open:** the existence-sweep tombstone pass.
 
 **Depends on:** S2, for per-message TRASH and SPAM truth · **Unblocks:** trustworthy mailbox views ·
 **Spec:** F2 incremental, §9 #17
