@@ -104,4 +104,201 @@ describe('thread snapshot persistence', () => {
       params: ['account', 'old@test']
     })
   })
+
+  it('stores message labels from full and metadata snapshots without losing attachments', () => {
+    const db = openDatabase(':memory:')
+    try {
+      const message = {
+        id: 'message',
+        threadId: 'thread',
+        labelIds: ['INBOX', 'TRASH'],
+        internalDate: '100',
+        snippet: 'Full snapshot',
+        payload: {
+          headers: [
+            { name: 'From', value: 'Maya <maya@example.com>' },
+            { name: 'Subject', value: 'Roadmap' }
+          ],
+          parts: [
+            {
+              mimeType: 'application/pdf',
+              filename: 'notes.pdf',
+              body: { attachmentId: 'attachment', size: 42 }
+            }
+          ]
+        }
+      }
+      persistThread(db, 'account', { id: 'thread', messages: [message] })
+      const full = db
+        .prepare('SELECT labels_json, attachments_json FROM messages WHERE account_id = ? AND id = ?')
+        .get('account', 'message') as { labels_json: string; attachments_json: string }
+      expect(JSON.parse(full.labels_json)).toEqual(['INBOX', 'TRASH'])
+      expect(JSON.parse(full.attachments_json)).toEqual([
+        expect.objectContaining({ attachmentId: 'attachment', filename: 'notes.pdf', sizeBytes: 42 })
+      ])
+
+      persistThread(
+        db,
+        'account',
+        {
+          id: 'thread',
+          messages: [
+            {
+              ...message,
+              labelIds: ['INBOX', 'STARRED'],
+              snippet: 'Metadata snapshot',
+              payload: { headers: message.payload.headers }
+            }
+          ]
+        },
+        { metadataOnly: true }
+      )
+      const metadata = db
+        .prepare('SELECT labels_json, attachments_json FROM messages WHERE account_id = ? AND id = ?')
+        .get('account', 'message') as { labels_json: string; attachments_json: string }
+      expect(JSON.parse(metadata.labels_json)).toEqual(['INBOX', 'STARRED'])
+      expect(metadata.attachments_json).toBe(full.attachments_json)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('summarizes the messages shown by the normal reader instead of newer junk', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'visible',
+            threadId: 'thread',
+            labelIds: ['INBOX'],
+            internalDate: '200',
+            snippet: 'Visible reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Maya <maya@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          },
+          {
+            id: 'trashed',
+            threadId: 'thread',
+            labelIds: ['TRASH', 'UNREAD', 'STARRED'],
+            internalDate: '300',
+            snippet: 'Hidden deleted reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Deleted <deleted@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ],
+              parts: [
+                {
+                  mimeType: 'application/pdf',
+                  filename: 'deleted.pdf',
+                  body: { attachmentId: 'deleted-attachment', size: 42 }
+                }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        db
+          .prepare(
+            `SELECT subject, snippet, last_msg_at, from_display, is_unread, is_starred, has_attachment
+             FROM threads WHERE account_id = ? AND id = ?`
+          )
+          .get('account', 'thread')
+      ).toEqual({
+        subject: 'Roadmap',
+        snippet: 'Visible reply',
+        last_msg_at: 200,
+        from_display: 'Maya',
+        is_unread: 0,
+        is_starred: 0,
+        has_attachment: 0
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('keeps a useful summary when every stored message is junk', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'trashed',
+            threadId: 'thread',
+            labelIds: ['TRASH', 'UNREAD'],
+            internalDate: '300',
+            snippet: 'Deleted reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Maya <maya@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        db
+          .prepare(
+            `SELECT subject, snippet, last_msg_at, from_display, is_unread
+             FROM threads WHERE account_id = ? AND id = ?`
+          )
+          .get('account', 'thread')
+      ).toEqual({
+        subject: 'Roadmap',
+        snippet: 'Deleted reply',
+        last_msg_at: 300,
+        from_display: 'Maya',
+        is_unread: 1
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('prunes stale ordinary mail when the authoritative snapshot contains only a draft', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'sent',
+            threadId: 'thread',
+            labelIds: ['INBOX'],
+            internalDate: '100',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Maya <maya@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        persistThread(db, 'account', {
+          id: 'thread',
+          messages: [{ id: 'draft', threadId: 'thread', labelIds: ['DRAFT'] }]
+        })
+      ).toBe(false)
+      expect(db.prepare('SELECT id FROM threads WHERE account_id = ?').all('account')).toEqual([])
+      expect(db.prepare('SELECT id FROM messages WHERE account_id = ?').all('account')).toEqual([])
+      expect(db.prepare('SELECT email FROM contacts WHERE account_id = ?').all('account')).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
 })

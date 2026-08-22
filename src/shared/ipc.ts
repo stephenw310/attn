@@ -97,7 +97,8 @@ export const TEST_CHANNELS = {
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',
   remoteDraft: 'attn:test:remoteDraft',
-  runLifetimeSweep: 'attn:test:runLifetimeSweep'
+  runLifetimeSweep: 'attn:test:runLifetimeSweep',
+  listMailboxThreadIds: 'attn:test:listMailboxThreadIds'
 } as const
 
 export interface InvokeChannels {

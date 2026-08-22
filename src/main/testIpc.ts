@@ -8,9 +8,10 @@ import { ipcMain } from 'electron'
 import { errorMessage } from '../shared/error'
 import { nonEmptyString } from '../shared/guards'
 import { TEST_CHANNELS } from '../shared/ipc'
-import type { SyncState } from '../shared/mail'
+import type { MessageMailbox, SyncState } from '../shared/mail'
 import type { ActionExecutor, ActionRecoveryProvider } from './actions/executor'
 import type { Db } from './db'
+import { listMailboxThreadIds } from './db/queries'
 import { loadSeed, readSeedThread } from './dev/seed'
 import { GmailApiError } from './gmail/client'
 import type { GmailThread } from './gmail/parse'
@@ -58,6 +59,10 @@ function isLabelRows(value: unknown): value is LabelRow[] {
         typeof (label as LabelRow).type === 'string'
     )
   )
+}
+
+function isMessageMailbox(value: unknown): value is MessageMailbox {
+  return value === 'all-mail' || value === 'spam' || value === 'trash'
 }
 
 export class TestSeams {
@@ -124,6 +129,24 @@ export class TestSeams {
     })
     ipcMain.on(TEST_CHANNELS.setSyncState, (_event, state: SyncState) =>
       this.deps.syncController()?.setStateForTest(state)
+    )
+    ipcMain.on(
+      TEST_CHANNELS.listMailboxThreadIds,
+      (_event, mailbox: unknown, done?: (threadIds: string[], error?: string) => void) => {
+        setImmediate(() => {
+          try {
+            const db = this.deps.db()
+            const account = this.deps.currentAccountId()
+            if (!db || !account || !isMessageMailbox(mailbox)) {
+              done?.([], 'mailbox query unavailable')
+              return
+            }
+            done?.(listMailboxThreadIds(db, account, mailbox))
+          } catch (error) {
+            done?.([], errorMessage(error))
+          }
+        })
+      }
     )
     ipcMain.on(
       TEST_CHANNELS.reloadSeed,

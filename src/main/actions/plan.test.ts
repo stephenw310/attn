@@ -16,6 +16,19 @@ describe('triage action planning', () => {
     })
   })
 
+  it('projects dedicated trash endpoints into local mailbox labels', () => {
+    expect(planAction({ kind: 'trash', threadIds: ['t1'] })).toEqual({
+      add: ['TRASH'],
+      remove: ['INBOX'],
+      queueKind: 'trash'
+    })
+    expect(planAction({ kind: 'untrash', threadIds: ['t1'] })).toEqual({
+      add: ['INBOX'],
+      remove: ['TRASH'],
+      queueKind: 'untrash'
+    })
+  })
+
   it('computes precise toggle and label inverses from pre-state', () => {
     const labels = new Set(['INBOX', 'STARRED', 'keep'])
     expect(inverseForThread({ kind: 'star', threadIds: ['t1'], on: true }, labels, 't1')).toEqual({

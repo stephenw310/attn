@@ -50,6 +50,17 @@
           "bodyText": "I added the launch milestones and owner notes.\n\n-- \nMaya Lin\n\nOn Friday, Priya wrote:\n> Please include owners for each milestone."
         },
         {
+          "id": "m-roadmap-trash",
+          "labelIds": ["TRASH"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:30",
+          "from": "Maya Lin <maya@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Q3 roadmap review",
+          "snippet": "This deleted reply belongs only in Trash.",
+          "bodyText": "This deleted reply belongs only in Trash."
+        },
+        {
           "id": "m-roadmap-draft",
           "labelIds": ["DRAFT"],
           "receivedDaysAgo": 0,

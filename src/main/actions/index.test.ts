@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Db } from '../db'
+import { type Db, openDatabase } from '../db'
+import { listMailboxThreadIds } from '../db/queries'
 import {
   actionQueueStatus,
   clearUndo,
   dropOutboxSendUndo,
   pendingActionCount,
+  performTriage,
   recordOutboxSendUndo,
   undoLast
 } from '.'
@@ -43,6 +45,36 @@ describe('action queue status', () => {
   it('does not count a non-auth failure as paused', () => {
     const db = queueDb([storeActionError(new Error('bad request'), 'permanent')])
     expect(actionQueueStatus(db, 'a@example.com')).toEqual({ pending: 1, paused: 0, authPaused: false })
+  })
+})
+
+describe('mailbox triage projection', () => {
+  it('moves known messages between All Mail and Trash before Gmail confirms the action', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare(
+        `INSERT INTO threads (account_id, id, subject, last_msg_at)
+         VALUES (?, 'thread', 'Roadmap', 100)`
+      ).run(ACCOUNT)
+      db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, labels_json)
+         VALUES (?, 'message', 'thread', '["INBOX"]')`
+      ).run(ACCOUNT)
+      db.prepare(
+        `INSERT INTO thread_labels (account_id, thread_id, label_id)
+         VALUES (?, 'thread', 'INBOX')`
+      ).run(ACCOUNT)
+
+      performTriage(db, ACCOUNT, { kind: 'trash', threadIds: ['thread'] }, false)
+      expect(listMailboxThreadIds(db, ACCOUNT, 'all-mail')).toEqual([])
+      expect(listMailboxThreadIds(db, ACCOUNT, 'trash')).toEqual(['thread'])
+
+      performTriage(db, ACCOUNT, { kind: 'untrash', threadIds: ['thread'] }, false)
+      expect(listMailboxThreadIds(db, ACCOUNT, 'all-mail')).toEqual(['thread'])
+      expect(listMailboxThreadIds(db, ACCOUNT, 'trash')).toEqual([])
+    } finally {
+      db.close()
+    }
   })
 })
 
