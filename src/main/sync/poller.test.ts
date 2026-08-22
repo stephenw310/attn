@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Db } from '../db'
+import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
 import {
   BACKGROUND_POLL_MS,
@@ -181,6 +181,48 @@ describe('stateful history application', () => {
 
     expect(missing).toEqual(['junk-gone'])
     expect(stripped).toEqual([['test@example.com', 'junk-gone', 'SPAM']])
+  })
+
+  it('replays a pending local delta after authoritative membership wins', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare(
+        `INSERT INTO threads (account_id, id, is_unread, is_starred)
+         VALUES ('test@example.com', 'pending', 0, 0)`
+      ).run()
+      db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, labels_json)
+         VALUES ('test@example.com', 'message', 'pending', '["STARRED"]')`
+      ).run()
+      db.prepare(
+        `INSERT INTO thread_labels (account_id, thread_id, label_id)
+         VALUES ('test@example.com', 'pending', 'INBOX')`
+      ).run()
+      db.prepare(
+        `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
+         VALUES (
+           'test@example.com',
+           'modifyLabels',
+           'pending',
+           '{"add":["INBOX"],"remove":[]}',
+           'pending'
+         )`
+      ).run()
+
+      reconcileInboxMembership(db, 'test@example.com', [])
+
+      expect(db.prepare('SELECT label_id FROM thread_labels').all()).toEqual([{ label_id: 'INBOX' }])
+      expect(
+        JSON.parse(
+          (db.prepare('SELECT labels_json FROM messages').get() as { labels_json: string }).labels_json
+        )
+      ).toEqual(['STARRED', 'INBOX'])
+      expect(db.prepare('SELECT thread_id, state FROM action_queue').all()).toEqual([
+        { thread_id: 'pending', state: 'pending' }
+      ])
+    } finally {
+      db.close()
+    }
   })
 
   it('verifies purge candidates individually: refetch persists, 404 deletes', async () => {
