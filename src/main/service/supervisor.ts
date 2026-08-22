@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream'
 import { utilityProcess } from 'electron'
 import type { InvokeChannel, InvokeChannels } from '../../shared/ipc'
 import type { TokenSet } from '../auth/googleAuth'
+import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import type {
   MainToServiceMessage,
   ServiceAuth,
@@ -14,7 +15,10 @@ import type {
 } from './protocol'
 
 const RESTART_DELAY_MS = 100
-const STOP_TIMEOUT_MS = 6_000
+const MAX_RESTART_DELAY_MS = 5_000
+const RESTART_FAILURE_WINDOW_MS = 60_000
+const MAX_RESTART_FAILURES = 5
+const STOP_TIMEOUT_MS = 10_000
 const MAX_INITIAL_START_FAILURES = 3
 
 export interface ServiceChild {
@@ -28,6 +32,23 @@ export interface ServiceChild {
 
 export type ServiceFork = () => ServiceChild
 
+function forwardOutput(stream: Readable | null | undefined, level: 'log' | 'error'): void {
+  if (!stream) return
+  let buffered = ''
+  const flush = (includeRemainder: boolean): void => {
+    const lines = buffered.split(/\r?\n/)
+    buffered = includeRemainder ? '' : (lines.pop() ?? '')
+    for (const line of lines) {
+      if (line) console[level](line)
+    }
+  }
+  stream.on('data', (chunk) => {
+    buffered += String(chunk)
+    flush(false)
+  })
+  stream.on('end', () => flush(true))
+}
+
 interface PendingRequest {
   resolve: (result: unknown) => void
   reject: (error: Error) => void
@@ -36,6 +57,10 @@ interface PendingRequest {
 export interface ServiceSupervisorOptions {
   fork?: ServiceFork
   restartDelayMs?: number
+  maxRestartDelayMs?: number
+  restartFailureWindowMs?: number
+  maxRestartFailures?: number
+  time?: SchedulerTime
 }
 
 export class ServiceSupervisor {
@@ -47,11 +72,16 @@ export class ServiceSupervisor {
   private stopping = false
   private hasEverBeenReady = false
   private initialStartFailures = 0
+  private restartFailures: number[] = []
   private stoppedAck: (() => void) | null = null
   private queuedControls: ServiceControl[] = []
   private eventSink: (event: ServiceEvent) => void = () => {}
   private readonly fork: ServiceFork
   private readonly restartDelayMs: number
+  private readonly maxRestartDelayMs: number
+  private readonly restartFailureWindowMs: number
+  private readonly maxRestartFailures: number
+  private readonly time: SchedulerTime
 
   constructor(
     utilityPath: string,
@@ -62,9 +92,14 @@ export class ServiceSupervisor {
       options.fork ??
       (() =>
         utilityProcess.fork(utilityPath, [], {
-          serviceName: 'Attn Service'
+          serviceName: 'Attn Service',
+          stdio: ['ignore', 'pipe', 'pipe']
         }) as ServiceChild)
     this.restartDelayMs = options.restartDelayMs ?? RESTART_DELAY_MS
+    this.maxRestartDelayMs = options.maxRestartDelayMs ?? MAX_RESTART_DELAY_MS
+    this.restartFailureWindowMs = options.restartFailureWindowMs ?? RESTART_FAILURE_WINDOW_MS
+    this.maxRestartFailures = options.maxRestartFailures ?? MAX_RESTART_FAILURES
+    this.time = options.time ?? systemTime
   }
 
   onEvent(sink: (event: ServiceEvent) => void): void {
@@ -149,14 +184,14 @@ export class ServiceSupervisor {
       this.rejectReadyWaiters(error)
       return
     }
-    let timeout: NodeJS.Timeout | null = null
+    let timeout: TimerHandle | null = null
     await Promise.race([
       stopped,
       new Promise<void>((resolve) => {
-        timeout = setTimeout(resolve, STOP_TIMEOUT_MS)
+        timeout = this.time.timers.setTimeout(resolve, STOP_TIMEOUT_MS)
       })
     ])
-    if (timeout) clearTimeout(timeout)
+    if (timeout) this.time.timers.clearTimeout(timeout)
     if (this.child === child) {
       child.kill()
       this.child = null
@@ -170,8 +205,8 @@ export class ServiceSupervisor {
     const child = this.fork()
     this.child = child
     this.readyState = null
-    child.stdout?.on('data', (chunk) => process.stdout.write(chunk))
-    child.stderr?.on('data', (chunk) => process.stderr.write(chunk))
+    forwardOutput(child.stdout, 'log')
+    forwardOutput(child.stderr, 'error')
     child.on('message', (message) => this.receive(child, message))
     child.on('exit', (code) => this.exited(child, code))
     child.postMessage({ type: 'initialize', payload: this.initialize })
@@ -181,6 +216,10 @@ export class ServiceSupervisor {
     if (child !== this.child || !value || typeof value !== 'object') return
     const message = value as ServiceToMainMessage
     if (message.type === 'ready') {
+      if (this.stopping) {
+        this.rejectReadyWaiters(new Error('Attn service is stopping'))
+        return
+      }
       this.readyState = message.payload
       this.hasEverBeenReady = true
       this.initialStartFailures = 0
@@ -238,11 +277,31 @@ export class ServiceSupervisor {
         console.error(`[utility] ${error.message}`)
         return
       }
+    } else {
+      const now = this.time.now()
+      this.restartFailures = this.restartFailures.filter(
+        (failedAt) => now - failedAt <= this.restartFailureWindowMs
+      )
+      this.restartFailures.push(now)
+      if (this.restartFailures.length >= this.maxRestartFailures) {
+        const error = new Error(
+          `Attn service stopped after ${this.restartFailures.length} crashes within ${this.restartFailureWindowMs} ms (last exit ${code})`
+        )
+        this.stopping = true
+        this.rejectReadyWaiters(error)
+        console.error(`[utility] ${error.message}`)
+        return
+      }
     }
-    console.error(`[utility] exited (${code}); restarting`)
-    setTimeout(() => {
+    const failures = this.hasEverBeenReady ? this.restartFailures.length : this.initialStartFailures
+    const restartDelay = Math.min(
+      this.restartDelayMs * 2 ** Math.max(0, failures - 1),
+      this.maxRestartDelayMs
+    )
+    console.error(`[utility] exited (${code}); restarting in ${restartDelay} ms`)
+    this.time.timers.setTimeout(() => {
       if (!this.stopping && !this.child) this.spawn()
-    }, this.restartDelayMs)
+    }, restartDelay)
   }
 
   private waitUntilReady(requireNext = false): Promise<ServiceReady> {

@@ -8,10 +8,16 @@ import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
+import { isCurrentTokenUpdate } from './auth/tokenUpdate'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
-import { SERVICE_PROTOCOL_VERSION, type ServiceAuth, type ServiceEvent } from './service/protocol'
+import {
+  SERVICE_PROTOCOL_VERSION,
+  type ServiceAuth,
+  type ServiceEvent,
+  type ServiceReady
+} from './service/protocol'
 import { ServiceSupervisor } from './service/supervisor'
 import { TestSeams } from './testIpc'
 
@@ -37,6 +43,7 @@ let seedAccountId: string | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
 let signInInFlight = false
+let authGeneration = 0
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 
@@ -70,7 +77,7 @@ function authStatus(): AuthStatus {
 function currentServiceAuth(): ServiceAuth | null {
   const tokens = loadTokens(app.getPath('userData'))
   if (!tokens) return null
-  return { config: loadOAuthConfig(oauthSearchDirs()), tokens }
+  return { config: loadOAuthConfig(oauthSearchDirs()), tokens, generation: authGeneration }
 }
 
 async function signIn(): Promise<AuthSignInResult> {
@@ -84,11 +91,12 @@ async function signIn(): Promise<AuthSignInResult> {
   let resumedActions = 0
   try {
     const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
+    authGeneration++
     saveTokens(app.getPath('userData'), tokens)
     seedAccountId = null
     pendingFocus = null
     mailNotifier?.setAccountId(tokens.email ?? null)
-    service?.setAuth({ config, tokens })
+    service?.setAuth({ config, tokens, generation: authGeneration })
     resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
     console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
   } catch (error) {
@@ -102,6 +110,7 @@ async function signIn(): Promise<AuthSignInResult> {
 
 function signOut(): AuthStatus {
   cancelActiveSignIn()
+  authGeneration++
   service?.signOut()
   seedAccountId = null
   clearTokens(app.getPath('userData'))
@@ -128,6 +137,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       nodeIntegration: false
     }
   })
+  mailNotifier?.attachWindow(win)
   win.webContents.session.webRequest.onHeadersReceived(
     { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
     (details, callback) => {
@@ -184,7 +194,12 @@ function handleServiceEvent(event: ServiceEvent): void {
   else if (event.kind === 'notification-candidates') {
     mailNotifier?.notify(event.accountId, event.candidates, event.pausedUntil)
   } else if (event.kind === 'token-update') {
-    saveTokens(app.getPath('userData'), event.tokens)
+    const userDataPath = app.getPath('userData')
+    if (!isCurrentTokenUpdate(authGeneration, loadTokens(userDataPath), event)) {
+      console.warn(`[auth] ignored stale token update from generation ${event.generation}`)
+      return
+    }
+    saveTokens(userDataPath, event.tokens)
     service?.cacheTokens(event.tokens)
   } else if (event.kind === 'log') console[event.level](event.message)
 }
@@ -192,9 +207,10 @@ function handleServiceEvent(event: ServiceEvent): void {
 async function initialize(): Promise<void> {
   const userDataPath = app.getPath('userData')
   const initialTokens = loadTokens(userDataPath)
-  mailNotifier = new MailNotifier(initialTokens?.email ?? null, showMainWindow, focusInboxThread)
-  mailNotifier.start()
-  service = new ServiceSupervisor(join(__dirname, 'service/utility.js'), {
+  const ownedNotifier = new MailNotifier(initialTokens?.email ?? null, showMainWindow, focusInboxThread)
+  mailNotifier = ownedNotifier
+  ownedNotifier.start()
+  const ownedService = new ServiceSupervisor(join(__dirname, 'service/utility.js'), {
     protocolVersion: SERVICE_PROTOCOL_VERSION,
     dbPath: join(userDataPath, 'attn.db'),
     userDataPath,
@@ -204,14 +220,22 @@ async function initialize(): Promise<void> {
     auth: currentServiceAuth(),
     focused: false
   })
-  service.onEvent(handleServiceEvent)
-  const ready = await service.start()
+  service = ownedService
+  ownedService.onEvent(handleServiceEvent)
+  let ready: ServiceReady
+  try {
+    ready = await ownedService.start()
+  } catch (error) {
+    if (service !== ownedService || mailNotifier !== ownedNotifier) return
+    throw error
+  }
+  if (service !== ownedService || mailNotifier !== ownedNotifier) return
   seedAccountId = testUserData && process.env.ATTN_TEST_SEED ? ready.accountId : null
-  mailNotifier.setAccountId(ready.accountId)
+  ownedNotifier.setAccountId(ready.accountId)
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
   stopIpc = registerIpc({
-    service,
+    service: ownedService,
     authStatus,
     signIn,
     signOut,
@@ -225,7 +249,10 @@ async function initialize(): Promise<void> {
   const { startHidden } = initializeBackground(
     ready.background,
     {
-      markLoginItemRegistered: () => void service?.internal('mark-login-item-registered'),
+      markLoginItemRegistered: () =>
+        void service?.internal('mark-login-item-registered').catch((error) => {
+          console.error(`[background] could not save login item state: ${errorMessage(error)}`)
+        }),
       setNotificationPausedUntil: (pausedUntil) =>
         void service?.internal('set-notification-pause', pausedUntil).catch((error) => {
           console.error(`[notifications] could not save pause setting: ${errorMessage(error)}`)

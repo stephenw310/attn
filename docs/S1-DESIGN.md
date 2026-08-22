@@ -50,9 +50,10 @@ introduce a second reducer or a main-process fallback write.
 
 ## Crash and restart
 
-The supervisor starts one utility, waits for its `ready` event, and only then opens renderer IPC. Unexpected
-exit rejects in-flight requests and starts a fresh utility against the same database after a bounded delay.
-There is no app restart and no database fallback in main.
+The supervisor starts one utility, waits for its `ready` event, and only then opens renderer IPC. An unexpected
+exit rejects in-flight requests and starts a fresh utility against the same database with exponential backoff,
+capped at five seconds. Five crashes within one minute stop the restart loop and reject callers waiting for the
+service. There is no app restart and no database fallback in main.
 
 Backfill, lifetime, and attachment walkers checkpoint complete pages in `sync_state`. After restart,
 `SyncController` reads `backfill_cursor`, `sweep_cursor`, and `attachment_cursor` and resumes the unfinished
@@ -61,7 +62,13 @@ and message writes are idempotent upserts.
 
 Normal shutdown is different from a crash. Main asks the utility to stop. The utility first stops sync and the
 action scheduler, lets the active draft mirror and outbox sender use their existing five-second quiesce path,
-then closes SQLite and acknowledges shutdown. Main kills the child only if that bounded shutdown fails.
+then closes SQLite and acknowledges shutdown. Main waits up to ten seconds before killing the child. This gives
+the five-second worker quiesce path enough time to finish and close SQLite.
+
+Triage `Z` history remains in memory and is lost if the utility crashes. The queued mail intents and their local
+effects remain durable, but the user cannot undo a pre-crash triage action with `Z`. Undo Send is unaffected
+because its outbox row lives in SQLite. S1 accepts this narrow limitation instead of adding a second durable undo
+log.
 
 ## Performance
 

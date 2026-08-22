@@ -99,6 +99,15 @@ export function applyUnreadBadge(
   }
 }
 
+export function applyUnreadBadgeToWindow(
+  platform: NodeJS.Platform,
+  unreadCount: number,
+  setWindowsOverlay: BadgeEffects['setWindowsOverlay']
+): void {
+  if (platform !== 'win32') return
+  setWindowsOverlay(unreadCount > 0, unreadCount > 0 ? `${unreadCount} unread conversations` : '')
+}
+
 /** Keep batching policy independent from Electron so it can be exhaustively unit tested. */
 export function planNotifications(
   newMail: readonly NotificationCandidate[],
@@ -162,6 +171,7 @@ function getWindowsBadgeIcon(): NativeImage {
 
 export class MailNotifier {
   private accountId: string | null
+  private unreadCount = 0
   private readonly shown = new BoundedRetainer<Notification>(NOTIFICATION_RETENTION)
 
   constructor(
@@ -185,6 +195,7 @@ export class MailNotifier {
   }
 
   updateBadge(unreadCount: number): void {
+    this.unreadCount = unreadCount
     try {
       applyUnreadBadge(process.platform, unreadCount, {
         setMacBadge: (count) => app.setBadgeCount(count),
@@ -192,6 +203,16 @@ export class MailNotifier {
           const icon = show ? getWindowsBadgeIcon() : null
           for (const win of BrowserWindow.getAllWindows()) win.setOverlayIcon(icon, description)
         }
+      })
+    } catch (error) {
+      console.error(`[badge] failed: ${errorMessage(error)}`)
+    }
+  }
+
+  attachWindow(win: BrowserWindow): void {
+    try {
+      applyUnreadBadgeToWindow(process.platform, this.unreadCount, (show, description) => {
+        win.setOverlayIcon(show ? getWindowsBadgeIcon() : null, description)
       })
     } catch (error) {
       console.error(`[badge] failed: ${errorMessage(error)}`)

@@ -3,11 +3,12 @@ import type { InvokeChannel } from '../../shared/ipc'
 import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
 import type { NotificationCandidate } from './notificationQueries'
 
-export const SERVICE_PROTOCOL_VERSION = 1
+export const SERVICE_PROTOCOL_VERSION = 2
 
 export interface ServiceAuth {
   config: OAuthConfig | null
   tokens: TokenSet
+  generation: number
 }
 
 export interface ServiceInitialize {
@@ -64,7 +65,7 @@ export type ServiceEvent =
       candidates: NotificationCandidate[]
       pausedUntil: number | null
     }
-  | { kind: 'token-update'; tokens: TokenSet }
+  | { kind: 'token-update'; tokens: TokenSet; generation: number }
   | { kind: 'log'; level: 'log' | 'warn' | 'error'; message: string }
 
 export type ServiceToMainMessage =

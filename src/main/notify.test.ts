@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Db } from './db'
 import {
   applyUnreadBadge,
+  applyUnreadBadgeToWindow,
   BoundedRetainer,
   isolateNotificationFailure,
   notificationTarget,
@@ -119,7 +120,14 @@ describe('badge effects', () => {
     applyUnreadBadge('darwin', 4, effects)
     applyUnreadBadge('win32', 4, effects)
     applyUnreadBadge('win32', 0, effects)
-    expect(calls).toEqual(['mac:4', 'windows:true:4 unread conversations', 'windows:false:'])
+    applyUnreadBadgeToWindow('linux', 7, effects.setWindowsOverlay)
+    applyUnreadBadgeToWindow('win32', 7, effects.setWindowsOverlay)
+    expect(calls).toEqual([
+      'mac:4',
+      'windows:true:4 unread conversations',
+      'windows:false:',
+      'windows:true:7 unread conversations'
+    ])
   })
 })
 

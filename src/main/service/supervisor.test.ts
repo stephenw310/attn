@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import type { MainToServiceMessage, ServiceInitialize, ServiceReady } from './protocol'
@@ -16,7 +17,7 @@ const READY: ServiceReady = {
 
 function initialization(): ServiceInitialize {
   return {
-    protocolVersion: 1,
+    protocolVersion: 2,
     dbPath: '/tmp/attn-supervisor-test.db',
     userDataPath: '/tmp/attn-supervisor-test',
     downloadsPath: '/tmp',
@@ -28,6 +29,8 @@ function initialization(): ServiceInitialize {
 
 class FakeChild extends EventEmitter implements ServiceChild {
   readonly messages: MainToServiceMessage[] = []
+  readonly stdout = new PassThrough()
+  readonly stderr = new PassThrough()
   throwOnRequest = false
   killed = false
 
@@ -68,7 +71,8 @@ describe('ServiceSupervisor', () => {
     supervisor.control({ kind: 'focus', focused: true })
     supervisor.setAuth({
       config: { client_id: 'client', client_secret: 'secret' },
-      tokens: { access_token: 'access', expires_at: 1, email: 'user@example.com' }
+      tokens: { access_token: 'access', expires_at: 1, email: 'user@example.com' },
+      generation: 1
     })
     expect(child.messages.map((message) => message.type)).toEqual(['initialize'])
 
@@ -82,7 +86,8 @@ describe('ServiceSupervisor', () => {
           kind: 'auth',
           auth: {
             config: { client_id: 'client', client_secret: 'secret' },
-            tokens: { access_token: 'access', expires_at: 1, email: 'user@example.com' }
+            tokens: { access_token: 'access', expires_at: 1, email: 'user@example.com' },
+            generation: 1
           }
         }
       }
@@ -129,10 +134,76 @@ describe('ServiceSupervisor', () => {
     children[0].exit(1)
     await vi.advanceTimersByTimeAsync(10)
     children[1].exit(1)
-    await vi.advanceTimersByTimeAsync(10)
+    await vi.advanceTimersByTimeAsync(20)
     children[2].exit(1)
 
     await expect(started).rejects.toThrow('failed to start after 3 attempts')
     expect(nextChild).toBe(3)
+  })
+
+  it('does not release ready callers after shutdown starts', async () => {
+    const child = new FakeChild()
+    const supervisor = new ServiceSupervisor('/utility.js', initialization(), { fork: () => child })
+    const started = supervisor.start()
+
+    const stopped = supervisor.stop()
+    child.ready()
+    child.exit(0)
+
+    await expect(started).rejects.toThrow('stopping')
+    await expect(stopped).resolves.toBeUndefined()
+  })
+
+  it('backs off and stops restarting after repeated post-ready crashes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const children = [new FakeChild(), new FakeChild(), new FakeChild()]
+    let nextChild = 0
+    const supervisor = new ServiceSupervisor('/utility.js', initialization(), {
+      fork: () => children[nextChild++],
+      restartDelayMs: 10,
+      maxRestartDelayMs: 40,
+      restartFailureWindowMs: 1_000,
+      maxRestartFailures: 3
+    })
+    const started = supervisor.start()
+    children[0].ready()
+    await started
+
+    children[0].exit(1)
+    const waitingInvoke = supervisor.invoke(IPC_CHANNELS.mailListThreads)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(nextChild).toBe(2)
+    children[1].exit(1)
+    await vi.advanceTimersByTimeAsync(19)
+    expect(nextChild).toBe(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(nextChild).toBe(3)
+    children[2].exit(1)
+
+    await expect(waitingInvoke).rejects.toThrow('3 crashes within 1000 ms')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(nextChild).toBe(3)
+  })
+
+  it('forwards piped utility output through the main logger', async () => {
+    const child = new FakeChild()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const supervisor = new ServiceSupervisor('/utility.js', initialization(), { fork: () => child })
+    const started = supervisor.start()
+
+    child.stdout.write('[utility] standard output\n')
+    child.stderr.write('[utility] standard error\n')
+
+    expect(log).toHaveBeenCalledWith('[utility] standard output')
+    expect(error).toHaveBeenCalledWith('[utility] standard error')
+
+    child.ready()
+    await started
+    const stopped = supervisor.stop()
+    child.exit(0)
+    await stopped
   })
 })

@@ -89,10 +89,6 @@ export class ServiceRuntime {
       if (existing) this.seedAccountId = existing.id
       else {
         this.seedAccountId = loadSeed(this.db, input.testSeed).accountId
-        const count = this.db
-          .prepare('SELECT COUNT(*) AS count FROM threads WHERE account_id = ?')
-          .get(this.seedAccountId) as { count: number }
-        this.log('log', `[seed] loaded ${count.count} threads for ${this.seedAccountId}`)
       }
       this.log('log', `[sync] backfill stages skipped for seeded account ${this.seedAccountId}`)
     }
@@ -310,8 +306,8 @@ export class ServiceRuntime {
       auth.tokens,
       (tokens: TokenSet) => {
         if (generation !== this.syncController.getGeneration()) return
-        this.auth = { config: auth.config, tokens }
-        this.emit({ kind: 'token-update', tokens })
+        this.auth = { config: auth.config, tokens, generation: auth.generation }
+        this.emit({ kind: 'token-update', tokens, generation: auth.generation })
       },
       { quotaLimiter }
     )
