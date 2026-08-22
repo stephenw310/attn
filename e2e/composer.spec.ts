@@ -337,8 +337,9 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
       countdownAnimation: countdown ? getComputedStyle(countdown).animationName : ''
     }
   })
-  expect(timing.durationMs).toBeGreaterThan(6_000)
-  expect(timing.expiresAt).toBeGreaterThan(Date.now() + 6_000)
+  expect(timing.durationMs).toBeGreaterThan(3_500)
+  expect(timing.durationMs).toBeLessThanOrEqual(5_000)
+  expect(timing.expiresAt).toBeGreaterThan(Date.now() + 3_500)
   expect(Math.abs(timing.shellDurationMs - timing.durationMs)).toBeLessThan(50)
   expect(Math.abs(timing.countdownDurationMs - timing.durationMs)).toBeLessThan(50)
   expect(timing.countdownAnimation).toBe('toast-countdown')
@@ -351,6 +352,48 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
   await expect(composer.editor).toContainText('Nothing reaches the provider')
   await composer.expectPending(0)
 })
+
+for (const scenario of [
+  { kind: 'reply' as const, key: 'r', recipient: null },
+  { kind: 'forward' as const, key: 'f', recipient: 'forward@example.com' }
+]) {
+  test(`shows a queued ${scenario.kind} immediately, expanded, and removes it on undo`, async ({
+    app,
+    page
+  }) => {
+    await app.evaluate(
+      ({ ipcMain }, channel) => ipcMain.emit(channel, {}, 20),
+      TEST_CHANNELS.setUndoSendDelay
+    )
+    await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+    const composer = new ComposerPage(page)
+    await page.keyboard.press(scenario.key)
+    await expect(composer.root).toHaveAttribute('data-draft-kind', scenario.kind)
+    if (scenario.recipient) await composer.addRecipient(scenario.recipient)
+    const body = `Optimistic ${scenario.kind} appears before polling.`
+    await composer.typeBody(body)
+
+    await composer.triggerSend()
+
+    await expect(composer.root).toHaveCount(0)
+    const cards = page.getByTestId('message-card')
+    await expect(cards).toHaveCount(3)
+    const optimistic = cards.last()
+    await expect(optimistic).toHaveAttribute('data-pending', 'true')
+    await expect(optimistic).toHaveAttribute('data-collapsed', 'false')
+    await expect(page.getByTestId('conversation-scroll')).toBeFocused()
+    await expect(optimistic.getByTestId('html-body-frame').contentFrame().locator('body')).toContainText(body)
+
+    await page.keyboard.press('z')
+
+    await expect(composer.root).toBeVisible()
+    await expect(composer.root).toHaveAttribute('data-draft-kind', scenario.kind)
+    await expect(composer.editor).toContainText(body)
+    await expect(page.getByTestId('message-card')).toHaveCount(2)
+    await expect(page.locator('[data-testid="message-card"][data-pending="true"]')).toHaveCount(0)
+    await composer.expectPending(0)
+  })
+}
 
 test('spools picked and dropped attachments through queue and relaunch, then cleans on discard', async ({
   app,

@@ -3,6 +3,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MessageAttachment } from '../../shared/mail'
 import {
   MAIL_CID_SOURCE_MARKER as CID_SOURCE_MARKER,
+  MAIL_IMAGE_PENDING_MARKER as IMAGE_PENDING_MARKER,
   sanitizeMailHtml,
   MAIL_TRIM_MARKER as TRIM_MARKER
 } from '../../shared/mailSanitizer'
@@ -72,6 +73,7 @@ function frameReset(surface: MailSurface): string {
   }`
   }
   img { max-width: 100%; height: auto; }
+  img[${IMAGE_PENDING_MARKER}] { visibility: hidden !important; }
   table { max-width: 100%; }
   pre { white-space: pre-wrap; }
   [${TRIM_MARKER}] {
@@ -217,6 +219,9 @@ function makeSrcDoc(
   const template = sanitizeToTemplate(html, surface)
   if (!template) return null
   replaceCidSources(template.content, inlineImages)
+  template.content.querySelectorAll('img').forEach((image) => {
+    image.setAttribute(IMAGE_PENDING_MARKER, '')
+  })
   const trimMatch = findHtmlTrimStart(template.content)
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
   if (trimStart) {
@@ -310,10 +315,29 @@ export function MessageBody({
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
   const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
+  const watchedImagesRef = useRef(new WeakSet<HTMLImageElement>())
   const srcDoc = useMemo(
     () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface)),
     [bodyHtml, surface]
   )
+
+  const revealLoadedImages = useCallback((doc: Document) => {
+    doc.querySelectorAll<HTMLImageElement>(`img[${IMAGE_PENDING_MARKER}]`).forEach((image) => {
+      if (image.complete && image.naturalWidth > 0) {
+        image.removeAttribute(IMAGE_PENDING_MARKER)
+        return
+      }
+      if (watchedImagesRef.current.has(image)) return
+      watchedImagesRef.current.add(image)
+      image.addEventListener(
+        'load',
+        () => {
+          image.removeAttribute(IMAGE_PENDING_MARKER)
+        },
+        { once: true }
+      )
+    })
+  }, [])
 
   const applyInlineImages = useCallback(() => {
     const doc = frameRef.current?.contentDocument
@@ -325,7 +349,8 @@ export function MessageBody({
       image.setAttribute('src', dataUrl)
       image.removeAttribute(CID_SOURCE_MARKER)
     })
-  }, [])
+    revealLoadedImages(doc)
+  }, [revealLoadedImages])
 
   useLayoutEffect(() => {
     inlineImagesRef.current = EMPTY_IMAGES
@@ -442,6 +467,7 @@ export function MessageBody({
 
       disconnect()
       applyInlineImages()
+      revealLoadedImages(doc)
       measure(frame)
       const observer = new ResizeObserver(() => measure(frame))
       observer.observe(doc.body)
@@ -449,7 +475,7 @@ export function MessageBody({
       doc.addEventListener('keydown', forwardKey)
       keyDocumentRef.current = doc
     },
-    [applyInlineImages, disconnect, forwardKey, measure]
+    [applyInlineImages, disconnect, forwardKey, measure, revealLoadedImages]
   )
 
   const onLoad = useCallback(

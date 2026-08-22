@@ -48,6 +48,8 @@ export type MessageBodyState = 'complete' | 'loading' | 'signed-out' | 'unavaila
 
 export interface ConversationMsg {
   id: string
+  /** Local outbox projection shown before Gmail returns the confirmed message. */
+  pending?: boolean
   /** RFC Message-ID header, including angle brackets. */
   rfcMessageId: string | null
   /** Canonical RFC message ids from References, or In-Reply-To as a fallback. */

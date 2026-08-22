@@ -11,8 +11,13 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await page.emulateMedia({ colorScheme: 'dark' })
   let remoteImageRequests = 0
   let handlerImageRequests = 0
+  let releaseRemoteImage!: () => void
+  const remoteImageGate = new Promise<void>((resolve) => {
+    releaseRemoteImage = resolve
+  })
   await page.route('https://remote.attn.test/**', async (route) => {
     remoteImageRequests += 1
+    await remoteImageGate
     await route.fulfill({
       contentType: 'image/gif',
       body: Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64')
@@ -55,10 +60,16 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     'href',
     'https://www.kimi.com?referer=upcoming_invoice'
   )
+  await expect(body.locator('#remote-image')).toHaveAttribute('data-attn-image-pending', '')
+  await expect(body.locator('#remote-image')).toHaveCSS('visibility', 'hidden')
+  releaseRemoteImage()
+  await expect(body.locator('#remote-image')).not.toHaveAttribute('data-attn-image-pending')
+  await expect(body.locator('#remote-image')).toHaveCSS('visibility', 'visible')
   await expect(body.locator('#cid-image')).toHaveAttribute('src', /^data:image\/gif;base64,/)
   await expect(body.locator('#filename-cid-image')).toHaveAttribute('src', /^data:image\/png;base64,/)
   await expect(iframe).toHaveAttribute('data-load-count', '1')
   await expect(body.locator('#malformed-cid-image')).not.toHaveAttribute('src')
+  await expect(body.locator('#malformed-cid-image')).toHaveCSS('visibility', 'hidden')
   await expect(body.locator('#cid-image')).toBeVisible()
   await expect(body.locator('#filename-cid-image')).toBeVisible()
   await expect(page.getByTestId('attachment-chip')).toHaveCount(0)
@@ -81,6 +92,8 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(body.locator('#forged-trim-anchor')).not.toHaveAttribute('data-attn-trim-start')
   await expect(body.locator('#forged-cid')).not.toHaveAttribute('data-attn-cid-source')
   await expect(body.locator('#forged-cid')).not.toHaveAttribute('src')
+  await expect(body.locator('#forged-cid')).toHaveCSS('visibility', 'hidden')
+  await expect(body.locator('#handler-image')).toHaveCSS('visibility', 'hidden')
   await expect(body.locator('[data-attn-trim-start]')).toHaveCount(1)
   await expect(body.locator('form, input, button, select, textarea')).toHaveCount(0)
   await expect(body.locator('#self-link')).toHaveAttribute('target', '_blank')

@@ -376,7 +376,8 @@ async function initialize(): Promise<void> {
     beforeRemote: (signal) => draftMirrorExecutor?.waitForIdle(signal) ?? Promise.resolve(),
     spoolRoot: join(app.getPath('userData'), 'outbox'),
     cleanSpool: (id) => cleanOutboxSpool(app.getPath('userData'), id),
-    progress: broadcastOutboxProgress
+    progress: broadcastOutboxProgress,
+    mailChanged: broadcastMailChanged
   })
   snoozeScheduler = new SnoozeScheduler(
     activeDb,

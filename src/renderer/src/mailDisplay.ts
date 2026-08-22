@@ -27,6 +27,7 @@ export interface DisplayThread {
 
 export interface DisplayMessage {
   id: string
+  pending: boolean
   fromName: string
   fromEmail: string
   at: string
@@ -99,6 +100,7 @@ export function displayConversation(conversation: Conversation): DisplayConversa
     bodyHydrationFailed: false,
     messages: conversation.messages.map((message) => ({
       id: message.id,
+      pending: message.pending === true,
       fromName: message.fromName,
       fromEmail: message.fromEmail,
       at: formatTime(message.at),

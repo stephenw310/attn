@@ -16,11 +16,24 @@ interface ConversationMessagesProps {
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
   const { conversation, account, online, markNewest, onToast } = props
   const newestIndex = conversation.messages.length - 1
+  const newestMessageId = conversation.messages[newestIndex]?.id
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
-    const newestMessage = conversation.messages[newestIndex]
-    return new Set(newestMessage ? [newestMessage.id] : [])
+    return new Set(newestMessageId ? [newestMessageId] : [])
   })
   const [expandedTrimIds, setExpandedTrimIds] = useState<Set<string>>(() => new Set())
+
+  // This component stays mounted while local outbox and sync updates append to
+  // the same thread. Every newly newest message starts open, just like the
+  // initial newest message, instead of inheriting the older collapsed default.
+  useLayoutEffect(() => {
+    if (!newestMessageId) return
+    setExpandedMessageIds((current) => {
+      if (current.has(newestMessageId)) return current
+      const next = new Set(current)
+      next.add(newestMessageId)
+      return next
+    })
+  }, [newestMessageId])
 
   const toggleMessage = useCallback((messageId: string) => {
     setExpandedMessageIds((current) => {
@@ -109,6 +122,8 @@ export const ConversationView = memo(function ConversationView(
 
   const conversationThreadId = conversation?.threadId ?? (inlineComposer ? selected.id : null)
   const newestMessageId = conversation?.messages.at(-1)?.id ?? null
+  const newestMessagePending = conversation?.messages.at(-1)?.pending === true
+  const pendingFocusMessageId = newestMessagePending && inlineComposer === null ? newestMessageId : null
   const messageCount = conversation?.messages.length ?? 0
   const latestTargetKey = conversationThreadId
     ? `${conversationThreadId}:${messageCount}:${newestMessageId ?? ''}:${inlineComposerDraftId ?? ''}`
@@ -158,6 +173,15 @@ export const ConversationView = memo(function ConversationView(
       window.removeEventListener('keydown', stopTracking)
     }
   }, [latestTargetKey, scrollRef])
+
+  // The editor owned keyboard focus until the queued send unmounted it. Give
+  // that focus back to the reader as soon as the optimistic message appears so
+  // its expanded card is both visible and the active keyboard context during
+  // the undo window.
+  useLayoutEffect(() => {
+    if (!pendingFocusMessageId) return
+    scrollRef.current?.focus({ preventScroll: true })
+  }, [pendingFocusMessageId, scrollRef])
 
   return (
     <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">

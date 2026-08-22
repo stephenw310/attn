@@ -44,12 +44,12 @@ function queueDb(): { db: Db; run: ReturnType<typeof vi.fn> } {
 }
 
 describe('undo send setting', () => {
-  it('defaults to eight seconds and accepts only supported explicit values', () => {
-    expect(undoSendDelayMs(settingsDb(undefined))).toBe(8_000)
+  it('defaults to five seconds and accepts only supported explicit values', () => {
+    expect(undoSendDelayMs(settingsDb(undefined))).toBe(5_000)
     expect(undoSendDelayMs(settingsDb('20'))).toBe(20_000)
     expect(undoSendDelayMs(settingsDb('0'))).toBe(0)
-    expect(undoSendDelayMs(settingsDb('7'))).toBe(8_000)
-    expect(undoSendDelayMs(settingsDb('not-a-number'))).toBe(8_000)
+    expect(undoSendDelayMs(settingsDb('7'))).toBe(5_000)
+    expect(undoSendDelayMs(settingsDb('not-a-number'))).toBe(5_000)
   })
 
   it('uses the sender account domain for a durable Message-ID and resets both counters', () => {

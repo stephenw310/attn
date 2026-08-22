@@ -74,11 +74,17 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
 test('animates a marked-done row before removing it', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
+  const nextRow = rows.filter({ hasText: 'Northstar Books' })
+  const nextRowStart = await nextRow.evaluate((element) => element.getBoundingClientRect().y)
 
   await page.keyboard.press('e')
   await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
   await expect(rows.first()).toHaveClass(/app-thread-exit/)
+  await expect(nextRow).toHaveAttribute('data-selected', 'true')
   await expect(rows).toHaveCount(7)
+  expect(await nextRow.evaluate((element) => element.getBoundingClientRect().y)).toBeLessThan(
+    nextRowStart - 20
+  )
   const firstToastId = await page.getByTestId('toast').getAttribute('data-toast-id')
 
   await page.keyboard.press('e')

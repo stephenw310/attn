@@ -15,7 +15,7 @@ import { getDraft } from './drafts'
 import { planTransition } from './machine'
 import { validateMimeRecipients } from './mime'
 
-const DEFAULT_UNDO_SEND_SECONDS = 8
+const DEFAULT_UNDO_SEND_SECONDS = 5
 const ALLOWED_UNDO_SEND_SECONDS = new Set([0, 5, 8, 10, 20, 30])
 
 interface QueueRow {

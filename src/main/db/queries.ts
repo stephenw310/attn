@@ -27,6 +27,15 @@ interface StoredAttachment extends MessageAttachment {
   inlineData?: string
 }
 
+interface StoredOutboxAttachment {
+  id: string
+  filename: string
+  mimeType: string
+  sizeBytes: number
+  contentId?: string
+  inline?: boolean
+}
+
 /** Measured-safe bound; the renderer windows lists above 500 rows. */
 export const THREAD_LIST_LIMIT = 10_000
 
@@ -220,6 +229,146 @@ export function getConversation(
   }))
 
   return { threadId, subject: thread.subject ?? '(no subject)', messages }
+}
+
+interface OutboxConversationRow {
+  id: string
+  state: 'queued' | 'sending' | 'sent'
+  to_json: string
+  cc_json: string
+  bcc_json: string
+  body_html: string
+  body_text: string
+  attachments_json: string
+  quote_html: string
+  quote_text: string
+  references_json: string
+  rfc_message_id: string
+  gmail_message_id: string | null
+  updated_at: number
+}
+
+function combinedBody(primary: string, quote: string, separator: string): string {
+  if (!quote) return primary
+  if (!primary) return quote
+  return `${primary}${separator}${quote}`
+}
+
+const LEGACY_SENT_MATCH_WINDOW_MS = 2 * 60 * 1_000
+
+function canonicalSentBody(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Renderer-facing conversation projection. Reply and forward rows enter the
+ * local conversation as soon as they are queued, then disappear automatically
+ * when undo returns them to composing. A confirmed Gmail message replaces the
+ * projection by its durable Message-ID (or mirrored Gmail message id).
+ */
+export function getConversationForDisplay(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  missingBodyState: Exclude<MessageBodyState, 'complete'>
+): Conversation | null {
+  const conversation = getConversation(db, accountId, threadId, missingBodyState)
+  if (!conversation) return null
+
+  const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
+    | { email: string }
+    | undefined
+  const confirmedMessageIds = new Set(conversation.messages.map((message) => message.id))
+  const confirmedByRfcId = new Map(
+    conversation.messages.flatMap((message) =>
+      message.rfcMessageId ? [[message.rfcMessageId, message.id] as const] : []
+    )
+  )
+  const rows = db
+    .prepare(
+      `SELECT id, state, to_json, cc_json, bcc_json, body_html, body_text, attachments_json,
+              quote_html, quote_text, references_json, rfc_message_id, gmail_message_id, updated_at
+       FROM outbox
+       WHERE account_id = ? AND thread_id = ?
+         AND kind IN ('reply', 'replyAll', 'forward')
+         AND state IN ('queued', 'sending', 'sent')
+       ORDER BY updated_at, id`
+    )
+    .all(accountId, threadId) as OutboxConversationRow[]
+
+  const claimedConfirmedIds = new Set<string>()
+  const pending = rows.flatMap((row): ConversationMsg[] => {
+    const confirmedId =
+      confirmedByRfcId.get(row.rfc_message_id) ??
+      (row.gmail_message_id !== null && confirmedMessageIds.has(row.gmail_message_id)
+        ? row.gmail_message_id
+        : null)
+    if (confirmedId) {
+      claimedConfirmedIds.add(confirmedId)
+      return []
+    }
+    const bodyText = combinedBody(row.body_text, row.quote_text, '\n\n')
+    // Older Attn builds did not retain the definitive Gmail message id returned
+    // by drafts.send: the field can be empty or still contain the obsolete draft
+    // message id. Gmail may also rewrite our RFC Message-ID. Match those sent
+    // projections once by author, body, and the narrow send-time window so
+    // existing conversations heal without hiding queued mail.
+    if (row.state === 'sent' && account) {
+      const canonicalBody = canonicalSentBody(bodyText)
+      const legacyMatch = conversation.messages
+        .filter(
+          (message) =>
+            canonicalBody.length > 0 &&
+            !claimedConfirmedIds.has(message.id) &&
+            message.fromEmail.trim().toLowerCase() === account.email.trim().toLowerCase() &&
+            Math.abs(message.at - row.updated_at) <= LEGACY_SENT_MATCH_WINDOW_MS &&
+            canonicalSentBody(message.bodyText) === canonicalBody
+        )
+        .sort((left, right) => Math.abs(left.at - row.updated_at) - Math.abs(right.at - row.updated_at))[0]
+      if (legacyMatch) {
+        claimedConfirmedIds.add(legacyMatch.id)
+        return []
+      }
+    }
+    const storedAttachments = parseJson<StoredOutboxAttachment[]>(row.attachments_json, [])
+    const hasInlineAttachment = storedAttachments.some((attachment) => attachment.inline)
+    const bodyHtml = hasInlineAttachment ? '' : combinedBody(row.body_html, row.quote_html, '\n')
+    return [
+      {
+        id: `outbox:${row.id}`,
+        pending: true,
+        rfcMessageId: row.rfc_message_id,
+        references: parseJson(row.references_json, []),
+        fromName: 'Me',
+        fromEmail: account?.email ?? accountId,
+        at: row.updated_at,
+        recipients: {
+          to: parseJson(row.to_json, []),
+          cc: parseJson(row.cc_json, []),
+          bcc: parseJson(row.bcc_json, []),
+          replyTo: []
+        },
+        attachments: storedAttachments.map((attachment) => ({
+          attachmentId: attachment.id,
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
+          ...(attachment.inline ? { inline: true } : {})
+        })),
+        bodyText,
+        // Inline CID bytes still belong to the draft spool. Use the complete
+        // plain-text alternative until Gmail returns a real message id rather
+        // than rendering broken image placeholders during the undo window.
+        bodyHtml: bodyHtml || null,
+        bodyState: 'complete'
+      }
+    ]
+  })
+
+  return pending.length > 0
+    ? { ...conversation, messages: [...conversation.messages, ...pending] }
+    : conversation
 }
 
 interface ContactRow {
