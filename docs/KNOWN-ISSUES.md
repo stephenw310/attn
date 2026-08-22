@@ -11,6 +11,10 @@ removes a line is the record that it closed.
 concrete failure it produces, and a fix direction. Verify the anchor against `main` before you write it and
 stamp the date. IDs are never reused.
 
+**Always name the symbol, not only the line.** Line numbers drift fast: six anchors in this file moved when
+#65 landed, one day after they were written, while every defect they described was untouched. Read the line
+as a hint and the symbol as the truth, and re-stamp the date when you correct a drifted anchor.
+
 Sources so far: the 2026-08-16 review of `main` @ #52 ([REVIEW-2026-08-16.md](REVIEW-2026-08-16.md)) and its
 coverage map ([REVIEW-2026-08-16-coverage.md](REVIEW-2026-08-16-coverage.md)). Both are frozen snapshots kept
 for their reasoning. This file is the part that stays current. Each entry cross-references its original review
@@ -45,17 +49,17 @@ alternative is to continue to the next row instead of returning. Either one clos
 
 ### BUG-2: leaving a conversation mid-reply drops the draft *(review B6)*
 
-**Verified:** 2026-08-21 · **Severity:** medium, data loss
+**Verified:** 2026-08-22 · **Severity:** medium, data loss
 
 `Inbox.tsx` derives the inline composer from `readerOpen && selected.id === composerDraft.threadId`.
-`closeReader` routes through `inlineComposerRef.current.exitConversation()` (`Inbox.tsx:489`), but `switchView`
+`closeReader` routes through `inlineComposerRef.current.exitConversation()` (`Inbox.tsx:490`), but `switchView`
 (`Inbox.tsx:340`) and `openOutbox` (`Inbox.tsx:352`) do not. They set `readerOpen = false` and leave
 `composerDraft` intact, so the keyed inline `<Composer>` unmounts and a full-window one mounts from the object
 captured at open.
 
 `useComposerDraft`'s unmount clears timers without flushing. Edits inside the 5 second checkpoint window are
 lost outright. Edits that did checkpoint disappear from the editor and are overwritten in SQLite on the next
-keystroke. The header nav and the Outbox button stay enabled during inline compose, and `composer.spec.ts:857`
+keystroke. The header nav and the Outbox button stay enabled during inline compose, and `composer.spec.ts:964`
 pins that they do, so nothing stops a user from hitting this.
 
 **Fix direction:** route both transitions through `exitConversation()` the way `closeReader` does. Add an e2e
@@ -63,10 +67,10 @@ that clicks "Drafts" mid-reply and asserts the draft body survives.
 
 ### BUG-3: bulk labelling shows one thread's state and applies it to all *(review B7)*
 
-**Verified:** 2026-08-21 · **Severity:** low-medium
+**Verified:** 2026-08-22 · **Severity:** low-medium
 
-`Inbox.tsx:792` passes `targets={[{ id: labelTarget.id, ... }]}`, which is the focused thread alone, while
-`useTriage.ts:39` rewrites `threadIds` to the whole selection and then calls `clearSelection()`.
+`Inbox.tsx:798` passes `targets={[{ id: labelTarget.id, ... }]}`, which is the focused thread alone, while
+`useTriage.ts:41` rewrites `threadIds` to the whole selection and then calls `clearSelection()`.
 
 Select three threads, press `l`, and toggle a label the focused row already carries. The picker offers "remove"
 based on that one row, then removes the label from all three, including the two that never had it. Because the
@@ -116,9 +120,9 @@ the same treatment for raw `style` and `src`.
 
 ### SEC-2: the quote CSS filter misses several flow-escaping properties *(review S2)*
 
-**Verified:** 2026-08-21 · **Severity:** low, recipient-side cosmetics only
+**Verified:** 2026-08-22 · **Severity:** low, recipient-side cosmetics only
 
-`FLOW_ESCAPING_PROPERTY` (`shared/mailSanitizer.ts:49`) matches
+`FLOW_ESCAPING_PROPERTY` (`shared/mailSanitizer.ts:51`) matches
 `position|z-index|inset|top|right|bottom|left|transform`. It does not match the standalone `translate`,
 `rotate`, and `scale` properties, `offset-*`, or `text-indent`.
 
@@ -167,9 +171,9 @@ makes it the natural place to assert the row's snippet and `last_msg_at`, but no
 
 ### GAP-4: offline bulk replay runs at N=3, not N=20
 
-**Verified:** 2026-08-21 · **Criterion:** F2 "airplane mode: 20 archives"
+**Verified:** 2026-08-22 · **Criterion:** F2 "airplane mode: 20 archives"
 
-`triage.spec.ts:338` loops three times. The perf suite now covers the F4 side of scale, with a 100-thread
+`triage.spec.ts:344` loops three times. The perf suite now covers the F4 side of scale, with a 100-thread
 archive and undo at 10,000 threads (`perf.spec.ts:394`), so this is the remaining scale gap.
 
 ### GAP-5: crash recovery is tested with a graceful quit
@@ -197,9 +201,10 @@ somebody found and verified it, not because it is scheduled.
 
 ### REF-1: two components far exceed the ~350-line bar *(review R3)*
 
-**Verified:** 2026-08-21
+**Verified:** 2026-08-22
 
-`Composer.tsx` is 1,044 lines and `Inbox.tsx` is 823, against the bar R1 set at roughly 350. Clean seams exist:
+`Composer.tsx` is 1,060 lines and `Inbox.tsx` is 829, against the bar R1 set at roughly 350. Both grew
+again in #65. Clean seams exist:
 `InlineQuote` plus `quoteSrcDoc` out of the composer, and the label and snooze picker wiring out of `Inbox`.
 
 ### REF-2: per-row mirror backoff *(review R4)*
