@@ -7,6 +7,7 @@ const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outputDir = join(projectDir, 'dist')
 const requiredEntries = [
   '/out/main/index.js',
+  '/out/main/service/utility.js',
   '/out/preload/index.js',
   '/out/renderer/index.html',
   '/node_modules/jsdom/lib/api.js',

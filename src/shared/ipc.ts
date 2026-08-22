@@ -97,7 +97,9 @@ export const TEST_CHANNELS = {
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',
   remoteDraft: 'attn:test:remoteDraft',
-  runLifetimeSweep: 'attn:test:runLifetimeSweep'
+  runLifetimeSweep: 'attn:test:runLifetimeSweep',
+  utilityState: 'attn:test:utilityState',
+  crashUtility: 'attn:test:crashUtility'
 } as const
 
 export interface InvokeChannels {
@@ -195,3 +197,17 @@ export interface BroadcastChannels {
 
 export type InvokeChannel = keyof InvokeChannels
 export type BroadcastChannel = keyof BroadcastChannels
+
+const BROADCAST_CHANNEL_SET = new Set<string>([
+  IPC_CHANNELS.outboxChanged,
+  IPC_CHANNELS.outboxProgress,
+  IPC_CHANNELS.mailChanged,
+  IPC_CHANNELS.mailActionsReverted,
+  IPC_CHANNELS.mailBodyHydrationFailed,
+  IPC_CHANNELS.mailFocusThreadAvailable,
+  IPC_CHANNELS.syncState
+])
+
+export const INVOKE_CHANNEL_NAMES = Object.values(IPC_CHANNELS).filter(
+  (channel): channel is InvokeChannel => !BROADCAST_CHANNEL_SET.has(channel)
+)

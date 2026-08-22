@@ -1,42 +1,23 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, powerMonitor, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
-import type { RevertedAction } from '../shared/actionRevert'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
-import type { OutboxChanged, OutboxProgress } from '../shared/outbox'
-import { clearUndo } from './actions'
-import { ActionExecutor, type ActionRecoveryProvider } from './actions/executor'
-import { ActionRevertNotices } from './actions/revertNotices'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
-import { type Db, openDatabase, schemaVersion } from './db'
-import { loadSeed } from './dev/seed'
-import { GmailClient } from './gmail/client'
-import { GmailMailProvider } from './gmail/provider'
-import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE, GmailQuotaLimiter } from './gmail/quota'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
-import { DraftMirrorExecutor } from './outbox/mirrorExecutor'
-import { OutboxSender } from './outbox/sender'
-import { cleanOutboxSpool, reconcileOutboxSpool } from './outbox/spool'
-import { SnoozeScheduler } from './scheduler'
-import { SyncController } from './syncController'
+import { SERVICE_PROTOCOL_VERSION, type ServiceAuth, type ServiceEvent } from './service/protocol'
+import { ServiceSupervisor } from './service/supervisor'
 import { TestSeams } from './testIpc'
 
-// E2E seam: an isolated userData dir gives each test run a fresh DB and empty
-// token store. Must be set before requestSingleInstanceLock() so concurrent
-// test apps (distinct dirs) don't share an instance lock.
 const testUserData = process.env.ATTN_TEST_USER_DATA
 if (testUserData) {
   app.setPath('userData', testUserData)
-  // Mirror console output to a file the e2e fixture attaches on failure —
-  // Playwright consumes early stdout before test listeners can attach, so
-  // boot-time lines would otherwise be lost to diagnostics.
   const logFile = join(testUserData, 'main.log')
   for (const level of ['log', 'warn', 'error'] as const) {
     const original = console[level].bind(console)
@@ -45,81 +26,27 @@ if (testUserData) {
       try {
         appendFileSync(logFile, `[${level}] ${args.map(String).join(' ')}\n`)
       } catch {
-        // Diagnostics only — never let logging break the app under test.
+        // Diagnostics must never break the app under test.
       }
     }
   }
 }
 
-let db: Db | null = null
+let service: ServiceSupervisor | null = null
 let seedAccountId: string | null = null
-let seedPath: string | undefined
-let actionExecutor: ActionExecutor | null = null
-let draftMirrorExecutor: DraftMirrorExecutor | null = null
-let outboxSender: OutboxSender | null = null
-let snoozeScheduler: SnoozeScheduler | null = null
-let mailNotifier: MailNotifier | null = null
-let syncController: SyncController | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
 let signInInFlight = false
 let teardownPromise: Promise<void> | null = null
-const foregroundProviderWork = new Map<string, number>()
-const gmailQuotaLimiters = new Map<string, GmailQuotaLimiter>()
-const actionRevertNotices = new ActionRevertNotices()
-// All attn:test:* seams live in testIpc.ts; inert (and never registered) in
-// production, where the deps below are read lazily so boot order is unchanged.
+let mailNotifier: MailNotifier | null = null
+
 const testSeams = new TestSeams(Boolean(testUserData), {
-  db: () => db,
-  seedPath: () => seedPath,
-  seedAccountId: () => seedAccountId,
-  currentAccountId,
-  actionExecutor: () => actionExecutor,
-  syncController: () => syncController,
-  broadcastMailChanged,
+  service: () => service,
   focusInboxThread
 })
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
-}
-
-function broadcastMailChanged(): void {
-  broadcast(IPC_CHANNELS.mailChanged, undefined)
-  mailNotifier?.updateBadge()
-}
-
-function broadcastOutboxChanged(change: OutboxChanged): void {
-  broadcast(IPC_CHANNELS.outboxChanged, change)
-  mailNotifier?.updateBadge()
-}
-
-function broadcastOutboxProgress(progress: OutboxProgress | null): void {
-  broadcast(IPC_CHANNELS.outboxProgress, progress)
-}
-
-function broadcastBodyHydrationFailed(accountId: string, threadId: string): void {
-  broadcast(IPC_CHANNELS.mailBodyHydrationFailed, { accountId, threadId })
-}
-
-function broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {
-  actionRevertNotices.add(accountId, actions)
-  broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
-}
-
-function hasForegroundProviderWork(accountId: string): boolean {
-  return (foregroundProviderWork.get(accountId) ?? 0) > 0
-}
-
-async function trackForegroundProviderWork<T>(accountId: string, work: () => Promise<T>): Promise<T> {
-  foregroundProviderWork.set(accountId, (foregroundProviderWork.get(accountId) ?? 0) + 1)
-  try {
-    return await work()
-  } finally {
-    const remaining = (foregroundProviderWork.get(accountId) ?? 1) - 1
-    if (remaining > 0) foregroundProviderWork.set(accountId, remaining)
-    else foregroundProviderWork.delete(accountId)
-  }
 }
 
 function focusInboxThread(threadId: string): void {
@@ -130,13 +57,7 @@ function focusInboxThread(threadId: string): void {
 }
 
 function oauthSearchDirs(): string[] {
-  // Under e2e, only the isolated dir — a developer's real oauth.config.json in
-  // either checkout must never leak into test runs.
   return oauthConfigSearchDirs(app.getAppPath(), app.getPath('userData'), Boolean(testUserData))
-}
-
-function isSeeded(): boolean {
-  return seedAccountId !== null
 }
 
 function authStatus(): AuthStatus {
@@ -146,64 +67,16 @@ function authStatus(): AuthStatus {
   return { configured: config !== null, signedIn: tokens !== null, email: tokens?.email }
 }
 
-function currentAccountId(): string | null {
-  return seedAccountId ?? loadTokens(app.getPath('userData'))?.email ?? null
-}
-
-function makeClient(generation: number): GmailClient | null {
-  const config = loadOAuthConfig(oauthSearchDirs())
+function currentServiceAuth(): ServiceAuth | null {
   const tokens = loadTokens(app.getPath('userData'))
-  if (!config || !tokens) return null
-  const quotaAccount = tokens.email ?? 'unknown-account'
-  let quotaLimiter = gmailQuotaLimiters.get(quotaAccount)
-  if (!quotaLimiter) {
-    quotaLimiter = new GmailQuotaLimiter({
-      unitsPerMinute: config.quota_units_per_minute ?? DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE
-    })
-    gmailQuotaLimiters.set(quotaAccount, quotaLimiter)
-  }
-  return new GmailClient(
-    config,
-    tokens,
-    (nextTokens) => {
-      if (generation === syncController?.getGeneration()) {
-        saveTokens(app.getPath('userData'), nextTokens)
-      }
-    },
-    { quotaLimiter }
-  )
-}
-
-function makeCurrentClient(): GmailClient | null {
-  const controller = syncController
-  return controller ? makeClient(controller.getGeneration()) : null
-}
-
-function makeProvider(generation: number): GmailMailProvider | null {
-  if (seedAccountId) return null
-  const client = makeClient(generation)
-  return client ? new GmailMailProvider(client) : null
-}
-
-function makeCurrentProvider(): GmailMailProvider | null {
-  const controller = syncController
-  return controller ? makeProvider(controller.getGeneration()) : null
-}
-
-function disposeGmailQuotaLimiters(reason: Error): void {
-  for (const limiter of gmailQuotaLimiters.values()) limiter.dispose(reason)
-  gmailQuotaLimiters.clear()
-}
-
-function makeCurrentActionProvider(): ActionRecoveryProvider | null {
-  return testSeams.provider() ?? makeCurrentProvider()
+  if (!tokens) return null
+  return { config: loadOAuthConfig(oauthSearchDirs()), tokens }
 }
 
 async function signIn(): Promise<AuthSignInResult> {
   const config = loadOAuthConfig(oauthSearchDirs())
   if (!config) {
-    const resumedActions = testSeams.seededResume()
-    if (resumedActions > 0) syncController?.onSignIn()
+    const resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
     return { status: authStatus(), resumedActions }
   }
   if (signInInFlight) cancelActiveSignIn()
@@ -212,14 +85,14 @@ async function signIn(): Promise<AuthSignInResult> {
   try {
     const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
     saveTokens(app.getPath('userData'), tokens)
+    seedAccountId = null
     pendingFocus = null
     mailNotifier?.setAccountId(tokens.email ?? null)
+    service?.setAuth({ config, tokens })
+    resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
     console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
-    snoozeScheduler?.refresh()
-    if (tokens.email) resumedActions = actionExecutor?.resumeAuthFailures(tokens.email) ?? 0
-    syncController?.onSignIn()
   } catch (error) {
-    console.error('[auth] sign-in failed:', error instanceof Error ? error.message : error)
+    console.error(`[auth] sign-in failed: ${errorMessage(error)}`)
     throw error
   } finally {
     signInInFlight = false
@@ -228,18 +101,12 @@ async function signIn(): Promise<AuthSignInResult> {
 }
 
 function signOut(): AuthStatus {
-  const account = currentAccountId()
   cancelActiveSignIn()
-  syncController?.onSignOut()
-  disposeGmailQuotaLimiters(new Error('signed out'))
+  service?.signOut()
   seedAccountId = null
   clearTokens(app.getPath('userData'))
   pendingFocus = null
-  if (account) actionRevertNotices.clear(account)
   mailNotifier?.setAccountId(null)
-  clearUndo(account ?? undefined)
-  snoozeScheduler?.refresh()
-  outboxSender?.refresh()
   console.log('[auth] signed out')
   return authStatus()
 }
@@ -261,10 +128,6 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       nodeIntegration: false
     }
   })
-  // HTML mail lives in our scriptless srcdoc frame. Some legitimate senders
-  // serve images with CORP: same-origin, which Chromium otherwise blocks in
-  // that frame. Remove only that embedding response header for image requests
-  // from the mail frame; the renderer still loads the original URL directly.
   win.webContents.session.webRequest.onHeadersReceived(
     { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
     (details, callback) => {
@@ -285,116 +148,98 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   win.on('ready-to-show', () => {
     if (shouldShow) win.show()
   })
+  win.on('focus', publishFocus)
+  win.on('blur', publishFocus)
   attachBackgroundWindow(win)
-  // A file dropped outside the composer's drop target must never replace the
-  // sandboxed renderer with file:// content (or navigate it anywhere else).
   win.webContents.on('will-navigate', (event) => event.preventDefault())
-  // All external links open in the system browser, never in-app (SPEC §6).
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
   })
-  if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
-  else win.loadFile(join(__dirname, '../renderer/index.html'))
+  if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
+  else void win.loadFile(join(__dirname, '../renderer/index.html'))
   return win
 }
 
-async function initialize(): Promise<void> {
-  const dbPath = join(app.getPath('userData'), 'attn.db')
-  db = openDatabase(dbPath)
-  console.log(`[db] open at ${dbPath} (schema v${schemaVersion(db)})`)
-  seedPath = testUserData ? process.env.ATTN_TEST_SEED : undefined
-  if (seedPath) {
-    const existing = db.prepare('SELECT id FROM accounts ORDER BY created_at LIMIT 1').get() as
-      | { id: string }
-      | undefined
-    seedAccountId = existing?.id ?? loadSeed(db, seedPath).accountId
-    console.log(`[sync] backfill stages skipped for seeded account ${seedAccountId}`)
-  }
-  const activeDb = db
-  await reconcileOutboxSpool(activeDb, app.getPath('userData'))
-  // Quitting during that await runs teardown to completion, including
-  // db.close(). Everything below would then build on a closed handle.
-  if (db !== activeDb) {
-    console.log('[boot] aborted: shutdown ran while reconciling the outbox spool')
-    return
-  }
-  syncController = new SyncController({
-    db: activeDb,
-    currentAccountId,
-    isSignedIn: () => authStatus().signedIn,
-    isSeeded,
-    makeProvider,
-    isForeground: () => BrowserWindow.getAllWindows().some((win) => win.isFocused()),
-    hasForegroundProviderWork,
-    broadcastState: (state) => broadcast(IPC_CHANNELS.syncState, state),
-    broadcastMailChanged,
-    getActionExecutor: () => actionExecutor,
-    getDraftMirrorExecutor: () => draftMirrorExecutor,
-    getOutboxSender: () => outboxSender,
-    getSnoozeScheduler: () => snoozeScheduler
+function publishFocus(): void {
+  service?.control({
+    kind: 'focus',
+    focused: BrowserWindow.getAllWindows().some((win) => win.isFocused())
   })
+}
+
+function handleServiceEvent(event: ServiceEvent): void {
+  if (event.kind === 'mail-changed') broadcast(IPC_CHANNELS.mailChanged, undefined)
+  else if (event.kind === 'outbox-changed') broadcast(IPC_CHANNELS.outboxChanged, event.payload)
+  else if (event.kind === 'outbox-progress') broadcast(IPC_CHANNELS.outboxProgress, event.payload)
+  else if (event.kind === 'sync-state') broadcast(IPC_CHANNELS.syncState, event.payload)
+  else if (event.kind === 'body-hydration-failed') {
+    broadcast(IPC_CHANNELS.mailBodyHydrationFailed, {
+      accountId: event.accountId,
+      threadId: event.threadId
+    })
+  } else if (event.kind === 'actions-reverted') {
+    broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
+  } else if (event.kind === 'badge') mailNotifier?.updateBadge(event.unreadCount)
+  else if (event.kind === 'notification-candidates') {
+    mailNotifier?.notify(event.accountId, event.candidates, event.pausedUntil)
+  } else if (event.kind === 'token-update') {
+    saveTokens(app.getPath('userData'), event.tokens)
+    service?.cacheTokens(event.tokens)
+  } else if (event.kind === 'log') console[event.level](event.message)
+}
+
+async function initialize(): Promise<void> {
+  const userDataPath = app.getPath('userData')
+  const initialTokens = loadTokens(userDataPath)
+  mailNotifier = new MailNotifier(initialTokens?.email ?? null, showMainWindow, focusInboxThread)
+  mailNotifier.start()
+  service = new ServiceSupervisor(join(__dirname, 'service/utility.js'), {
+    protocolVersion: SERVICE_PROTOCOL_VERSION,
+    dbPath: join(userDataPath, 'attn.db'),
+    userDataPath,
+    downloadsPath: app.getPath('downloads'),
+    testMode: Boolean(testUserData),
+    ...(testUserData && process.env.ATTN_TEST_SEED ? { testSeed: process.env.ATTN_TEST_SEED } : {}),
+    auth: currentServiceAuth(),
+    focused: false
+  })
+  service.onEvent(handleServiceEvent)
+  const ready = await service.start()
+  seedAccountId = testUserData && process.env.ATTN_TEST_SEED ? ready.accountId : null
+  mailNotifier.setAccountId(ready.accountId)
+  console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
+  console.log('[utility] service ready; SQLite ownership transferred')
   stopIpc = registerIpc({
-    db: activeDb,
-    currentAccountId,
+    service,
     authStatus,
     signIn,
     signOut,
-    makeClient: makeCurrentClient,
-    makeProvider: makeCurrentProvider,
-    isSeeded,
-    executor: () => actionExecutor,
-    draftMirrorExecutor: () => draftMirrorExecutor,
-    outboxSender: () => outboxSender,
-    scheduler: () => snoozeScheduler,
-    syncController: () => syncController,
-    broadcastMailChanged,
-    broadcastOutboxChanged,
-    broadcastBodyHydrationFailed,
-    trackForegroundProviderWork,
     pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
       pendingFocus = null
     },
-    peekRevertedActions: (accountId) => actionRevertNotices.peek(accountId),
-    acknowledgeRevertedActions: (accountId, noticeId) => actionRevertNotices.acknowledge(accountId, noticeId),
-    waitForConversation: (threadId) => testSeams.waitForConversation(threadId),
-    draftReopenDelay: () => testSeams.draftReopenDelay(),
-    pickAttachmentPaths: testUserData ? async () => testSeams.takeAttachmentPickerPaths() : undefined,
-    draftInlineImageDelay: () => testSeams.draftInlineImageDelay(),
-    consumeTestDraftSaveFailure: () => testSeams.consumeDraftSaveFailure(),
-    testUserData: Boolean(testUserData)
+    pickAttachmentPaths: testUserData ? async () => testSeams.takeAttachmentPickerPaths() : undefined
   })
-  actionExecutor = new ActionExecutor(activeDb, currentAccountId, makeCurrentActionProvider, {
-    notify: broadcastMailChanged,
-    notifyReverted: broadcastActionsReverted
-  })
-  draftMirrorExecutor = new DraftMirrorExecutor(activeDb, currentAccountId, makeCurrentProvider, {
-    spoolRoot: join(app.getPath('userData'), 'outbox')
-  })
-  outboxSender = new OutboxSender(activeDb, currentAccountId, makeCurrentProvider, broadcastOutboxChanged, {
-    beforeRemote: (signal) => draftMirrorExecutor?.waitForIdle(signal) ?? Promise.resolve(),
-    spoolRoot: join(app.getPath('userData'), 'outbox'),
-    cleanSpool: (id) => cleanOutboxSpool(app.getPath('userData'), id),
-    progress: broadcastOutboxProgress,
-    mailChanged: broadcastMailChanged
-  })
-  snoozeScheduler = new SnoozeScheduler(
-    activeDb,
-    currentAccountId,
-    broadcastMailChanged,
-    () => void actionExecutor?.trigger()
+  powerMonitor.on('resume', refreshSchedulersAfterResume)
+  const { startHidden } = initializeBackground(
+    ready.background,
+    {
+      markLoginItemRegistered: () => void service?.internal('mark-login-item-registered'),
+      setNotificationPausedUntil: (pausedUntil) =>
+        void service?.internal('set-notification-pause', pausedUntil).catch((error) => {
+          console.error(`[notifications] could not save pause setting: ${errorMessage(error)}`)
+        })
+    },
+    createWindow
   )
-  snoozeScheduler.start()
-  outboxSender.start()
-  powerMonitor.on('resume', refreshSnoozesAfterResume)
-  const { startHidden } = initializeBackground(activeDb, createWindow)
   createWindow({ show: !startHidden })
-  mailNotifier = new MailNotifier(activeDb, currentAccountId(), showMainWindow, focusInboxThread)
-  mailNotifier.start()
   testSeams.register()
-  if (authStatus().signedIn) void syncController.resumeOnlineWork()
   app.on('activate', () => showMainWindow())
+}
+
+function refreshSchedulersAfterResume(): void {
+  service?.control({ kind: 'refresh-schedulers' })
 }
 
 function teardown(): Promise<void> {
@@ -404,43 +249,15 @@ function teardown(): Promise<void> {
 }
 
 async function teardownOwnedResources(): Promise<void> {
-  // Invoke handlers close over process-owned resources, so remove them before
-  // stopping those resources. Iterating the channel map keeps this exhaustive.
-  for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel)
   stopIpc?.()
   stopIpc = null
-  syncController?.stop()
-  syncController = null
-  powerMonitor.removeListener('resume', refreshSnoozesAfterResume)
-  actionExecutor?.stop()
-  actionExecutor = null
-  const mirror = draftMirrorExecutor
-  const sender = outboxSender
-  snoozeScheduler?.stop()
-  snoozeScheduler = null
+  powerMonitor.removeListener('resume', refreshSchedulersAfterResume)
+  testSeams.dispose()
   mailNotifier?.stop()
   mailNotifier = null
-  testSeams.dispose()
-  actionRevertNotices.clear()
-  const stopped = await Promise.allSettled([
-    mirror?.stop() ?? Promise.resolve(),
-    sender?.stop() ?? Promise.resolve()
-  ])
-  for (const result of stopped) {
-    if (result.status === 'rejected') {
-      console.error(`[shutdown] worker stop failed: ${String(result.reason)}`)
-    }
-  }
-  draftMirrorExecutor = null
-  outboxSender = null
-  disposeGmailQuotaLimiters(new Error('application shutting down'))
-  db?.close()
-  db = null
-}
-
-function refreshSnoozesAfterResume(): void {
-  snoozeScheduler?.refresh()
-  outboxSender?.refresh()
+  const ownedService = service
+  service = null
+  await ownedService?.stop()
 }
 
 const gotLock = app.requestSingleInstanceLock()
@@ -453,8 +270,6 @@ else {
     event.preventDefault()
     if (preparingQuit) return
     preparingQuit = true
-    // Gmail draft creation is not idempotent. Quiesce both workers before
-    // teardown closes SQLite, then stop before either can select another row.
     void teardown().finally(() => {
       quitPrepared = true
       app.quit()
@@ -470,8 +285,6 @@ else {
       void teardown().finally(() => app.exit(1))
     }
   })
-  // Deliberately keep the process alive with no windows so sync and
-  // notifications continue running in the background on every platform.
   app.on('window-all-closed', () => {})
   app.on('will-quit', () => void teardown())
 }

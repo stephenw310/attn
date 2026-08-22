@@ -1,20 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import type { Db } from './db'
-import type { NotificationCandidate } from './notify'
 import {
   applyUnreadBadge,
   BoundedRetainer,
-  candidatesFor,
   isolateNotificationFailure,
-  notificationPausedUntil,
   notificationTarget,
   oneHourFrom,
   PENDING_FOCUS_TTL_MS,
   planNotifications,
-  setNotificationPausedUntil,
   takePendingFocus,
   tomorrowStart
 } from './notify'
+import {
+  candidatesFor,
+  type NotificationCandidate,
+  notificationPausedUntil,
+  setNotificationPausedUntil
+} from './service/notificationQueries'
 
 function mail(threadId: string, overrides: Partial<NotificationCandidate> = {}): NotificationCandidate {
   return {

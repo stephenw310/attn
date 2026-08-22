@@ -18,14 +18,14 @@ whole stage pipeline at once rather than split it across milestones. What remain
 
 | Task | State | Blocks |
 |---|---|---|
-| S1 utility process | **open**, not started | F10's indexing |
+| S1 utility process | **done** | F10's indexing |
 | S2 per-message labels | **open**, not started | F3 mailbox views, S4's tombstone pass |
 | S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
 | S4 reconcile and expiry recovery | **part done**: membership shipped in #51, tombstone pass open | trustworthy mailbox views |
 | Feature half | **open**, not planned | nothing yet |
 
-So two and a half tasks are left: S1, S2, and S4's tombstone pass. S1 and S2 are independent and can run side
-by side. The feature tasks get written up once the store's shape is settled.
+So one and a half storage tasks are left: S2 and S4's tombstone pass. The feature tasks get written up once
+the store's shape is settled.
 
 Every task section below opens with the same **Status** line, so you never have to infer state from whether a
 section looks long.
@@ -113,7 +113,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 
 ## S1: move sync work into an Electron utility process
 
-**Status: open, not started.**
+**Status: done.** The boundary design is recorded in [S1-DESIGN.md](S1-DESIGN.md).
 
 **Depends on:** nothing · **Unblocks:** F10's FTS indexing · **Parallel with:** S2 · **Spec:** §6 architecture
 
@@ -161,6 +161,13 @@ Existing unit and e2e coverage passes with the boundary moved. Add a supervisor 
 process mid-backfill and asserts the next cycle resumes from the persisted cursor with no duplicate rows. Done
 when sync runs off the main thread, the §7 interaction budgets are unchanged or better, and no invariant has a
 second implementation.
+
+**Shipped shape:** `ServiceSupervisor` owns the Electron utility lifecycle and typed request protocol. The
+utility runtime owns SQLite, sync, action replay, snooze scheduling, draft mirroring, outbox sending, local
+reads, and seeded test mutations. Main retains OAuth/keychain access and native effects. The crash e2e kills
+the utility during a lifetime page walk, waits for the supervisor restart, resumes from `sweep_cursor`, and
+asserts one thread and message row per fixture. The 10,000-thread profile kept cached conversation open at
+5 ms p95, local mail refresh at 37 ms p95, and application-owned steady-state memory at 130 MB.
 
 ---
 
@@ -330,7 +337,6 @@ consequences.
 | Question | Why it matters | Decide by |
 |---|---|---|
 | Pathological-mailbox posture: pick a design target such as smooth to 250k messages, then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages, and lifetime headers can exceed that | E7's real-mailbox capture in [T20-EVIDENCE.md](T20-EVIDENCE.md) |
-| Does S1 run before or after the M2 dogfood week, and does S1 or S2 go first? | S1 moves the process boundary across most of `src/main/`, which is disruptive under a daily driver; S2 bumps the schema, which costs a manual DDL on the dogfood profile | Before either task starts |
 
 Open defects and coverage gaps live in [KNOWN-ISSUES.md](KNOWN-ISSUES.md). Manual sign-off evidence is ticked
 in [T20-EVIDENCE.md](T20-EVIDENCE.md).

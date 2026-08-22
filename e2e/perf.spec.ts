@@ -1,4 +1,5 @@
-import type { Page, TestInfo } from '@playwright/test'
+import type { ElectronApplication, Page, TestInfo } from '@playwright/test'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 const SAMPLE_COUNT = 5
@@ -104,6 +105,28 @@ async function reportMetric(
     body: JSON.stringify(result, null, 2),
     contentType: 'application/json'
   })
+}
+
+interface UtilityMemoryKb {
+  rss: number
+  heapTotal: number
+  heapUsed: number
+  external: number
+  sqliteCacheBudget: number
+}
+
+async function utilityMemoryKb(app: ElectronApplication): Promise<UtilityMemoryKb> {
+  return app.evaluate(
+    ({ ipcMain }, channel) =>
+      new Promise<UtilityMemoryKb>((resolve, reject) =>
+        ipcMain.emit(channel, {}, [], (result: { utilityMemoryKb?: UtilityMemoryKb; error?: string }) => {
+          if (result.error) reject(new Error(result.error))
+          else if (result.utilityMemoryKb) resolve(result.utilityMemoryKb)
+          else reject(new Error('utility memory measurement unavailable'))
+        })
+      ),
+    TEST_CHANNELS.utilityState
+  )
 }
 
 async function measureListRender(page: Page): Promise<number> {
@@ -321,11 +344,14 @@ test.describe('@perf 10,000-thread inbox', () => {
     )
 
     // Chromium's macOS working-set figures count shared Electron pages once per
-    // process, so summing them badly overstates memory owned by Attn. The main
-    // process private figure includes SQLite and other native allocations; the
-    // renderer heap captures the 10k-thread model. The virtualized DOM remains
-    // separately bounded by the row-count assertion above.
+    // process, so summing them badly overstates memory owned by Attn. Main private
+    // memory plus the utility's live heap/external allocations and configured
+    // SQLite cache ceiling captures app-owned allocations. Utility RSS is diagnostic
+    // only on macOS because the Plugin helper maps nearly 1 GB of shared Electron
+    // pages. Renderer JS heap captures the 10k-thread model. The virtualized DOM
+    // remains separately bounded by the row-count assertion above.
     const mainPrivateKb = await app.evaluate(async () => (await process.getProcessMemoryInfo()).private)
+    const utilityMemory = await utilityMemoryKb(app)
     const rendererHeapBytes = await page.evaluate(
       () =>
         (
@@ -335,10 +361,18 @@ test.describe('@perf 10,000-thread inbox', () => {
         ).memory?.usedJSHeapSize ?? 0
     )
     expect(rendererHeapBytes, 'Chromium renderer heap measurement is available').toBeGreaterThan(0)
-    const memoryMb = Math.round(mainPrivateKb / 1024 + rendererHeapBytes / 1024 / 1024)
+    const utilityOwnedKb = utilityMemory.heapUsed + utilityMemory.external + utilityMemory.sqliteCacheBudget
+    const memoryMb = Math.round(
+      mainPrivateKb / 1024 + utilityOwnedKb / 1024 + rendererHeapBytes / 1024 / 1024
+    )
     const memoryResult = {
       applicationOwnedMemoryMb: memoryMb,
       mainPrivateMb: Math.round(mainPrivateKb / 1024),
+      utilityRssMb: Math.round(utilityMemory.rss / 1024),
+      utilityHeapUsedMb: Math.round(utilityMemory.heapUsed / 1024),
+      utilityExternalMb: Math.round(utilityMemory.external / 1024),
+      utilitySqliteCacheBudgetMb: Math.round(utilityMemory.sqliteCacheBudget / 1024),
+      utilityOwnedMb: Math.round(utilityOwnedKb / 1024),
       rendererHeapMb: Math.round(rendererHeapBytes / 1024 / 1024),
       ceilingMb: MEMORY_CEILING_MB
     }
@@ -347,7 +381,9 @@ test.describe('@perf 10,000-thread inbox', () => {
       body: JSON.stringify(memoryResult, null, 2),
       contentType: 'application/json'
     })
-    expect(memoryMb, 'main private memory plus renderer JS heap').toBeLessThan(MEMORY_CEILING_MB)
+    expect(memoryMb, 'main private memory plus utility-owned allocations and renderer JS heap').toBeLessThan(
+      MEMORY_CEILING_MB
+    )
   })
 
   test('opens mounted conversation content within the CI-safe ceiling', async ({ page }, testInfo) => {

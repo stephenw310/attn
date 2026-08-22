@@ -45,6 +45,28 @@ Follow-up review-fix run on 2026-08-20 (`npm run e2e:perf`, hidden macOS arm64 a
 The new full local snapshot refresh measured 30 ms median / 33 ms p95; list render measured 337 ms median /
 445 ms p95, scroll pacing 8 ms median / 9 ms p95, and application-owned memory 306 MB.
 
+## S1 utility-boundary profile — 2026-08-22
+
+Command: `npm run e2e:perf`, hidden macOS arm64 app. Environment: macOS 26.5.2, Node 24.14.0,
+Electron 43.3.0. All nine cases passed after SQLite and the service workers moved into the utility process.
+
+| Metric | Result | Budget |
+|---|---:|---:|
+| Cached conversation open | 1 ms median / 5 ms p95 | <50 ms |
+| Full local snapshot refresh | 34 ms median / 37 ms p95 | 2,000 ms CI ceiling |
+| Scrolling `requestAnimationFrame` interval | 8 ms median / 9 ms p95 | <20 ms p95 |
+| Single-thread triage feedback | 0 ms p95 | <16 ms |
+| 100-thread archive feedback + undo | 0 ms | <16 ms |
+| Composer open | 3 ms median / 3 ms p95 | <50 ms |
+| Composer keystroke → next paint | 4 ms median / 10 ms p95 | <16 ms |
+| Application-owned steady-state memory | 130 MB | <500 MB |
+
+The memory gate now includes main private memory, utility V8 heap and external allocations, the configured
+SQLite cache ceiling, and renderer JS heap. It records utility RSS separately for diagnostics but excludes it
+from the app-owned sum on macOS: the Electron Plugin helper maps 976 MB of shared framework pages while its
+live heap, external data, and SQLite cache ceiling total 28 MB. Counting those shared mappings as private
+would report the same Electron framework once per process.
+
 ## Quota and bootstrap instrumentation
 
 Gmail requests share one per-account weighted scheduler across authentication generations. A short burst bucket
