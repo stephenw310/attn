@@ -1,6 +1,7 @@
 import type { Readable } from 'node:stream'
 import { utilityProcess } from 'electron'
 import type { InvokeChannel, InvokeChannels } from '../../shared/ipc'
+import type { SyncState } from '../../shared/mail'
 import type { TokenSet } from '../auth/googleAuth'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import type {
@@ -71,6 +72,7 @@ export class ServiceSupervisor {
   private nextRequestId = 1
   private stopping = false
   private terminalError: Error | null = null
+  private terminalSync: SyncState | null = null
   private hasEverBeenReady = false
   private initialStartFailures = 0
   private restartFailures: number[] = []
@@ -112,6 +114,15 @@ export class ServiceSupervisor {
     if (this.stopping) return Promise.reject(new Error('Attn service is stopping'))
     if (!this.child) this.spawn()
     return this.waitUntilReady()
+  }
+
+  /**
+   * The sync state to report once the service has stopped for good, or null
+   * while it is running. A crash-loop failure is broadcast once, so a window
+   * that mounts afterwards has to read it instead of waiting for the event.
+   */
+  terminalState(): SyncState | null {
+    return this.terminalSync
   }
 
   async invoke<K extends InvokeChannel>(
@@ -286,13 +297,14 @@ export class ServiceSupervisor {
           `Attn service stopped after ${this.restartFailures.length} crashes within ${this.restartFailureWindowMs} ms (last exit ${code})`
         )
         this.terminalError = error
-        this.dispatchEvent({
-          kind: 'sync-state',
-          payload: {
-            phase: 'error',
-            message: 'Mail service stopped after repeated crashes. Restart Attn.'
-          }
-        })
+        // Broadcast reaches every live window; `terminalState()` answers the
+        // seeding read a window opened after this point makes, which would
+        // otherwise be forwarded to the dead utility and rejected.
+        this.terminalSync = {
+          phase: 'error',
+          message: 'Mail service stopped after repeated crashes. Restart Attn.'
+        }
+        this.dispatchEvent({ kind: 'sync-state', payload: this.terminalSync })
         this.rejectReadyWaiters(error)
         console.error(`[utility] ${error.message}`)
         return

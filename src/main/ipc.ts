@@ -38,7 +38,8 @@ export function registerIpc(context: IpcContext): () => void {
     IPC_CHANNELS.authSignOut,
     IPC_CHANNELS.draftPickAttachments,
     IPC_CHANNELS.mailDownloadAttachment,
-    IPC_CHANNELS.mailTakePendingFocus
+    IPC_CHANNELS.mailTakePendingFocus,
+    IPC_CHANNELS.syncGetState
   ])
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
@@ -61,6 +62,13 @@ export function registerIpc(context: IpcContext): () => void {
     const result = await context.service.invoke(IPC_CHANNELS.mailDownloadAttachment, request)
     if ('path' in result) shell.showItemInFolder(result.path)
     return result
+  })
+  // A window that mounts after the utility stopped for good seeds its sync
+  // banner from this read. Forwarding it would reject and leave that window
+  // showing an idle, healthy-looking status for a service that is gone.
+  handle(IPC_CHANNELS.syncGetState, () => {
+    const terminal = context.service.terminalState()
+    return terminal ?? context.service.invoke(IPC_CHANNELS.syncGetState)
   })
   handle(IPC_CHANNELS.mailTakePendingFocus, () => {
     const threadId = takePendingFocus(context.pendingFocus())

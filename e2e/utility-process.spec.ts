@@ -56,6 +56,14 @@ function runSweep(app: ElectronApplication, request: SweepRequest): Promise<Swee
   )
 }
 
+function crashUtilityRaw(app: ElectronApplication): Promise<string | undefined> {
+  return app.evaluate(
+    ({ ipcMain }, channel) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(channel, {}, resolve)),
+    TEST_CHANNELS.crashUtility
+  )
+}
+
 function crashUtility(app: ElectronApplication): Promise<void> {
   return app.evaluate(
     ({ ipcMain }, channel) =>
@@ -118,5 +126,30 @@ test('restarts after a utility crash and resumes the persisted sweep cursor with
     threadCount: 2,
     messageCount: 2,
     cursors: { sweep_cursor: 'done' }
+  })
+})
+
+test('surfaces a crash-looped utility to a window that reads sync state after it died', async ({
+  app,
+  page
+}) => {
+  // The supervisor tolerates four crashes inside its rolling window and gives up
+  // on the fifth. Each of the first four has to reach `ready` again before the
+  // next kill counts, so drive them one at a time rather than in parallel.
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    expect(await crashUtilityRaw(app), `crash ${attempt} should recover`).toBeUndefined()
+  }
+  expect(await crashUtilityRaw(app)).toContain('crashes within')
+
+  // Live windows learn from the one-shot broadcast.
+  await expect(page.getByTestId('status-note')).toHaveAttribute('data-status', 'error')
+  await page.getByTestId('status-error-button').click()
+  await expect(page.getByTestId('status-error-message')).toContainText('Mail service stopped')
+
+  // A window mounting now has no broadcast to catch, so it seeds from this read.
+  // Forwarded to the dead utility it would reject and leave the banner idle.
+  expect(await page.evaluate(() => window.attn.sync.getState())).toEqual({
+    phase: 'error',
+    message: 'Mail service stopped after repeated crashes. Restart Attn.'
   })
 })

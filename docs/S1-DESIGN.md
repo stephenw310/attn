@@ -53,7 +53,9 @@ introduce a second reducer or a main-process fallback write.
 The supervisor starts one utility, waits for its `ready` event, and only then opens renderer IPC. An unexpected
 exit rejects in-flight requests and starts a fresh utility against the same database with exponential backoff,
 capped at five seconds. Five crashes within one minute stop the restart loop and reject callers waiting for the
-service. There is no app restart and no database fallback in main.
+service. Giving up broadcasts a terminal `sync` error, and the supervisor keeps that state so a window opened
+afterwards reads it from main instead of forwarding to the stopped utility. There is no app restart and no
+database fallback in main.
 
 Backfill, lifetime, and attachment walkers checkpoint complete pages in `sync_state`. After restart,
 `SyncController` reads `backfill_cursor`, `sweep_cursor`, and `attachment_cursor` and resumes the unfinished

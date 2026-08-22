@@ -172,6 +172,7 @@ describe('ServiceSupervisor', () => {
     const started = supervisor.start()
     children[0].ready()
     await started
+    expect(supervisor.terminalState()).toBeNull()
 
     children[0].exit(1)
     const waitingInvoke = supervisor.invoke(IPC_CHANNELS.mailListThreads)
@@ -192,6 +193,12 @@ describe('ServiceSupervisor', () => {
         phase: 'error',
         message: 'Mail service stopped after repeated crashes. Restart Attn.'
       }
+    })
+    // The broadcast above only reaches windows that already exist. A window
+    // opened afterwards seeds its banner from this instead.
+    expect(supervisor.terminalState()).toEqual({
+      phase: 'error',
+      message: 'Mail service stopped after repeated crashes. Restart Attn.'
     })
     await vi.advanceTimersByTimeAsync(1_000)
     expect(nextChild).toBe(3)
