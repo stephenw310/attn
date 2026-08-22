@@ -305,13 +305,14 @@ footer is absent and the composer owns its action footer, so editing controls ca
 - **A round trip keeps the body and the quoted trail apart (2026-08-16):** Gmail stores a draft as one document, so a reply or forward returns with its quote joined to the body. Attn separates them again on reimport by recognizing the trailing quote structurally — never by matching bytes, since Gmail rewrites markup. Reopening therefore shows the same collapsed quote it showed before the round trip, rather than loading quoted mail into the editor as authored content. Attn declines to split when anything but whitespace follows the quote, because the author typed it there and reassembly always puts the quote last; such a draft stays merged.
 - **A mirrored draft is complete (2026-08-16):** attachments mirror with the body, so a draft composed in Attn can be opened and **sent from Gmail web or mobile** with its files intact. Because Gmail replaces a draft wholesale, each checkpoint re-sends every attachment byte; the mirror interval therefore lengthens once a draft carries meaningful payload, while attaching or removing a file still pushes on the normal interval. Bytes stream from the local spool rather than being held in memory, and a file that Gmail echoes back is recognized as the one already held locally rather than stored a second time.
 - **Send:** `Mod+Enter`.
-- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/5/**8**/10/20/30s, default 8). A toast shows "Sent — Undo (Z)", stays visible for the entire window, and counts down the durable send deadline with a progress bar. Undo reopens the composer with everything intact. The API call happens only after the window elapses.
+- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/**5**/8/10/20/30s, default 5). A queued reply or forward closes the composer and appears in its conversation immediately, without waiting for either the send deadline or a sync poll; that newest message is expanded by default. A toast shows "Sent — Undo (Z)", stays visible for the entire window, and counts down the durable send deadline with a progress bar. Undo removes the queued message from the conversation and reopens the composer with everything intact. The API call happens only after the window elapses.
 - Outbox state machine (`composing → queued → sending → sent`) guarantees exactly-once send across crashes: on relaunch, `sending`-state items are verified against the server before any retry.
 
 **Acceptance criteria**
 - Composer opens in < 50ms; typing latency is imperceptible (< 16ms/keystroke).
 - Force-quit mid-compose → draft fully recovers on relaunch.
 - Undo within the window always succeeds; the message never reaches the network before the window closes.
+- Queued replies and forwards appear expanded in the conversation immediately; undo removes that projection and restores the composer.
 - No scenario produces a duplicate send.
 
 ### F7 — Send later (deferred to v1.5)

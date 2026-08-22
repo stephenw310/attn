@@ -36,6 +36,43 @@ test.use({ seed: '.artifacts/perf-seed.json' })
 // A retry would hide the instability this smoke is intended to expose.
 test.describe.configure({ retries: 0, timeout: PERF_TEST_TIMEOUT_MS })
 
+test.describe('@perf focused-row archive motion', () => {
+  test.use({ seed: 'fixtures/seed-inbox.json' })
+
+  test('starts moving the replacement row before the exit midpoint', async ({ page }) => {
+    await page.addStyleTag({
+      content: '.app-thread-exit-shell { animation-play-state: paused !important; }'
+    })
+    const rows = page.getByTestId('thread-row')
+    await expect(rows).toHaveCount(8)
+    const nextRow = rows.filter({ hasText: 'Northstar Books' })
+    const nextRowStart = await nextRow.evaluate((element) => element.getBoundingClientRect().y)
+
+    await page.keyboard.press('e')
+    await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
+    await expect(nextRow).toHaveAttribute('data-selected', 'true')
+    const timeline = await rows.first().evaluate((element) => {
+      const shell = element.closest<HTMLElement>('.app-thread-exit-shell')
+      const collapse = shell?.getAnimations().find((animation) => {
+        const effect = animation.effect as KeyframeEffect | null
+        return effect?.getKeyframes().some((keyframe) => keyframe.maxHeight === '0px')
+      })
+      if (!shell || !collapse) throw new Error('collapse animation missing')
+      collapse.currentTime = 130
+      return {
+        currentTime: collapse.currentTime,
+        shellHeight: shell.getBoundingClientRect().height
+      }
+    })
+    expect(timeline.currentTime).toBe(130)
+    expect(timeline.shellHeight).toBeLessThan(44)
+    expect(await nextRow.evaluate((element) => element.getBoundingClientRect().y)).toBeLessThan(
+      nextRowStart - 2
+    )
+    await expect(rows).toHaveCount(7)
+  })
+})
+
 function median(samples: readonly number[]): number {
   const sorted = [...samples].sort((a, b) => a - b)
   return sorted[Math.floor(sorted.length / 2)]

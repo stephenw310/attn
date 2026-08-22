@@ -2,6 +2,7 @@ import type { Config, DOMPurify } from 'dompurify'
 
 export const MAIL_TRIM_MARKER = 'data-attn-trim-start'
 export const MAIL_CID_SOURCE_MARKER = 'data-attn-cid-source'
+export const MAIL_IMAGE_PENDING_MARKER = 'data-attn-image-pending'
 
 const FORBIDDEN_MAIL_TAGS = ['script', 'form', 'input', 'button', 'select', 'textarea']
 // A quote is embedded into a document the recipient renders, so two tags that are
@@ -21,7 +22,8 @@ const BASE_MAIL_SANITIZER_CONFIG: Config = {
     'onmouseover',
     'onfocus',
     MAIL_TRIM_MARKER,
-    MAIL_CID_SOURCE_MARKER
+    MAIL_CID_SOURCE_MARKER,
+    MAIL_IMAGE_PENDING_MARKER
   ],
   ADD_ATTR: ['target'],
   FORCE_BODY: true

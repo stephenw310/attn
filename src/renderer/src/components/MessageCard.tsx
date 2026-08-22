@@ -106,6 +106,10 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
 
   const download = useCallback(
     (attachment: MessageAttachment) => {
+      if (message.pending) {
+        onToast('Attachment available after sending completes')
+        return
+      }
       if (!window.attn) {
         onToast('Attachments download when signed in')
         return
@@ -121,7 +125,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         })
         .catch(() => onToast('Could not download attachment'))
     },
-    [message.id, onToast]
+    [message.id, message.pending, onToast]
   )
 
   if (collapsed) {
@@ -129,6 +133,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       <article
         data-testid="message-card"
         data-collapsed="true"
+        data-pending={message.pending ? 'true' : undefined}
         className="rounded-[10px] border border-edge bg-ground"
       >
         <button
@@ -160,6 +165,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     <article
       data-testid="message-card"
       data-collapsed="false"
+      data-pending={message.pending ? 'true' : undefined}
       className="rounded-[10px] border border-edge bg-ground px-5 py-4"
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}

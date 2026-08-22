@@ -626,6 +626,26 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const closeAndSave = useCallback(() => saveAndClose(onClose), [onClose, saveAndClose])
   const closeAndExit = useCallback(() => saveAndClose(onExit ?? onClose), [onClose, onExit, saveAndClose])
 
+  const runComposerKey = useCallback(
+    (event: KeyboardEvent): boolean => {
+      const command = matchComposerKey(event)
+      if (command) {
+        command.run()
+        return true
+      }
+      // The outer composer can be visible for one commit before Lexical's
+      // command plugin registers. Keep its fundamental Escape behavior live
+      // during that narrow window instead of dropping a fast close keystroke.
+      if (event.key === 'Escape' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        const close = mode === 'inline' ? closeAndExit : closeAndSave
+        close()
+        return true
+      }
+      return false
+    },
+    [closeAndExit, closeAndSave, mode]
+  )
+
   useImperativeHandle(ref, () => ({ exitConversation: closeAndExit }), [closeAndExit])
 
   const send = useCallback(() => {
@@ -657,20 +677,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       })
   }, [closing, commitPendingRecipients, draft.id, onClose, onToast, saveNow])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      const command = matchComposerKey(event)
-      if (!command) return
+      if (!runComposerKey(event)) return
       event.preventDefault()
       event.stopPropagation()
-      command.run()
     }
     // The persistent account control remains outside the composer subtree. A
     // bubble listener preserves Escape after that control has handled and closed
     // its own transient menu, in both full-window and inline modes.
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [runComposerKey])
 
   const discard = useCallback((): void => {
     if (closing || !window.attn) return
@@ -727,11 +745,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       onKeyDownCapture={(event) => {
         const target = event.target as HTMLElement | null
         if (event.key === 'Escape' && target?.closest('[data-composer-transient]')) return
-        const command = matchComposerKey(event.nativeEvent)
-        if (!command) return
+        if (!runComposerKey(event.nativeEvent)) return
         event.preventDefault()
         event.stopPropagation()
-        command.run()
       }}
     >
       <header

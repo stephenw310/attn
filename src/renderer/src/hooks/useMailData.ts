@@ -23,6 +23,7 @@ interface MailDataState {
   pendingActionCount: number
   pausedActionCount: number
   mailRevision: number
+  invalidateConversations: () => void
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
 }
@@ -47,6 +48,7 @@ export function useMailData(
   const [pendingActionCount, setPendingActionCount] = useState(0)
   const [pausedActionCount, setPausedActionCount] = useState(0)
   const [mailRevision, setMailRevision] = useState(0)
+  const invalidateConversations = useCallback(() => setMailRevision((revision) => revision + 1), [])
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
   const deferGateRef = useRef<Promise<void> | null>(null)
@@ -175,6 +177,9 @@ export function useMailData(
     })
     const offOutbox = bridge.outbox.onChanged((change) => {
       if (change.kind === 'failed') setOutboxFailure(change)
+      // Reply/forward rows are projected into the open conversation while
+      // queued, so outbox transitions invalidate that cache as well as lists.
+      mailChangedPending = true
       refresh()
     })
     const offProgress = bridge.outbox.onProgress(setOutboxProgress)
@@ -265,6 +270,7 @@ export function useMailData(
     pendingActionCount,
     pausedActionCount,
     mailRevision,
+    invalidateConversations,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
   }

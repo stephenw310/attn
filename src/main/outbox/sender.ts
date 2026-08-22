@@ -30,6 +30,7 @@ interface SendRow {
   state: 'queued' | 'sending'
   kind: DraftKind
   gmail_draft_id: string | null
+  gmail_message_id: string | null
   rfc_message_id: string
   to_json: string
   cc_json: string
@@ -132,7 +133,7 @@ export interface DraftSendProtocolInput {
 }
 
 export type DraftSendProtocolResult =
-  | { kind: 'sent'; threadId: string }
+  | { kind: 'sent'; messageId: string; threadId: string }
   | { kind: 'consumed' }
   | { kind: 'missing-before-send' }
   | { kind: 'aborted' }
@@ -190,7 +191,7 @@ export async function executeDraftSendProtocol(
   }
   try {
     const sent = await provider.sendDraft(gmailDraftId, { signal, priority: 'send' })
-    return { kind: 'sent', threadId: sent.threadId }
+    return { kind: 'sent', messageId: sent.id, threadId: sent.threadId }
   } catch (error) {
     if (error instanceof GmailApiError && error.status === 404) return { kind: 'consumed' }
     throw error
@@ -203,6 +204,7 @@ export interface OutboxSenderOptions {
   spoolRoot?: string | null
   cleanSpool?: (id: string) => void
   progress?: (progress: OutboxProgress | null) => void
+  mailChanged?: () => void
 }
 
 /** The sole production chokepoint that may call Gmail drafts.send. */
@@ -218,6 +220,7 @@ export class OutboxSender {
   private readonly spoolRoot: string | null
   private readonly cleanSpool: (id: string) => void
   private readonly progress: (progress: OutboxProgress | null) => void
+  private readonly mailChanged: () => void
 
   constructor(
     private readonly db: Db,
@@ -231,6 +234,7 @@ export class OutboxSender {
     this.spoolRoot = options.spoolRoot ?? null
     this.cleanSpool = options.cleanSpool ?? (() => {})
     this.progress = options.progress ?? (() => {})
+    this.mailChanged = options.mailChanged ?? (() => {})
   }
 
   start(): void {
@@ -323,7 +327,8 @@ export class OutboxSender {
   private nextDue(accountId: string): SendRow | undefined {
     return this.db
       .prepare(
-        `SELECT id, account_id, state, kind, gmail_draft_id, rfc_message_id, to_json, cc_json,
+        `SELECT id, account_id, state, kind, gmail_draft_id, gmail_message_id, rfc_message_id,
+                to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, updated_at, send_at, attempts, verify_attempts
          FROM outbox
@@ -403,7 +408,8 @@ export class OutboxSender {
   private reloadSending(accountId: string, id: string): SendRow | undefined {
     return this.db
       .prepare(
-        `SELECT id, account_id, state, kind, gmail_draft_id, rfc_message_id, to_json, cc_json,
+        `SELECT id, account_id, state, kind, gmail_draft_id, gmail_message_id, rfc_message_id,
+                to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, updated_at, send_at, attempts, verify_attempts
          FROM outbox WHERE account_id = ? AND id = ? AND state = 'sending'`
@@ -463,7 +469,7 @@ export class OutboxSender {
     if (!provider.findByRfcId) throw new Error('Gmail Message-ID verification is unavailable')
     const match = await provider.findByRfcId(row.rfc_message_id, { signal, priority: 'send' })
     if (match?.kind === 'message') {
-      await this.markSent(row, provider, match.threadId ?? row.thread_id, signal)
+      await this.markSent(row, provider, match.threadId ?? row.thread_id, signal, match.messageId)
       return false
     }
     if (match?.kind === 'draft') {
@@ -639,7 +645,8 @@ export class OutboxSender {
       row,
       provider,
       result.kind === 'sent' ? result.threadId || row.thread_id : row.thread_id,
-      signal
+      signal,
+      result.kind === 'sent' ? result.messageId : row.gmail_message_id
     )
   }
 
@@ -735,15 +742,17 @@ export class OutboxSender {
     row: SendRow,
     provider: MailProvider,
     threadId: string | null,
-    signal: AbortSignal
+    signal: AbortSignal,
+    gmailMessageId: string | null = row.gmail_message_id
   ): Promise<void> {
     const now = this.time.now()
     const settled = this.db
       .prepare(
-        `UPDATE outbox SET state = 'sent', send_at = NULL, last_error = NULL, updated_at = ?
+        `UPDATE outbox SET state = 'sent', gmail_message_id = COALESCE(?, gmail_message_id),
+         send_at = NULL, last_error = NULL, updated_at = ?
          WHERE account_id = ? AND id = ? AND state = 'sending'`
       )
-      .run(now, row.account_id, row.id)
+      .run(gmailMessageId, now, row.account_id, row.id)
     if (settled.changes === 0) return
     this.cleanSpool(row.id)
     this.pruneSent(row.account_id, now)
@@ -753,7 +762,7 @@ export class OutboxSender {
     if (!threadId || this.stopping || this.accountId() !== row.account_id) return
     try {
       const thread = await provider.getThread(threadId, { format: 'full', signal, priority: 'send' })
-      persistThread(this.db, row.account_id, thread)
+      if (persistThread(this.db, row.account_id, thread)) this.mailChanged()
       this.notify({ kind: 'changed' })
     } catch (error) {
       console.warn(`[outbox] sent ${row.id}, but refresh failed: ${errorMessage(error)}`)

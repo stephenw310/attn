@@ -45,6 +45,7 @@ import type { Db } from './db'
 import {
   countInboxUnread,
   getConversation,
+  getConversationForDisplay,
   getInlineAttachmentData,
   listInboxThreads,
   listSnoozedThreads,
@@ -596,7 +597,7 @@ export function registerIpc(context: IpcContext): () => void {
     const account = context.currentAccountId()
     if (!account) return null
     const attemptState = bodyHydrator.state(account, threadId)
-    const conversation = getConversation(
+    const conversation = getConversationForDisplay(
       context.db,
       account,
       threadId,
