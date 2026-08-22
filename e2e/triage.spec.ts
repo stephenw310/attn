@@ -71,7 +71,13 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
   await expect(page.getByTestId('toast')).toHaveText('Google reconnected — 1 pending change is retrying.')
 })
 
-test('animates a marked-done row before removing it', async ({ page }) => {
+test('animates a marked-done row before removing it', async ({ app, page }) => {
+  // This is the one smoke assertion that measures animation progress rather
+  // than final state. Keep Chromium's animation clock live while the harness
+  // intentionally holds its BrowserWindow off the desktop.
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.setBackgroundThrottling(false)
+  })
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   const nextRow = rows.filter({ hasText: 'Northstar Books' })
@@ -100,7 +106,10 @@ test('animates a marked-done row before removing it', async ({ page }) => {
       })
   )
   expect(motion.every(({ selected }) => selected)).toBe(true)
-  expect(motion.some(({ elapsed, y }) => elapsed < 260 && y < nextRowStart - 2)).toBe(true)
+  expect(
+    motion.some(({ elapsed, y }) => elapsed < 260 && y < nextRowStart - 2),
+    `replacement row motion: ${JSON.stringify(motion)}`
+  ).toBe(true)
   expect(motion.at(-1)?.y).toBeLessThan(nextRowStart - 20)
   await expect(rows).toHaveCount(7)
   const firstToastId = await page.getByTestId('toast').getAttribute('data-toast-id')
