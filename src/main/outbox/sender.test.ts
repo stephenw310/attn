@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import { type Db, openDatabase } from '../db'
+import { getConversationForDisplay } from '../db/queries'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
 import type { SchedulerTime, TimerHandle } from '../time'
@@ -67,7 +68,7 @@ describe('outbox Gmail draft protocol', () => {
           return true
         }
       })
-    ).resolves.toEqual({ kind: 'sent', threadId: 'sent-thread' })
+    ).resolves.toEqual({ kind: 'sent', messageId: 'sent-message', threadId: 'sent-thread' })
     expect(order).toEqual(['create', 'persist:created-draft', 'update:created-draft', 'send:created-draft'])
   })
 
@@ -204,6 +205,7 @@ interface FakeSendRow {
   state: FakeSendState
   kind: 'new'
   gmail_draft_id: string | null
+  gmail_message_id: string | null
   rfc_message_id: string
   to_json: string
   cc_json: string
@@ -233,6 +235,7 @@ function fakeRow(patch: Partial<FakeSendRow> = {}): FakeSendRow {
     state: 'queued',
     kind: 'new',
     gmail_draft_id: null,
+    gmail_message_id: null,
     rfc_message_id: '<message@example.com>',
     to_json: JSON.stringify([{ name: '', email: 'to@example.com' }]),
     cc_json: '[]',
@@ -370,12 +373,13 @@ class FakeOutboxDb {
       return { changes: 1 }
     }
     if (query.startsWith("UPDATE outbox SET state = 'sent'")) {
-      const row = this.rows.get(String(args[2]))
-      if (!row || row.account_id !== args[1] || row.state !== 'sending') return { changes: 0 }
+      const row = this.rows.get(String(args[3]))
+      if (!row || row.account_id !== args[2] || row.state !== 'sending') return { changes: 0 }
       row.state = 'sent'
+      if (args[0] !== null) row.gmail_message_id = String(args[0])
       row.send_at = null
       row.last_error = null
-      row.updated_at = Number(args[0])
+      row.updated_at = Number(args[1])
       return { changes: 1 }
     }
     throw new Error(`unexpected fake run: ${query}`)
@@ -479,7 +483,12 @@ describe('OutboxSender effect layer', () => {
 
     await sender.trigger()
 
-    expect(store.row()).toMatchObject({ state: 'sent', gmail_draft_id: 'draft-1', updated_at: NOW })
+    expect(store.row()).toMatchObject({
+      state: 'sent',
+      gmail_draft_id: 'draft-1',
+      gmail_message_id: 'sent-message',
+      updated_at: NOW
+    })
     expect(createDraft).toHaveBeenCalledOnce()
     expect(updateDraft).toHaveBeenCalledWith(expect.objectContaining({ id: 'draft-1' }), expect.anything())
     expect(sendDraft).toHaveBeenCalledWith('draft-1', expect.anything())
@@ -531,7 +540,7 @@ describe('OutboxSender effect layer', () => {
                   { name: 'From', value: 'Me <me@example.com>' },
                   { name: 'To', value: 'you@example.com' },
                   { name: 'Subject', value: 'Re: Immediate refresh' },
-                  { name: 'Message-ID', value: '<fresh@example.com>' }
+                  { name: 'Message-ID', value: '<gmail-rewritten@example.com>' }
                 ],
                 body: { data: Buffer.from('Fresh reply').toString('base64url') }
               }
@@ -552,10 +561,18 @@ describe('OutboxSender effect layer', () => {
 
       await sender.trigger()
 
-      expect(db.prepare('SELECT state FROM outbox WHERE id = ?').get(id)).toEqual({ state: 'sent' })
+      expect(db.prepare('SELECT state, gmail_message_id FROM outbox WHERE id = ?').get(id)).toEqual({
+        state: 'sent',
+        gmail_message_id: 'sent-message'
+      })
       expect(db.prepare('SELECT body_text FROM messages WHERE id = ?').get('sent-message')).toEqual({
         body_text: 'Fresh reply'
       })
+      expect(
+        getConversationForDisplay(db, 'me@example.com', 'thread-1', 'unavailable')?.messages.map(
+          (message) => message.id
+        )
+      ).toEqual(['sent-message'])
       expect(mailChanged).toHaveBeenCalledOnce()
     } finally {
       db.close()
@@ -749,7 +766,7 @@ describe('OutboxSender effect layer', () => {
       })
     ).trigger()
 
-    expect(store.row().state).toBe('sent')
+    expect(store.row()).toMatchObject({ state: 'sent', gmail_message_id: 'sent-message' })
     expect(createDraft).not.toHaveBeenCalled()
     expect(sendDraft).not.toHaveBeenCalled()
   })

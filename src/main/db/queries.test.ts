@@ -155,4 +155,21 @@ describe('display conversation queries', () => {
     expect(confirmed?.messages.map((message) => message.id)).toEqual(['message-1', 'message-2'])
     expect(confirmed?.messages.some((message) => message.pending)).toBe(false)
   })
+
+  it('heals sent projections created before Gmail message ids were retained', () => {
+    db.prepare("UPDATE outbox SET state = 'sent' WHERE id = 'reply-1'").run()
+    db.prepare(
+      `INSERT INTO messages
+       (account_id, id, thread_id, from_name, from_email, internal_date, body_text,
+        recipients_json, attachments_json, rfc_message_id, references_json)
+       VALUES ('account', 'message-legacy', 'thread-1', '', 'test@example.com', 250,
+               'Queued reply\n\n> Initial',
+               '{"to":[],"cc":[],"bcc":[],"replyTo":[]}', '[]', '<gmail-rewritten@example.com>',
+               '["<initial@example.com>"]')`
+    ).run()
+
+    const confirmed = getConversationForDisplay(db, 'account', 'thread-1', 'unavailable')
+    expect(confirmed?.messages.map((message) => message.id)).toEqual(['message-1', 'message-legacy'])
+    expect(confirmed?.messages.some((message) => message.pending)).toBe(false)
+  })
 })

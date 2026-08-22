@@ -233,6 +233,7 @@ export function getConversation(
 
 interface OutboxConversationRow {
   id: string
+  state: 'queued' | 'sending' | 'sent'
   to_json: string
   cc_json: string
   bcc_json: string
@@ -251,6 +252,12 @@ function combinedBody(primary: string, quote: string, separator: string): string
   if (!quote) return primary
   if (!primary) return quote
   return `${primary}${separator}${quote}`
+}
+
+const LEGACY_SENT_MATCH_WINDOW_MS = 2 * 60 * 1_000
+
+function canonicalSentBody(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -272,12 +279,14 @@ export function getConversationForDisplay(
     | { email: string }
     | undefined
   const confirmedMessageIds = new Set(conversation.messages.map((message) => message.id))
-  const confirmedRfcIds = new Set(
-    conversation.messages.flatMap((message) => (message.rfcMessageId ? [message.rfcMessageId] : []))
+  const confirmedByRfcId = new Map(
+    conversation.messages.flatMap((message) =>
+      message.rfcMessageId ? [[message.rfcMessageId, message.id] as const] : []
+    )
   )
   const rows = db
     .prepare(
-      `SELECT id, to_json, cc_json, bcc_json, body_html, body_text, attachments_json,
+      `SELECT id, state, to_json, cc_json, bcc_json, body_html, body_text, attachments_json,
               quote_html, quote_text, references_json, rfc_message_id, gmail_message_id, updated_at
        FROM outbox
        WHERE account_id = ? AND thread_id = ?
@@ -287,12 +296,38 @@ export function getConversationForDisplay(
     )
     .all(accountId, threadId) as OutboxConversationRow[]
 
+  const claimedConfirmedIds = new Set<string>()
   const pending = rows.flatMap((row): ConversationMsg[] => {
-    if (
-      confirmedRfcIds.has(row.rfc_message_id) ||
-      (row.gmail_message_id !== null && confirmedMessageIds.has(row.gmail_message_id))
-    ) {
+    const confirmedId =
+      confirmedByRfcId.get(row.rfc_message_id) ??
+      (row.gmail_message_id !== null && confirmedMessageIds.has(row.gmail_message_id)
+        ? row.gmail_message_id
+        : null)
+    if (confirmedId) {
+      claimedConfirmedIds.add(confirmedId)
       return []
+    }
+    const bodyText = combinedBody(row.body_text, row.quote_text, '\n\n')
+    // Older Attn builds did not retain the definitive Gmail message id returned
+    // by drafts.send, and Gmail may rewrite our RFC Message-ID. Match those
+    // already-sent projections once by author, body, and the narrow send-time
+    // window so existing conversations heal without hiding queued mail.
+    if (row.state === 'sent' && row.gmail_message_id === null && account) {
+      const canonicalBody = canonicalSentBody(bodyText)
+      const legacyMatch = conversation.messages
+        .filter(
+          (message) =>
+            canonicalBody.length > 0 &&
+            !claimedConfirmedIds.has(message.id) &&
+            message.fromEmail.trim().toLowerCase() === account.email.trim().toLowerCase() &&
+            Math.abs(message.at - row.updated_at) <= LEGACY_SENT_MATCH_WINDOW_MS &&
+            canonicalSentBody(message.bodyText) === canonicalBody
+        )
+        .sort((left, right) => Math.abs(left.at - row.updated_at) - Math.abs(right.at - row.updated_at))[0]
+      if (legacyMatch) {
+        claimedConfirmedIds.add(legacyMatch.id)
+        return []
+      }
     }
     const storedAttachments = parseJson<StoredOutboxAttachment[]>(row.attachments_json, [])
     const hasInlineAttachment = storedAttachments.some((attachment) => attachment.inline)
@@ -320,7 +355,7 @@ export function getConversationForDisplay(
           ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
           ...(attachment.inline ? { inline: true } : {})
         })),
-        bodyText: combinedBody(row.body_text, row.quote_text, '\n\n'),
+        bodyText,
         // Inline CID bytes still belong to the draft spool. Use the complete
         // plain-text alternative until Gmail returns a real message id rather
         // than rendering broken image placeholders during the undo window.
