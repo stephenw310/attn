@@ -137,10 +137,22 @@ The full design is this task's first deliverable. These bound it:
   exactly-once send. Neither may acquire a second implementation across the process boundary.
 - **Durable checkpoints survive a crash of the utility process**, and the supervisor restarts it without
   restarting the app or losing the action queue. All three cursors resume.
-- **The SQLite connection has exactly one owner.** Decide explicitly. Either the utility process owns the
-  database and the main process asks it for reads, or the database stays in main and the utility process ships
-  parsed results back. Two writers is a corruption bug. The current `Db` handle is passed straight into
-  queries, IPC handlers, and executors, so this decision reaches most of `src/main/`.
+- **The utility process owns the SQLite connection.** Decided by the owner on 2026-08-22, recorded in SPEC §9
+  #19. It holds the only handle and is the only writer. The main process asks it for reads. Two writers is a
+  corruption bug, so there is no fallback path where main writes "just this once".
+
+  This is the expensive half of S1, so scope it before starting. The main process runs raw SQL at **81 sites
+  across 20 files** today. They split three ways, and each group needs its own answer in the design:
+
+  1. **Moves wholesale.** `sync/` (`backfill`, `bodies`, `lifetimeSweep`, `persist`, `poller`,
+     `attachmentFlags`) and `store/mutate.ts`. This code is the reason for the move.
+  2. **Becomes a request across the boundary.** `db/queries.ts` serves every renderer read. Those now travel
+     renderer to main to utility and back, so the §7 budgets have to be re-proved rather than assumed. A
+     conversation open at 50 ms is the tightest of them.
+  3. **Needs an explicit home.** `outbox/` and `actions/executor.ts` write on the user's behalf and carry the
+     exactly-once invariant. Putting them behind an IPC hop introduces a failure mode M2 does not have, where
+     the caller cannot tell a lost reply from a lost write. Decide where they live and prove the invariant
+     holds there before moving anything else.
 - **`SchedulerTime` injection stays** (`src/main/time.ts`) so tests never wait on wall-clock time.
 
 ### Testing and done condition
@@ -312,9 +324,11 @@ store's shape is settled.
 
 ## Open questions
 
+**Decided 2026-08-22:** the utility process owns SQLite (SPEC §9 #19). S1's design constraints carry the
+consequences.
+
 | Question | Why it matters | Decide by |
 |---|---|---|
-| Does the utility process own SQLite, or does main? | Reaches most of `src/main/`; two writers is a corruption bug | S1 design |
 | Pathological-mailbox posture: pick a design target such as smooth to 250k messages, then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages, and lifetime headers can exceed that | E7's real-mailbox capture in [T20-EVIDENCE.md](T20-EVIDENCE.md) |
 | Does S1 run before or after the M2 dogfood week, and does S1 or S2 go first? | S1 moves the process boundary across most of `src/main/`, which is disruptive under a daily driver; S2 bumps the schema, which costs a manual DDL on the dogfood profile | Before either task starts |
 

@@ -113,6 +113,9 @@ applications on the clipboard, which is plausible but untested.
 
 `ImageNode.importJSON` (`nodes/ImageNode.tsx:50-53`) takes `serialized.src` raw by the same route.
 
+**Decided 2026-08-22:** the owner asked for this to ship with the BUG-1, BUG-2 and BUG-3 fix pass rather
+than on its own.
+
 **Fix direction:** decode, run `sanitizeDraftHtmlForImport`, then re-encode inside `OpaqueHtmlNode.importJSON`
 and `importDOM`, so the node type cannot hold unsanitized HTML however it was built. Sanitizing at the restore
 step instead would also close it, and would cover any future path into an opaque region. Give the sibling nodes
