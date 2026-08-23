@@ -224,9 +224,9 @@ describe('mail surface classification', () => {
     ).toEqual({ surface: 'native', layout: 'padded' })
   })
 
-  it('removes sender canvases but preserves typography and layout on the native surface', () => {
+  it('removes sender canvases while adapting meaningful text colors for the native surface', () => {
     const document = new DOMParser().parseFromString(
-      '<style>div{background:white}</style><div bgcolor="white" background="paper.png" style="background:url(data:image/gif;base64,AAA);color:#111;margin:0"><span style="font-size:12px;background-image:none">Text</span></div>',
+      '<style>div{background:white}</style><div bgcolor="white" background="paper.png" style="background:url(data:image/gif;base64,AAA);color:#111;margin:0"><span style="font-size:12px;background-image:none">Question</span><font id="legacy-blue" color="#0056d6">Answer</font><span id="inline-blue" style="color:#0042a9">More</span></div>',
       'text/html'
     )
 
@@ -235,8 +235,14 @@ describe('mail surface classification', () => {
     expect(document.querySelector('style')).toBeNull()
     expect(document.body.innerHTML).not.toContain('background')
     expect(document.body.innerHTML).not.toContain('bgcolor')
-    expect(document.body.innerHTML).toMatch(/color:\s*#111/)
+    expect(document.querySelector('div')?.style.color).toBe('')
     expect(document.body.innerHTML).toMatch(/margin:\s*0/)
     expect(document.body.innerHTML).toMatch(/font-size:\s*12px/)
+    const legacyBlue = document.querySelector<HTMLElement>('#legacy-blue')
+    const inlineBlue = document.querySelector<HTMLElement>('#inline-blue')
+    expect(legacyBlue?.hasAttribute('color')).toBe(false)
+    expect(legacyBlue?.style.color).toMatch(/^rgb\(/)
+    expect(inlineBlue?.style.color).toMatch(/^rgb\(/)
+    expect(legacyBlue?.style.color).not.toBe(inlineBlue?.style.color)
   })
 })

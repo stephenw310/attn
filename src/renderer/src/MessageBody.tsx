@@ -64,9 +64,11 @@ function frameReset(surface: MailSurface, layout: MailLayout): string {
       : `
   #attn-mail-body,
   #attn-mail-body :where(*) {
-    color: inherit !important;
     background-color: transparent !important;
     background-image: none !important;
+  }
+  #attn-mail-body :is(blockquote, .gmail_quote) {
+    color: #9da2ac;
   }
   #attn-mail-body a {
     color: #60a5fa !important;

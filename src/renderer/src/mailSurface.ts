@@ -17,8 +17,108 @@ const PSEUDO_ELEMENT = /::[a-z-]+(?:\([^)]*\))?|:(?:before|after|first-letter|fi
 const CONDITIONAL_RULE = new Set(['container', 'document', 'layer', 'scope', 'supports'])
 const BACKGROUND_PROPERTIES = ['background', 'background-color', 'background-image'] as const
 const BACKGROUND_LONGHANDS = ['background-color', 'background-image'] as const
+const NATIVE_BACKGROUND = { red: 16, green: 17, blue: 20 }
+const MIN_NATIVE_TEXT_CONTRAST = 4.5
+const NEUTRAL_TEXT_CHROMA = 24
 
 const backgroundProbe = document.createElement('span').style
+const textColorProbe = document.createElement('span').style
+
+interface RgbColor {
+  red: number
+  green: number
+  blue: number
+  alpha: number
+}
+
+function parsedRgbColor(value: string): RgbColor | null {
+  const match = value.match(
+    /^rgba?\(\s*([\d.]+)(%?)[,\s]+([\d.]+)(%?)[,\s]+([\d.]+)(%?)(?:\s*[,/]\s*([\d.]+)(%?))?\s*\)$/i
+  )
+  if (!match) return null
+  const channel = (part: string, percent: string): number => {
+    const numeric = Number(part)
+    return percent ? (numeric / 100) * 255 : numeric
+  }
+  return {
+    red: channel(match[1], match[2]),
+    green: channel(match[3], match[4]),
+    blue: channel(match[5], match[6]),
+    alpha: match[7] ? Number(match[7]) / (match[8] ? 100 : 1) : 1
+  }
+}
+
+function resolvedTextColor(value: string): RgbColor | null {
+  const raw = value.replace(CSS_COMMENT, '').replace(IMPORTANT, '').trim()
+  if (!raw || /^(?:currentcolor|transparent)$/i.test(raw) || /var\s*\(/i.test(raw)) return null
+  textColorProbe.cssText = ''
+  textColorProbe.color = raw
+  if (!textColorProbe.color) return null
+
+  let serialized = textColorProbe.color
+  if (!/^rgba?\(/i.test(serialized)) {
+    const probe = document.createElement('span')
+    probe.style.color = serialized
+    document.documentElement.append(probe)
+    serialized = window.getComputedStyle(probe).color
+    probe.remove()
+  }
+  return parsedRgbColor(serialized)
+}
+
+function linearChannel(channel: number): number {
+  const normalized = channel / 255
+  return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+}
+
+function relativeLuminance(color: Pick<RgbColor, 'red' | 'green' | 'blue'>): number {
+  return (
+    0.2126 * linearChannel(color.red) +
+    0.7152 * linearChannel(color.green) +
+    0.0722 * linearChannel(color.blue)
+  )
+}
+
+function contrastRatio(
+  foreground: Pick<RgbColor, 'red' | 'green' | 'blue'>,
+  background: Pick<RgbColor, 'red' | 'green' | 'blue'>
+): number {
+  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background))
+  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background))
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+function serializedRgb(color: Pick<RgbColor, 'red' | 'green' | 'blue'>): string {
+  return `rgb(${Math.round(color.red)}, ${Math.round(color.green)}, ${Math.round(color.blue)})`
+}
+
+function nativeTextColor(value: string): string | null {
+  const parsed = resolvedTextColor(value)
+  if (!parsed || parsed.alpha === 0) return null
+  const color = {
+    red: parsed.red * parsed.alpha + NATIVE_BACKGROUND.red * (1 - parsed.alpha),
+    green: parsed.green * parsed.alpha + NATIVE_BACKGROUND.green * (1 - parsed.alpha),
+    blue: parsed.blue * parsed.alpha + NATIVE_BACKGROUND.blue * (1 - parsed.alpha)
+  }
+  if (contrastRatio(color, NATIVE_BACKGROUND) >= MIN_NATIVE_TEXT_CONTRAST) {
+    return serializedRgb(color)
+  }
+
+  const chroma = Math.max(color.red, color.green, color.blue) - Math.min(color.red, color.green, color.blue)
+  if (chroma < NEUTRAL_TEXT_CHROMA) return null
+
+  for (let white = 0.01; white <= 1; white += 0.01) {
+    const adjusted = {
+      red: color.red + (255 - color.red) * white,
+      green: color.green + (255 - color.green) * white,
+      blue: color.blue + (255 - color.blue) * white
+    }
+    if (contrastRatio(adjusted, NATIVE_BACKGROUND) >= MIN_NATIVE_TEXT_CONTRAST) {
+      return serializedRgb(adjusted)
+    }
+  }
+  return null
+}
 
 function isNeutralCanvas(value: string): boolean {
   const normalized = value.toLowerCase().replace(/\s+/g, '')
@@ -700,6 +800,20 @@ export function normalizeNativeMailDocument(root: ParentNode): void {
       .join('; ')
     if (style) element.setAttribute('style', style)
     else element.removeAttribute('style')
+  })
+  root.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
+    const color = element.style.getPropertyValue('color')
+    if (!color) return
+    const priority = element.style.getPropertyPriority('color')
+    const adjusted = nativeTextColor(color)
+    if (adjusted) element.style.setProperty('color', adjusted, priority)
+    else element.style.removeProperty('color')
+    if (!element.getAttribute('style')?.trim()) element.removeAttribute('style')
+  })
+  root.querySelectorAll<HTMLElement>('font[color]').forEach((element) => {
+    const adjusted = nativeTextColor(element.getAttribute('color') ?? '')
+    element.removeAttribute('color')
+    if (adjusted) element.style.setProperty('color', adjusted)
   })
 }
 
