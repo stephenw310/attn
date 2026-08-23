@@ -1,7 +1,11 @@
 import { expect, it, vi } from 'vitest'
-import type { Db } from '../db'
+import { emptyDraftInput } from '../../shared/drafts'
+import { type Db, openDatabase } from '../db'
+import { GmailApiError } from '../gmail/client'
+import type { MailActionProvider } from '../sync/provider'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
-import type { drainDraftMirrors } from './mirror'
+import { saveDraft } from './drafts'
+import { DraftMirrorRowError, type drainDraftMirrors } from './mirror'
 import { DraftMirrorExecutor } from './mirrorExecutor'
 
 class ManualTime implements SchedulerTime {
@@ -102,4 +106,94 @@ it('aborts a stalled checkpoint after the shutdown grace period', async () => {
   expect(observedSignal?.aborted).toBe(true)
   await executor.trigger()
   expect(drain).toHaveBeenCalledOnce()
+})
+
+it('backs off a permanently rejected draft and mirrors later rows', async () => {
+  const time = new ManualTime()
+  const db = openDatabase(':memory:')
+  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+    'user@example.com',
+    'user@example.com',
+    1
+  )
+  const rejectedId = saveDraft(
+    db,
+    'user@example.com',
+    { ...emptyDraftInput(), subject: 'Rejected draft' },
+    10
+  )
+  const laterId = saveDraft(db, 'user@example.com', { ...emptyDraftInput(), subject: 'Later draft' }, 20)
+  const attempted: string[] = []
+  const saveRemote = vi.fn(async ({ raw }: { id: string | null; raw: string }) => {
+    const message = Buffer.from(raw, 'base64url').toString()
+    const subject = message.includes('Subject: Rejected draft') ? 'rejected' : 'later'
+    attempted.push(subject)
+    if (subject === 'rejected') throw new GmailApiError(400, 'draft rejected')
+    return 'gmail-later'
+  })
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const executor = new DraftMirrorExecutor(
+    db,
+    () => 'user@example.com',
+    () => ({ saveDraft: saveRemote }) as unknown as MailActionProvider,
+    { time }
+  )
+
+  try {
+    await executor.trigger()
+
+    expect(attempted).toEqual(['rejected', 'later'])
+    expect(db.prepare('SELECT mirror_revision FROM outbox WHERE id = ?').get(rejectedId)).toEqual({
+      mirror_revision: 0
+    })
+    expect(db.prepare('SELECT mirror_revision FROM outbox WHERE id = ?').get(laterId)).toEqual({
+      mirror_revision: 1
+    })
+    expect(time.nextDelay()).toBe(5_000)
+
+    time.advance(4_999)
+    expect(attempted).toEqual(['rejected', 'later'])
+    time.advance(1)
+    await vi.waitFor(() => expect(attempted).toEqual(['rejected', 'later', 'rejected']))
+    await vi.waitFor(() => expect(time.nextDelay()).toBe(30_000))
+  } finally {
+    await executor.stop()
+    log.mockRestore()
+    db.close()
+  }
+})
+
+it('keeps the provider paired with its account when authentication changes mid-drain', async () => {
+  const time = new ManualTime()
+  const providerA = {} as MailActionProvider
+  const providerB = {} as MailActionProvider
+  let activeAccount = 'account-a'
+  let activeProvider = providerA
+  let attempt = 0
+  const accountId = vi.fn(() => activeAccount)
+  const provider = vi.fn(() => activeProvider)
+  const drain = vi.fn<typeof drainDraftMirrors>(async (_db, capturedAccount, capturedProvider) => {
+    expect(capturedAccount).toBe('account-a')
+    expect(capturedProvider).toBe(providerA)
+    attempt += 1
+    if (attempt === 1) {
+      activeAccount = 'account-b'
+      activeProvider = providerB
+      throw new DraftMirrorRowError('draft-a', new GmailApiError(400, 'draft rejected'))
+    }
+  })
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const executor = new DraftMirrorExecutor({} as Db, accountId, provider, { time, drainDrafts: drain })
+
+  try {
+    await executor.trigger()
+
+    expect(drain).toHaveBeenCalledTimes(2)
+    expect(accountId).toHaveBeenCalledOnce()
+    expect(provider).toHaveBeenCalledOnce()
+    expect(time.nextDelay()).toBe(5_000)
+  } finally {
+    await executor.stop()
+    log.mockRestore()
+  }
 })

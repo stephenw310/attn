@@ -29,7 +29,7 @@ export class StyledTextNode extends TextNode {
       .setFormat(serialized.format)
       .setDetail(serialized.detail)
       .setMode(serialized.mode)
-      .setStyle(serialized.style)
+      .setStyle(sanitizeComposerStyle(serialized.style))
   }
 
   static importDOM(): DOMConversionMap | null {

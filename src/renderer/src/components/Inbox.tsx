@@ -36,7 +36,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
-  const [labelTargetId, setLabelTargetId] = useState<string | null>(null)
+  const [labelTargetIds, setLabelTargetIds] = useState<readonly string[] | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
   const [detachedDraftThread, setDetachedDraftThread] = useState<DisplayThread | null>(null)
   const [composerError, setComposerError] = useState<string | null>(null)
@@ -135,7 +135,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           selectedThreadIdRef.current = draft.threadId
           setReaderOpen(true)
           setSnoozeOpen(false)
-          setLabelTargetId(null)
+          setLabelTargetIds(null)
           setDetachedDraftThread(cachedThread ?? fallbackThread)
           setComposerDraft(draft)
           return
@@ -155,7 +155,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           setSelectedIndex(destination.index)
           setReaderOpen(true)
           setSnoozeOpen(false)
-          setLabelTargetId(null)
+          setLabelTargetIds(null)
           setDetachedDraftThread(null)
         } else {
           setDetachedDraftThread(fallbackThread)
@@ -176,7 +176,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSelectedIndex(0)
     setReaderOpen(false)
     setSnoozeOpen(false)
-    setLabelTargetId(null)
+    setLabelTargetIds(null)
     setComposerDraft(null)
     setDetachedDraftThread(null)
     setComposerError(null)
@@ -292,16 +292,21 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const starOn = targetedThreads.some((thread) => !thread.starred)
   const markUnreadOn = targetedThreads.some((thread) => !thread.unread)
 
-  // The label picker targets a thread by id, not by list position: a refresh can
-  // reorder or drop rows underneath an open picker.
-  const labelTarget = useMemo(
-    () => (labelTargetId === null ? undefined : threads.find((thread) => thread.id === labelTargetId)),
-    [labelTargetId, threads]
-  )
+  // Snapshot ids when the picker opens. A bulk apply clears the list selection,
+  // but the open picker keeps operating on the same conversations.
+  const labelTargets = useMemo(() => {
+    if (labelTargetIds === null) return undefined
+    const threadsById = new Map(threads.map((thread) => [thread.id, thread]))
+    const targets = labelTargetIds.flatMap((id) => {
+      const thread = threadsById.get(id)
+      return thread ? [thread] : []
+    })
+    return targets.length === labelTargetIds.length ? targets : undefined
+  }, [labelTargetIds, threads])
 
   useEffect(() => {
-    if (labelTargetId !== null && !labelTarget) setLabelTargetId(null)
-  }, [labelTarget, labelTargetId])
+    if (labelTargetIds !== null && !labelTargets) setLabelTargetIds(null)
+  }, [labelTargetIds, labelTargets])
 
   useEffect(() => {
     if (view === 'inbox' || view === 'snoozed') selectedThreadIdRef.current = selected?.id ?? null
@@ -338,7 +343,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       })
   }, [activeAccount, onStatus, showToast])
 
-  const switchView = useCallback((next: 'inbox' | 'snoozed' | 'drafts') => {
+  const switchViewNow = useCallback((next: 'inbox' | 'snoozed' | 'drafts') => {
     activeViewRef.current = next
     selectedThreadIdRef.current = null
     selectedDraftIdRef.current = null
@@ -346,11 +351,26 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSelectedIndex(0)
     setReaderOpen(false)
     setSnoozeOpen(false)
-    setLabelTargetId(null)
+    setLabelTargetIds(null)
     setDetachedDraftThread(null)
   }, [])
 
-  const openOutbox = useCallback(() => {
+  const switchView = useCallback(
+    (next: 'inbox' | 'snoozed' | 'drafts', afterSwitch?: () => void) => {
+      if (inlineComposerDraft && inlineComposerRef.current) {
+        inlineComposerRef.current.exitConversation(() => {
+          switchViewNow(next)
+          afterSwitch?.()
+        })
+        return
+      }
+      switchViewNow(next)
+      afterSwitch?.()
+    },
+    [inlineComposerDraft, switchViewNow]
+  )
+
+  const openOutboxNow = useCallback(() => {
     if (view === 'outbox') return
     outboxReturnRef.current = { view, selectedIndex, readerOpen }
     activeViewRef.current = 'outbox'
@@ -359,8 +379,17 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSelectedIndex(0)
     setReaderOpen(false)
     setSnoozeOpen(false)
-    setLabelTargetId(null)
+    setLabelTargetIds(null)
   }, [readerOpen, selectedIndex, view])
+
+  const openOutbox = useCallback(() => {
+    if (view === 'outbox') return
+    if (inlineComposerDraft && inlineComposerRef.current) {
+      inlineComposerRef.current.exitConversation(openOutboxNow)
+      return
+    }
+    openOutboxNow()
+  }, [inlineComposerDraft, openOutboxNow, view])
 
   const closeOutbox = useCallback(() => {
     const previous = outboxReturnRef.current
@@ -376,20 +405,21 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     return window.attn.mail.onFocusThread((threadId) => {
       // Close the old reader before changing lists so auto-read cannot observe
       // an old cursor against Inbox and mutate the wrong thread.
-      switchView('inbox')
-      clearSelection()
-      void window.attn?.mail
-        .listThreads()
-        .then((nextThreads) => {
-          const nextIndex = nextThreads.findIndex((thread) => thread.id === threadId)
-          setRealThreads(nextThreads)
-          if (nextIndex < 0) return
-          selectedThreadIdRef.current = threadId
-          setDetachedDraftThread(null)
-          setSelectedIndex(nextIndex)
-          setReaderOpen(true)
-        })
-        .catch(() => {})
+      switchView('inbox', () => {
+        clearSelection()
+        void window.attn?.mail
+          .listThreads()
+          .then((nextThreads) => {
+            const nextIndex = nextThreads.findIndex((thread) => thread.id === threadId)
+            setRealThreads(nextThreads)
+            if (nextIndex < 0) return
+            selectedThreadIdRef.current = threadId
+            setDetachedDraftThread(null)
+            setSelectedIndex(nextIndex)
+            setReaderOpen(true)
+          })
+          .catch(() => {})
+      })
     })
   }, [activeAccount, clearSelection, setRealThreads, switchView])
 
@@ -413,15 +443,15 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const toggleLabel = useCallback(
     (label: MailLabel, state: LabelCheckState) => {
-      if (!labelTarget) return
+      if (!labelTargets) return
       triage({
         kind: 'label',
-        threadIds: [labelTarget.id],
+        threadIds: labelTargets.map((target) => target.id),
         add: state === 'all' ? [] : [label.id],
         remove: state === 'all' ? [label.id] : []
       })
     },
-    [labelTarget, triage]
+    [labelTargets, triage]
   )
 
   const openOutboxItem = useCallback(
@@ -496,13 +526,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     finishReaderClose()
   }, [finishReaderClose, inlineComposerDraft])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
-  const closeLabel = useCallback(() => setLabelTargetId(null), [])
+  const closeLabel = useCallback(() => setLabelTargetIds(null), [])
   const openSnooze = useCallback(() => {
     if (selected) setSnoozeOpen(true)
   }, [selected])
   const openLabel = useCallback(() => {
-    if (selected) setLabelTargetId(selected.id)
-  }, [selected])
+    if (!selected) return
+    setLabelTargetIds(selectedIds.size > 0 ? [...selectedIds] : [selected.id])
+  }, [selected, selectedIds])
   const openThread = useCallback(
     (index: number) => {
       const thread = threads[index]
@@ -543,7 +574,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         setDetachedDraftThread(null)
         setReaderOpen(true)
         setSnoozeOpen(false)
-        setLabelTargetId(null)
+        setLabelTargetIds(null)
       }
       composerOpeningRef.current = true
       void window.attn.draft
@@ -670,7 +701,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   })
 
   useKeyboardDispatch({
-    blocked: labelTarget !== undefined || composerDraft !== null,
+    blocked: labelTargets !== undefined || composerDraft !== null,
     readerOpen,
     outboxOpen: view === 'outbox',
     snoozeOpen,
@@ -795,10 +826,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         />
       )}
 
-      {!composerDraft && labelTarget && (
+      {!composerDraft && labelTargets && (
         <LabelPicker
           labels={labels}
-          targets={[{ id: labelTarget.id, labelIds: labelTarget.labelIds }]}
+          targets={labelTargets.map((target) => ({ id: target.id, labelIds: target.labelIds }))}
           onClose={closeLabel}
           onToggle={toggleLabel}
         />
