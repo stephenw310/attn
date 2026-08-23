@@ -402,10 +402,6 @@ touches `persist.ts` and the schema, not the renderer, so the two tracks do not 
    size and query latency at 50k and at the largest profile available, and those numbers answer the question
    instead of a guess made now.
 
-The BUG-1, BUG-2, BUG-3 and SEC-1 fix pass in [KNOWN-ISSUES.md](KNOWN-ISSUES.md) is owner-decided and
-unshipped. BUG-2 loses a reply draft when the header nav switches views mid-compose, and T22 adds five more
-places to switch views from, so that pass should land before or beside T22.
-
 ---
 
 ## T22 — System mailbox navigation
@@ -460,8 +456,8 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
 ### Implementation guide
 
 - Renderer: `Inbox.tsx` view state and `switchView`, `MailHeader`, `ThreadList` windowing, `useMailData`.
-  Route every view transition through `exitConversation()` the way `closeReader` does, or T22 multiplies
-  BUG-2 by five.
+  Route every view transition through `exitConversation()` before changing the view. This checkpoints an
+  inline reply before React unmounts its composer.
 - Main: `db/queries.ts` (`listMailboxThreads`), the service handler and protocol operation in
   `src/main/service/`, the preload bridge, and the channel map. All three IPC halves in one commit
   (global rule 2).

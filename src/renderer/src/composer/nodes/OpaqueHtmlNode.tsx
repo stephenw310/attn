@@ -9,12 +9,24 @@ import {
 } from 'lexical'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { DraftContentIdContext } from '../DraftContentContext'
-import { decodeOpaqueHtml, opaqueHtmlText } from '../preserve'
+import { decodeOpaqueHtml, encodeOpaqueHtml, opaqueHtmlText, sanitizedDomMatchesSource } from '../preserve'
+import { sanitizeDraftHtmlForImport } from '../sanitize'
 
 export type SerializedOpaqueHtmlNode = Spread<{ html: string; inline: boolean }, SerializedLexicalNode>
 
 const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 const MAX_PREVIEW_HEIGHT = 600
+
+function sanitizeEncodedHtml(encoded: unknown): string {
+  if (typeof encoded !== 'string') return ''
+  try {
+    const source = decodeOpaqueHtml(encoded)
+    const sanitized = sanitizeDraftHtmlForImport(source)
+    return sanitizedDomMatchesSource(source, sanitized) ? encoded : encodeOpaqueHtml(sanitized)
+  } catch {
+    return ''
+  }
+}
 
 function normalizeContentId(value: string): string {
   try {
@@ -131,7 +143,7 @@ export class OpaqueHtmlNode extends DecoratorNode<React.JSX.Element> {
   }
 
   static importJSON(serialized: SerializedOpaqueHtmlNode): OpaqueHtmlNode {
-    return new OpaqueHtmlNode(serialized.html, serialized.inline)
+    return new OpaqueHtmlNode(sanitizeEncodedHtml(serialized.html), serialized.inline === true)
   }
 
   static importDOM(): DOMConversionMap | null {
@@ -139,7 +151,7 @@ export class OpaqueHtmlNode extends DecoratorNode<React.JSX.Element> {
       const html = element.getAttribute('data-attn-opaque')
       if (!html) return null
       return {
-        conversion: () => ({ node: new OpaqueHtmlNode(html, inline) }),
+        conversion: () => ({ node: new OpaqueHtmlNode(sanitizeEncodedHtml(html), inline) }),
         priority: 4 as const
       }
     }

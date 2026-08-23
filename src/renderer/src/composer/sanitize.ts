@@ -67,7 +67,8 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
 const UNSAFE_STYLE_RESOURCE =
   /(?:url\s*\(|(?:-webkit-)?image-set\s*\(|(?:image|cross-fade|element|-moz-element|paint|src)\s*\(|expression\s*\(|javascript:|@import|behavior\s*:|(?:https?|data|cid|blob|file):|\/\/|\\|\/\*)/i
 
-export function sanitizeComposerStyle(style: string): string {
+export function sanitizeComposerStyle(style: unknown): string {
+  if (typeof style !== 'string') return ''
   return style
     .split(';')
     .map((declaration) => declaration.trim())
@@ -253,4 +254,12 @@ export function sanitizeDraftHtmlForImport(html: string): string {
     ALLOWED_URI_REGEXP: SAFE_URI,
     ALLOW_ARIA_ATTR: false
   })
+}
+
+export function sanitizeComposerImageSource(source: unknown): string {
+  if (typeof source !== 'string') return ''
+  const image = document.createElement('img')
+  image.setAttribute('src', source)
+  const safe = new DOMParser().parseFromString(sanitizeDraftHtmlForImport(image.outerHTML), 'text/html')
+  return safe.body.querySelector('img')?.getAttribute('src') ?? ''
 }

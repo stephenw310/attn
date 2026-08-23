@@ -2,6 +2,7 @@ import { createReadStream, type Stats } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { MailAddress } from '../../shared/address'
+import { errorMessage } from '../../shared/error'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { isPathInside } from '../pathSafety'
@@ -38,11 +39,25 @@ interface DraftMirrorRow {
   local_revision: number
 }
 
+export class DraftMirrorRowError extends Error {
+  constructor(
+    readonly rowId: string,
+    readonly reason: unknown
+  ) {
+    super(errorMessage(reason))
+    this.name = 'DraftMirrorRowError'
+  }
+}
+
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T
 }
 
-function nextPending(db: Db, accountId: string): DraftMirrorRow | undefined {
+function nextPending(
+  db: Db,
+  accountId: string,
+  skip: (rowId: string) => boolean
+): DraftMirrorRow | undefined {
   const rows = db
     .prepare(
       `SELECT id, state, gmail_draft_id, to_json, cc_json, bcc_json, subject, body_html,
@@ -59,24 +74,25 @@ function nextPending(db: Db, accountId: string): DraftMirrorRow | undefined {
     .all(accountId) as DraftMirrorRow[]
   return rows.find(
     (row) =>
-      row.state === 'discarding' ||
-      !isEmptyDraft({
-        id: row.id,
-        kind: 'new',
-        to: parseJson<MailAddress[]>(row.to_json),
-        cc: parseJson<MailAddress[]>(row.cc_json),
-        bcc: parseJson<MailAddress[]>(row.bcc_json),
-        subject: row.subject,
-        bodyHtml: row.body_html,
-        bodyText: row.body_text,
-        attachments: parseStoredDraftAttachments(row.attachments_json),
-        threadId: row.thread_id,
-        sourceMessageId: null,
-        inReplyTo: row.in_reply_to,
-        references: parseJson<string[]>(row.references_json),
-        quoteHtml: row.quote_html,
-        quoteText: row.quote_text
-      })
+      !skip(row.id) &&
+      (row.state === 'discarding' ||
+        !isEmptyDraft({
+          id: row.id,
+          kind: 'new',
+          to: parseJson<MailAddress[]>(row.to_json),
+          cc: parseJson<MailAddress[]>(row.cc_json),
+          bcc: parseJson<MailAddress[]>(row.bcc_json),
+          subject: row.subject,
+          bodyHtml: row.body_html,
+          bodyText: row.body_text,
+          attachments: parseStoredDraftAttachments(row.attachments_json),
+          threadId: row.thread_id,
+          sourceMessageId: null,
+          inReplyTo: row.in_reply_to,
+          references: parseJson<string[]>(row.references_json),
+          quoteHtml: row.quote_html,
+          quoteText: row.quote_text
+        }))
   )
 }
 
@@ -492,17 +508,23 @@ export async function drainDraftMirrors(
   provider: MailActionProvider | null,
   shouldContinue: () => boolean = () => true,
   spoolRoot: string | null = null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  skip: (rowId: string) => boolean = () => false
 ): Promise<void> {
   while (shouldContinue()) {
-    const row = nextPending(db, accountId)
+    const row = nextPending(db, accountId, skip)
     if (!row) return
-    const progressed =
-      row.state === 'discarding'
-        ? await deleteDiscarded(db, accountId, row, provider, signal)
-        : provider
-          ? await mirrorComposing(db, accountId, row, provider, spoolRoot, signal)
-          : false
+    let progressed: boolean
+    try {
+      progressed =
+        row.state === 'discarding'
+          ? await deleteDiscarded(db, accountId, row, provider, signal)
+          : provider
+            ? await mirrorComposing(db, accountId, row, provider, spoolRoot, signal)
+            : false
+    } catch (error) {
+      throw new DraftMirrorRowError(row.id, error)
+    }
     if (!progressed) return
   }
 }

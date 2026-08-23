@@ -30,95 +30,7 @@ unless a plan doc says so.
 
 ---
 
-## Bugs
-
-### BUG-1: a non-retryable mirror failure stalls every later draft *(review B3)*
-
-**Verified:** 2026-08-21 · **Severity:** medium · **Pairs with:** REF-2
-
-`mirrorExecutor.ts:118` returns on a non-retryable `GmailApiError` without setting a timer or marking the row.
-`drainDraftMirrors` orders by `updated_at` (`mirror.ts:56`), so the same rejected row is selected first on every
-trigger. Newer drafts never mirror, and Gmail receives one rejected request per poll cycle, indefinitely.
-
-Nothing surfaces in the UI, so a week of drafts can fail to mirror with no visible symptom. That makes it a poor
-thing to carry into a dogfood run.
-
-**Fix direction:** an in-memory `nextAttemptAt` map keyed by row id is enough, and needs no schema change. The
-alternative is to continue to the next row instead of returning. Either one closes REF-2 in the same change.
-
-### BUG-2: leaving a conversation mid-reply drops the draft *(review B6)*
-
-**Verified:** 2026-08-22 · **Severity:** medium, data loss
-
-`Inbox.tsx` derives the inline composer from `readerOpen && selected.id === composerDraft.threadId`.
-`closeReader` routes through `inlineComposerRef.current.exitConversation()` (`Inbox.tsx:490`), but `switchView`
-(`Inbox.tsx:340`) and `openOutbox` (`Inbox.tsx:352`) do not. They set `readerOpen = false` and leave
-`composerDraft` intact, so the keyed inline `<Composer>` unmounts and a full-window one mounts from the object
-captured at open.
-
-`useComposerDraft`'s unmount clears timers without flushing. Edits inside the 5 second checkpoint window are
-lost outright. Edits that did checkpoint disappear from the editor and are overwritten in SQLite on the next
-keystroke. The header nav and the Outbox button stay enabled during inline compose, and `composer.spec.ts:964`
-pins that they do, so nothing stops a user from hitting this.
-
-**Fix direction:** route both transitions through `exitConversation()` the way `closeReader` does. Add an e2e
-that clicks "Drafts" mid-reply and asserts the draft body survives.
-
-### BUG-3: bulk labelling shows one thread's state and applies it to all *(review B7)*
-
-**Verified:** 2026-08-22 · **Severity:** low-medium
-
-`Inbox.tsx:798` passes `targets={[{ id: labelTarget.id, ... }]}`, which is the focused thread alone, while
-`useTriage.ts:41` rewrites `threadIds` to the whole selection and then calls `clearSelection()`.
-
-Select three threads, press `l`, and toggle a label the focused row already carries. The picker offers "remove"
-based on that one row, then removes the label from all three, including the two that never had it. Because the
-selection is cleared on the first action, the next toggle in the still-open picker applies to the focused thread
-alone. `LabelPicker` already renders multi-target `some` states, so the component is not the blocker.
-
-No e2e covers bulk labelling.
-
-**Fix direction:** pass the real selection as `targets` when a selection exists, and decide explicitly whether
-the picker stays open across a bulk apply. Add the missing e2e.
-
----
-
 ## Security hardening
-
-### SEC-1: crafted clipboard JSON puts unsanitized HTML into outgoing mail *(review S1)*
-
-**Verified:** 2026-08-22 · **Severity:** medium, sanitizer bypass
-
-`OpaqueHtmlNode.importJSON` (`nodes/OpaqueHtmlNode.tsx:133-134`) constructs the node straight from
-`serialized.html`. Every other route into an opaque region passes the composer's import sanitizer first.
-
-Three things line up to make that reach the wire:
-
-1. The composer's paste handler (`Composer.tsx:364`) calls `preventDefault` only when the clipboard carries
-   image files. Anything else falls through to Lexical's default importer, which reads
-   `application/x-lexical-editor` and calls `importJSON`. The only gate is the editor namespace, and that is
-   the fixed public string `attn-composer` (`editorConfig.ts:13`).
-2. `serializeEditorState` (`serialize.ts:92-94`) runs `restoreOpaqueHtml` **after** `sanitizeOutgoingHtml`, by
-   design. While the sanitizer runs, the payload sits base64url-encoded inside `data-attn-opaque`, which
-   `sanitize.ts:210` explicitly allows through untouched.
-3. `restoreOpaqueHtml` (`preserve.ts:415-417`) is a raw string replace. It decodes the payload back into the
-   body with no sanitization.
-
-Confirmed by probe on 2026-08-22: feeding `<script>alert(1)</script><img src=x onerror=alert(2)>` through
-`restoreOpaqueHtml(sanitizeOutgoingHtml(...))` returns it intact. So this is an outgoing-mail sanitizer bypass,
-not defense in depth. The harm lands on the recipient's mail client, not locally, because the reader is a
-scriptless sandbox under CSP. Exploitability depends on Chromium carrying a custom MIME type across
-applications on the clipboard, which is plausible but untested.
-
-`ImageNode.importJSON` (`nodes/ImageNode.tsx:50-53`) takes `serialized.src` raw by the same route.
-
-**Decided 2026-08-22:** the owner asked for this to ship with the BUG-1, BUG-2 and BUG-3 fix pass rather
-than on its own.
-
-**Fix direction:** decode, run `sanitizeDraftHtmlForImport`, then re-encode inside `OpaqueHtmlNode.importJSON`
-and `importDOM`, so the node type cannot hold unsanitized HTML however it was built. Sanitizing at the restore
-step instead would also close it, and would cover any future path into an opaque region. Give the sibling nodes
-the same treatment for raw `style` and `src`.
 
 ### SEC-2: the quote CSS filter misses several flow-escaping properties *(review S2)*
 
@@ -208,13 +120,6 @@ somebody found and verified it, not because it is scheduled.
 `Composer.tsx` is 1,060 lines and `Inbox.tsx` is 829, against the bar R1 set at roughly 350. Both grew
 again in #65. Clean seams exist:
 `InlineQuote` plus `quoteSrcDoc` out of the composer, and the label and snooze picker wiring out of `Inbox`.
-
-### REF-2: per-row mirror backoff *(review R4)*
-
-**Verified:** 2026-08-21 · **Same change as:** BUG-1
-
-Give `drainDraftMirrors` a `skip` predicate and let the executor own per-row backoff, matching the action
-executor's shape. This is BUG-1's fix seen as a simplification.
 
 ### REF-3: two MIME builders with subtly different header rules *(review R6)*
 

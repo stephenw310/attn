@@ -254,7 +254,7 @@ export function draftHtmlFidelityIssues(
     .filter((reason): reason is string => reason !== null)
 }
 
-function encodeOpaque(value: string): string {
+export function encodeOpaqueHtml(value: string): string {
   const bytes = new TextEncoder().encode(value)
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
@@ -332,7 +332,7 @@ function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSource
 }
 
 /** DOMPurify remains the security authority; serialization differences alone do not make safe HTML lossy. */
-function sanitizedDomMatchesSource(source: string, sanitized: string): boolean {
+export function sanitizedDomMatchesSource(source: string, sanitized: string): boolean {
   const left = parseFragment(source)
   const right = parseFragment(sanitized)
   const children = (node: DefaultTreeAdapterTypes.ParentNode): DefaultTreeAdapterTypes.ChildNode[] =>
@@ -397,7 +397,7 @@ export function prepareHtmlForEditor(html: string): { html: string; issues: stri
     let replacement = ''
     if (preserved && draftHtmlFidelityIssues(preserved, hasStylesheet).length > 0) {
       const markerTag = INLINE_TAGS.has(region.tag) ? 'span' : 'div'
-      replacement = `<${markerTag} data-attn-opaque="${encodeOpaque(preserved)}"></${markerTag}>`
+      replacement = `<${markerTag} data-attn-opaque="${encodeOpaqueHtml(preserved)}"></${markerTag}>`
       issues.unshift(...region.issues)
     } else {
       replacement = preserved

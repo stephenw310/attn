@@ -7,6 +7,7 @@ import {
   type SerializedLexicalNode,
   type Spread
 } from 'lexical'
+import { sanitizeComposerImageSource, sanitizeComposerStyle } from '../sanitize'
 
 export type SerializedImageNode = Spread<
   {
@@ -20,6 +21,14 @@ export type SerializedImageNode = Spread<
   },
   SerializedLexicalNode
 >
+
+function safeString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function safeDimension(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
 
 export class ImageNode extends DecoratorNode<React.JSX.Element> {
   __src: string
@@ -49,13 +58,13 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
 
   static importJSON(serialized: SerializedImageNode): ImageNode {
     return new ImageNode(
-      serialized.src,
-      serialized.contentId,
-      serialized.altText,
-      serialized.width,
-      serialized.height,
-      serialized.style,
-      serialized.dataSurl ?? ''
+      sanitizeComposerImageSource(serialized.src),
+      safeString(serialized.contentId),
+      safeString(serialized.altText),
+      safeDimension(serialized.width),
+      safeDimension(serialized.height),
+      sanitizeComposerStyle(serialized.style),
+      safeString(serialized.dataSurl)
     )
   }
 
@@ -70,12 +79,12 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
             (source.toLowerCase().startsWith('cid:') ? source.slice(4) : '')
           return {
             node: new ImageNode(
-              source,
+              sanitizeComposerImageSource(source),
               contentId,
               image.getAttribute('alt') ?? '',
               image.hasAttribute('width') ? Number(image.getAttribute('width')) || null : null,
               image.hasAttribute('height') ? Number(image.getAttribute('height')) || null : null,
-              image.getAttribute('style') ?? '',
+              sanitizeComposerStyle(image.getAttribute('style') ?? ''),
               image.getAttribute('data-surl') ?? ''
             )
           }

@@ -63,7 +63,7 @@ interface ComposerProps {
 }
 
 export interface ComposerHandle {
-  exitConversation: () => void
+  exitConversation: (afterExit?: () => void) => void
 }
 
 function TrashIcon(): React.JSX.Element {
@@ -624,7 +624,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   )
 
   const closeAndSave = useCallback(() => saveAndClose(onClose), [onClose, saveAndClose])
-  const closeAndExit = useCallback(() => saveAndClose(onExit ?? onClose), [onClose, onExit, saveAndClose])
+  const closeAndExit = useCallback(
+    (afterExit?: () => void) =>
+      saveAndClose(() => {
+        const finishExit = onExit ?? onClose
+        finishExit()
+        afterExit?.()
+      }),
+    [onClose, onExit, saveAndClose]
+  )
 
   const runComposerKey = useCallback(
     (event: KeyboardEvent): boolean => {

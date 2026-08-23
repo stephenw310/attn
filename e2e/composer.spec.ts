@@ -986,6 +986,19 @@ test('keeps the view nav and sync footer while an inline draft is open', async (
   await expect(page.getByTestId('mail-footer')).toHaveCount(0)
 })
 
+test('saves an inline reply before switching to Drafts from the header', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  const design = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
+  await design.click()
+  await composer.openReply()
+  await composer.typeBody('Saved through header navigation')
+
+  await page.getByTestId('view-drafts').click()
+  await expect(page.getByTestId('draft-list')).toBeVisible()
+  await page.getByTestId('draft-row').filter({ hasText: 'Design notes' }).click()
+  await expect(composer.editor).toContainText('Saved through header navigation')
+})
+
 test('restores a bound draft when J reads into its conversation', async ({ page }) => {
   const composer = new ComposerPage(page)
   const design = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })

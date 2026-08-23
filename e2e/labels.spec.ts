@@ -89,6 +89,32 @@ test('shows existing user-label membership without system labels', async ({ page
   await expect(options.filter({ hasText: 'projects' })).toHaveAttribute('data-state', 'off')
 })
 
+test('applies labels to the full bulk target set while the picker stays open', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await rows.nth(2).click({ modifiers: ['Shift'] })
+  await expect(page.getByTestId('selection-count')).toHaveText('3 selected')
+
+  await page.keyboard.press('l')
+  const picker = page.getByTestId('label-picker')
+  const projects = picker.getByTestId('label-option').filter({ hasText: 'projects' })
+  await expect(projects).toHaveAttribute('data-state', 'some')
+  await projects.click()
+
+  await expect(picker).toBeVisible()
+  await expect(page.getByTestId('selection-count')).toHaveCount(0)
+  await expect(projects).toHaveAttribute('data-state', 'all')
+  for (let index = 0; index < 3; index++) {
+    await expect(rows.nth(index).getByTestId('label-chip').filter({ hasText: 'projects' })).toBeVisible()
+  }
+
+  await projects.click()
+  await expect(projects).toHaveAttribute('data-state', 'off')
+  for (let index = 0; index < 3; index++) {
+    await expect(rows.nth(index).getByTestId('label-chip').filter({ hasText: 'projects' })).toHaveCount(0)
+  }
+})
+
 test('refreshes the picker from an authoritative renamed label catalog', async ({ app, page }) => {
   const error = await app.evaluate(
     ({ ipcMain }, { channel, labels }) =>
