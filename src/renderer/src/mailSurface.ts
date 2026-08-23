@@ -1,8 +1,6 @@
 export type MailSurface = 'native' | 'light'
 
 const SIGNATURE = '.gmail_signature_prefix, .gmail_signature'
-const QUOTED_MAIL = '.gmail_quote, blockquote[type="cite"]'
-const CANVAS_CANDIDATE = 'style, [bgcolor], [background], [style]'
 const CSS_COMMENT = /\/\*[\s\S]*?\*\//g
 const IMPORTANT = /\s*!\s*important\s*$/i
 const GENERATED_CANVAS =
@@ -12,6 +10,7 @@ const INTERACTION_PSEUDO = /:(?:hover|active|focus(?:-visible|-within)?|visited)
 const PSEUDO_ELEMENT = /::[a-z-]+(?:\([^)]*\))?|:(?:before|after|first-letter|first-line)\b/gi
 const CONDITIONAL_RULE = new Set(['container', 'document', 'layer', 'scope', 'supports'])
 const BACKGROUND_PROPERTIES = ['background', 'background-color', 'background-image'] as const
+const BACKGROUND_LONGHANDS = ['background-color', 'background-image'] as const
 
 const backgroundProbe = document.createElement('span').style
 
@@ -102,11 +101,9 @@ function backgroundCreatesCanvas(property: string, rawValue: string): boolean {
   return GENERATED_CANVAS.test(value)
 }
 
-function legacyBackgroundCreatesCanvas(value: string): boolean {
+function legacyBackgroundValue(value: string): string {
   const trimmed = value.trim()
-  if (!trimmed) return false
-  const cssColor = /^[\da-f]{3,8}$/i.test(trimmed) ? `#${trimmed}` : trimmed
-  return backgroundCreatesCanvas('background-color', cssColor)
+  return /^[\da-f]{3,8}$/i.test(trimmed) ? `#${trimmed}` : trimmed
 }
 
 function matchingBlockEnd(css: string, open: number): number {
@@ -237,78 +234,323 @@ function directDeclarations(css: string): string {
   return result + css.slice(cursor)
 }
 
-function declarationsCreateCanvas(css: string): boolean {
+type BackgroundLonghand = (typeof BACKGROUND_LONGHANDS)[number]
+type Specificity = readonly [ids: number, classes: number, types: number]
+
+interface BackgroundDeclaration {
+  longhand: BackgroundLonghand
+  sourceProperty: (typeof BACKGROUND_PROPERTIES)[number]
+  value: string
+  important: boolean
+}
+
+interface CascadedBackground extends BackgroundDeclaration {
+  inline: boolean
+  specificity: Specificity
+  order: number
+}
+
+type BackgroundWinners = Partial<Record<BackgroundLonghand, CascadedBackground>>
+
+function backgroundDeclarations(css: string): BackgroundDeclaration[] {
   backgroundProbe.cssText = css
-  const backgrounds = BACKGROUND_PROPERTIES.map(
-    (property) => [property, backgroundProbe.getPropertyValue(property)] as const
-  )
-  return backgrounds.some(([property, value]) => value && backgroundCreatesCanvas(property, value))
-}
-
-function selectorMatchesDocument(document: Document, selectorList: string): boolean {
-  return splitCssList(selectorList).some((selector) => {
-    const candidates = [selector, selector.replace(PSEUDO_ELEMENT, '').replace(INTERACTION_PSEUDO, '')]
-    return candidates.some((candidate, index) => {
-      if (index === 1 && candidate === selector) return false
-      try {
-        return Boolean(candidate.trim() && document.querySelector(candidate))
-      } catch {
-        return false
-      }
-    })
+  const parsed = BACKGROUND_LONGHANDS.flatMap((longhand) => {
+    const value = backgroundProbe.getPropertyValue(longhand)
+    return value
+      ? [
+          {
+            longhand,
+            sourceProperty: longhand,
+            value,
+            important: backgroundProbe.getPropertyPriority(longhand) === 'important'
+          } satisfies BackgroundDeclaration
+        ]
+      : []
   })
+  if (parsed.length > 0) return parsed
+
+  // A shorthand containing a custom property stays unresolved in a detached
+  // declaration block. Keep treating it as sender-owned, while still giving a
+  // later shorthand the chance to replace both longhands through the cascade.
+  const shorthand = backgroundProbe.getPropertyValue('background')
+  if (!shorthand || !GENERATED_CANVAS.test(shorthand)) return []
+  const important = backgroundProbe.getPropertyPriority('background') === 'important'
+  return BACKGROUND_LONGHANDS.map((longhand) => ({
+    longhand,
+    sourceProperty: 'background',
+    value: shorthand,
+    important
+  }))
 }
 
-function stylesheetCreatesCanvas(css: string, document: Document): boolean {
+function addSpecificity(left: Specificity, right: Specificity): Specificity {
+  return [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
+}
+
+function compareSpecificity(left: Specificity, right: Specificity): number {
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index]
+  }
+  return 0
+}
+
+function matchingDelimiterEnd(source: string, open: number, opening: string, closing: string): number {
+  let depth = 0
+  let quote: string | null = null
+  let escaped = false
+  for (let index = open; index < source.length; index += 1) {
+    const character = source[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === '\\') {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (character === quote) quote = null
+      continue
+    }
+    if (character === '"' || character === "'") quote = character
+    else if (character === opening) depth += 1
+    else if (character === closing) {
+      depth -= 1
+      if (depth === 0) return index
+    }
+  }
+  return source.length - 1
+}
+
+function identifierEnd(source: string, start: number): number {
+  let index = start
+  while (index < source.length) {
+    const character = source[index]
+    if (character === '\\') index += Math.min(2, source.length - index)
+    else if (/[\w-]/.test(character) || character.charCodeAt(0) >= 0x80) index += 1
+    else break
+  }
+  return index
+}
+
+function maxSpecificity(selectorList: string): Specificity {
+  return splitCssList(selectorList)
+    .map(selectorSpecificity)
+    .reduce<Specificity>(
+      (best, specificity) => (compareSpecificity(specificity, best) > 0 ? specificity : best),
+      [0, 0, 0]
+    )
+}
+
+function selectorSpecificity(selector: string): Specificity {
+  let specificity: Specificity = [0, 0, 0]
+  let index = 0
+  let typeAllowed = true
+  while (index < selector.length) {
+    const character = selector[index]
+    if (/\s/.test(character) || character === '>' || character === '+' || character === '~') {
+      typeAllowed = true
+      index += 1
+      continue
+    }
+    if (character === '#') {
+      specificity = addSpecificity(specificity, [1, 0, 0])
+      index = identifierEnd(selector, index + 1)
+      typeAllowed = false
+      continue
+    }
+    if (character === '.') {
+      specificity = addSpecificity(specificity, [0, 1, 0])
+      index = identifierEnd(selector, index + 1)
+      typeAllowed = false
+      continue
+    }
+    if (character === '[') {
+      specificity = addSpecificity(specificity, [0, 1, 0])
+      index = matchingDelimiterEnd(selector, index, '[', ']') + 1
+      typeAllowed = false
+      continue
+    }
+    if (character === ':') {
+      const pseudoElement = selector[index + 1] === ':'
+      const nameStart = index + (pseudoElement ? 2 : 1)
+      const nameEnd = identifierEnd(selector, nameStart)
+      const name = selector.slice(nameStart, nameEnd).toLowerCase()
+      const legacyPseudoElement =
+        !pseudoElement && ['after', 'before', 'first-letter', 'first-line'].includes(name)
+      const open = selector[nameEnd] === '(' ? nameEnd : -1
+      const close = open >= 0 ? matchingDelimiterEnd(selector, open, '(', ')') : nameEnd - 1
+      if (pseudoElement || legacyPseudoElement) {
+        specificity = addSpecificity(specificity, [0, 0, 1])
+      } else if (name === 'is' || name === 'not' || name === 'has') {
+        specificity = addSpecificity(specificity, maxSpecificity(selector.slice(open + 1, close)))
+      } else if (name !== 'where') {
+        specificity = addSpecificity(specificity, [0, 1, 0])
+        if ((name === 'nth-child' || name === 'nth-last-child') && open >= 0) {
+          const argument = selector.slice(open + 1, close)
+          const of = /\bof\b([\s\S]*)$/i.exec(argument)
+          if (of) specificity = addSpecificity(specificity, maxSpecificity(of[1]))
+        }
+      }
+      index = open >= 0 ? close + 1 : nameEnd
+      typeAllowed = false
+      continue
+    }
+    if (character === '*') {
+      index += 1
+      typeAllowed = false
+      continue
+    }
+    if (
+      typeAllowed &&
+      (/[a-z_-]/i.test(character) || character === '\\' || character.charCodeAt(0) >= 0x80)
+    ) {
+      specificity = addSpecificity(specificity, [0, 0, 1])
+      index = identifierEnd(selector, index)
+      if (selector[index] === '|') {
+        index += 1
+        index = selector[index] === '*' ? index + 1 : identifierEnd(selector, index)
+      }
+      typeAllowed = false
+      continue
+    }
+    index += 1
+  }
+  return specificity
+}
+
+function matchingElements(document: Document, selector: string): Element[] {
+  const normalized = selector.replace(PSEUDO_ELEMENT, '').replace(INTERACTION_PSEUDO, '')
+  const candidates = normalized === selector ? [selector] : [selector, normalized]
+  for (const candidate of candidates) {
+    try {
+      if (!candidate.trim()) continue
+      const matches = [...document.querySelectorAll(candidate)]
+      if (matches.length > 0) return matches
+    } catch {
+      // Try the normalized selector after browser-state pseudo-classes.
+    }
+  }
+  return []
+}
+
+function winsCascade(candidate: CascadedBackground, current: CascadedBackground | undefined): boolean {
+  if (!current) return true
+  if (candidate.important !== current.important) return candidate.important
+  if (candidate.inline !== current.inline) return candidate.inline
+  const specificity = compareSpecificity(candidate.specificity, current.specificity)
+  if (specificity !== 0) return specificity > 0
+  return candidate.order >= current.order
+}
+
+function applyBackgroundDeclarations(
+  winners: Map<Element, BackgroundWinners>,
+  elements: Iterable<Element>,
+  declarations: readonly BackgroundDeclaration[],
+  cascade: Pick<CascadedBackground, 'inline' | 'specificity' | 'order'>
+): void {
+  for (const element of elements) {
+    const elementWinners = winners.get(element) ?? {}
+    for (const declaration of declarations) {
+      const candidate = { ...declaration, ...cascade }
+      if (winsCascade(candidate, elementWinners[declaration.longhand])) {
+        elementWinners[declaration.longhand] = candidate
+      }
+    }
+    winners.set(element, elementWinners)
+  }
+}
+
+function applyStylesheetBackgrounds(
+  css: string,
+  document: Document,
+  winners: Map<Element, BackgroundWinners>,
+  sourceOrder: { value: number }
+): void {
   const source = css.replace(CSS_COMMENT, '')
   let cursor = 0
   let block = nextCssBlock(source, cursor)
   while (block) {
     const close = matchingBlockEnd(source, block.open)
-    if (close < 0) return false
+    if (close < 0) return
     const content = source.slice(block.open + 1, close)
     const atRule = /^@([\w-]+)\b([\s\S]*)$/i.exec(block.prelude)
     if (atRule) {
       const name = atRule[1].toLowerCase()
       const condition = atRule[2].trim()
       if (name === 'media') {
-        if (!darkSchemeOnly(condition) && stylesheetCreatesCanvas(content, document)) return true
-      } else if (CONDITIONAL_RULE.has(name) && stylesheetCreatesCanvas(content, document)) {
-        return true
+        if (!darkSchemeOnly(condition)) applyStylesheetBackgrounds(content, document, winners, sourceOrder)
+      } else if (CONDITIONAL_RULE.has(name)) {
+        applyStylesheetBackgrounds(content, document, winners, sourceOrder)
       }
-    } else if (
-      selectorMatchesDocument(document, block.prelude) &&
-      declarationsCreateCanvas(directDeclarations(content))
-    ) {
-      return true
+    } else {
+      const declarations = backgroundDeclarations(directDeclarations(content))
+      const order = sourceOrder.value
+      sourceOrder.value += 1
+      if (declarations.length > 0) {
+        for (const selector of splitCssList(block.prelude)) {
+          applyBackgroundDeclarations(winners, matchingElements(document, selector), declarations, {
+            inline: false,
+            specificity: selectorSpecificity(selector),
+            order
+          })
+        }
+      }
     }
     cursor = close + 1
     block = nextCssBlock(source, cursor)
   }
-  return false
 }
 
-function elementCreatesCanvas(element: Element): boolean {
-  if (
-    element instanceof HTMLStyleElement &&
-    stylesheetCreatesCanvas(element.textContent ?? '', element.ownerDocument)
-  ) {
-    return true
-  }
-  const bgcolor = element.getAttribute('bgcolor')
-  if (bgcolor !== null && legacyBackgroundCreatesCanvas(bgcolor)) return true
-  if (element.getAttribute('background')?.trim()) return true
-  const style = (element as HTMLElement).style
-  if (!style) return false
-  return BACKGROUND_PROPERTIES.some((property) => {
-    const value = style.getPropertyValue(property)
-    return Boolean(value && backgroundCreatesCanvas(property, value))
+function hasAuthoredCanvas(document: Document): boolean {
+  const winners = new Map<Element, BackgroundWinners>()
+  document.querySelectorAll('[bgcolor]').forEach((element) => {
+    const value = legacyBackgroundValue(element.getAttribute('bgcolor') ?? '')
+    if (!value) return
+    applyBackgroundDeclarations(
+      winners,
+      [element],
+      [{ longhand: 'background-color', sourceProperty: 'background-color', value, important: false }],
+      { inline: false, specificity: [0, 0, 0], order: -1 }
+    )
   })
-}
+  document.querySelectorAll('[background]').forEach((element) => {
+    const value = element.getAttribute('background')?.trim()
+    if (!value) return
+    applyBackgroundDeclarations(
+      winners,
+      [element],
+      [
+        {
+          longhand: 'background-image',
+          sourceProperty: 'background-image',
+          value: `url(${JSON.stringify(value)})`,
+          important: false
+        }
+      ],
+      { inline: false, specificity: [0, 0, 0], order: -1 }
+    )
+  })
 
-function hasAuthoredCanvas(root: ParentNode): boolean {
-  if (root instanceof Element && root.matches(CANVAS_CANDIDATE) && elementCreatesCanvas(root)) return true
-  return [...root.querySelectorAll(CANVAS_CANDIDATE)].some(elementCreatesCanvas)
+  const sourceOrder = { value: 0 }
+  document.querySelectorAll('style').forEach((style) => {
+    applyStylesheetBackgrounds(style.textContent ?? '', document, winners, sourceOrder)
+  })
+  document.querySelectorAll('[style]').forEach((element) => {
+    applyBackgroundDeclarations(
+      winners,
+      [element],
+      backgroundDeclarations(element.getAttribute('style') ?? ''),
+      { inline: true, specificity: [0, 0, 0], order: sourceOrder.value }
+    )
+  })
+
+  return [...winners.values()].some((elementWinners) =>
+    BACKGROUND_LONGHANDS.some((longhand) => {
+      const winner = elementWinners[longhand]
+      return Boolean(winner && backgroundCreatesCanvas(winner.sourceProperty, winner.value))
+    })
+  )
 }
 
 /** Remove sender canvases from content classified for Attn's native dark surface. */
@@ -342,11 +584,8 @@ export function mailSurfaceForHtml(html: string | null): MailSurface {
     element.remove()
   })
 
-  // A forward carries the original document inside its quote. Preserve a real
-  // authored canvas there, but do not let ordinary quoted formatting promote
-  // every later reply in the thread to a white document.
-  const quoted = [...document.querySelectorAll(QUOTED_MAIL)]
-  if (quoted.some(hasAuthoredCanvas)) return 'light'
-  for (const element of quoted) element.remove()
+  // Keep quoted content in the document while resolving stylesheet selectors.
+  // A real canvas in a forward still belongs to the visible message, even when
+  // the matching style block lives outside the quoted wrapper.
   return hasAuthoredCanvas(document) ? 'light' : 'native'
 }

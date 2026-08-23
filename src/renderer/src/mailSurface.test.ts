@@ -98,6 +98,27 @@ describe('mail surface classification', () => {
     ).toBe('native')
   })
 
+  it('uses the winning stylesheet background after the author cascade', () => {
+    const neutralMessages = [
+      '<style>.card{background:#123456}.card{background:transparent}</style><div class="card">Plain</div>',
+      '<style>div.card{background:transparent}.card{background:#123456}</style><div class="card">Plain</div>',
+      '<style>.card{background:#123456}.card{background:transparent!important}</style><div class="card">Plain</div>',
+      '<style>#message{background:transparent}.card{background:#123456}</style><div id="message" class="card">Plain</div>',
+      '<style>.card{background:#123456}</style><div class="card" style="background:transparent">Plain</div>',
+      '<style>.card{background:#123456}</style><style>.card{background:transparent}</style><div class="card">Plain</div>',
+      '<style>.card{background:#123456!important}</style><div class="card" style="background:transparent!important">Plain</div>'
+    ]
+    for (const html of neutralMessages) expect(mailSurfaceForHtml(html)).toBe('native')
+
+    const designedMessages = [
+      '<style>.card{background:transparent}.card{background:#123456}</style><div class="card">Designed</div>',
+      '<style>.card{background:#123456!important}.card{background:transparent}</style><div class="card">Designed</div>',
+      '<style>div.card{background:#123456}.card{background:transparent}</style><div class="card">Designed</div>',
+      '<style>.card{background:#123456!important}</style><div class="card" style="background:transparent">Designed</div>'
+    ]
+    for (const html of designedMessages) expect(mailSurfaceForHtml(html)).toBe('light')
+  })
+
   it('accepts browser-valid important syntax on inline backgrounds', () => {
     expect(mailSurfaceForHtml('<div style="background:#123456 ! important">Designed mail</div>')).toBe(
       'light'
@@ -148,6 +169,11 @@ describe('mail surface classification', () => {
     expect(
       mailSurfaceForHtml(
         '<div class="gmail_quote"><style>.hero{background:#fff3d6}</style><div class="hero">Designed</div></div>'
+      )
+    ).toBe('light')
+    expect(
+      mailSurfaceForHtml(
+        '<style>.gmail_quote{background:#f6d5c4}</style><div class="gmail_quote">Quoted design</div>'
       )
     ).toBe('light')
   })
