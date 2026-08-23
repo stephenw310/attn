@@ -48,22 +48,32 @@ const QUOTED_MAIL_SANITIZER_CONFIG: Config = {
 // Strip only the properties that let content leave normal flow — colour, font,
 // border, background, padding and table layout stay, because a quote stripped of
 // its formatting is a worse quote.
-const FLOW_ESCAPING_PROPERTY = /^(position|z-index|inset|top|right|bottom|left|transform)(-|$)/
+const FLOW_ESCAPING_PROPERTY =
+  /^(position|z-index|inset|top|right|bottom|left|transform|translate|rotate|scale|offset|text-indent)(-|$)/
 // `behavior` and `-moz-binding` ran script from CSS in IE and pre-2013 Gecko, as
 // did `expression()`. No mail client in service still honours them; they are
 // dropped because a sanitizer that emits them invites the question, not because
 // any recipient is at risk.
 const LEGACY_SCRIPTING_PROPERTY = /^(behavior|binding)$/
 const LEGACY_SCRIPTING_VALUE = /expression\s*\(/i
+// Custom properties make value-based checks unreliable. A declaration such as
+// `margin:var(--m)` can resolve to a negative length defined elsewhere in the
+// quote, so quoted mail does not retain declarations that consume them.
+const CUSTOM_PROPERTY_REFERENCE = /var\s*\(/i
 const VENDOR_PREFIX = /^-(?:webkit|moz|ms|o)-/
+// Browsers decode escapes before interpreting CSS identifiers, while this
+// filter reads the original attribute text. Drop an escaped declaration rather
+// than maintain a second, security-sensitive CSS tokenizer here.
+const CSS_ESCAPE = /\\/
 // A negative margin drags quoted content up over the reply without needing
 // `position`, so it is the one case where the value decides, not the name.
 const NEGATIVE_LENGTH = /(?:^|[\s,(])-\s*\.?\d/
 
 function isUnsafeDeclaration(property: string, value: string): boolean {
+  if (CSS_ESCAPE.test(property) || CSS_ESCAPE.test(value)) return true
   const name = property.replace(VENDOR_PREFIX, '')
   if (FLOW_ESCAPING_PROPERTY.test(name) || LEGACY_SCRIPTING_PROPERTY.test(name)) return true
-  if (LEGACY_SCRIPTING_VALUE.test(value)) return true
+  if (LEGACY_SCRIPTING_VALUE.test(value) || CUSTOM_PROPERTY_REFERENCE.test(value)) return true
   return name.startsWith('margin') && NEGATIVE_LENGTH.test(value)
 }
 

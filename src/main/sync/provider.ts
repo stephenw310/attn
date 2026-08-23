@@ -7,6 +7,13 @@ export interface ProviderProfile {
   threadsTotal?: number
 }
 
+export interface ProviderSendAs {
+  sendAsEmail: string
+  displayName?: string
+  isPrimary?: boolean
+  isDefault?: boolean
+}
+
 export interface ProviderLabel {
   id: string
   name: string
@@ -138,6 +145,8 @@ export interface MailActionProvider {
 
 export interface MailProvider extends MailActionProvider {
   getProfile(options?: ProviderRequestOptions): Promise<ProviderProfile>
+  /** Optional only for narrow test providers; production uses it to build the outgoing From header. */
+  getSendAs?(email: string, options?: ProviderRequestOptions): Promise<ProviderSendAs>
   listLabels(options?: ProviderRequestOptions): Promise<ProviderLabel[]>
   listThreadIds(options?: ListThreadIdsOptions): Promise<ThreadIdPage>
   getThread(id: string, options?: GetThreadOptions): Promise<GmailThread>
