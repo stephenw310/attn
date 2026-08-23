@@ -9,6 +9,7 @@ import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
 import { type AttachmentFlagProgress, runAttachmentFlagWalk } from './sync/attachmentFlags'
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
+import { reconcileThreadExistence } from './sync/existenceSweep'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
 import { syncLabelCatalog } from './sync/labels'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
@@ -532,6 +533,23 @@ export class SyncController {
     this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
     let failure: unknown = new Error('history recovery backfill failed')
     try {
+      // Keep the expired checkpoint durable until tombstoning finishes. If the
+      // utility process stops mid-pass, the next launch must detect expiry again.
+      const existence = await reconcileThreadExistence(this.context.db, accountId, provider, {
+        shouldContinue: () =>
+          !this.stopped && generation === this.generation && this.context.currentAccountId() === accountId
+      })
+      if (!existence) throw new Error('authentication session changed')
+      if (existence.deletedThreadIds.length > 0) {
+        console.log(
+          `[sync] expiry recovery removed ${existence.deletedThreadIds.length} missing threads for ${accountId}`
+        )
+        // Publish the durable deletions now. A later backfill failure must not
+        // leave the renderer showing rows that are already gone from SQLite.
+        this.context.broadcastMailChanged()
+      }
+
+      this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
       const result = await runInboxBackfill(
         this.context.db,
         provider,

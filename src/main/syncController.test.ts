@@ -13,6 +13,7 @@ import type {
   AttachmentFlagResult
 } from './sync/attachmentFlags'
 import type { BackfillCallbacks, BackfillResult } from './sync/backfill'
+import type { ThreadExistenceSweepResult } from './sync/existenceSweep'
 import type { LifetimeSweepCallbacks, LifetimeSweepOptions, LifetimeSweepResult } from './sync/lifetimeSweep'
 import type { HistoryPollerOptions } from './sync/poller'
 
@@ -40,6 +41,7 @@ const mocks = vi.hoisted(() => {
     runInboxBackfill: vi.fn(),
     runLifetimeSweep: vi.fn(),
     runAttachmentFlagWalk: vi.fn(),
+    reconcileThreadExistence: vi.fn(),
     syncLabelCatalog: vi.fn(),
     reconcileInboxMembership: vi.fn(),
     reconcilePurgeableMembership: vi.fn(async () => {})
@@ -60,6 +62,9 @@ vi.mock('./sync/poller', () => ({
 vi.mock('./sync/lifetimeSweep', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync/lifetimeSweep')>()),
   runLifetimeSweep: mocks.runLifetimeSweep
+}))
+vi.mock('./sync/existenceSweep', () => ({
+  reconcileThreadExistence: mocks.reconcileThreadExistence
 }))
 vi.mock('./sync/labels', () => ({ syncLabelCatalog: mocks.syncLabelCatalog }))
 vi.mock('./sync/attachmentFlags', async (importOriginal) => ({
@@ -193,6 +198,8 @@ beforeEach(() => {
   mocks.runInboxBackfill.mockReset()
   mocks.runLifetimeSweep.mockReset()
   mocks.runAttachmentFlagWalk.mockReset()
+  mocks.reconcileThreadExistence.mockReset()
+  mocks.reconcileThreadExistence.mockResolvedValue({ listedThreadCount: 0, deletedThreadIds: [] })
   mocks.syncLabelCatalog.mockReset()
   mocks.reconcileInboxMembership.mockReset()
   mocks.reconcilePurgeableMembership.mockReset()
@@ -576,6 +583,44 @@ describe('backfill to poller handoff', () => {
 
     mocks.FakePoller.instances[0].options.onCycleStart?.()
     expect(shouldYield?.()).toBe(true)
+  })
+
+  it('finishes expiry tombstoning before replacing the checkpoint with a recovery backfill', async () => {
+    const { controller, backfills, lifetimeSweeps, states, broadcastMailChanged, db, provider } = harness({
+      backfillCursor: 'done'
+    })
+    const existence = deferred<ThreadExistenceSweepResult | null>()
+    mocks.reconcileThreadExistence.mockReturnValueOnce(existence.promise)
+    controller.retry()
+    const poller = mocks.FakePoller.instances[0]
+    const lifetime = lifetimeSweeps[0]
+
+    const recovery = poller.options.recoverExpiredHistory()
+    expect(lifetime.options.shouldYield?.()).toBe(true)
+    expect(states.at(-1)).toEqual({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
+    expect(mocks.reconcileThreadExistence).toHaveBeenCalledWith(
+      db,
+      'user@example.com',
+      provider,
+      expect.objectContaining({ shouldContinue: expect.any(Function) })
+    )
+    expect(mocks.runInboxBackfill).not.toHaveBeenCalled()
+
+    existence.resolve({ listedThreadCount: 9, deletedThreadIds: ['purged'] })
+    await flush()
+    expect(broadcastMailChanged).toHaveBeenCalledOnce()
+    expect(mocks.runInboxBackfill).toHaveBeenCalledWith(db, provider, expect.anything(), { recovery: true })
+    expect(lifetime.options.shouldYield?.()).toBe(true)
+
+    backfills[0].result.resolve({
+      threadCount: 9,
+      inboxThreadIds: ['inbox'],
+      spamThreadIds: ['spam'],
+      trashThreadIds: ['trash']
+    })
+    await recovery
+    expect(lifetime.options.shouldYield?.()).toBe(false)
+    expect(mocks.runLifetimeSweep).toHaveBeenCalledOnce()
   })
 
   it('does not let background progress overwrite a history failure', () => {

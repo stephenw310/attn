@@ -98,6 +98,7 @@ export const TEST_CHANNELS = {
   failOutbox: 'attn:test:failOutbox',
   remoteDraft: 'attn:test:remoteDraft',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
+  runExistenceSweep: 'attn:test:runExistenceSweep',
   utilityState: 'attn:test:utilityState',
   crashUtility: 'attn:test:crashUtility',
   listMailboxThreadIds: 'attn:test:listMailboxThreadIds'

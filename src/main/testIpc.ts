@@ -74,6 +74,14 @@ export class TestSeams {
           .catch((error) => done?.({ cursor: null, error: errorMessage(error), formats: [], pageTokens: [] }))
       }
     )
+    ipcMain.on(
+      TEST_CHANNELS.runExistenceSweep,
+      (_event, request: unknown, done?: (result: unknown) => void) => {
+        void this.forward(TEST_CHANNELS.runExistenceSweep, [request])
+          .then((result) => done?.(result))
+          .catch((error) => done?.({ error: errorMessage(error) }))
+      }
+    )
     ipcMain.on(TEST_CHANNELS.utilityState, (_event, ids: unknown, done?: (result: unknown) => void) => {
       void this.forward(TEST_CHANNELS.utilityState, [ids])
         .then((result) => done?.(result))

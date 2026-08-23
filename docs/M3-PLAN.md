@@ -13,19 +13,19 @@ than with search.
 
 ## What is left
 
-S3 and S4's membership half shipped early, inside the T13A sync-stage PR (#51). S2 followed on 2026-08-22.
-What remains:
+S3 and S4's membership half shipped early, inside the T13A sync-stage PR (#51). S2, S1, and S4's
+tombstone pass followed on 2026-08-22. The sync restructure is complete. What remains is the feature half:
 
 | Task | State | Blocks |
 |---|---|---|
 | S1 utility process | **done** | F10's indexing |
 | S2 per-message labels | **done**, completed 2026-08-22 | nothing; F3 and S4 are unblocked |
 | S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
-| S4 reconcile and expiry recovery | **part done**: membership shipped in #51, tombstone pass open | trustworthy mailbox views |
+| S4 reconcile and expiry recovery | **done**, completed 2026-08-22 | trustworthy mailbox views |
 | Feature half | **open**, not planned | nothing yet |
 
-Only S4's tombstone pass remains. S2 settled the store shape needed to plan F3 mailbox views and finish S4,
-and S1 moved that store into the utility process. The feature tasks get written up from here.
+S2 settled the store shape needed for F3 mailbox views and S4, S1 moved that store into the utility process,
+and S4 closed the last sync correctness gap. The feature tasks get written up from here.
 
 Every task section below opens with the same **Status** line, so you never have to infer state from whether a
 section looks long.
@@ -94,7 +94,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 ## Global rules (carried from M2, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative
-   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 16. Throwaway profiles may be
+   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 17. Throwaway profiles may be
    deleted and re-synced. A real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and every
    schema-changing task publishes its exact DDL.
 2. **IPC has three parts**: main handler, preload bridge, and the typed channel map in `src/shared/`. All in
@@ -264,7 +264,8 @@ and continues into older mail. Neither fetches a thread the other already stored
 
 ## S4: generalized reconcile and expiry recovery
 
-**Status: part done. The membership half shipped in #51. The tombstone pass is open and is the work here.**
+**Status: done, completed 2026-08-22.** The membership half shipped in #51; the tombstone pass followed after
+S2 and S1.
 
 The shipped half: `reconcileLabelMembership` (`src/main/sync/poller.ts`) generalizes the
 INBOX-only helper, the backfill's reconcile phase re-lists INBOX, SPAM, and TRASH, and
@@ -286,34 +287,79 @@ a week, leaves ghost rows that no code path removes.
 carries no system label at all, so "absent from every re-listed system label" describes most archived mail.
 Deleting on that signal would destroy valid cached bodies, search results, and contact contributions.
 
-Existence has exactly two trustworthy signals:
+Existence reconciliation uses two layers of evidence:
 
-1. Absence from an unfiltered thread-id listing walked to exhaustion **in the same run**, plus the SPAM and
-   TRASH listings, since the unfiltered walk excludes both.
-2. A per-thread `threads.get` returning 404.
+1. Absence from an unfiltered thread-id listing walked to exhaustion, plus the SPAM and TRASH listings, makes
+   a local snapshot row a deletion candidate. Listing scopes run sequentially, so absence alone does not prove
+   deletion when a thread moves between scopes during the walk.
+2. A per-thread `threads.get` returning 404 authorizes deletion. A live result removes that row from the
+   candidate set.
 
-Membership reconciliation therefore never deletes. The tombstone pass runs only when a full existence sweep is
-in hand, which expiry recovery or a lifetime re-walk can supply, or it verifies each candidate individually and
-deletes on 404 alone. Partial pages prove nothing. A network truncation must never delete real mail.
+Membership reconciliation therefore never deletes. The tombstone pass waits for a completed existence sweep,
+then verifies every candidate individually and deletes on 404 alone. Partial pages prove nothing. A network
+truncation or scope transition must never delete real mail.
 
 S2 now provides the per-message truth S4 needs to distinguish a partially trashed live thread from a purged
 one.
 
-### Design and implementation
+### What shipped
 
-- Keep reconcile bounded: ids only, no bodies, and let the M1 offline and retry routing handle interruption.
-- `replayPendingThreadDeltas` preserves local intent on top of server truth. The tombstone pass must keep
-  using it, or a queued local action is lost whenever reconcile runs.
-- A long lifetime sweep will very likely span a `historyId` expiry. Make that interaction explicit and tested
-  rather than discovered.
+- `reconcileThreadExistence` runs first during expired-history recovery, before the replacement history
+  checkpoint is recorded. It walks Gmail's unfiltered, Spam, and Trash thread-id listings to exhaustion at
+  background priority.
+- Each run snapshots the local thread ids into durable SQLite evidence before listing. Threads persisted while
+  the scan is running are outside that snapshot and cannot be deleted by it.
+- Every page commits its ids and next-page cursor in one transaction. An interrupted listing or authentication
+  change retains that progress and deletes nothing. The next attempt resumes the same complete-account walk.
+  Only a 400 or 404 diagnostic that names the page token resets a saved cursor; other request errors retain it.
+- Every snapshot id absent from the completed union receives a direct metadata fetch. A 404 becomes durable
+  deletion evidence, while a live result marks the row present and lets recovery continue without another
+  listing walk. Interrupted verification resumes from the first candidate without durable 404 evidence.
+- Once verification finishes, the worker deletes only snapshot ids with direct 404 evidence. It removes stale
+  reminders with each thread but leaves `action_queue` rows intact.
+- A concurrent lifetime header walk yields while expiry recovery owns foreground sync. It resumes from its
+  independent durable cursor after the tombstone pass, with no second lifetime owner or cursor reset.
+- Membership reconciliation still calls `replayPendingThreadDeltas`, and tombstoning leaves `action_queue`
+  rows intact. Server truth wins without silently discarding a user's queued action.
+- The test-only seam `attn:test:runExistenceSweep` drives the pass through main, the utility
+  process, and the real seeded SQLite store without contacting Gmail.
+
+The schema is version 17. A stopped local dogfood profile can use this exact additive DDL through the manual
+procedure in `AGENTS.md`:
+
+```sql
+BEGIN IMMEDIATE;
+CREATE TABLE thread_existence_state (
+  account_id TEXT PRIMARY KEY,
+  phase      TEXT NOT NULL,
+  page_token TEXT
+);
+CREATE TABLE thread_existence_evidence (
+  account_id       TEXT NOT NULL,
+  thread_id        TEXT NOT NULL,
+  was_local        INTEGER NOT NULL DEFAULT 0,
+  remote_seen      INTEGER NOT NULL DEFAULT 0,
+  verified_missing INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, thread_id)
+);
+CREATE INDEX idx_thread_existence_candidates ON thread_existence_evidence (
+  account_id,
+  was_local,
+  remote_seen,
+  verified_missing
+);
+PRAGMA user_version = 17;
+COMMIT;
+```
 
 ### Testing and done condition
 
-Unit: the tombstone rule and both its negative cases, an archived thread with no system label surviving
-reconcile untouched, and a truncated listing that must not delete; pending local deltas replayed on top of
-server truth. E2e: a seeded store where a thread absent from an exhausted existence sweep, or 404ing on direct
-fetch, is removed. Done when a week offline followed by a relaunch converges every cached label to server truth
-without ghost rows, archived label-less mail survives, and no local pending action is lost.
+Unit coverage proves the tombstone rule, archived and Trash-only threads surviving, durable page resume,
+token-specific cursor reset, authentication cancellation, local-snapshot isolation, scope-transition safety,
+resumable candidate verification, reminder cleanup, and pending local deltas replaying on top of server truth.
+Existing purge reconciliation coverage pins direct-fetch 404 deletion. Seeded Electron coverage removes one
+thread absent from a completed account listing while preserving archived and partially trashed mail.
+Expired-history recovery now converges cached membership and existence without ghost rows or lost local actions.
 
 ---
 

@@ -13,6 +13,7 @@ import { GmailApiError } from '../gmail/client'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { type SchedulerTime, systemTime } from '../time'
 import { hydrateMissingThreadBodies } from './bodies'
+import { isExpiredPageTokenError } from './pageToken'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 import type { DraftPage, ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
 import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './windows'
@@ -428,7 +429,7 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
         priority: options.priority
       })
     } catch (error) {
-      if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
+      if (!pageToken || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
       // Preserve the original history checkpoint while restarting this phase.
       pageToken = undefined
       resetExpiredCursor = true
@@ -483,7 +484,7 @@ async function runDraftPhase(options: DraftPhaseOptions): Promise<void> {
     try {
       page = await options.provider.listDrafts(pageToken, { priority: 'background' })
     } catch (error) {
-      if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
+      if (!pageToken || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
       pageToken = undefined
       resetExpiredCursor = true
       checkpoint(options.db, options.accountId, 'drafts')
@@ -554,10 +555,6 @@ function parseCursor(raw: string | null | undefined): ParsedCursor {
 
 function checkpoint(db: Db, accountId: string, cursor: string): void {
   db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run(cursor, accountId)
-}
-
-function isExpiredPageToken(error: unknown): boolean {
-  return error instanceof GmailApiError && (error.status === 400 || error.status === 404)
 }
 
 async function mapConcurrent<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

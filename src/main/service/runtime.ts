@@ -19,6 +19,7 @@ import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
 import { readSetting, settingEnabled, writeSetting } from '../settings'
+import { reconcileThreadExistence } from '../sync/existenceSweep'
 import { runLifetimeSweep } from '../sync/lifetimeSweep'
 import { deleteThread, type LabelRow } from '../sync/persist'
 import { historyEvents, type NewMail } from '../sync/poller'
@@ -470,6 +471,7 @@ export class ServiceRuntime {
       return listMailboxThreadIds(this.db, accountId, mailbox)
     }
     if (channel === TEST_CHANNELS.runLifetimeSweep) return this.runTestLifetimeSweep(args[0])
+    if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])
     if (channel === TEST_CHANNELS.utilityState) {
       const ids = args[0]
       if (!accountId || !Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
@@ -610,6 +612,26 @@ export class ServiceRuntime {
     }
   }
 
+  private async runTestExistenceSweep(value: unknown): Promise<unknown> {
+    const accountId = this.currentAccountId()
+    if (!accountId || !isExistenceSweepRequest(value)) throw new Error('invalid existence sweep request')
+    const provider: Pick<MailProvider, 'listThreadIds' | 'getThread'> = {
+      listThreadIds: async (options = {}) => {
+        if (options.labelIds?.includes('SPAM')) return { threadIds: value.spamThreadIds }
+        if (options.labelIds?.includes('TRASH')) return { threadIds: value.trashThreadIds }
+        return { threadIds: value.allMailThreadIds }
+      },
+      getThread: async () => {
+        // This seam receives complete authoritative id sets. A local row
+        // absent from their union models a server-purged thread.
+        throw new GmailApiError(404, 'test existence sweep thread missing')
+      }
+    }
+    const result = await reconcileThreadExistence(this.db, accountId, provider)
+    if (result?.deletedThreadIds.length) this.broadcastMailChanged()
+    return result
+  }
+
   private log(level: 'log' | 'warn' | 'error', message: string): void {
     this.emit({ kind: 'log', level, message })
   }
@@ -628,6 +650,12 @@ interface LifetimeSweepRequest {
   pauseAtPageToken?: string
   threadsTotal?: number
   messagesTotal?: number
+}
+
+interface ExistenceSweepRequest {
+  allMailThreadIds: string[]
+  spamThreadIds: string[]
+  trashThreadIds: string[]
 }
 
 function isMessageMailbox(value: unknown): value is MessageMailbox {
@@ -656,4 +684,12 @@ function isLifetimeSweepRequest(value: unknown): value is LifetimeSweepRequest {
   if (!value || typeof value !== 'object') return false
   const request = value as Partial<LifetimeSweepRequest>
   return Array.isArray(request.threads) && Array.isArray(request.pages)
+}
+
+function isExistenceSweepRequest(value: unknown): value is ExistenceSweepRequest {
+  if (!value || typeof value !== 'object') return false
+  const request = value as Partial<ExistenceSweepRequest>
+  return [request.allMailThreadIds, request.spamThreadIds, request.trashThreadIds].every(
+    (ids) => Array.isArray(ids) && ids.every((id) => typeof id === 'string')
+  )
 }
