@@ -287,15 +287,17 @@ a week, leaves ghost rows that no code path removes.
 carries no system label at all, so "absent from every re-listed system label" describes most archived mail.
 Deleting on that signal would destroy valid cached bodies, search results, and contact contributions.
 
-Existence has exactly two trustworthy signals:
+Existence reconciliation uses two layers of evidence:
 
-1. Absence from an unfiltered thread-id listing walked to exhaustion **in the same run**, plus the SPAM and
-   TRASH listings, since the unfiltered walk excludes both.
-2. A per-thread `threads.get` returning 404.
+1. Absence from an unfiltered thread-id listing walked to exhaustion, plus the SPAM and TRASH listings, makes
+   a local snapshot row a deletion candidate. Listing scopes run sequentially, so absence alone does not prove
+   deletion when a thread moves between scopes during the walk.
+2. A per-thread `threads.get` returning 404 authorizes deletion. A live result removes that row from the
+   candidate set.
 
-Membership reconciliation therefore never deletes. The tombstone pass runs only when a full existence sweep is
-in hand, which expiry recovery or a lifetime re-walk can supply, or it verifies each candidate individually and
-deletes on 404 alone. Partial pages prove nothing. A network truncation must never delete real mail.
+Membership reconciliation therefore never deletes. The tombstone pass waits for a completed existence sweep,
+then verifies every candidate individually and deletes on 404 alone. Partial pages prove nothing. A network
+truncation or scope transition must never delete real mail.
 
 S2 now provides the per-message truth S4 needs to distinguish a partially trashed live thread from a purged
 one.
@@ -309,11 +311,12 @@ one.
   the scan is running are outside that snapshot and cannot be deleted by it.
 - Every page commits its ids and next-page cursor in one transaction. An interrupted listing or authentication
   change retains that progress and deletes nothing. The next attempt resumes the same complete-account walk.
-- A candidate set covering at least one quarter of the local snapshot receives direct metadata fetches before
-  deletion. Every candidate must return 404. One live result rejects the listing and restarts without deleting
-  anything.
-- Once the three listings finish, the worker deletes only snapshot ids absent from the completed union. It
-  removes stale reminders with each thread but leaves `action_queue` rows intact.
+  Only a 400 or 404 diagnostic that names the page token resets a saved cursor; other request errors retain it.
+- Every snapshot id absent from the completed union receives a direct metadata fetch. A 404 becomes durable
+  deletion evidence, while a live result marks the row present and lets recovery continue without another
+  listing walk. Interrupted verification resumes from the first candidate without durable 404 evidence.
+- Once verification finishes, the worker deletes only snapshot ids with direct 404 evidence. It removes stale
+  reminders with each thread but leaves `action_queue` rows intact.
 - A concurrent lifetime header walk yields while expiry recovery owns foreground sync. It resumes from its
   independent durable cursor after the tombstone pass, with no second lifetime owner or cursor reset.
 - Membership reconciliation still calls `replayPendingThreadDeltas`, and tombstoning leaves `action_queue`
@@ -352,11 +355,11 @@ COMMIT;
 ### Testing and done condition
 
 Unit coverage proves the tombstone rule, archived and Trash-only threads surviving, durable page resume,
-authentication cancellation, local-snapshot isolation, mass-delete verification, reminder cleanup, and pending
-local deltas replaying on top of server truth. Existing purge reconciliation coverage pins direct-fetch 404
-deletion. Seeded Electron coverage removes one thread absent from a completed account listing while preserving
-archived and partially trashed mail. Expired-history recovery now converges cached membership and existence
-without ghost rows or lost local actions.
+token-specific cursor reset, authentication cancellation, local-snapshot isolation, scope-transition safety,
+resumable candidate verification, reminder cleanup, and pending local deltas replaying on top of server truth.
+Existing purge reconciliation coverage pins direct-fetch 404 deletion. Seeded Electron coverage removes one
+thread absent from a completed account listing while preserving archived and partially trashed mail.
+Expired-history recovery now converges cached membership and existence without ghost rows or lost local actions.
 
 ---
 

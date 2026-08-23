@@ -1,5 +1,6 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
+import { isExpiredPageTokenError } from './pageToken'
 import { deleteThread } from './persist'
 import type { ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
 
@@ -20,6 +21,8 @@ interface ExistenceStateRow {
   page_token: string | null
 }
 
+type ThreadExistenceProvider = Pick<MailProvider, 'listThreadIds' | 'getThread'>
+
 const SCOPES: Record<
   Exclude<ExistencePhase, 'complete'>,
   Pick<ListThreadIdsOptions, 'labelIds' | 'includeSpamTrash'> & { nextPhase: ExistencePhase }
@@ -29,8 +32,6 @@ const SCOPES: Record<
   trash: { labelIds: ['TRASH'], includeSpamTrash: true, nextPhase: 'complete' }
 }
 
-const MASS_DELETE_FRACTION_DENOMINATOR = 4
-
 /**
  * Reconcile a snapshot of local thread existence against one complete Gmail
  * account listing. Page evidence and its cursor commit together, so a later
@@ -39,7 +40,7 @@ const MASS_DELETE_FRACTION_DENOMINATOR = 4
 export async function reconcileThreadExistence(
   db: Db,
   accountId: string,
-  provider: MailProvider,
+  provider: ThreadExistenceProvider,
   options: ThreadExistenceSweepOptions = {}
 ): Promise<ThreadExistenceSweepResult | null> {
   const shouldContinue = options.shouldContinue ?? (() => true)
@@ -61,7 +62,7 @@ export async function reconcileThreadExistence(
         priority: 'background'
       })
     } catch (error) {
-      if (!state.page_token || resetExpiredCursor || !isExpiredPageToken(error)) throw error
+      if (!state.page_token || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
       restartListing(db, accountId)
       resetExpiredCursor = true
       continue
@@ -81,22 +82,19 @@ export async function reconcileThreadExistence(
   const counts = db
     .prepare(
       `SELECT
-         COALESCE(SUM(was_local), 0) AS local_count,
          COALESCE(SUM(remote_seen), 0) AS remote_count
        FROM thread_existence_evidence
        WHERE account_id = ?`
     )
-    .get(accountId) as { local_count: number; remote_count: number }
+    .get(accountId) as { remote_count: number }
   const missing = listMissingSnapshotThreads(db, accountId)
-  if (missing.length > 0 && missing.length * MASS_DELETE_FRACTION_DENOMINATOR >= counts.local_count) {
-    if (!(await verifyMassDeletion(db, accountId, provider, missing, shouldContinue))) return null
-  }
+  if (!(await verifyDeletionCandidates(db, accountId, provider, missing, shouldContinue))) return null
 
   // No await occurs between the final guard and the deletes. A session change
   // cannot turn old evidence into a half-applied pass, and a crash mid-delete
   // resumes from the durable complete state.
   if (!shouldContinue()) return null
-  const deletedThreadIds = listMissingSnapshotThreads(db, accountId).map((row) => row.id)
+  const deletedThreadIds = listVerifiedMissingSnapshotThreads(db, accountId).map((row) => row.id)
   for (const threadId of deletedThreadIds) deleteThread(db, accountId, threadId)
   clearSweep(db, accountId)
   return { listedThreadCount: counts.remote_count, deletedThreadIds }
@@ -185,10 +183,26 @@ function listMissingSnapshotThreads(db: Db, accountId: string): { id: string }[]
     .all(accountId) as { id: string }[]
 }
 
-async function verifyMassDeletion(
+function listVerifiedMissingSnapshotThreads(db: Db, accountId: string): { id: string }[] {
+  return db
+    .prepare(
+      `SELECT evidence.thread_id AS id
+       FROM thread_existence_evidence evidence
+       JOIN threads local
+         ON local.account_id = evidence.account_id AND local.id = evidence.thread_id
+       WHERE evidence.account_id = ?
+         AND evidence.was_local = 1
+         AND evidence.remote_seen = 0
+         AND evidence.verified_missing = 1
+       ORDER BY evidence.thread_id`
+    )
+    .all(accountId) as { id: string }[]
+}
+
+async function verifyDeletionCandidates(
   db: Db,
   accountId: string,
-  provider: MailProvider,
+  provider: ThreadExistenceProvider,
   candidates: { id: string }[],
   shouldContinue: () => boolean
 ): Promise<boolean> {
@@ -201,6 +215,11 @@ async function verifyMassDeletion(
     `UPDATE thread_existence_evidence SET verified_missing = 1
      WHERE account_id = ? AND thread_id = ?`
   )
+  const markLive = db.prepare(
+    `UPDATE thread_existence_evidence
+     SET remote_seen = 1, verified_missing = 0
+     WHERE account_id = ? AND thread_id = ?`
+  )
   for (const { id } of candidates) {
     const row = verified.get(accountId, id) as { verified_missing: number } | undefined
     if (row?.verified_missing) continue
@@ -208,6 +227,7 @@ async function verifyMassDeletion(
     try {
       await provider.getThread(id, { format: 'metadata', priority: 'background' })
     } catch (error) {
+      if (!shouldContinue()) return false
       if (error instanceof GmailApiError && error.status === 404) {
         markVerified.run(accountId, id)
         continue
@@ -215,8 +235,7 @@ async function verifyMassDeletion(
       throw error
     }
     if (!shouldContinue()) return false
-    clearSweep(db, accountId)
-    throw new Error(`account existence listing omitted live thread ${id}; retrying without deletion`)
+    markLive.run(accountId, id)
   }
   return true
 }
@@ -226,8 +245,4 @@ function clearSweep(db: Db, accountId: string): void {
     db.prepare('DELETE FROM thread_existence_evidence WHERE account_id = ?').run(accountId)
     db.prepare('DELETE FROM thread_existence_state WHERE account_id = ?').run(accountId)
   })()
-}
-
-function isExpiredPageToken(error: unknown): boolean {
-  return error instanceof GmailApiError && (error.status === 400 || error.status === 404)
 }

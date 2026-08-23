@@ -8,9 +8,9 @@
 // mail arrives through full-format fetches that set the flag on the write path.
 
 import type { Db } from '../db'
-import { GmailApiError } from '../gmail/client'
 import { type SchedulerTime, systemTime } from '../time'
 import { LIFETIME_FOREGROUND_YIELD_MS, LIFETIME_PAGE_PAUSE_MS } from './lifetimeSweep'
+import { isExpiredPageTokenError } from './pageToken'
 import type { MailProvider, ThreadIdPage } from './provider'
 
 /** The one Gmail operator this pass depends on. */
@@ -131,7 +131,7 @@ export async function runAttachmentFlagWalk(
           priority: 'background'
         })
       } catch (error) {
-        if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
+        if (!pageToken || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
         pageToken = undefined
         resetExpiredCursor = true
         threadsFlagged = 0
@@ -159,8 +159,4 @@ export async function runAttachmentFlagWalk(
     if (shouldContinue()) callbacks.onError(error)
     return null
   }
-}
-
-function isExpiredPageToken(error: unknown): boolean {
-  return error instanceof GmailApiError && (error.status === 400 || error.status === 404)
 }

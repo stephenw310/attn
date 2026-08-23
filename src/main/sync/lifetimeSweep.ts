@@ -4,6 +4,7 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { type SchedulerTime, systemTime } from '../time'
+import { isExpiredPageTokenError } from './pageToken'
 import { persistThread } from './persist'
 import type { MailProvider, ThreadIdPage } from './provider'
 
@@ -217,7 +218,7 @@ export async function runLifetimeSweep(
         // except Spam and Trash, which become explicit stages in M3.
         page = await provider.listThreadIds({ pageToken, priority: 'background' })
       } catch (error) {
-        if (!pageToken || resetExpiredCursor || !isExpiredPageToken(error)) throw error
+        if (!pageToken || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
         pageToken = undefined
         resetExpiredCursor = true
         listedThreadsDone = 0
@@ -299,8 +300,4 @@ function estimateRemainingMs(
     return undefined
   }
   return Math.ceil(((threadsTotal - threadsDone) * indexingElapsedMs) / threadsIndexedBySweep)
-}
-
-function isExpiredPageToken(error: unknown): boolean {
-  return error instanceof GmailApiError && (error.status === 400 || error.status === 404)
 }

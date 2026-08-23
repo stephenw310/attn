@@ -615,13 +615,18 @@ export class ServiceRuntime {
   private async runTestExistenceSweep(value: unknown): Promise<unknown> {
     const accountId = this.currentAccountId()
     if (!accountId || !isExistenceSweepRequest(value)) throw new Error('invalid existence sweep request')
-    const provider = {
+    const provider: Pick<MailProvider, 'listThreadIds' | 'getThread'> = {
       listThreadIds: async (options = {}) => {
         if (options.labelIds?.includes('SPAM')) return { threadIds: value.spamThreadIds }
         if (options.labelIds?.includes('TRASH')) return { threadIds: value.trashThreadIds }
         return { threadIds: value.allMailThreadIds }
+      },
+      getThread: async () => {
+        // This seam receives complete authoritative id sets. A local row
+        // absent from their union models a server-purged thread.
+        throw new GmailApiError(404, 'test existence sweep thread missing')
       }
-    } as MailProvider
+    }
     const result = await reconcileThreadExistence(this.db, accountId, provider)
     if (result?.deletedThreadIds.length) this.broadcastMailChanged()
     return result

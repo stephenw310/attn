@@ -71,12 +71,18 @@ describe('thread existence sweep', () => {
          VALUES ('account', 'deleted', 'snooze', 100, 'pending')`
       ).run()
 
-      const mail = provider(async (options) => {
-        if (options.labelIds?.includes('SPAM')) return { threadIds: ['junk'] }
-        if (options.labelIds?.includes('TRASH')) return { threadIds: ['bin'] }
-        if (!options.pageToken) return { threadIds: ['archived'], nextPageToken: 'page-2' }
-        return { threadIds: ['normal'] }
-      })
+      const mail = provider(
+        async (options) => {
+          if (options.labelIds?.includes('SPAM')) return { threadIds: ['junk'] }
+          if (options.labelIds?.includes('TRASH')) return { threadIds: ['bin'] }
+          if (!options.pageToken) return { threadIds: ['archived'], nextPageToken: 'page-2' }
+          return { threadIds: ['normal'] }
+        },
+        async (id) => {
+          if (id === 'deleted') throw new GmailApiError(404, 'gone')
+          return thread(id)
+        }
+      )
 
       await expect(reconcileThreadExistence(db, 'account', mail)).resolves.toEqual({
         listedThreadCount: 4,
@@ -198,6 +204,26 @@ describe('thread existence sweep', () => {
     }
   })
 
+  it.each([400, 404])('does not reset a saved cursor for an unrelated %i response', async (status) => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', thread('a'))
+      const listThreadIds = vi
+        .fn<(options: ListThreadIdsOptions) => Promise<ThreadIdPage>>()
+        .mockResolvedValueOnce({ threadIds: ['a'], nextPageToken: 'page-2' })
+        .mockRejectedValueOnce(new GmailApiError(status, 'invalid labelIds argument'))
+      const mail = provider(listThreadIds)
+
+      await expect(reconcileThreadExistence(db, 'account', mail)).rejects.toMatchObject({ status })
+      expect(listThreadIds).toHaveBeenCalledTimes(2)
+      expect(
+        db.prepare('SELECT phase, page_token FROM thread_existence_state WHERE account_id = ?').get('account')
+      ).toEqual({ phase: 'all-mail', page_token: 'page-2' })
+    } finally {
+      db.close()
+    }
+  })
+
   it('never considers a thread persisted after the initial local snapshot', async () => {
     const db = openDatabase(':memory:')
     try {
@@ -221,18 +247,23 @@ describe('thread existence sweep', () => {
     }
   })
 
-  it('refuses a mass deletion when a direct fetch contradicts the completed listing', async () => {
+  it('retains live candidates when direct fetches contradict an empty listing', async () => {
     const db = openDatabase(':memory:')
     try {
       persistThread(db, 'account', thread('a'))
       persistThread(db, 'account', thread('b'))
       const mail = provider(async () => ({ threadIds: [] }))
 
-      await expect(reconcileThreadExistence(db, 'account', mail)).rejects.toThrow(
-        'account existence listing omitted live thread a'
-      )
+      await expect(reconcileThreadExistence(db, 'account', mail)).resolves.toEqual({
+        listedThreadCount: 0,
+        deletedThreadIds: []
+      })
       expect(db.prepare('SELECT id FROM threads ORDER BY id').all()).toEqual([{ id: 'a' }, { id: 'b' }])
-      expect(mail.getThread).toHaveBeenCalledWith('a', {
+      expect(mail.getThread).toHaveBeenNthCalledWith(1, 'a', {
+        format: 'metadata',
+        priority: 'background'
+      })
+      expect(mail.getThread).toHaveBeenNthCalledWith(2, 'b', {
         format: 'metadata',
         priority: 'background'
       })
@@ -241,7 +272,39 @@ describe('thread existence sweep', () => {
     }
   })
 
-  it('resumes mass-deletion verification and deletes only direct-fetch 404s', async () => {
+  it('retains a live thread missed while it moves between listing scopes', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      const threadIds = Array.from({ length: 20 }, (_, index) => `t${index}`)
+      for (const id of threadIds) persistThread(db, 'account', thread(id))
+      let movedOutOfTrash = false
+      const mail = provider(async (options) => {
+        if (!options.labelIds?.length) {
+          movedOutOfTrash = true
+          return { threadIds: threadIds.filter((id) => id !== 't7') }
+        }
+        if (!movedOutOfTrash) throw new Error('scope transition did not occur')
+        return { threadIds: [] }
+      })
+
+      await expect(reconcileThreadExistence(db, 'account', mail)).resolves.toEqual({
+        listedThreadCount: 19,
+        deletedThreadIds: []
+      })
+      expect(mail.getThread).toHaveBeenCalledOnce()
+      expect(mail.getThread).toHaveBeenCalledWith('t7', {
+        format: 'metadata',
+        priority: 'background'
+      })
+      expect(
+        db.prepare('SELECT id FROM threads WHERE account_id = ? AND id = ?').get('account', 't7')
+      ).toEqual({ id: 't7' })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('resumes candidate verification and deletes only direct-fetch 404s', async () => {
     const db = openDatabase(':memory:')
     try {
       persistThread(db, 'account', thread('a'))
@@ -275,6 +338,37 @@ describe('thread existence sweep', () => {
         format: 'metadata',
         priority: 'background'
       })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('does not retain a 404 from a canceled account session as deletion evidence', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', thread('a'))
+      let active = true
+      const mail = provider(
+        async () => ({ threadIds: [] }),
+        async () => {
+          active = false
+          throw new GmailApiError(404, 'gone')
+        }
+      )
+
+      await expect(
+        reconcileThreadExistence(db, 'account', mail, { shouldContinue: () => active })
+      ).resolves.toBeNull()
+      expect(db.prepare('SELECT id FROM threads').all()).toEqual([{ id: 'a' }])
+      expect(
+        db
+          .prepare(
+            `SELECT verified_missing
+             FROM thread_existence_evidence
+             WHERE account_id = ? AND thread_id = ?`
+          )
+          .get('account', 'a')
+      ).toEqual({ verified_missing: 0 })
     } finally {
       db.close()
     }
