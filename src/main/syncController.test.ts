@@ -586,7 +586,7 @@ describe('backfill to poller handoff', () => {
   })
 
   it('finishes expiry tombstoning before replacing the checkpoint with a recovery backfill', async () => {
-    const { controller, backfills, lifetimeSweeps, broadcastMailChanged, db, provider } = harness({
+    const { controller, backfills, lifetimeSweeps, states, broadcastMailChanged, db, provider } = harness({
       backfillCursor: 'done'
     })
     const existence = deferred<ThreadExistenceSweepResult | null>()
@@ -597,6 +597,7 @@ describe('backfill to poller handoff', () => {
 
     const recovery = poller.options.recoverExpiredHistory()
     expect(lifetime.options.shouldYield?.()).toBe(true)
+    expect(states.at(-1)).toEqual({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
     expect(mocks.reconcileThreadExistence).toHaveBeenCalledWith(
       db,
       'user@example.com',

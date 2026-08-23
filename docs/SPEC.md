@@ -144,8 +144,8 @@ route to it) — then T13A's independent, low-priority lifetime sweep starts. Sp
 verifies each locally-labeled thread missing from the server listing by direct fetch and deletes only on
 404, never on listing absence. Per-message labels are also stored and drive mailbox membership and reader
 subsets. Expired-history recovery now walks the complete unfiltered, Spam, and Trash id union before deleting
-label-less orphans, and a partial listing deletes nothing. The SQLite store and sync workers run in the utility
-process. The remaining M3 work is the mailbox and search surfaces (§9 #10, #17).
+absent local snapshots, and a partial listing deletes nothing. The SQLite store and sync workers run in the
+utility process. The remaining M3 work is the mailbox and search surfaces (§9 #10, #17).
 
 **Window rationale and completion semantics:** headers are cheap in bytes — roughly 1–2 KB — but Google's
 post-May-2026 Gmail quota charges 40 units for each `threads.get` plus 10 per amortized listing page. At the

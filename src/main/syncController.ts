@@ -530,7 +530,7 @@ export class SyncController {
       return
     }
     this.running = true
-    this.setState({ phase: 'syncing', stage: 'reconcile', threadsDone: 0 })
+    this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
     let failure: unknown = new Error('history recovery backfill failed')
     try {
       // Keep the expired checkpoint durable until tombstoning finishes. If the

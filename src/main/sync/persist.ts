@@ -318,6 +318,7 @@ export function deleteThread(db: Db, accountId: string, threadId: string): void 
        )`
     ).run(accountId, accountId, threadId)
     db.prepare('DELETE FROM messages WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
+    db.prepare('DELETE FROM reminders WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM threads WHERE account_id = ? AND id = ?').run(accountId, threadId)
     rebuildContacts(
       db,

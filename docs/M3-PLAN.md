@@ -94,7 +94,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 ## Global rules (carried from M2, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative
-   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 16. Throwaway profiles may be
+   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 17. Throwaway profiles may be
    deleted and re-synced. A real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and every
    schema-changing task publishes its exact DDL.
 2. **IPC has three parts**: main handler, preload bridge, and the typed channel map in `src/shared/`. All in
@@ -305,12 +305,15 @@ one.
 - `reconcileThreadExistence` runs first during expired-history recovery, before the replacement history
   checkpoint is recorded. It walks Gmail's unfiltered, Spam, and Trash thread-id listings to exhaustion at
   background priority.
-- Each run writes its evidence to a unique temporary SQLite table. It queries local ids missing from the
-  completed union, deletes those snapshots through `deleteThread`, then drops the table. The set does not
-  occupy JavaScript heap and needs no schema change.
-- An interrupted listing or authentication-generation change drops the temporary evidence and deletes
-  nothing. The expired checkpoint remains durable until tombstoning finishes, so a process interruption also
-  retriggers the whole pass. Partial pages never become deletion evidence.
+- Each run snapshots the local thread ids into durable SQLite evidence before listing. Threads persisted while
+  the scan is running are outside that snapshot and cannot be deleted by it.
+- Every page commits its ids and next-page cursor in one transaction. An interrupted listing or authentication
+  change retains that progress and deletes nothing. The next attempt resumes the same complete-account walk.
+- A candidate set covering at least one quarter of the local snapshot receives direct metadata fetches before
+  deletion. Every candidate must return 404. One live result rejects the listing and restarts without deleting
+  anything.
+- Once the three listings finish, the worker deletes only snapshot ids absent from the completed union. It
+  removes stale reminders with each thread but leaves `action_queue` rows intact.
 - A concurrent lifetime header walk yields while expiry recovery owns foreground sync. It resumes from its
   independent durable cursor after the tombstone pass, with no second lifetime owner or cursor reset.
 - Membership reconciliation still calls `replayPendingThreadDeltas`, and tombstoning leaves `action_queue`
@@ -318,14 +321,42 @@ one.
 - The test-only seam `attn:test:runExistenceSweep` drives the pass through main, the utility
   process, and the real seeded SQLite store without contacting Gmail.
 
+The schema is version 17. A stopped local dogfood profile can use this exact additive DDL through the manual
+procedure in `AGENTS.md`:
+
+```sql
+BEGIN IMMEDIATE;
+CREATE TABLE thread_existence_state (
+  account_id TEXT PRIMARY KEY,
+  phase      TEXT NOT NULL,
+  page_token TEXT
+);
+CREATE TABLE thread_existence_evidence (
+  account_id       TEXT NOT NULL,
+  thread_id        TEXT NOT NULL,
+  was_local        INTEGER NOT NULL DEFAULT 0,
+  remote_seen      INTEGER NOT NULL DEFAULT 0,
+  verified_missing INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, thread_id)
+);
+CREATE INDEX idx_thread_existence_candidates ON thread_existence_evidence (
+  account_id,
+  was_local,
+  remote_seen,
+  verified_missing
+);
+PRAGMA user_version = 17;
+COMMIT;
+```
+
 ### Testing and done condition
 
-Unit coverage proves the tombstone rule, an archived thread with no system label surviving, an interrupted
-listing deleting nothing, authentication cancellation deleting nothing, and pending local deltas replaying
-on top of server truth. Existing purge reconciliation coverage pins direct-fetch 404 deletion. Seeded Electron
-coverage removes one thread absent from a completed account listing while preserving archived and partially
-trashed mail. Expired-history recovery now converges cached membership and existence without ghost rows or
-lost local actions.
+Unit coverage proves the tombstone rule, archived and Trash-only threads surviving, durable page resume,
+authentication cancellation, local-snapshot isolation, mass-delete verification, reminder cleanup, and pending
+local deltas replaying on top of server truth. Existing purge reconciliation coverage pins direct-fetch 404
+deletion. Seeded Electron coverage removes one thread absent from a completed account listing while preserving
+archived and partially trashed mail. Expired-history recovery now converges cached membership and existence
+without ghost rows or lost local actions.
 
 ---
 
