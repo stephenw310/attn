@@ -1,3 +1,4 @@
+import { normalizeEmailKey } from '../../shared/address'
 import { foldForSearch } from '../../shared/contacts'
 import { messageLabelsMatchMailbox } from '../../shared/mail'
 import type { Db } from '../db'
@@ -235,7 +236,7 @@ export function persistThread(
       if (!subject) subject = header(msg, 'Subject')
       if (at >= lastMsgAt) {
         lastMsgAt = at
-        fromDisplay = from.name
+        fromDisplay = normalizeEmailKey(from.email) === normalizeEmailKey(accountId) ? 'Me' : from.name
         snippet = msg.snippet ?? ''
       }
       anyUnread ||= unread

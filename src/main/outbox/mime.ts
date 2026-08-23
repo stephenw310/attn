@@ -46,6 +46,7 @@ export interface MimeDraft {
 
 export interface BuildMimeOptions {
   accountEmail: string
+  accountName?: string
   /** Stable, caller-owned id. The outbox persists this before any send attempt. */
   rfcMessageId: string
   date: Date
@@ -315,7 +316,7 @@ function buildMimeSegments<T extends Omit<MimeAttachment, 'content'>>(
   const authoredHtml = draft.bodyHtml.trim() ? draft.bodyHtml : plainTextHtml(draft.bodyText)
   const html = combinedBody(authoredHtml, draft.quoteHtml, '\n')
   const headers = [
-    ...foldHeader('From', formatAddress({ name: '', email: options.accountEmail })),
+    ...foldHeader('From', formatAddress({ name: options.accountName ?? '', email: options.accountEmail })),
     ...addressHeader('To', draft.to),
     ...addressHeader('Cc', cc),
     ...addressHeader('Bcc', bcc),

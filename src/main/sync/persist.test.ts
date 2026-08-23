@@ -226,6 +226,38 @@ describe('thread snapshot persistence', () => {
     }
   })
 
+  it('summarizes a self-authored latest message as Me', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'me@example.com', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'sent',
+            threadId: 'thread',
+            labelIds: ['SENT'],
+            internalDate: '200',
+            snippet: 'Sent reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'magic-name <me@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        db
+          .prepare('SELECT from_display FROM threads WHERE account_id = ? AND id = ?')
+          .get('me@example.com', 'thread')
+      ).toEqual({ from_display: 'Me' })
+    } finally {
+      db.close()
+    }
+  })
+
   it('keeps a useful summary when every stored message is junk', () => {
     const db = openDatabase(':memory:')
     try {
