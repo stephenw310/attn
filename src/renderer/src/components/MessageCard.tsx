@@ -4,7 +4,7 @@ import type { MailAddress, MessageAttachment, MessageRecipients } from '../../..
 import { formatBytes } from '../formatBytes'
 import { MessageBody } from '../MessageBody'
 import type { DisplayMessage } from '../mailDisplay'
-import { mailSurfaceForHtml } from '../mailSurface'
+import { mailPresentationForHtml } from '../mailSurface'
 
 function firstName(address: MailAddress, account: string | null): string {
   if (account && normalizeEmailKey(address.email) === normalizeEmailKey(account)) return 'me'
@@ -100,8 +100,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     onToggleTrim,
     bodyHydrationMessage
   } = props
-  const bodySurface = useMemo(() => mailSurfaceForHtml(message.html), [message.html])
-  const htmlSurface = bodySurface === 'light'
+  const presentation = useMemo(() => mailPresentationForHtml(message.html), [message.html])
+  const htmlSurface = presentation.surface === 'light'
   const visibleAttachments = message.attachments.filter((attachment) => !attachment.inline)
 
   const download = useCallback(
@@ -216,7 +216,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         <MessageBody
           bodyText={message.text}
           bodyHtml={message.html}
-          surface={bodySurface}
+          surface={presentation.surface}
+          layout={presentation.layout}
           threadId={threadId}
           messageId={message.id}
           attachments={message.attachments}

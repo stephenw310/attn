@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
-import { mailSurfaceForHtml, normalizeNativeMailDocument } from './mailSurface'
+import { mailPresentationForHtml, mailSurfaceForHtml, normalizeNativeMailDocument } from './mailSurface'
 
 describe('mail surface classification', () => {
   it('uses the native surface for plain and text-like HTML', () => {
@@ -176,6 +176,52 @@ describe('mail surface classification', () => {
         '<style>.gmail_quote{background:#f6d5c4}</style><div class="gmail_quote">Quoted design</div>'
       )
     ).toBe('light')
+  })
+
+  it('keeps native mail and constrained canvases padded', () => {
+    const nativeFragments = [
+      '<table><tr><td>Compact data</td></tr></table>',
+      '<img src="https://images.example/chart.png" alt="Chart">',
+      '<div style="max-width:600px">Designed fragment</div>',
+      '<style>.canvas{background:#eef2ff}.canvas{background:transparent}</style><div class="canvas">Text</div>',
+      '<style>.canvas{background:#eef2ff}</style><div class="canvas" style="background:transparent">Text</div>',
+      '<style>.canvas{background:transparent}</style><div class="canvas" bgcolor="#eef2ff">Text</div>'
+    ]
+    for (const html of nativeFragments) {
+      expect(mailPresentationForHtml(html)).toEqual({ surface: 'native', layout: 'padded' })
+    }
+
+    const paddedCanvases = [
+      '<table bgcolor="#eef2ff"><tr><td>Small card</td></tr></table>',
+      '<div style="width:600px;background:#eef2ff">Fixed-width card</div>',
+      '<div style="max-width:600px;background:#eef2ff">Centered card</div>',
+      'Intro text<div style="background:#eef2ff">Colored section</div>',
+      '<html style="background:#eef2ff"><body><table><tr><td>HTML wrapper canvas</td></tr></table></body></html>',
+      '<body bgcolor="#eef2ff"><table><tr><td>Body wrapper canvas</td></tr></table></body>'
+    ]
+    for (const html of paddedCanvases) {
+      expect(mailPresentationForHtml(html)).toEqual({ surface: 'light', layout: 'padded' })
+    }
+  })
+
+  it('uses full bleed only when the winning background owns the outer canvas', () => {
+    const fullBleedMessages = [
+      '<table width="100%" bgcolor="#eef2ff"><tr><td>Newsletter</td></tr></table>',
+      '<table width="100%"><tr><td bgcolor="#eef2ff">Newsletter cell</td></tr></table>',
+      '<table width="600" style="width:100%;background:#eef2ff"><tr><td>Responsive newsletter</td></tr></table>',
+      '<div style="background:#eef2ff">Block canvas</div>',
+      '<style>body{background:#eef2ff}.canvas{background:#dbeafe}</style><div>Body canvas</div>',
+      '<style>.canvas{background:#dbeafe}</style><div class="canvas">Styled canvas</div>'
+    ]
+    for (const html of fullBleedMessages) {
+      expect(mailPresentationForHtml(html)).toEqual({ surface: 'light', layout: 'full-bleed' })
+    }
+
+    expect(
+      mailPresentationForHtml(
+        '<style>.canvas{background:#dbeafe}.canvas{background:transparent}</style><div class="canvas">No canvas</div>'
+      )
+    ).toEqual({ surface: 'native', layout: 'padded' })
   })
 
   it('removes sender canvases but preserves typography and layout on the native surface', () => {

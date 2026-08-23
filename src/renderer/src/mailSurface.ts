@@ -1,4 +1,10 @@
 export type MailSurface = 'native' | 'light'
+export type MailLayout = 'padded' | 'full-bleed'
+
+export interface MailPresentation {
+  surface: MailSurface
+  layout: MailLayout
+}
 
 const SIGNATURE = '.gmail_signature_prefix, .gmail_signature'
 const CSS_COMMENT = /\/\*[\s\S]*?\*\//g
@@ -502,7 +508,7 @@ function applyStylesheetBackgrounds(
   }
 }
 
-function hasAuthoredCanvas(document: Document): boolean {
+function authoredBackgrounds(document: Document): Map<Element, BackgroundWinners> {
   const winners = new Map<Element, BackgroundWinners>()
   document.querySelectorAll('[bgcolor]').forEach((element) => {
     const value = legacyBackgroundValue(element.getAttribute('bgcolor') ?? '')
@@ -545,12 +551,139 @@ function hasAuthoredCanvas(document: Document): boolean {
     )
   })
 
-  return [...winners.values()].some((elementWinners) =>
-    BACKGROUND_LONGHANDS.some((longhand) => {
-      const winner = elementWinners[longhand]
-      return Boolean(winner && backgroundCreatesCanvas(winner.sourceProperty, winner.value))
-    })
+  return winners
+}
+
+function winnersCreateCanvas(elementWinners: BackgroundWinners | undefined): boolean {
+  return Boolean(
+    elementWinners &&
+      BACKGROUND_LONGHANDS.some((longhand) => {
+        const winner = elementWinners[longhand]
+        return Boolean(winner && backgroundCreatesCanvas(winner.sourceProperty, winner.value))
+      })
   )
+}
+
+function hasAuthoredCanvas(winners: Map<Element, BackgroundWinners>): boolean {
+  return [...winners.values()].some(winnersCreateCanvas)
+}
+
+function applyMatchingStyleDeclarations(
+  css: string,
+  document: Document,
+  element: Element,
+  declarations: CSSStyleDeclaration[]
+): void {
+  const source = css.replace(CSS_COMMENT, '')
+  let cursor = 0
+  let block = nextCssBlock(source, cursor)
+  while (block) {
+    const close = matchingBlockEnd(source, block.open)
+    if (close < 0) return
+    const content = source.slice(block.open + 1, close)
+    const atRule = /^@([\w-]+)\b([\s\S]*)$/i.exec(block.prelude)
+    if (atRule) {
+      const name = atRule[1].toLowerCase()
+      const condition = atRule[2].trim()
+      if (name === 'media') {
+        if (!darkSchemeOnly(condition))
+          applyMatchingStyleDeclarations(content, document, element, declarations)
+      } else if (CONDITIONAL_RULE.has(name)) {
+        applyMatchingStyleDeclarations(content, document, element, declarations)
+      }
+    } else if (
+      splitCssList(block.prelude).some((selector) => matchingElements(document, selector).includes(element))
+    ) {
+      const probe = document.createElement('div')
+      probe.setAttribute('style', directDeclarations(content))
+      declarations.push(probe.style)
+    }
+    cursor = close + 1
+    block = nextCssBlock(source, cursor)
+  }
+}
+
+function matchingStyleDeclarations(document: Document, element: Element): CSSStyleDeclaration[] {
+  const declarations: CSSStyleDeclaration[] = []
+  document.querySelectorAll('style').forEach((style) => {
+    applyMatchingStyleDeclarations(style.textContent ?? '', document, element, declarations)
+  })
+  return declarations
+}
+
+function spansDocument(element: HTMLElement): boolean {
+  const width = (element.style.width || element.getAttribute('width') || '').toLowerCase().replace(/\s/g, '')
+  return width === '100%'
+}
+
+function nonZeroMargin(value: string): boolean {
+  const normalized = value.trim().toLowerCase()
+  return Boolean(normalized && normalized !== 'auto' && !/^0(?:[a-z%]+)?$/.test(normalized))
+}
+
+function constrainsNaturalWidth(style: CSSStyleDeclaration): boolean {
+  const width = style.width.trim().toLowerCase().replace(/\s/g, '')
+  if (width && width !== 'auto' && width !== '100%') return true
+  const maxWidth = style.maxWidth.trim().toLowerCase().replace(/\s/g, '')
+  if (maxWidth && maxWidth !== 'none' && maxWidth !== '100%') return true
+  const display = style.display.trim().toLowerCase()
+  if (display.startsWith('inline') || display === 'contents') return true
+  const float = style.float.trim().toLowerCase()
+  if (float && float !== 'none') return true
+  return nonZeroMargin(style.marginLeft) || nonZeroMargin(style.marginRight)
+}
+
+function hasWidthConstraint(document: Document, element: HTMLElement): boolean {
+  return (
+    constrainsNaturalWidth(element.style) ||
+    matchingStyleDeclarations(document, element).some(constrainsNaturalWidth)
+  )
+}
+
+function stylesheetWinnerCreatesCanvas(elementWinners: BackgroundWinners | undefined): boolean {
+  return Boolean(
+    elementWinners &&
+      BACKGROUND_LONGHANDS.some((longhand) => {
+        const winner = elementWinners[longhand]
+        return Boolean(
+          winner &&
+            !winner.inline &&
+            winner.order >= 0 &&
+            backgroundCreatesCanvas(winner.sourceProperty, winner.value)
+        )
+      })
+  )
+}
+
+const NATURAL_FULL_WIDTH = new Set(['DIV', 'SECTION', 'MAIN', 'ARTICLE', 'HEADER', 'FOOTER'])
+const NON_CONTENT = new Set(['STYLE', 'LINK', 'META', 'TITLE', 'SCRIPT'])
+
+function ownsOuterCanvas(document: Document, winners: Map<Element, BackgroundWinners>): boolean {
+  // DOMPurify sanitizes mail as a fragment, so canvas attributes on source
+  // html/body wrappers do not reach the iframe. Stylesheet rules targeting the
+  // reconstructed wrappers survive and can establish an outer canvas.
+  if (
+    stylesheetWinnerCreatesCanvas(winners.get(document.documentElement)) ||
+    stylesheetWinnerCreatesCanvas(winners.get(document.body))
+  ) {
+    return true
+  }
+
+  const hasDirectText = [...document.body.childNodes].some((node) => {
+    return node.nodeType === 3 && Boolean(node.textContent?.trim())
+  })
+  if (hasDirectText) return false
+  const content = [...document.body.children].filter((element) => !NON_CONTENT.has(element.tagName))
+  if (content.length !== 1) return false
+  const outer = content[0] as HTMLElement
+  const fullWidth =
+    !hasWidthConstraint(document, outer) && (NATURAL_FULL_WIDTH.has(outer.tagName) || spansDocument(outer))
+  if (!fullWidth) return false
+  if (winnersCreateCanvas(winners.get(outer))) return true
+
+  if (outer.tagName !== 'TABLE' || !spansDocument(outer)) return false
+  const firstCell = outer.querySelector<HTMLElement>(':scope > tbody > tr > td, :scope > tr > td')
+  return Boolean(firstCell && winnersCreateCanvas(winners.get(firstCell)))
 }
 
 /** Remove sender canvases from content classified for Attn's native dark surface. */
@@ -577,8 +710,8 @@ export function normalizeNativeMailDocument(root: ParentNode): void {
  * sender authored a non-neutral background or background image whose removal
  * would change the meaning of the document.
  */
-export function mailSurfaceForHtml(html: string | null): MailSurface {
-  if (!html?.trim()) return 'native'
+export function mailPresentationForHtml(html: string | null): MailPresentation {
+  if (!html?.trim()) return { surface: 'native', layout: 'padded' }
   const document = new DOMParser().parseFromString(html, 'text/html')
   document.querySelectorAll(SIGNATURE).forEach((element) => {
     element.remove()
@@ -587,5 +720,12 @@ export function mailSurfaceForHtml(html: string | null): MailSurface {
   // Keep quoted content in the document while resolving stylesheet selectors.
   // A real canvas in a forward still belongs to the visible message, even when
   // the matching style block lives outside the quoted wrapper.
-  return hasAuthoredCanvas(document) ? 'light' : 'native'
+  const winners = authoredBackgrounds(document)
+  const surface = hasAuthoredCanvas(winners) ? 'light' : 'native'
+  const layout = surface === 'light' && ownsOuterCanvas(document, winners) ? 'full-bleed' : 'padded'
+  return { surface, layout }
+}
+
+export function mailSurfaceForHtml(html: string | null): MailSurface {
+  return mailPresentationForHtml(html).surface
 }
