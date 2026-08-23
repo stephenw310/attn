@@ -60,6 +60,21 @@
           "bodyHtml": "<style>body{padding:31px!important;background:#eef2ff}</style><div id=styled-body>Sender padding wins.</div>"
         }
       ]
+    },
+    {
+      "id": "t-layout-wrapper-canvas",
+      "messages": [
+        {
+          "id": "m-layout-wrapper-canvas",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "13:00",
+          "from": "Wrapper Sender <wrapper@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Discarded wrapper canvas",
+          "bodyHtml": "<html style=\"background:#eef2ff\"><body bgcolor=#eef2ff><table id=wrapper-content><tr><td>Wrapper attributes do not survive fragment sanitization.</td></tr></table></body></html>"
+        }
+      ]
     }
   ]
 }

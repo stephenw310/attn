@@ -215,7 +215,13 @@ const NATURAL_FULL_WIDTH = new Set(['DIV', 'SECTION', 'MAIN', 'ARTICLE', 'HEADER
 const NON_CONTENT = new Set(['STYLE', 'LINK', 'META', 'TITLE', 'SCRIPT'])
 
 function ownsOuterCanvas(document: Document): boolean {
-  if (elementOwnsCanvas(document, document.documentElement) || elementOwnsCanvas(document, document.body)) {
+  // DOMPurify sanitizes mail as a fragment, so inline styles and legacy canvas
+  // attributes on the source html/body wrappers do not reach the iframe. Only
+  // stylesheet rules targeting the reconstructed wrappers survive sanitization.
+  if (
+    stylesheetCanvas(document, document.documentElement) === true ||
+    stylesheetCanvas(document, document.body) === true
+  ) {
     return true
   }
 

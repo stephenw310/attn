@@ -5,7 +5,7 @@ import { expect, test } from './electron'
 test.use({ seed: 'fixtures/seed-mail-layout.json' })
 
 test('separates padded rich mail from full-bleed sender canvases', async ({ page }, testInfo) => {
-  await expect(page.getByTestId('thread-row')).toHaveCount(4)
+  await expect(page.getByTestId('thread-row')).toHaveCount(5)
 
   await page.getByTestId('thread-row').filter({ hasText: 'Plain layout' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
@@ -51,4 +51,11 @@ test('separates padded rich mail from full-bleed sender canvases', async ({ page
     'padding-left',
     '31px'
   )
+
+  await page.keyboard.press('Escape')
+  await page.getByTestId('thread-row').filter({ hasText: 'Discarded wrapper canvas' }).click()
+  await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-layout', 'padded')
+  const wrapperBody = page.frameLocator('[data-testid="html-body-frame"]').locator('body')
+  await expect(wrapperBody).toHaveCSS('padding-left', '12px')
+  await expect(wrapperBody).toHaveCSS('padding-right', '12px')
 })

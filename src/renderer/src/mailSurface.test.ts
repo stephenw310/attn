@@ -118,6 +118,16 @@ describe('mail surface classification', () => {
         '<style>.canvas{background:transparent}</style><div class="canvas" bgcolor="#eef2ff">Text</div>'
       )
     ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml(
+        '<html style="background:#eef2ff"><body><table><tr><td>HTML wrapper canvas</td></tr></table></body></html>'
+      )
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml(
+        '<body bgcolor="#eef2ff"><table><tr><td>Body wrapper canvas</td></tr></table></body>'
+      )
+    ).toEqual({ surface: 'light', layout: 'padded' })
   })
 
   it('uses full bleed only when the message owns a non-neutral outer canvas', () => {
