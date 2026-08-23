@@ -515,17 +515,25 @@ trust it.
 - **Coverage follows the store, and the UI has to say so.** Headers are lifetime once the sweep completes.
   Body terms and filenames match hydrated mail only. `has:attachment` is lifetime-wide after the attachment
   walk. T24 renders that disclosure; T23 exposes the state it needs.
-- **Index text, not markup.** Index `messages.body_text`. When a message stored only `body_html`, derive text
-  through the existing sanitizer path at index time. Indexing tags produces matches on `div`.
+- **Index text, not markup.** Index `messages.body_text`. When a row has HTML and no text, derive it with
+  `textFromRaw('text/html', …)` from `gmail/parse.ts`, which is the same DOM-free helper `mergeBodies.ts`
+  already uses to fill `body_text` during hydration. Do **not** reach for `shared/mailSanitizer.ts`: it
+  configures a live DOMPurify instance and needs a DOM, which the utility process does not have. The
+  sanitizer's job is safe rendering, and this one is stripping tags before tokenizing. Indexing markup
+  produces matches on `div`.
 - **Backfilling existing rows is a fourth cursor, not a fifth mechanism.** A resumable pass in the utility
-  process, keyed `fts_cursor` in `sync_state`, running at background priority behind the three sync cursors
-  and yielding to interactive work (global rule 7). It resumes from SQLite after a supervisor restart exactly
-  as the other three do.
+  process, keyed by the `fts_cursor` column this task adds to `sync_state`, running at background priority
+  behind the three sync cursors and yielding to interactive work (global rule 7). It resumes from SQLite
+  after a supervisor restart exactly as the other three do.
 - **Tokenizer and prefix index:** `unicode61 remove_diacritics 2`, with `prefix='2 3'` for as-you-type. The
   prefix index costs storage. Measure it rather than assuming it.
-- **Table shape.** FTS5 cannot delete by a text key without a scan, so a mapping table owns the rowid:
+- **Table shape.** FTS5 cannot delete by a text key without a scan, so a mapping table owns the rowid.
+  `sync_state` is a column per cursor, not a key-value table, so the backfill cursor is a column too.
+  Revision 18 adds:
 
 ```sql
+ALTER TABLE sync_state ADD COLUMN fts_cursor TEXT;
+
 CREATE TABLE message_fts_map (
   account_id TEXT NOT NULL,
   message_id TEXT NOT NULL,
@@ -560,6 +568,7 @@ in one transaction under the `AGENTS.md` procedure:
 
 ```sql
 BEGIN IMMEDIATE;
+ALTER TABLE sync_state ADD COLUMN fts_cursor TEXT;
 CREATE TABLE message_fts_map (
   account_id TEXT NOT NULL,
   message_id TEXT NOT NULL,
