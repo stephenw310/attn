@@ -641,10 +641,11 @@ Opening a conversation row with a bound draft reopens the newest matching draft 
 close button leaves the reader open, while either `Esc` or the reader Back control saves the draft and returns
 to the originating list in one action. Opening or navigating to a conversation keeps the reading viewport
 anchored to the newest message or restored draft while asynchronously sized HTML settles. Quoted history sits
-behind an inline `...` control and shares the reader's surface decision: text-like mail uses the native composer
-canvas and normalizes dark sender foreground colours for contrast, while presentation HTML retains a light
-document canvas plus its sanitized structure and explicit styling. From Inbox or Snoozed, `r` and `f` open
-the selected row directly into the corresponding inline composer.
+behind an inline `...` control and shares the reader's surface decision: mail without a non-neutral authored
+canvas uses the native composer canvas and normalizes dark sender foreground colours for contrast, while
+non-neutral backgrounds and background images retain a light document canvas plus their sanitized structure
+and explicit styling. Typography, media, tables, and layout alone remain native. From Inbox or Snoozed, `r`
+and `f` open the selected row directly into the corresponding inline composer.
 `Enter` is a reader-only Reply-all alias alongside `a` and retains native activation on focused links.
 
 Gmail-imported forwards need one additional identity rule. A draft whose authoritative Gmail `threadId`
