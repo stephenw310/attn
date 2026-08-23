@@ -22,10 +22,20 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | S2 per-message labels | **done**, completed 2026-08-22 | nothing; F3 and S4 are unblocked |
 | S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
 | S4 reconcile and expiry recovery | **done**, completed 2026-08-22 | trustworthy mailbox views |
-| Feature half | **open**, not planned | nothing yet |
+| T22 mailbox navigation (F3) | **planned**, not started | T27, T24's `in:` operator |
+| T23 FTS5 index (F10) | **planned**, not started | T24, T25 |
+| T24 search UI and operators (F10) | **planned**, not started | T25 |
+| T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
+| T26 palette and registry completeness (F5) | **planned**, not started | milestone exit |
+| T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
+| T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
+| T29 inbox zero (F13) | **planned**, not started | nothing |
+| T30 light theme (F14) | **planned**, not started | nothing |
 
 S2 settled the store shape needed for F3 mailbox views and S4, S1 moved that store into the utility process,
-and S4 closed the last sync correctness gap. The feature tasks get written up from here.
+and S4 closed the last sync correctness gap. The feature tasks are written up below, under
+[The feature half](#the-feature-half-order-and-open-assumptions), which also records the two assumptions
+they rest on.
 
 Every task section below opens with the same **Status** line, so you never have to infer state from whether a
 section looks long.
@@ -363,24 +373,517 @@ Expired-history recovery now converges cached membership and existence without g
 
 ---
 
-## Still to be planned
+## The feature half: order and open assumptions
 
-These are the milestone's feature half. They get planned once the remaining sync work is underway and the
-store's shape is settled.
+Nine tasks, T22 through T30. They keep M2's `T` numbering rather than continuing `S1`–`S4`, because the `S`
+names describe the sync restructure and no id is ever reused. Two tracks run in parallel and meet at the
+palette:
 
-- **F10, FTS5 instant search and operators**, including the "Search all of Gmail" server row and the
-  on-demand thread fetch it implies. Fetching and persisting an arbitrary thread id is a primitive the app
-  does not have today, and it is useful beyond search.
-- **F3, system mailbox navigation** (Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash) with `G`
-  chords and palette entries. List virtualization stops being conditional at All Mail scale. F3 also keeps a
-  chronological marker for each trashed message hidden inside a normal or All Mail conversation. Its
-  `Show message` action reveals the message locally without restoring it. This is reader behavior, not a new
-  message-level trash action.
-- **F11, split inbox and rules.**
-- **Inbox-zero states, F14 themes, and palette hardening**, with every command registered and asserted.
-- **§9 #14, the contextual chord guide** in the shortcut footer, deferred from M2.
-- **§5 reader keys `N`, `P`, and `O`.** Decided 2026-08-17: bind them, do not cut them (SPEC §9 #18d). They
-  land with palette hardening's registry-completeness assertion.
+```
+A  T22 mailboxes ──> T27 splits ──> T28 chord guide ──> T29 inbox zero
+B  T23 FTS index ──> T24 search UI ──> T25 server search
+   T26 palette   ── depends on A and B registering their commands, asserts the inventory last
+   T30 light theme ── independent, schedule it wherever it fits
+```
+
+T22 goes first because S2 and S4 exist to serve it, because the store already answers its questions, and
+because All Mail is what forces list windowing to stop being conditional. T23 can start the same day: it
+touches `persist.ts` and the schema, not the renderer, so the two tracks do not collide.
+
+**Two assumptions this plan makes. Both are owner calls, and ratifying them belongs in SPEC §9.**
+
+1. **F3 registers palette commands, T26 builds the palette.** F3's acceptance criteria say every mailbox is
+   reachable by palette and keyboard, and no palette exists today (`commands.ts` is a registry whose own
+   comment calls the palette "future"). Blocking F3 on the palette would invert the dependency for no gain,
+   so T22 through T25 register their entries in `COMMAND_SPECS` and T26 builds the surface and asserts the
+   inventory. `AGENTS.md` already phrases the rule this way.
+2. **Search targets §7's stated budget, and measures for the unanswered one.** The gate is p95 under 100 ms
+   at 50,000 messages. The pathological-mailbox question below is still open, so T23 records measured index
+   size and query latency at 50k and at the largest profile available, and those numbers answer the question
+   instead of a guess made now.
+
+The BUG-1, BUG-2, BUG-3 and SEC-1 fix pass in [KNOWN-ISSUES.md](KNOWN-ISSUES.md) is owner-decided and
+unshipped. BUG-2 loses a reply draft when the header nav switches views mid-compose, and T22 adds five more
+places to switch views from, so that pass should land before or beside T22.
+
+---
+
+## T22 — System mailbox navigation
+
+**Status: not started.**
+
+**Depends on:** S2, S4 (both done) · **Unblocks:** T27, and T24's `in:` operator · **Parallel with:** T23 ·
+**Spec:** F3 system mailbox navigation, §9 #10, §5 `G` chords
+
+### Why
+
+The store holds every mailbox and the renderer shows four views. `MailView` in `Inbox.tsx:32` is
+`inbox | snoozed | drafts | outbox`, while `listMailboxThreadIds` (`db/queries.ts:76`) already owns the All
+Mail, Spam, and Trash membership rules S2 shipped and no IPC read reaches it. It returns ids, not rows,
+because it was built ahead of this task to make the rules testable.
+
+This is the task S2 and S4 were paid for. It is also where windowing stops being conditional.
+
+### Design (decided)
+
+- **One `MailboxView` union in `src/shared/mail.ts`:** `inbox`, `allMail`, `sent`, `drafts`, `starred`,
+  `snoozed`, `spam`, `trash`. Outbox stays outside the union. F3 is explicit that Outbox is an on-demand
+  operational view, not a mailbox, and T16 already built it that way.
+- **One typed read.** `mail:listThreads({ view })` replaces the `mailListThreads` / `mailListSnoozed` pair
+  in `src/shared/ipc.ts`. Drafts keeps its own row shape (`DraftList` merges outbox rows with cached Gmail
+  drafts) and Snoozed keeps its reminder fields. Every filter and every sort stays in SQL. A renderer that
+  fetches the inbox and filters it for Sent has already lost the 50 ms budget at 10,000 rows.
+- **`listMailboxThreadIds` grows into `listMailboxThreads`**, returning the same projection as
+  `listInboxThreads` under the membership rules S2 recorded: Spam and Trash include a thread when any message
+  carries the label and sort by that mailbox's newest matching message, All Mail includes a thread when any
+  message is outside Spam and Trash. Sent is `SENT` and Starred is `STARRED`, both with the junk exclusion the
+  normal reader already applies.
+- **The trashed-message marker is reader behavior, not an action.** A normal or All Mail conversation shows
+  `This message was moved to Trash. Show message.` at the message's chronological position. `Show message`
+  reveals it in the current reader only. It changes no label, queues no action, and resets when the reader
+  closes. Spam and Trash readers keep S2's behavior of showing only their own messages.
+- **Per-view selection and scroll.** Keep one record per view and restore it on return. Switching mailboxes
+  closes an open reader, per F3.
+- **Windowing becomes unconditional.** Delete `VIRTUALIZE_AT = 500` (`ThreadList.tsx:86`) and window every
+  list. All Mail at the 10,000-row `THREAD_LIST_LIMIT` is now the ordinary case, and keeping two layout paths
+  keeps two sets of scroll-restore bugs. The row height and overscan constants stay.
+- **Triage removes a row when it stops matching the active view.** The inbox predicate generalizes per view:
+  archiving in All Mail removes nothing, trashing in Inbox removes the row, restoring in Trash removes it
+  there. v1 still ships no permanent delete and no empty-folder action in Spam or Trash.
+- **Commands are registry data, not dispatch code.** Add `view.allMail` (`g a`), `view.sent` (`g t`),
+  `view.starred` (`g s`), `view.spam` (`g p`), `view.trash` (`g r`) beside the existing four.
+  `useKeyboardDispatch.ts:47` already resolves two-key chords from the registry, so nothing in dispatch
+  changes. Palette entries stay registry-only until T26.
+- **The list header shows the active mailbox name** (`MailHeader`), which is the whole of F3's answer to not
+  having a sidebar.
+
+### Implementation guide
+
+- Renderer: `Inbox.tsx` view state and `switchView`, `MailHeader`, `ThreadList` windowing, `useMailData`.
+  Route every view transition through `exitConversation()` the way `closeReader` does, or T22 multiplies
+  BUG-2 by five.
+- Main: `db/queries.ts` (`listMailboxThreads`), the service handler and protocol operation in
+  `src/main/service/`, the preload bridge, and the channel map. All three IPC halves in one commit
+  (global rule 2).
+- Testids: `mailbox-title`, `mailbox-row`, `trashed-message-marker`, `trashed-message-reveal`.
+- Screenshot artifacts: `all-mail.png` and `trash-marker.png`. Add both to the `AGENTS.md` list in the same
+  PR (global rule 8).
+
+**Schema:** none. Every rule this task needs shipped with S2 at revision 16.
+
+### Testing
+
+- **Unit:** the view-to-query mapping, each membership rule against a seeded in-memory database, and the
+  reader's marker placement for a thread whose middle message is trashed. Extend `queries.test.ts` rather
+  than starting a parallel file.
+- **E2e (seeded):** every `G` chord reaches its view; the existing mixed-label fixture appears in both All
+  Mail and Trash with the right message subset in each reader; per-view selection and scroll survive a round
+  trip; a triage verb removes a row from a view it no longer matches; a Drafts row opens the composer; a
+  boot with no provider still switches views. Extend `e2e/message-labels.spec.ts` seeds with one Sent-only
+  and one Starred-only thread rather than reordering the existing fixture list.
+- **Perf (@perf):** switching to All Mail on the 10,000-thread profile renders under the F3 50 ms budget,
+  and scrolling holds the existing `requestAnimationFrame` interval now that every list is windowed.
+
+### Done when
+
+Eight views render from SQLite, a cached switch is measured under 50 ms in the perf suite, both artifacts are
+reviewed, and verify is green.
+
+---
+
+## T23 — FTS5 index in the utility process
+
+**Status: not started.**
+
+**Depends on:** S1 (done) · **Unblocks:** T24, T25 · **Parallel with:** T22 · **Spec:** F10, §6, §7
+
+### Why
+
+F10 runs entirely locally, so the index is the feature. S1 put the only SQLite writer in the utility process,
+which is where the index write path belongs. Nothing about this task is visible, which is the argument for
+making it its own PR: the index has to be correct under delete, tombstone, and hydration before a UI can
+trust it.
+
+### Design (decided)
+
+- **The indexed unit is the message.** Columns: subject, sender, recipients, body, filenames. Thread ranking
+  takes the best-matching message per thread, so a thread whose fifth message matches ranks on that message.
+- **Write inside the same transaction as the row.** `persistThread` (`sync/persist.ts`) indexes every message
+  it writes. `sync/bodies.ts` and `sync/onDemandBodies.ts` update the body column when hydration fills it.
+  Every delete path removes index rows in the same transaction: S4's tombstone pass, S2's draft-only pruning,
+  and account teardown. An index that outlives its rows returns results that open onto nothing.
+- **Coverage follows the store, and the UI has to say so.** Headers are lifetime once the sweep completes.
+  Body terms and filenames match hydrated mail only. `has:attachment` is lifetime-wide after the attachment
+  walk. T24 renders that disclosure; T23 exposes the state it needs.
+- **Index text, not markup.** Index `messages.body_text`. When a message stored only `body_html`, derive text
+  through the existing sanitizer path at index time. Indexing tags produces matches on `div`.
+- **Backfilling existing rows is a fourth cursor, not a fifth mechanism.** A resumable pass in the utility
+  process, keyed `fts_cursor` in `sync_state`, running at background priority behind the three sync cursors
+  and yielding to interactive work (global rule 7). It resumes from SQLite after a supervisor restart exactly
+  as the other three do.
+- **Tokenizer and prefix index:** `unicode61 remove_diacritics 2`, with `prefix='2 3'` for as-you-type. The
+  prefix index costs storage. Measure it rather than assuming it.
+- **Table shape.** FTS5 cannot delete by a text key without a scan, so a mapping table owns the rowid:
+
+```sql
+CREATE TABLE message_fts_map (
+  account_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  thread_id  TEXT NOT NULL,
+  fts_rowid  INTEGER NOT NULL,
+  PRIMARY KEY (account_id, message_id)
+);
+CREATE UNIQUE INDEX idx_message_fts_map_rowid ON message_fts_map (fts_rowid);
+CREATE INDEX idx_message_fts_map_thread ON message_fts_map (account_id, thread_id);
+
+CREATE VIRTUAL TABLE message_fts USING fts5(
+  subject,
+  sender,
+  recipients,
+  body,
+  filenames,
+  tokenize = 'unicode61 remove_diacritics 2',
+  prefix = '2 3'
+);
+```
+
+  The alternative worth one hour before writing code is an external-content table over `messages`, which
+  removes the duplicate text at the cost of a synthetic integer key on a table whose primary key is
+  `(account_id, id)`. Pick one, record why, and move on. Whichever wins, the delete path must be a rowid
+  delete.
+- **Update the cursor contract in the same PR.** [Where sync stands today](#where-sync-stands-today) says
+  three cursors, not two. `fts_cursor` makes it four, and that prose is what the next task reads before
+  touching sync.
+
+**Schema revision 18.** For a stopped revision-17 dogfood profile, apply the DDL above plus the version stamp
+in one transaction under the `AGENTS.md` procedure:
+
+```sql
+BEGIN IMMEDIATE;
+CREATE TABLE message_fts_map (
+  account_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  thread_id  TEXT NOT NULL,
+  fts_rowid  INTEGER NOT NULL,
+  PRIMARY KEY (account_id, message_id)
+);
+CREATE UNIQUE INDEX idx_message_fts_map_rowid ON message_fts_map (fts_rowid);
+CREATE INDEX idx_message_fts_map_thread ON message_fts_map (account_id, thread_id);
+CREATE VIRTUAL TABLE message_fts USING fts5(
+  subject,
+  sender,
+  recipients,
+  body,
+  filenames,
+  tokenize = 'unicode61 remove_diacritics 2',
+  prefix = '2 3'
+);
+PRAGMA user_version = 18;
+COMMIT;
+```
+
+The change is additive and indexes nothing until the backfill pass runs, so existing mail, contact, reminder,
+and action counts must be unchanged before relaunch.
+
+### Testing
+
+- **Unit** against `openDatabase(':memory:')`: insert, update, and delete parity between `messages` and the
+  index; a hydrated body becoming searchable; a tombstoned thread leaving no index rows; prefix and diacritic
+  matching; the backfill pass resuming from a persisted cursor.
+- **E2e:** the utility-process crash spec gains a case that kills the process mid-backfill and asserts the
+  index continues from `fts_cursor` with no duplicate rows, matching how the other three cursors are covered.
+- **Perf (@perf):** p95 query latency and on-disk index size on the generated profile, both recorded in
+  [T20-EVIDENCE.md](T20-EVIDENCE.md). These numbers are the input to the pathological-mailbox question.
+
+### Done when
+
+The index is maintained transactionally on every write and delete path, the backfill resumes across a
+relaunch and a supervisor restart, latency and size are recorded, and verify is green.
+
+---
+
+## T24 — Search UI, operators, and local results
+
+**Status: not started.**
+
+**Depends on:** T23 · **Unblocks:** T25 · **Spec:** F10, §5 `/`
+
+### Design (decided)
+
+- **The parser is a pure shared module,** `src/shared/searchQuery.ts`, because T25's server row and T26's
+  palette both need to parse the same string. Operators: `from:`, `to:`, `subject:`, `in:`, `is:`,
+  `has:`, `before:`, `after:`. Quoted phrases survive. Anything unrecognized is literal search text, never an
+  error: a user typing `re: budget` is searching, not writing a malformed query.
+- **Two halves, one query.** Text terms hit FTS5; `is:`, `has:`, `in:`, `before:`, and `after:` become SQL
+  predicates over `threads`, `messages`, and `thread_labels`. The utility process runs them as one statement
+  and returns ranked threads. `in:` accepts T22's mailbox names and user labels.
+- **Results are a view, not a mode.** `/` focuses a field in the list header; results replace the list using
+  the same row component and the same reader behavior. `Esc` returns to the previous mailbox with its
+  selection and scroll intact, and a second `Esc` behaves as it does in that mailbox.
+- **Typing is never blocked.** Debounce, cancel the in-flight query on the next keystroke, and render the
+  last complete result set until the next one lands.
+- **One quiet coverage line** under the results states what the store cannot answer yet, driven by T23's
+  state. F10 promises header matches lifetime-wide and body matches for hydrated mail, and a user who does
+  not know that reads a missing old body as a broken search.
+- **Commands:** `search.open` (`/`) and `search.clear`, registry-only until T26.
+
+### Testing
+
+- **Unit:** a parse table covering each operator, combinations, quoting, unknown operators as text, and
+  empty input; the query builder producing the same result set as a hand-written control query.
+- **E2e (seeded):** results appear as you type; F10's own acceptance combination
+  (`from:acme.com has:attachment after:2026-01-01`) returns the fixture thread and only that thread; a result
+  opens into the reader and `Esc` returns twice, correctly.
+- **Perf (@perf):** p95 under 100 ms at 50,000 messages. The profile generator currently scales threads, so
+  this task teaches it a message-count mode.
+
+### Done when
+
+F10's two acceptance criteria are measured rather than asserted, and verify is green.
+
+---
+
+## T25 — On-demand thread fetch and "Search all of Gmail"
+
+**Status: not started.**
+
+**Depends on:** T24 · **Spec:** F10
+
+### Why
+
+The server row needs to fetch and persist a thread the store has never seen. The app has no such primitive
+today, and it is useful well beyond search: a notification for an unsynced thread, a shared link, and any
+future "open this id" path all want it.
+
+### Design (decided)
+
+- **The primitive comes first, with one owner.** A function that fetches a single thread id at the requested
+  format, persists it through `persistThread`, and returns the stored thread. Foreground priority, through
+  the quota limiter, honoring the same auth-pause behavior as every other provider call. Recovery paths in
+  `poller.ts` already do a version of this; factor them onto the new function rather than leaving two.
+- **Server search reuses the parsed query.** Translate the parsed structure into Gmail `q=` syntax, run it,
+  and merge ids under a divider below the local results. A thread present locally keeps its local row. Threads
+  the server returns are persisted through the normal write path and stay cached, which F10 requires.
+- **Failure is visible.** Offline disables the row and says why. A quota wait shows as a wait, not as an empty
+  result. An auth pause routes into the existing reconnect surface.
+
+### Testing
+
+- **Unit:** query translation to Gmail syntax; merge and dedupe ordering; the fetch primitive against a mock
+  provider, including a 404 and a transient error, asserting one persisted thread and no duplicate rows.
+- **E2e (seeded):** the seeded provider serves one thread absent from the local store; invoking the row
+  persists it, opens it, and it survives `boot.relaunch()`.
+
+### Done when
+
+An arbitrary thread id can be fetched and cached by one code path, server results merge without duplicates,
+and verify is green.
+
+---
+
+## T26 — Command palette, registry completeness, and the reader keys
+
+**Status: not started.**
+
+**Depends on:** T22 and T24 registering their commands · **Spec:** F5, §5, §9 #18d
+
+### Why
+
+Every task since M1 has registered commands into `COMMAND_SPECS` for a palette that does not exist. F5 calls
+the palette the app's primary control surface, and its engineering rule ("no feature ships reachable only by
+mouse") is an honor system until a test asserts the inventory.
+
+### Design (decided)
+
+- **`Mod+K` from anywhere.** Fuzzy match with exact prefix ranked above fuzzy score, boosted by recent and
+  frequent use, persisted per account in `settings`.
+- **The registry stays the single source.** Each row renders its shortcut from `COMMAND_SPECS`, so a command
+  added without a shortcut shows without one instead of drifting into a second list. Context filtering uses
+  the existing `CommandContext` values.
+- **Parameterized commands share their parsers.** "Remind me tomorrow 9am" parses through the same
+  natural-language code the snooze picker uses. Do not fork it for the palette.
+- **Bind `N`, `P`, and `O` in the reader** (next message, previous message, expand or collapse), which §9 #18d
+  decided on 2026-08-17 and deferred to exactly this task.
+- **The completeness assertion is a test, not a paragraph.** Enumerate every user-facing feature's command id
+  and fail when one is missing. Keeping the list in the test is what makes it break when someone adds a
+  feature and forgets.
+
+### Testing
+
+- **Unit:** ranking, including prefix beating fuzzy and recency breaking ties; context filtering; the
+  inline-argument parse path.
+- **E2e (seeded):** the palette opens from list, reader, and composer contexts and dispatches a command in
+  each; every `G` chord's command also appears in the palette; `N`, `P`, and `O` move and collapse messages
+  in the reader.
+- **Perf (@perf):** open under 50 ms, re-rank under 30 ms, per F5.
+
+### Done when
+
+Every command in the registry is reachable and asserted, the reader keys are bound, F5's two budgets are
+measured, and verify is green.
+
+---
+
+## T27 — Split inbox, rules, and per-split notifications
+
+**Status: not started.**
+
+**Depends on:** T22 · **Unblocks:** T28's digit completions, T29's remaining-split counts ·
+**Spec:** F11, F12 (the per-split slice), §5 `←`/`→` and `G` `1`–`9`
+
+### Design (decided)
+
+- **Splits are read-time views over the Inbox list.** First matching rule wins, every inbox thread lands in
+  exactly one split, and mail is never moved. Evaluating at read time means a rule change re-buckets by
+  re-rendering, which satisfies F11's "under 1s for 10k threads" by construction and avoids a denormalized
+  column that can disagree with its rules.
+- **Defaults are Important and Other.** Important reads Gmail's `IMPORTANT` label, which `thread_labels` and
+  `labels_json` already carry, so no new fetch is needed.
+- **User rules match sender address, sender domain, `List-Id`, or label.** `List-Id` is not stored. Add
+  `messages.list_id` and add `List-Id` to `METADATA_HEADERS` (`gmail/provider.ts:19`). Existing rows stay
+  `NULL` until an ordinary refetch fills them, exactly as S2's legacy labels do, so address, domain, and label
+  rules work on day one while list rules ramp. Say that in the rule editor rather than letting it look broken.
+- **The strip follows D6:** a horizontal top-bar strip, unread counts on hot splits, overflow behind `···`
+  past about eight. `←`/`→` moves between splits, `G` then `1`–`9` jumps by configured order, and each split
+  keeps its own selection.
+- **F12's slice lands here.** A per-split notify flag, default Important only, feeding `planNotifications`
+  and `applyUnreadBadge` in `notify.ts`. The badge counts notification-enabled splits, which is what F12 has
+  said since M1 staging.
+- **The rule manager is minimal.** F15's settings surface is M4. T27 ships rule creation, ordering, and
+  deletion, reachable by palette command, and no more.
+
+**Schema revision 19.** For a stopped revision-18 profile:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE messages ADD COLUMN list_id TEXT;
+CREATE TABLE split_rules (
+  account_id TEXT NOT NULL,
+  id         TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  match_json TEXT NOT NULL DEFAULT '[]',
+  notify     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, id)
+);
+CREATE INDEX idx_split_rules_order ON split_rules (account_id, position);
+PRAGMA user_version = 19;
+COMMIT;
+```
+
+### Testing
+
+- **Unit:** the matcher, covering rule order, first match wins, a thread matching two rules landing in one
+  split, a malformed rule being skipped rather than throwing, and `NULL` `list_id` falling through; the
+  notification planner honoring per-split flags and the badge counting only enabled splits.
+- **E2e (seeded):** `←`/`→` and `G` digits switch splits; each split keeps its selection; unread counts are
+  per split; adding a rule re-buckets without a reload; splits never appear outside Inbox.
+- **Perf (@perf):** a rule change re-buckets the 10,000-thread profile under 1s.
+
+### Done when
+
+F11's two acceptance criteria are measured, per-split notification and badge behavior is covered, and verify
+is green.
+
+---
+
+## T28 — The contextual chord guide
+
+**Status: not started.**
+
+**Depends on:** T22, T27 · **Spec:** §9 #14, F5
+
+### Design (decided)
+
+- The footer's default state is one non-wrapping line of commands relevant to the active view, derived from
+  the registry rather than from a hand-kept list in `MailFooter`.
+- A pending chord prefix replaces that line with the valid completions, again from the registry: fixed
+  mailbox letters from T22, and split digits from T27's configured order.
+- **Reconcile the two timeouts before writing UI.** Dispatch holds a pending chord for 500 ms
+  (`useKeyboardDispatch.ts:56`) and §9 #14 wants the guide visible for 2 to 3 seconds. A guide that outlives
+  the chord it describes is a lie the user acts on. Pick one number, 2 seconds, and use it in both places.
+  Raising the dispatch window is a behavior change to a shipped key path, so it needs its own test.
+- The guide clears on completion, `Esc`, a view change, or that timeout. The palette and the cheat sheet stay
+  the exhaustive references.
+
+### Testing
+
+- **Unit:** completions derived from the registry for each context, including a view with no split digits.
+- **E2e (seeded):** the default line per view; `G` showing mailbox letters and split digits; dismissal by
+  each of the four routes; the raised chord window still completing `g i` and still expiring.
+- **Screenshot artifact:** `chord-guide.png`, added to the `AGENTS.md` list.
+
+### Done when
+
+The guide is registry-derived, the two timeouts agree, and verify is green.
+
+---
+
+## T29 — Inbox zero
+
+**Status: not started.**
+
+**Depends on:** T27 · **Spec:** F13
+
+### Design (decided)
+
+- When the active split reaches zero, a full-pane zero state replaces the list: a rotating bundled background
+  image, a short affirmation, the time, and the remaining splits with counts. Images ship in the asar. No
+  network, ever, for a reward screen.
+- **Gate it on sync state.** A fresh profile mid-backfill has an empty inbox because nothing has arrived yet,
+  and showing "you are done" to someone who has not seen their mail is the failure mode this task has to
+  avoid. Read the backfill phase from `sync_state` and show sync progress instead until the inbox stage
+  completes.
+
+### Testing
+
+- **E2e (seeded):** archiving the last thread in a split shows the zero state with the other splits' counts;
+  a profile whose backfill has not reached the inbox stage does not show it.
+- **Screenshot artifact:** `inbox-zero.png`, added to the `AGENTS.md` list.
+
+### Done when
+
+The zero state appears only when the mailbox is genuinely empty, and verify is green.
+
+---
+
+## T30 — Light theme
+
+**Status: not started.**
+
+**Depends on:** nothing · **Parallel with:** everything · **Spec:** F14, D6
+
+### Design (decided)
+
+- The dark tokens already exist as semantic names in `app.css` (`--color-ground`, `--color-raised`,
+  `--color-ink`, `--color-accent`, and the rest). The light variant is a second value set over the same
+  names. If a component needs a new token to go light, the token is missing from the system and the fix is
+  the token, not a conditional in the component.
+- Follow the OS by default, with a manual override stored in `settings` and a "Switch theme" palette command.
+- **Mail rendering is the hard half.** HTML mail carries its own colors. The light theme leaves mail canvases
+  alone, dark keeps the behavior `mailSurface.ts` ships today, and F14's per-message "view original" escape
+  hatch stays. Do not guess at luminance inversion in v1.
+
+### Testing
+
+- **Unit:** a check that renderer components carry no raw color literals outside the token file, which is
+  what keeps the light theme from rotting one component at a time.
+- **E2e:** light-theme artifacts `inbox-light.png` and `reading-light.png`, plus an OS-preference switch
+  applying without a reload. Add both to the `AGENTS.md` list.
+
+### Done when
+
+Both themes are legible across list, reader, composer, and HTML mail, the override persists across relaunch,
+and verify is green.
+
+---
+
+## Out of scope for M3
+
+Snippets (F8), follow-up reminders (F9), the full settings surface (F15), AI reply drafting (F17), and
+auto-update with signing are M4. T27 ships a minimal split-rule editor because splits are useless without
+one; that is not the start of F15.
 
 ---
 
@@ -391,7 +894,8 @@ constraints carry the consequences.
 
 | Question | Why it matters | Decide by |
 |---|---|---|
-| Pathological-mailbox posture: pick a design target such as smooth to 250k messages, then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages, and lifetime headers can exceed that | E7's real-mailbox capture in [T20-EVIDENCE.md](T20-EVIDENCE.md) |
+| Pathological-mailbox posture: pick a design target such as smooth to 250k messages, then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages, and lifetime headers can exceed that | E7's real-mailbox capture in [T20-EVIDENCE.md](T20-EVIDENCE.md), plus T23's measured index size and query latency |
+| Does F3 ship with registry-only palette commands, with T26 building the palette and asserting the inventory? | It decides whether T22 or T26 goes first, and F3's acceptance criteria name the palette | Before T22 starts |
 
 Open defects and coverage gaps live in [KNOWN-ISSUES.md](KNOWN-ISSUES.md). Manual sign-off evidence is ticked
 in [T20-EVIDENCE.md](T20-EVIDENCE.md).
