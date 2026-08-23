@@ -75,6 +75,21 @@
           "bodyHtml": "<html style=\"background:#eef2ff\"><body bgcolor=#eef2ff><table id=wrapper-content><tr><td>Wrapper attributes do not survive fragment sanitization.</td></tr></table></body></html>"
         }
       ]
+    },
+    {
+      "id": "t-layout-colored-reply",
+      "messages": [
+        {
+          "id": "m-layout-colored-reply",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "14:00",
+          "from": "Reply Sender <reply@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Color-coded reply",
+          "bodyHtml": "<div>Thanks, that answers my questions.</div><blockquote type=cite><div id=quoted-question style=\"color:#202124\">Is any other paperwork required?</div><font id=quoted-answer color=#0056d6>No other paperwork for now.</font><div><font id=quoted-answer-dark color=#0042a9>Most likely sometime in October.</font></div></blockquote>"
+        }
+      ]
     }
   ]
 }
