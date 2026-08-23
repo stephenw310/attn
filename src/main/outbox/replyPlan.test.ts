@@ -233,6 +233,21 @@ describe('quote HTML sanitizer', () => {
     expect(plan.quoteHtml).toContain('<p style="color:red">Please pay.</p>')
   })
 
+  it('strips CSS-escaped positioning and custom-property references from a quote', () => {
+    const source = message({
+      bodyText: 'Please pay.',
+      bodyHtml:
+        '<div style="tr\\61nslate:0 -900px;color:red">ESCAPED POSITION</div>' +
+        '<div style="--m:-600px;margin-top:v\\61r(--m);padding:8px">ESCAPED VARIABLE</div>'
+    })
+
+    const plan = planReply('reply', conversation([source]), SELF)
+
+    expect(plan.quoteHtml).toContain('<div style="color:red">ESCAPED POSITION</div>')
+    expect(plan.quoteHtml).toContain('<div style="--m:-600px; padding:8px">ESCAPED VARIABLE</div>')
+    expect(plan.quoteHtml).not.toContain('\\61')
+  })
+
   it('drops document metadata that a full-page mail body carries into the quote', () => {
     const source = message({
       bodyText: 'Real body',
