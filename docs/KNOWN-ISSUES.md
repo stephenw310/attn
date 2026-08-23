@@ -30,27 +30,6 @@ unless a plan doc says so.
 
 ---
 
-## Security hardening
-
-### SEC-2: the quote CSS filter misses several flow-escaping properties *(review S2)*
-
-**Verified:** 2026-08-22 · **Severity:** low, recipient-side cosmetics only
-
-`FLOW_ESCAPING_PROPERTY` (`shared/mailSanitizer.ts:51`) matches
-`position|z-index|inset|top|right|bottom|left|transform`. It does not match the standalone `translate`,
-`rotate`, and `scale` properties, `offset-*`, or `text-indent`.
-
-Custom-property indirection also slips the negative-margin check. `NEGATIVE_LENGTH` tests the literal value, so
-`--m: -600px; margin: var(--m)` passes because `var(--m)` contains no digit.
-
-Either gap lets quoted content leave normal flow and land on top of the reply the user wrote, which is what the
-filter exists to prevent.
-
-**Fix direction:** extend the property list, and either resolve custom properties before the value check or drop
-declarations whose value references `var(`.
-
----
-
 ## Test coverage gaps
 
 Each was verified against the acceptance criteria in SPEC §4 and the plan docs' Testing bullets.
