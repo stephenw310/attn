@@ -56,6 +56,8 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
   const conversation = await page.evaluate(() => window.attn.mail.getConversation('t-sent-history', false))
   expect(conversation?.messages).toHaveLength(1)
   expect(conversation?.messages[0]).toMatchObject({
+    fromName: 'Me',
+    fromEmail: 'seed@attn.test',
     rfcMessageId: '<sent-history@attn.test>',
     references: ['<roadmap-root@example.com>', '<roadmap-reply@example.com>']
   })

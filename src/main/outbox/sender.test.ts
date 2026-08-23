@@ -523,7 +523,18 @@ describe('OutboxSender effect layer', () => {
         NOW,
         id
       )
+      const getSendAs = vi.fn(async () => ({
+        sendAsEmail: 'me@example.com',
+        displayName: 'Chao Zhou',
+        isPrimary: true
+      }))
+      const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
+        expect(Buffer.from(raw, 'base64url').toString()).toContain('From: Chao Zhou <me@example.com>')
+        return 'created-draft'
+      })
       const remote = provider({
+        getSendAs,
+        createDraft,
         sendDraft: vi.fn(async () => ({ id: 'sent-message', threadId: 'thread-1' })),
         getThread: vi.fn(async () => ({
           id: 'thread-1',
@@ -537,7 +548,7 @@ describe('OutboxSender effect layer', () => {
               payload: {
                 mimeType: 'text/plain',
                 headers: [
-                  { name: 'From', value: 'Me <me@example.com>' },
+                  { name: 'From', value: 'me@example.com' },
                   { name: 'To', value: 'you@example.com' },
                   { name: 'Subject', value: 'Re: Immediate refresh' },
                   { name: 'Message-ID', value: '<gmail-rewritten@example.com>' }
@@ -565,6 +576,15 @@ describe('OutboxSender effect layer', () => {
         state: 'sent',
         gmail_message_id: 'sent-message'
       })
+      expect(getSendAs).toHaveBeenCalledWith('me@example.com', {
+        signal: expect.any(AbortSignal),
+        priority: 'send'
+      })
+      expect(
+        db
+          .prepare("SELECT value FROM settings WHERE account_id = ? AND key = 'sendAsDisplayName'")
+          .get('me@example.com')
+      ).toEqual({ value: 'Chao Zhou' })
       expect(db.prepare('SELECT body_text FROM messages WHERE id = ?').get('sent-message')).toEqual({
         body_text: 'Fresh reply'
       })
@@ -573,6 +593,9 @@ describe('OutboxSender effect layer', () => {
           (message) => message.id
         )
       ).toEqual(['sent-message'])
+      expect(
+        getConversationForDisplay(db, 'me@example.com', 'thread-1', 'unavailable')?.messages[0]
+      ).toMatchObject({ fromName: 'Me', fromEmail: 'me@example.com' })
       expect(mailChanged).toHaveBeenCalledOnce()
     } finally {
       db.close()
