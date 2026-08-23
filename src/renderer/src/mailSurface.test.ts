@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
-import { mailSurfaceForHtml, normalizeNativeMailDocument } from './mailSurface'
+import { mailPresentationForHtml, mailSurfaceForHtml, normalizeNativeMailDocument } from './mailSurface'
 
 describe('mail surface classification', () => {
   it('uses the native surface for plain and text-like HTML', () => {
@@ -70,6 +70,94 @@ describe('mail surface classification', () => {
     expect(mailSurfaceForHtml('<style>.hero{color:red}</style><div class="hero">Designed mail</div>')).toBe(
       'light'
     )
+  })
+
+  it('pads rich fragments that do not own the outer document canvas', () => {
+    expect(mailPresentationForHtml('<table><tr><td>Compact data</td></tr></table>')).toEqual({
+      surface: 'light',
+      layout: 'padded'
+    })
+    expect(mailPresentationForHtml('<img src="https://images.example/chart.png" alt="Chart">')).toEqual({
+      surface: 'light',
+      layout: 'padded'
+    })
+    expect(mailPresentationForHtml('<div style="max-width:600px">Designed fragment</div>')).toEqual({
+      surface: 'light',
+      layout: 'padded'
+    })
+    expect(mailPresentationForHtml('<table bgcolor="#eef2ff"><tr><td>Small card</td></tr></table>')).toEqual({
+      surface: 'light',
+      layout: 'padded'
+    })
+    expect(
+      mailPresentationForHtml('<div style="width:600px;background:#eef2ff">Fixed-width card</div>')
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml('<div style="max-width:600px;background:#eef2ff">Centered card</div>')
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml('Intro text<div style="background:#eef2ff">Colored section</div>')
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml(
+        '<style>@media (prefers-color-scheme: dark){body{background:#111}}</style><div>Text</div>'
+      )
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml(
+        '<style>.canvas{background:#eef2ff}.canvas{background:transparent}</style><div class="canvas">Text</div>'
+      )
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml(
+        '<style>.canvas{background:#eef2ff}</style><div class="canvas" style="background:transparent">Text</div>'
+      )
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml(
+        '<style>.canvas{background:transparent}</style><div class="canvas" bgcolor="#eef2ff">Text</div>'
+      )
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml(
+        '<html style="background:#eef2ff"><body><table><tr><td>HTML wrapper canvas</td></tr></table></body></html>'
+      )
+    ).toEqual({ surface: 'light', layout: 'padded' })
+    expect(
+      mailPresentationForHtml(
+        '<body bgcolor="#eef2ff"><table><tr><td>Body wrapper canvas</td></tr></table></body>'
+      )
+    ).toEqual({ surface: 'light', layout: 'padded' })
+  })
+
+  it('uses full bleed only when the message owns a non-neutral outer canvas', () => {
+    expect(
+      mailPresentationForHtml('<table width="100%" bgcolor="#eef2ff"><tr><td>Newsletter</td></tr></table>')
+    ).toEqual({ surface: 'light', layout: 'full-bleed' })
+    expect(
+      mailPresentationForHtml(
+        '<table width="100%"><tr><td bgcolor="#eef2ff">Newsletter cell</td></tr></table>'
+      )
+    ).toEqual({ surface: 'light', layout: 'full-bleed' })
+    expect(
+      mailPresentationForHtml(
+        '<table width="600" style="width:100%;background:#eef2ff"><tr><td>Responsive newsletter</td></tr></table>'
+      )
+    ).toEqual({ surface: 'light', layout: 'full-bleed' })
+    expect(mailPresentationForHtml('<div style="background:#eef2ff">Block canvas</div>')).toEqual({
+      surface: 'light',
+      layout: 'full-bleed'
+    })
+    expect(
+      mailPresentationForHtml(
+        '<style>body{background:#eef2ff}.canvas{background:#dbeafe}</style><div>Body canvas</div>'
+      )
+    ).toEqual({ surface: 'light', layout: 'full-bleed' })
+    expect(
+      mailPresentationForHtml(
+        '<style>.canvas{background:#dbeafe}</style><div class="canvas">Styled canvas</div>'
+      )
+    ).toEqual({ surface: 'light', layout: 'full-bleed' })
   })
 
   it('removes sender canvases but preserves typography on the native surface', () => {

@@ -14,13 +14,14 @@ import {
   normalizedContentId
 } from './mailInlineImages'
 import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
-import { type MailSurface, normalizeNativeMailDocument } from './mailSurface'
+import { type MailLayout, type MailSurface, normalizeNativeMailDocument } from './mailSurface'
 import { findSignatureLineIndex, findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
   bodyText: string
   bodyHtml: string | null
   surface: MailSurface
+  layout: MailLayout
   threadId: string
   messageId: string
   attachments: MessageAttachment[]
@@ -38,8 +39,9 @@ const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, 
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
-function frameReset(surface: MailSurface): string {
+function frameReset(surface: MailSurface, layout: MailLayout): string {
   const light = surface === 'light'
+  const bodyPadding = light && layout === 'padded' ? '12px' : '0'
   return `
   :root { color-scheme: only ${light ? 'light' : 'dark'}; }
   html, body {
@@ -53,10 +55,8 @@ function frameReset(surface: MailSurface): string {
   body {
     font: ${light ? '14px/1.6 Arial, Helvetica, sans-serif' : '15px/1.7 Arial, Helvetica, sans-serif'};
     overflow-wrap: break-word;
-  }
-  #attn-mail-body {
     box-sizing: border-box;
-    padding: ${light ? '12px' : '0'} !important;
+    padding: ${bodyPadding};
   }
   ${
     light
@@ -214,7 +214,8 @@ function cidReferences(html: string): InlineImageReference[] {
 function makeSrcDoc(
   html: string,
   inlineImages: ReadonlyMap<string, string>,
-  surface: MailSurface
+  surface: MailSurface,
+  layout: MailLayout
 ): string | null {
   const template = sanitizeToTemplate(html, surface)
   if (!template) return null
@@ -229,7 +230,7 @@ function makeSrcDoc(
     marker.setAttribute(TRIM_MARKER, '')
     trimStart.parentNode?.insertBefore(marker, trimStart)
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${surface === 'light' ? 'light' : 'dark'}"><base target="_blank"><style>${frameReset(surface)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${surface === 'light' ? 'light' : 'dark'}"><base target="_blank"><style>${frameReset(surface, layout)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
 }
 
 function LinkedMailText({ text }: { text: string }): React.JSX.Element {
@@ -303,6 +304,7 @@ export function MessageBody({
   bodyText,
   bodyHtml,
   surface,
+  layout,
   threadId,
   messageId,
   attachments,
@@ -317,8 +319,8 @@ export function MessageBody({
   const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
   const watchedImagesRef = useRef(new WeakSet<HTMLImageElement>())
   const srcDoc = useMemo(
-    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface)),
-    [bodyHtml, surface]
+    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface, layout)),
+    [bodyHtml, layout, surface]
   )
 
   const revealLoadedImages = useCallback((doc: Document) => {
@@ -548,6 +550,7 @@ export function MessageBody({
     <div
       data-testid="html-body-container"
       data-surface={surface}
+      data-layout={layout}
       className={`relative min-w-0 ${surface === 'light' ? 'bg-white' : 'bg-transparent'}`}
     >
       {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
@@ -555,7 +558,7 @@ export function MessageBody({
           expanded={expanded}
           lightSurface={surface === 'light'}
           onToggle={onToggleTrim}
-          className={`absolute z-10 h-7 ${surface === 'light' ? 'left-3' : 'left-0'}`}
+          className={`absolute z-10 h-7 ${surface === 'light' && layout === 'padded' ? 'left-3' : 'left-0'}`}
           style={{ top: measurement.trimTop }}
         />
       )}
