@@ -20,6 +20,8 @@ import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
 import { readSetting, settingEnabled, writeSetting } from '../settings'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
+import { refreshMessageBodyFromStore, searchMessageIndex } from '../sync/fts'
+import { runFtsBackfill } from '../sync/ftsBackfill'
 import { runLifetimeSweep } from '../sync/lifetimeSweep'
 import { deleteThread, type LabelRow } from '../sync/persist'
 import { historyEvents, type NewMail } from '../sync/poller'
@@ -411,9 +413,13 @@ export class ServiceRuntime {
       if (!accountId || typeof messageId !== 'string' || typeof bodyText !== 'string') {
         throw new Error('invalid message update')
       }
-      this.db
-        .prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?')
-        .run(bodyText, accountId, messageId)
+      this.db.transaction(() => {
+        this.db
+          .prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?')
+          .run(bodyText, accountId, messageId)
+        // Keep the seam on the production invariant: body and index move together.
+        refreshMessageBodyFromStore(this.db, accountId, messageId)
+      })()
       this.broadcastMailChanged()
       return undefined
     }
@@ -472,6 +478,8 @@ export class ServiceRuntime {
     }
     if (channel === TEST_CHANNELS.runLifetimeSweep) return this.runTestLifetimeSweep(args[0])
     if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])
+    if (channel === TEST_CHANNELS.runFtsBackfill) return this.runTestFtsBackfill(args[0])
+    if (channel === TEST_CHANNELS.searchIndexStats) return this.testSearchIndexStats(args[0])
     if (channel === TEST_CHANNELS.utilityState) {
       const ids = args[0]
       if (!accountId || !Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
@@ -498,7 +506,8 @@ export class ServiceRuntime {
         : 0
       const cursors = this.db
         .prepare(
-          'SELECT backfill_cursor, sweep_cursor, attachment_cursor FROM sync_state WHERE account_id = ?'
+          `SELECT backfill_cursor, sweep_cursor, attachment_cursor, fts_cursor
+           FROM sync_state WHERE account_id = ?`
         )
         .get(accountId)
       const memory = process.memoryUsage()
@@ -612,6 +621,87 @@ export class ServiceRuntime {
     }
   }
 
+  private async runTestFtsBackfill(value: unknown): Promise<unknown> {
+    const accountId = this.currentAccountId()
+    if (!accountId || !isFtsBackfillRequest(value)) throw new Error('invalid FTS backfill request')
+    if (value.resetIndex) {
+      // Reproduce the manual revision-18 upgrade state: stored messages with an
+      // empty index and an unset cursor.
+      this.db.transaction(() => {
+        const mapped = this.db
+          .prepare('SELECT fts_rowid FROM message_fts_map WHERE account_id = ?')
+          .all(accountId) as { fts_rowid: number }[]
+        const deleteIndexed = this.db.prepare('DELETE FROM message_fts WHERE rowid = ?')
+        for (const row of mapped) deleteIndexed.run(row.fts_rowid)
+        this.db.prepare('DELETE FROM message_fts_map WHERE account_id = ?').run(accountId)
+        this.db.prepare('UPDATE sync_state SET fts_cursor = NULL WHERE account_id = ?').run(accountId)
+      })()
+    }
+    let failure: unknown
+    const result = await runFtsBackfill(
+      this.db,
+      accountId,
+      {
+        onProgress: () => {},
+        onError: (error) => {
+          failure = error
+        }
+      },
+      {
+        batchPauseMs: 0,
+        ...(value.batchSize === undefined ? {} : { batchSize: value.batchSize }),
+        ...(value.pauseAfterBatches === undefined
+          ? {}
+          : {
+              onBatchCheckpoint: ({ batchIndex }) =>
+                batchIndex + 1 >= (value.pauseAfterBatches as number)
+                  ? new Promise<never>(() => {})
+                  : undefined
+            })
+      }
+    )
+    const state = this.db.prepare('SELECT fts_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
+      | { fts_cursor: string | null }
+      | undefined
+    const parity = this.db
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM messages WHERE account_id = ?) AS messages,
+           (SELECT COUNT(*) FROM message_fts_map WHERE account_id = ?) AS mapped,
+           (SELECT COUNT(*) FROM message_fts) AS ftsRows`
+      )
+      .get(accountId, accountId)
+    return {
+      cursor: state?.fts_cursor ?? null,
+      indexed: result?.messagesIndexed ?? null,
+      parity,
+      ...(failure ? { error: failure instanceof Error ? failure.message : String(failure) } : {})
+    }
+  }
+
+  private testSearchIndexStats(value: unknown): unknown {
+    const accountId = this.currentAccountId()
+    if (!accountId || !isSearchIndexStatsRequest(value)) throw new Error('invalid search stats request')
+    const runsPerQuery = value.runsPerQuery ?? 1
+    const limit = value.limit ?? 50
+    const queries = value.queries.map((match) => {
+      const samplesUs: number[] = []
+      let threadCount = 0
+      for (let run = 0; run < runsPerQuery; run++) {
+        const startedAt = process.hrtime.bigint()
+        threadCount = searchMessageIndex(this.db, accountId, match, limit).length
+        samplesUs.push(Number(process.hrtime.bigint() - startedAt) / 1_000)
+      }
+      return { match, threadCount, samplesUs }
+    })
+    const indexBytes = (
+      this.db
+        .prepare("SELECT COALESCE(SUM(pgsize), 0) AS bytes FROM dbstat WHERE name LIKE '%message_fts%'")
+        .get() as { bytes: number }
+    ).bytes
+    return { indexBytes, queries }
+  }
+
   private async runTestExistenceSweep(value: unknown): Promise<unknown> {
     const accountId = this.currentAccountId()
     if (!accountId || !isExistenceSweepRequest(value)) throw new Error('invalid existence sweep request')
@@ -656,6 +746,44 @@ interface ExistenceSweepRequest {
   allMailThreadIds: string[]
   spamThreadIds: string[]
   trashThreadIds: string[]
+}
+
+interface FtsBackfillRequest {
+  resetIndex?: boolean
+  batchSize?: number
+  pauseAfterBatches?: number
+}
+
+interface SearchIndexStatsRequest {
+  queries: string[]
+  runsPerQuery?: number
+  limit?: number
+}
+
+function optionalPositiveInteger(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isInteger(value) && value > 0)
+}
+
+function isFtsBackfillRequest(value: unknown): value is FtsBackfillRequest {
+  if (!value || typeof value !== 'object') return false
+  const request = value as Partial<FtsBackfillRequest>
+  return (
+    (request.resetIndex === undefined || typeof request.resetIndex === 'boolean') &&
+    optionalPositiveInteger(request.batchSize) &&
+    optionalPositiveInteger(request.pauseAfterBatches)
+  )
+}
+
+function isSearchIndexStatsRequest(value: unknown): value is SearchIndexStatsRequest {
+  if (!value || typeof value !== 'object') return false
+  const request = value as Partial<SearchIndexStatsRequest>
+  return (
+    Array.isArray(request.queries) &&
+    request.queries.length > 0 &&
+    request.queries.every((query) => typeof query === 'string' && query.length > 0) &&
+    optionalPositiveInteger(request.runsPerQuery) &&
+    optionalPositiveInteger(request.limit)
+  )
 }
 
 function isMessageMailbox(value: unknown): value is MessageMailbox {

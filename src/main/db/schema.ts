@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 17
+export const CURRENT_SCHEMA_VERSION = 18
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -67,7 +67,28 @@ CREATE TABLE sync_state (
   sweep_cursor       TEXT,
   sweep_threads_done INTEGER NOT NULL DEFAULT 0,
   sweep_threads_total INTEGER,
-  attachment_cursor  TEXT
+  attachment_cursor  TEXT,
+  fts_cursor         TEXT
+);
+
+CREATE TABLE message_fts_map (
+  account_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  thread_id  TEXT NOT NULL,
+  fts_rowid  INTEGER NOT NULL,
+  PRIMARY KEY (account_id, message_id)
+);
+CREATE UNIQUE INDEX idx_message_fts_map_rowid ON message_fts_map (fts_rowid);
+CREATE INDEX idx_message_fts_map_thread ON message_fts_map (account_id, thread_id);
+
+CREATE VIRTUAL TABLE message_fts USING fts5(
+  subject,
+  sender,
+  recipients,
+  body,
+  filenames,
+  tokenize = 'unicode61 remove_diacritics 2',
+  prefix = '2 3'
 );
 
 CREATE TABLE thread_existence_state (

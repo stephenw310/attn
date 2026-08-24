@@ -11,6 +11,7 @@ import { type AttachmentFlagProgress, runAttachmentFlagWalk } from './sync/attac
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { reconcileThreadExistence } from './sync/existenceSweep'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
+import { runFtsBackfill } from './sync/ftsBackfill'
 import { syncLabelCatalog } from './sync/labels'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
 import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership } from './sync/poller'
@@ -46,6 +47,7 @@ export class SyncController {
   private state: SyncState = { phase: 'idle' }
   private running = false
   private lifetimeRunning = false
+  private ftsBackfillRunning = false
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
   private pollerRunning = false
@@ -459,6 +461,8 @@ export class SyncController {
             `[sync] attachment index done: ${flags.threadsFlagged} threads flagged for ${accountId}`
           )
         }
+        // The purely local FTS backfill runs behind all three Gmail cursors.
+        this.startFtsBackfill(accountId, generation)
       })
       .catch((error) => {
         if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
@@ -466,6 +470,39 @@ export class SyncController {
         if (this.publishLifetimePause(error, '[sync] failed after lifetime header sweep')) {
           this.scheduleLifetimeRetry(accountId, provider, generation)
         }
+      })
+  }
+
+  private startFtsBackfill(accountId: string, generation: number): void {
+    if (this.stopped || this.ftsBackfillRunning || generation !== this.generation) return
+    this.ftsBackfillRunning = true
+    // Deliberately decoupled from `lifetimeRunId`: a manual retry that re-walks
+    // the (already done) lifetime chain must not cancel a mid-flight local
+    // pass, and the `ftsBackfillRunning` guard absorbs the duplicate start.
+    void runFtsBackfill(
+      this.context.db,
+      accountId,
+      {
+        onProgress: () => {},
+        onError: (error) => {
+          console.error(`[sync] search index backfill failed: ${errorMessage(error)}`)
+        }
+      },
+      {
+        shouldContinue: () =>
+          !this.stopped && generation === this.generation && this.context.currentAccountId() === accountId,
+        shouldYield: () => this.shouldYieldLifetime(accountId)
+      }
+    )
+      .then((result) => {
+        if (result && result.messagesIndexed > 0) {
+          console.log(
+            `[sync] search index backfill done: ${result.messagesIndexed} messages indexed for ${accountId}`
+          )
+        }
+      })
+      .finally(() => {
+        this.ftsBackfillRunning = false
       })
   }
 

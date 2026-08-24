@@ -23,7 +23,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
 | S4 reconcile and expiry recovery | **done**, completed 2026-08-22 | trustworthy mailbox views |
 | T22 mailbox navigation (F3) | **planned**, not started | T27, T24's `in:` operator |
-| T23 FTS5 index (F10) | **planned**, not started | T24, T25 |
+| T23 FTS5 index (F10) | **done**, completed 2026-08-23 | nothing; T24 and T25 are unblocked |
 | T24 search UI and operators (F10) | **planned**, not started | T25 |
 | T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
 | T26 palette and registry completeness (F5) | **planned**, not started | milestone exit |
@@ -44,8 +44,8 @@ section looks long.
 
 ## Where sync stands today
 
-Three mechanisms exist as this milestone begins. Read all three before touching any of them. The most likely
-M3 mistake is re-implementing something #51 already shipped.
+Four mechanisms exist. Read all four before touching any of them. The most likely M3 mistake is
+re-implementing something an earlier PR already shipped.
 
 **1. The staged backfill** (`src/main/sync/backfill.ts`) walks one cursor, `sync_state.backfill_cursor`, with
 the grammar `phase`, `phase:pageToken`, or `done`. `SyncStage` in `src/shared/mail.ts` enumerates the phases.
@@ -59,7 +59,12 @@ filter, skipping threads already stored. That shape is correct and M3 does not c
 sweep on its own `attachment_cursor`. It is an ids-only `q=has:attachment` listing that raises thread-level
 attachment flags, so `has:attachment` is trustworthy before bodies are hydrated.
 
-That is three cursors, not two. Any task that moves or restarts sync has to carry all three.
+**4. The FTS backfill** (`src/main/sync/ftsBackfill.ts`, T23) runs after the attachment walk on its own
+`fts_cursor`. It is purely local: ordinary writes index inline inside `persistThread`'s transaction, so this
+pass only covers rows that predate the index (a manually upgraded dogfood profile) and finishes immediately
+on a freshly synced store.
+
+That is four cursors, not three. Any task that moves or restarts sync has to carry all four.
 
 ### The shipped stage pipeline
 
@@ -76,6 +81,8 @@ That is three cursors, not two. Any task that moves or restarts sync has to carr
 8  lifetime    no date bound       headers   indexing       everything older than 12m
 ── sweep_cursor ends; attachment_cursor takes over ──
 9  attachments has:attachment      ids only  indexing       none
+── attachment_cursor ends; fts_cursor takes over ──
+10 fts-index   local store only    nothing   (silent)       none
 ```
 
 Spam and Trash are **two separate stages**, not one combined pass. The retired `sent` stage is gone; old
@@ -489,7 +496,11 @@ reviewed, and verify is green.
 
 ## T23 — FTS5 index in the utility process
 
-**Status: not started.**
+**Status: done, completed 2026-08-23.** The mapping-table shape below shipped as written; the
+external-content alternative was rejected because every indexed string is derived (thread-level subject,
+JSON-decoded recipients and filenames, HTML-stripped bodies) and FTS5 external content must read back
+exactly the indexed text from real content-table columns at query time. Measured on the generated
+10,000-message profile: 5.3 MB on-disk index, p95 under 5 ms per query ([T20-EVIDENCE.md](T20-EVIDENCE.md)).
 
 **Depends on:** S1 (done) · **Unblocks:** T24, T25 · **Parallel with:** T22 · **Spec:** F10, §6, §7
 

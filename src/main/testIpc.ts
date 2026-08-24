@@ -82,6 +82,13 @@ export class TestSeams {
           .catch((error) => done?.({ error: errorMessage(error) }))
       }
     )
+    for (const channel of [TEST_CHANNELS.runFtsBackfill, TEST_CHANNELS.searchIndexStats]) {
+      ipcMain.on(channel, (_event, request: unknown, done?: (result: unknown) => void) => {
+        void this.forward(channel, [request])
+          .then((result) => done?.(result))
+          .catch((error) => done?.({ error: errorMessage(error) }))
+      })
+    }
     ipcMain.on(TEST_CHANNELS.utilityState, (_event, ids: unknown, done?: (result: unknown) => void) => {
       void this.forward(TEST_CHANNELS.utilityState, [ids])
         .then((result) => done?.(result))
