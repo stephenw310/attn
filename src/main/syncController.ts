@@ -19,6 +19,7 @@ import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { sameSyncState } from './sync/state'
 
 const LIFETIME_RETRY_MS = 15_000
+const FTS_RETRY_MS = 15_000
 
 interface SyncControllerContext {
   db: Db
@@ -64,6 +65,7 @@ export class SyncController {
   private poller: HistoryPoller | null = null
   private readonly offlineRetry = new OfflineRetryScheduler(15_000)
   private readonly lifetimeRetry = new OfflineRetryScheduler(LIFETIME_RETRY_MS)
+  private readonly ftsRetry = new OfflineRetryScheduler(FTS_RETRY_MS)
 
   constructor(private readonly context: SyncControllerContext) {}
 
@@ -103,6 +105,7 @@ export class SyncController {
     if (this.stopped) return
     this.offlineRetry.clear()
     this.lifetimeRetry.clear()
+    this.ftsRetry.clear()
     const route = syncRetryRoute({
       signedIn: this.context.isSignedIn(),
       seeded: this.context.isSeeded(),
@@ -153,6 +156,7 @@ export class SyncController {
     this.stopHistoryPoller()
     this.offlineRetry.clear()
     this.lifetimeRetry.clear()
+    this.ftsRetry.clear()
     this.backfillRetryGeneration = null
     this.pendingFtsBackfill = null
     this.running = false
@@ -224,6 +228,17 @@ export class SyncController {
         this.context.isSignedIn() &&
         this.context.currentAccountId() === accountId,
       () => this.startLifetimeSweep(accountId, provider, generation)
+    )
+  }
+
+  private scheduleFtsRetry(accountId: string, generation: number): void {
+    this.ftsRetry.schedule(
+      () =>
+        !this.stopped &&
+        generation === this.generation &&
+        this.context.isSignedIn() &&
+        this.context.currentAccountId() === accountId,
+      () => this.startFtsBackfill(accountId, generation)
     )
   }
 
@@ -492,15 +507,18 @@ export class SyncController {
       return
     }
     this.pendingFtsBackfill = null
+    this.ftsRetry.clear()
     this.ftsBackfillRun = requestedRun
     // Deliberately decoupled from `lifetimeRunId`: a manual retry that re-walks
     // the already-done lifetime chain must not cancel a mid-flight local pass.
+    let failed = false
     void runFtsBackfill(
       this.context.db,
       accountId,
       {
         onProgress: () => {},
         onError: (error) => {
+          failed = true
           console.error(`[sync] search index backfill failed: ${errorMessage(error)}`)
         }
       },
@@ -511,7 +529,11 @@ export class SyncController {
       }
     )
       .then((result) => {
-        if (result && result.messagesIndexed > 0) {
+        if (!result) {
+          if (failed) this.scheduleFtsRetry(accountId, generation)
+          return
+        }
+        if (result.messagesIndexed > 0) {
           console.log(
             `[sync] search index backfill done: ${result.messagesIndexed} messages indexed for ${accountId}`
           )

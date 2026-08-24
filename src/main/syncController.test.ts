@@ -828,6 +828,46 @@ describe('offline retry', () => {
     expect(mocks.runLifetimeSweep).toHaveBeenCalledTimes(2)
   })
 
+  it('retries a failed FTS pass without replaying the completed Gmail indexers', async () => {
+    vi.useFakeTimers()
+    const { controller, lifetimeSweeps, attachmentWalks, ftsBackfills } = harness({
+      backfillCursor: 'done'
+    })
+    controller.retry()
+    lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+    attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ftsBackfills).toHaveLength(1)
+
+    ftsBackfills[0].callbacks.onError(new Error('database is full'))
+    ftsBackfills[0].result.resolve(null)
+    await vi.advanceTimersByTimeAsync(0)
+
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(ftsBackfills).toHaveLength(2)
+    expect(mocks.runLifetimeSweep).toHaveBeenCalledOnce()
+    expect(mocks.runAttachmentFlagWalk).toHaveBeenCalledOnce()
+  })
+
+  it('does not retry an FTS pass canceled without an error', async () => {
+    vi.useFakeTimers()
+    const { controller, lifetimeSweeps, attachmentWalks, ftsBackfills } = harness({
+      backfillCursor: 'done'
+    })
+    controller.retry()
+    lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+    attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+
+    ftsBackfills[0].result.resolve(null)
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(ftsBackfills).toHaveLength(1)
+  })
+
   it('pauses a non-retryable lifetime failure without masking foreground sync health', async () => {
     vi.useFakeTimers()
     const { controller, lifetimeSweeps, states } = harness({ backfillCursor: 'done' })
