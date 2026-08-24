@@ -12,14 +12,15 @@ import type {
 } from './drafts'
 import type {
   Conversation,
+  ConversationMailbox,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
   InlineImageRepairRequest,
   InlineImageRequest,
   InlineImageResult,
   MailLabel,
-  SnoozedThreadRow,
   SyncState,
+  ThreadListView,
   ThreadRow
 } from './mail'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
@@ -53,7 +54,6 @@ export const IPC_CHANNELS = {
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
   mailListThreads: 'mail:listThreads',
-  mailListSnoozed: 'mail:listSnoozed',
   mailListLabels: 'mail:listLabels',
   mailGetUnreadCount: 'mail:getUnreadCount',
   mailPeekActionsReverted: 'mail:peekActionsReverted',
@@ -151,8 +151,9 @@ export interface InvokeChannels {
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: string | null }
-  [IPC_CHANNELS.mailListThreads]: { args: []; result: ThreadRow[] }
-  [IPC_CHANNELS.mailListSnoozed]: { args: []; result: SnoozedThreadRow[] }
+  // Snoozed rows carry their reminder fields: the result is SnoozedThreadRow[]
+  // when view is 'snoozed', which the preload narrows for the renderer.
+  [IPC_CHANNELS.mailListThreads]: { args: [request: { view: ThreadListView }]; result: ThreadRow[] }
   [IPC_CHANNELS.mailListLabels]: { args: []; result: MailLabel[] }
   [IPC_CHANNELS.mailGetUnreadCount]: { args: []; result: number }
   [IPC_CHANNELS.mailPeekActionsReverted]: {
@@ -164,7 +165,7 @@ export interface InvokeChannels {
     result: boolean
   }
   [IPC_CHANNELS.mailGetConversation]: {
-    args: [threadId: string, allowHydration: boolean]
+    args: [threadId: string, allowHydration: boolean, mailbox: ConversationMailbox]
     result: Conversation | null
   }
   [IPC_CHANNELS.mailDownloadAttachment]: {

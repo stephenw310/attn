@@ -40,36 +40,32 @@ test.describe.configure({ retries: 0, timeout: PERF_TEST_TIMEOUT_MS })
 test.describe('@perf focused-row archive motion', () => {
   test.use({ seed: 'fixtures/seed-inbox.json' })
 
-  test('starts moving the replacement row before the exit midpoint', async ({ page }) => {
-    await page.addStyleTag({
-      content: '.app-thread-exit-shell { animation-play-state: paused !important; }'
-    })
+  test('projects the replacement row toward the vacated slot in the archive keydown commit', async ({
+    page
+  }) => {
     const rows = page.getByTestId('thread-row')
     await expect(rows).toHaveCount(8)
     const nextRow = rows.filter({ hasText: 'Northstar Books' })
-    const nextRowStart = await nextRow.evaluate((element) => element.getBoundingClientRect().y)
+    const wrapperTop = await nextRow.evaluate(
+      (element) => element.closest<HTMLElement>('.absolute')?.style.top ?? ''
+    )
 
     await page.keyboard.press('e')
     await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
     await expect(nextRow).toHaveAttribute('data-selected', 'true')
-    const timeline = await rows.first().evaluate((element) => {
-      const shell = element.closest<HTMLElement>('.app-thread-exit-shell')
-      const collapse = shell?.getAnimations().find((animation) => {
-        const effect = animation.effect as KeyframeEffect | null
-        return effect?.getKeyframes().some((keyframe) => keyframe.maxHeight === '0px')
-      })
-      if (!shell || !collapse) throw new Error('collapse animation missing')
-      collapse.currentTime = 130
+    // Every list is windowed, so the replacement motion is a transitioned `top`
+    // on the surviving row's wrapper: the projected target is set immediately
+    // with the transition class, while the exiting row overlays its old slot.
+    const projected = await nextRow.evaluate((element) => {
+      const wrapper = element.closest<HTMLElement>('.absolute')
+      if (!wrapper) throw new Error('windowed row wrapper missing')
       return {
-        currentTime: collapse.currentTime,
-        shellHeight: shell.getBoundingClientRect().height
+        top: wrapper.style.top,
+        shifting: wrapper.classList.contains('app-thread-position-shift')
       }
     })
-    expect(timeline.currentTime).toBe(130)
-    expect(timeline.shellHeight).toBeLessThan(44)
-    expect(await nextRow.evaluate((element) => element.getBoundingClientRect().y)).toBeLessThan(
-      nextRowStart - 2
-    )
+    expect(projected.shifting).toBe(true)
+    expect(Number.parseFloat(projected.top)).toBeLessThan(Number.parseFloat(wrapperTop) - 2)
     await expect(rows).toHaveCount(7)
   })
 })
@@ -155,7 +151,7 @@ async function measureLocalMailRefresh(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const started = performance.now()
     await Promise.all([
-      window.attn.mail.listThreads(),
+      window.attn.mail.listThreads('inbox'),
       window.attn.mail.listSnoozed(),
       window.attn.draft.list(),
       window.attn.outbox.listPending(),
@@ -219,6 +215,40 @@ async function measureConversationOpen(page: Page): Promise<number> {
       observer.observe(document.body, { childList: true, subtree: true })
     })
   })
+}
+
+async function measureMailboxSwitch(page: Page, chordKey: string, expectedTitle: string): Promise<number> {
+  return page.evaluate(
+    async ({ pressed, title }) => {
+      const ready = (): boolean =>
+        document.querySelector('[data-testid="mailbox-title"]')?.textContent === title &&
+        document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') === '10000'
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }))
+      const started = performance.now()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: pressed, bubbles: true }))
+      if (ready()) return performance.now() - started
+
+      return new Promise<number>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          observer.disconnect()
+          reject(new Error(`Timed out switching to ${title}`))
+        }, 10_000)
+        const observer = new MutationObserver(() => {
+          if (!ready()) return
+          window.clearTimeout(timeout)
+          observer.disconnect()
+          resolve(performance.now() - started)
+        })
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true
+        })
+      })
+    },
+    { pressed: chordKey, title: expectedTitle }
+  )
 }
 
 async function measureTriageFeedback(page: Page): Promise<number> {
@@ -434,6 +464,23 @@ test.describe('@perf 10,000-thread inbox', () => {
     expect(medianMs, 'median Enter to conversation content mounted').toBeLessThan(
       CONVERSATION_OPEN_CEILING_MS
     )
+  })
+
+  test('switches to a cached All Mail within the F3 budget', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    // The cold first visit ships 10,000 rows across the utility boundary, so it
+    // is reported without a ceiling; F3's 50ms budget binds the cached switch.
+    const coldMs = await measureMailboxSwitch(page, 'a', 'All Mail')
+    await reportMetric(testInfo, 'mailbox-switch-cold', [coldMs], coldMs)
+
+    const samples: number[] = []
+    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
+      await measureMailboxSwitch(page, 'i', 'Inbox')
+      samples.push(await measureMailboxSwitch(page, 'a', 'All Mail'))
+    }
+    const medianMs = median(samples)
+    await reportMetric(testInfo, 'mailbox-switch', samples, medianMs)
+    expect(medianMs, 'median cached switch to All Mail').toBeLessThan(CONVERSATION_OPEN_CEILING_MS)
   })
 
   test('refreshes the 10k local mail snapshot within the CI-safe ceiling', async ({ page }, testInfo) => {

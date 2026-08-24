@@ -28,7 +28,7 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
     Math.abs((statusBox?.x ?? 0) + (statusBox?.width ?? 0) - (contentBox?.x ?? 0) - (contentBox?.width ?? 0))
   ).toBeLessThan(1)
 
-  expect(await page.evaluate(() => window.attn.mail.listThreads())).toHaveLength(8)
+  expect(await page.evaluate(() => window.attn.mail.listThreads('inbox'))).toHaveLength(8)
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(4)
 
   await page.keyboard.press('Enter')
@@ -37,14 +37,19 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
   await expect(page.getByTestId('message-card').last()).toContainText(
     'I added the launch milestones and owner notes.'
   )
-  await expect.poll(mainLog).toContain('[seed] loaded 9 threads for seed@attn.test')
+  await expect.poll(mainLog).toContain('[seed] loaded 10 threads for seed@attn.test')
   await expect.poll(mainLog).toContain('[sync] backfill stages skipped for seeded account seed@attn.test')
   expect(mainLog()).not.toContain('[sync] history poller started')
 })
 
 test('exposes threading headers and idempotent contact ranking over IPC', async ({ app, page }) => {
-  const replyConversation = await page.evaluate(() => window.attn.mail.getConversation('t-roadmap', false))
-  expect(replyConversation?.messages).toHaveLength(2)
+  const replyConversation = await page.evaluate(() =>
+    window.attn.mail.getConversation('t-roadmap', false, 'normal')
+  )
+  // Two readable messages plus the trashed message kept as a marker (F3); the
+  // Gmail draft in the fixture still never surfaces.
+  expect(replyConversation?.messages).toHaveLength(3)
+  expect(replyConversation?.messages[2]).toMatchObject({ id: 'm-roadmap-trash', trashed: true })
   expect(replyConversation?.messages[1]).toMatchObject({
     rfcMessageId: '<roadmap-reply@example.com>',
     references: ['<roadmap-root@example.com>'],
@@ -53,7 +58,9 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
     }
   })
 
-  const conversation = await page.evaluate(() => window.attn.mail.getConversation('t-sent-history', false))
+  const conversation = await page.evaluate(() =>
+    window.attn.mail.getConversation('t-sent-history', false, 'normal')
+  )
   expect(conversation?.messages).toHaveLength(1)
   expect(conversation?.messages[0]).toMatchObject({
     rfcMessageId: '<sent-history@attn.test>',

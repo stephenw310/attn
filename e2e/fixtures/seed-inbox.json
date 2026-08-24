@@ -240,6 +240,23 @@
           "references": ["<roadmap-root@example.com>", "<roadmap-reply@example.com>"]
         }
       ]
+    },
+    {
+      "id": "t-starred-archive",
+      "historyId": "1009",
+      "messages": [
+        {
+          "id": "m-starred-archive",
+          "labelIds": ["STARRED"],
+          "receivedDaysAgo": 4,
+          "receivedAt": "15:45",
+          "from": "Nora Field <nora@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Starred reference",
+          "snippet": "Keeping this handy.",
+          "bodyText": "Keeping this handy for the archive review."
+        }
+      ]
     }
   ]
 }

@@ -29,7 +29,8 @@ function runExistenceSweep(app: ElectronApplication): Promise<ExistenceSweepResu
           't-budget',
           't-travel',
           't-research',
-          't-sent-history'
+          't-sent-history',
+          't-starred-archive'
         ],
         spamThreadIds: [],
         trashThreadIds: ['t-roadmap']
@@ -40,15 +41,21 @@ function runExistenceSweep(app: ElectronApplication): Promise<ExistenceSweepResu
 
 test('removes a local ghost only after the account existence listings finish', async ({ app, page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  expect(await page.evaluate(() => window.attn.mail.getConversation('t-weekly', false))).not.toBeNull()
+  expect(
+    await page.evaluate(() => window.attn.mail.getConversation('t-weekly', false, 'normal'))
+  ).not.toBeNull()
 
   await expect(runExistenceSweep(app)).resolves.toEqual({
-    listedThreadCount: 8,
+    listedThreadCount: 9,
     deletedThreadIds: ['t-weekly']
   })
 
   await expect(page.getByTestId('thread-row')).toHaveCount(7)
-  expect(await page.evaluate(() => window.attn.mail.getConversation('t-weekly', false))).toBeNull()
-  expect(await page.evaluate(() => window.attn.mail.getConversation('t-sent-history', false))).not.toBeNull()
-  expect(await page.evaluate(() => window.attn.mail.getConversation('t-roadmap', false))).not.toBeNull()
+  expect(await page.evaluate(() => window.attn.mail.getConversation('t-weekly', false, 'normal'))).toBeNull()
+  expect(
+    await page.evaluate(() => window.attn.mail.getConversation('t-sent-history', false, 'normal'))
+  ).not.toBeNull()
+  expect(
+    await page.evaluate(() => window.attn.mail.getConversation('t-roadmap', false, 'normal'))
+  ).not.toBeNull()
 })

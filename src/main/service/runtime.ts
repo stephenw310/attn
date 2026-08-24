@@ -7,7 +7,7 @@ import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor
 import { ActionRevertNotices } from '../actions/revertNotices'
 import type { TokenSet } from '../auth/googleAuth'
 import { type Db, openDatabase, schemaVersion } from '../db'
-import { countInboxUnread, listMailboxThreadIds } from '../db/queries'
+import { countInboxUnread, listMailboxThreads } from '../db/queries'
 import { loadSeed, readSeedThread } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
@@ -468,7 +468,8 @@ export class ServiceRuntime {
     if (channel === TEST_CHANNELS.listMailboxThreadIds) {
       const mailbox = args[0]
       if (!accountId || !isMessageMailbox(mailbox)) throw new Error('mailbox query unavailable')
-      return listMailboxThreadIds(this.db, accountId, mailbox)
+      const view = mailbox === 'all-mail' ? 'allMail' : mailbox
+      return listMailboxThreads(this.db, accountId, view).map((row) => row.id)
     }
     if (channel === TEST_CHANNELS.runLifetimeSweep) return this.runTestLifetimeSweep(args[0])
     if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])

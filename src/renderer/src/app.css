@@ -104,34 +104,12 @@
   }
 }
 
-.app-thread-exit-shell {
-  --thread-exit-height: 46px;
-
-  max-height: var(--thread-exit-height);
-  overflow: hidden;
-  animation: thread-exit-collapse 520ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-.app-thread-exit-shell-with-group {
-  --thread-exit-height: 90px;
-}
-
-.app-thread-exit-content {
-  min-height: 0;
-}
-
 .app-thread-position-shift {
   transition: top 520ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .app-thread-virtual-collapse {
   transition: height 520ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@keyframes thread-exit-collapse {
-  to {
-    max-height: 0;
-  }
 }
 
 .app-thread-exit {
@@ -316,11 +294,6 @@
 
   .app-thread-exit {
     animation: none;
-  }
-
-  .app-thread-exit-shell {
-    animation: none;
-    max-height: 0;
   }
 
   .app-thread-position-shift,

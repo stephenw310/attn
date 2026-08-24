@@ -38,9 +38,11 @@ test('boots the built app with an isolated store and working IPC bridge', async 
     configured: false,
     signedIn: false
   })
-  expect(await page.evaluate(() => window.attn.mail.listThreads())).toEqual([])
+  expect(await page.evaluate(() => window.attn.mail.listThreads('inbox'))).toEqual([])
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(0)
-  expect(await page.evaluate(() => window.attn.mail.getConversation('no-such-thread', false))).toBeNull()
+  expect(
+    await page.evaluate(() => window.attn.mail.getConversation('no-such-thread', false, 'normal'))
+  ).toBeNull()
   expect(await page.evaluate(() => window.attn.sync.getState())).toEqual({ phase: 'idle' })
   expect(mainLog()).not.toContain('[sync] history poller started')
 })

@@ -3,8 +3,9 @@ import { type Db, openDatabase } from '.'
 import {
   getConversation,
   getConversationForDisplay,
+  type LabelMailboxView,
   listInboxThreads,
-  listMailboxThreadIds,
+  listMailboxThreads,
   listSnoozedThreads
 } from './queries'
 
@@ -78,6 +79,9 @@ describe('thread list queries', () => {
     ])
   })
 
+  const mailboxIds = (view: LabelMailboxView): string[] =>
+    listMailboxThreads(db, 'account', view).map((row) => row.id)
+
   it('uses per-message truth for All Mail, Spam, and Trash membership', () => {
     const insertThread = db.prepare(
       `INSERT INTO threads (account_id, id, subject, last_msg_at)
@@ -106,9 +110,61 @@ describe('thread list queries', () => {
     insertThreadLabel.run('only-spam', 'SPAM')
     insertThreadLabel.run('legacy-trash', 'TRASH')
 
-    expect(listMailboxThreadIds(db, 'account', 'all-mail')).toEqual(['mixed'])
-    expect(listMailboxThreadIds(db, 'account', 'trash')).toEqual(['only-trash', 'legacy-trash', 'mixed'])
-    expect(listMailboxThreadIds(db, 'account', 'spam')).toEqual(['only-spam'])
+    expect(mailboxIds('allMail')).toEqual(['mixed'])
+    // Trash sorts by the mailbox's newest matching message: mixed's only
+    // trashed message (300) files behind both fully trashed threads.
+    expect(mailboxIds('trash')).toEqual(['only-trash', 'legacy-trash', 'mixed'])
+    expect(mailboxIds('spam')).toEqual(['only-spam'])
+    expect(listMailboxThreads(db, 'account', 'trash').map((row) => [row.id, row.lastMsgAt])).toEqual([
+      ['only-trash', 400],
+      ['legacy-trash', 325],
+      ['mixed', 300]
+    ])
+  })
+
+  it('applies the normal junk exclusion to Sent and Starred membership', () => {
+    const insertThread = db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at)
+       VALUES ('account', ?, ?, ?)`
+    )
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+       VALUES ('account', ?, ?, ?, ?)`
+    )
+    const insertThreadLabel = db.prepare(
+      `INSERT INTO thread_labels (account_id, thread_id, label_id)
+       VALUES ('account', ?, ?)`
+    )
+    insertThread.run('sent-live', 'Sent live', 500)
+    insertMessage.run('sent-live-message', 'sent-live', 500, '["SENT"]')
+    insertThreadLabel.run('sent-live', 'SENT')
+    // The thread label union still carries SENT, but its only sent copy was
+    // trashed: it belongs to Trash now, not Sent.
+    insertThread.run('sent-trashed', 'Sent then trashed', 450)
+    insertMessage.run('sent-trashed-message', 'sent-trashed', 450, '["SENT","TRASH"]')
+    insertMessage.run('sent-trashed-reply', 'sent-trashed', 440, '["INBOX"]')
+    insertThreadLabel.run('sent-trashed', 'SENT')
+    insertThreadLabel.run('sent-trashed', 'TRASH')
+    insertThreadLabel.run('sent-trashed', 'INBOX')
+    // A Gmail draft never renders as sent mail (SPEC F3).
+    insertThread.run('sent-draft', 'Draft only', 430)
+    insertMessage.run('sent-draft-message', 'sent-draft', 430, '["SENT","DRAFT"]')
+    insertThreadLabel.run('sent-draft', 'SENT')
+    insertThreadLabel.run('sent-draft', 'DRAFT')
+    // Legacy rows without labels_json fall back to thread-level labels.
+    insertThread.run('sent-legacy', 'Sent legacy', 420)
+    insertMessage.run('sent-legacy-message', 'sent-legacy', 420, null)
+    insertThreadLabel.run('sent-legacy', 'SENT')
+    insertThread.run('starred-live', 'Starred live', 410)
+    insertMessage.run('starred-live-message', 'starred-live', 410, '["INBOX","STARRED"]')
+    insertThreadLabel.run('starred-live', 'STARRED')
+    insertThread.run('starred-spammed', 'Starred spammed', 400)
+    insertMessage.run('starred-spammed-message', 'starred-spammed', 400, '["STARRED","SPAM"]')
+    insertThreadLabel.run('starred-spammed', 'STARRED')
+    insertThreadLabel.run('starred-spammed', 'SPAM')
+
+    expect(mailboxIds('sent')).toEqual(['sent-live', 'sent-legacy'])
+    expect(mailboxIds('starred')).toEqual(['starred-live'])
   })
 
   it('keeps All Mail scoped to its account when another account needs the slow path', () => {
@@ -134,12 +190,12 @@ describe('thread list queries', () => {
     insertThreadLabel.run('INBOX')
     insertThreadLabel.run('TRASH')
 
-    expect(listMailboxThreadIds(db, 'account', 'all-mail')).not.toContain('other-mixed')
-    expect(listMailboxThreadIds(db, 'other-account', 'all-mail')).toEqual(['other-mixed'])
+    expect(mailboxIds('allMail')).not.toContain('other-mixed')
+    expect(listMailboxThreads(db, 'other-account', 'allMail').map((row) => row.id)).toEqual(['other-mixed'])
   })
 
-  it('uses SQLite indexes for sparse Spam and Trash membership', () => {
-    const explain = (mailbox: 'spam' | 'trash'): string[] => {
+  it('uses SQLite indexes for sparse label-driven mailbox membership', () => {
+    const explain = (mailbox: LabelMailboxView): string[] => {
       let details: string[] = []
       const queryDb = {
         prepare: (sql: string) => {
@@ -155,11 +211,11 @@ describe('thread list queries', () => {
         }
       } as unknown as Db
 
-      listMailboxThreadIds(queryDb, 'account', mailbox)
+      listMailboxThreads(queryDb, 'account', mailbox)
       return details
     }
 
-    for (const mailbox of ['spam', 'trash'] as const) {
+    for (const mailbox of ['spam', 'trash', 'sent', 'starred'] as const) {
       const details = explain(mailbox)
       expect(details.some((detail) => detail.includes('idx_thread_labels_label'))).toBe(true)
       expect(details.some((detail) => detail.includes('idx_messages_thread'))).toBe(true)
@@ -305,6 +361,45 @@ describe('display conversation queries', () => {
         (message) => message.id
       )
     ).toEqual(['message-trash'])
+  })
+
+  it('keeps trashed messages at their chronological position as reader markers', () => {
+    const insert = db.prepare(
+      `INSERT INTO messages
+       (account_id, id, thread_id, internal_date, body_text, labels_json)
+       VALUES ('account', ?, 'thread-1', ?, ?, ?)`
+    )
+    db.prepare("UPDATE messages SET labels_json = '[\"INBOX\"]' WHERE id = 'message-1'").run()
+    insert.run('message-trash', 110, 'Deleted middle copy', '["TRASH"]')
+    insert.run('message-late', 120, 'Later reply', '["INBOX"]')
+    insert.run('message-spam', 130, 'Spam copy', '["SPAM"]')
+    insert.run('message-spam-trash', 140, 'Spammed then trashed', '["SPAM","TRASH"]')
+
+    const marked = getConversation(db, 'account', 'thread-1', 'unavailable', 'normal', true)
+    expect(marked?.messages.map((message) => [message.id, message.trashed === true])).toEqual([
+      ['message-1', false],
+      ['message-trash', true],
+      ['message-late', false]
+    ])
+    // All Mail readers carry the same markers; spammed messages stay hidden.
+    expect(
+      getConversation(db, 'account', 'thread-1', 'unavailable', 'all-mail', true)?.messages.map(
+        (message) => message.id
+      )
+    ).toEqual(['message-1', 'message-trash', 'message-late'])
+    // Reply planning and other non-display readers keep the filtered projection.
+    expect(
+      getConversation(db, 'account', 'thread-1', 'unavailable')?.messages.map((message) => message.id)
+    ).toEqual(['message-1', 'message-late'])
+    // The Trash reader shows trashed messages as ordinary cards, never markers.
+    expect(
+      getConversationForDisplay(db, 'account', 'thread-1', 'unavailable', 'trash', true)?.messages.map(
+        (message) => [message.id, message.trashed === true]
+      )
+    ).toEqual([
+      ['message-trash', false],
+      ['message-spam-trash', false]
+    ])
   })
 
   it('keeps legacy mixed-label messages readable until an authoritative refetch', () => {

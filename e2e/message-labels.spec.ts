@@ -17,7 +17,7 @@ async function mailboxThreadIds(app: ElectronApplication, mailbox: MessageMailbo
   )
 }
 
-test('keeps a partially trashed thread in All Mail and Trash while the normal reader hides it', async ({
+test('keeps a partially trashed thread in All Mail and Trash while the normal reader keeps its body hidden', async ({
   app,
   page
 }) => {

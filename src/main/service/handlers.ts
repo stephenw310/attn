@@ -13,11 +13,13 @@ import { errorMessage } from '../../shared/error'
 import { nonEmptyString } from '../../shared/guards'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../../shared/ipc'
 import type {
+  ConversationMailbox,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
   InlineImageRepairRequest,
   InlineImageRequest,
-  InlineImageResult
+  InlineImageResult,
+  ThreadListView
 } from '../../shared/mail'
 import {
   actionQueueStatus,
@@ -38,6 +40,7 @@ import {
   getConversationForDisplay,
   getInlineAttachmentData,
   listInboxThreads,
+  listMailboxThreads,
   listSnoozedThreads,
   listUserLabels,
   searchContacts
@@ -141,6 +144,28 @@ function isInlineImageRepairRequest(value: unknown): value is InlineImageRepairR
   if (!value || typeof value !== 'object') return false
   const threadId = (value as Partial<InlineImageRepairRequest>).threadId
   return nonEmptyString(threadId) && threadId.length <= 256
+}
+
+const THREAD_LIST_VIEWS: readonly ThreadListView[] = [
+  'inbox',
+  'allMail',
+  'sent',
+  'starred',
+  'snoozed',
+  'spam',
+  'trash'
+]
+
+function isThreadListRequest(value: unknown): value is { view: ThreadListView } {
+  if (!value || typeof value !== 'object') return false
+  const view = (value as { view?: unknown }).view
+  return typeof view === 'string' && (THREAD_LIST_VIEWS as readonly string[]).includes(view)
+}
+
+const CONVERSATION_MAILBOXES: readonly ConversationMailbox[] = ['normal', 'all-mail', 'spam', 'trash']
+
+function isConversationMailbox(value: unknown): value is ConversationMailbox {
+  return typeof value === 'string' && (CONVERSATION_MAILBOXES as readonly string[]).includes(value)
 }
 
 function isSnoozeRequest(value: unknown): value is SnoozeRequest {
@@ -546,13 +571,13 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (context.currentAccountId() !== accountId) return false
     return context.acknowledgeRevertedActions(accountId, noticeId)
   })
-  handle(IPC_CHANNELS.mailListThreads, () => {
+  handle(IPC_CHANNELS.mailListThreads, (_event, request) => {
     const account = context.currentAccountId()
-    return account ? listInboxThreads(context.db, account) : []
-  })
-  handle(IPC_CHANNELS.mailListSnoozed, () => {
-    const account = context.currentAccountId()
-    return account ? listSnoozedThreads(context.db, account) : []
+    const view = isThreadListRequest(request) ? request.view : null
+    if (!account || !view) return []
+    if (view === 'inbox') return listInboxThreads(context.db, account)
+    if (view === 'snoozed') return listSnoozedThreads(context.db, account)
+    return listMailboxThreads(context.db, account, view)
   })
   handle(IPC_CHANNELS.mailListLabels, () => {
     const account = context.currentAccountId()
@@ -562,7 +587,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const account = context.currentAccountId()
     return account ? countInboxUnread(context.db, account) : 0
   })
-  handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration) => {
+  handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration, mailbox) => {
     if (typeof threadId !== 'string') return null
     await context.waitForConversation(threadId)
     const account = context.currentAccountId()
@@ -572,7 +597,9 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       context.db,
       account,
       threadId,
-      attemptState === 'idle' ? idleMissingBodyState(context.isSeeded()) : attemptState
+      attemptState === 'idle' ? idleMissingBodyState(context.isSeeded()) : attemptState,
+      isConversationMailbox(mailbox) ? mailbox : 'normal',
+      true
     )
     if (
       !conversation?.messages.some((message) => message.bodyState !== 'complete') ||

@@ -93,6 +93,7 @@ it('opens a message appended to the current conversation by default', async () =
   const message = (id: string, text: string) => ({
     id,
     pending: id.startsWith('outbox:'),
+    trashed: false,
     fromName: id.startsWith('outbox:') ? 'me@example.com' : 'Maya',
     fromEmail: id.startsWith('outbox:') ? 'me@example.com' : 'maya@example.com',
     at: '9:30 AM',

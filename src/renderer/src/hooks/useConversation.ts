@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ConversationMailbox } from '../../../shared/mail'
 import { hydrationAttemptDecision } from '../bodyHydrationStatus'
 import { type DisplayConversation, type DisplayThread, displayConversation } from '../mailDisplay'
 
@@ -12,6 +13,8 @@ interface UseConversationOptions {
   online: boolean
   account: string | null
   mailRevision: number
+  /** Reader projection for the active view; switching views bumps mailRevision. */
+  mailbox: ConversationMailbox
 }
 
 interface ConversationState {
@@ -20,7 +23,8 @@ interface ConversationState {
 }
 
 export function useConversation(options: UseConversationOptions): ConversationState {
-  const { selected, selectedIndex, threads, readerOpen, prefetch, online, account, mailRevision } = options
+  const { selected, selectedIndex, threads, readerOpen, prefetch, online, account, mailRevision, mailbox } =
+    options
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const cache = useRef(new Map<string, DisplayConversation>())
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -89,7 +93,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     let cancelled = false
     const requestedRevision = mailRevision
     window.attn.mail
-      .getConversation(selectedId, allowHydration)
+      .getConversation(selectedId, allowHydration, mailbox)
       .then((result) => {
         if (cancelled || revisionRef.current !== requestedRevision || !result) return
         const display = displayConversation(result)
@@ -100,7 +104,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     return () => {
       cancelled = true
     }
-  }, [account, mailRevision, online, prefetch, readerOpen, selectedId])
+  }, [account, mailbox, mailRevision, online, prefetch, readerOpen, selectedId])
 
   useEffect(() => {
     if (!window.attn || !prefetch) return
@@ -110,7 +114,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
       const thread = threads[index]
       if (!thread || cache.current.has(thread.id)) continue
       window.attn.mail
-        .getConversation(thread.id, false)
+        .getConversation(thread.id, false, mailbox)
         .then((result) => {
           // The revision alone cannot catch a sign-out: it resets to 0, so a
           // preload issued at revision 0 would still look current afterwards.
@@ -122,7 +126,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     return () => {
       cancelled = true
     }
-  }, [mailRevision, prefetch, selectedIndex, threads])
+  }, [mailbox, mailRevision, prefetch, selectedIndex, threads])
 
   useEffect(() => {
     if (!readerOpen) {

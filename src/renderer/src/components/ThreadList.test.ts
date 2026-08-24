@@ -44,6 +44,7 @@ it('skips the row tree when an unrelated parent update preserves its props', asy
     exitingThreadIds,
     labelsById,
     selectedRowRef,
+    listRef: { current: null as HTMLElement | null },
     onExtendSelection,
     onOpen
   }
@@ -92,6 +93,7 @@ it('windows large lists while keeping an offscreen keyboard selection mounted', 
     exitingThreadIds: new Set<string>(),
     labelsById: new Map(),
     selectedRowRef: { current: null as HTMLDivElement | null },
+    listRef: { current: null as HTMLElement | null },
     onExtendSelection: (): void => {},
     onOpen: (): void => {}
   }
@@ -146,6 +148,7 @@ it('projects virtual rows into the space left by an exiting row without moving t
     selectedIds: new Set<string>(),
     labelsById: new Map(),
     selectedRowRef: { current: null },
+    listRef: { current: null as HTMLElement | null },
     onExtendSelection: (): void => {},
     onOpen: (): void => {}
   }
@@ -293,6 +296,7 @@ it('measures the sizer against the list when scrolling a selection into view', a
     exitingThreadIds: new Set<string>(),
     labelsById: new Map(),
     selectedRowRef: { current: null },
+    listRef: { current: null as HTMLElement | null },
     onExtendSelection: (): void => {},
     onOpen: (): void => {}
   }

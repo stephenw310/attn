@@ -3,7 +3,11 @@ import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
 import type { OutboxChanged, OutboxItem, OutboxProgress } from '../../../shared/outbox'
 import { reuseLabels, reuseSnoozedRows, reuseThreadRows } from '../mailDataEquality'
+import { type LabelMailboxView, labelMailboxView, type MailView } from '../mailDisplay'
 import { refreshedSelectionIndex } from '../selection'
+
+/** Cached rows per label-driven mailbox view, kept across pure view switches. */
+export type MailboxRowCache = Partial<Record<LabelMailboxView, ThreadRow[]>>
 
 interface MailDataState {
   sync: SyncState
@@ -12,6 +16,9 @@ interface MailDataState {
   setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
   realSnoozedThreads: SnoozedThreadRow[] | null
   setRealSnoozedThreads: React.Dispatch<React.SetStateAction<SnoozedThreadRow[] | null>>
+  mailboxRows: MailboxRowCache
+  setMailboxRows: React.Dispatch<React.SetStateAction<MailboxRowCache>>
+  refreshMailboxView: (view: LabelMailboxView) => Promise<void>
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
   outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
@@ -31,7 +38,7 @@ interface MailDataState {
 
 export function useMailData(
   activeAccount: string | null,
-  activeViewRef: React.RefObject<'inbox' | 'snoozed' | 'drafts' | 'outbox'>,
+  activeViewRef: React.RefObject<MailView>,
   selectedThreadIdRef: React.RefObject<string | null>,
   selectedDraftIdRef: React.RefObject<string | null>,
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
@@ -40,6 +47,7 @@ export function useMailData(
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine)
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [realSnoozedThreads, setRealSnoozedThreads] = useState<SnoozedThreadRow[] | null>(null)
+  const [mailboxRows, setMailboxRows] = useState<MailboxRowCache>({})
   const [realDrafts, setRealDrafts] = useState<Draft[]>([])
   const [realOutbox, setRealOutbox] = useState<OutboxItem[]>([])
   const [outboxFailure, setOutboxFailure] = useState<Extract<OutboxChanged, { kind: 'failed' }> | null>(null)
@@ -83,6 +91,7 @@ export function useMailData(
   useEffect(() => {
     setRealThreads(null)
     setRealSnoozedThreads(null)
+    setMailboxRows({})
     setRealDrafts([])
     setRealOutbox([])
     setOutboxFailure(null)
@@ -122,28 +131,33 @@ export function useMailData(
       }
       const preserveSelection = preserveSelectionOnRefreshRef.current
       preserveSelectionOnRefreshRef.current = true
+      const extraView = labelMailboxView(activeViewRef.current)
       void Promise.all([
-        bridge.mail.listThreads(),
+        bridge.mail.listThreads('inbox'),
         bridge.mail.listSnoozed(),
         bridge.draft.list(),
         bridge.outbox.listPending(),
         bridge.mail.listLabels(),
         bridge.mail.getUnreadCount(),
         bridge.mail.getPendingActionCount(),
-        bridge.mail.getActionQueueStatus()
+        bridge.mail.getActionQueueStatus(),
+        extraView ? bridge.mail.listThreads(extraView) : Promise.resolve(null)
       ])
-        .then(([threads, snoozed, drafts, outbox, nextLabels, unread, pending, actionStatus]) => {
+        .then(([threads, snoozed, drafts, outbox, nextLabels, unread, pending, actionStatus, extraRows]) => {
           if (cancelled) return
+          const active = activeViewRef.current
           const visible =
-            activeViewRef.current === 'inbox'
+            active === 'inbox'
               ? threads
-              : activeViewRef.current === 'snoozed'
+              : active === 'snoozed'
                 ? snoozed
-                : activeViewRef.current === 'drafts'
+                : active === 'drafts'
                   ? drafts
-                  : outbox
+                  : active === 'outbox'
+                    ? outbox
+                    : (extraRows ?? [])
           const selectedId =
-            activeViewRef.current === 'drafts' || activeViewRef.current === 'outbox'
+            active === 'drafts' || active === 'outbox'
               ? selectedDraftIdRef.current
               : selectedThreadIdRef.current
           setSelectedIndex((current) =>
@@ -151,6 +165,13 @@ export function useMailData(
           )
           setRealThreads((current) => reuseThreadRows(current, threads))
           setRealSnoozedThreads((current) => reuseSnoozedRows(current, snoozed))
+          // Mail changed, so cached rows for the other label-driven views are
+          // stale: keep only the view this refresh just re-read.
+          setMailboxRows((current) =>
+            extraView && extraRows
+              ? { [extraView]: reuseThreadRows(current[extraView] ?? null, extraRows) }
+              : {}
+          )
           setRealDrafts(drafts)
           setRealOutbox(outbox)
           setOutboxProgress((current) =>
@@ -233,16 +254,19 @@ export function useMailData(
     if (!window.attn || !account) return
     await awaitRefreshGate()
     if (!window.attn || activeAccountRef.current !== account) return
-    const [threads, snoozed, drafts] = await Promise.all([
-      window.attn.mail.listThreads(),
+    const extraView = labelMailboxView(activeViewRef.current)
+    const [threads, snoozed, drafts, extraRows] = await Promise.all([
+      window.attn.mail.listThreads('inbox'),
       window.attn.mail.listSnoozed(),
-      window.attn.draft.list()
+      window.attn.draft.list(),
+      extraView ? window.attn.mail.listThreads(extraView) : Promise.resolve(null)
     ])
     if (activeAccountRef.current !== account) return
+    const active = activeViewRef.current
     const visible =
-      activeViewRef.current === 'inbox' ? threads : activeViewRef.current === 'snoozed' ? snoozed : drafts
+      active === 'inbox' ? threads : active === 'snoozed' ? snoozed : extraView ? (extraRows ?? []) : drafts
     const selectedId =
-      activeViewRef.current === 'drafts' ? selectedDraftIdRef.current : selectedThreadIdRef.current
+      active === 'drafts' || active === 'outbox' ? selectedDraftIdRef.current : selectedThreadIdRef.current
     const preserveSelection = preserveSelectionOnRefreshRef.current
     preserveSelectionOnRefreshRef.current = true
     setSelectedIndex((current) =>
@@ -250,8 +274,29 @@ export function useMailData(
     )
     setRealThreads((current) => reuseThreadRows(current, threads))
     setRealSnoozedThreads((current) => reuseSnoozedRows(current, snoozed))
+    if (extraView && extraRows) {
+      setMailboxRows((current) => ({
+        ...current,
+        [extraView]: reuseThreadRows(current[extraView] ?? null, extraRows)
+      }))
+    }
     setRealDrafts(drafts)
   }
+
+  /**
+   * Read one label-driven view's rows without touching the rest of the
+   * snapshot. View switches call this so a first visit fills the cache and a
+   * return revalidates it in the background while cached rows render. Stable
+   * identity: view-switch callbacks depend on it, and losing stability would
+   * resubscribe every effect built on top of switching.
+   */
+  const refreshMailboxView = useCallback(async (view: LabelMailboxView): Promise<void> => {
+    const account = activeAccountRef.current
+    if (!window.attn || !account) return
+    const rows = await window.attn.mail.listThreads(view)
+    if (!window.attn || activeAccountRef.current !== account) return
+    setMailboxRows((current) => ({ ...current, [view]: reuseThreadRows(current[view] ?? null, rows) }))
+  }, [])
 
   return {
     sync,
@@ -260,6 +305,9 @@ export function useMailData(
     setRealThreads,
     realSnoozedThreads,
     setRealSnoozedThreads,
+    mailboxRows,
+    setMailboxRows,
+    refreshMailboxView,
     realDrafts,
     realOutbox,
     outboxFailure,

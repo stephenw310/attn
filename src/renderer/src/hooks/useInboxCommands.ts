@@ -2,13 +2,14 @@ import { useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { DraftKind } from '../../../shared/drafts'
 import { createCommand, registerCommands } from '../commands'
+import type { MailView } from '../mailDisplay'
 
 interface Options {
   selected: { id: string } | undefined
   selectedCount: number
   selectedIndex: number
   readerOpen: boolean
-  view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
+  view: MailView
   starOn: boolean
   markUnreadOn: boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
@@ -19,7 +20,7 @@ interface Options {
   extendSelection: (index: number) => void
   openSelected: () => void
   closeReader: () => void
-  switchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
+  switchView: (view: Exclude<MailView, 'outbox'>) => void
   openOutbox: () => void
   closeOutbox: () => void
   triage: (action: TriageAction) => void
@@ -79,8 +80,13 @@ export function useInboxCommands(options: Options): void {
             ? [createCommand('outbox.open', openSelected)]
             : [createCommand('conversation.open', openSelected)]),
         createCommand('view.inbox', () => switchView('inbox')),
+        createCommand('view.allMail', () => switchView('allMail')),
+        createCommand('view.sent', () => switchView('sent')),
+        createCommand('view.starred', () => switchView('starred')),
         createCommand('view.snoozed', () => switchView('snoozed')),
         createCommand('view.drafts', () => switchView('drafts')),
+        createCommand('view.spam', () => switchView('spam')),
+        createCommand('view.trash', () => switchView('trash')),
         createCommand('view.outbox', openOutbox),
         createCommand('composer.new', openComposer),
         ...(view !== 'drafts' && selected

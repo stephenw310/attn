@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
-import type { MailLabel } from '../../../shared/mail'
+import type { ConversationMailbox, MailLabel } from '../../../shared/mail'
 import { actionReconnectMessage } from '../actionReconnect'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
@@ -14,7 +14,15 @@ import { useSyncActions } from '../hooks/useSyncActions'
 import { useToast } from '../hooks/useToast'
 import { useTriage } from '../hooks/useTriage'
 import { type LabelCheckState, LabelPicker } from '../LabelPicker'
-import { type DisplayThread, displaySnoozedThread, displayThread } from '../mailDisplay'
+import {
+  type DisplayThread,
+  displaySnoozedThread,
+  displaySnoozedThreads,
+  displayThread,
+  displayThreads,
+  labelMailboxView,
+  type MailView
+} from '../mailDisplay'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
 import { MailFooter } from './MailFooter'
@@ -29,7 +37,24 @@ interface InboxProps {
   onStatus: (status: AuthStatus) => void
 }
 
-type MailView = 'inbox' | 'snoozed' | 'drafts' | 'outbox'
+/** Selection and scroll survive a round trip away from each view (SPEC F3). */
+interface ViewRecord {
+  threadId: string | null
+  index: number
+  scrollTop: number
+}
+
+/**
+ * The reader projection each view owns. All Mail deliberately maps to 'normal':
+ * both hide spam and keep trashed-message markers, so the projections are
+ * identical and sharing the value keeps the conversation cache warm across an
+ * Inbox ⇄ All Mail switch.
+ */
+function conversationMailboxFor(view: MailView): ConversationMailbox {
+  if (view === 'spam') return 'spam'
+  if (view === 'trash') return 'trash'
+  return 'normal'
+}
 
 export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [view, setView] = useState<MailView>('inbox')
@@ -46,6 +71,15 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const selectedThreadIdRef = useRef<string | null>(null)
   const selectedDraftIdRef = useRef<string | null>(null)
   const activeViewRef = useRef<MailView>('inbox')
+  const listElRef = useRef<HTMLElement | null>(null)
+  const viewStateRef = useRef(new Map<MailView, ViewRecord>())
+  const pendingViewRestoreRef = useRef<{ view: MailView; record: ViewRecord } | null>(null)
+  // Render-time mirrors keep the view-switch callbacks referentially stable:
+  // effects subscribe on top of switchView, and churning it re-runs them all.
+  const selectedIndexRef = useRef(0)
+  selectedIndexRef.current = selectedIndex
+  const readerOpenRef = useRef(false)
+  readerOpenRef.current = readerOpen
   const outboxReturnRef = useRef<{
     view: Exclude<MailView, 'outbox'>
     selectedIndex: number
@@ -70,6 +104,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setRealThreads,
     realSnoozedThreads,
     setRealSnoozedThreads,
+    mailboxRows,
+    setMailboxRows,
+    refreshMailboxView,
     realDrafts,
     realOutbox,
     outboxFailure,
@@ -89,14 +126,17 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
   const online = networkOnline && sync.phase !== 'offline'
   const backingMailView = view === 'outbox' ? outboxReturnRef.current.view : view
+  const backingLabelView = labelMailboxView(backingMailView)
   const threads: DisplayThread[] = useMemo(
     () =>
       backingMailView === 'inbox'
-        ? (realThreads ?? []).map(displayThread)
+        ? displayThreads(realThreads ?? [])
         : backingMailView === 'snoozed'
-          ? (realSnoozedThreads ?? []).map(displaySnoozedThread)
-          : [],
-    [backingMailView, realSnoozedThreads, realThreads]
+          ? displaySnoozedThreads(realSnoozedThreads ?? [])
+          : backingLabelView
+            ? displayThreads(mailboxRows[backingLabelView] ?? [])
+            : [],
+    [backingLabelView, backingMailView, mailboxRows, realSnoozedThreads, realThreads]
   )
   const { selectedIds, clearSelection, resetSelection, toggleFocusedSelection, extendSelectionTo } =
     useSelectionState(threads, selectedIndex, setSelectedIndex)
@@ -285,7 +325,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     prefetch: selectedIds.size === 0,
     online,
     account: activeAccount,
-    mailRevision
+    mailRevision,
+    mailbox: conversationMailboxFor(view)
   })
   const targetedThreads =
     selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
@@ -309,7 +350,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [labelTargetIds, labelTargets])
 
   useEffect(() => {
-    if (view === 'inbox' || view === 'snoozed') selectedThreadIdRef.current = selected?.id ?? null
+    if (view !== 'drafts' && view !== 'outbox') selectedThreadIdRef.current = selected?.id ?? null
   }, [selected?.id, view])
 
   useEffect(() => {
@@ -343,20 +384,48 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       })
   }, [activeAccount, onStatus, showToast])
 
-  const switchViewNow = useCallback((next: 'inbox' | 'snoozed' | 'drafts') => {
-    activeViewRef.current = next
-    selectedThreadIdRef.current = null
-    selectedDraftIdRef.current = null
-    setView(next)
-    setSelectedIndex(0)
-    setReaderOpen(false)
-    setSnoozeOpen(false)
-    setLabelTargetIds(null)
-    setDetachedDraftThread(null)
+  const saveActiveViewRecord = useCallback(() => {
+    const current = activeViewRef.current
+    if (current === 'drafts' || current === 'outbox') return
+    // While the reader is open the list is display:none and reads scrollTop 0;
+    // keep the last visible offset instead of clobbering it.
+    const scrollTop = readerOpenRef.current
+      ? (viewStateRef.current.get(current)?.scrollTop ?? 0)
+      : (listElRef.current?.scrollTop ?? 0)
+    viewStateRef.current.set(current, {
+      threadId: selectedThreadIdRef.current,
+      index: selectedIndexRef.current,
+      scrollTop
+    })
   }, [])
 
+  const switchViewNow = useCallback(
+    (next: Exclude<MailView, 'outbox'>) => {
+      const previous = activeViewRef.current
+      if (previous !== next) saveActiveViewRecord()
+      activeViewRef.current = next
+      selectedDraftIdRef.current = null
+      const record = viewStateRef.current.get(next) ?? { threadId: null, index: 0, scrollTop: 0 }
+      selectedThreadIdRef.current = next === 'drafts' ? null : record.threadId
+      pendingViewRestoreRef.current = next === 'drafts' ? null : { view: next, record }
+      // Reader projections differ per mailbox: a Trash reader must never reuse
+      // an All Mail conversation, so drop the cache when the projection changes.
+      if (conversationMailboxFor(previous) !== conversationMailboxFor(next)) invalidateConversations()
+      const target = labelMailboxView(next)
+      if (target) void refreshMailboxView(target).catch(() => {})
+      clearSelection()
+      setView(next)
+      setSelectedIndex(next === 'drafts' ? 0 : Math.max(0, record.index))
+      setReaderOpen(false)
+      setSnoozeOpen(false)
+      setLabelTargetIds(null)
+      setDetachedDraftThread(null)
+    },
+    [clearSelection, invalidateConversations, refreshMailboxView, saveActiveViewRecord]
+  )
+
   const switchView = useCallback(
-    (next: 'inbox' | 'snoozed' | 'drafts', afterSwitch?: () => void) => {
+    (next: Exclude<MailView, 'outbox'>, afterSwitch?: () => void) => {
       if (inlineComposerDraft && inlineComposerRef.current) {
         inlineComposerRef.current.exitConversation(() => {
           switchViewNow(next)
@@ -369,6 +438,34 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     },
     [inlineComposerDraft, switchViewNow]
   )
+
+  const viewRowsLoaded =
+    backingMailView === 'inbox'
+      ? realThreads !== null
+      : backingMailView === 'snoozed'
+        ? realSnoozedThreads !== null
+        : backingLabelView
+          ? mailboxRows[backingLabelView] !== undefined
+          : true
+
+  // Restore the returning view's selection and scroll once its rows are in
+  // state. Selection follows the thread id first — refreshed rows may have
+  // moved it — and falls back to the clamped index when the thread left the
+  // view. ThreadList's follow-scroll then keeps the row visible if the two
+  // restored halves disagree.
+  useLayoutEffect(() => {
+    const pending = pendingViewRestoreRef.current
+    if (!pending || pending.view !== view || !viewRowsLoaded) return
+    pendingViewRestoreRef.current = null
+    const record = pending.record
+    const restoredIndex = record.threadId ? threads.findIndex((thread) => thread.id === record.threadId) : -1
+    const nextIndex =
+      restoredIndex >= 0 ? restoredIndex : Math.max(0, Math.min(record.index, threads.length - 1))
+    selectedThreadIdRef.current = threads[nextIndex]?.id ?? null
+    setSelectedIndex(nextIndex)
+    const list = listElRef.current
+    if (list) list.scrollTop = record.scrollTop
+  }, [threads, view, viewRowsLoaded])
 
   const openOutboxNow = useCallback(() => {
     if (view === 'outbox') return
@@ -408,11 +505,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       switchView('inbox', () => {
         clearSelection()
         void window.attn?.mail
-          .listThreads()
+          .listThreads('inbox')
           .then((nextThreads) => {
             const nextIndex = nextThreads.findIndex((thread) => thread.id === threadId)
             setRealThreads(nextThreads)
             if (nextIndex < 0) return
+            // The notification target owns the selection: cancel any saved
+            // record the switch queued so it cannot override this focus.
+            pendingViewRestoreRef.current = null
             selectedThreadIdRef.current = threadId
             setDetachedDraftThread(null)
             setSelectedIndex(nextIndex)
@@ -428,13 +528,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex,
     threads,
     readerOpen,
-    view: view === 'snoozed' ? 'snoozed' : 'inbox',
+    view,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef,
     selectedThreadIdRef,
     selectedRowRef,
     setRealThreads,
     setRealSnoozedThreads,
+    setMailboxRows,
     clearSelection,
     showToast,
     setExitingThreadIds,
@@ -725,7 +826,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         pendingActionCount={pendingActionCount}
         pausedActionCount={pausedActionCount}
         outboxCount={realOutbox.length}
-        selectionCount={view === 'inbox' || view === 'snoozed' ? selectedIds.size : 0}
+        selectionCount={view !== 'drafts' && view !== 'outbox' ? selectedIds.size : 0}
         composerOpen={fullWindowComposerDraft !== null}
         status={status}
         onStatus={onStatus}
@@ -772,7 +873,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         ) : (
           <ThreadList
             threads={threads}
-            view={view === 'snoozed' ? 'snoozed' : 'inbox'}
+            view={view}
             syncing={sync.phase === 'syncing'}
             readerOpen={readerOpen}
             selectedIndex={selectedIndex}
@@ -780,6 +881,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             exitingThreadIds={exitingThreadIds}
             labelsById={userLabelsById}
             selectedRowRef={selectedRowRef}
+            listRef={listElRef}
             onExtendSelection={extendSelectionTo}
             onOpen={openThread}
           />

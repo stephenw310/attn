@@ -15,6 +15,7 @@ import { nonEmptyString } from '../shared/guards'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   Conversation,
+  ConversationMailbox,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
   InlineImageRepairRequest,
@@ -23,6 +24,7 @@ import type {
   MailLabel,
   SnoozedThreadRow,
   SyncState,
+  ThreadListView,
   ThreadRow
 } from '../shared/mail'
 import type {
@@ -49,12 +51,19 @@ const api = {
     signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut)
   },
   mail: {
-    listThreads: (): Promise<ThreadRow[]> => invoke(IPC_CHANNELS.mailListThreads),
-    listSnoozed: (): Promise<SnoozedThreadRow[]> => invoke(IPC_CHANNELS.mailListSnoozed),
+    listThreads: (view: Exclude<ThreadListView, 'snoozed'>): Promise<ThreadRow[]> =>
+      invoke(IPC_CHANNELS.mailListThreads, { view }),
+    // The one typed read serves Snoozed too; only that view returns reminder rows.
+    listSnoozed: (): Promise<SnoozedThreadRow[]> =>
+      invoke(IPC_CHANNELS.mailListThreads, { view: 'snoozed' }) as Promise<SnoozedThreadRow[]>,
     listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
     getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),
-    getConversation: (threadId: string, allowHydration: boolean): Promise<Conversation | null> =>
-      invoke(IPC_CHANNELS.mailGetConversation, threadId, allowHydration),
+    getConversation: (
+      threadId: string,
+      allowHydration: boolean,
+      mailbox: ConversationMailbox
+    ): Promise<Conversation | null> =>
+      invoke(IPC_CHANNELS.mailGetConversation, threadId, allowHydration, mailbox),
     downloadAttachment: (request: DownloadAttachmentRequest): Promise<DownloadAttachmentResult> =>
       invoke(IPC_CHANNELS.mailDownloadAttachment, request),
     getInlineImage: (request: InlineImageRequest): Promise<InlineImageResult> =>

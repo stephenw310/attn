@@ -22,7 +22,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | S2 per-message labels | **done**, completed 2026-08-22 | nothing; F3 and S4 are unblocked |
 | S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
 | S4 reconcile and expiry recovery | **done**, completed 2026-08-22 | trustworthy mailbox views |
-| T22 mailbox navigation (F3) | **planned**, not started | T27, T24's `in:` operator |
+| T22 mailbox navigation (F3) | **done**, completed 2026-08-23 | nothing; T27 and T24's `in:` operator are unblocked |
 | T23 FTS5 index (F10) | **planned**, not started | T24, T25 |
 | T24 search UI and operators (F10) | **planned**, not started | T25 |
 | T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
@@ -406,7 +406,15 @@ touches `persist.ts` and the schema, not the renderer, so the two tracks do not 
 
 ## T22 — System mailbox navigation
 
-**Status: not started.**
+**Status: done, completed 2026-08-23.** Eight views render from SQLite through the unified
+`mail:listThreads({ view })` read; `listMailboxThreadIds` grew into `listMailboxThreads` with the Sent and
+Starred junk exclusion; windowing is unconditional (the 500-row threshold and the non-virtual render path are
+deleted); per-view selection and scroll restore on return; normal and All Mail readers keep trashed messages
+as reveal-in-place markers; the five `view.*` chords registered; the header names the active mailbox and adds
+a mailbox menu (the whole of pointer navigation until T26's palette). The measured cached All Mail switch on
+the 10,000-thread profile is ~4 ms median against the 50 ms budget (the cold first visit is reported
+unbudgeted). One renderer-level decision worth recording: display-row mapping is cached by rows-array
+identity (`displayThreads`), because remapping 10,000 rows through Intl on every switch cost ~176 ms alone.
 
 **Depends on:** S2, S4 (both done) · **Unblocks:** T27, and T24's `in:` operator · **Parallel with:** T23 ·
 **Spec:** F3 system mailbox navigation, §9 #10, §5 `G` chords
@@ -897,10 +905,13 @@ one; that is not the start of F15.
 **Decided 2026-08-22:** the utility process owns SQLite (SPEC §9 #19), and S2 landed before S1. S1's design
 constraints carry the consequences.
 
+**Decided by shipping T22 (2026-08-23):** F3 registered its five `view.*` commands in `COMMAND_SPECS` only;
+T26 builds the palette surface and asserts the inventory. Ratifying the wording in SPEC §9 remains an owner
+call.
+
 | Question | Why it matters | Decide by |
 |---|---|---|
 | Pathological-mailbox posture: pick a design target such as smooth to 250k messages, then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages, and lifetime headers can exceed that | E7's real-mailbox capture in [T20-EVIDENCE.md](T20-EVIDENCE.md), plus T23's measured index size and query latency |
-| Does F3 ship with registry-only palette commands, with T26 building the palette and asserting the inventory? | It decides whether T22 or T26 goes first, and F3's acceptance criteria name the palette | Before T22 starts |
 
 Open defects and coverage gaps live in [KNOWN-ISSUES.md](KNOWN-ISSUES.md). Manual sign-off evidence is ticked
 in [T20-EVIDENCE.md](T20-EVIDENCE.md).

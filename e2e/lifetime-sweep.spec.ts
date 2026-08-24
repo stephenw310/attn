@@ -72,7 +72,7 @@ test('resumes a header-only lifetime sweep across offline relaunch without chang
   const secondThread = oldThread('t-lifetime-2011', 'Archive Two <archive.two@example.com>', 2011)
   const unreadBefore = await page.evaluate(() => window.attn.mail.getUnreadCount())
   const inboxIdsBefore = await page.evaluate(async () =>
-    (await window.attn.mail.listThreads()).map((thread) => thread.id)
+    (await window.attn.mail.listThreads('inbox')).map((thread) => thread.id)
   )
 
   const interrupted = await runSweep(boot.app, {
@@ -98,10 +98,10 @@ test('resumes a header-only lifetime sweep across offline relaunch without chang
   })
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(unreadBefore)
   expect(
-    await page.evaluate(async () => (await window.attn.mail.listThreads()).map((thread) => thread.id))
+    await page.evaluate(async () => (await window.attn.mail.listThreads('inbox')).map((thread) => thread.id))
   ).toEqual(inboxIdsBefore)
   expect(
-    await page.evaluate(() => window.attn.mail.getConversation('t-lifetime-inbox-2010', false))
+    await page.evaluate(() => window.attn.mail.getConversation('t-lifetime-inbox-2010', false, 'normal'))
   ).toMatchObject({ threadId: 't-lifetime-inbox-2010' })
   expect(await page.evaluate(() => window.attn.contacts.search('archive.one'))).toEqual([
     expect.objectContaining({ email: 'archive.one@example.com' })
@@ -123,11 +123,11 @@ test('resumes a header-only lifetime sweep across offline relaunch without chang
   expect(await relaunched.page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(unreadBefore)
   expect(
     await relaunched.page.evaluate(async () =>
-      (await window.attn.mail.listThreads()).map((thread) => thread.id)
+      (await window.attn.mail.listThreads('inbox')).map((thread) => thread.id)
     )
   ).toEqual(inboxIdsBefore)
   expect(
-    await relaunched.page.evaluate(() => window.attn.mail.getConversation('t-lifetime-2011', false))
+    await relaunched.page.evaluate(() => window.attn.mail.getConversation('t-lifetime-2011', false, 'normal'))
   ).toMatchObject({
     messages: [
       {

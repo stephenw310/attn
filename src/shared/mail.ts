@@ -50,6 +50,12 @@ export interface ConversationMsg {
   id: string
   /** Local outbox projection shown before Gmail returns the confirmed message. */
   pending?: boolean
+  /**
+   * Trashed message kept at its chronological position in a normal or All Mail
+   * reader (SPEC F3). Rendered as a compact marker until revealed; revealing is
+   * reader-local and changes no labels.
+   */
+  trashed?: boolean
   /** RFC Message-ID header, including angle brackets. */
   rfcMessageId: string | null
   /** Canonical RFC message ids from References, or In-Reply-To as a fallback. */
@@ -72,6 +78,15 @@ export interface Conversation {
   subject: string
   messages: ConversationMsg[]
 }
+
+/**
+ * Mailboxes sharing the list/reading shell (SPEC F3). Outbox stays outside the
+ * union: it is an on-demand operational view, not a mailbox.
+ */
+export type MailboxView = 'inbox' | 'allMail' | 'sent' | 'drafts' | 'starred' | 'snoozed' | 'spam' | 'trash'
+
+/** Views served by the unified mail:listThreads read. Drafts merges outbox rows with cached Gmail drafts instead. */
+export type ThreadListView = Exclude<MailboxView, 'drafts'>
 
 /** Mailboxes whose membership and reader contents depend on per-message labels. */
 export type MessageMailbox = 'all-mail' | 'spam' | 'trash'

@@ -1,0 +1,182 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import type { Page } from '@playwright/test'
+import { expect, test } from './electron'
+
+// F3 system mailbox navigation (T22): eight views over one seeded SQLite
+// store, no provider and no network — switching is a local read.
+test.use({ seed: 'fixtures/seed-inbox.json' })
+
+async function goTo(page: Page, chordKey: string): Promise<void> {
+  await page.keyboard.press('g')
+  await page.keyboard.press(chordKey)
+}
+
+test('every G chord reaches its mailbox and the header names it', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  const title = page.getByTestId('mailbox-title')
+  await expect(rows).toHaveCount(8)
+  await expect(title).toHaveText('Inbox')
+
+  await goTo(page, 't')
+  await expect(title).toHaveText('Sent')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toContainText('Re: Q3 roadmap review')
+
+  await goTo(page, 's')
+  await expect(title).toHaveText('Starred')
+  await expect(rows).toHaveCount(2)
+  await expect(rows.first()).toContainText('Design notes')
+  await expect(rows.last()).toContainText('Starred reference')
+
+  await goTo(page, 'p')
+  await expect(title).toHaveText('Spam')
+  await expect(rows).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toContainText('Spam is empty')
+
+  await goTo(page, 'r')
+  await expect(title).toHaveText('Trash')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toContainText('Q3 roadmap review')
+
+  await goTo(page, 'h')
+  await expect(title).toHaveText('Snoozed')
+  await expect(page.getByTestId('thread-list')).toContainText('Nothing snoozed')
+
+  await goTo(page, 'd')
+  await expect(title).toHaveText('Drafts')
+  await expect(page.getByTestId('view-title')).toHaveText('Drafts')
+
+  await goTo(page, 'a')
+  await expect(title).toHaveText('All Mail')
+  // Every thread with a message outside Spam and Trash, including archived
+  // Sent-only and Starred-only mail: 8 inbox threads + t-sent-history +
+  // t-starred-archive.
+  await expect(rows).toHaveCount(10)
+
+  const artifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(artifactDirectory, { recursive: true })
+  await page.screenshot({ path: join(artifactDirectory, 'all-mail.png') })
+
+  await goTo(page, 'i')
+  await expect(title).toHaveText('Inbox')
+  await expect(rows).toHaveCount(8)
+})
+
+test('the header mailbox menu reaches every view by pointer', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await page.getByTestId('mailbox-menu').click()
+  await expect(page.getByTestId('mailbox-row')).toHaveCount(8)
+  await page.getByTestId('mailbox-row').filter({ hasText: 'Trash' }).click()
+  await expect(page.getByTestId('mailbox-title')).toHaveText('Trash')
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+
+  await page.getByTestId('mailbox-menu').click()
+  await page.getByTestId('mailbox-row').filter({ hasText: 'Inbox' }).click()
+  await expect(page.getByTestId('mailbox-title')).toHaveText('Inbox')
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+})
+
+test('keeps the trashed message as a reader marker that reveals locally and resets on close', async ({
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await goTo(page, 'a')
+  await expect(page.getByTestId('thread-row')).toHaveCount(10)
+  await expect(page.getByTestId('thread-row').first()).toHaveAttribute('data-thread-id', 't-roadmap')
+
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('message-card')).toHaveCount(2)
+  const marker = page.getByTestId('trashed-message-marker')
+  await expect(marker).toHaveCount(1)
+  await expect(marker).toContainText('This message was moved to Trash.')
+  await expect(page.getByTestId('conversation-content')).not.toContainText(
+    'This deleted reply belongs only in Trash.'
+  )
+
+  const artifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(artifactDirectory, { recursive: true })
+  await page.screenshot({ path: join(artifactDirectory, 'trash-marker.png') })
+
+  // Show message reveals in this reader only: no labels change, so the row
+  // stays put and closing the reader forgets the reveal.
+  await page.getByTestId('trashed-message-reveal').click()
+  await expect(page.getByTestId('message-card')).toHaveCount(3)
+  await expect(page.getByTestId('conversation-content')).toContainText(
+    'This deleted reply belongs only in Trash.'
+  )
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('message-card')).toHaveCount(2)
+  await expect(page.getByTestId('trashed-message-marker')).toHaveCount(1)
+
+  // The Trash reader shows only its own messages, as ordinary cards.
+  await page.keyboard.press('Escape')
+  await goTo(page, 'r')
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('message-card')).toHaveCount(1)
+  await expect(page.getByTestId('trashed-message-marker')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-content')).toContainText(
+    'This deleted reply belongs only in Trash.'
+  )
+})
+
+test('restores per-view selection and scroll across a round trip', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  // Shrink the window so ten windowed rows overflow and the list has to scroll.
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setContentSize(1100, 420)
+  })
+  await goTo(page, 'a')
+  await expect(page.getByTestId('thread-row')).toHaveCount(10)
+
+  for (let step = 0; step < 8; step++) await page.keyboard.press('j')
+  const selected = page.locator('[data-testid="thread-row"][data-selected="true"]')
+  await expect(selected).toHaveAttribute('data-thread-id', 't-research')
+  const list = page.getByTestId('thread-list')
+  const scrollTop = await list.evaluate((element) => element.scrollTop)
+  expect(scrollTop).toBeGreaterThan(0)
+
+  await goTo(page, 'r')
+  await expect(page.getByTestId('mailbox-title')).toHaveText('Trash')
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+
+  await goTo(page, 'a')
+  await expect(page.getByTestId('thread-row')).toHaveCount(10)
+  await expect(selected).toHaveAttribute('data-thread-id', 't-research')
+  await expect.poll(async () => list.evaluate((element) => element.scrollTop)).toBe(scrollTop)
+})
+
+test('a triage verb removes a row only from views it no longer matches', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await goTo(page, 'a')
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(10)
+  await expect(rows.first()).toHaveAttribute('data-thread-id', 't-roadmap')
+
+  // Archiving in All Mail removes nothing: membership ignores INBOX.
+  await page.keyboard.press('e')
+  await expect(page.getByTestId('toast')).toContainText('Archived')
+  await expect(rows).toHaveCount(10)
+
+  // Trashing moves every message to Trash, so the thread leaves All Mail.
+  await page.keyboard.press('#')
+  await expect(page.getByTestId('toast')).toContainText('Trashed')
+  await expect(rows).toHaveCount(9)
+
+  await goTo(page, 'r')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toHaveAttribute('data-thread-id', 't-roadmap')
+
+  // Undo restores the thread out of Trash, removing its row here in turn.
+  await page.keyboard.press('z')
+  await expect(page.getByTestId('toast')).toContainText('Undid trashed')
+  await expect(rows).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toContainText('Trash is empty')
+
+  await goTo(page, 'a')
+  await expect(rows).toHaveCount(10)
+})
