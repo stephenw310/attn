@@ -102,6 +102,8 @@ export const TEST_CHANNELS = {
   remoteDraft: 'attn:test:remoteDraft',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
   runExistenceSweep: 'attn:test:runExistenceSweep',
+  runFtsBackfill: 'attn:test:runFtsBackfill',
+  searchIndexStats: 'attn:test:searchIndexStats',
   utilityState: 'attn:test:utilityState',
   crashUtility: 'attn:test:crashUtility',
   listMailboxThreadIds: 'attn:test:listMailboxThreadIds'

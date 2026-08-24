@@ -12,6 +12,8 @@ const TRIAGE_FEEDBACK_CEILING_MS = 16
 const SCROLL_FRAME_P95_CEILING_MS = 20
 const COMPOSER_OPEN_WARMUP_COUNT = 2
 const COMPOSER_OPEN_CEILING_MS = 50
+// A CI-safe ceiling at 10k messages; T24 owns F10's strict 100 ms budget at 50k.
+const SEARCH_QUERY_CEILING_MS = 100
 const COMPOSER_MUTATION_CEILING_MS = 8
 // Two 60Hz vsync intervals. The paint sample is timed from before the key is
 // dispatched, so on its own it carries CDP dispatch latency plus a wait for the
@@ -417,6 +419,53 @@ test.describe('@perf 10,000-thread inbox', () => {
     expect(memoryMb, 'main private memory plus utility-owned allocations and renderer JS heap').toBeLessThan(
       MEMORY_CEILING_MB
     )
+  })
+
+  test('answers search index queries within the CI-safe ceiling', async ({ app, page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    // Realistic MATCH shapes over the generated profile: the broadest term hits
+    // every message, the prefix drives as-you-type, the rest are narrow.
+    const stats = await app.evaluate(
+      ({ ipcMain }, { channel, input }) =>
+        new Promise<{
+          error?: string
+          indexBytes: number
+          queries: { match: string; threadCount: number; samplesUs: number[] }[]
+        }>((resolve) => ipcMain.emit(channel, {}, input, resolve)),
+      {
+        channel: TEST_CHANNELS.searchIndexStats,
+        input: {
+          queries: ['performance', 'perf*', 'cached', '"performance thread 9999"', 'sender42'],
+          runsPerQuery: 20,
+          limit: 50
+        }
+      }
+    )
+    expect(stats.error).toBeUndefined()
+    expect(stats.queries.find((query) => query.match === 'performance')?.threadCount).toBe(50)
+    expect(stats.queries.find((query) => query.match === '"performance thread 9999"')?.threadCount).toBe(1)
+    expect(stats.queries.find((query) => query.match === 'sender42')?.threadCount).toBe(1)
+
+    const samples = stats.queries.flatMap((query) => query.samplesUs.map((sample) => sample / 1_000))
+    const medianMs = median(samples)
+    await reportMetric(testInfo, 'search-index-query', samples, medianMs)
+    const sizeResult = {
+      name: 'search-index-size',
+      indexBytes: stats.indexBytes,
+      indexMb: Math.round((stats.indexBytes / 1024 / 1024) * 10) / 10,
+      perQueryP95Ms: stats.queries.map((query) => ({
+        match: query.match,
+        threadCount: query.threadCount,
+        p95Ms: Math.round(percentile(query.samplesUs, 0.95) / 100) / 10
+      }))
+    }
+    console.log(`[perf] ${JSON.stringify(sizeResult)}`)
+    await testInfo.attach('search-index-size', {
+      body: JSON.stringify(sizeResult, null, 2),
+      contentType: 'application/json'
+    })
+    expect(stats.indexBytes, 'FTS index pages exist on disk').toBeGreaterThan(0)
+    expect(percentile(samples, 0.95), 'p95 FTS query latency').toBeLessThan(SEARCH_QUERY_CEILING_MS)
   })
 
   test('opens mounted conversation content within the CI-safe ceiling', async ({ page }, testInfo) => {

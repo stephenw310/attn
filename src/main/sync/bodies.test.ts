@@ -50,12 +50,18 @@ function bodyDb(
 ): Db {
   return {
     prepare: (sql: string) => ({
-      get: () => row,
+      // The FTS refresh's map lookup returns no row, so the index update stays
+      // out of these stubs; parity itself is covered by the real-SQLite tests.
+      get: () => (sql.includes('message_fts_map') ? undefined : row),
       run: (...args: unknown[]) => {
         if (sql.startsWith('UPDATE messages SET body_text')) write(...args)
         return { changes: 1 }
       }
-    })
+    }),
+    transaction:
+      (callback: (...args: unknown[]) => unknown) =>
+      (...args: unknown[]) =>
+        callback(...args)
   } as unknown as Db
 }
 

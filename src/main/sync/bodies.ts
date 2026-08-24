@@ -7,6 +7,7 @@ import {
   type GmailThread,
   hasInlinePlainText
 } from '../gmail/parse'
+import { refreshMessageBodyFromStore } from './fts'
 import { mergeExternalBodies } from './mergeBodies'
 import type { MailProvider, ProviderRequestOptions } from './provider'
 
@@ -64,6 +65,10 @@ export async function hydrateMissingThreadBodies(
     })
     if (bodyText === row.body_text && bodyHtml === row.body_html) continue
     if (!shouldContinue()) return
-    writeBody.run(bodyText, bodyHtml, accountId, message.id)
+    // The hydrated body and its index column commit together (SPEC F10).
+    db.transaction(() => {
+      writeBody.run(bodyText, bodyHtml, accountId, message.id)
+      refreshMessageBodyFromStore(db, accountId, message.id)
+    })()
   }
 }

@@ -164,14 +164,16 @@ export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): S
     for (const thread of fixture.threads) {
       persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))
     }
-    // Seeded stores are complete local snapshots and never contact Gmail. Mark both
-    // foreground backfill and lifetime indexing complete so relaunches stay settled.
+    // Seeded stores are complete local snapshots and never contact Gmail. Mark
+    // foreground backfill, lifetime indexing, and the FTS backfill complete so
+    // relaunches stay settled; persistThread above indexed every seeded row.
     db.prepare(
-      `INSERT INTO sync_state (account_id, backfill_cursor, sweep_cursor)
-       VALUES (?, 'done', 'done')
+      `INSERT INTO sync_state (account_id, backfill_cursor, sweep_cursor, fts_cursor)
+       VALUES (?, 'done', 'done', 'done')
        ON CONFLICT(account_id) DO UPDATE SET
          backfill_cursor = excluded.backfill_cursor,
-         sweep_cursor = COALESCE(sync_state.sweep_cursor, excluded.sweep_cursor)`
+         sweep_cursor = COALESCE(sync_state.sweep_cursor, excluded.sweep_cursor),
+         fts_cursor = COALESCE(sync_state.fts_cursor, excluded.fts_cursor)`
     ).run(fixture.account)
   })()
 
