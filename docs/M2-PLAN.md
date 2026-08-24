@@ -641,10 +641,11 @@ Opening a conversation row with a bound draft reopens the newest matching draft 
 close button leaves the reader open, while either `Esc` or the reader Back control saves the draft and returns
 to the originating list in one action. Opening or navigating to a conversation keeps the reading viewport
 anchored to the newest message or restored draft while asynchronously sized HTML settles. Quoted history sits
-behind an inline `...` control and shares the reader's surface decision: text-like mail uses the native composer
-canvas and normalizes dark sender foreground colours for contrast, while presentation HTML retains a light
-document canvas plus its sanitized structure and explicit styling. From Inbox or Snoozed, `r` and `f` open
-the selected row directly into the corresponding inline composer.
+behind an inline `...` control and shares the reader's surface decision: mail without a non-neutral authored
+canvas uses the native composer canvas and normalizes dark sender foreground colours for contrast, while
+non-neutral backgrounds and background images retain a light document canvas plus their sanitized structure
+and explicit styling. Typography, media, tables, and layout alone remain native. From Inbox or Snoozed, `r`
+and `f` open the selected row directly into the corresponding inline composer.
 `Enter` is a reader-only Reply-all alias alongside `a` and retains native activation on focused links.
 
 Gmail-imported forwards need one additional identity rule. A draft whose authoritative Gmail `threadId`
@@ -682,7 +683,7 @@ Everything here is a pure function from stored state to bytes or to a prefilled 
 ### Implementation guide
 
 **`src/main/outbox/mime.ts`** — RFC 5322/2045 builder, no dependencies:
-- `buildMime(draft, { accountEmail, rfcMessageId, date }): string` → complete message: headers (`From`, `To`/`Cc`/`Bcc`, `Subject` with RFC 2047 encoded-words for non-ASCII, `Message-ID` (the caller-supplied one — exactly-once depends on it), `In-Reply-To`/`References` when replying, `Date`, `MIME-Version`), body as `multipart/alternative` (text + html), wrapped in `multipart/mixed` when attachments exist (base64, 76-col lines, `Content-Disposition: attachment; filename*=` RFC 2231 for non-ASCII names; `Content-ID` for future inline use).
+- `buildMime(draft, { accountEmail, accountName, rfcMessageId, date }): string` → complete message: headers (`From`, including the primary Gmail send-as display name, `To`/`Cc`/`Bcc`, `Subject` with RFC 2047 encoded-words for non-ASCII, `Message-ID` (the caller-supplied one — exactly-once depends on it), `In-Reply-To`/`References` when replying, `Date`, `MIME-Version`), body as `multipart/alternative` (text + html), wrapped in `multipart/mixed` when attachments exist (base64, 76-col lines, `Content-Disposition: attachment; filename*=` RFC 2231 for non-ASCII names; `Content-ID` for future inline use).
 - Deterministic boundaries derived from the message id (stable output = testable with fixture files).
 
 **`src/main/outbox/replyPlan.ts`:**
@@ -768,7 +769,7 @@ COMMIT;
 ```
 
 - **Pure core** `src/main/outbox/machine.ts`: `planTransition(row, event, now)` returning the next state + required effects (`persist`, `armTimer`, `verify`, `send`, `notify`) — the vitest surface. Effects live in `src/main/outbox/sender.ts` and are unit-tested against a fake durable store, fake provider, and injected clock.
-- Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.
+- Provider grows `createDraft/updateDraft/sendDraft/getDraft/findByRfcId/getSendAs` — interface in `sync/provider.ts`, implementation in `gmail/provider.ts` (raw upload paths). `getSendAs` reads the primary account display name before MIME serialization. `getDraft` is the decisive recovery probe; `findByRfcId` is only the secondary check and must search drafts as well as messages. No `sendMessage` — the draft path is the only send route.
 - IPC: `outbox:send(draftId)`, `outbox:undoSend(outboxId)` (also reachable via the undo stack), `outbox:listPending()` for the local Outbox page, and broadcast `outbox:changed` consumed by the renderer for refreshes and failure toasts.
 - Reply entry points: `r`/`a`/`f` commands (reader context) call `planReply` and open the composer prefilled; register in the registry (§5 keys).
 - Discovery surface: clicking the pending readout or invoking **Go to Outbox** replaces the current list/reader with the pending-state view; selecting an actionable row reopens the full-window composer. Preserve and restore the prior mailbox context like every other full-window task.

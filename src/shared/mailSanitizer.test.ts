@@ -10,6 +10,11 @@ describe('stripUnsafeQuoteCss', () => {
       'width:100%; height:100%'
     )
     expect(stripUnsafeQuoteCss('transform:translateY(-900px);color:red')).toBe('color:red')
+    expect(
+      stripUnsafeQuoteCss(
+        'translate:0 -900px;rotate:45deg;scale:20;offset-path:path("M 0 -900");text-indent:-900px;color:red'
+      )
+    ).toBe('color:red')
   })
 
   it('keeps the formatting that makes a quote readable', () => {
@@ -22,6 +27,21 @@ describe('stripUnsafeQuoteCss', () => {
     expect(stripUnsafeQuoteCss('margin-top:-500px;color:blue')).toBe('color:blue')
     expect(stripUnsafeQuoteCss('margin:0 -40px')).toBe('')
     expect(stripUnsafeQuoteCss('margin:0 auto;margin-bottom:12px')).toBe('margin:0 auto; margin-bottom:12px')
+  })
+
+  it('drops declarations that consume custom properties', () => {
+    expect(stripUnsafeQuoteCss('--m:-600px;margin:var(--m);color:var(--ink, red);padding:8px')).toBe(
+      '--m:-600px; padding:8px'
+    )
+    expect(stripUnsafeQuoteCss('margin:calc(8px + VAR(--m));border-left:2px solid #ccc')).toBe(
+      'border-left:2px solid #ccc'
+    )
+  })
+
+  it('drops CSS escapes before browsers can decode blocked identifiers', () => {
+    expect(
+      stripUnsafeQuoteCss('tr\\61nslate:0 -900px;margin-top:v\\61r(--m);text\\2d indent:-900px;color:red')
+    ).toBe('color:red')
   })
 
   it('matches vendor-prefixed forms of the same properties', () => {

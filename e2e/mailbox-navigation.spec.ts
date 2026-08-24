@@ -12,6 +12,34 @@ async function goTo(page: Page, chordKey: string): Promise<void> {
   await page.keyboard.press(chordKey)
 }
 
+async function createClosedDrafts(page: Page, count: number): Promise<void> {
+  await page.evaluate(
+    async (subjects) => {
+      for (const subject of subjects) {
+        const { id } = await window.attn.draft.save({
+          id: null,
+          kind: 'new',
+          to: [],
+          cc: [],
+          bcc: [],
+          subject,
+          bodyHtml: '',
+          bodyText: '',
+          attachments: [],
+          threadId: null,
+          sourceMessageId: null,
+          inReplyTo: null,
+          references: [],
+          quoteHtml: '',
+          quoteText: ''
+        })
+        await window.attn.draft.close(id)
+      }
+    },
+    Array.from({ length: count }, (_, index) => `Restorable draft ${index + 1}`)
+  )
+}
+
 test('every G chord reaches its mailbox and the header names it', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   const title = page.getByTestId('mailbox-title')
@@ -147,6 +175,33 @@ test('restores per-view selection and scroll across a round trip', async ({ app,
   await goTo(page, 'a')
   await expect(page.getByTestId('thread-row')).toHaveCount(10)
   await expect(selected).toHaveAttribute('data-thread-id', 't-research')
+  await expect.poll(async () => list.evaluate((element) => element.scrollTop)).toBe(scrollTop)
+})
+
+test('restores Drafts selection and scroll across a mailbox round trip', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await createClosedDrafts(page, 18)
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setContentSize(1100, 420)
+  })
+
+  await goTo(page, 'd')
+  const rows = page.getByTestId('draft-row')
+  await expect(rows).toHaveCount(18)
+  for (let step = 0; step < 12; step++) await page.keyboard.press('j')
+
+  const selected = page.locator('[data-testid="draft-row"][data-selected="true"]')
+  const selectedId = await selected.getAttribute('data-draft-id')
+  expect(selectedId).not.toBeNull()
+  const list = page.getByTestId('draft-list')
+  const scrollTop = await list.evaluate((element) => element.scrollTop)
+  expect(scrollTop).toBeGreaterThan(0)
+
+  await goTo(page, 'i')
+  await expect(page.getByTestId('mailbox-title')).toHaveText('Inbox')
+  await goTo(page, 'd')
+  await expect(rows).toHaveCount(18)
+  await expect(selected).toHaveAttribute('data-draft-id', selectedId ?? '')
   await expect.poll(async () => list.evaluate((element) => element.scrollTop)).toBe(scrollTop)
 })
 

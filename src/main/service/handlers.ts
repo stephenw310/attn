@@ -21,6 +21,7 @@ import type {
   InlineImageResult,
   ThreadListView
 } from '../../shared/mail'
+import { isThemePreference } from '../../shared/theme'
 import {
   actionQueueStatus,
   dropOutboxSendUndo,
@@ -70,6 +71,7 @@ import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
 import type { SnoozeScheduler } from '../scheduler'
+import { readSetting, writeSetting } from '../settings'
 import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
 import { OnDemandBodyHydrator } from '../sync/onDemandBodies'
@@ -300,6 +302,15 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const account = context.currentAccountId()
     if (!account || typeof query !== 'string') return []
     return searchContacts(context.db, account, query.slice(0, 200))
+  })
+  handle(IPC_CHANNELS.settingsGetTheme, () => {
+    const stored = readSetting(context.db, 'theme')
+    return isThemePreference(stored) ? stored : 'system'
+  })
+  handle(IPC_CHANNELS.settingsSetTheme, (_event, preference) => {
+    if (!isThemePreference(preference)) throw new Error('invalid theme preference')
+    writeSetting(context.db, 'theme', preference)
+    return preference
   })
   handle(IPC_CHANNELS.draftSave, (_event, draft) => {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')

@@ -30,7 +30,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
 | T29 inbox zero (F13) | **planned**, not started | nothing |
-| T30 light theme (F14) | **planned**, not started | nothing |
+| T30 built-in themes (F14) | **done**, completed 2026-08-23 | nothing |
 
 S2 settled the store shape needed for F3 mailbox views and S4, S1 moved that store into the utility process,
 and S4 closed the last sync correctness gap. The feature tasks are written up below, under
@@ -383,7 +383,7 @@ palette:
 A  T22 mailboxes ──> T27 splits ──> T28 chord guide ──> T29 inbox zero
 B  T23 FTS index ──> T24 search UI ──> T25 server search
    T26 palette   ── depends on A and B registering their commands, asserts the inventory last
-   T30 light theme ── independent, schedule it wherever it fits
+   T30 built-in themes ── independent, schedule it wherever it fits
 ```
 
 T22 goes first because S2 and S4 exist to serve it, because the store already answers its questions, and
@@ -861,19 +861,24 @@ The zero state appears only when the mailbox is genuinely empty, and verify is g
 
 ---
 
-## T30 — Light theme
+## T30 — Built-in themes
 
-**Status: not started.**
+**Status: done.**
 
 **Depends on:** nothing · **Parallel with:** everything · **Spec:** F14, D6
 
-### Design (decided)
+### Design (revised 2026-08-23)
 
 - The dark tokens already exist as semantic names in `app.css` (`--color-ground`, `--color-raised`,
-  `--color-ink`, `--color-accent`, and the rest). The light variant is a second value set over the same
-  names. If a component needs a new token to go light, the token is missing from the system and the fix is
-  the token, not a conditional in the component.
-- Follow the OS by default, with a manual override stored in `settings` and a "Switch theme" palette command.
+  `--color-ink`, `--color-accent`, and the rest). Every palette is another value set over the same names. If
+  a component needs a new token to change palettes, the token is missing from the system and the fix is the
+  token, not a conditional in the component.
+- Ship four curated palettes: Dark, Light, Midnight, and Sand. This is intentionally more
+  like VS Code's small built-in collection than a three-state System/Light/Dark switch. User-authored token
+  sets and accent editing remain v1.1 work.
+- Follow the OS by default by resolving System to the dark/light pair. A named palette is a manual
+  override stored in `settings` and does not change when the OS changes. Expose each choice in the account
+  menu and register it for the command palette.
 - **Mail rendering is the hard half.** HTML mail carries its own colors. The light theme leaves mail canvases
   alone, dark keeps the behavior `mailSurface.ts` ships today, and F14's per-message "view original" escape
   hatch stays. Do not guess at luminance inversion in v1.
@@ -882,13 +887,13 @@ The zero state appears only when the mailbox is genuinely empty, and verify is g
 
 - **Unit:** a check that renderer components carry no raw color literals outside the token file, which is
   what keeps the light theme from rotting one component at a time.
-- **E2e:** light-theme artifacts `inbox-light.png` and `reading-light.png`, plus an OS-preference switch
-  applying without a reload. Add both to the `AGENTS.md` list.
+- **E2e:** Light artifacts `inbox-light.png` and `reading-light.png`, persistence for a named theme,
+  and an OS-preference switch applying without a reload. Add both artifacts to the `AGENTS.md` list.
 
 ### Done when
 
-Both themes are legible across list, reader, composer, and HTML mail, the override persists across relaunch,
-and verify is green.
+All four themes are legible across list, reader, composer, and HTML mail, the override persists across
+relaunch, System reacts to OS changes without a reload, and verify is green.
 
 ---
 

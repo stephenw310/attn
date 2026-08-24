@@ -1,6 +1,6 @@
 // Read queries for the renderer. Plain Node module (no Electron imports).
 
-import { isValidEmail } from '../../shared/address'
+import { isValidEmail, normalizeEmailKey } from '../../shared/address'
 import {
   CONTACT_CANDIDATE_LIMIT,
   CONTACT_SEARCH_LIMIT,
@@ -380,6 +380,10 @@ export function getConversation(
     references_json: string | null
     trashed?: boolean
   }[]
+  const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
+    | { email: string }
+    | undefined
+  const selfEmail = normalizeEmailKey(account?.email ?? accountId)
 
   const messages: ConversationMsg[] = rows
     .flatMap((row) => {
@@ -398,7 +402,7 @@ export function getConversation(
       id: r.id,
       rfcMessageId: r.rfc_message_id,
       references: parseJson(r.references_json, []),
-      fromName: r.from_name ?? '',
+      fromName: r.from_email && normalizeEmailKey(r.from_email) === selfEmail ? 'Me' : (r.from_name ?? ''),
       fromEmail: r.from_email ?? '',
       at: r.internal_date ?? 0,
       recipients: parseJson(r.recipients_json, EMPTY_RECIPIENTS),
@@ -507,7 +511,7 @@ export function getConversationForDisplay(
           (message) =>
             canonicalBody.length > 0 &&
             !claimedConfirmedIds.has(message.id) &&
-            message.fromEmail.trim().toLowerCase() === account.email.trim().toLowerCase() &&
+            normalizeEmailKey(message.fromEmail) === normalizeEmailKey(account.email) &&
             Math.abs(message.at - row.updated_at) <= LEGACY_SENT_MATCH_WINDOW_MS &&
             canonicalSentBody(message.bodyText) === canonicalBody
         )

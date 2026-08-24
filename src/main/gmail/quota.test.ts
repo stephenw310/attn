@@ -51,6 +51,7 @@ describe('Gmail weighted quota scheduling', () => {
       ['GET', '/messages', 'messages.list', 5],
       ['GET', '/messages/m1', 'messages.get', 20],
       ['GET', '/messages/m1/attachments/a1', 'messages.attachments.get', 20],
+      ['GET', '/settings/sendAs/me%40example.com', 'settings.sendAs.get', 1],
       ['GET', '/drafts', 'drafts.list', 5],
       ['POST', '/drafts', 'drafts.create', 10],
       ['GET', '/drafts/d1', 'drafts.get', 20],

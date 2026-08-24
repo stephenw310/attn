@@ -135,7 +135,7 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
       </div>
 
       {invalid && (
-        <div className="absolute left-13 top-full z-20 mt-1 rounded-md bg-danger px-2 py-1 text-[11px] text-white">
+        <div className="absolute left-13 top-full z-20 mt-1 rounded-md bg-danger px-2 py-1 text-[11px] text-on-danger">
           {invalid} is not a valid email address
         </div>
       )}

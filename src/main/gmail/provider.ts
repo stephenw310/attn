@@ -9,6 +9,7 @@ import type {
   ProviderLabel,
   ProviderProfile,
   ProviderRequestOptions,
+  ProviderSendAs,
   ProviderSendResult,
   RfcMessageMatch,
   ThreadIdPage
@@ -219,6 +220,10 @@ export class GmailMailProvider implements MailProvider {
 
   getProfile(options?: ProviderRequestOptions): Promise<ProviderProfile> {
     return this.client.get('/profile', undefined, options)
+  }
+
+  getSendAs(email: string, options?: ProviderRequestOptions): Promise<ProviderSendAs> {
+    return this.client.get(`/settings/sendAs/${encodeURIComponent(email)}`, undefined, options)
   }
 
   async listLabels(options?: ProviderRequestOptions): Promise<ProviderLabel[]> {

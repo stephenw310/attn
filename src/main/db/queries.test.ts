@@ -304,6 +304,10 @@ describe('display conversation queries', () => {
     const confirmed = getConversationForDisplay(db, 'account', 'thread-1', 'unavailable')
     expect(confirmed?.messages.map((message) => message.id)).toEqual(['message-1', 'message-2'])
     expect(confirmed?.messages.some((message) => message.pending)).toBe(false)
+    expect(confirmed?.messages.at(-1)).toMatchObject({
+      fromName: 'Me',
+      fromEmail: 'test@example.com'
+    })
   })
 
   it('heals a stale draft message id without appending the old projection after newer mail', () => {

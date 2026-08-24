@@ -4,12 +4,36 @@ import { dateGroup } from '../dateGroup'
 import type { DisplayThread } from '../mailDisplay'
 
 const LABEL_PALETTE = [
-  { backgroundColor: '#44351b', borderColor: '#765b26', color: '#ffd789' },
-  { backgroundColor: '#193b4a', borderColor: '#28647d', color: '#8cdbff' },
-  { backgroundColor: '#263d2a', borderColor: '#3f6a48', color: '#a9e8b3' },
-  { backgroundColor: '#402b43', borderColor: '#704a76', color: '#e6abe9' },
-  { backgroundColor: '#452a2d', borderColor: '#75464b', color: '#ffadb3' },
-  { backgroundColor: '#28334c', borderColor: '#465985', color: '#b8c9ff' }
+  {
+    backgroundColor: 'var(--attn-label-1-bg)',
+    borderColor: 'var(--attn-label-1-edge)',
+    color: 'var(--attn-label-1-ink)'
+  },
+  {
+    backgroundColor: 'var(--attn-label-2-bg)',
+    borderColor: 'var(--attn-label-2-edge)',
+    color: 'var(--attn-label-2-ink)'
+  },
+  {
+    backgroundColor: 'var(--attn-label-3-bg)',
+    borderColor: 'var(--attn-label-3-edge)',
+    color: 'var(--attn-label-3-ink)'
+  },
+  {
+    backgroundColor: 'var(--attn-label-4-bg)',
+    borderColor: 'var(--attn-label-4-edge)',
+    color: 'var(--attn-label-4-ink)'
+  },
+  {
+    backgroundColor: 'var(--attn-label-5-bg)',
+    borderColor: 'var(--attn-label-5-edge)',
+    color: 'var(--attn-label-5-ink)'
+  },
+  {
+    backgroundColor: 'var(--attn-label-6-bg)',
+    borderColor: 'var(--attn-label-6-edge)',
+    color: 'var(--attn-label-6-ink)'
+  }
 ] as const
 
 function labelColor(labelId: string): (typeof LABEL_PALETTE)[number] {

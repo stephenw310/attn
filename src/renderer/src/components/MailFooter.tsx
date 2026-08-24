@@ -89,7 +89,7 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
   return (
     <footer
       data-testid="mail-footer"
-      className="relative z-40 flex min-h-11 items-center gap-4 border-t border-white/10 bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-[0_-8px_24px_rgba(0,0,0,0.32)]"
+      className="relative z-40 flex min-h-11 items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
     >
       <div data-testid="footer-shortcuts" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
         {footerShortcuts(readerOpen, outboxOpen, composing).map((shortcut) => (

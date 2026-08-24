@@ -6,6 +6,7 @@ import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
+import { readAccountSetting, writeAccountSetting } from '../settings'
 import { isOfflineFailure } from '../sync/failure'
 import { persistThread } from '../sync/persist'
 import type { MailProvider, ProviderMimeUpload } from '../sync/provider'
@@ -22,6 +23,7 @@ const SECONDARY_CHECKS = 6
 const MAX_ATTACHMENT_SOURCE_ATTEMPTS = 8
 const OFFLINE_RECHECK_MS = 30_000
 const STOP_TIMEOUT_MS = 5_000
+const SEND_AS_DISPLAY_NAME_SETTING = 'sendAsDisplayName'
 export const SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 
 interface SendRow {
@@ -537,6 +539,7 @@ export class OutboxSender {
     provider: MailProvider,
     signal?: AbortSignal
   ): Promise<{ raw: string; updateMime?: ProviderMimeUpload }> {
+    const accountName = await this.senderDisplayName(row.account_id, provider, signal)
     const storedAttachments = parseStoredDraftAttachments(row.attachments_json)
     const draft = {
       to: parseJson<MailAddress[]>(row.to_json),
@@ -552,6 +555,7 @@ export class OutboxSender {
     }
     const options = {
       accountEmail: row.account_id,
+      accountName,
       rfcMessageId: row.rfc_message_id,
       date: new Date(row.send_at ?? row.updated_at)
     }
@@ -601,6 +605,26 @@ export class OutboxSender {
             })
           })()
       }
+    }
+  }
+
+  private async senderDisplayName(
+    accountId: string,
+    provider: MailProvider,
+    signal?: AbortSignal
+  ): Promise<string> {
+    if (!provider.getSendAs) return ''
+    const cached = readAccountSetting(this.db, accountId, SEND_AS_DISPLAY_NAME_SETTING)
+    try {
+      const sendAs = await provider.getSendAs(accountId, { signal, priority: 'send' })
+      const displayName = sendAs.displayName?.trim() ?? ''
+      writeAccountSetting(this.db, accountId, SEND_AS_DISPLAY_NAME_SETTING, displayName)
+      return displayName
+    } catch (error) {
+      if (signal?.aborted) throw error
+      if (cached === undefined) throw error
+      console.warn(`[outbox] send-as refresh failed for ${accountId}: ${errorMessage(error)}`)
+      return cached
     }
   }
 

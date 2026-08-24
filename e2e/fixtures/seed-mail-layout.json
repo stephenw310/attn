@@ -1,0 +1,95 @@
+{
+  "account": "seed@attn.test",
+  "threads": [
+    {
+      "id": "t-layout-plain",
+      "messages": [
+        {
+          "id": "m-layout-plain",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:00",
+          "from": "Plain Sender <plain@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Plain layout",
+          "bodyText": "Plain text keeps its message-card padding."
+        }
+      ]
+    },
+    {
+      "id": "t-layout-rich",
+      "messages": [
+        {
+          "id": "m-layout-rich",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:00",
+          "from": "Table Sender <table@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Padded rich fragment",
+          "bodyHtml": "<div id=compact-card style=\"width:600px;background:#eef2ff\">A fixed-width card does not own the canvas.</div>"
+        }
+      ]
+    },
+    {
+      "id": "t-layout-newsletter",
+      "messages": [
+        {
+          "id": "m-layout-newsletter",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "11:00",
+          "from": "Newsletter Sender <newsletter@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Full-bleed newsletter",
+          "bodyHtml": "<table id=newsletter-canvas width=600 style=\"width:100%;background:#dbeafe\"><tr><td style=padding:24px>Newsletter canvas reaches both edges.</td></tr></table>"
+        }
+      ]
+    },
+    {
+      "id": "t-layout-sender-padding",
+      "messages": [
+        {
+          "id": "m-layout-sender-padding",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "12:00",
+          "from": "Styled Sender <styled@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Sender-owned padding",
+          "bodyHtml": "<style>body{padding:31px!important;background:#eef2ff}</style><div id=styled-body>Sender padding wins.</div>"
+        }
+      ]
+    },
+    {
+      "id": "t-layout-wrapper-canvas",
+      "messages": [
+        {
+          "id": "m-layout-wrapper-canvas",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "13:00",
+          "from": "Wrapper Sender <wrapper@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Discarded wrapper canvas",
+          "bodyHtml": "<html style=\"background:#eef2ff\"><body bgcolor=#eef2ff><table id=wrapper-content><tr><td>Wrapper attributes do not survive fragment sanitization.</td></tr></table></body></html>"
+        }
+      ]
+    },
+    {
+      "id": "t-layout-colored-reply",
+      "messages": [
+        {
+          "id": "m-layout-colored-reply",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "14:00",
+          "from": "Reply Sender <reply@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Color-coded reply",
+          "bodyHtml": "<div>Thanks, that answers my questions.</div><blockquote type=cite><div id=quoted-question style=\"color:#202124\">Is any other paperwork required?</div><font id=quoted-answer color=#0056d6>No other paperwork for now.</font><div><font id=quoted-answer-dark color=#0042a9>Most likely sometime in October.</font></div></blockquote>"
+        }
+      ]
+    }
+  ]
+}

@@ -140,25 +140,35 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   await expect(frameBody.locator('body')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(frameBody.locator('body')).toHaveCSS('color', 'rgb(233, 234, 238)')
   await expect(frameBody.locator('#plain-html-copy')).toContainText('Your order total was $24.00.')
+  await expect(frameBody.locator('#plain-export-styles')).toHaveCount(0)
+  await expect(frameBody.locator('#plain-layout')).not.toHaveAttribute('bgcolor')
+  await expect(frameBody.locator('#plain-layout')).toHaveAttribute('width', '100%')
+  await expect(frameBody.locator('#plain-html-copy').locator('xpath=ancestor::font')).toHaveAttribute(
+    'face',
+    'garamond, times new roman, serif'
+  )
+  await expect(frameBody.locator('#plain-inline-image')).toHaveCount(1)
   const generatedLink = frameBody.getByRole('link', {
     name: 'https://northstar.test/orders/24.pdf'
   })
   await expect(generatedLink).toHaveAttribute('href', 'https://northstar.test/orders/24.pdf')
   await expect(generatedLink).toHaveAttribute('target', '_blank')
   await expect(generatedLink).toHaveCSS('color', 'rgb(96, 165, 250)')
-  expect(
-    await frame.evaluate((element) => {
-      const iframe = element as HTMLIFrameElement
-      const marker = iframe.contentDocument?.querySelector<HTMLElement>('[data-attn-trim-start]')
-      const decorated = iframe.contentDocument?.querySelector<HTMLElement>('#decorated-signature-copy')
-      const prefix = iframe.contentDocument?.querySelector<HTMLElement>('.gmail_signature_prefix')
-      return marker && decorated && prefix
-        ? Math.abs(marker.getBoundingClientRect().bottom - iframe.clientHeight) < 1 &&
-            decorated.getBoundingClientRect().top >= iframe.clientHeight &&
-            prefix.getBoundingClientRect().top >= iframe.clientHeight
-        : false
-    })
-  ).toBe(true)
+  await expect
+    .poll(() =>
+      frame.evaluate((element) => {
+        const iframe = element as HTMLIFrameElement
+        const marker = iframe.contentDocument?.querySelector<HTMLElement>('[data-attn-trim-start]')
+        const decorated = iframe.contentDocument?.querySelector<HTMLElement>('#decorated-signature-copy')
+        const prefix = iframe.contentDocument?.querySelector<HTMLElement>('.gmail_signature_prefix')
+        return marker && decorated && prefix
+          ? Math.abs(marker.getBoundingClientRect().bottom - iframe.clientHeight) < 1 &&
+              decorated.getBoundingClientRect().top >= iframe.clientHeight - 1 &&
+              prefix.getBoundingClientRect().top >= iframe.clientHeight - 1
+          : false
+      })
+    )
+    .toBe(true)
   const toggle = page.getByTestId('mail-trim-toggle')
   const frameLeft = await frame.evaluate((element) => element.getBoundingClientRect().left)
   const toggleLeft = await toggle.evaluate((element) => element.getBoundingClientRect().left)

@@ -39,7 +39,7 @@ interface InboxProps {
 
 /** Selection and scroll survive a round trip away from each view (SPEC F3). */
 interface ViewRecord {
-  threadId: string | null
+  rowId: string | null
   index: number
   scrollTop: number
 }
@@ -386,14 +386,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const saveActiveViewRecord = useCallback(() => {
     const current = activeViewRef.current
-    if (current === 'drafts' || current === 'outbox') return
+    if (current === 'outbox') return
     // While the reader is open the list is display:none and reads scrollTop 0;
     // keep the last visible offset instead of clobbering it.
     const scrollTop = readerOpenRef.current
       ? (viewStateRef.current.get(current)?.scrollTop ?? 0)
       : (listElRef.current?.scrollTop ?? 0)
     viewStateRef.current.set(current, {
-      threadId: selectedThreadIdRef.current,
+      rowId: current === 'drafts' ? selectedDraftIdRef.current : selectedThreadIdRef.current,
       index: selectedIndexRef.current,
       scrollTop
     })
@@ -404,10 +404,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       const previous = activeViewRef.current
       if (previous !== next) saveActiveViewRecord()
       activeViewRef.current = next
-      selectedDraftIdRef.current = null
-      const record = viewStateRef.current.get(next) ?? { threadId: null, index: 0, scrollTop: 0 }
-      selectedThreadIdRef.current = next === 'drafts' ? null : record.threadId
-      pendingViewRestoreRef.current = next === 'drafts' ? null : { view: next, record }
+      const record = viewStateRef.current.get(next) ?? { rowId: null, index: 0, scrollTop: 0 }
+      selectedDraftIdRef.current = next === 'drafts' ? record.rowId : null
+      selectedThreadIdRef.current = next === 'drafts' ? null : record.rowId
+      pendingViewRestoreRef.current = { view: next, record }
       // Reader projections differ per mailbox: a Trash reader must never reuse
       // an All Mail conversation, so drop the cache when the projection changes.
       if (conversationMailboxFor(previous) !== conversationMailboxFor(next)) invalidateConversations()
@@ -415,7 +415,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       if (target) void refreshMailboxView(target).catch(() => {})
       clearSelection()
       setView(next)
-      setSelectedIndex(next === 'drafts' ? 0 : Math.max(0, record.index))
+      setSelectedIndex(Math.max(0, record.index))
       setReaderOpen(false)
       setSnoozeOpen(false)
       setLabelTargetIds(null)
@@ -458,14 +458,17 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (!pending || pending.view !== view || !viewRowsLoaded) return
     pendingViewRestoreRef.current = null
     const record = pending.record
-    const restoredIndex = record.threadId ? threads.findIndex((thread) => thread.id === record.threadId) : -1
+    const rowIds =
+      view === 'drafts' ? realDrafts.map((draft) => draft.id) : threads.map((thread) => thread.id)
+    const restoredIndex = record.rowId ? rowIds.indexOf(record.rowId) : -1
     const nextIndex =
-      restoredIndex >= 0 ? restoredIndex : Math.max(0, Math.min(record.index, threads.length - 1))
-    selectedThreadIdRef.current = threads[nextIndex]?.id ?? null
+      restoredIndex >= 0 ? restoredIndex : Math.max(0, Math.min(record.index, rowIds.length - 1))
+    selectedDraftIdRef.current = view === 'drafts' ? (rowIds[nextIndex] ?? null) : null
+    selectedThreadIdRef.current = view === 'drafts' ? null : (rowIds[nextIndex] ?? null)
     setSelectedIndex(nextIndex)
     const list = listElRef.current
     if (list) list.scrollTop = record.scrollTop
-  }, [threads, view, viewRowsLoaded])
+  }, [realDrafts, threads, view, viewRowsLoaded])
 
   const openOutboxNow = useCallback(() => {
     if (view === 'outbox') return
@@ -845,6 +848,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             readerOpen={readerOpen}
             selectedIndex={selectedIndex}
             selectedRowRef={selectedRowRef}
+            listRef={listElRef}
             onOpen={(index) => {
               setSelectedIndex(index)
               const draft = realDrafts[index]

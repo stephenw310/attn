@@ -8,6 +8,7 @@ import {
 } from 'electron'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
+import { isThemePreference, type ThemePreference } from '../shared/theme'
 import type { PendingFocus } from './notify'
 import { takePendingFocus } from './notify'
 import type { ServiceSupervisor } from './service/supervisor'
@@ -28,6 +29,7 @@ export interface IpcContext {
   signOut: () => AuthStatus
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
+  setThemePreference: (preference: ThemePreference) => void
   pickAttachmentPaths?: () => Promise<string[]>
 }
 
@@ -39,11 +41,17 @@ export function registerIpc(context: IpcContext): () => void {
     IPC_CHANNELS.draftPickAttachments,
     IPC_CHANNELS.mailDownloadAttachment,
     IPC_CHANNELS.mailTakePendingFocus,
+    IPC_CHANNELS.settingsSetTheme,
     IPC_CHANNELS.syncGetState
   ])
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
   handle(IPC_CHANNELS.authSignOut, () => context.signOut())
+  handle(IPC_CHANNELS.settingsSetTheme, (_event, preference) => {
+    if (!isThemePreference(preference)) throw new Error('invalid theme preference')
+    context.setThemePreference(preference)
+    return context.service.invoke(IPC_CHANNELS.settingsSetTheme, preference)
+  })
   handle(IPC_CHANNELS.draftPickAttachments, async (event, id) => {
     let paths: string[]
     if (context.pickAttachmentPaths) paths = await context.pickAttachmentPaths()

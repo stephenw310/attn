@@ -36,12 +36,15 @@ import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import { escapeHtmlText as escapeHtml } from '../../../shared/html'
+import type { ThemeAppearance } from '../../../shared/theme'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
 import { formatBytes } from '../formatBytes'
 import type { ShowToast } from '../hooks/useToast'
+import { forceLightMailCss } from '../mailCss'
 import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
+import { useTheme } from '../theme'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
@@ -144,18 +147,20 @@ function plainTextForEditor(value: string): string {
   return `<p>${escapeHtml(value).replace(/\r\n?|\n/g, '<br>')}</p>`
 }
 
-function quoteSrcDoc(body: string, surface: MailSurface): string {
-  const light = surface === 'light'
+function quoteSrcDoc(body: string, surface: MailSurface, appearance: ThemeAppearance): string {
+  const senderCanvas = surface === 'light'
+  const light = senderCanvas || appearance === 'light'
   const nativeContrast = light
     ? ''
     : 'body,body :where(*){color:inherit!important;background-color:transparent!important;background-image:none!important}body a{color:#60a5fa!important}'
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${light ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${light ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${senderCanvas ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${senderCanvas ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
 }
 
 function InlineQuote({ draftId, html }: { draftId: string; html: string }): React.JSX.Element | null {
   const [expanded, setExpanded] = useState(false)
+  const { appearance } = useTheme()
   const surface = useMemo(() => mailSurfaceForHtml(html), [html])
-  const [srcDoc, setSrcDoc] = useState(() => quoteSrcDoc('', surface))
+  const [srcDoc, setSrcDoc] = useState(() => quoteSrcDoc('', surface, appearance))
   const [height, setHeight] = useState(1)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
@@ -210,7 +215,12 @@ function InlineQuote({ draftId, html }: { draftId: string; html: string }): Reac
     if (!html) return
     let cancelled = false
     const document = new DOMParser().parseFromString(sanitizeOutgoingHtml(html), 'text/html')
-    if (surface === 'native') normalizeNativeMailDocument(document.body)
+    if (surface === 'native' && appearance === 'dark') normalizeNativeMailDocument(document.body)
+    if (appearance === 'light' || surface === 'light') {
+      document.querySelectorAll('style').forEach((style) => {
+        style.textContent = forceLightMailCss(style.textContent ?? '')
+      })
+    }
     const pending = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
       const source = image.getAttribute('src') ?? ''
       if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
@@ -218,19 +228,19 @@ function InlineQuote({ draftId, html }: { draftId: string; html: string }): Reac
       image.setAttribute('src', TRANSPARENT_IMAGE)
       return [{ contentId, image }]
     })
-    setSrcDoc(quoteSrcDoc(document.body.innerHTML, surface))
+    setSrcDoc(quoteSrcDoc(document.body.innerHTML, surface, appearance))
     void Promise.all(
       pending.map(async ({ contentId, image }) => {
         const result = await window.attn?.draft.getInlineImage(draftId, contentId)
         if (result && 'dataUrl' in result) image.setAttribute('src', result.dataUrl)
       })
     ).then(() => {
-      if (!cancelled) setSrcDoc(quoteSrcDoc(document.body.innerHTML, surface))
+      if (!cancelled) setSrcDoc(quoteSrcDoc(document.body.innerHTML, surface, appearance))
     })
     return () => {
       cancelled = true
     }
-  }, [draftId, html, surface])
+  }, [appearance, draftId, html, surface])
 
   const renderedQuote = expanded ? srcDoc : null
   useLayoutEffect(() => {
@@ -267,10 +277,11 @@ function InlineQuote({ draftId, html }: { draftId: string; html: string }): Reac
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
           data-testid="composer-quote"
           data-surface={surface}
-          className={`block w-full border-0 ${surface === 'light' ? 'bg-white' : 'bg-transparent'}`}
+          data-appearance={appearance}
+          className={`block w-full border-0 ${surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'}`}
           srcDoc={srcDoc}
           onLoad={(event) => observe(event.currentTarget)}
-          style={{ colorScheme: surface === 'light' ? 'light' : 'dark', height }}
+          style={{ colorScheme: surface === 'light' ? 'light' : appearance, height }}
         />
       )}
       <button
@@ -721,7 +732,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <section
       className={`${
         mode === 'inline'
-          ? 'flex w-full flex-none flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-[0_18px_44px_rgba(0,0,0,0.24)]'
+          ? 'flex w-full flex-none flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-composer'
           : 'flex min-h-0 flex-1 flex-col bg-raised/35'
       } ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}

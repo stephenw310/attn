@@ -7,6 +7,7 @@ import {
   sanitizeMailHtml,
   MAIL_TRIM_MARKER as TRIM_MARKER
 } from '../../shared/mailSanitizer'
+import type { ThemeAppearance } from '../../shared/theme'
 import { forceLightMailCss } from './mailCss'
 import {
   type InlineImageReference,
@@ -14,13 +15,15 @@ import {
   normalizedContentId
 } from './mailInlineImages'
 import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
-import { type MailSurface, normalizeNativeMailDocument } from './mailSurface'
+import { type MailLayout, type MailSurface, normalizeNativeMailDocument } from './mailSurface'
 import { findSignatureLineIndex, findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
   bodyText: string
   bodyHtml: string | null
   surface: MailSurface
+  layout: MailLayout
+  appearance: ThemeAppearance
   threadId: string
   messageId: string
   attachments: MessageAttachment[]
@@ -38,14 +41,16 @@ const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, 
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
-function frameReset(surface: MailSurface): string {
-  const light = surface === 'light'
+function frameReset(surface: MailSurface, layout: MailLayout, appearance: ThemeAppearance): string {
+  const senderCanvas = surface === 'light'
+  const light = senderCanvas || appearance === 'light'
+  const bodyPadding = senderCanvas && layout === 'padded' ? '12px' : '0'
   return `
   :root { color-scheme: only ${light ? 'light' : 'dark'}; }
   html, body {
     margin: 0;
     padding: 0;
-    background: ${light ? '#fff' : 'transparent'};
+    background: ${senderCanvas ? '#fff' : 'transparent'};
     color: ${light ? '#202124' : '#e9eaee'};
   }
   html { overflow-x: auto; overflow-y: hidden; }
@@ -53,10 +58,8 @@ function frameReset(surface: MailSurface): string {
   body {
     font: ${light ? '14px/1.6 Arial, Helvetica, sans-serif' : '15px/1.7 Arial, Helvetica, sans-serif'};
     overflow-wrap: break-word;
-  }
-  #attn-mail-body {
     box-sizing: border-box;
-    padding: ${light ? '12px' : '0'} !important;
+    padding: ${bodyPadding};
   }
   ${
     light
@@ -64,9 +67,11 @@ function frameReset(surface: MailSurface): string {
       : `
   #attn-mail-body,
   #attn-mail-body :where(*) {
-    color: inherit !important;
     background-color: transparent !important;
     background-image: none !important;
+  }
+  #attn-mail-body :is(blockquote, .gmail_quote) {
+    color: #9da2ac;
   }
   #attn-mail-body a {
     color: #60a5fa !important;
@@ -157,7 +162,11 @@ function findHtmlTrimStart(content: DocumentFragment): Node | null {
   return null
 }
 
-function sanitizeToTemplate(html: string, surface: MailSurface): HTMLTemplateElement | null {
+function sanitizeToTemplate(
+  html: string,
+  surface: MailSurface,
+  appearance: ThemeAppearance
+): HTMLTemplateElement | null {
   if (!html.trim()) return null
   const clean = sanitizeMailHtml(DOMPurify, html)
 
@@ -165,12 +174,12 @@ function sanitizeToTemplate(html: string, surface: MailSurface): HTMLTemplateEle
   template.innerHTML = clean
   template.content.querySelectorAll('style').forEach((style) => {
     const frozen = freezeViewportHeightUnits(style.textContent ?? '')
-    style.textContent = surface === 'light' ? forceLightMailCss(frozen) : frozen
+    style.textContent = surface === 'light' || appearance === 'light' ? forceLightMailCss(frozen) : frozen
   })
   template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
   })
-  if (surface === 'native') normalizeNativeMailDocument(template.content)
+  if (surface === 'native' && appearance === 'dark') normalizeNativeMailDocument(template.content)
   template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
     const normalizedHref = normalizeMailLink(link.getAttribute('href') ?? '')
     if (normalizedHref === null) link.removeAttribute('href')
@@ -214,9 +223,11 @@ function cidReferences(html: string): InlineImageReference[] {
 function makeSrcDoc(
   html: string,
   inlineImages: ReadonlyMap<string, string>,
-  surface: MailSurface
+  surface: MailSurface,
+  layout: MailLayout,
+  appearance: ThemeAppearance
 ): string | null {
-  const template = sanitizeToTemplate(html, surface)
+  const template = sanitizeToTemplate(html, surface, appearance)
   if (!template) return null
   replaceCidSources(template.content, inlineImages)
   template.content.querySelectorAll('img').forEach((image) => {
@@ -229,10 +240,11 @@ function makeSrcDoc(
     marker.setAttribute(TRIM_MARKER, '')
     trimStart.parentNode?.insertBefore(marker, trimStart)
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${surface === 'light' ? 'light' : 'dark'}"><base target="_blank"><style>${frameReset(surface)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
+  const renderedAppearance = surface === 'light' ? 'light' : appearance
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${renderedAppearance}"><base target="_blank"><style>${frameReset(surface, layout, appearance)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
 }
 
-function LinkedMailText({ text }: { text: string }): React.JSX.Element {
+function LinkedMailText({ text, lightSurface }: { text: string; lightSurface: boolean }): React.JSX.Element {
   let offset = 0
   const content = mailTextParts(text).map((part) => {
     const start = offset
@@ -243,7 +255,7 @@ function LinkedMailText({ text }: { text: string }): React.JSX.Element {
         href={part.href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[#60a5fa]"
+        className={lightSurface ? 'text-mail-light-link' : 'text-mail-link'}
       >
         {part.text}
       </a>
@@ -289,7 +301,7 @@ function TrimToggle({
         event.currentTarget.blur()
       }}
       className={`cursor-pointer border-0 bg-transparent px-0.5 text-sm font-normal tracking-normal ${
-        lightSurface ? 'text-[#6b7280] hover:text-[#202124]' : 'text-ink-faint hover:text-ink'
+        lightSurface ? 'text-mail-light-ink-dim hover:text-mail-light-ink' : 'text-ink-faint hover:text-ink'
       } ${className}`}
       style={style}
       title={label}
@@ -303,6 +315,8 @@ export function MessageBody({
   bodyText,
   bodyHtml,
   surface,
+  layout,
+  appearance,
   threadId,
   messageId,
   attachments,
@@ -317,8 +331,8 @@ export function MessageBody({
   const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
   const watchedImagesRef = useRef(new WeakSet<HTMLImageElement>())
   const srcDoc = useMemo(
-    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface)),
-    [bodyHtml, surface]
+    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface, layout, appearance)),
+    [appearance, bodyHtml, layout, surface]
   )
 
   const revealLoadedImages = useCallback((doc: Document) => {
@@ -507,7 +521,7 @@ export function MessageBody({
 
   if (srcDoc === null || oversized) {
     const lightSurface = surface === 'light'
-    const surfaceClass = lightSurface ? 'p-3 text-[#202124]' : 'text-ink'
+    const surfaceClass = lightSurface ? 'p-3 text-mail-light-ink' : 'text-ink'
     const trimIndex = findTrimIndex(bodyText)
     if (trimIndex === null) {
       return (
@@ -515,7 +529,7 @@ export function MessageBody({
           data-testid="plain-text-body"
           className={`whitespace-pre-wrap leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
         >
-          <LinkedMailText text={bodyText} />
+          <LinkedMailText text={bodyText} lightSurface={lightSurface} />
         </div>
       )
     }
@@ -527,7 +541,7 @@ export function MessageBody({
         className={`leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
       >
         <div data-testid="plain-text-visible" className="whitespace-pre-wrap">
-          <LinkedMailText text={visibleText} />
+          <LinkedMailText text={visibleText} lightSurface={lightSurface} />
         </div>
         <TrimToggle
           expanded={expanded}
@@ -537,7 +551,7 @@ export function MessageBody({
         />
         {expanded && (
           <div data-testid="plain-text-trimmed" className="whitespace-pre-wrap">
-            <LinkedMailText text={trimmedText} />
+            <LinkedMailText text={trimmedText} lightSurface={lightSurface} />
           </div>
         )}
       </div>
@@ -548,14 +562,16 @@ export function MessageBody({
     <div
       data-testid="html-body-container"
       data-surface={surface}
-      className={`relative min-w-0 ${surface === 'light' ? 'bg-white' : 'bg-transparent'}`}
+      data-layout={layout}
+      data-appearance={appearance}
+      className={`relative min-w-0 ${surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'}`}
     >
       {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
         <TrimToggle
           expanded={expanded}
           lightSurface={surface === 'light'}
           onToggle={onToggleTrim}
-          className={`absolute z-10 h-7 ${surface === 'light' ? 'left-3' : 'left-0'}`}
+          className={`absolute z-10 h-7 ${surface === 'light' && layout === 'padded' ? 'left-3' : 'left-0'}`}
           style={{ top: measurement.trimTop }}
         />
       )}
@@ -566,9 +582,9 @@ export function MessageBody({
         sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         srcDoc={srcDoc}
         onLoad={onLoad}
-        className={`block w-full border-0 ${surface === 'light' ? 'bg-white' : 'bg-transparent'}`}
+        className={`block w-full border-0 ${surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'}`}
         style={{
-          colorScheme: surface === 'light' ? 'light' : 'dark',
+          colorScheme: surface === 'light' ? 'light' : appearance,
           height: height ?? 1,
           visibility: height === null ? 'hidden' : 'visible'
         }}

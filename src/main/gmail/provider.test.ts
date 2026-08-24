@@ -2,6 +2,24 @@ import { describe, expect, it, vi } from 'vitest'
 import type { GmailClient } from './client'
 import { GmailMailProvider } from './provider'
 
+describe('GmailMailProvider.getSendAs', () => {
+  it('reads the sender identity for the exact account address', async () => {
+    const get = vi.fn(async () => ({
+      sendAsEmail: 'me+alias@example.com',
+      displayName: 'Chao Zhou',
+      isPrimary: true
+    }))
+    const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+
+    await expect(provider.getSendAs('me+alias@example.com', { priority: 'send' })).resolves.toMatchObject({
+      displayName: 'Chao Zhou'
+    })
+    expect(get).toHaveBeenCalledWith('/settings/sendAs/me%2Balias%40example.com', undefined, {
+      priority: 'send'
+    })
+  })
+})
+
 describe('GmailMailProvider.listThreadIds', () => {
   it('passes explicit labels without silently adding INBOX', async () => {
     const get = vi.fn(async () => ({ threads: [{ id: 'sent-1' }], resultSizeEstimate: 42 }))
