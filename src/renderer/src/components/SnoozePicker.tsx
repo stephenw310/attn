@@ -32,7 +32,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
     <>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled by the app-level picker guard */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is the pointer dismissal path */}
-      <div className="fixed inset-0 z-50 bg-[rgba(8,9,11,0.72)]" onClick={onCancel} />
+      <div className="fixed inset-0 z-50 bg-overlay" onClick={onCancel} />
       <section
         ref={dialogRef}
         role="dialog"
@@ -40,7 +40,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
         aria-labelledby="snooze-title"
         data-testid="snooze-picker"
         tabIndex={-1}
-        className="fixed top-1/2 left-1/2 z-[60] w-[min(430px,90vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-edge bg-raised p-3 shadow-[0_24px_64px_rgba(0,0,0,0.65)] focus:outline-none"
+        className="fixed top-1/2 left-1/2 z-[60] w-[min(430px,90vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-edge bg-raised p-3 shadow-dialog focus:outline-none"
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault()

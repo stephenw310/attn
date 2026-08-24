@@ -37,7 +37,7 @@ This spec covers **v1: the inbox experience only**. Calendar is explicitly out o
 - Instant local full-text search with operators
 - Native notifications + dock/taskbar unread badge
 - Background mode: launch at login, tray/menu-bar presence (F16)
-- Inbox-zero state, light/dark themes
+- Inbox-zero state, curated built-in themes
 - Offline action queue, background sync
 - Packaged installers for macOS + Windows, auto-update
 
@@ -55,7 +55,7 @@ This spec covers **v1: the inbox experience only**. Calendar is explicitly out o
 | Team features (shared threads, comments) | Requires backend + multi-tenant model |
 | Unified inbox across accounts | Multi-account itself is v1.1 (see D4) |
 | Full keyboard remapping UI | Post-v1; v1 ships fixed defaults |
-| Custom themes (user-defined palettes / accent colors) | Post-v1 (v1.1 candidate); v1 ships Dispatch dark + the derived light variant (F14). D6's semantic token system is the enabler — a custom theme is just another token set |
+| Custom themes (user-defined palettes / accent colors) | Post-v1 (v1.1 candidate); v1 ships four curated palettes (F14). D6's semantic token system is the enabler — a custom theme is just another token set |
 
 ---
 
@@ -79,7 +79,7 @@ Serverless roadmap: **v1** pure client → **v1.5** optional *companion Apps Scr
 
 **D5 — SQLite + FTS5 as the local store.** Message headers for the account's whole lifetime (staged: interactive windows first, then a low-priority background sweep — §9 #17), full bodies for the last 90 days of Inbox mail, older bodies fetched on demand and cached permanently. Attachment bytes are never bulk-synced: metadata rides with full-format fetches, content downloads on demand. Search runs entirely locally against FTS5.
 
-**D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. Layout (revised 2026-08-12 after M1 dogfood, 2026-08-14 for the new-message composer, and 2026-08-15 for thread drafting, §9 #7/#9/#11/#13): full-width list ⇄ **full-window conversation or new-message composer** — the active task owns the window; `Esc` or the visible Back/List control restores the prior view at the same selection and scroll position. Reply, reply-all, and forward are the deliberate exception: their composer is the final inline card beneath the conversation so the source mail remains visible while writing. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing competing panes. This supersedes the centered overlay, the interim reading split, and the docked new-message composer; simultaneous list/reader variants are rejected. Inbox splits render as a horizontal strip (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Settings live behind the account-chip menu (Settings, keyboard shortcuts, split rules, sign out) — no hamburger. Light theme derives from the same tokens at M3 (F14).
+**D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. Layout (revised 2026-08-12 after M1 dogfood, 2026-08-14 for the new-message composer, and 2026-08-15 for thread drafting, §9 #7/#9/#11/#13): full-width list ⇄ **full-window conversation or new-message composer** — the active task owns the window; `Esc` or the visible Back/List control restores the prior view at the same selection and scroll position. Reply, reply-all, and forward are the deliberate exception: their composer is the final inline card beneath the conversation so the source mail remains visible while writing. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing competing panes. This supersedes the centered overlay, the interim reading split, and the docked new-message composer; simultaneous list/reader variants are rejected. Inbox splits render as a horizontal strip (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Settings live behind the account-chip menu (Settings, keyboard shortcuts, split rules, sign out) — no hamburger. Built-in themes share the same semantic tokens (F14).
 
 **Modifier convention:** `Mod` = `Cmd` on macOS, `Ctrl` on Windows. All shortcuts in this spec are written platform-neutrally.
 
@@ -380,7 +380,15 @@ When a split reaches zero, the list pane is replaced by a full-pane zero state: 
 
 ### F14 — Themes
 
-Light and dark themes; follows the OS by default with a manual override (palette: "Switch theme"). Dark is the Dispatch base (D6); the light variant is derived from the same tokens at M3, and user-customizable themes (own token sets over the same semantic names) are post-v1 roadmap. All UI, including rendered HTML mail, must be legible in both (dark mode sanitizes/inverts mail backgrounds where safe, with a per-message "view original" escape hatch).
+Attn ships four curated palettes: Dark, Light, Midnight, and Sand. The default System preference follows the
+OS and resolves to the dark/light pair; selecting a named palette pins it
+regardless of OS changes. Theme choices are available from the account menu and as palette commands. User-
+customizable palettes and accent colors remain post-v1. Every built-in uses D6's semantic token names rather
+than component-level color branches.
+
+All UI, including rendered HTML mail, must be legible in every palette. Light palettes leave sender colors
+alone and evaluate color-scheme rules as light. Dark palettes keep the safe background normalization that
+`mailSurface.ts` applies today, with a per-message "View original" escape hatch.
 
 ### F15 — Settings
 

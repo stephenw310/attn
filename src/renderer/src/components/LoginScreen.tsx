@@ -44,13 +44,7 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
       data-testid="login-screen"
       className="app-drag relative flex h-full flex-col overflow-hidden bg-ground"
     >
-      <div
-        className="pointer-events-none absolute inset-0 opacity-80"
-        style={{
-          background:
-            'radial-gradient(circle at 50% 38%, rgba(255, 178, 36, 0.11), transparent 29%), radial-gradient(circle at 12% 100%, rgba(72, 82, 112, 0.13), transparent 34%)'
-        }}
-      />
+      <div className="app-login-backdrop pointer-events-none absolute inset-0 opacity-80" />
       <header className="relative flex items-center px-7 py-5">
         <div className="text-base font-bold tracking-tight">
           attn<span className="text-accent">:</span>
@@ -59,7 +53,7 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
 
       <main className="relative flex min-h-0 flex-1 items-center justify-center px-6 pb-14">
         <section className="app-no-drag w-full max-w-[430px] text-center">
-          <div className="mx-auto mb-7 flex size-14 items-center justify-center rounded-2xl border border-accent/25 bg-accent/[0.08] text-accent shadow-[0_18px_60px_rgba(0,0,0,0.32)]">
+          <div className="mx-auto mb-7 flex size-14 items-center justify-center rounded-2xl border border-accent/25 bg-accent/[0.08] text-accent shadow-dialog">
             <svg aria-hidden viewBox="0 0 24 24" className="size-6" fill="none">
               <title>Mail</title>
               <path

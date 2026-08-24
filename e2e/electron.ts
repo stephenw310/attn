@@ -94,7 +94,11 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
         // firstWindow has its own 30-second default that is independent of the
         // test timeout. Let suites with expensive deterministic setup (the
         // 10,000-thread performance seed) extend both waits together.
-        watchRenderer(await launched.firstWindow({ timeout: testInfo.timeout }))
+        const page = await launched.firstWindow({ timeout: testInfo.timeout })
+        // Keep pre-F14 suites pinned to the original Dark baseline.
+        // Theme coverage overrides this explicitly when it exercises System.
+        await page.emulateMedia({ colorScheme: 'dark' })
+        watchRenderer(page)
       } catch (err) {
         // A boot that dies before its first window (e.g. a failed seed) must
         // not leak the half-launched instance while the failure propagates.

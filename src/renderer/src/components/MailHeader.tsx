@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuthStatus } from '../../../shared/auth'
+import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
+import { useTheme } from '../theme'
 import { blurActive } from './blurActive'
 import { Kbd } from './Kbd'
 
@@ -84,6 +86,7 @@ function AccountMenu({
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  const { preference, setPreference } = useTheme()
 
   const closeMenu = useCallback(() => {
     setOpen(false)
@@ -129,7 +132,23 @@ function AccountMenu({
         {status.email ?? 'signed in'} <span className="text-[8px]">▾</span>
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-2 w-[230px] rounded-lg border border-edge bg-raised p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
+        <div className="absolute top-full right-0 z-50 mt-2 w-[250px] rounded-lg border border-edge bg-raised p-1.5 shadow-menu">
+          <label className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim">
+            <span>Theme</span>
+            <select
+              data-testid="theme-picker"
+              aria-label="Theme"
+              value={preference}
+              onChange={(event) => setPreference(event.target.value as ThemePreference)}
+              className="min-w-0 cursor-pointer rounded-md border border-edge bg-ground px-2 py-1 text-xs text-ink outline-none focus:border-accent"
+            >
+              {THEME_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             disabled

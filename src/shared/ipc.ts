@@ -23,11 +23,14 @@ import type {
   ThreadRow
 } from './mail'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
+import type { ThemePreference } from './theme'
 
 export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',
   authSignIn: 'auth:signIn',
   authSignOut: 'auth:signOut',
+  settingsGetTheme: 'settings:getTheme',
+  settingsSetTheme: 'settings:setTheme',
   contactsSearch: 'contacts:search',
   draftSave: 'draft:save',
   draftGet: 'draft:get',
@@ -108,6 +111,8 @@ export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthSignInResult }
   [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
+  [IPC_CHANNELS.settingsGetTheme]: { args: []; result: ThemePreference }
+  [IPC_CHANNELS.settingsSetTheme]: { args: [preference: ThemePreference]; result: ThemePreference }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {
     args: [draft: DraftSaveInput]

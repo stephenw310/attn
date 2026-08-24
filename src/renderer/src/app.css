@@ -1,28 +1,195 @@
 @import "@fontsource-variable/inter";
 @import "tailwindcss";
 
-/* Design tokens — Dispatch direction (SPEC D6). The M3 theming pass (F14)
-   derives the light variant from these same semantic names. */
-@theme {
-  --color-ground: #101114;
-  --color-raised: #17181c;
-  --color-active: #1f2127;
-  --color-edge: #262931;
-  --color-ink: #e9eaee;
-  --color-ink-dim: #9da2ac;
-  --color-ink-faint: #626875;
-  --color-accent: #ffb224;
-  --color-star: #ffb224;
-  --color-danger: #e06c75;
-  --color-status-live: #4ade80;
-  --color-status-offline: #737985;
+/* F14 theme tokens. Components consume the semantic Tailwind names; only this
+   file knows the palette values. Sender-authored mail colors are separate. */
+@theme inline {
+  --color-ground: var(--attn-ground);
+  --color-raised: var(--attn-raised);
+  --color-active: var(--attn-active);
+  --color-edge: var(--attn-edge);
+  --color-ink: var(--attn-ink);
+  --color-ink-dim: var(--attn-ink-dim);
+  --color-ink-faint: var(--attn-ink-faint);
+  --color-accent: var(--attn-accent);
+  --color-star: var(--attn-star);
+  --color-danger: var(--attn-danger);
+  --color-on-danger: var(--attn-on-danger);
+  --color-status-live: var(--attn-status-live);
+  --color-status-offline: var(--attn-status-offline);
+  --color-overlay: var(--attn-overlay);
+  --color-mail-link: var(--attn-mail-link);
+  --color-mail-light-link: #1a73e8;
+  --color-mail-light-ground: #ffffff;
+  --color-mail-light-ink: #202124;
+  --color-mail-light-ink-dim: #6b7280;
+  --color-mail-light-raised: #f3f4f6;
+  --color-mail-light-edge: #d1d5db;
+  --color-mail-light-edge-hover: #9ca3af;
+  --shadow-menu: var(--attn-shadow-menu);
+  --shadow-dialog: var(--attn-shadow-dialog);
+  --shadow-toast: var(--attn-shadow-toast);
+  --shadow-footer: var(--attn-shadow-footer);
+  --shadow-composer: var(--attn-shadow-composer);
   --font-sans:
     "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 @layer base {
   :root {
+    --attn-ground: #101114;
+    --attn-raised: #17181c;
+    --attn-active: #1f2127;
+    --attn-edge: #262931;
+    --attn-ink: #e9eaee;
+    --attn-ink-dim: #9da2ac;
+    --attn-ink-faint: #737985;
+    --attn-accent: #ffb224;
+    --attn-star: #ffb224;
+    --attn-danger: #e06c75;
+    --attn-on-danger: #ffffff;
+    --attn-status-live: #4ade80;
+    --attn-status-offline: #737985;
+    --attn-overlay: rgb(8 9 11 / 72%);
+    --attn-mail-link: #60a5fa;
+    --attn-shadow-menu: 0 12px 32px rgb(0 0 0 / 50%);
+    --attn-shadow-dialog: 0 24px 64px rgb(0 0 0 / 65%);
+    --attn-shadow-toast: 0 12px 40px rgb(0 0 0 / 65%);
+    --attn-shadow-footer: 0 -8px 24px rgb(0 0 0 / 32%);
+    --attn-shadow-composer: 0 18px 44px rgb(0 0 0 / 24%);
+    --attn-login-glow:
+      radial-gradient(circle at 50% 38%, rgb(255 178 36 / 11%), transparent 29%),
+      radial-gradient(circle at 12% 100%, rgb(72 82 112 / 13%), transparent 34%);
+    --attn-label-1-bg: #44351b;
+    --attn-label-1-edge: #765b26;
+    --attn-label-1-ink: #ffd789;
+    --attn-label-2-bg: #193b4a;
+    --attn-label-2-edge: #28647d;
+    --attn-label-2-ink: #8cdbff;
+    --attn-label-3-bg: #263d2a;
+    --attn-label-3-edge: #3f6a48;
+    --attn-label-3-ink: #a9e8b3;
+    --attn-label-4-bg: #402b43;
+    --attn-label-4-edge: #704a76;
+    --attn-label-4-ink: #e6abe9;
+    --attn-label-5-bg: #452a2d;
+    --attn-label-5-edge: #75464b;
+    --attn-label-5-ink: #ffadb3;
+    --attn-label-6-bg: #28334c;
+    --attn-label-6-edge: #465985;
+    --attn-label-6-ink: #b8c9ff;
     color-scheme: dark;
+  }
+
+  :root[data-theme="dispatch-light"] {
+    --attn-ground: #f6f4ef;
+    --attn-raised: #ffffff;
+    --attn-active: #ebe7de;
+    --attn-edge: #d8d3c9;
+    --attn-ink: #1c1d21;
+    --attn-ink-dim: #555b66;
+    --attn-ink-faint: #737985;
+    --attn-accent: #925700;
+    --attn-star: #a86100;
+    --attn-danger: #b42318;
+    --attn-on-danger: #ffffff;
+    --attn-status-live: #167647;
+    --attn-status-offline: #68707d;
+    --attn-overlay: rgb(45 40 32 / 38%);
+    --attn-mail-link: #1a5fb4;
+    --attn-shadow-menu: 0 12px 32px rgb(55 45 30 / 18%);
+    --attn-shadow-dialog: 0 24px 64px rgb(55 45 30 / 24%);
+    --attn-shadow-toast: 0 12px 40px rgb(55 45 30 / 24%);
+    --attn-shadow-footer: 0 -8px 24px rgb(55 45 30 / 10%);
+    --attn-shadow-composer: 0 18px 44px rgb(55 45 30 / 16%);
+    --attn-login-glow:
+      radial-gradient(circle at 50% 38%, rgb(146 87 0 / 11%), transparent 29%),
+      radial-gradient(circle at 12% 100%, rgb(119 131 160 / 12%), transparent 34%);
+    --attn-label-1-bg: #f8e8c2;
+    --attn-label-1-edge: #d3a64d;
+    --attn-label-1-ink: #654200;
+    --attn-label-2-bg: #dbeef6;
+    --attn-label-2-edge: #77afc8;
+    --attn-label-2-ink: #174f67;
+    --attn-label-3-bg: #e0efdf;
+    --attn-label-3-edge: #82b087;
+    --attn-label-3-ink: #295f32;
+    --attn-label-4-bg: #f0e1f1;
+    --attn-label-4-edge: #b88fbb;
+    --attn-label-4-ink: #693b6d;
+    --attn-label-5-bg: #f7e0e1;
+    --attn-label-5-edge: #c79196;
+    --attn-label-5-ink: #773a40;
+    --attn-label-6-bg: #e2e8f7;
+    --attn-label-6-edge: #929fc4;
+    --attn-label-6-ink: #3b4d82;
+    color-scheme: light;
+  }
+
+  :root[data-theme="midnight"] {
+    --attn-ground: #08111f;
+    --attn-raised: #0e1a2b;
+    --attn-active: #16273c;
+    --attn-edge: #263b55;
+    --attn-ink: #e6f0ff;
+    --attn-ink-dim: #a3b5ce;
+    --attn-ink-faint: #768aa5;
+    --attn-accent: #62a8ff;
+    --attn-star: #ffd166;
+    --attn-danger: #ff7b86;
+    --attn-on-danger: #08111f;
+    --attn-status-live: #4fd1a1;
+    --attn-status-offline: #718198;
+    --attn-overlay: rgb(2 7 15 / 76%);
+    --attn-mail-link: #7db7ff;
+    --attn-login-glow:
+      radial-gradient(circle at 50% 38%, rgb(98 168 255 / 13%), transparent 29%),
+      radial-gradient(circle at 12% 100%, rgb(51 94 151 / 18%), transparent 34%);
+  }
+
+  :root[data-theme="sand"] {
+    --attn-ground: #f3eadb;
+    --attn-raised: #fffaf1;
+    --attn-active: #eadcc6;
+    --attn-edge: #d7c6aa;
+    --attn-ink: #30271f;
+    --attn-ink-dim: #66584b;
+    --attn-ink-faint: #7d6d5f;
+    --attn-accent: #a33f19;
+    --attn-star: #9a5900;
+    --attn-danger: #a62c2b;
+    --attn-on-danger: #fffaf1;
+    --attn-status-live: #34734b;
+    --attn-status-offline: #766d63;
+    --attn-overlay: rgb(57 42 27 / 42%);
+    --attn-mail-link: #8d381d;
+    --attn-shadow-menu: 0 12px 32px rgb(80 50 25 / 19%);
+    --attn-shadow-dialog: 0 24px 64px rgb(80 50 25 / 26%);
+    --attn-shadow-toast: 0 12px 40px rgb(80 50 25 / 26%);
+    --attn-shadow-footer: 0 -8px 24px rgb(80 50 25 / 11%);
+    --attn-shadow-composer: 0 18px 44px rgb(80 50 25 / 17%);
+    --attn-login-glow:
+      radial-gradient(circle at 50% 38%, rgb(163 63 25 / 12%), transparent 29%),
+      radial-gradient(circle at 12% 100%, rgb(155 113 66 / 12%), transparent 34%);
+    --attn-label-1-bg: #f1dcae;
+    --attn-label-1-edge: #c5963b;
+    --attn-label-1-ink: #5e3d00;
+    --attn-label-2-bg: #d8e9e5;
+    --attn-label-2-edge: #78a9a0;
+    --attn-label-2-ink: #215c55;
+    --attn-label-3-bg: #dfe8cc;
+    --attn-label-3-edge: #92a96c;
+    --attn-label-3-ink: #455f20;
+    --attn-label-4-bg: #eadde8;
+    --attn-label-4-edge: #ae8ba9;
+    --attn-label-4-ink: #633e5d;
+    --attn-label-5-bg: #f0d8d1;
+    --attn-label-5-edge: #bd8779;
+    --attn-label-5-ink: #713a2d;
+    --attn-label-6-bg: #dce1ee;
+    --attn-label-6-edge: #8d9ab7;
+    --attn-label-6-ink: #3b4a70;
+    color-scheme: light;
   }
 
   html,
@@ -44,6 +211,10 @@
     outline: 1px solid var(--color-accent);
     outline-offset: 2px;
   }
+}
+
+.app-login-backdrop {
+  background: var(--attn-login-glow);
 }
 
 /* Electron window-drag regions — not expressible as standard utilities. */
@@ -162,7 +333,7 @@
 
 [data-unread="true"] .app-thread-unread-dot {
   background: var(--color-accent);
-  box-shadow: 0 0 6px rgb(255 178 36 / 45%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
 [data-unread="true"] .app-thread-sender,
@@ -260,7 +431,7 @@
 }
 
 .app-sync-phase-segment[data-phase-state="complete"] {
-  background: rgb(255 178 36 / 62%);
+  background: color-mix(in srgb, var(--color-accent) 62%, transparent);
 }
 
 .app-sync-phase-segment[data-phase-state="active"]::after {
@@ -268,7 +439,12 @@
   width: 72%;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgb(255 178 36 / 20%), var(--color-accent), rgb(255 178 36 / 20%));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-accent) 20%, transparent),
+    var(--color-accent),
+    color-mix(in srgb, var(--color-accent) 20%, transparent)
+  );
   content: "";
   animation: status-phase-sweep 1.25s ease-in-out infinite;
 }

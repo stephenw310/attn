@@ -5,6 +5,7 @@ import { formatBytes } from '../formatBytes'
 import { MessageBody } from '../MessageBody'
 import type { DisplayMessage } from '../mailDisplay'
 import { mailPresentationForHtml } from '../mailSurface'
+import { useTheme } from '../theme'
 
 function firstName(address: MailAddress, account: string | null): string {
   if (account && normalizeEmailKey(address.email) === normalizeEmailKey(account)) return 'me'
@@ -100,7 +101,13 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     onToggleTrim,
     bodyHydrationMessage
   } = props
-  const presentation = useMemo(() => mailPresentationForHtml(message.html), [message.html])
+  const { appearance } = useTheme()
+  const [viewOriginal, setViewOriginal] = useState(false)
+  const detectedPresentation = useMemo(() => mailPresentationForHtml(message.html), [message.html])
+  const presentation =
+    viewOriginal && detectedPresentation.surface === 'native'
+      ? { ...detectedPresentation, surface: 'light' as const }
+      : detectedPresentation
   const htmlSurface = presentation.surface === 'light'
   const visibleAttachments = message.attachments.filter((attachment) => !attachment.inline)
 
@@ -208,16 +215,30 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         <div className="col-span-2 min-w-0">
           <RecipientLine message={message} account={account} />
         </div>
+        {message.html && detectedPresentation.surface === 'native' && appearance === 'dark' && (
+          <button
+            type="button"
+            data-testid="mail-original-toggle"
+            onClick={(event) => {
+              setViewOriginal((current) => !current)
+              event.currentTarget.blur()
+            }}
+            className="col-span-2 mt-1 w-fit cursor-pointer text-[11px] text-ink-faint hover:text-ink-dim hover:underline"
+          >
+            {viewOriginal ? 'Use dark view' : 'View original'}
+          </button>
+        )}
       </div>
       <div
         data-testid="message-content"
-        className={`min-w-0 ${htmlSurface ? 'overflow-hidden bg-white' : ''}`}
+        className={`min-w-0 ${htmlSurface ? 'overflow-hidden bg-mail-light-ground' : ''}`}
       >
         <MessageBody
           bodyText={message.text}
           bodyHtml={message.html}
           surface={presentation.surface}
           layout={presentation.layout}
+          appearance={appearance}
           threadId={threadId}
           messageId={message.id}
           attachments={message.attachments}
@@ -233,7 +254,10 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           {bodyHydrationMessage ?? ''}
         </p>
         {visibleAttachments.length > 0 && (
-          <div data-testid="message-accessories" className={htmlSurface ? 'bg-white px-3 pb-3' : ''}>
+          <div
+            data-testid="message-accessories"
+            className={htmlSurface ? 'bg-mail-light-ground px-3 pb-3' : ''}
+          >
             <div className="mt-3 flex flex-wrap gap-2">
               {visibleAttachments.map((attachment) => (
                 <button
@@ -246,7 +270,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                   }}
                   className={`cursor-pointer rounded-lg border px-3 py-2 text-left text-xs ${
                     htmlSurface
-                      ? 'border-[#d1d5db] bg-[#f3f4f6] text-[#4b5563] hover:border-[#9ca3af] hover:text-[#202124]'
+                      ? 'border-mail-light-edge bg-mail-light-raised text-mail-light-ink-dim hover:border-mail-light-edge-hover hover:text-mail-light-ink'
                       : 'border-edge bg-active text-ink-dim hover:border-accent hover:text-ink'
                   }`}
                   title={`Download ${attachment.filename}`}
@@ -255,7 +279,9 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                     📎
                   </span>
                   <span className="font-medium">{attachment.filename}</span>
-                  <span className={`ml-2 tabular-nums ${htmlSurface ? 'text-[#6b7280]' : 'text-ink-faint'}`}>
+                  <span
+                    className={`ml-2 tabular-nums ${htmlSurface ? 'text-mail-light-ink-dim' : 'text-ink-faint'}`}
+                  >
                     {formatBytes(attachment.sizeBytes)}
                   </span>
                 </button>
