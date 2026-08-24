@@ -67,6 +67,31 @@ from the app-owned sum on macOS: the Electron Plugin helper maps 976 MB of share
 live heap, external data, and SQLite cache ceiling total 28 MB. Counting those shared mappings as private
 would report the same Electron framework once per process.
 
+## T23 FTS5 index profile — 2026-08-23
+
+Command: `npm run e2e:perf`, hidden macOS arm64 app. Environment: macOS 26.5.2, Node 24.14.0,
+Electron 43.3.0, SQLite 3.53.4. All eleven cases passed with the FTS5 message index maintained on every
+write path and the 10,000-message profile indexed at seed time. These numbers are the requested input to
+the open pathological-mailbox question (M3-PLAN §"Open questions"): scaled linearly they suggest roughly
+130 MB of index and comfortably sub-100 ms queries at 250k messages, but scaling must be measured, not
+assumed, once a real large mailbox is captured under E7.
+
+| Metric | Result | Budget |
+|---|---:|---:|
+| On-disk index size (`dbstat`, all `message_fts` shadow tables + map) at 10k messages | 5.3 MB (5,509,120 bytes) | recorded, no gate |
+| Of which the `prefix='2 3'` option: measured on the same corpus, optimized tables | +1.4 MB (+58% over a no-prefix build) | recorded, no gate |
+| FTS query latency, all shapes pooled (100 samples, measured in-utility) | 4 ms median / 5 ms p95 | <100 ms CI ceiling |
+| `performance` — one term matching all 10,000 messages | 3.8 ms p95 | — |
+| `perf*` — prefix-index path matching all messages | 4.7 ms p95 | — |
+| `"performance thread 9999"` — phrase, one thread | 0.1 ms p95 | — |
+| `sender42` — narrow sender term, one thread | 0.0 ms p95 | — |
+| Application-owned steady-state memory with the index present | 130 MB | <500 MB |
+
+The latency samples time `searchMessageIndex` (thread-ranked `MIN(rank)` aggregation over the
+`message_fts_map` join, LIMIT 50) inside the utility process via `attn:test:searchIndexStats`, so IPC
+round-trip cost is excluded — T24 owns the end-to-end keystroke budget. Steady-state memory is unchanged
+from the S1 run: the index lives on disk inside the same SQLite cache budget.
+
 ## Quota and bootstrap instrumentation
 
 Gmail requests share one per-account weighted scheduler across authentication generations. A short burst bucket

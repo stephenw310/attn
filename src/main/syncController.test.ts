@@ -14,6 +14,7 @@ import type {
 } from './sync/attachmentFlags'
 import type { BackfillCallbacks, BackfillResult } from './sync/backfill'
 import type { ThreadExistenceSweepResult } from './sync/existenceSweep'
+import type { FtsBackfillCallbacks, FtsBackfillOptions, FtsBackfillResult } from './sync/ftsBackfill'
 import type { LifetimeSweepCallbacks, LifetimeSweepOptions, LifetimeSweepResult } from './sync/lifetimeSweep'
 import type { HistoryPollerOptions } from './sync/poller'
 
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => {
     runInboxBackfill: vi.fn(),
     runLifetimeSweep: vi.fn(),
     runAttachmentFlagWalk: vi.fn(),
+    runFtsBackfill: vi.fn(),
     reconcileThreadExistence: vi.fn(),
     syncLabelCatalog: vi.fn(),
     reconcileInboxMembership: vi.fn(),
@@ -70,6 +72,10 @@ vi.mock('./sync/labels', () => ({ syncLabelCatalog: mocks.syncLabelCatalog }))
 vi.mock('./sync/attachmentFlags', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync/attachmentFlags')>()),
   runAttachmentFlagWalk: mocks.runAttachmentFlagWalk
+}))
+vi.mock('./sync/ftsBackfill', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./sync/ftsBackfill')>()),
+  runFtsBackfill: mocks.runFtsBackfill
 }))
 const { SyncController } = await import('./syncController')
 
@@ -119,6 +125,12 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     options: AttachmentFlagOptions
     result: Deferred<AttachmentFlagResult | null>
   }> = []
+  const ftsBackfills: Array<{
+    accountId: string
+    callbacks: FtsBackfillCallbacks
+    options: FtsBackfillOptions
+    result: Deferred<FtsBackfillResult | null>
+  }> = []
   const trigger = vi.fn(async () => {})
   const mirrorTrigger = vi.fn(async () => {})
   const outboxTrigger = vi.fn(async () => {})
@@ -143,6 +155,13 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     (_db, _provider, _accountId, callbacks: AttachmentFlagCallbacks, walkOptions: AttachmentFlagOptions) => {
       const result = deferred<AttachmentFlagResult | null>()
       attachmentWalks.push({ callbacks, options: walkOptions, result })
+      return result.promise
+    }
+  )
+  mocks.runFtsBackfill.mockImplementation(
+    (_db, accountId: string, callbacks: FtsBackfillCallbacks, backfillOptions: FtsBackfillOptions) => {
+      const result = deferred<FtsBackfillResult | null>()
+      ftsBackfills.push({ accountId, callbacks, options: backfillOptions, result })
       return result.promise
     }
   )
@@ -184,6 +203,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     backfills,
     lifetimeSweeps,
     attachmentWalks,
+    ftsBackfills,
     trigger,
     mirrorTrigger,
     outboxTrigger,
@@ -198,6 +218,7 @@ beforeEach(() => {
   mocks.runInboxBackfill.mockReset()
   mocks.runLifetimeSweep.mockReset()
   mocks.runAttachmentFlagWalk.mockReset()
+  mocks.runFtsBackfill.mockReset()
   mocks.reconcileThreadExistence.mockReset()
   mocks.reconcileThreadExistence.mockResolvedValue({ listedThreadCount: 0, deletedThreadIds: [] })
   mocks.syncLabelCatalog.mockReset()
@@ -532,6 +553,32 @@ describe('backfill to poller handoff', () => {
     expect(states.at(-1)).toEqual({ phase: 'idle' })
   })
 
+  it('starts the new account FTS pass after a stale account pass exits', async () => {
+    const { controller, session, lifetimeSweeps, attachmentWalks, ftsBackfills } = harness({
+      backfillCursor: 'done'
+    })
+    controller.onSignIn()
+    lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
+    await flush()
+    attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await flush()
+    expect(ftsBackfills.map((run) => run.accountId)).toEqual(['user@example.com'])
+
+    session.accountId = 'next@example.com'
+    controller.onSignIn()
+    lifetimeSweeps[1].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
+    await flush()
+    attachmentWalks[1].result.resolve({ threadsFlagged: 0 })
+    await flush()
+
+    expect(ftsBackfills).toHaveLength(1)
+    expect(ftsBackfills[0].options.shouldContinue?.()).toBe(false)
+    ftsBackfills[0].result.resolve(null)
+    await flush()
+
+    expect(ftsBackfills.map((run) => run.accountId)).toEqual(['user@example.com', 'next@example.com'])
+  })
+
   it('does not start the attachment index when the sweep did not finish', async () => {
     const { controller, lifetimeSweeps, attachmentWalks } = harness({ backfillCursor: 'done' })
     controller.onSignIn()
@@ -779,6 +826,46 @@ describe('offline retry', () => {
     await vi.advanceTimersByTimeAsync(15_000)
 
     expect(mocks.runLifetimeSweep).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a failed FTS pass without replaying the completed Gmail indexers', async () => {
+    vi.useFakeTimers()
+    const { controller, lifetimeSweeps, attachmentWalks, ftsBackfills } = harness({
+      backfillCursor: 'done'
+    })
+    controller.retry()
+    lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+    attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ftsBackfills).toHaveLength(1)
+
+    ftsBackfills[0].callbacks.onError(new Error('database is full'))
+    ftsBackfills[0].result.resolve(null)
+    await vi.advanceTimersByTimeAsync(0)
+
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(ftsBackfills).toHaveLength(2)
+    expect(mocks.runLifetimeSweep).toHaveBeenCalledOnce()
+    expect(mocks.runAttachmentFlagWalk).toHaveBeenCalledOnce()
+  })
+
+  it('does not retry an FTS pass canceled without an error', async () => {
+    vi.useFakeTimers()
+    const { controller, lifetimeSweeps, attachmentWalks, ftsBackfills } = harness({
+      backfillCursor: 'done'
+    })
+    controller.retry()
+    lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+    attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+
+    ftsBackfills[0].result.resolve(null)
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(ftsBackfills).toHaveLength(1)
   })
 
   it('pauses a non-retryable lifetime failure without masking foreground sync health', async () => {

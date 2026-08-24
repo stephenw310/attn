@@ -11,6 +11,7 @@ import { type AttachmentFlagProgress, runAttachmentFlagWalk } from './sync/attac
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { reconcileThreadExistence } from './sync/existenceSweep'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
+import { runFtsBackfill } from './sync/ftsBackfill'
 import { syncLabelCatalog } from './sync/labels'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
 import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership } from './sync/poller'
@@ -18,6 +19,7 @@ import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { sameSyncState } from './sync/state'
 
 const LIFETIME_RETRY_MS = 15_000
+const FTS_RETRY_MS = 15_000
 
 interface SyncControllerContext {
   db: Db
@@ -37,6 +39,11 @@ interface SyncControllerContext {
   getSnoozeScheduler: () => SnoozeScheduler | null
 }
 
+interface FtsBackfillRun {
+  accountId: string
+  generation: number
+}
+
 /**
  * Owns all online sync lifecycle state. Every async callback captures the
  * current authentication generation; callbacks from an earlier account may
@@ -46,6 +53,8 @@ export class SyncController {
   private state: SyncState = { phase: 'idle' }
   private running = false
   private lifetimeRunning = false
+  private ftsBackfillRun: FtsBackfillRun | null = null
+  private pendingFtsBackfill: FtsBackfillRun | null = null
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
   private pollerRunning = false
@@ -56,6 +65,7 @@ export class SyncController {
   private poller: HistoryPoller | null = null
   private readonly offlineRetry = new OfflineRetryScheduler(15_000)
   private readonly lifetimeRetry = new OfflineRetryScheduler(LIFETIME_RETRY_MS)
+  private readonly ftsRetry = new OfflineRetryScheduler(FTS_RETRY_MS)
 
   constructor(private readonly context: SyncControllerContext) {}
 
@@ -95,6 +105,7 @@ export class SyncController {
     if (this.stopped) return
     this.offlineRetry.clear()
     this.lifetimeRetry.clear()
+    this.ftsRetry.clear()
     const route = syncRetryRoute({
       signedIn: this.context.isSignedIn(),
       seeded: this.context.isSeeded(),
@@ -145,7 +156,9 @@ export class SyncController {
     this.stopHistoryPoller()
     this.offlineRetry.clear()
     this.lifetimeRetry.clear()
+    this.ftsRetry.clear()
     this.backfillRetryGeneration = null
+    this.pendingFtsBackfill = null
     this.running = false
     this.lifetimeRunning = false
     this.lifetimeProgress = null
@@ -215,6 +228,17 @@ export class SyncController {
         this.context.isSignedIn() &&
         this.context.currentAccountId() === accountId,
       () => this.startLifetimeSweep(accountId, provider, generation)
+    )
+  }
+
+  private scheduleFtsRetry(accountId: string, generation: number): void {
+    this.ftsRetry.schedule(
+      () =>
+        !this.stopped &&
+        generation === this.generation &&
+        this.context.isSignedIn() &&
+        this.context.currentAccountId() === accountId,
+      () => this.startFtsBackfill(accountId, generation)
     )
   }
 
@@ -459,6 +483,8 @@ export class SyncController {
             `[sync] attachment index done: ${flags.threadsFlagged} threads flagged for ${accountId}`
           )
         }
+        // The purely local FTS backfill runs behind all three Gmail cursors.
+        this.startFtsBackfill(accountId, generation)
       })
       .catch((error) => {
         if (generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) return
@@ -466,6 +492,67 @@ export class SyncController {
         if (this.publishLifetimePause(error, '[sync] failed after lifetime header sweep')) {
           this.scheduleLifetimeRetry(accountId, provider, generation)
         }
+      })
+  }
+
+  private startFtsBackfill(accountId: string, generation: number): void {
+    if (this.stopped || generation !== this.generation) return
+    const requestedRun = { accountId, generation }
+    if (this.ftsBackfillRun) {
+      // A duplicate request for the active session needs no second pass. A
+      // newer session must start after the stale pass observes cancellation.
+      if (this.ftsBackfillRun.accountId !== accountId || this.ftsBackfillRun.generation !== generation) {
+        this.pendingFtsBackfill = requestedRun
+      }
+      return
+    }
+    this.pendingFtsBackfill = null
+    this.ftsRetry.clear()
+    this.ftsBackfillRun = requestedRun
+    // Deliberately decoupled from `lifetimeRunId`: a manual retry that re-walks
+    // the already-done lifetime chain must not cancel a mid-flight local pass.
+    let failed = false
+    void runFtsBackfill(
+      this.context.db,
+      accountId,
+      {
+        onProgress: () => {},
+        onError: (error) => {
+          failed = true
+          console.error(`[sync] search index backfill failed: ${errorMessage(error)}`)
+        }
+      },
+      {
+        shouldContinue: () =>
+          !this.stopped && generation === this.generation && this.context.currentAccountId() === accountId,
+        shouldYield: () => this.shouldYieldLifetime(accountId)
+      }
+    )
+      .then((result) => {
+        if (!result) {
+          if (failed) this.scheduleFtsRetry(accountId, generation)
+          return
+        }
+        if (result.messagesIndexed > 0) {
+          console.log(
+            `[sync] search index backfill done: ${result.messagesIndexed} messages indexed for ${accountId}`
+          )
+        }
+      })
+      .finally(() => {
+        if (this.ftsBackfillRun !== requestedRun) return
+        this.ftsBackfillRun = null
+        const pending = this.pendingFtsBackfill
+        this.pendingFtsBackfill = null
+        if (
+          !pending ||
+          this.stopped ||
+          pending.generation !== this.generation ||
+          this.context.currentAccountId() !== pending.accountId
+        ) {
+          return
+        }
+        this.startFtsBackfill(pending.accountId, pending.generation)
       })
   }
 

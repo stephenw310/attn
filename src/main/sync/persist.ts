@@ -15,6 +15,7 @@ import {
 } from '../gmail/parse'
 import { replaySnoozeReminderDelta } from '../store/reminders'
 import { replayPendingThreadDeltas } from '../store/replay'
+import { indexThreadMessages, removeThreadFromIndex } from './fts'
 
 export interface LabelRow {
   id: string
@@ -266,6 +267,8 @@ export function persistThread(
 
     clearLabels.run(accountId, thread.id)
     for (const label of labelUnion) insertLabel.run(accountId, thread.id, label)
+    // After the thread row is current: the index derives its subject from it.
+    indexThreadMessages(db, accountId, thread.id)
   })()
   replayPendingThreadDeltas(db, accountId, thread.id)
   replaySnoozeReminderDelta(db, accountId, thread.id)
@@ -318,6 +321,7 @@ export function deleteThread(db: Db, accountId: string, threadId: string): void 
          SELECT id FROM messages WHERE account_id = ? AND thread_id = ?
        )`
     ).run(accountId, accountId, threadId)
+    removeThreadFromIndex(db, accountId, threadId)
     db.prepare('DELETE FROM messages WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM reminders WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM threads WHERE account_id = ? AND id = ?').run(accountId, threadId)

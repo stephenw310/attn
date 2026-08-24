@@ -80,12 +80,30 @@ function utilityState(
 ): Promise<{
   threadCount: number
   messageCount: number
-  cursors: { sweep_cursor: string | null }
+  cursors: { sweep_cursor: string | null; fts_cursor: string | null }
 }> {
   return app.evaluate(
     ({ ipcMain }, { channel, threadIds }) =>
       new Promise((resolve) => ipcMain.emit(channel, {}, threadIds, resolve)),
     { channel: TEST_CHANNELS.utilityState, threadIds: ids }
+  )
+}
+
+interface FtsBackfillResult {
+  cursor: string | null
+  indexed: number | null
+  parity: { messages: number; mapped: number; ftsRows: number }
+  error?: string
+}
+
+function runFtsBackfill(
+  app: ElectronApplication,
+  request: { resetIndex?: boolean; batchSize?: number; pauseAfterBatches?: number }
+): Promise<FtsBackfillResult> {
+  return app.evaluate(
+    ({ ipcMain }, { channel, input }) =>
+      new Promise<FtsBackfillResult>((resolve) => ipcMain.emit(channel, {}, input, resolve)),
+    { channel: TEST_CHANNELS.runFtsBackfill, input: request }
   )
 }
 
@@ -130,6 +148,30 @@ test('restarts after a utility crash and resumes the persisted sweep cursor with
     messageCount: 2,
     cursors: { sweep_cursor: 'done' }
   })
+})
+
+test('resumes the FTS backfill from its persisted cursor after a utility crash, without duplicates', async ({
+  app
+}) => {
+  const BATCH_SIZE = 4
+  // Reproduce a manually upgraded revision-18 profile — stored messages, empty
+  // index — then pause after the first committed batch and kill the process.
+  const interrupted = runFtsBackfill(app, {
+    resetIndex: true,
+    batchSize: BATCH_SIZE,
+    pauseAfterBatches: 1
+  })
+  await expect.poll(async () => (await utilityState(app, [])).cursors.fts_cursor).toMatch(/^fts:/)
+  await crashUtility(app)
+  expect(await interrupted).toMatchObject({ error: expect.stringContaining('exited') })
+
+  const resumed = await runFtsBackfill(app, {})
+  expect(resumed.cursor).toBe('done')
+  // Only the remainder is indexed: the pass resumed instead of restarting.
+  expect(resumed.indexed).toBe(resumed.parity.messages - BATCH_SIZE)
+  expect(resumed.parity.mapped).toBe(resumed.parity.messages)
+  expect(resumed.parity.ftsRows).toBe(resumed.parity.mapped)
+  expect((await utilityState(app, [])).cursors.fts_cursor).toBe('done')
 })
 
 test('surfaces a crash-looped utility to a window that reads sync state after it died', async ({
