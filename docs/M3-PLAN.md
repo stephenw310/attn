@@ -865,10 +865,10 @@ The zero state appears only when the mailbox is genuinely empty, and verify is g
   `--color-ink`, `--color-accent`, and the rest). Every palette is another value set over the same names. If
   a component needs a new token to change palettes, the token is missing from the system and the fix is the
   token, not a conditional in the component.
-- Ship four curated palettes: Dispatch Dark, Dispatch Light, Midnight, and Sand. This is intentionally more
+- Ship four curated palettes: Dark, Light, Midnight, and Sand. This is intentionally more
   like VS Code's small built-in collection than a three-state System/Light/Dark switch. User-authored token
   sets and accent editing remain v1.1 work.
-- Follow the OS by default by resolving System to the Dispatch dark/light pair. A named palette is a manual
+- Follow the OS by default by resolving System to the dark/light pair. A named palette is a manual
   override stored in `settings` and does not change when the OS changes. Expose each choice in the account
   menu and register it for the command palette.
 - **Mail rendering is the hard half.** HTML mail carries its own colors. The light theme leaves mail canvases
@@ -879,7 +879,7 @@ The zero state appears only when the mailbox is genuinely empty, and verify is g
 
 - **Unit:** a check that renderer components carry no raw color literals outside the token file, which is
   what keeps the light theme from rotting one component at a time.
-- **E2e:** Dispatch Light artifacts `inbox-light.png` and `reading-light.png`, persistence for a named theme,
+- **E2e:** Light artifacts `inbox-light.png` and `reading-light.png`, persistence for a named theme,
   and an OS-preference switch applying without a reload. Add both artifacts to the `AGENTS.md` list.
 
 ### Done when

@@ -52,7 +52,7 @@ test('light mail uses sender colors and dark mail offers the original rendering'
   await expect(page.getByTestId('mail-original-toggle')).toHaveText('Use dark view')
 })
 
-test('captures Dispatch Light inbox and reading surfaces', async ({ page }, testInfo) => {
+test('captures Light inbox and reading surfaces', async ({ page }, testInfo) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await chooseTheme(page, 'dispatch-light')
   const directory = join(__dirname, '.artifacts')
@@ -60,11 +60,11 @@ test('captures Dispatch Light inbox and reading surfaces', async ({ page }, test
 
   const inboxPath = join(directory, 'inbox-light.png')
   await page.screenshot({ path: inboxPath })
-  await testInfo.attach('Dispatch Light inbox', { path: inboxPath, contentType: 'image/png' })
+  await testInfo.attach('Light inbox', { path: inboxPath, contentType: 'image/png' })
 
   await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
   await expect(page.getByTestId('html-body-frame')).toBeVisible()
   const readingPath = join(directory, 'reading-light.png')
   await page.screenshot({ path: readingPath })
-  await testInfo.attach('Dispatch Light reading', { path: readingPath, contentType: 'image/png' })
+  await testInfo.attach('Light reading', { path: readingPath, contentType: 'image/png' })
 })

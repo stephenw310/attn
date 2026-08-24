@@ -95,7 +95,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
         // test timeout. Let suites with expensive deterministic setup (the
         // 10,000-thread performance seed) extend both waits together.
         const page = await launched.firstWindow({ timeout: testInfo.timeout })
-        // Keep pre-F14 suites pinned to the original Dispatch Dark baseline.
+        // Keep pre-F14 suites pinned to the original Dark baseline.
         // Theme coverage overrides this explicitly when it exercises System.
         await page.emulateMedia({ colorScheme: 'dark' })
         watchRenderer(page)

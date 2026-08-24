@@ -12,8 +12,8 @@ export interface ThemeOption {
 
 export const THEME_OPTIONS: readonly ThemeOption[] = [
   { id: 'system', label: 'System', appearance: 'system' },
-  { id: 'dispatch-dark', label: 'Dispatch Dark', appearance: 'dark' },
-  { id: 'dispatch-light', label: 'Dispatch Light', appearance: 'light' },
+  { id: 'dispatch-dark', label: 'Dark', appearance: 'dark' },
+  { id: 'dispatch-light', label: 'Light', appearance: 'light' },
   { id: 'midnight', label: 'Midnight', appearance: 'dark' },
   { id: 'sand', label: 'Sand', appearance: 'light' }
 ]

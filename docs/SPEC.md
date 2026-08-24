@@ -380,8 +380,8 @@ When a split reaches zero, the list pane is replaced by a full-pane zero state: 
 
 ### F14 — Themes
 
-Attn ships four curated palettes: Dispatch Dark, Dispatch Light, Midnight, and Sand. The default System
-preference follows the OS and resolves to the Dispatch dark/light pair; selecting a named palette pins it
+Attn ships four curated palettes: Dark, Light, Midnight, and Sand. The default System preference follows the
+OS and resolves to the dark/light pair; selecting a named palette pins it
 regardless of OS changes. Theme choices are available from the account menu and as palette commands. User-
 customizable palettes and accent colors remain post-v1. Every built-in uses D6's semantic token names rather
 than component-level color branches.
