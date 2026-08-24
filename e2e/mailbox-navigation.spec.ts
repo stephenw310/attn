@@ -130,6 +130,7 @@ test('keeps the trashed message as a reader marker that reveals locally and rese
   // stays put and closing the reader forgets the reveal.
   await page.getByTestId('trashed-message-reveal').click()
   await expect(page.getByTestId('message-card')).toHaveCount(3)
+  await expect(page.getByTestId('message-card').last()).toHaveAttribute('data-collapsed', 'false')
   await expect(page.getByTestId('conversation-content')).toContainText(
     'This deleted reply belongs only in Trash.'
   )

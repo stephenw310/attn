@@ -76,6 +76,11 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       next.add(messageId)
       return next
     })
+    setExpandedMessageIds((current) => {
+      const next = new Set(current)
+      next.add(messageId)
+      return next
+    })
   }, [])
 
   return (
