@@ -111,7 +111,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 ## Global rules (carried from M2, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative
-   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 17. Throwaway profiles may be
+   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 18. Throwaway profiles may be
    deleted and re-synced. A real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and every
    schema-changing task publishes its exact DDL.
 2. **IPC has three parts**: main handler, preload bridge, and the typed channel map in `src/shared/`. All in
@@ -535,6 +535,8 @@ trust it.
 - **Tokenizer and prefix index:** `unicode61 remove_diacritics 2`, with `prefix='2 3'` for as-you-type. The
   prefix index costs storage. Measure it rather than assuming it.
 - **Table shape.** FTS5 cannot delete by a text key without a scan, so a mapping table owns the rowid.
+  Each FTS row stores `account_id UNINDEXED`, which lets account teardown remove orphaned rows when a mapping
+  is missing.
   `sync_state` is a column per cursor, not a key-value table, so the backfill cursor is a column too.
   Revision 18 adds:
 
@@ -552,6 +554,7 @@ CREATE UNIQUE INDEX idx_message_fts_map_rowid ON message_fts_map (fts_rowid);
 CREATE INDEX idx_message_fts_map_thread ON message_fts_map (account_id, thread_id);
 
 CREATE VIRTUAL TABLE message_fts USING fts5(
+  account_id UNINDEXED,
   subject,
   sender,
   recipients,
@@ -586,6 +589,7 @@ CREATE TABLE message_fts_map (
 CREATE UNIQUE INDEX idx_message_fts_map_rowid ON message_fts_map (fts_rowid);
 CREATE INDEX idx_message_fts_map_thread ON message_fts_map (account_id, thread_id);
 CREATE VIRTUAL TABLE message_fts USING fts5(
+  account_id UNINDEXED,
   subject,
   sender,
   recipients,

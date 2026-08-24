@@ -38,6 +38,11 @@ interface SyncControllerContext {
   getSnoozeScheduler: () => SnoozeScheduler | null
 }
 
+interface FtsBackfillRun {
+  accountId: string
+  generation: number
+}
+
 /**
  * Owns all online sync lifecycle state. Every async callback captures the
  * current authentication generation; callbacks from an earlier account may
@@ -47,7 +52,8 @@ export class SyncController {
   private state: SyncState = { phase: 'idle' }
   private running = false
   private lifetimeRunning = false
-  private ftsBackfillRunning = false
+  private ftsBackfillRun: FtsBackfillRun | null = null
+  private pendingFtsBackfill: FtsBackfillRun | null = null
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
   private pollerRunning = false
@@ -148,6 +154,7 @@ export class SyncController {
     this.offlineRetry.clear()
     this.lifetimeRetry.clear()
     this.backfillRetryGeneration = null
+    this.pendingFtsBackfill = null
     this.running = false
     this.lifetimeRunning = false
     this.lifetimeProgress = null
@@ -474,11 +481,20 @@ export class SyncController {
   }
 
   private startFtsBackfill(accountId: string, generation: number): void {
-    if (this.stopped || this.ftsBackfillRunning || generation !== this.generation) return
-    this.ftsBackfillRunning = true
+    if (this.stopped || generation !== this.generation) return
+    const requestedRun = { accountId, generation }
+    if (this.ftsBackfillRun) {
+      // A duplicate request for the active session needs no second pass. A
+      // newer session must start after the stale pass observes cancellation.
+      if (this.ftsBackfillRun.accountId !== accountId || this.ftsBackfillRun.generation !== generation) {
+        this.pendingFtsBackfill = requestedRun
+      }
+      return
+    }
+    this.pendingFtsBackfill = null
+    this.ftsBackfillRun = requestedRun
     // Deliberately decoupled from `lifetimeRunId`: a manual retry that re-walks
-    // the (already done) lifetime chain must not cancel a mid-flight local
-    // pass, and the `ftsBackfillRunning` guard absorbs the duplicate start.
+    // the already-done lifetime chain must not cancel a mid-flight local pass.
     void runFtsBackfill(
       this.context.db,
       accountId,
@@ -502,7 +518,19 @@ export class SyncController {
         }
       })
       .finally(() => {
-        this.ftsBackfillRunning = false
+        if (this.ftsBackfillRun !== requestedRun) return
+        this.ftsBackfillRun = null
+        const pending = this.pendingFtsBackfill
+        this.pendingFtsBackfill = null
+        if (
+          !pending ||
+          this.stopped ||
+          pending.generation !== this.generation ||
+          this.context.currentAccountId() !== pending.accountId
+        ) {
+          return
+        }
+        this.startFtsBackfill(pending.accountId, pending.generation)
       })
   }
 

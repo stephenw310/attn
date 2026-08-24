@@ -20,7 +20,7 @@ import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
 import { readSetting, settingEnabled, writeSetting } from '../settings'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
-import { refreshMessageBodyFromStore, searchMessageIndex } from '../sync/fts'
+import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
 import { runFtsBackfill } from '../sync/ftsBackfill'
 import { runLifetimeSweep } from '../sync/lifetimeSweep'
 import { deleteThread, type LabelRow } from '../sync/persist'
@@ -628,12 +628,7 @@ export class ServiceRuntime {
       // Reproduce the manual revision-18 upgrade state: stored messages with an
       // empty index and an unset cursor.
       this.db.transaction(() => {
-        const mapped = this.db
-          .prepare('SELECT fts_rowid FROM message_fts_map WHERE account_id = ?')
-          .all(accountId) as { fts_rowid: number }[]
-        const deleteIndexed = this.db.prepare('DELETE FROM message_fts WHERE rowid = ?')
-        for (const row of mapped) deleteIndexed.run(row.fts_rowid)
-        this.db.prepare('DELETE FROM message_fts_map WHERE account_id = ?').run(accountId)
+        removeAccountFromIndex(this.db, accountId)
         this.db.prepare('UPDATE sync_state SET fts_cursor = NULL WHERE account_id = ?').run(accountId)
       })()
     }

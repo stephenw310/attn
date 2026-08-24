@@ -33,6 +33,10 @@ interface FtsColumns {
   filenames: string
 }
 
+interface StoredFtsRow extends FtsColumns {
+  account_id: string
+}
+
 export interface FtsWriteCounts {
   inserted: number
   updated: number
@@ -43,6 +47,11 @@ export interface FtsWriteCounts {
 const STORED_ROW_COLUMNS = `
   m.id, m.thread_id, t.subject, m.from_name, m.from_email, m.body_text, m.body_html,
   m.recipients_json, m.attachments_json`
+
+// SQLite trim(X, Y) treats Y as a set of code points. This set matches the
+// whitespace and line terminators removed by JavaScript String.prototype.trim.
+const JAVASCRIPT_TRIM_CHARACTERS =
+  '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff'
 
 function parseJson(raw: string | null): unknown {
   if (!raw) return null
@@ -124,13 +133,20 @@ function upsertStoredRows(db: Db, accountId: string, rows: StoredMessageRow[]): 
     'SELECT fts_rowid, thread_id FROM message_fts_map WHERE account_id = ? AND message_id = ?'
   )
   const selectIndexed = db.prepare(
-    'SELECT subject, sender, recipients, body, filenames FROM message_fts WHERE rowid = ?'
+    'SELECT account_id, subject, sender, recipients, body, filenames FROM message_fts WHERE rowid = ?'
   )
   const updateIndexed = db.prepare(
-    'UPDATE message_fts SET subject = ?, sender = ?, recipients = ?, body = ?, filenames = ? WHERE rowid = ?'
+    `UPDATE message_fts
+     SET account_id = ?, subject = ?, sender = ?, recipients = ?, body = ?, filenames = ?
+     WHERE rowid = ?`
   )
   const insertIndexed = db.prepare(
-    'INSERT INTO message_fts (subject, sender, recipients, body, filenames) VALUES (?, ?, ?, ?, ?)'
+    `INSERT INTO message_fts (account_id, subject, sender, recipients, body, filenames)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+  const restoreIndexed = db.prepare(
+    `INSERT INTO message_fts (rowid, account_id, subject, sender, recipients, body, filenames)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   )
   const insertMapping = db.prepare(
     'INSERT INTO message_fts_map (account_id, message_id, thread_id, fts_rowid) VALUES (?, ?, ?, ?)'
@@ -144,6 +160,7 @@ function upsertStoredRows(db: Db, accountId: string, rows: StoredMessageRow[]): 
     const mapped = selectMapped.get(accountId, row.id) as { fts_rowid: number; thread_id: string } | undefined
     if (!mapped) {
       const inserted = insertIndexed.run(
+        accountId,
         next.subject,
         next.sender,
         next.recipients,
@@ -155,12 +172,33 @@ function upsertStoredRows(db: Db, accountId: string, rows: StoredMessageRow[]): 
       continue
     }
     if (mapped.thread_id !== row.thread_id) moveMapping.run(row.thread_id, accountId, row.id)
-    const current = selectIndexed.get(mapped.fts_rowid) as FtsColumns | undefined
-    if (current && sameColumns(current, next)) {
+    const current = selectIndexed.get(mapped.fts_rowid) as StoredFtsRow | undefined
+    if (!current) {
+      restoreIndexed.run(
+        mapped.fts_rowid,
+        accountId,
+        next.subject,
+        next.sender,
+        next.recipients,
+        next.body,
+        next.filenames
+      )
+      counts.updated++
+      continue
+    }
+    if (current.account_id === accountId && sameColumns(current, next)) {
       counts.unchanged++
       continue
     }
-    updateIndexed.run(next.subject, next.sender, next.recipients, next.body, next.filenames, mapped.fts_rowid)
+    updateIndexed.run(
+      accountId,
+      next.subject,
+      next.sender,
+      next.recipients,
+      next.body,
+      next.filenames,
+      mapped.fts_rowid
+    )
     counts.updated++
   }
   return counts
@@ -225,6 +263,15 @@ export function removeThreadFromIndex(db: Db, accountId: string, threadId: strin
   deleteMappedRows(db, rows)
 }
 
+/** Remove all mapped and orphaned index rows for an account inside the caller's transaction. */
+export function removeAccountFromIndex(db: Db, accountId: string): void {
+  const mapped = db.prepare('SELECT fts_rowid FROM message_fts_map WHERE account_id = ?').all(accountId) as {
+    fts_rowid: number
+  }[]
+  deleteMappedRows(db, mapped)
+  db.prepare('DELETE FROM message_fts WHERE account_id = ?').run(accountId)
+}
+
 /** Re-derive the body column after a stored body changed (hydration fills). */
 export function refreshMessageBodyFromStore(db: Db, accountId: string, messageId: string): void {
   const mapped = db
@@ -236,10 +283,14 @@ export function refreshMessageBodyFromStore(db: Db, accountId: string, messageId
     .get(accountId, messageId) as { body_text: string | null; body_html: string | null } | undefined
   if (!stored) return
   const body = bodyColumnFor(stored.body_text, stored.body_html)
-  const current = db.prepare('SELECT body FROM message_fts WHERE rowid = ?').get(mapped.fts_rowid) as
-    | { body: string }
-    | undefined
-  if (!current || current.body === body) return
+  const current = db
+    .prepare('SELECT account_id, body FROM message_fts WHERE rowid = ?')
+    .get(mapped.fts_rowid) as { account_id: string; body: string } | undefined
+  if (!current || current.account_id !== accountId) {
+    indexStoredMessages(db, accountId, [messageId])
+    return
+  }
+  if (current.body === body) return
   db.prepare('UPDATE message_fts SET body = ? WHERE rowid = ?').run(body, mapped.fts_rowid)
 }
 
@@ -265,12 +316,12 @@ export function searchMessageIndex(
       `SELECT map.thread_id AS threadId, MIN(message_fts.rank) AS score
        FROM message_fts
        JOIN message_fts_map map ON map.fts_rowid = message_fts.rowid
-       WHERE message_fts MATCH ? AND map.account_id = ?
+       WHERE message_fts MATCH ? AND map.account_id = ? AND message_fts.account_id = ?
        GROUP BY map.thread_id
        ORDER BY score
        LIMIT ?`
     )
-    .all(match, accountId, limit) as SearchIndexHit[]
+    .all(match, accountId, accountId, limit) as SearchIndexHit[]
 }
 
 export interface SearchCoverage {
@@ -295,11 +346,14 @@ export function searchCoverage(db: Db, accountId: string): SearchCoverage {
   const bodies = db
     .prepare(
       `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN (body_text IS NOT NULL AND body_text != '')
-                         OR (body_html IS NOT NULL AND body_html != '') THEN 1 ELSE 0 END) AS with_body
+              SUM(CASE WHEN trim(COALESCE(body_text, ''), ?) != ''
+                         OR trim(COALESCE(body_html, ''), ?) != '' THEN 1 ELSE 0 END) AS with_body
        FROM messages WHERE account_id = ?`
     )
-    .get(accountId) as { total: number; with_body: number | null }
+    .get(JAVASCRIPT_TRIM_CHARACTERS, JAVASCRIPT_TRIM_CHARACTERS, accountId) as {
+    total: number
+    with_body: number | null
+  }
   return {
     headersComplete: cursors?.sweep_cursor === 'done',
     indexComplete: cursors?.fts_cursor === 'done',

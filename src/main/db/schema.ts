@@ -82,6 +82,7 @@ CREATE UNIQUE INDEX idx_message_fts_map_rowid ON message_fts_map (fts_rowid);
 CREATE INDEX idx_message_fts_map_thread ON message_fts_map (account_id, thread_id);
 
 CREATE VIRTUAL TABLE message_fts USING fts5(
+  account_id UNINDEXED,
   subject,
   sender,
   recipients,

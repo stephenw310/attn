@@ -2,11 +2,18 @@ import { describe, expect, it, vi } from 'vitest'
 import { openDatabase } from '../db'
 import type { GmailMessage, GmailPart, GmailThread } from '../gmail/parse'
 import { hydrateMissingThreadBodies } from './bodies'
-import { indexThreadMessages, refreshMessageBodyFromStore, searchCoverage, searchMessageIndex } from './fts'
+import {
+  indexThreadMessages,
+  refreshMessageBodyFromStore,
+  removeAccountFromIndex,
+  searchCoverage,
+  searchMessageIndex
+} from './fts'
 import { deleteThread, persistThread } from './persist'
 import type { MailProvider } from './provider'
 
 const ACCOUNT = 'account@example.test'
+const OTHER_ACCOUNT = 'other@example.test'
 
 interface TestMessageInput {
   id: string
@@ -175,6 +182,64 @@ describe('message index maintenance', () => {
     }
   })
 
+  it('restores an FTS row when its durable mapping outlives it', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(
+        db,
+        ACCOUNT,
+        testThread('t1', [testMessage({ id: 'm1', threadId: 't1', bodyText: 'repair target' })])
+      )
+      const before = mapRows(db)
+      db.prepare('DELETE FROM message_fts WHERE rowid = ?').run(before[0].fts_rowid)
+
+      expect(indexThreadMessages(db, ACCOUNT, 't1')).toEqual({
+        inserted: 0,
+        updated: 1,
+        removed: 0,
+        unchanged: 0
+      })
+      expect(mapRows(db)).toEqual(before)
+      expect(matches(db, 'repair')).toEqual(['t1'])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('stores account ownership in FTS rows and removes mapped and orphaned account rows', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(
+        db,
+        ACCOUNT,
+        testThread('t1', [testMessage({ id: 'm1', threadId: 't1', bodyText: 'first account' })])
+      )
+      persistThread(
+        db,
+        OTHER_ACCOUNT,
+        testThread('t2', [testMessage({ id: 'm2', threadId: 't2', bodyText: 'second account' })])
+      )
+      db.prepare(
+        `INSERT INTO message_fts (account_id, subject, sender, recipients, body, filenames)
+         VALUES (?, '', '', '', 'orphaned account row', '')`
+      ).run(ACCOUNT)
+      expect(
+        db.prepare('SELECT account_id FROM message_fts ORDER BY rowid').all() as { account_id: string }[]
+      ).toEqual([{ account_id: ACCOUNT }, { account_id: OTHER_ACCOUNT }, { account_id: ACCOUNT }])
+
+      db.transaction(() => removeAccountFromIndex(db, ACCOUNT))()
+
+      expect(searchMessageIndex(db, ACCOUNT, 'first', 50)).toEqual([])
+      expect(searchMessageIndex(db, OTHER_ACCOUNT, 'second', 50).map((hit) => hit.threadId)).toEqual(['t2'])
+      expect(db.prepare('SELECT account_id FROM message_fts').all()).toEqual([{ account_id: OTHER_ACCOUNT }])
+      expect(db.prepare('SELECT account_id FROM message_fts_map').all()).toEqual([
+        { account_id: OTHER_ACCOUNT }
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   it('drops index rows for messages pruned from the latest snapshot', () => {
     const db = openDatabase(':memory:')
     try {
@@ -309,6 +374,22 @@ describe('message index maintenance', () => {
       refreshMessageBodyFromStore(db, ACCOUNT, 'm1')
       expect(matches(db, 'rewritten')).toEqual(['t1'])
       expect(matches(db, 'original')).toEqual([])
+
+      const mapped = mapRows(db)[0]
+      db.prepare('DELETE FROM message_fts WHERE rowid = ?').run(mapped.fts_rowid)
+      db.prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?').run(
+        'restored body',
+        ACCOUNT,
+        'm1'
+      )
+      refreshMessageBodyFromStore(db, ACCOUNT, 'm1')
+      expect(matches(db, 'restored')).toEqual(['t1'])
+
+      db.prepare('UPDATE message_fts SET account_id = ? WHERE rowid = ?').run(OTHER_ACCOUNT, mapped.fts_rowid)
+      refreshMessageBodyFromStore(db, ACCOUNT, 'm1')
+      expect(db.prepare('SELECT account_id FROM message_fts WHERE rowid = ?').get(mapped.fts_rowid)).toEqual({
+        account_id: ACCOUNT
+      })
       expect(() => refreshMessageBodyFromStore(db, ACCOUNT, 'missing')).not.toThrow()
     } finally {
       db.close()
@@ -332,7 +413,8 @@ describe('search coverage', () => {
         ACCOUNT,
         testThread('t1', [
           testMessage({ id: 'm1', threadId: 't1', bodyText: 'hydrated' }),
-          testMessage({ id: 'm2', threadId: 't1', subject: 'Header only' })
+          testMessage({ id: 'm2', threadId: 't1', subject: 'Header only' }),
+          testMessage({ id: 'm3', threadId: 't1', subject: 'Whitespace only', bodyText: ' \t\n\u00a0' })
         ])
       )
       db.prepare(
@@ -343,7 +425,7 @@ describe('search coverage', () => {
         headersComplete: true,
         indexComplete: true,
         attachmentFlagsComplete: true,
-        messagesTotal: 2,
+        messagesTotal: 3,
         messagesWithBody: 1
       })
     } finally {
