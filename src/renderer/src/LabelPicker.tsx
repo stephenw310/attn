@@ -53,13 +53,13 @@ export function LabelPicker({ labels, targets, onClose, onToggle }: LabelPickerP
     <>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the focused search input handles Escape */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: this is the conventional pointer-only backdrop */}
-      <div className="fixed inset-0 z-[60] bg-[rgba(8,9,11,0.72)]" onClick={onClose} />
+      <div className="fixed inset-0 z-[60] bg-overlay" onClick={onClose} />
       <section
         data-testid="label-picker"
         role="dialog"
         aria-label="Label conversations"
         aria-modal="true"
-        className="fixed top-[18vh] left-1/2 z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-[0_24px_64px_rgba(0,0,0,0.68)]"
+        className="fixed top-[18vh] left-1/2 z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
         onKeyDownCapture={(event) => {
           if (event.key !== 'Escape') return
           event.preventDefault()

@@ -32,6 +32,7 @@ import type {
   QueueSendResult,
   ReopenOutboxResult
 } from '../shared/outbox'
+import type { ThemePreference } from '../shared/theme'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
 function invoke<K extends InvokeChannel>(
@@ -47,6 +48,11 @@ const api = {
     getStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authGetStatus),
     signIn: (): Promise<AuthSignInResult> => invoke(IPC_CHANNELS.authSignIn),
     signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut)
+  },
+  settings: {
+    getTheme: (): Promise<ThemePreference> => invoke(IPC_CHANNELS.settingsGetTheme),
+    setTheme: (preference: ThemePreference): Promise<ThemePreference> =>
+      invoke(IPC_CHANNELS.settingsSetTheme, preference)
   },
   mail: {
     listThreads: (): Promise<ThreadRow[]> => invoke(IPC_CHANNELS.mailListThreads),

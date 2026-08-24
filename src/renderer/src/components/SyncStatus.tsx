@@ -256,7 +256,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           data-testid="status-error-details"
           role="dialog"
           aria-label="Sync error details"
-          className="absolute right-0 bottom-full z-50 mb-2 w-[330px] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-[0_15px_42px_rgba(0,0,0,0.58)]"
+          className="absolute right-0 bottom-full z-50 mb-2 w-[330px] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
         >
           <div className="flex items-center gap-2 text-xs font-bold text-ink">
             <span className="text-danger" aria-hidden>
