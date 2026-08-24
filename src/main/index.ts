@@ -5,6 +5,7 @@ import appIcon from '../../resources/icon.png?asset'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
+import type { ThemePreference } from '../shared/theme'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
@@ -46,6 +47,7 @@ let signInInFlight = false
 let authGeneration = 0
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
+let themePreference: ThemePreference = 'system'
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
@@ -134,7 +136,8 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      additionalArguments: [`--attn-theme=${themePreference}`]
     }
   })
   win.webContents.session.webRequest.onHeadersReceived(
@@ -234,6 +237,7 @@ async function initialize(): Promise<void> {
   ownedNotifier.setAccountId(ready.accountId)
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
+  themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
   stopIpc = registerIpc({
     service: ownedService,
     authStatus,
@@ -242,6 +246,9 @@ async function initialize(): Promise<void> {
     pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
       pendingFocus = null
+    },
+    setThemePreference: (preference) => {
+      themePreference = preference
     },
     pickAttachmentPaths: testUserData ? async () => testSeams.takeAttachmentPickerPaths() : undefined
   })

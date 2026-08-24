@@ -32,8 +32,13 @@ import type {
   QueueSendResult,
   ReopenOutboxResult
 } from '../shared/outbox'
-import type { ThemePreference } from '../shared/theme'
+import { isThemePreference, type ThemePreference } from '../shared/theme'
 import { subscribeToActionReverts } from './actionRevertDelivery'
+
+const THEME_ARGUMENT_PREFIX = '--attn-theme='
+const themeArgument = process.argv.find((argument) => argument.startsWith(THEME_ARGUMENT_PREFIX))
+const themeCandidate = themeArgument?.slice(THEME_ARGUMENT_PREFIX.length)
+const initialTheme: ThemePreference = isThemePreference(themeCandidate) ? themeCandidate : 'system'
 
 function invoke<K extends InvokeChannel>(
   channel: K,
@@ -50,6 +55,7 @@ const api = {
     signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut)
   },
   settings: {
+    initialTheme,
     getTheme: (): Promise<ThemePreference> => invoke(IPC_CHANNELS.settingsGetTheme),
     setTheme: (preference: ThemePreference): Promise<ThemePreference> =>
       invoke(IPC_CHANNELS.settingsSetTheme, preference)

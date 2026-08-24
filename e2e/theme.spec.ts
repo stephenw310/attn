@@ -29,6 +29,7 @@ test('System follows the OS while a named palette persists across relaunch', asy
 
   const relaunched = await boot.relaunch()
   await expect(relaunched.page.getByTestId('thread-row')).toHaveCount(8)
+  await expect.poll(() => relaunched.page.evaluate(() => window.attn.settings.initialTheme)).toBe('midnight')
   await expect(relaunched.page.locator('html')).toHaveAttribute('data-theme', 'midnight')
   await expect(relaunched.page.locator('html')).toHaveAttribute('data-theme-appearance', 'dark')
 })

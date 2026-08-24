@@ -20,7 +20,8 @@ function prefersDarkAppearance(): boolean {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true
 }
 
-const initialTheme = resolveTheme('system', prefersDarkAppearance())
+const initialPreference = window.attn?.settings.initialTheme ?? 'system'
+const initialTheme = resolveTheme(initialPreference, prefersDarkAppearance())
 
 function applyTheme(theme: ThemeId): void {
   const root = document.documentElement
@@ -34,13 +35,13 @@ applyTheme(initialTheme)
 
 const ThemeContext = createContext<ThemeContextValue>({
   appearance: themeAppearance(initialTheme),
-  preference: 'system',
+  preference: initialPreference,
   resolvedTheme: initialTheme,
   setPreference: () => {}
 })
 
 export function ThemeProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
-  const [preference, setPreferenceState] = useState<ThemePreference>('system')
+  const [preference, setPreferenceState] = useState<ThemePreference>(initialPreference)
   const [prefersDark, setPrefersDark] = useState(prefersDarkAppearance)
   const resolvedTheme = resolveTheme(preference, prefersDark)
 
@@ -52,19 +53,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
     const onChange = (event: MediaQueryListEvent): void => setPrefersDark(event.matches)
     darkMedia.addEventListener('change', onChange)
     return () => darkMedia.removeEventListener('change', onChange)
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    void window.attn?.settings
-      .getTheme()
-      .then((stored) => {
-        if (active) setPreferenceState(stored)
-      })
-      .catch(() => {})
-    return () => {
-      active = false
-    }
   }, [])
 
   const setPreference = useCallback((next: ThemePreference) => {
