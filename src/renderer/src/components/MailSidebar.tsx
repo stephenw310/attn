@@ -76,12 +76,12 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
     <aside
       id="mail-sidebar"
       data-testid="mail-sidebar"
-      className="flex w-[216px] flex-none flex-col border-r border-edge bg-raised/45 px-3 py-3"
+      className="flex w-54 flex-none flex-col border-r border-edge bg-raised/45 px-3 py-3"
       aria-label="Mail navigation"
     >
       <div
         data-testid="sidebar-brand"
-        className="flex h-14 flex-none items-center px-2.5 pb-2 text-[40px] leading-none font-bold tracking-[-0.04em]"
+        className="flex h-14 flex-none items-center px-2.5 pb-2 text-3xl leading-none font-bold tracking-[-0.04em]"
       >
         attn<span className="text-accent">:</span>
       </div>

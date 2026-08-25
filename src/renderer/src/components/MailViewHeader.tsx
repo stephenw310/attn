@@ -17,7 +17,7 @@ export function MailViewHeader(props: MailViewHeaderProps): React.JSX.Element {
       data-testid="mail-view-header"
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       className={`flex min-h-13 items-center gap-3 border-b border-edge pr-6 ${
-        sidebarCollapsed ? 'pl-[54px]' : 'pl-6'
+        sidebarCollapsed ? 'pl-8' : 'pl-6'
       }`}
     >
       {outbox ? (
