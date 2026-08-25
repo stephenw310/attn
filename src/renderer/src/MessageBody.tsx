@@ -15,7 +15,12 @@ import {
   normalizedContentId
 } from './mailInlineImages'
 import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
-import { type MailLayout, type MailSurface, normalizeNativeMailDocument } from './mailSurface'
+import {
+  type MailLayout,
+  type MailSurface,
+  normalizeNativeMailBackgrounds,
+  normalizeNativeMailDocument
+} from './mailSurface'
 import { findSignatureLineIndex, findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
@@ -44,7 +49,7 @@ const attn = window.attn
 function frameReset(surface: MailSurface, layout: MailLayout, appearance: ThemeAppearance): string {
   const senderCanvas = surface === 'light'
   const light = senderCanvas || appearance === 'light'
-  const bodyPadding = senderCanvas && layout === 'padded' ? '12px' : '0'
+  const bodyPadding = senderCanvas && layout !== 'full-bleed' ? '12px' : '0'
   return `
   :root { color-scheme: only ${light ? 'light' : 'dark'}; }
   html, body {
@@ -62,14 +67,28 @@ function frameReset(surface: MailSurface, layout: MailLayout, appearance: ThemeA
     padding: ${bodyPadding};
   }
   ${
+    senderCanvas && layout === 'centered'
+      ? `#attn-mail-body#attn-mail-body {
+    width: fit-content !important;
+    max-width: 100% !important;
+    margin-inline: auto !important;
+  }`
+      : ''
+  }
+  ${
+    senderCanvas
+      ? ''
+      : `
+  #attn-mail-body#attn-mail-body,
+  #attn-mail-body#attn-mail-body :where(*) {
+    background-color: transparent !important;
+    background-image: none !important;
+  }`
+  }
+  ${
     light
       ? ''
       : `
-  #attn-mail-body,
-  #attn-mail-body :where(*) {
-    background-color: transparent !important;
-    background-image: none !important;
-  }
   #attn-mail-body :is(blockquote, .gmail_quote) {
     color: #9da2ac;
   }
@@ -179,7 +198,10 @@ function sanitizeToTemplate(
   template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
   })
-  if (surface === 'native' && appearance === 'dark') normalizeNativeMailDocument(template.content)
+  if (surface === 'native') {
+    if (appearance === 'dark') normalizeNativeMailDocument(template.content)
+    else normalizeNativeMailBackgrounds(template.content)
+  }
   template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
     const normalizedHref = normalizeMailLink(link.getAttribute('href') ?? '')
     if (normalizedHref === null) link.removeAttribute('href')
@@ -571,7 +593,7 @@ export function MessageBody({
           expanded={expanded}
           lightSurface={surface === 'light'}
           onToggle={onToggleTrim}
-          className={`absolute z-10 h-7 ${surface === 'light' && layout === 'padded' ? 'left-3' : 'left-0'}`}
+          className={`absolute z-10 h-7 ${surface === 'light' && layout !== 'full-bleed' ? 'left-3' : 'left-0'}`}
           style={{ top: measurement.trimTop }}
         />
       )}
