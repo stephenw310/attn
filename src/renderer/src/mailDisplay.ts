@@ -14,6 +14,7 @@ export type UserLabelView = `label:${string}`
 /** Every view the shell can host: mailboxes, user labels, and the on-demand Outbox. */
 export type MailView = MailboxView | UserLabelView | 'outbox'
 export type NavigableMailView = Exclude<MailView, 'outbox'>
+export type PagedThreadView = Exclude<NavigableMailView, 'drafts'>
 
 /** Mailbox views whose rows come from the label-driven listMailboxThreads read. */
 export type LabelMailboxView = Exclude<MailboxView, 'inbox' | 'drafts' | 'snoozed'>

@@ -88,8 +88,23 @@ export type MailboxView = 'inbox' | 'allMail' | 'sent' | 'drafts' | 'starred' | 
 /** Views served by the unified mail:listThreads read. Drafts merges outbox rows with cached Gmail drafts instead. */
 export type ThreadListView = Exclude<MailboxView, 'drafts'>
 
-/** A local list read targets either a system mailbox or one Gmail user label. */
-export type ThreadListRequest = { view: ThreadListView } | { view: 'label'; labelId: string }
+export const THREAD_PAGE_SIZE = 100
+
+/** Stable keyset cursor for mailbox rows ordered by timestamp, then Gmail thread id. */
+export interface ThreadPageCursor {
+  at: number
+  id: string
+}
+
+export interface ThreadPage<Row extends ThreadRow = ThreadRow> {
+  rows: Row[]
+  nextCursor: ThreadPageCursor | null
+}
+
+/** A local list read targets one 100-row page of a system mailbox or Gmail user label. */
+export type ThreadListRequest = ({ view: ThreadListView } | { view: 'label'; labelId: string }) & {
+  cursor?: ThreadPageCursor
+}
 
 /** Mailboxes whose membership and reader contents depend on per-message labels. */
 export type MessageMailbox = 'all-mail' | 'spam' | 'trash'

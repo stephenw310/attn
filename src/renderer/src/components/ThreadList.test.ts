@@ -2,9 +2,60 @@
 
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import type { DisplayThread } from '../mailDisplay'
 import { ThreadList } from './ThreadList'
+
+it('loads the next page when keyboard selection approaches the loaded tail', async () => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const threads: DisplayThread[] = Array.from({ length: 100 }, (_, index) => ({
+    id: `thread-${index}`,
+    from: `Sender ${index}`,
+    subject: `Subject ${index}`,
+    snippet: '',
+    at: '9:30 AM',
+    unread: false,
+    starred: false,
+    hasAttachment: false,
+    returned: false,
+    hasDraft: false,
+    labelIds: [],
+    lastMsgAt: 100 - index
+  }))
+  const onLoadMore = vi.fn()
+  const root = createRoot(document.createElement('div'))
+
+  try {
+    await act(async () =>
+      root.render(
+        createElement(ThreadList, {
+          threads,
+          view: 'inbox',
+          hasMore: true,
+          loadingMore: false,
+          syncing: false,
+          readerOpen: false,
+          selectedIndex: 80,
+          selectedIds: new Set<string>(),
+          exitingThreadIds: new Set<string>(),
+          labelsById: new Map(),
+          selectedRowRef: { current: null },
+          listRef: { current: null },
+          onExtendSelection: () => {},
+          onLoadMore,
+          onOpenLabel: () => {},
+          onOpen: () => {}
+        })
+      )
+    )
+    expect(onLoadMore).toHaveBeenCalledOnce()
+  } finally {
+    await act(async () => root.unmount())
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+  }
+})
 
 it('skips the row tree when an unrelated parent update preserves its props', async () => {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

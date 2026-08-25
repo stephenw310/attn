@@ -56,8 +56,7 @@ test('focus-thread safely leaves an open Snoozed conversation before opening Inb
   await page.keyboard.press('g')
   await page.keyboard.press('h')
   await expect(rows).toHaveCount(5)
-  await page.keyboard.press('j')
-  await page.keyboard.press('Enter')
+  await rows.filter({ hasText: 'Your receipt' }).click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
   const pendingBefore = await page.evaluate(() => window.attn.mail.getPendingActionCount())
 

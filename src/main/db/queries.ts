@@ -20,6 +20,7 @@ import type {
   MessageRecipients,
   SnoozedThreadRow,
   ThreadListView,
+  ThreadPageCursor,
   ThreadRow
 } from '../../shared/mail'
 import { messageLabelsMatchMailbox } from '../../shared/mail'
@@ -39,8 +40,20 @@ interface StoredOutboxAttachment {
   inline?: boolean
 }
 
-/** Measured-safe bound; the renderer windows lists above 500 rows. */
+/** Upper bound for internal diagnostics; renderer mailbox reads request one 101-row lookahead page. */
 export const THREAD_LIST_LIMIT = 10_000
+
+function descendingCursorSql(sortExpression: string, cursor: ThreadPageCursor | null): string {
+  return cursor ? `AND (${sortExpression} < ? OR (${sortExpression} = ? AND t.id > ?))` : ''
+}
+
+function ascendingCursorSql(sortExpression: string, cursor: ThreadPageCursor | null): string {
+  return cursor ? `AND (${sortExpression} > ? OR (${sortExpression} = ? AND t.id > ?))` : ''
+}
+
+function cursorValues(cursor: ThreadPageCursor | null): [number, number, string] | [] {
+  return cursor ? [cursor.at, cursor.at, cursor.id] : []
+}
 
 function labelIds(value: string): string[] {
   return value ? value.split('\u001f') : []
@@ -134,7 +147,8 @@ export function listMailboxThreads(
   db: Db,
   accountId: string,
   view: LabelMailboxView,
-  limit = THREAD_LIST_LIMIT
+  limit = THREAD_LIST_LIMIT,
+  cursor: ThreadPageCursor | null = null
 ): ThreadRow[] {
   const wrap = (visibleSql: string): string =>
     `WITH visible AS (${visibleSql})
@@ -146,20 +160,19 @@ export function listMailboxThreads(
      ORDER BY v.mailbox_last_msg_at DESC, v.id`
   let rows: MailboxThreadQueryRow[]
   if (view === 'allMail') {
+    const sortExpression = 'COALESCE(t.last_msg_at, 0)'
     rows = db
       .prepare(
-        wrap(`SELECT ${THREAD_PROJECTION_SQL}, t.last_msg_at AS mailbox_last_msg_at
+        wrap(`SELECT ${THREAD_PROJECTION_SQL}, ${sortExpression} AS mailbox_last_msg_at
               FROM threads t
               WHERE t.account_id = ? AND (${allMailMembershipSql()})
+                ${descendingCursorSql(sortExpression, cursor)}
               ORDER BY mailbox_last_msg_at DESC, t.id
               LIMIT ?`)
       )
-      .all(accountId, limit) as MailboxThreadQueryRow[]
+      .all(accountId, ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
   } else if (view === 'spam' || view === 'trash') {
-    rows = db
-      .prepare(
-        wrap(`SELECT ${THREAD_PROJECTION_SQL},
-                     COALESCE((
+    const sortExpression = `COALESCE((
                        SELECT MAX(m.internal_date)
                        FROM messages m
                        WHERE m.account_id = t.account_id AND m.thread_id = t.id
@@ -167,26 +180,33 @@ export function listMailboxThreads(
                            SELECT 1 FROM json_each(m.labels_json) stored
                            WHERE stored.value = mailbox.label_id
                          ))
-                     ), t.last_msg_at, 0) AS mailbox_last_msg_at
+                     ), t.last_msg_at, 0)`
+    rows = db
+      .prepare(
+        wrap(`SELECT ${THREAD_PROJECTION_SQL},
+                     ${sortExpression} AS mailbox_last_msg_at
               FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
               JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
               WHERE mailbox.account_id = ? AND mailbox.label_id = ?
+                ${descendingCursorSql(sortExpression, cursor)}
               ORDER BY mailbox_last_msg_at DESC, t.id
               LIMIT ?`)
       )
-      .all(accountId, MAILBOX_LABEL_IDS[view], limit) as MailboxThreadQueryRow[]
+      .all(accountId, MAILBOX_LABEL_IDS[view], ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
   } else {
+    const sortExpression = 'COALESCE(t.last_msg_at, 0)'
     rows = db
       .prepare(
-        wrap(`SELECT ${THREAD_PROJECTION_SQL}, t.last_msg_at AS mailbox_last_msg_at
+        wrap(`SELECT ${THREAD_PROJECTION_SQL}, ${sortExpression} AS mailbox_last_msg_at
               FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
               JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
               WHERE mailbox.account_id = ? AND mailbox.label_id = ?
                 AND (${labeledMailboxMembershipSql()})
+                ${descendingCursorSql(sortExpression, cursor)}
               ORDER BY mailbox_last_msg_at DESC, t.id
               LIMIT ?`)
       )
-      .all(accountId, MAILBOX_LABEL_IDS[view], limit) as MailboxThreadQueryRow[]
+      .all(accountId, MAILBOX_LABEL_IDS[view], ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
   }
   return rows.map((r) => ({
     id: r.id,
@@ -212,18 +232,21 @@ export function listLabelThreads(
   db: Db,
   accountId: string,
   labelId: string,
-  limit = THREAD_LIST_LIMIT
+  limit = THREAD_LIST_LIMIT,
+  cursor: ThreadPageCursor | null = null
 ): ThreadRow[] {
+  const sortExpression = 'COALESCE(t.last_msg_at, 0)'
   const rows = db
     .prepare(
       `WITH visible AS (
-         SELECT ${THREAD_PROJECTION_SQL}, t.last_msg_at AS mailbox_last_msg_at
+         SELECT ${THREAD_PROJECTION_SQL}, ${sortExpression} AS mailbox_last_msg_at
          FROM labels catalog
          JOIN thread_labels mailbox
            ON mailbox.account_id = catalog.account_id AND mailbox.label_id = catalog.id
          JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
          WHERE catalog.account_id = ? AND catalog.id = ? AND lower(catalog.type) = 'user'
            AND (${labeledMailboxMembershipSql()})
+           ${descendingCursorSql(sortExpression, cursor)}
          ORDER BY mailbox_last_msg_at DESC, t.id
          LIMIT ?
        )
@@ -234,7 +257,7 @@ export function listLabelThreads(
        FROM visible v
        ORDER BY v.mailbox_last_msg_at DESC, v.id`
     )
-    .all(accountId, labelId, limit) as MailboxThreadQueryRow[]
+    .all(accountId, labelId, ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
 
   return rows.map((r) => ({
     id: r.id,
@@ -251,7 +274,13 @@ export function listLabelThreads(
   }))
 }
 
-export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_LIMIT): ThreadRow[] {
+export function listInboxThreads(
+  db: Db,
+  accountId: string,
+  limit = THREAD_LIST_LIMIT,
+  cursor: ThreadPageCursor | null = null
+): ThreadRow[] {
+  const sortExpression = 'COALESCE(t.last_msg_at, 0)'
   const rows = db
     .prepare(
       `WITH visible AS (
@@ -267,7 +296,8 @@ export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_
          JOIN thread_labels inbox
            ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
          WHERE t.account_id = ? AND t.is_inbox_visible = 1
-         ORDER BY t.last_msg_at DESC
+           ${descendingCursorSql(sortExpression, cursor)}
+         ORDER BY ${sortExpression} DESC, t.id
          LIMIT ?
        )
        SELECT v.*,
@@ -275,9 +305,9 @@ export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_
                         FROM thread_labels tl
                         WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
        FROM visible v
-       ORDER BY v.last_msg_at DESC`
+       ORDER BY COALESCE(v.last_msg_at, 0) DESC, v.id`
     )
-    .all(accountId, limit) as {
+    .all(accountId, ...cursorValues(cursor), limit) as {
     account_id: string
     id: string
     from_display: string | null
@@ -307,7 +337,12 @@ export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_
   }))
 }
 
-export function listSnoozedThreads(db: Db, accountId: string, limit = THREAD_LIST_LIMIT): SnoozedThreadRow[] {
+export function listSnoozedThreads(
+  db: Db,
+  accountId: string,
+  limit = THREAD_LIST_LIMIT,
+  cursor: ThreadPageCursor | null = null
+): SnoozedThreadRow[] {
   const rows = db
     .prepare(
       `WITH visible AS (
@@ -319,7 +354,8 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = THREAD_LIS
          FROM reminders r
          JOIN threads t ON t.account_id = r.account_id AND t.id = r.thread_id
          WHERE r.account_id = ? AND r.kind = 'snooze' AND r.state = 'pending'
-         ORDER BY r.due_at ASC
+           ${ascendingCursorSql('r.due_at', cursor)}
+         ORDER BY r.due_at ASC, t.id
          LIMIT ?
        )
        SELECT v.*,
@@ -327,9 +363,9 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = THREAD_LIS
                         FROM thread_labels tl
                         WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
        FROM visible v
-       ORDER BY v.due_at ASC`
+       ORDER BY v.due_at ASC, v.id`
     )
-    .all(accountId, limit) as {
+    .all(accountId, ...cursorValues(cursor), limit) as {
     account_id: string
     id: string
     from_display: string | null

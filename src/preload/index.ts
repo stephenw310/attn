@@ -24,7 +24,10 @@ import type {
   MailLabel,
   SnoozedThreadRow,
   SyncState,
+  ThreadListRequest,
   ThreadListView,
+  ThreadPage,
+  ThreadPageCursor,
   ThreadRow
 } from '../shared/mail'
 import type {
@@ -49,6 +52,10 @@ function invoke<K extends InvokeChannel>(
   return ipcRenderer.invoke(channel, ...args)
 }
 
+function listThreadPage(request: ThreadListRequest): Promise<ThreadPage> {
+  return invoke(IPC_CHANNELS.mailListThreads, request)
+}
+
 const api = {
   platform: process.platform,
   auth: {
@@ -63,13 +70,23 @@ const api = {
       invoke(IPC_CHANNELS.settingsSetTheme, preference)
   },
   mail: {
+    listThreadPage: (
+      view: Exclude<ThreadListView, 'snoozed'>,
+      cursor?: ThreadPageCursor
+    ): Promise<ThreadPage> => listThreadPage({ view, ...(cursor ? { cursor } : {}) }),
+    listLabelThreadPage: (labelId: string, cursor?: ThreadPageCursor): Promise<ThreadPage> =>
+      listThreadPage({ view: 'label', labelId, ...(cursor ? { cursor } : {}) }),
+    listSnoozedPage: (cursor?: ThreadPageCursor): Promise<ThreadPage<SnoozedThreadRow>> =>
+      listThreadPage({ view: 'snoozed', ...(cursor ? { cursor } : {}) }) as Promise<
+        ThreadPage<SnoozedThreadRow>
+      >,
     listThreads: (view: Exclude<ThreadListView, 'snoozed'>): Promise<ThreadRow[]> =>
-      invoke(IPC_CHANNELS.mailListThreads, { view }),
+      listThreadPage({ view }).then((page) => page.rows),
     listLabelThreads: (labelId: string): Promise<ThreadRow[]> =>
-      invoke(IPC_CHANNELS.mailListThreads, { view: 'label', labelId }),
+      listThreadPage({ view: 'label', labelId }).then((page) => page.rows),
     // The one typed read serves Snoozed too; only that view returns reminder rows.
     listSnoozed: (): Promise<SnoozedThreadRow[]> =>
-      invoke(IPC_CHANNELS.mailListThreads, { view: 'snoozed' }) as Promise<SnoozedThreadRow[]>,
+      listThreadPage({ view: 'snoozed' }).then((page) => page.rows as SnoozedThreadRow[]),
     listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
     getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),
     getConversation: (

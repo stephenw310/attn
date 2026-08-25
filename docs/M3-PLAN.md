@@ -441,10 +441,10 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
 - **One `MailboxView` union in `src/shared/mail.ts`:** `inbox`, `allMail`, `sent`, `drafts`, `starred`,
   `snoozed`, `spam`, `trash`. Outbox stays outside the union. F3 is explicit that Outbox is an on-demand
   operational view, not a mailbox, and T16 already built it that way.
-- **One typed read.** `mail:listThreads({ view })` replaces the `mailListThreads` / `mailListSnoozed` pair
-  in `src/shared/ipc.ts`. Drafts keeps its own row shape (`DraftList` merges outbox rows with cached Gmail
-  drafts) and Snoozed keeps its reminder fields. Every filter and every sort stays in SQL. A renderer that
-  fetches the inbox and filters it for Sent has already lost the 50 ms budget at 10,000 rows.
+- **One paged typed read.** `mail:listThreads({ view, cursor })` returns at most 100 rows plus the next
+  timestamp/thread-id cursor. Drafts keeps its own row shape (`DraftList` merges outbox rows with cached Gmail
+  drafts) and Snoozed keeps its reminder fields. Every filter and every sort stays in SQL. The renderer
+  accumulates pages only as the user approaches the loaded tail.
 - **`listMailboxThreadIds` grows into `listMailboxThreads`**, returning the same projection as
   `listInboxThreads` under the membership rules S2 recorded: Spam and Trash include a thread when any message
   carries the label and sort by that mailbox's newest matching message, All Mail includes a thread when any
@@ -456,9 +456,8 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   closes. Spam and Trash readers keep S2's behavior of showing only their own messages.
 - **Per-view selection and scroll.** Keep one record per view and restore it on return. Switching mailboxes
   closes an open reader, per F3.
-- **Windowing becomes unconditional.** Delete `VIRTUALIZE_AT = 500` (`ThreadList.tsx:86`) and window every
-  list. All Mail at the 10,000-row `THREAD_LIST_LIMIT` is now the ordinary case, and keeping two layout paths
-  keeps two sets of scroll-restore bugs. The row height and overscan constants stay.
+- **Windowing stays unconditional.** Every list uses one fixed-height layout over its accumulated pages. The
+  row height and overscan constants stay, and loading another page does not replace the current rows.
 - **Triage removes a row when it stops matching the active view.** The inbox predicate generalizes per view:
   archiving in All Mail removes nothing, trashing in Inbox removes the row, restoring in Trash removes it
   there. v1 still ships no permanent delete and no empty-folder action in Spam or Trash.
@@ -467,14 +466,14 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   `useKeyboardDispatch.ts:47` already resolves two-key chords from the registry, so nothing in dispatch
   changes. Palette entries stay registry-only until T26.
 - **Pointer navigation lives in a stable left sidebar.** System mailboxes, Outbox, and the current user-label
-  catalog stay in fixed groups. User-label rows and message-list label chips open local label views. Inbox
-  splits remain a separate horizontal strip in the content header. The sidebar starts expanded, collapses to
-  zero width, and stores that choice in the local browser profile. Its wordmark lives above the navigation;
-  one persistent top-bar control closes and reopens the whole sidebar.
+  catalog stay in fixed groups. User-label rows and message-list label chips open local label views. There is
+  no mailbox title/count header. Inbox splits get a separate strip only when configured. The sidebar starts
+  expanded, collapses to zero width, and stores that choice in the local browser profile. Its wordmark lives
+  above the navigation; one persistent top-bar control closes and reopens the whole sidebar.
 
 ### Implementation guide
 
-- Renderer: `Inbox.tsx` view state and `switchView`, `MailSidebar`, `MailViewHeader`, `ThreadList` windowing,
+- Renderer: `Inbox.tsx` view state and `switchView`, `MailSidebar`, `ThreadList` windowing and page-tail loading,
   `useMailData`.
   Route every view transition through `exitConversation()` before changing the view. This checkpoints an
   inline reply before React unmounts its composer.
@@ -498,8 +497,8 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   trip; a triage verb removes a row from a view it no longer matches; a Drafts row opens the composer; a
   boot with no provider still switches views. Extend `e2e/message-labels.spec.ts` seeds with one Sent-only
   and one Starred-only thread rather than reordering the existing fixture list.
-- **Perf (@perf):** switching to All Mail on the 10,000-thread profile renders under the F3 50 ms budget,
-  and scrolling holds the existing `requestAnimationFrame` interval now that every list is windowed.
+- **Perf (@perf):** the 10,000-thread profile returns 100 rows on first read, loads another 100 at the tail,
+  switches cached mailboxes under the F3 50 ms budget, and holds the scroll-frame interval.
 
 ### Done when
 

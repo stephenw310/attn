@@ -12,15 +12,19 @@ import {
 import { errorMessage } from '../../shared/error'
 import { nonEmptyString } from '../../shared/guards'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../../shared/ipc'
-import type {
-  ConversationMailbox,
-  DownloadAttachmentRequest,
-  DownloadAttachmentResult,
-  InlineImageRepairRequest,
-  InlineImageRequest,
-  InlineImageResult,
-  ThreadListRequest,
-  ThreadListView
+import {
+  type ConversationMailbox,
+  type DownloadAttachmentRequest,
+  type DownloadAttachmentResult,
+  type InlineImageRepairRequest,
+  type InlineImageRequest,
+  type InlineImageResult,
+  THREAD_PAGE_SIZE,
+  type ThreadListRequest,
+  type ThreadListView,
+  type ThreadPage,
+  type ThreadPageCursor,
+  type ThreadRow
 } from '../../shared/mail'
 import { isThemePreference } from '../../shared/theme'
 import {
@@ -162,9 +166,28 @@ const THREAD_LIST_VIEWS: readonly ThreadListView[] = [
 
 function isThreadListRequest(value: unknown): value is ThreadListRequest {
   if (!value || typeof value !== 'object') return false
-  const request = value as { view?: unknown; labelId?: unknown }
+  const request = value as { view?: unknown; labelId?: unknown; cursor?: unknown }
+  if (request.cursor !== undefined && !isThreadPageCursor(request.cursor)) return false
   if (request.view === 'label') return nonEmptyString(request.labelId)
   return typeof request.view === 'string' && (THREAD_LIST_VIEWS as readonly string[]).includes(request.view)
+}
+
+function isThreadPageCursor(value: unknown): value is ThreadPageCursor {
+  if (!value || typeof value !== 'object') return false
+  const cursor = value as { at?: unknown; id?: unknown }
+  return typeof cursor.at === 'number' && Number.isFinite(cursor.at) && nonEmptyString(cursor.id)
+}
+
+function threadPage<Row extends ThreadRow>(rows: Row[], snoozed = false): ThreadPage<Row> {
+  const hasMore = rows.length > THREAD_PAGE_SIZE
+  const pageRows = hasMore ? rows.slice(0, THREAD_PAGE_SIZE) : rows
+  const last = pageRows.at(-1)
+  const cursorAt =
+    snoozed && last && 'dueAt' in last && typeof last.dueAt === 'number' ? last.dueAt : last?.lastMsgAt
+  return {
+    rows: pageRows,
+    nextCursor: hasMore && last && cursorAt !== undefined ? { at: cursorAt, id: last.id } : null
+  }
 }
 
 const CONVERSATION_MAILBOXES: readonly ConversationMailbox[] = ['normal', 'all-mail', 'spam', 'trash']
@@ -588,11 +611,19 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.mailListThreads, (_event, request) => {
     const account = context.currentAccountId()
     const input = isThreadListRequest(request) ? request : null
-    if (!account || !input) return []
-    if (input.view === 'label') return listLabelThreads(context.db, account, input.labelId)
-    if (input.view === 'inbox') return listInboxThreads(context.db, account)
-    if (input.view === 'snoozed') return listSnoozedThreads(context.db, account)
-    return listMailboxThreads(context.db, account, input.view)
+    if (!account || !input) return threadPage([])
+    const cursor = input.cursor ?? null
+    const limit = THREAD_PAGE_SIZE + 1
+    if (input.view === 'label') {
+      return threadPage(listLabelThreads(context.db, account, input.labelId, limit, cursor))
+    }
+    if (input.view === 'inbox') {
+      return threadPage(listInboxThreads(context.db, account, limit, cursor))
+    }
+    if (input.view === 'snoozed') {
+      return threadPage(listSnoozedThreads(context.db, account, limit, cursor), true)
+    }
+    return threadPage(listMailboxThreads(context.db, account, input.view, limit, cursor))
   })
   handle(IPC_CHANNELS.mailListLabels, () => {
     const account = context.currentAccountId()

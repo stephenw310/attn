@@ -40,7 +40,7 @@ async function createClosedDrafts(page: Page, count: number): Promise<void> {
   )
 }
 
-test('every G chord reaches its mailbox and the header names it', async ({ page }) => {
+test('every G chord reaches its mailbox and updates the semantic view name', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   const title = page.getByTestId('mailbox-title')
   await expect(rows).toHaveCount(8)
@@ -111,11 +111,14 @@ test('the sidebar reaches every mailbox by pointer without moving', async ({ pag
   const sidebar = page.getByTestId('mail-sidebar')
   const sidebarBox = await sidebar.boundingBox()
   await expect(page.getByTestId('sidebar-mailbox')).toHaveCount(8)
+  const inbox = page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })
+  await expect(inbox.getByTestId('sidebar-count')).toHaveText('4')
+  await expect(inbox.locator('kbd')).toHaveText('G I')
   await page.getByTestId('sidebar-mailbox').filter({ hasText: 'Trash' }).click()
   await expect(page.getByTestId('mailbox-title')).toHaveText('Trash')
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
 
-  await page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' }).click()
+  await inbox.click()
   await expect(page.getByTestId('mailbox-title')).toHaveText('Inbox')
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   expect(await sidebar.boundingBox()).toEqual(sidebarBox)
@@ -139,11 +142,9 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   await expect(sidebar).toHaveCount(0)
   await expect(page.getByTestId('sidebar-mailbox')).toHaveCount(0)
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Expand sidebar')
-  expect((await page.getByTestId('mail-view-header').boundingBox())?.x).toBe(0)
+  await expect(page.getByTestId('mail-view-header')).toHaveCount(0)
+  expect((await page.getByTestId('thread-list').boundingBox())?.x).toBe(0)
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  const titleBox = await page.getByTestId('view-title').boundingBox()
-  const senderBox = await page.getByTestId('thread-sender').first().boundingBox()
-  expect(Math.abs((titleBox?.x ?? 0) - (senderBox?.x ?? 0))).toBeLessThanOrEqual(1)
 
   const artifactDirectory = join(__dirname, '.artifacts')
   mkdirSync(artifactDirectory, { recursive: true })

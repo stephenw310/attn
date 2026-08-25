@@ -116,6 +116,8 @@ const EMPTY_TEXT: Record<ThreadListKind, string> = {
 interface ThreadListProps {
   threads: DisplayThread[]
   view: ThreadListKind
+  hasMore?: boolean
+  loadingMore?: boolean
   syncing: boolean
   readerOpen: boolean
   selectedIndex: number
@@ -126,6 +128,7 @@ interface ThreadListProps {
   /** The scroll element, owned by the parent so per-view scroll can be saved and restored. */
   listRef: React.RefObject<HTMLElement | null>
   onExtendSelection: (index: number) => void
+  onLoadMore?: () => void
   onOpenLabel: (labelId: string) => void
   onOpen: (index: number) => void
 }
@@ -133,6 +136,7 @@ interface ThreadListProps {
 const VIRTUAL_ROW_HEIGHT = 46
 const VIRTUAL_GROUP_HEIGHT = 44
 const VIRTUAL_OVERSCAN_PX = VIRTUAL_ROW_HEIGHT * 12
+const NOOP = (): void => {}
 
 interface VirtualThreadEntry {
   index: number
@@ -186,6 +190,8 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
   const {
     threads,
     view,
+    hasMore = false,
+    loadingMore = false,
     syncing,
     readerOpen,
     selectedIndex,
@@ -195,6 +201,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     selectedRowRef,
     listRef,
     onExtendSelection,
+    onLoadMore = NOOP,
     onOpenLabel,
     onOpen
   } = props
@@ -290,6 +297,11 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     },
     []
   )
+
+  useEffect(() => {
+    if (!hasMore || loadingMore || threads.length === 0) return
+    if (selectedIndex >= threads.length - 20) onLoadMore()
+  }, [hasMore, loadingMore, onLoadMore, selectedIndex, threads.length])
 
   const renderThread = (entry: VirtualThreadEntry): React.JSX.Element[] => {
     const { index, group, showGroup } = entry
@@ -422,12 +434,22 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     <main
       ref={listRef}
       data-testid="thread-list"
+      data-view={view}
       data-thread-count={threads.length}
+      data-has-more={hasMore || undefined}
       data-virtualized="true"
       className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
       aria-label="Conversation list"
       onScroll={(event) => {
-        pendingScrollTopRef.current = event.currentTarget.scrollTop
+        const list = event.currentTarget
+        pendingScrollTopRef.current = list.scrollTop
+        if (
+          hasMore &&
+          !loadingMore &&
+          list.scrollHeight - list.scrollTop - list.clientHeight <= list.clientHeight * 2
+        ) {
+          onLoadMore()
+        }
         if (frameRef.current !== null) return
         frameRef.current = requestAnimationFrame(() => {
           frameRef.current = null
@@ -447,6 +469,15 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       >
         {mountedEntries.flatMap(renderThread)}
       </div>
+      {loadingMore && (
+        <div
+          data-testid="thread-list-loading"
+          className="flex h-8 items-center justify-center text-xs text-ink-faint"
+          role="status"
+        >
+          Loading more…
+        </div>
+      )}
     </main>
   )
 })

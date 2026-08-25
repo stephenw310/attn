@@ -49,11 +49,12 @@ function NavButton({
       }`}
     >
       <span className="min-w-0 flex-1 truncate">{title}</span>
-      {count !== undefined && count !== null && count > 0 ? (
-        <span className="text-[11px] font-semibold text-accent tabular-nums">{count}</span>
-      ) : shortcut ? (
-        <Kbd>{shortcut.toUpperCase()}</Kbd>
-      ) : null}
+      {count !== undefined && count !== null && count > 0 && (
+        <span data-testid="sidebar-count" className="text-[11px] font-semibold text-accent tabular-nums">
+          {count}
+        </span>
+      )}
+      {shortcut && <Kbd>{shortcut.toUpperCase()}</Kbd>}
     </button>
   )
 }
@@ -81,7 +82,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
     >
       <div
         data-testid="sidebar-brand"
-        className="flex h-14 flex-none items-center px-2.5 pb-2 text-3xl leading-none font-bold tracking-[-0.04em]"
+        className="flex h-14 flex-none items-center px-2.5 pb-2 text-[40px] leading-none font-bold tracking-[-0.04em]"
       >
         attn<span className="text-accent">:</span>
       </div>

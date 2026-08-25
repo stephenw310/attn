@@ -3,7 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ThreadRow } from '../../../shared/mail'
+import type { ThreadPage, ThreadRow } from '../../../shared/mail'
 import type { MailView } from '../mailDisplay'
 import { useMailData } from './useMailData'
 
@@ -41,10 +41,10 @@ afterEach(() => {
 
 describe('useMailData mailbox refreshes', () => {
   it('does not let an older Inbox snapshot erase rows loaded after switching mailboxes', async () => {
-    const initialInbox = deferred<ThreadRow[]>()
+    const initialInbox = deferred<ThreadPage>()
     const allMailRows = [thread('all-mail-row')]
-    const listThreads = vi.fn((view: string) =>
-      view === 'inbox' ? initialInbox.promise : Promise.resolve(allMailRows)
+    const listThreadPage = vi.fn((view: string) =>
+      view === 'inbox' ? initialInbox.promise : Promise.resolve({ rows: allMailRows, nextCursor: null })
     )
     const stop = (): void => {}
     const bridge = {
@@ -54,8 +54,9 @@ describe('useMailData mailbox refreshes', () => {
         onState: () => stop
       },
       mail: {
-        listThreads,
-        listSnoozed: () => Promise.resolve([]),
+        listThreadPage,
+        listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
         listLabels: () => Promise.resolve([]),
         getUnreadCount: () => Promise.resolve(0),
         getPendingActionCount: () => Promise.resolve(0),
@@ -100,7 +101,7 @@ describe('useMailData mailbox refreshes', () => {
       root.render(createElement(Harness))
       await Promise.resolve()
     })
-    expect(listThreads).toHaveBeenCalledWith('inbox')
+    expect(listThreadPage).toHaveBeenCalledWith('inbox', undefined)
 
     activeViewRef.current = 'allMail'
     await act(async () => {
@@ -109,7 +110,7 @@ describe('useMailData mailbox refreshes', () => {
     expect(currentState().mailboxRows.allMail).toEqual(allMailRows)
 
     await act(async () => {
-      initialInbox.resolve([])
+      initialInbox.resolve({ rows: [], nextCursor: null })
       await initialInbox.promise
       await Promise.resolve()
     })

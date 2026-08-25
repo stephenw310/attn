@@ -69,6 +69,26 @@ describe('thread list queries', () => {
     expect(listInboxThreads(db, 'account').map((thread) => thread.id)).toEqual(['newest', 'older'])
   })
 
+  it('continues inbox pages after a timestamp and thread-id cursor', () => {
+    db.prepare(
+      `INSERT INTO threads
+       (account_id, id, subject, last_msg_at, from_display, is_unread, is_starred, has_attachment)
+       VALUES ('account', 'newest-z', 'Newest tie', 300, 'Zoe', 0, 0, 0)`
+    ).run()
+    db.prepare(
+      `INSERT INTO thread_labels (account_id, thread_id, label_id)
+       VALUES ('account', 'newest-z', 'INBOX')`
+    ).run()
+
+    expect(listInboxThreads(db, 'account', 1).map((thread) => thread.id)).toEqual(['newest'])
+    expect(listInboxThreads(db, 'account', 1, { at: 300, id: 'newest' }).map((thread) => thread.id)).toEqual([
+      'newest-z'
+    ])
+    expect(
+      listInboxThreads(db, 'account', 1, { at: 300, id: 'newest-z' }).map((thread) => thread.id)
+    ).toEqual(['older'])
+  })
+
   it('returns pending snoozes with their labels', () => {
     expect(listSnoozedThreads(db, 'account')).toEqual([
       expect.objectContaining({
@@ -78,6 +98,18 @@ describe('thread list queries', () => {
         labelIds: ['Label_A']
       })
     ])
+  })
+
+  it('continues ascending snoozed pages after equal due dates', () => {
+    db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+       VALUES ('account', 'older', 'snooze', 100, 'pending')`
+    ).run()
+
+    expect(listSnoozedThreads(db, 'account', 1).map((thread) => thread.id)).toEqual(['older'])
+    expect(listSnoozedThreads(db, 'account', 1, { at: 100, id: 'older' }).map((thread) => thread.id)).toEqual(
+      ['snoozed']
+    )
   })
 
   const mailboxIds = (view: LabelMailboxView): string[] =>

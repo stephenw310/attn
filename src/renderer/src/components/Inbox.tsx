@@ -23,6 +23,7 @@ import {
   displayThreads,
   type MailView,
   type NavigableMailView,
+  type PagedThreadView,
   userLabelId,
   userLabelView,
   VIEW_TITLES
@@ -33,7 +34,6 @@ import { DraftList } from './DraftList'
 import { MailFooter } from './MailFooter'
 import { MailHeader } from './MailHeader'
 import { MailSidebar } from './MailSidebar'
-import { MailViewHeader } from './MailViewHeader'
 import { OutboxList } from './OutboxList'
 import { SnoozePicker } from './SnoozePicker'
 import { ThreadList } from './ThreadList'
@@ -135,6 +135,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     mailboxRows,
     setMailboxRows,
     refreshCachedThreadView,
+    threadPagination,
+    loadMoreThreads,
     realDrafts,
     realOutbox,
     outboxFailure,
@@ -167,6 +169,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [backingCachedView, backingMailView, mailboxRows, realSnoozedThreads, realThreads]
   )
   const activeViewTitle = titleForView(view, userLabelsById)
+  const pagedView = view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
+  const activePageState = pagedView ? threadPagination[pagedView] : undefined
+  const loadMoreVisibleThreads = useCallback(() => {
+    if (pagedView) void loadMoreThreads(pagedView)
+  }, [loadMoreThreads, pagedView])
   const { selectedIds, clearSelection, resetSelection, toggleFocusedSelection, extendSelectionTo } =
     useSelectionState(threads, selectedIndex, setSelectedIndex)
 
@@ -860,10 +867,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     clearOutboxFailure()
   }, [clearOutboxFailure, outboxFailure, showToast])
 
-  const visibleCount =
-    view === 'drafts' ? realDrafts.length : view === 'outbox' ? realOutbox.length : threads.length
-  const visibleKind = view === 'drafts' ? 'drafts' : view === 'outbox' ? 'messages' : 'conversations'
-
   return (
     <div className="flex h-full flex-col">
       <MailHeader
@@ -898,17 +901,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         )}
         <div className="flex min-w-0 flex-1 flex-col">
           {!readerOpen && !fullWindowComposerDraft && (
-            <MailViewHeader
-              title={activeViewTitle}
-              count={visibleCount}
-              kind={visibleKind}
-              inbox={view === 'inbox'}
-              outbox={view === 'outbox'}
-              sidebarCollapsed={sidebarCollapsed}
-              onBackOutbox={closeOutbox}
-            />
+            <h1 data-testid="mailbox-title" className="sr-only">
+              <span data-testid="view-title">{activeViewTitle}</span>
+            </h1>
           )}
-
           <div className="flex min-h-0 flex-1">
             {view === 'drafts' ? (
               <DraftList
@@ -945,6 +941,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               <ThreadList
                 threads={threads}
                 view={threadListKind(view)}
+                hasMore={activePageState?.nextCursor !== null && activePageState !== undefined}
+                loadingMore={activePageState?.loadingMore ?? false}
                 syncing={sync.phase === 'syncing'}
                 readerOpen={readerOpen}
                 selectedIndex={selectedIndex}
@@ -954,6 +952,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 selectedRowRef={selectedRowRef}
                 listRef={listElRef}
                 onExtendSelection={extendSelectionTo}
+                onLoadMore={loadMoreVisibleThreads}
                 onOpenLabel={(labelId) => switchView(userLabelView(labelId))}
                 onOpen={openThread}
               />
