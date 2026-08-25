@@ -904,6 +904,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               kind={visibleKind}
               inbox={view === 'inbox'}
               outbox={view === 'outbox'}
+              sidebarCollapsed={sidebarCollapsed}
               onBackOutbox={closeOutbox}
             />
           )}

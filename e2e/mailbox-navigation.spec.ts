@@ -81,6 +81,17 @@ test('every G chord reaches its mailbox and the header names it', async ({ page 
   // Sent-only and Starred-only mail: 8 inbox threads + t-sent-history +
   // t-starred-archive.
   await expect(rows).toHaveCount(10)
+  await expect(page.getByTestId('thread-done-indicator')).toHaveCount(2)
+  await expect(
+    rows
+      .filter({ has: page.getByTestId('thread-done-indicator') })
+      .evaluateAll((doneRows) => doneRows.map((row) => row.getAttribute('data-thread-id')))
+  ).resolves.toEqual(['t-sent-history', 't-starred-archive'])
+  await expect(
+    page.locator(
+      '[data-testid="thread-row"][data-thread-id="t-roadmap"] [data-testid="thread-done-indicator"]'
+    )
+  ).toHaveCount(0)
 
   const artifactDirectory = join(__dirname, '.artifacts')
   mkdirSync(artifactDirectory, { recursive: true })
@@ -125,6 +136,9 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Expand sidebar')
   expect((await page.getByTestId('mail-view-header').boundingBox())?.x).toBe(0)
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  const titleBox = await page.getByTestId('view-title').boundingBox()
+  const senderBox = await page.getByTestId('thread-sender').first().boundingBox()
+  expect(Math.abs((titleBox?.x ?? 0) - (senderBox?.x ?? 0))).toBeLessThanOrEqual(1)
 
   const artifactDirectory = join(__dirname, '.artifacts')
   mkdirSync(artifactDirectory, { recursive: true })
@@ -276,11 +290,13 @@ test('a triage verb removes a row only from views it no longer matches', async (
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(10)
   await expect(rows.first()).toHaveAttribute('data-thread-id', 't-roadmap')
+  await expect(rows.first().getByTestId('thread-done-indicator')).toHaveCount(0)
 
   // Archiving in All Mail removes nothing: membership ignores INBOX.
   await page.keyboard.press('e')
   await expect(page.getByTestId('toast')).toContainText('Archived')
   await expect(rows).toHaveCount(10)
+  await expect(rows.first().getByTestId('thread-done-indicator')).toBeVisible()
 
   // Trashing moves every message to Trash, so the thread leaves All Mail.
   await page.keyboard.press('#')

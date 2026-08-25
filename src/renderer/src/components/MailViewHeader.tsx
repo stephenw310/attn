@@ -4,17 +4,21 @@ interface MailViewHeaderProps {
   kind: 'conversations' | 'drafts' | 'messages'
   inbox: boolean
   outbox: boolean
+  sidebarCollapsed: boolean
   onBackOutbox: () => void
 }
 
 export function MailViewHeader(props: MailViewHeaderProps): React.JSX.Element {
-  const { title, count, kind, inbox, outbox, onBackOutbox } = props
+  const { title, count, kind, inbox, outbox, sidebarCollapsed, onBackOutbox } = props
   const noun = count === 1 ? kind.slice(0, -1) : kind
 
   return (
     <div
       data-testid="mail-view-header"
-      className="flex min-h-13 items-center gap-3 border-b border-edge px-6"
+      data-sidebar-collapsed={sidebarCollapsed || undefined}
+      className={`flex min-h-13 items-center gap-3 border-b border-edge pr-6 ${
+        sidebarCollapsed ? 'pl-[54px]' : 'pl-6'
+      }`}
     >
       {outbox ? (
         <button

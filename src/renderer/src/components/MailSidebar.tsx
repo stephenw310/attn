@@ -81,7 +81,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
     >
       <div
         data-testid="sidebar-brand"
-        className="flex h-10 flex-none items-center px-2.5 pb-2 text-base font-bold tracking-tight"
+        className="flex h-10 flex-none items-center px-2.5 pb-2 text-xl font-bold tracking-[-0.03em]"
       >
         attn<span className="text-accent">:</span>
       </div>

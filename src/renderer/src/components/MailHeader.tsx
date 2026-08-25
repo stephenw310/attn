@@ -221,7 +221,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   return (
     <header
       data-testid="mail-header"
-      className="app-drag app-titlebar-safe-area flex items-center gap-6 border-b border-edge py-3"
+      className="app-drag app-titlebar-safe-area flex h-11 flex-none items-center gap-6 border-b border-edge"
     >
       <button
         type="button"
@@ -232,7 +232,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         aria-expanded={!sidebarCollapsed}
         title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         onClick={onToggleSidebar}
-        className="app-no-drag flex size-8 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
           <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />

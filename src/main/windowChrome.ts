@@ -1,7 +1,7 @@
 import type { BrowserWindowConstructorOptions, TitleBarOverlayOptions } from 'electron'
 import { resolveTheme, type ThemePreference, themeAppearance } from '../shared/theme'
 
-export const TITLE_BAR_HEIGHT = 56
+export const TITLE_BAR_HEIGHT = 44
 
 type WindowChromeOptions = Pick<BrowserWindowConstructorOptions, 'titleBarOverlay' | 'titleBarStyle'>
 

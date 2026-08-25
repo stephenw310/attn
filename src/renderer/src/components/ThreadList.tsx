@@ -296,6 +296,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     const thread = threads[index]
     const selected = index === selectedIndex
     const checked = selectedIds.has(thread.id)
+    const done = view === 'allMail' && !thread.labelIds.includes('INBOX')
     const exiting = exitingThreadIds.has(thread.id)
     const projectedEntry = projected?.byThreadId.get(thread.id)
     const currentRowTop = entry.top + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
@@ -315,6 +316,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         data-checked={checked || undefined}
         data-unread={thread.unread || undefined}
         data-starred={thread.starred || undefined}
+        data-done={done || undefined}
         data-exiting={exiting || undefined}
         className={`flex h-[46px] cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
           selected ? 'border-l-accent' : 'border-l-transparent'
@@ -326,6 +328,14 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         <span className="flex size-4 flex-none items-center justify-center self-center" aria-hidden>
           {checked ? (
             <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
+              ✓
+            </span>
+          ) : done ? (
+            <span
+              data-testid="thread-done-indicator"
+              title="Done, not in Inbox"
+              className="flex size-4 items-center justify-center text-[13px] font-semibold text-ink-faint"
+            >
               ✓
             </span>
           ) : (
