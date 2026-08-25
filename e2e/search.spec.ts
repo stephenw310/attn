@@ -23,7 +23,6 @@ test('searches locally as typed and restores the mailbox after reading a result'
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
   await expect(page.locator('[data-testid="thread-row"][data-thread-id="t-search-acme"]')).toBeVisible()
   await expect(page.getByTestId('search-coverage')).toHaveAttribute('data-search-query', combinedQuery)
-  await page.screenshot({ path: join(artifactDirectory, 'search.png') })
 
   await input.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
@@ -39,6 +38,27 @@ test('searches locally as typed and restores the mailbox after reading a result'
     'data-thread-id',
     originalId ?? ''
   )
+})
+
+test('sorts text results newest first and keeps their date headers separated', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('visualsort')
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(3)
+  expect(await rows.evaluateAll((items) => items.map((item) => item.getAttribute('data-thread-id')))).toEqual(
+    ['t-search-origin', 't-search-return', 't-search-acme']
+  )
+  const timestamps = await rows.evaluateAll((items) =>
+    items.map((item) => Number(item.getAttribute('data-last-msg-at')))
+  )
+  expect(timestamps).toEqual([...timestamps].sort((left, right) => right - left))
+
+  const headerTops = await page
+    .getByTestId('thread-date-group')
+    .evaluateAll((headers) => headers.map((header) => (header as HTMLElement).style.top))
+  expect(new Set(headerTops).size).toBe(headerTops.length)
+  await page.screenshot({ path: join(artifactDirectory, 'search.png') })
 })
 
 test('opens an outbox-backed Drafts result in the composer', async ({ page }) => {
@@ -86,6 +106,40 @@ test('plans a reply from the mailbox projection selected by the search query', a
   const composer = new ComposerPage(page)
   await composer.openReply()
   await composer.expectRecipients(['trash.reply@example.com'])
+})
+
+test('refetches the same thread when its search mailbox projection changes', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('subject:"Projection switch"')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
+  await input.press('Enter')
+  await expect(page.getByTestId('message-header')).toContainText('Normal Projection')
+
+  await page.keyboard.press('Escape')
+  await input.fill('in:trash subject:"Projection switch"')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
+  await input.press('Enter')
+  await expect(page.getByTestId('message-header')).toContainText('Trash Projection')
+})
+
+test('updates bulk flags and Inbox exits optimistically in search results', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('in:inbox')
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(2)
+  await input.blur()
+
+  await page.keyboard.press('x')
+  await page.keyboard.press('Shift+j')
+  await expect(page.locator('[data-testid="thread-row"][data-checked="true"]')).toHaveCount(2)
+  await page.keyboard.press('s')
+  await expect(page.locator('[data-testid="thread-row"][data-starred="true"]')).toHaveCount(2)
+
+  await page.keyboard.press('e')
+  await expect(page.locator('[data-testid="thread-row"][data-exiting="true"]')).toHaveCount(1)
+  await expect(rows).toHaveCount(1)
 })
 
 test('restores the selected thread by id when the mailbox reorders during search', async ({ app, page }) => {

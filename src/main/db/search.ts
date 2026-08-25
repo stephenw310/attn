@@ -322,7 +322,7 @@ export function searchThreads(
        FROM search_candidates candidates
        JOIN threads t ON t.id = candidates.thread_id
        WHERE t.account_id = ?
-       ORDER BY candidates.score, COALESCE(last_msg_at, 0) DESC, t.id
+       ORDER BY COALESCE(last_msg_at, 0) DESC, candidates.score, t.id
        LIMIT ?`
     )
     .all(...values) as SearchThreadRow[]

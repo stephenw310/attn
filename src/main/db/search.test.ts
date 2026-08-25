@@ -170,6 +170,36 @@ describe('searchThreads', () => {
     }
   })
 
+  it('orders text results newest first even when an older message ranks higher', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(
+        db,
+        ACCOUNT,
+        thread('older-strong-match', {
+          from: 'Older <older@example.test>',
+          subject: 'Project project project project',
+          body: 'Project project project project project project',
+          at: String(Date.UTC(2025, 0, 1))
+        })
+      )
+      persistThread(
+        db,
+        ACCOUNT,
+        thread('newer-weak-match', {
+          from: 'Newer <newer@example.test>',
+          subject: 'Status note',
+          body: 'One project update',
+          at: String(Date.UTC(2026, 0, 1))
+        })
+      )
+
+      expect(ids(db, 'project')).toEqual(['newer-weak-match', 'older-strong-match'])
+    } finally {
+      db.close()
+    }
+  })
+
   it('searches the same readable message projection that its result reader opens', () => {
     const db = openDatabase(':memory:')
     try {

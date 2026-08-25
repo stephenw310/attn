@@ -15,7 +15,7 @@
           "to": "seed@attn.test",
           "subject": "Inbox starting point",
           "snippet": "Return here after search.",
-          "bodyText": "This conversation anchors the inbox selection before search opens."
+          "bodyText": "This conversation anchors the inbox selection before search opens. visualsort"
         }
       ]
     },
@@ -32,7 +32,7 @@
           "to": "seed@attn.test",
           "subject": "Acme annual roadmap",
           "snippet": "The 2026 launch plan is attached.",
-          "bodyText": "The 2026 launch plan is attached for review.",
+          "bodyText": "The 2026 launch plan is attached for review. visualsort visualsort visualsort visualsort",
           "attachments": [
             {
               "attachmentId": "att-search-roadmap",
@@ -57,7 +57,7 @@
           "to": "seed@attn.test",
           "subject": "Stable return target",
           "snippet": "Keep this selected when the list changes.",
-          "bodyText": "This row moves when a newer local ghost disappears during search."
+          "bodyText": "This row moves when a newer local ghost disappears during search. visualsort"
         }
       ]
     },
@@ -75,6 +75,34 @@
           "subject": "Trashed reply source",
           "snippet": "Reply using the Trash projection.",
           "bodyText": "This trashed message is the only valid reply source."
+        }
+      ]
+    },
+    {
+      "id": "t-search-mixed",
+      "historyId": "2004",
+      "messages": [
+        {
+          "id": "m-search-mixed-normal",
+          "labelIds": ["Label_Search"],
+          "receivedDaysAgo": 3,
+          "receivedAt": "09:00",
+          "from": "Normal Projection <normal.projection@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Projection switch",
+          "snippet": "This is the normal copy.",
+          "bodyText": "Normal projection body."
+        },
+        {
+          "id": "m-search-mixed-trash",
+          "labelIds": ["TRASH"],
+          "receivedDaysAgo": 2,
+          "receivedAt": "09:00",
+          "from": "Trash Projection <trash.projection@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Projection switch",
+          "snippet": "This is the Trash copy.",
+          "bodyText": "Trash projection body."
         }
       ]
     }

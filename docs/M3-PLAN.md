@@ -650,7 +650,8 @@ relaunch and a supervisor restart, latency and size are recorded, and verify is 
   error: a user typing `re: budget` is searching, not writing a malformed query.
 - **Two halves, one query.** Text terms hit FTS5; `is:`, `has:`, `in:`, `before:`, and `after:` become SQL
   predicates over `threads`, `messages`, and `thread_labels`. The utility process runs them as one statement
-  and returns ranked threads. `in:` accepts T22's mailbox names and user labels.
+  and returns matching threads newest first, with the best-message score breaking timestamp ties. `in:`
+  accepts T22's mailbox names and user labels.
 - **Results are a view, not a mode.** `/` focuses a field in the list header; results replace the list using
   the same row component and the same reader behavior. `Esc` returns to the previous mailbox with its
   selection and scroll intact, and a second `Esc` behaves as it does in that mailbox.
@@ -678,11 +679,11 @@ F10's two acceptance criteria are measured rather than asserted, and verify is g
 ### Shipped
 
 The shared parser and utility-owned query combine FTS5 terms with mailbox, label, state, attachment, and date
-predicates. Search is a temporary list view with latest-query-wins rendering, a quiet local-coverage line,
-normal conversation reading, and two-step `Esc` restoration. Seeded Electron coverage exercises the accepted
-operator combination. The production app's full keystroke-to-render path measured 75 ms median / 83 ms p95
-across 20 local queries on the generated 10,000-thread, 50,000-message profile; the checked-in gate remains
-strictly below 100 ms.
+predicates. Search is a newest-first temporary list view with latest-query-wins rendering, a quiet local-
+coverage line, normal conversation reading, and two-step `Esc` restoration. Seeded Electron coverage exercises
+the accepted operator combination. The production app's full keystroke-to-render path measured 74 ms median /
+76 ms p95 across 20 local queries on the generated 10,000-thread, 50,000-message profile; the checked-in gate
+remains strictly below 100 ms.
 
 ---
 

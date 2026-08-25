@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { ConversationMailbox, MailLabel, ThreadListView } from '../../../shared/mail'
-import { parseSearchQuery } from '../../../shared/searchQuery'
 import { actionReconnectMessage } from '../actionReconnect'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
@@ -30,6 +29,12 @@ import {
   userLabelView,
   VIEW_TITLES
 } from '../mailDisplay'
+import {
+  conversationMailboxForSearch,
+  retainedSearchQuery,
+  searchesDrafts,
+  triageViewForSearch
+} from '../searchView'
 import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
@@ -64,24 +69,6 @@ function conversationMailboxFor(view: MailView): ConversationMailbox {
   if (view === 'spam') return 'spam'
   if (view === 'trash') return 'trash'
   return 'normal'
-}
-
-function searchMailboxes(query: string): string[] {
-  return parseSearchQuery(query)
-    .filters.filter((filter) => filter.kind === 'in')
-    .map((filter) => filter.value.toLowerCase().replaceAll(/[\s_-]/g, ''))
-}
-
-function conversationMailboxForSearch(query: string): ConversationMailbox {
-  const mailboxes = searchMailboxes(query)
-  if (mailboxes.includes('spam')) return 'spam'
-  if (mailboxes.includes('trash')) return 'trash'
-  return 'normal'
-}
-
-function searchesDrafts(query: string): boolean {
-  const mailboxes = searchMailboxes(query)
-  return mailboxes.includes('draft') || mailboxes.includes('drafts')
 }
 
 function threadListKind(view: MailView): ThreadListView | 'label' {
@@ -200,7 +187,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const search = useLocalSearch(searchOpen, searchQuery, activeAccount, mailRevision)
   const searchThreads = useMemo(() => displayThreads(search.response?.rows ?? []), [search.response])
   const searchDrafts = useMemo(() => search.response?.drafts ?? [], [search.response])
-  const searchDraftMode = searchOpen && searchesDrafts(searchQuery)
+  const searchResultQuery = retainedSearchQuery(searchQuery, search.completedQuery)
+  const searchDraftMode = searchOpen && searchesDrafts(searchResultQuery)
   const threads = searchOpen ? searchThreads : mailboxThreads
   const activeViewTitle = titleForView(view, userLabelsById)
   const pagedView = searchOpen || view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
@@ -430,7 +418,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     online,
     account: activeAccount,
     mailRevision,
-    mailbox: searchOpen ? conversationMailboxForSearch(searchQuery) : conversationMailboxFor(view)
+    mailbox: searchOpen ? conversationMailboxForSearch(searchResultQuery) : conversationMailboxFor(view)
   })
   const targetedThreads =
     selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
@@ -662,7 +650,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex,
     threads,
     readerOpen,
-    view: searchOpen ? 'allMail' : view,
+    view: searchOpen ? triageViewForSearch(searchResultQuery) : view,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef,
     selectedThreadIdRef,
@@ -670,6 +658,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setRealThreads,
     setRealSnoozedThreads,
     setMailboxRows,
+    updateSearchRows: searchOpen ? search.updateRows : undefined,
     clearSelection,
     showToast,
     setExitingThreadIds,
@@ -897,7 +886,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       }
       composerOpeningRef.current = true
       const replyMailbox = searchOpen
-        ? conversationMailboxForSearch(searchQuery)
+        ? conversationMailboxForSearch(searchResultQuery)
         : conversationMailboxFor(view)
       void window.attn.draft
         .createReply(selected.id, kind, replyMailbox)
@@ -912,7 +901,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           composerOpeningRef.current = false
         })
     },
-    [readerOpen, searchOpen, searchQuery, selected, showDraft, view]
+    [readerOpen, searchOpen, searchResultQuery, selected, showDraft, view]
   )
 
   const closeComposer = useCallback(() => {

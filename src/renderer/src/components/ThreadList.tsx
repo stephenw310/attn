@@ -144,18 +144,26 @@ interface VirtualThreadEntry {
   top: number
   height: number
   group: ReturnType<typeof dateGroup>
+  groupKey: string
   showGroup: boolean
 }
 
 function virtualLayout(threads: readonly DisplayThread[], view: ThreadListKind): VirtualThreadEntry[] {
   let top = 0
   let previousGroup: ReturnType<typeof dateGroup> | undefined
+  let activeGroupKey = ''
+  const groupOccurrences = new Map<ReturnType<typeof dateGroup>, number>()
   return threads.map((thread, index) => {
     const group = dateGroup(thread)
     // Snoozed sorts by due time, so relative-date groups would mislead there.
     const showGroup = view !== 'snoozed' && group !== previousGroup
+    if (showGroup) {
+      const occurrence = groupOccurrences.get(group) ?? 0
+      activeGroupKey = `${group}\0${occurrence}`
+      groupOccurrences.set(group, occurrence + 1)
+    }
     const height = VIRTUAL_ROW_HEIGHT + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
-    const entry = { index, top, height, group, showGroup }
+    const entry = { index, top, height, group, groupKey: activeGroupKey, showGroup }
     top += height
     previousGroup = group
     return entry
@@ -222,9 +230,9 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     return { threads: survivingThreads, layout: projectedLayout, byThreadId }
   }, [exitingThreadIds, threads, view])
   const projectedGroupTops = useMemo(() => {
-    const tops = new Map<VirtualThreadEntry['group'], number>()
+    const tops = new Map<string, number>()
     for (const entry of projected?.layout ?? []) {
-      if (entry.showGroup) tops.set(entry.group, entry.top)
+      if (entry.showGroup) tops.set(entry.groupKey, entry.top)
     }
     return tops
   }, [projected])
@@ -313,7 +321,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
   }, [hasMore, loadingMore, onLoadMore, selectedIndex, threads.length])
 
   const renderThread = (entry: VirtualThreadEntry): React.JSX.Element[] => {
-    const { index, group, showGroup } = entry
+    const { index, group, groupKey, showGroup } = entry
     const thread = threads[index]
     const selected = index === selectedIndex
     const checked = selectedIds.has(thread.id)
@@ -333,6 +341,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         data-testid="thread-row"
         data-thread-index={index}
         data-thread-id={thread.id}
+        data-last-msg-at={thread.lastMsgAt}
         data-selected={selected || undefined}
         data-checked={checked || undefined}
         data-unread={thread.unread || undefined}
@@ -405,13 +414,13 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         </span>
       </div>
     )
-    const projectedGroupTop = projectedGroupTops.get(group)
+    const projectedGroupTop = projectedGroupTops.get(groupKey)
     const groupRemoved = projected !== null && projectedGroupTop === undefined
     const parts: React.JSX.Element[] = []
     if (showGroup) {
       parts.push(
         <div
-          key={`group:${group}`}
+          key={`group:${groupKey}`}
           data-testid="thread-date-group"
           className={`absolute right-0 left-0 h-[44px] px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint ${
             projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''

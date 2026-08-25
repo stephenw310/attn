@@ -100,7 +100,7 @@ app. The generator created 10,000 threads containing 50,000 messages, and the pr
 
 | Metric | Result | Budget |
 |---|---:|---:|
-| Search input mutation → completed result render | 75 ms median / 83 ms p95 | <100 ms p95 |
+| Search input mutation → completed result render | 74 ms median / 76 ms p95 | <100 ms p95 |
 
 This measurement includes the 25 ms typing debounce, renderer-to-utility IPC, the combined FTS5 and SQL
 operator query, and React rendering. The test waits for both the completed-query marker and the one-row result,

@@ -335,6 +335,65 @@ it('projects virtual rows into the space left by an exiting row without moving t
   }
 })
 
+it('keeps repeated date headers at distinct positions while projecting an exit', async () => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  const makeThread = (id: string, lastMsgAt: number): DisplayThread => ({
+    id,
+    from: id,
+    subject: id,
+    snippet: '',
+    at: '',
+    unread: false,
+    starred: false,
+    hasAttachment: false,
+    returned: false,
+    hasDraft: false,
+    labelIds: [],
+    lastMsgAt
+  })
+  const threads = [
+    makeThread('today-first', today.getTime()),
+    makeThread('old', new Date(2013, 0, 1).getTime()),
+    makeThread('today-second', today.getTime() - 60_000)
+  ]
+  const container = document.createElement('div')
+  const root = createRoot(container)
+
+  try {
+    await act(async () =>
+      root.render(
+        createElement(ThreadList, {
+          threads,
+          view: 'search',
+          syncing: false,
+          readerOpen: false,
+          selectedIndex: 0,
+          selectedIds: new Set<string>(),
+          exitingThreadIds: new Set(['old']),
+          labelsById: new Map(),
+          selectedRowRef: { current: null },
+          listRef: { current: null },
+          onExtendSelection: () => {},
+          onOpenLabel: () => {},
+          onOpen: () => {}
+        })
+      )
+    )
+
+    const headerTops = [...container.querySelectorAll<HTMLElement>('[data-testid="thread-date-group"]')].map(
+      (header) => header.style.top
+    )
+    expect(new Set(headerTops).size).toBe(headerTops.length)
+  } finally {
+    await act(async () => root.unmount())
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+  }
+})
+
 // jsdom has no layout, so model the real geometry the effect measures: the list
 // sits below a header, and the virtual sizer starts one padding step into the
 // list's scroll content. Measuring the sizer against anything but the list --

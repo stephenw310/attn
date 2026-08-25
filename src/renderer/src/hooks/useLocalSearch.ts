@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ThreadRow } from '../../../shared/mail'
 import type { SearchResponse } from '../../../shared/searchQuery'
 
 const SEARCH_DEBOUNCE_MS = 25
@@ -8,6 +9,7 @@ interface LocalSearchState {
   pending: boolean
   failed: boolean
   completedQuery: string | null
+  updateRows: (updater: (rows: ThreadRow[]) => ThreadRow[]) => void
 }
 
 /** Debounce local search and prevent an older IPC response from replacing a newer query. */
@@ -24,6 +26,13 @@ export function useLocalSearch(
   const requestVersionRef = useRef(0)
   const mailRevisionRef = useRef(mailRevision)
   mailRevisionRef.current = mailRevision
+  const updateRows = useCallback((updater: (rows: ThreadRow[]) => ThreadRow[]): void => {
+    setResponse((current) => {
+      if (!current) return current
+      const rows = updater(current.rows)
+      return rows === current.rows ? current : { ...current, rows }
+    })
+  }, [])
 
   useEffect(() => {
     const version = ++requestVersionRef.current
@@ -59,5 +68,5 @@ export function useLocalSearch(
     return () => window.clearTimeout(timer)
   }, [account, mailRevision, open, query])
 
-  return { response, pending, failed, completedQuery }
+  return { response, pending, failed, completedQuery, updateRows }
 }

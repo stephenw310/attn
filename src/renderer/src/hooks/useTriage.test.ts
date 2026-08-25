@@ -42,12 +42,15 @@ test('rolls back overlapping failed star and unread actions independently', asyn
   const root = createRoot(container)
   let runTriage: ReturnType<typeof useTriage> | undefined
   let visibleRows: ThreadRow[] = []
+  let visibleSearchRows: ThreadRow[] = []
   function Harness(): null {
     const [rows, setRows] = useState<ThreadRow[] | null>([thread])
+    const [searchRows, setSearchRows] = useState<ThreadRow[]>([thread])
     const [, setSnoozedRows] = useState<SnoozedThreadRow[] | null>(null)
     const [, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
     const [, setSelectedIndex] = useState(0)
     visibleRows = rows ?? []
+    visibleSearchRows = searchRows
     runTriage = useTriage({
       selectedIds: new Set(),
       selectedIndex: 0,
@@ -61,6 +64,7 @@ test('rolls back overlapping failed star and unread actions independently', asyn
       setRealThreads: setRows,
       setRealSnoozedThreads: setSnoozedRows,
       setMailboxRows: () => {},
+      updateSearchRows: (updater) => setSearchRows(updater),
       clearSelection: () => {},
       showToast: () => {},
       setExitingThreadIds,
@@ -74,6 +78,7 @@ test('rolls back overlapping failed star and unread actions independently', asyn
     act(() => runTriage?.({ kind: 'star', threadIds: [thread.id], on: true }))
     act(() => runTriage?.({ kind: 'markUnread', threadIds: [thread.id], on: true }))
     expect(visibleRows[0]).toMatchObject({ starred: true, unread: true })
+    expect(visibleSearchRows[0]).toMatchObject({ starred: true, unread: true })
 
     await act(async () => {
       rejections[0]?.(new Error('star failed'))
@@ -82,6 +87,7 @@ test('rolls back overlapping failed star and unread actions independently', asyn
       await Promise.resolve()
     })
     expect(visibleRows[0]).toMatchObject({ starred: false, unread: false })
+    expect(visibleSearchRows[0]).toMatchObject({ starred: false, unread: false })
   } finally {
     await act(async () => root.unmount())
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
