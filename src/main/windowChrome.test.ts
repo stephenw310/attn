@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { TITLE_BAR_HEIGHT, titleBarOverlayOptions, windowChromeOptions } from './windowChrome'
+import {
+  MAC_TRAFFIC_LIGHT_POSITION,
+  TITLE_BAR_HEIGHT,
+  titleBarOverlayOptions,
+  windowChromeOptions
+} from './windowChrome'
 
 describe('window chrome', () => {
   it('uses a compact title bar that matches native control alignment', () => {
@@ -9,7 +14,8 @@ describe('window chrome', () => {
   it('keeps native macOS traffic lights over a full-height content window', () => {
     expect(windowChromeOptions('darwin', 'dispatch-dark', true)).toEqual({
       titleBarStyle: 'hiddenInset',
-      titleBarOverlay: true
+      titleBarOverlay: true,
+      trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION
     })
   })
 

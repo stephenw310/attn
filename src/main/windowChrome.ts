@@ -2,8 +2,12 @@ import type { BrowserWindowConstructorOptions, TitleBarOverlayOptions } from 'el
 import { resolveTheme, type ThemePreference, themeAppearance } from '../shared/theme'
 
 export const TITLE_BAR_HEIGHT = 44
+export const MAC_TRAFFIC_LIGHT_POSITION = { x: 12, y: 16 } as const
 
-type WindowChromeOptions = Pick<BrowserWindowConstructorOptions, 'titleBarOverlay' | 'titleBarStyle'>
+type WindowChromeOptions = Pick<
+  BrowserWindowConstructorOptions,
+  'titleBarOverlay' | 'titleBarStyle' | 'trafficLightPosition'
+>
 
 export function titleBarOverlayOptions(
   preference: ThemePreference,
@@ -25,7 +29,8 @@ export function windowChromeOptions(
   if (platform === 'darwin') {
     return {
       titleBarStyle: 'hiddenInset',
-      titleBarOverlay: true
+      titleBarOverlay: true,
+      trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION
     }
   }
   return {

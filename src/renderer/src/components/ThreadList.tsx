@@ -330,14 +330,6 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
             <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
               ✓
             </span>
-          ) : done ? (
-            <span
-              data-testid="thread-done-indicator"
-              title="Done, not in Inbox"
-              className="flex size-4 items-center justify-center text-[13px] font-semibold text-ink-faint"
-            >
-              ✓
-            </span>
           ) : (
             <span className="app-thread-unread-dot size-1.5 rounded-full" />
           )}
@@ -371,7 +363,24 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         <span className="flex flex-none items-center gap-2.5 text-xs">
           <ThreadStatusChips thread={thread} />
           {thread.hasAttachment && <span title="Has attachment">📎</span>}
-          <span className="app-thread-time min-w-[70px] text-right tabular-nums">{thread.at}</span>
+          <span data-testid="thread-time" className="app-thread-time min-w-[70px] text-right tabular-nums">
+            {thread.at}
+          </span>
+          {view === 'allMail' && (
+            <span className="flex size-4 flex-none items-center justify-center">
+              {done && (
+                <span
+                  data-testid="thread-done-indicator"
+                  role="img"
+                  aria-label="Done, not in Inbox"
+                  title="Done, not in Inbox"
+                  className="text-[14px] font-bold text-status-live"
+                >
+                  ✓
+                </span>
+              )}
+            </span>
+          )}
         </span>
       </div>
     )

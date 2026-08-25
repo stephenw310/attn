@@ -92,6 +92,10 @@ test('every G chord reaches its mailbox and the header names it', async ({ page 
       '[data-testid="thread-row"][data-thread-id="t-roadmap"] [data-testid="thread-done-indicator"]'
     )
   ).toHaveCount(0)
+  const doneRow = page.locator('[data-testid="thread-row"][data-thread-id="t-starred-archive"]')
+  const doneBox = await doneRow.getByTestId('thread-done-indicator').boundingBox()
+  const timeBox = await doneRow.getByTestId('thread-time').boundingBox()
+  expect((doneBox?.x ?? 0) > (timeBox?.x ?? 0)).toBe(true)
 
   const artifactDirectory = join(__dirname, '.artifacts')
   mkdirSync(artifactDirectory, { recursive: true })
@@ -127,6 +131,7 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   if (process.platform === 'win32') expect(titleBarPadding.right).toBeGreaterThan(24)
   const sidebar = page.getByTestId('mail-sidebar')
   await expect(page.getByTestId('sidebar-brand')).toHaveText('attn:')
+  await expect(page.getByTestId('sidebar-brand')).toHaveCSS('font-size', '40px')
   expect((await sidebar.boundingBox())?.width).toBe(216)
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Collapse sidebar')
 
@@ -296,6 +301,7 @@ test('a triage verb removes a row only from views it no longer matches', async (
   await page.keyboard.press('e')
   await expect(page.getByTestId('toast')).toContainText('Archived')
   await expect(rows).toHaveCount(10)
+  await expect(rows.first()).toHaveAttribute('data-unread', 'true')
   await expect(rows.first().getByTestId('thread-done-indicator')).toBeVisible()
 
   // Trashing moves every message to Trash, so the thread leaves All Mail.
