@@ -226,6 +226,16 @@
   -webkit-app-region: no-drag;
 }
 
+/* Keep custom title-bar content clear of native macOS traffic lights and the
+   Windows/Linux controls overlay. Electron supplies these environment values. */
+.app-titlebar-safe-area {
+  padding-left: max(1.5rem, calc(env(titlebar-area-x, 0px) + 0.75rem));
+  padding-right: max(
+    1.5rem,
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 1.5rem)
+  );
+}
+
 @keyframes confirmation-toast {
   0% {
     opacity: 0;

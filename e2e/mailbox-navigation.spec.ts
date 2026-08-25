@@ -108,6 +108,12 @@ test('the sidebar reaches every mailbox by pointer without moving', async ({ pag
 
 test('collapses the sidebar and keeps that choice across relaunch', async ({ boot, page }, testInfo) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  const titleBarPadding = await page.getByTestId('mail-header').evaluate((header) => {
+    const style = getComputedStyle(header)
+    return { left: Number.parseFloat(style.paddingLeft), right: Number.parseFloat(style.paddingRight) }
+  })
+  if (process.platform === 'darwin') expect(titleBarPadding.left).toBeGreaterThan(24)
+  if (process.platform === 'win32') expect(titleBarPadding.right).toBeGreaterThan(24)
   const sidebar = page.getByTestId('mail-sidebar')
   await expect(page.getByTestId('sidebar-brand')).toHaveText('attn:')
   expect((await sidebar.boundingBox())?.width).toBe(216)

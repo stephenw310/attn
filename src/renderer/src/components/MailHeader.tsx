@@ -219,7 +219,10 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     onToggleSidebar
   } = props
   return (
-    <header className="app-drag flex items-center gap-6 border-b border-edge px-6 py-3">
+    <header
+      data-testid="mail-header"
+      className="app-drag app-titlebar-safe-area flex items-center gap-6 border-b border-edge py-3"
+    >
       <button
         type="button"
         data-testid="sidebar-toggle"

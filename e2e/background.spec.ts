@@ -25,6 +25,16 @@ test('development and test runs do not register a login item', async ({ app }) =
   expect(settings.openAtLogin).toBe(false)
 })
 
+test('extends web content into the native title bar', async ({ app, page }) => {
+  await expect(page.getByTestId('login-screen')).toBeVisible()
+  const sizes = await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    return win ? { window: win.getBounds(), content: win.getContentBounds() } : null
+  })
+  expect(sizes).not.toBeNull()
+  expect(Math.abs((sizes?.window.height ?? 0) - (sizes?.content.height ?? 0))).toBeLessThanOrEqual(2)
+})
+
 test.describe('login launch', () => {
   test.use({ appArgs: ['--hidden'] })
 
