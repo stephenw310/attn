@@ -19,6 +19,7 @@ import type {
   MessageBodyState,
   MessageRecipients,
   SnoozedThreadRow,
+  SystemMailboxCounts,
   ThreadListView,
   ThreadPageCursor,
   ThreadRow
@@ -394,6 +395,68 @@ export function listSnoozedThreads(
     labelIds: labelIds(r.label_ids),
     dueAt: r.due_at
   }))
+}
+
+function scalarCount(db: Db, sql: string, ...values: unknown[]): number {
+  return (db.prepare(sql).get(...values) as { count: number }).count
+}
+
+/** Exact local totals using the same membership rules as each system mailbox list. */
+export function countSystemMailboxes(db: Db, accountId: string): SystemMailboxCounts {
+  const labeledCount = (view: Exclude<LabelMailboxView, 'allMail'>): number => {
+    if (view === 'spam' || view === 'trash') {
+      return scalarCount(
+        db,
+        `SELECT COUNT(*) AS count
+         FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
+         JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+         WHERE mailbox.account_id = ? AND mailbox.label_id = ?`,
+        accountId,
+        MAILBOX_LABEL_IDS[view]
+      )
+    }
+    return scalarCount(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
+       JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+       WHERE mailbox.account_id = ? AND mailbox.label_id = ?
+         AND (${labeledMailboxMembershipSql()})`,
+      accountId,
+      MAILBOX_LABEL_IDS[view]
+    )
+  }
+
+  return {
+    inbox: scalarCount(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM threads t
+       JOIN thread_labels inbox
+         ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
+       WHERE t.account_id = ? AND t.is_inbox_visible = 1`,
+      accountId
+    ),
+    allMail: scalarCount(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM threads t
+       WHERE t.account_id = ? AND (${allMailMembershipSql()})`,
+      accountId
+    ),
+    sent: labeledCount('sent'),
+    starred: labeledCount('starred'),
+    snoozed: scalarCount(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM reminders r
+       JOIN threads t ON t.account_id = r.account_id AND t.id = r.thread_id
+       WHERE r.account_id = ? AND r.kind = 'snooze' AND r.state = 'pending'`,
+      accountId
+    ),
+    spam: labeledCount('spam'),
+    trash: labeledCount('trash')
+  }
 }
 
 export function listUserLabels(db: Db, accountId: string): MailLabel[] {

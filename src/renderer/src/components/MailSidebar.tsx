@@ -1,4 +1,4 @@
-import type { MailboxView, MailLabel } from '../../../shared/mail'
+import type { MailboxView, MailLabel, SystemMailboxCounts } from '../../../shared/mail'
 import { COMMAND_SPECS } from '../commands'
 import {
   type MailView,
@@ -19,6 +19,13 @@ const MAILBOX_ITEMS: readonly { view: MailboxView; shortcut: string }[] = [
   { view: 'spam', shortcut: COMMAND_SPECS['view.spam'].shortcut },
   { view: 'trash', shortcut: COMMAND_SPECS['view.trash'].shortcut }
 ]
+
+function compactCount(count: number): string {
+  if (count < 10_000) return String(count)
+  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`
+  const millions = count / 1_000_000
+  return `${millions < 10 ? millions.toFixed(1).replace(/\.0$/, '') : Math.round(millions)}m`
+}
 
 function NavButton({
   active,
@@ -49,9 +56,14 @@ function NavButton({
       }`}
     >
       <span className="min-w-0 flex-1 truncate">{title}</span>
-      {count !== undefined && count !== null && count > 0 && (
-        <span data-testid="sidebar-count" className="text-[11px] font-semibold text-accent tabular-nums">
-          {count}
+      {count !== undefined && count !== null && (
+        <span
+          data-testid="sidebar-count"
+          data-count={count}
+          title={count.toLocaleString()}
+          className={`text-[11px] font-semibold tabular-nums ${count > 0 ? 'text-accent' : 'text-ink-faint'}`}
+        >
+          {compactCount(count)}
         </span>
       )}
       {shortcut && <Kbd>{shortcut.toUpperCase()}</Kbd>}
@@ -62,7 +74,7 @@ function NavButton({
 interface MailSidebarProps {
   view: MailView
   labels: readonly MailLabel[]
-  unreadCount: number | null
+  mailboxCounts: SystemMailboxCounts | null
   draftCount: number
   outboxCount: number
   onSwitchView: (view: NavigableMailView) => void
@@ -70,7 +82,7 @@ interface MailSidebarProps {
 }
 
 export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
-  const { view, labels, unreadCount, draftCount, outboxCount, onSwitchView, onOpenOutbox } = props
+  const { view, labels, mailboxCounts, draftCount, outboxCount, onSwitchView, onOpenOutbox } = props
   const activeLabelId = userLabelId(view)
 
   return (
@@ -96,7 +108,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
             active={view === item.view}
             title={VIEW_TITLES[item.view]}
             shortcut={item.shortcut}
-            count={item.view === 'inbox' ? unreadCount : item.view === 'drafts' ? draftCount : undefined}
+            count={item.view === 'drafts' ? draftCount : mailboxCounts?.[item.view]}
             testId="sidebar-mailbox"
             onClick={() => onSwitchView(item.view)}
           />

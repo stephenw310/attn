@@ -20,6 +20,7 @@ import type {
   InlineImageResult,
   MailLabel,
   SyncState,
+  SystemMailboxCounts,
   ThreadListRequest,
   ThreadPage
 } from './mail'
@@ -58,6 +59,7 @@ export const IPC_CHANNELS = {
   mailTakePendingFocus: 'mail:takePendingFocus',
   mailListThreads: 'mail:listThreads',
   mailListLabels: 'mail:listLabels',
+  mailGetMailboxCounts: 'mail:getMailboxCounts',
   mailGetUnreadCount: 'mail:getUnreadCount',
   mailPeekActionsReverted: 'mail:peekActionsReverted',
   mailAcknowledgeActionsReverted: 'mail:acknowledgeActionsReverted',
@@ -162,6 +164,7 @@ export interface InvokeChannels {
   // when view is 'snoozed', which the preload narrows for the renderer.
   [IPC_CHANNELS.mailListThreads]: { args: [request: ThreadListRequest]; result: ThreadPage }
   [IPC_CHANNELS.mailListLabels]: { args: []; result: MailLabel[] }
+  [IPC_CHANNELS.mailGetMailboxCounts]: { args: []; result: SystemMailboxCounts }
   [IPC_CHANNELS.mailGetUnreadCount]: { args: []; result: number }
   [IPC_CHANNELS.mailPeekActionsReverted]: {
     args: [accountId: string]

@@ -42,6 +42,7 @@ import { writeAttachment } from '../attachments'
 import type { Db } from '../db'
 import {
   countInboxUnread,
+  countSystemMailboxes,
   getConversation,
   getConversationForDisplay,
   getInlineAttachmentData,
@@ -628,6 +629,12 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.mailListLabels, () => {
     const account = context.currentAccountId()
     return account ? listUserLabels(context.db, account) : []
+  })
+  handle(IPC_CHANNELS.mailGetMailboxCounts, () => {
+    const account = context.currentAccountId()
+    return account
+      ? countSystemMailboxes(context.db, account)
+      : { inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }
   })
   handle(IPC_CHANNELS.mailGetUnreadCount, () => {
     const account = context.currentAccountId()

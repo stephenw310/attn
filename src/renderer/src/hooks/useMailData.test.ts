@@ -58,6 +58,8 @@ describe('useMailData mailbox refreshes', () => {
         listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
         listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
         listLabels: () => Promise.resolve([]),
+        getMailboxCounts: () =>
+          Promise.resolve({ inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }),
         getUnreadCount: () => Promise.resolve(0),
         getPendingActionCount: () => Promise.resolve(0),
         getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),

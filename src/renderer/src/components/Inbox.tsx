@@ -144,6 +144,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     clearOutboxFailure,
     refreshDrafts,
     refreshMailRows,
+    realMailboxCounts,
     realUnreadTotal,
     labels,
     pendingActionCount,
@@ -892,7 +893,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           <MailSidebar
             view={view}
             labels={labels}
-            unreadCount={realUnreadTotal}
+            mailboxCounts={realMailboxCounts}
             draftCount={realDrafts.length}
             outboxCount={realOutbox.length}
             onSwitchView={switchView}

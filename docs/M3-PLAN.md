@@ -469,7 +469,8 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   catalog stay in fixed groups. User-label rows and message-list label chips open local label views. There is
   no mailbox title/count header. Inbox splits get a separate strip only when configured. The sidebar starts
   expanded, collapses to zero width, and stores that choice in the local browser profile. Its wordmark lives
-  above the navigation; one persistent top-bar control closes and reopens the whole sidebar.
+  above the navigation; one persistent top-bar control closes and reopens the whole sidebar. System rows show
+  exact local totals, including zero, without displacing their `G` chords. Large totals are compacted visually.
 
 ### Implementation guide
 

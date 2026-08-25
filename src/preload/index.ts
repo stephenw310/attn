@@ -24,6 +24,7 @@ import type {
   MailLabel,
   SnoozedThreadRow,
   SyncState,
+  SystemMailboxCounts,
   ThreadListRequest,
   ThreadListView,
   ThreadPage,
@@ -88,6 +89,7 @@ const api = {
     listSnoozed: (): Promise<SnoozedThreadRow[]> =>
       listThreadPage({ view: 'snoozed' }).then((page) => page.rows as SnoozedThreadRow[]),
     listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
+    getMailboxCounts: (): Promise<SystemMailboxCounts> => invoke(IPC_CHANNELS.mailGetMailboxCounts),
     getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),
     getConversation: (
       threadId: string,

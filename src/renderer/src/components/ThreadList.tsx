@@ -208,6 +208,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
   const virtualContentRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef<number | null>(null)
   const pendingScrollTopRef = useRef(0)
+  const followedSelectionRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(800)
   const layout = useMemo(() => virtualLayout(threads, view), [threads, view])
@@ -263,11 +264,18 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
   }, [listRef])
 
   useLayoutEffect(() => {
+    if (readerOpen) {
+      followedSelectionRef.current = null
+      return
+    }
     const list = listRef.current
     const selectedThread = threads[selectedIndex]
     const selected =
       (selectedThread ? projected?.byThreadId.get(selectedThread.id) : undefined) ?? layout[selectedIndex]
-    if (!list || !selected || readerOpen) return
+    if (!list || !selected) return
+    const selectionKey = `${view}\u0000${selectedThread?.id ?? selectedIndex}`
+    if (followedSelectionRef.current === selectionKey) return
+    followedSelectionRef.current = selectionKey
 
     // The sizer starts inside the list's own padding box. `offsetTop` would
     // measure from the nearest positioned ancestor — <main> is static, so that
@@ -289,7 +297,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     list.scrollTop = nextScrollTop
     pendingScrollTopRef.current = nextScrollTop
     setScrollTop(nextScrollTop)
-  }, [layout, listRef, projected, readerOpen, selectedIndex, threads, viewportHeight])
+  }, [layout, listRef, projected, readerOpen, selectedIndex, threads, view, viewportHeight])
 
   useEffect(
     () => () => {

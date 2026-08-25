@@ -88,6 +88,9 @@ export type MailboxView = 'inbox' | 'allMail' | 'sent' | 'drafts' | 'starred' | 
 /** Views served by the unified mail:listThreads read. Drafts merges outbox rows with cached Gmail drafts instead. */
 export type ThreadListView = Exclude<MailboxView, 'drafts'>
 
+/** Exact local conversation totals for the system mailboxes backed by thread queries. */
+export type SystemMailboxCounts = Record<ThreadListView, number>
+
 export const THREAD_PAGE_SIZE = 100
 
 /** Stable keyset cursor for mailbox rows ordered by timestamp, then Gmail thread id. */

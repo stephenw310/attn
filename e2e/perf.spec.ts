@@ -400,8 +400,12 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
       element.scrollTop = element.scrollHeight
       element.dispatchEvent(new Event('scroll', { bubbles: true }))
     })
+    const scrollTopBeforeAppend = await list.evaluate((element) => element.scrollTop)
 
     await expect(list).toHaveAttribute('data-thread-count', String(THREAD_PAGE_SIZE * 2))
+    await expect
+      .poll(() => list.evaluate((element) => element.scrollTop))
+      .toBeGreaterThanOrEqual(scrollTopBeforeAppend)
     expect(await page.getByTestId('thread-row').count()).toBeLessThan(100)
   })
 

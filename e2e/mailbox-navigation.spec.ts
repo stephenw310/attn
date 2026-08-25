@@ -111,8 +111,23 @@ test('the sidebar reaches every mailbox by pointer without moving', async ({ pag
   const sidebar = page.getByTestId('mail-sidebar')
   const sidebarBox = await sidebar.boundingBox()
   await expect(page.getByTestId('sidebar-mailbox')).toHaveCount(8)
+  const expectedCounts = new Map([
+    ['Inbox', '8'],
+    ['Starred', '2'],
+    ['Snoozed', '0'],
+    ['Drafts', '0'],
+    ['Sent', '1'],
+    ['All Mail', '10'],
+    ['Spam', '0'],
+    ['Trash', '1']
+  ])
+  for (const [title, count] of expectedCounts) {
+    await expect(
+      page.getByTestId('sidebar-mailbox').filter({ hasText: title }).getByTestId('sidebar-count')
+    ).toHaveText(count)
+  }
+  await expect(page.getByTestId('sidebar-outbox').getByTestId('sidebar-count')).toHaveText('0')
   const inbox = page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })
-  await expect(inbox.getByTestId('sidebar-count')).toHaveText('4')
   await expect(inbox.locator('kbd')).toHaveText('G I')
   await page.getByTestId('sidebar-mailbox').filter({ hasText: 'Trash' }).click()
   await expect(page.getByTestId('mailbox-title')).toHaveText('Trash')

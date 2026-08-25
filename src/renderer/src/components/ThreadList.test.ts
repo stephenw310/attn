@@ -57,6 +57,58 @@ it('loads the next page when keyboard selection approaches the loaded tail', asy
   }
 })
 
+it('keeps a manual scroll offset when a page is appended without moving the selection', async () => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const makeThreads = (count: number): DisplayThread[] =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `thread-${index}`,
+      from: `Sender ${index}`,
+      subject: `Subject ${index}`,
+      snippet: '',
+      at: '9:30 AM',
+      unread: false,
+      starred: false,
+      hasAttachment: false,
+      returned: false,
+      hasDraft: false,
+      labelIds: [],
+      lastMsgAt: count - index
+    }))
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  const listRef = { current: null as HTMLElement | null }
+  const baseProps = {
+    view: 'inbox' as const,
+    syncing: false,
+    readerOpen: false,
+    selectedIndex: 0,
+    selectedIds: new Set<string>(),
+    exitingThreadIds: new Set<string>(),
+    labelsById: new Map(),
+    selectedRowRef: { current: null },
+    listRef,
+    onExtendSelection: (): void => {},
+    onOpenLabel: (): void => {},
+    onOpen: (): void => {}
+  }
+
+  try {
+    await act(async () => root.render(createElement(ThreadList, { ...baseProps, threads: makeThreads(100) })))
+    const list = listRef.current
+    if (!list) throw new Error('thread list did not mount')
+    list.scrollTop = 2_000
+
+    await act(async () => root.render(createElement(ThreadList, { ...baseProps, threads: makeThreads(200) })))
+
+    expect(list.scrollTop).toBe(2_000)
+  } finally {
+    await act(async () => root.unmount())
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+  }
+})
+
 it('skips the row tree when an unrelated parent update preserves its props', async () => {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT

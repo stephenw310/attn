@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from '.'
 import {
+  countSystemMailboxes,
   getConversation,
   getConversationForDisplay,
   type LabelMailboxView,
@@ -100,6 +101,18 @@ describe('thread list queries', () => {
     ])
   })
 
+  it('counts every system mailbox from the same local membership rules as its list', () => {
+    expect(countSystemMailboxes(db, 'account')).toEqual({
+      inbox: 2,
+      allMail: 0,
+      sent: 0,
+      starred: 0,
+      snoozed: 1,
+      spam: 0,
+      trash: 0
+    })
+  })
+
   it('continues ascending snoozed pages after equal due dates', () => {
     db.prepare(
       `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
@@ -148,6 +161,7 @@ describe('thread list queries', () => {
     // trashed message (300) files behind both fully trashed threads.
     expect(mailboxIds('trash')).toEqual(['only-trash', 'legacy-trash', 'mixed'])
     expect(mailboxIds('spam')).toEqual(['only-spam'])
+    expect(countSystemMailboxes(db, 'account')).toMatchObject({ allMail: 1, spam: 1, trash: 3 })
     expect(listMailboxThreads(db, 'account', 'trash').map((row) => [row.id, row.lastMsgAt])).toEqual([
       ['only-trash', 400],
       ['legacy-trash', 325],
@@ -198,6 +212,7 @@ describe('thread list queries', () => {
 
     expect(mailboxIds('sent')).toEqual(['sent-live', 'sent-legacy'])
     expect(mailboxIds('starred')).toEqual(['starred-live'])
+    expect(countSystemMailboxes(db, 'account')).toMatchObject({ sent: 2, starred: 1 })
   })
 
   it('lists a user label from local message membership and excludes junk copies', () => {

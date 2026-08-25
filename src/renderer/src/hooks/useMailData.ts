@@ -4,6 +4,7 @@ import {
   type MailLabel,
   type SnoozedThreadRow,
   type SyncState,
+  type SystemMailboxCounts,
   THREAD_PAGE_SIZE,
   type ThreadPage,
   type ThreadPageCursor,
@@ -81,6 +82,7 @@ interface MailDataState {
   clearOutboxFailure: () => void
   refreshDrafts: () => Promise<void>
   refreshMailRows: () => Promise<void>
+  realMailboxCounts: SystemMailboxCounts | null
   realUnreadTotal: number | null
   labels: MailLabel[]
   pendingActionCount: number
@@ -108,6 +110,7 @@ export function useMailData(
   const [realOutbox, setRealOutbox] = useState<OutboxItem[]>([])
   const [outboxFailure, setOutboxFailure] = useState<Extract<OutboxChanged, { kind: 'failed' }> | null>(null)
   const [outboxProgress, setOutboxProgress] = useState<OutboxProgress | null>(null)
+  const [realMailboxCounts, setRealMailboxCounts] = useState<SystemMailboxCounts | null>(null)
   const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [pendingActionCount, setPendingActionCount] = useState(0)
@@ -163,6 +166,7 @@ export function useMailData(
     setRealOutbox([])
     setOutboxFailure(null)
     setOutboxProgress(null)
+    setRealMailboxCounts(null)
     setRealUnreadTotal(null)
     setLabels([])
     setPendingActionCount(0)
@@ -217,6 +221,7 @@ export function useMailData(
         bridge.draft.list(),
         bridge.outbox.listPending(),
         bridge.mail.listLabels(),
+        bridge.mail.getMailboxCounts(),
         bridge.mail.getUnreadCount(),
         bridge.mail.getPendingActionCount(),
         bridge.mail.getActionQueueStatus(),
@@ -231,6 +236,7 @@ export function useMailData(
             drafts,
             outbox,
             nextLabels,
+            mailboxCounts,
             unread,
             pending,
             actionStatus,
@@ -301,6 +307,7 @@ export function useMailData(
                 : null
             )
             setLabels((current) => reuseLabels(current, nextLabels))
+            setRealMailboxCounts(mailboxCounts)
             setRealUnreadTotal(unread)
             setPendingActionCount(pending)
             setPausedActionCount(actionStatus.paused)
@@ -386,10 +393,11 @@ export function useMailData(
     if (extraView && extraViewVersion !== null) {
       mailboxRefreshVersionRef.current[extraView] = extraViewVersion
     }
-    const [inboxPage, snoozedPage, drafts, extraPage] = await Promise.all([
+    const [inboxPage, snoozedPage, drafts, mailboxCounts, extraPage] = await Promise.all([
       listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0),
       listThreadSnapshot('snoozed', loadedRowCountsRef.current.snoozed ?? 0),
       window.attn.draft.list(),
+      window.attn.mail.getMailboxCounts(),
       extraView
         ? listThreadSnapshot(extraView, loadedRowCountsRef.current[extraView] ?? 0)
         : Promise.resolve(null)
@@ -443,6 +451,7 @@ export function useMailData(
       return next
     })
     setRealDrafts(drafts)
+    setRealMailboxCounts(mailboxCounts)
   }
 
   /**
@@ -537,6 +546,7 @@ export function useMailData(
     clearOutboxFailure,
     refreshDrafts,
     refreshMailRows,
+    realMailboxCounts,
     realUnreadTotal,
     labels,
     pendingActionCount,
