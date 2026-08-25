@@ -195,10 +195,12 @@ interface MailHeaderProps {
   outboxCount: number
   selectionCount: number
   composerOpen: boolean
+  sidebarCollapsed: boolean
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
   onReconnectActions: () => void
   onOpenOutbox: () => void
+  onToggleSidebar: () => void
 }
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
@@ -209,16 +211,31 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     outboxCount,
     selectionCount,
     composerOpen,
+    sidebarCollapsed,
     status,
     onStatus,
     onReconnectActions,
-    onOpenOutbox
+    onOpenOutbox,
+    onToggleSidebar
   } = props
   return (
     <header className="app-drag flex items-center gap-6 border-b border-edge px-6 py-3">
-      <div className="text-base font-bold tracking-tight">
-        attn<span className="text-accent">:</span>
-      </div>
+      <button
+        type="button"
+        data-testid="sidebar-toggle"
+        data-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-controls="mail-sidebar"
+        aria-expanded={!sidebarCollapsed}
+        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        onClick={onToggleSidebar}
+        className="app-no-drag flex size-8 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
+          <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
+          <path d="M8.5 4v16" strokeWidth="1.75" />
+        </svg>
+      </button>
       <div className="app-no-drag ml-auto flex items-center gap-4">
         {!composerOpen && selectionCount > 0 && (
           <span

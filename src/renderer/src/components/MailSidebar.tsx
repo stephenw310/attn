@@ -64,76 +64,30 @@ interface MailSidebarProps {
   unreadCount: number | null
   draftCount: number
   outboxCount: number
-  collapsed: boolean
   onSwitchView: (view: NavigableMailView) => void
   onOpenOutbox: () => void
-  onToggleCollapsed: () => void
 }
 
 export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
-  const {
-    view,
-    labels,
-    unreadCount,
-    draftCount,
-    outboxCount,
-    collapsed,
-    onSwitchView,
-    onOpenOutbox,
-    onToggleCollapsed
-  } = props
+  const { view, labels, unreadCount, draftCount, outboxCount, onSwitchView, onOpenOutbox } = props
   const activeLabelId = userLabelId(view)
-
-  if (collapsed) {
-    return (
-      <aside
-        data-testid="mail-sidebar"
-        data-collapsed="true"
-        className="flex w-11 flex-none justify-center border-r border-edge bg-raised/45 py-3"
-        aria-label="Mail navigation collapsed"
-      >
-        <button
-          type="button"
-          data-testid="sidebar-expand"
-          aria-label="Expand sidebar"
-          title="Expand sidebar"
-          onClick={onToggleCollapsed}
-          className="flex size-8 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current stroke-2">
-            <path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </aside>
-    )
-  }
 
   return (
     <aside
+      id="mail-sidebar"
       data-testid="mail-sidebar"
-      data-collapsed="false"
       className="flex w-[216px] flex-none flex-col border-r border-edge bg-raised/45 px-3 py-3"
       aria-label="Mail navigation"
     >
+      <div
+        data-testid="sidebar-brand"
+        className="flex h-10 flex-none items-center px-2.5 pb-2 text-base font-bold tracking-tight"
+      >
+        attn<span className="text-accent">:</span>
+      </div>
       <nav className="flex flex-none flex-col gap-0.5" aria-label="Mailboxes">
-        <div className="flex min-h-8 items-center justify-between px-2.5 pb-1.5">
+        <div className="flex min-h-8 items-center px-2.5 pb-1.5">
           <h2 className="text-[10px] font-bold tracking-[0.14em] text-ink-faint uppercase">Mailboxes</h2>
-          <button
-            type="button"
-            data-testid="sidebar-collapse"
-            aria-label="Collapse sidebar"
-            title="Collapse sidebar"
-            onClick={onToggleCollapsed}
-            className="flex size-6 cursor-pointer items-center justify-center rounded text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              className="size-3.5 fill-none stroke-current stroke-2"
-            >
-              <path d="m15 6-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
         </div>
         {MAILBOX_ITEMS.map((item) => (
           <NavButton

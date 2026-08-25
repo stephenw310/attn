@@ -109,14 +109,15 @@ test('the sidebar reaches every mailbox by pointer without moving', async ({ pag
 test('collapses the sidebar and keeps that choice across relaunch', async ({ boot, page }, testInfo) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   const sidebar = page.getByTestId('mail-sidebar')
-  await expect(sidebar).toHaveAttribute('data-collapsed', 'false')
+  await expect(page.getByTestId('sidebar-brand')).toHaveText('attn:')
   expect((await sidebar.boundingBox())?.width).toBe(216)
+  await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Collapse sidebar')
 
-  await page.getByTestId('sidebar-collapse').click()
-  await expect(sidebar).toHaveAttribute('data-collapsed', 'true')
+  await page.getByTestId('sidebar-toggle').click()
+  await expect(sidebar).toHaveCount(0)
   await expect(page.getByTestId('sidebar-mailbox')).toHaveCount(0)
-  await expect(page.getByTestId('sidebar-expand')).toBeVisible()
-  expect((await sidebar.boundingBox())?.width).toBe(44)
+  await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Expand sidebar')
+  expect((await page.getByTestId('mail-view-header').boundingBox())?.x).toBe(0)
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
 
   const artifactDirectory = join(__dirname, '.artifacts')
@@ -127,11 +128,13 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
 
   const relaunched = await boot.relaunch()
   const relaunchedSidebar = relaunched.page.getByTestId('mail-sidebar')
-  await expect(relaunchedSidebar).toHaveAttribute('data-collapsed', 'true')
+  await expect(relaunchedSidebar).toHaveCount(0)
   await expect(relaunched.page.getByTestId('sidebar-mailbox')).toHaveCount(0)
+  await expect(relaunched.page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Expand sidebar')
 
-  await relaunched.page.getByTestId('sidebar-expand').click()
-  await expect(relaunchedSidebar).toHaveAttribute('data-collapsed', 'false')
+  await relaunched.page.getByTestId('sidebar-toggle').click()
+  await expect(relaunchedSidebar).toBeVisible()
+  expect((await relaunchedSidebar.boundingBox())?.width).toBe(216)
   await expect(relaunched.page.getByTestId('sidebar-mailbox')).toHaveCount(8)
   await expect(relaunched.page.getByTestId('sidebar-label')).toHaveCount(12)
 })

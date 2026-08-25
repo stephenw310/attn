@@ -873,27 +873,29 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         outboxCount={realOutbox.length}
         selectionCount={view !== 'drafts' && view !== 'outbox' ? selectedIds.size : 0}
         composerOpen={fullWindowComposerDraft !== null}
+        sidebarCollapsed={sidebarCollapsed}
         status={status}
         onStatus={onStatus}
         onReconnectActions={reconnectActions}
         onOpenOutbox={openOutbox}
+        onToggleSidebar={toggleSidebar}
       />
 
       <div
         className={`min-h-0 flex-1 ${fullWindowComposerDraft ? 'hidden' : 'flex'}`}
         aria-hidden={!!fullWindowComposerDraft}
       >
-        <MailSidebar
-          view={view}
-          labels={labels}
-          unreadCount={realUnreadTotal}
-          draftCount={realDrafts.length}
-          outboxCount={realOutbox.length}
-          collapsed={sidebarCollapsed}
-          onSwitchView={switchView}
-          onOpenOutbox={openOutbox}
-          onToggleCollapsed={toggleSidebar}
-        />
+        {!sidebarCollapsed && (
+          <MailSidebar
+            view={view}
+            labels={labels}
+            unreadCount={realUnreadTotal}
+            draftCount={realDrafts.length}
+            outboxCount={realOutbox.length}
+            onSwitchView={switchView}
+            onOpenOutbox={openOutbox}
+          />
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           {!readerOpen && !fullWindowComposerDraft && (
             <MailViewHeader
