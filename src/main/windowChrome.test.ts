@@ -12,6 +12,7 @@ describe('window chrome', () => {
   })
 
   it('keeps native macOS traffic lights over a full-height content window', () => {
+    expect(MAC_TRAFFIC_LIGHT_POSITION).toEqual({ x: 12, y: 15 })
     expect(windowChromeOptions('darwin', 'dispatch-dark', true)).toEqual({
       titleBarStyle: 'hiddenInset',
       titleBarOverlay: true,

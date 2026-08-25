@@ -2,7 +2,7 @@ import type { BrowserWindowConstructorOptions, TitleBarOverlayOptions } from 'el
 import { resolveTheme, type ThemePreference, themeAppearance } from '../shared/theme'
 
 export const TITLE_BAR_HEIGHT = 44
-export const MAC_TRAFFIC_LIGHT_POSITION = { x: 12, y: 16 } as const
+export const MAC_TRAFFIC_LIGHT_POSITION = { x: 12, y: 15 } as const
 
 type WindowChromeOptions = Pick<
   BrowserWindowConstructorOptions,
