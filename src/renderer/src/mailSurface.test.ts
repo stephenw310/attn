@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
-import { mailPresentationForHtml, mailSurfaceForHtml, normalizeNativeMailDocument } from './mailSurface'
+import {
+  mailPresentationForHtml,
+  mailSurfaceForHtml,
+  normalizeNativeMailBackgrounds,
+  normalizeNativeMailDocument
+} from './mailSurface'
 
 describe('mail surface classification', () => {
   it('uses the native surface for plain and text-like HTML', () => {
@@ -137,7 +142,10 @@ describe('mail surface classification', () => {
       '<table bgcolor="FFFFFF"><tr><td>Plain table</td></tr></table>',
       '<div style="background:none;background-color:transparent">Plain note</div>',
       '<div style="background-image:none;background-color:rgba(12,34,56,0)">Plain note</div>',
-      '<style>body{background:#fff!important;color:#333;margin:0}</style><p>Plain note</p>'
+      '<div style="background-color:white;background-image:initial">Plain note</div>',
+      '<div style="background-color:rgb(255 255 255 / 1)">Plain note</div>',
+      '<style>body{background:#fff!important;color:#333;margin:0}</style><p>Plain note</p>',
+      '<style>#styled-white{background:#fff!important;font-weight:700}</style><div>Practice is at 5:00.</div><p><span id=inline-white style="background:#fff;color:#202124">Bring a glove and water.</span></p><p id=styled-white>Games start next Saturday.</p>'
     ]
 
     for (const html of neutralMessages) expect(mailSurfaceForHtml(html)).toBe('native')
@@ -193,7 +201,6 @@ describe('mail surface classification', () => {
 
     const paddedCanvases = [
       '<table bgcolor="#eef2ff"><tr><td>Small card</td></tr></table>',
-      '<div style="width:600px;background:#eef2ff">Fixed-width card</div>',
       '<div style="max-width:600px;background:#eef2ff">Centered card</div>',
       'Intro text<div style="background:#eef2ff">Colored section</div>',
       '<html style="background:#eef2ff"><body><table><tr><td>HTML wrapper canvas</td></tr></table></body></html>',
@@ -201,6 +208,15 @@ describe('mail surface classification', () => {
     ]
     for (const html of paddedCanvases) {
       expect(mailPresentationForHtml(html)).toEqual({ surface: 'light', layout: 'padded' })
+    }
+
+    const centeredCanvases = [
+      '<div style="width:600px;background:#eef2ff">Fixed-width card</div>',
+      '<table width="600" bgcolor="#eef2ff"><tr><td>Fixed-width table</td></tr></table>',
+      '<style>.card{width:40em}</style><div class="card" style="background:#eef2ff">Styled card</div>'
+    ]
+    for (const html of centeredCanvases) {
+      expect(mailPresentationForHtml(html)).toEqual({ surface: 'light', layout: 'centered' })
     }
   })
 
@@ -244,5 +260,21 @@ describe('mail surface classification', () => {
     expect(legacyBlue?.style.color).toMatch(/^rgb\(/)
     expect(inlineBlue?.style.color).toMatch(/^rgb\(/)
     expect(legacyBlue?.style.color).not.toBe(inlineBlue?.style.color)
+  })
+
+  it('removes inline native backgrounds without changing light-theme foreground styles', () => {
+    const document = new DOMParser().parseFromString(
+      '<style>.copy{font-family:serif;background:#fff}</style><div id="copy" bgcolor="white" style="color:#123456;background:white;font-size:16px">Question</div>',
+      'text/html'
+    )
+
+    normalizeNativeMailBackgrounds(document)
+
+    const copy = document.querySelector<HTMLElement>('#copy')
+    expect(document.querySelector('style')?.textContent).toContain('font-family:serif')
+    expect(copy?.hasAttribute('bgcolor')).toBe(false)
+    expect(copy?.style.background).toBe('')
+    expect(copy?.style.color).toBe('rgb(18, 52, 86)')
+    expect(copy?.style.fontSize).toBe('16px')
   })
 })

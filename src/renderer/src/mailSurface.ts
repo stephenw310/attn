@@ -1,5 +1,5 @@
 export type MailSurface = 'native' | 'light'
-export type MailLayout = 'padded' | 'full-bleed'
+export type MailLayout = 'padded' | 'centered' | 'full-bleed'
 
 export interface MailPresentation {
   surface: MailSurface
@@ -121,9 +121,21 @@ function nativeTextColor(value: string): string | null {
 }
 
 function isNeutralCanvas(value: string): boolean {
+  const parsed = parsedRgbColor(value.replace(CSS_COMMENT, '').replace(IMPORTANT, '').trim())
+  if (
+    parsed &&
+    (parsed.alpha === 0 ||
+      (parsed.alpha === 1 && parsed.red === 255 && parsed.green === 255 && parsed.blue === 255))
+  ) {
+    return true
+  }
   const normalized = value.toLowerCase().replace(/\s+/g, '')
   if (
     normalized === '' ||
+    normalized === 'initial' ||
+    normalized === 'unset' ||
+    normalized === 'revert' ||
+    normalized === 'revert-layer' ||
     normalized === 'transparent' ||
     normalized === 'none' ||
     normalized === 'white' ||
@@ -740,6 +752,23 @@ function hasWidthConstraint(document: Document, element: HTMLElement): boolean {
   )
 }
 
+function isFixedWidth(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/\s/g, '')
+  return Boolean(
+    normalized &&
+      !normalized.includes('%') &&
+      !['auto', 'initial', 'inherit', 'unset', 'revert', 'revert-layer'].includes(normalized)
+  )
+}
+
+function hasFixedWidth(document: Document, element: HTMLElement): boolean {
+  return (
+    isFixedWidth(element.getAttribute('width') ?? '') ||
+    isFixedWidth(element.style.width) ||
+    matchingStyleDeclarations(document, element).some((style) => isFixedWidth(style.width))
+  )
+}
+
 function stylesheetWinnerCreatesCanvas(elementWinners: BackgroundWinners | undefined): boolean {
   return Boolean(
     elementWinners &&
@@ -786,11 +815,16 @@ function ownsOuterCanvas(document: Document, winners: Map<Element, BackgroundWin
   return Boolean(firstCell && winnersCreateCanvas(winners.get(firstCell)))
 }
 
-/** Remove sender canvases from content classified for Attn's native dark surface. */
-export function normalizeNativeMailDocument(root: ParentNode): void {
-  root.querySelectorAll('style').forEach((style) => {
-    style.remove()
+function hasCenteredOuterCanvas(document: Document): boolean {
+  const hasDirectText = [...document.body.childNodes].some((node) => {
+    return node.nodeType === 3 && Boolean(node.textContent?.trim())
   })
+  if (hasDirectText) return false
+  const content = [...document.body.children].filter((element) => !NON_CONTENT.has(element.tagName))
+  return content.length === 1 && hasFixedWidth(document, content[0] as HTMLElement)
+}
+
+function removeElementBackgrounds(root: ParentNode): void {
   root.querySelectorAll<HTMLElement>('[bgcolor], [background], [style]').forEach((element) => {
     element.removeAttribute('bgcolor')
     element.removeAttribute('background')
@@ -801,6 +835,19 @@ export function normalizeNativeMailDocument(root: ParentNode): void {
     if (style) element.setAttribute('style', style)
     else element.removeAttribute('style')
   })
+}
+
+/** Remove inline canvases while preserving light-theme typography and foreground colours. */
+export function normalizeNativeMailBackgrounds(root: ParentNode): void {
+  removeElementBackgrounds(root)
+}
+
+/** Remove sender canvases and adapt foreground colours for Attn's native dark surface. */
+export function normalizeNativeMailDocument(root: ParentNode): void {
+  root.querySelectorAll('style').forEach((style) => {
+    style.remove()
+  })
+  removeElementBackgrounds(root)
   root.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
     const color = element.style.getPropertyValue('color')
     if (!color) return
@@ -836,7 +883,14 @@ export function mailPresentationForHtml(html: string | null): MailPresentation {
   // the matching style block lives outside the quoted wrapper.
   const winners = authoredBackgrounds(document)
   const surface = hasAuthoredCanvas(winners) ? 'light' : 'native'
-  const layout = surface === 'light' && ownsOuterCanvas(document, winners) ? 'full-bleed' : 'padded'
+  const layout =
+    surface !== 'light'
+      ? 'padded'
+      : ownsOuterCanvas(document, winners)
+        ? 'full-bleed'
+        : hasCenteredOuterCanvas(document)
+          ? 'centered'
+          : 'padded'
   return { surface, layout }
 }
 

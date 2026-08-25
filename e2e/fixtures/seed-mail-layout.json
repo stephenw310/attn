@@ -26,8 +26,8 @@
           "receivedAt": "10:00",
           "from": "Table Sender <table@example.com>",
           "to": "seed@attn.test",
-          "subject": "Padded rich fragment",
-          "bodyHtml": "<div id=compact-card style=\"width:600px;background:#eef2ff\">A fixed-width card does not own the canvas.</div>"
+          "subject": "Centered newsletter",
+          "bodyHtml": "<style>body{margin:0!important;background:#fff!important}</style><table id=compact-card width=600 style=\"width:600px;background:#fff;border-collapse:collapse\"><tr><td style=\"height:72px;background:#343b5c\"></td></tr><tr><td style=\"padding:32px;color:#202124\">A fixed-width newsletter is centered on the reading surface.</td></tr><tr><td style=\"height:48px;background:#343b5c\"></td></tr></table>"
         }
       ]
     },
@@ -88,6 +88,21 @@
           "to": "seed@attn.test",
           "subject": "Color-coded reply",
           "bodyHtml": "<div>Thanks, that answers my questions.</div><blockquote type=cite><div id=quoted-question style=\"color:#202124\">Is any other paperwork required?</div><font id=quoted-answer color=#0056d6>No other paperwork for now.</font><div><font id=quoted-answer-dark color=#0042a9>Most likely sometime in October.</font></div></blockquote>"
+        }
+      ]
+    },
+    {
+      "id": "t-layout-neutral-backgrounds",
+      "messages": [
+        {
+          "id": "m-layout-neutral-backgrounds",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "15:00",
+          "from": "Coach <coach@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Neutral line backgrounds",
+          "bodyHtml": "<style>#styled-white{background:#fff!important;font-weight:700}</style><div>Practice is at 5:00.</div><p><span id=inline-white style=\"background:#fff;color:#202124\">Bring a glove and water.</span></p><p id=styled-white>Games start next Saturday.</p>"
         }
       ]
     }
