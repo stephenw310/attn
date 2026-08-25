@@ -125,11 +125,17 @@ test.describe('seeded inbox smoke coverage', () => {
   test('groups the list by age and labels the list-context shortcuts', async ({ page }) => {
     // The fixture is day-anchored (`receivedDaysAgo`), so these headers hold on
     // any calendar day — the reason absolute stamps were retired from the seed.
+    const now = new Date()
+    const oldestMessage = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 40, 7, 30)
+    const oldestGroup =
+      oldestMessage.getFullYear() === now.getFullYear() && oldestMessage.getMonth() === now.getMonth()
+        ? 'Earlier this month'
+        : String(oldestMessage.getFullYear())
     await expect(page.getByTestId('thread-date-group')).toHaveText([
       'Today',
       'Yesterday',
       'Last 7 days',
-      'Older'
+      oldestGroup
     ])
     await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
     await expect(page.getByTestId('pending-count')).toHaveCount(0)

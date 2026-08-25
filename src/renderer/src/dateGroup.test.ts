@@ -10,7 +10,9 @@ describe('dateGroup', () => {
     expect(dateGroup({ lastMsgAt: atDaysAgo(1) }, now)).toBe('Yesterday')
     expect(dateGroup({ lastMsgAt: atDaysAgo(6) }, now)).toBe('Last 7 days')
     expect(dateGroup({ lastMsgAt: atDaysAgo(7) }, now)).toBe('Earlier this month')
-    expect(dateGroup({ lastMsgAt: new Date(2026, 6, 31).getTime() }, now)).toBe('Older')
+    expect(dateGroup({ lastMsgAt: new Date(2026, 6, 31).getTime() }, now)).toBe('2026')
+    expect(dateGroup({ lastMsgAt: new Date(2025, 11, 31).getTime() }, now)).toBe('2025')
+    expect(dateGroup({ lastMsgAt: new Date(2024, 2, 18).getTime() }, now)).toBe('2024')
   })
 
   it('treats mail timestamped later today as today rather than the future', () => {
