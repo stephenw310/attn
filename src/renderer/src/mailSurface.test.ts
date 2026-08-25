@@ -172,6 +172,16 @@ describe('mail surface classification', () => {
         '<style>@media not (prefers-color-scheme:dark){body{background:#fff3d6}}</style><p>Light-only design</p>'
       )
     ).toBe('light')
+    expect(
+      mailSurfaceForHtml(
+        '<style>@media not screen and (prefers-color-scheme:dark){body{background:#fff3d6}}</style><p>Negated dark design</p>'
+      )
+    ).toBe('light')
+    expect(
+      mailSurfaceForHtml(
+        '<style>@media not screen and (prefers-color-scheme:light){body{background:#fff3d6}}</style><p>Negated light design</p>'
+      )
+    ).toBe('native')
   })
 
   it('ignores print-only backgrounds when resolving the screen canvas', () => {

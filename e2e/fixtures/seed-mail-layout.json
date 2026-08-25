@@ -120,6 +120,21 @@
           "bodyHtml": "<style>html{background:#fff!important}#styled-white{background:#fff!important;font-weight:700}</style><div>Practice is at 5:00.</div><p><span id=inline-white style=\"background:#fff;color:#202124\">Bring a glove and water.</span></p><p id=styled-white>Games start next Saturday.</p>"
         }
       ]
+    },
+    {
+      "id": "t-layout-negated-dark",
+      "messages": [
+        {
+          "id": "m-layout-negated-dark",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "17:00",
+          "from": "Media Sender <media@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Negated dark canvas",
+          "bodyHtml": "<style>@media not screen and (prefers-color-scheme:dark){#negated-dark-canvas{background:#fff3d6;color:#202124}}</style><div id=negated-dark-canvas>Negating the complete dark query keeps this light canvas.</div>"
+        }
+      ]
     }
   ]
 }

@@ -301,13 +301,14 @@ function mediaQueryCanApplyOnLightScreen(query: string): boolean {
 
   const typeMatch = condition.startsWith('(') ? null : /^([a-z][\w-]*)\b/i.exec(condition)
   const mediaType = typeMatch?.[1].toLowerCase() ?? 'all'
-  const matchesScreen =
-    qualifier === 'not'
-      ? typeMatch === null || (mediaType !== 'screen' && mediaType !== 'all')
-      : mediaType === 'screen' || mediaType === 'all'
-  if (!matchesScreen) return false
+  const typeMatchesScreen = typeMatch === null || mediaType === 'screen' || mediaType === 'all'
 
-  return !(DARK_COLOR_SCHEME.test(query) && qualifier !== 'not')
+  // `not` negates the complete query. On a light screen, either a non-screen
+  // media type or a required dark color scheme makes the inner query false.
+  if (qualifier === 'not') return !typeMatchesScreen || DARK_COLOR_SCHEME.test(condition)
+  if (!typeMatchesScreen) return false
+
+  return !DARK_COLOR_SCHEME.test(condition)
 }
 
 function lightScreenMediaCanApply(prelude: string): boolean {

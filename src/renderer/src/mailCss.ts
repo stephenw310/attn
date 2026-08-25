@@ -1,4 +1,5 @@
-const DARK_COLOR_SCHEME = /(\(\s*prefers-color-scheme\s*:\s*)dark(\s*\))/gi
+const DARK_COLOR_SCHEME = /\(\s*prefers-color-scheme\s*:\s*dark\s*\)/gi
+const ALWAYS_FALSE_LIGHT_MEDIA_FEATURE = '(width < 0px)'
 
 /**
  * HTML mail is rendered on an intentionally light canvas. Chromium evaluates
@@ -6,5 +7,5 @@ const DARK_COLOR_SCHEME = /(\(\s*prefers-color-scheme\s*:\s*)dark(\s*\))/gi
  * disable only the dark branch while leaving light and responsive rules intact.
  */
 export function forceLightMailCss(css: string): string {
-  return css.replace(DARK_COLOR_SCHEME, '$1attn-disabled-dark$2')
+  return css.replace(DARK_COLOR_SCHEME, ALWAYS_FALSE_LIGHT_MEDIA_FEATURE)
 }
