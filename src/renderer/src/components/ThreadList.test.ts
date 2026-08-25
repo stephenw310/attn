@@ -46,6 +46,7 @@ it('skips the row tree when an unrelated parent update preserves its props', asy
     selectedRowRef,
     listRef: { current: null as HTMLElement | null },
     onExtendSelection,
+    onOpenLabel: (): void => {},
     onOpen
   }
   const container = document.createElement('div')
@@ -95,6 +96,7 @@ it('windows large lists while keeping an offscreen keyboard selection mounted', 
     selectedRowRef: { current: null as HTMLDivElement | null },
     listRef: { current: null as HTMLElement | null },
     onExtendSelection: (): void => {},
+    onOpenLabel: (): void => {},
     onOpen: (): void => {}
   }
 
@@ -150,6 +152,7 @@ it('projects virtual rows into the space left by an exiting row without moving t
     selectedRowRef: { current: null },
     listRef: { current: null as HTMLElement | null },
     onExtendSelection: (): void => {},
+    onOpenLabel: (): void => {},
     onOpen: (): void => {}
   }
 
@@ -298,6 +301,7 @@ it('measures the sizer against the list when scrolling a selection into view', a
     selectedRowRef: { current: null },
     listRef: { current: null as HTMLElement | null },
     onExtendSelection: (): void => {},
+    onOpenLabel: (): void => {},
     onOpen: (): void => {}
   }
 

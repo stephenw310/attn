@@ -44,25 +44,32 @@ function labelColor(labelId: string): (typeof LABEL_PALETTE)[number] {
 
 function ThreadLabels({
   labelIds,
-  labelsById
+  labelsById,
+  onOpenLabel
 }: {
   labelIds: readonly string[]
   labelsById: ReadonlyMap<string, MailLabel>
+  onOpenLabel: (labelId: string) => void
 }): React.JSX.Element {
   return (
     <>
       {labelIds.map((labelId) => {
         const label = labelsById.get(labelId)
         return label ? (
-          <span
+          <button
+            type="button"
             key={labelId}
             data-testid="label-chip"
             title={label.name}
-            className="max-w-24 flex-none truncate rounded-[4px] border px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+            className="max-w-24 flex-none cursor-pointer truncate rounded-[4px] border px-1.5 py-0.5 text-[10px] font-semibold leading-none"
             style={labelColor(labelId)}
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpenLabel(labelId)
+            }}
           >
             {label.name}
-          </span>
+          </button>
         ) : null
       })}
     </>
@@ -93,19 +100,22 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
   )
 }
 
-const EMPTY_TEXT: Record<ThreadListView, string> = {
+type ThreadListKind = ThreadListView | 'label'
+
+const EMPTY_TEXT: Record<ThreadListKind, string> = {
   inbox: 'Inbox empty',
   allMail: 'All Mail is empty',
   sent: 'Nothing sent yet',
   starred: 'Nothing starred',
   snoozed: 'Nothing snoozed',
   spam: 'Spam is empty',
-  trash: 'Trash is empty'
+  trash: 'Trash is empty',
+  label: 'No conversations with this label'
 }
 
 interface ThreadListProps {
   threads: DisplayThread[]
-  view: ThreadListView
+  view: ThreadListKind
   syncing: boolean
   readerOpen: boolean
   selectedIndex: number
@@ -116,6 +126,7 @@ interface ThreadListProps {
   /** The scroll element, owned by the parent so per-view scroll can be saved and restored. */
   listRef: React.RefObject<HTMLElement | null>
   onExtendSelection: (index: number) => void
+  onOpenLabel: (labelId: string) => void
   onOpen: (index: number) => void
 }
 
@@ -131,7 +142,7 @@ interface VirtualThreadEntry {
   showGroup: boolean
 }
 
-function virtualLayout(threads: readonly DisplayThread[], view: ThreadListView): VirtualThreadEntry[] {
+function virtualLayout(threads: readonly DisplayThread[], view: ThreadListKind): VirtualThreadEntry[] {
   let top = 0
   let previousGroup: ReturnType<typeof dateGroup> | undefined
   return threads.map((thread, index) => {
@@ -184,6 +195,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     selectedRowRef,
     listRef,
     onExtendSelection,
+    onOpenLabel,
     onOpen
   } = props
   const virtualContentRef = useRef<HTMLDivElement | null>(null)
@@ -335,7 +347,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
               Draft
             </span>
           )}
-          <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} />
+          <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} onOpenLabel={onOpenLabel} />
           <span className="app-thread-star flex-none text-star" title="Starred">
             ★
           </span>

@@ -91,18 +91,43 @@ test('every G chord reaches its mailbox and the header names it', async ({ page 
   await expect(rows).toHaveCount(8)
 })
 
-test('the header mailbox menu reaches every view by pointer', async ({ page }) => {
+test('the sidebar reaches every mailbox by pointer without moving', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  await page.getByTestId('mailbox-menu').click()
-  await expect(page.getByTestId('mailbox-row')).toHaveCount(8)
-  await page.getByTestId('mailbox-row').filter({ hasText: 'Trash' }).click()
+  const sidebar = page.getByTestId('mail-sidebar')
+  const sidebarBox = await sidebar.boundingBox()
+  await expect(page.getByTestId('sidebar-mailbox')).toHaveCount(8)
+  await page.getByTestId('sidebar-mailbox').filter({ hasText: 'Trash' }).click()
   await expect(page.getByTestId('mailbox-title')).toHaveText('Trash')
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
 
-  await page.getByTestId('mailbox-menu').click()
-  await page.getByTestId('mailbox-row').filter({ hasText: 'Inbox' }).click()
+  await page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' }).click()
   await expect(page.getByTestId('mailbox-title')).toHaveText('Inbox')
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  expect(await sidebar.boundingBox()).toEqual(sidebarBox)
+})
+
+test('opens user-label views from the sidebar and label chips', async ({ page }, testInfo) => {
+  const labels = page.getByTestId('sidebar-label')
+  await expect(labels).toHaveCount(12)
+
+  const receipts = labels.filter({ hasText: 'receipts' })
+  await receipts.click()
+  await expect(receipts).toHaveAttribute('data-active', 'true')
+  await expect(page.getByTestId('mailbox-title')).toHaveText('receipts')
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  await expect(page.getByTestId('thread-row')).toContainText('Your receipt')
+
+  await page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' }).click()
+  await page.getByTestId('thread-row').filter({ hasText: 'Design notes' }).getByTestId('label-chip').click()
+  await expect(page.getByTestId('mailbox-title')).toHaveText('projects')
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  await expect(page.getByTestId('thread-row')).toContainText('Design notes')
+
+  const artifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(artifactDirectory, { recursive: true })
+  const path = join(artifactDirectory, 'label-view.png')
+  await page.screenshot({ path })
+  await testInfo.attach('label-view', { path, contentType: 'image/png' })
 })
 
 test('keeps the trashed message as a reader marker that reveals locally and resets on close', async ({

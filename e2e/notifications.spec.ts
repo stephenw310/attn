@@ -63,7 +63,10 @@ test('focus-thread safely leaves an open Snoozed conversation before opening Inb
 
   await emitFocusThread(app, 't-travel')
 
-  await expect(page.getByTestId('view-title')).toHaveText('Inbox')
+  await expect(page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })).toHaveAttribute(
+    'data-active',
+    'true'
+  )
   await expect(page.getByTestId('conversation-subject')).toHaveText('Flight options')
   await expect.poll(() => page.evaluate(() => window.attn.mail.getPendingActionCount())).toBe(pendingBefore)
 })

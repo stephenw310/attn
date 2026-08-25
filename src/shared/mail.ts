@@ -88,6 +88,9 @@ export type MailboxView = 'inbox' | 'allMail' | 'sent' | 'drafts' | 'starred' | 
 /** Views served by the unified mail:listThreads read. Drafts merges outbox rows with cached Gmail drafts instead. */
 export type ThreadListView = Exclude<MailboxView, 'drafts'>
 
+/** A local list read targets either a system mailbox or one Gmail user label. */
+export type ThreadListRequest = { view: ThreadListView } | { view: 'label'; labelId: string }
+
 /** Mailboxes whose membership and reader contents depend on per-message labels. */
 export type MessageMailbox = 'all-mail' | 'spam' | 'trash'
 

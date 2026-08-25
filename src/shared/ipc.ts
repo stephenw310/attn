@@ -20,7 +20,7 @@ import type {
   InlineImageResult,
   MailLabel,
   SyncState,
-  ThreadListView,
+  ThreadListRequest,
   ThreadRow
 } from './mail'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
@@ -160,7 +160,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: string | null }
   // Snoozed rows carry their reminder fields: the result is SnoozedThreadRow[]
   // when view is 'snoozed', which the preload narrows for the renderer.
-  [IPC_CHANNELS.mailListThreads]: { args: [request: { view: ThreadListView }]; result: ThreadRow[] }
+  [IPC_CHANNELS.mailListThreads]: { args: [request: ThreadListRequest]; result: ThreadRow[] }
   [IPC_CHANNELS.mailListLabels]: { args: []; result: MailLabel[] }
   [IPC_CHANNELS.mailGetUnreadCount]: { args: []; result: number }
   [IPC_CHANNELS.mailPeekActionsReverted]: {

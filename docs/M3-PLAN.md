@@ -413,12 +413,13 @@ touches `persist.ts` and the schema, not the renderer, so the two tracks do not 
 
 ## T22 — System mailbox navigation
 
-**Status: done, completed 2026-08-23.** Eight views render from SQLite through the unified
+**Status: done, completed 2026-08-23; navigation revised 2026-08-24.** Eight system views render from SQLite through the unified
 `mail:listThreads({ view })` read; `listMailboxThreadIds` grew into `listMailboxThreads` with the Sent and
 Starred junk exclusion; windowing is unconditional (the 500-row threshold and the non-virtual render path are
 deleted); per-view selection and scroll restore on return; normal and All Mail readers keep trashed messages
-as reveal-in-place markers; the five `view.*` chords registered; the header names the active mailbox and adds
-a mailbox menu (the whole of pointer navigation until T26's palette). The measured cached All Mail switch on
+as reveal-in-place markers; the five `view.*` chords registered. The follow-up replaces the header mailbox menu
+with a persistent system-mailbox and user-label sidebar, adds local user-label list reads, and keeps the content
+header stable for the future Inbox split strip. The measured cached All Mail switch on
 the 10,000-thread profile is ~4 ms median against the 50 ms budget (the cold first visit is reported
 unbudgeted). One renderer-level decision worth recording: display-row mapping is cached by rows-array
 identity (`displayThreads`), because remapping 10,000 rows through Intl on every switch cost ~176 ms alone.
@@ -465,18 +466,21 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   `view.starred` (`g s`), `view.spam` (`g p`), `view.trash` (`g r`) beside the existing four.
   `useKeyboardDispatch.ts:47` already resolves two-key chords from the registry, so nothing in dispatch
   changes. Palette entries stay registry-only until T26.
-- **The list header shows the active mailbox name** (`MailHeader`), which is the whole of F3's answer to not
-  having a sidebar.
+- **Pointer navigation lives in a stable left sidebar.** System mailboxes, Outbox, and the current user-label
+  catalog stay in fixed groups. User-label rows and message-list label chips open local label views. Inbox
+  splits remain a separate horizontal strip in the content header.
 
 ### Implementation guide
 
-- Renderer: `Inbox.tsx` view state and `switchView`, `MailHeader`, `ThreadList` windowing, `useMailData`.
+- Renderer: `Inbox.tsx` view state and `switchView`, `MailSidebar`, `MailViewHeader`, `ThreadList` windowing,
+  `useMailData`.
   Route every view transition through `exitConversation()` before changing the view. This checkpoints an
   inline reply before React unmounts its composer.
 - Main: `db/queries.ts` (`listMailboxThreads`), the service handler and protocol operation in
   `src/main/service/`, the preload bridge, and the channel map. All three IPC halves in one commit
   (global rule 2).
-- Testids: `mailbox-title`, `mailbox-row`, `trashed-message-marker`, `trashed-message-reveal`.
+- Testids: `mailbox-title`, `sidebar-mailbox`, `sidebar-label`, `trashed-message-marker`,
+  `trashed-message-reveal`.
 - Screenshot artifacts: `all-mail.png` and `trash-marker.png`. Add both to the `AGENTS.md` list in the same
   PR (global rule 8).
 

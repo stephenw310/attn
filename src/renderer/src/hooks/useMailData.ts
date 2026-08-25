@@ -3,11 +3,24 @@ import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, SnoozedThreadRow, SyncState, ThreadRow } from '../../../shared/mail'
 import type { OutboxChanged, OutboxItem, OutboxProgress } from '../../../shared/outbox'
 import { reuseLabels, reuseSnoozedRows, reuseThreadRows } from '../mailDataEquality'
-import { type LabelMailboxView, labelMailboxView, type MailView } from '../mailDisplay'
+import {
+  type CachedThreadView,
+  cachedThreadView,
+  labelMailboxView,
+  type MailView,
+  userLabelId
+} from '../mailDisplay'
 import { refreshedSelectionIndex } from '../selection'
 
-/** Cached rows per label-driven mailbox view, kept across pure view switches. */
-export type MailboxRowCache = Partial<Record<LabelMailboxView, ThreadRow[]>>
+/** Cached rows per system mailbox or user-label view, kept across pure switches. */
+export type MailboxRowCache = Record<string, ThreadRow[] | undefined>
+
+function listCachedThreads(view: CachedThreadView): Promise<ThreadRow[]> {
+  const bridge = window.attn
+  if (!bridge) return Promise.resolve([])
+  const mailbox = labelMailboxView(view)
+  return mailbox ? bridge.mail.listThreads(mailbox) : bridge.mail.listLabelThreads(userLabelId(view) ?? '')
+}
 
 interface MailDataState {
   sync: SyncState
@@ -18,7 +31,7 @@ interface MailDataState {
   setRealSnoozedThreads: React.Dispatch<React.SetStateAction<SnoozedThreadRow[] | null>>
   mailboxRows: MailboxRowCache
   setMailboxRows: React.Dispatch<React.SetStateAction<MailboxRowCache>>
-  refreshMailboxView: (view: LabelMailboxView) => Promise<void>
+  refreshCachedThreadView: (view: CachedThreadView) => Promise<void>
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
   outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
@@ -61,7 +74,7 @@ export function useMailData(
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
   const deferGateRef = useRef<Promise<void> | null>(null)
-  const mailboxRefreshVersionRef = useRef<Partial<Record<LabelMailboxView, number>>>({})
+  const mailboxRefreshVersionRef = useRef<Record<string, number | undefined>>({})
   const activeAccountRef = useRef(activeAccount)
   activeAccountRef.current = activeAccount
   const clearOutboxFailure = useCallback(() => setOutboxFailure(null), [])
@@ -134,7 +147,7 @@ export function useMailData(
       const preserveSelection = preserveSelectionOnRefreshRef.current
       preserveSelectionOnRefreshRef.current = true
       const viewAtStart = activeViewRef.current
-      const extraView = labelMailboxView(viewAtStart)
+      const extraView = cachedThreadView(viewAtStart)
       const extraViewVersion = extraView ? (mailboxRefreshVersionRef.current[extraView] ?? 0) + 1 : null
       if (extraView && extraViewVersion !== null) {
         mailboxRefreshVersionRef.current[extraView] = extraViewVersion
@@ -148,7 +161,7 @@ export function useMailData(
         bridge.mail.getUnreadCount(),
         bridge.mail.getPendingActionCount(),
         bridge.mail.getActionQueueStatus(),
-        extraView ? bridge.mail.listThreads(extraView) : Promise.resolve(null)
+        extraView ? listCachedThreads(extraView) : Promise.resolve(null)
       ])
         .then(([threads, snoozed, drafts, outbox, nextLabels, unread, pending, actionStatus, extraRows]) => {
           if (cancelled) return
@@ -270,7 +283,7 @@ export function useMailData(
     await awaitRefreshGate()
     if (!window.attn || activeAccountRef.current !== account) return
     const viewAtStart = activeViewRef.current
-    const extraView = labelMailboxView(viewAtStart)
+    const extraView = cachedThreadView(viewAtStart)
     const extraViewVersion = extraView ? (mailboxRefreshVersionRef.current[extraView] ?? 0) + 1 : null
     if (extraView && extraViewVersion !== null) {
       mailboxRefreshVersionRef.current[extraView] = extraViewVersion
@@ -279,7 +292,7 @@ export function useMailData(
       window.attn.mail.listThreads('inbox'),
       window.attn.mail.listSnoozed(),
       window.attn.draft.list(),
-      extraView ? window.attn.mail.listThreads(extraView) : Promise.resolve(null)
+      extraView ? listCachedThreads(extraView) : Promise.resolve(null)
     ])
     if (activeAccountRef.current !== account) return
     const viewStillCurrent = activeViewRef.current === viewAtStart
@@ -322,12 +335,12 @@ export function useMailData(
    * identity: view-switch callbacks depend on it, and losing stability would
    * resubscribe every effect built on top of switching.
    */
-  const refreshMailboxView = useCallback(async (view: LabelMailboxView): Promise<void> => {
+  const refreshCachedThreadView = useCallback(async (view: CachedThreadView): Promise<void> => {
     const account = activeAccountRef.current
     if (!window.attn || !account) return
     const version = (mailboxRefreshVersionRef.current[view] ?? 0) + 1
     mailboxRefreshVersionRef.current[view] = version
-    const rows = await window.attn.mail.listThreads(view)
+    const rows = await listCachedThreads(view)
     if (
       !window.attn ||
       activeAccountRef.current !== account ||
@@ -347,7 +360,7 @@ export function useMailData(
     setRealSnoozedThreads,
     mailboxRows,
     setMailboxRows,
-    refreshMailboxView,
+    refreshCachedThreadView,
     realDrafts,
     realOutbox,
     outboxFailure,

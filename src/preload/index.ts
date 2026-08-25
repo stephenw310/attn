@@ -65,6 +65,8 @@ const api = {
   mail: {
     listThreads: (view: Exclude<ThreadListView, 'snoozed'>): Promise<ThreadRow[]> =>
       invoke(IPC_CHANNELS.mailListThreads, { view }),
+    listLabelThreads: (labelId: string): Promise<ThreadRow[]> =>
+      invoke(IPC_CHANNELS.mailListThreads, { view: 'label', labelId }),
     // The one typed read serves Snoozed too; only that view returns reminder rows.
     listSnoozed: (): Promise<SnoozedThreadRow[]> =>
       invoke(IPC_CHANNELS.mailListThreads, { view: 'snoozed' }) as Promise<SnoozedThreadRow[]>,

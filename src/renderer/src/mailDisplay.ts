@@ -9,11 +9,17 @@ import type {
 } from '../../shared/mail'
 import { formatSnoozeDate } from '../../shared/snooze'
 
-/** Every view the shell can host: the F3 mailboxes plus the on-demand Outbox. */
-export type MailView = MailboxView | 'outbox'
+export type UserLabelView = `label:${string}`
+
+/** Every view the shell can host: mailboxes, user labels, and the on-demand Outbox. */
+export type MailView = MailboxView | UserLabelView | 'outbox'
+export type NavigableMailView = Exclude<MailView, 'outbox'>
 
 /** Mailbox views whose rows come from the label-driven listMailboxThreads read. */
 export type LabelMailboxView = Exclude<MailboxView, 'inbox' | 'drafts' | 'snoozed'>
+
+/** Views whose ordinary thread rows are cached independently by the renderer. */
+export type CachedThreadView = LabelMailboxView | UserLabelView
 
 export function labelMailboxView(view: MailView): LabelMailboxView | null {
   return view === 'allMail' || view === 'sent' || view === 'starred' || view === 'spam' || view === 'trash'
@@ -21,8 +27,25 @@ export function labelMailboxView(view: MailView): LabelMailboxView | null {
     : null
 }
 
+export function userLabelView(labelId: string): UserLabelView {
+  return `label:${encodeURIComponent(labelId)}`
+}
+
+export function userLabelId(view: MailView): string | null {
+  if (!view.startsWith('label:')) return null
+  try {
+    return decodeURIComponent(view.slice('label:'.length)) || null
+  } catch {
+    return null
+  }
+}
+
+export function cachedThreadView(view: MailView): CachedThreadView | null {
+  return labelMailboxView(view) ?? (userLabelId(view) ? (view as UserLabelView) : null)
+}
+
 /** Display names for every view the list/reading shell can host. */
-export const VIEW_TITLES: Record<MailView, string> = {
+export const VIEW_TITLES: Record<MailboxView | 'outbox', string> = {
   inbox: 'Inbox',
   allMail: 'All Mail',
   sent: 'Sent',

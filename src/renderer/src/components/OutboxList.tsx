@@ -4,7 +4,6 @@ interface OutboxListProps {
   items: readonly OutboxItem[]
   selectedIndex: number
   selectedRowRef: React.RefObject<HTMLDivElement | null>
-  onBack: () => void
   onOpen: (index: number) => void
 }
 
@@ -24,29 +23,12 @@ export function OutboxList({
   items,
   selectedIndex,
   selectedRowRef,
-  onBack,
   onOpen
 }: OutboxListProps): React.JSX.Element {
   return (
     <main data-testid="outbox-list" className="min-h-0 flex-1 overflow-y-auto" aria-label="Outbox">
-      <div className="flex min-h-14 items-center gap-3 border-b border-edge px-6">
-        <button
-          type="button"
-          data-testid="outbox-back"
-          className="cursor-pointer rounded-md px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
-          onClick={onBack}
-        >
-          ← Back
-        </button>
-        <h1 data-testid="view-title" className="text-sm font-semibold text-ink">
-          Outbox
-        </h1>
-        <span className="text-xs text-ink-faint">queued, sending, and messages needing attention</span>
-      </div>
       {items.length === 0 && (
-        <div className="flex h-[calc(100%-3.5rem)] items-center justify-center text-ink-faint">
-          Outbox is clear
-        </div>
+        <div className="flex h-full items-center justify-center text-ink-faint">Outbox is clear</div>
       )}
       <div className="py-2">
         {items.map((item, index) => {

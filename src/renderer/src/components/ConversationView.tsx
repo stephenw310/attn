@@ -1,7 +1,7 @@
 import { memo, type ReactNode, useCallback, useLayoutEffect, useState } from 'react'
 import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
-import { type DisplayConversation, type DisplayThread, type MailView, VIEW_TITLES } from '../mailDisplay'
+import type { DisplayConversation, DisplayThread } from '../mailDisplay'
 import { Kbd } from './Kbd'
 import { MessageCard } from './MessageCard'
 
@@ -135,7 +135,7 @@ interface ConversationViewProps {
   selected: DisplayThread
   selectedIndex: number
   threadCount: number
-  view: MailView
+  mailboxTitle: string
   conversation: DisplayConversation | null
   account: string | null
   online: boolean
@@ -153,7 +153,7 @@ export const ConversationView = memo(function ConversationView(
     selected,
     selectedIndex,
     threadCount,
-    view,
+    mailboxTitle,
     conversation,
     account,
     online,
@@ -236,7 +236,7 @@ export const ConversationView = memo(function ConversationView(
           className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
           onClick={onClose}
         >
-          <span aria-hidden>←</span> {VIEW_TITLES[view]}
+          <span aria-hidden>←</span> {mailboxTitle}
         </button>
         <h1
           data-testid="conversation-subject"

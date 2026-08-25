@@ -104,7 +104,7 @@ describe('useMailData mailbox refreshes', () => {
 
     activeViewRef.current = 'allMail'
     await act(async () => {
-      await currentState().refreshMailboxView('allMail')
+      await currentState().refreshCachedThreadView('allMail')
     })
     expect(currentState().mailboxRows.allMail).toEqual(allMailRows)
 

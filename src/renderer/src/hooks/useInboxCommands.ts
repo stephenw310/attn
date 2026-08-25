@@ -2,7 +2,7 @@ import { useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { DraftKind } from '../../../shared/drafts'
 import { createCommand, registerCommands } from '../commands'
-import type { MailView } from '../mailDisplay'
+import type { MailView, NavigableMailView } from '../mailDisplay'
 
 interface Options {
   selected: { id: string } | undefined
@@ -20,7 +20,7 @@ interface Options {
   extendSelection: (index: number) => void
   openSelected: () => void
   closeReader: () => void
-  switchView: (view: Exclude<MailView, 'outbox'>) => void
+  switchView: (view: NavigableMailView) => void
   openOutbox: () => void
   closeOutbox: () => void
   triage: (action: TriageAction) => void

@@ -203,6 +203,54 @@ export function listMailboxThreads(
   }))
 }
 
+/**
+ * User-label views use the same normal-reader rules as Sent and Starred. A
+ * trashed or spammed copy cannot pull an otherwise unrelated conversation into
+ * the view, and the label id must still exist in the account's user catalog.
+ */
+export function listLabelThreads(
+  db: Db,
+  accountId: string,
+  labelId: string,
+  limit = THREAD_LIST_LIMIT
+): ThreadRow[] {
+  const rows = db
+    .prepare(
+      `WITH visible AS (
+         SELECT ${THREAD_PROJECTION_SQL}, t.last_msg_at AS mailbox_last_msg_at
+         FROM labels catalog
+         JOIN thread_labels mailbox
+           ON mailbox.account_id = catalog.account_id AND mailbox.label_id = catalog.id
+         JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+         WHERE catalog.account_id = ? AND catalog.id = ? AND lower(catalog.type) = 'user'
+           AND (${labeledMailboxMembershipSql()})
+         ORDER BY mailbox_last_msg_at DESC, t.id
+         LIMIT ?
+       )
+       SELECT v.*,
+              COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
+                        FROM thread_labels tl
+                        WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+       FROM visible v
+       ORDER BY v.mailbox_last_msg_at DESC, v.id`
+    )
+    .all(accountId, labelId, limit) as MailboxThreadQueryRow[]
+
+  return rows.map((r) => ({
+    id: r.id,
+    fromDisplay: r.from_display ?? '',
+    subject: r.subject ?? '(no subject)',
+    snippet: r.snippet ?? '',
+    lastMsgAt: r.mailbox_last_msg_at ?? 0,
+    unread: r.is_unread === 1,
+    starred: r.is_starred === 1,
+    hasAttachment: r.has_attachment === 1,
+    returned: r.returned === 1,
+    hasDraft: r.has_draft === 1,
+    labelIds: labelIds(r.label_ids)
+  }))
+}
+
 export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_LIMIT): ThreadRow[] {
   const rows = db
     .prepare(

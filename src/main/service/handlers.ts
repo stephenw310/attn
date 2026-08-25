@@ -19,6 +19,7 @@ import type {
   InlineImageRepairRequest,
   InlineImageRequest,
   InlineImageResult,
+  ThreadListRequest,
   ThreadListView
 } from '../../shared/mail'
 import { isThemePreference } from '../../shared/theme'
@@ -41,6 +42,7 @@ import {
   getConversationForDisplay,
   getInlineAttachmentData,
   listInboxThreads,
+  listLabelThreads,
   listMailboxThreads,
   listSnoozedThreads,
   listUserLabels,
@@ -158,10 +160,11 @@ const THREAD_LIST_VIEWS: readonly ThreadListView[] = [
   'trash'
 ]
 
-function isThreadListRequest(value: unknown): value is { view: ThreadListView } {
+function isThreadListRequest(value: unknown): value is ThreadListRequest {
   if (!value || typeof value !== 'object') return false
-  const view = (value as { view?: unknown }).view
-  return typeof view === 'string' && (THREAD_LIST_VIEWS as readonly string[]).includes(view)
+  const request = value as { view?: unknown; labelId?: unknown }
+  if (request.view === 'label') return nonEmptyString(request.labelId)
+  return typeof request.view === 'string' && (THREAD_LIST_VIEWS as readonly string[]).includes(request.view)
 }
 
 const CONVERSATION_MAILBOXES: readonly ConversationMailbox[] = ['normal', 'all-mail', 'spam', 'trash']
@@ -584,11 +587,12 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.mailListThreads, (_event, request) => {
     const account = context.currentAccountId()
-    const view = isThreadListRequest(request) ? request.view : null
-    if (!account || !view) return []
-    if (view === 'inbox') return listInboxThreads(context.db, account)
-    if (view === 'snoozed') return listSnoozedThreads(context.db, account)
-    return listMailboxThreads(context.db, account, view)
+    const input = isThreadListRequest(request) ? request : null
+    if (!account || !input) return []
+    if (input.view === 'label') return listLabelThreads(context.db, account, input.labelId)
+    if (input.view === 'inbox') return listInboxThreads(context.db, account)
+    if (input.view === 'snoozed') return listSnoozedThreads(context.db, account)
+    return listMailboxThreads(context.db, account, input.view)
   })
   handle(IPC_CHANNELS.mailListLabels, () => {
     const account = context.currentAccountId()

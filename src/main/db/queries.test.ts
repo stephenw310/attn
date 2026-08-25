@@ -5,6 +5,7 @@ import {
   getConversationForDisplay,
   type LabelMailboxView,
   listInboxThreads,
+  listLabelThreads,
   listMailboxThreads,
   listSnoozedThreads
 } from './queries'
@@ -165,6 +166,35 @@ describe('thread list queries', () => {
 
     expect(mailboxIds('sent')).toEqual(['sent-live', 'sent-legacy'])
     expect(mailboxIds('starred')).toEqual(['starred-live'])
+  })
+
+  it('lists a user label from local message membership and excludes junk copies', () => {
+    db.prepare(
+      `INSERT INTO labels (account_id, id, name, type)
+       VALUES ('account', 'Label_2', 'projects', 'user')`
+    ).run()
+    db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+       VALUES ('account', 'newest-message', 'newest', 300, '["INBOX","Label_2"]')`
+    ).run()
+
+    db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at)
+       VALUES ('account', 'junk-project', 'Junk project', 400)`
+    ).run()
+    for (const labelId of ['Label_2', 'SPAM']) {
+      db.prepare(
+        `INSERT INTO thread_labels (account_id, thread_id, label_id)
+         VALUES ('account', 'junk-project', ?)`
+      ).run(labelId)
+    }
+    db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+       VALUES ('account', 'junk-project-message', 'junk-project', 400, '["Label_2","SPAM"]')`
+    ).run()
+
+    expect(listLabelThreads(db, 'account', 'Label_2').map((row) => row.id)).toEqual(['newest'])
+    expect(listLabelThreads(db, 'account', 'Label_missing')).toEqual([])
   })
 
   it('keeps All Mail scoped to its account when another account needs the slow path', () => {
