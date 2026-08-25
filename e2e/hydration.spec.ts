@@ -12,7 +12,7 @@ test('opens metadata-only mail immediately and explains the signed-out provider 
   )
   await expect(page.getByTestId('body-hydration-status')).toHaveText('Full message loads when signed in')
   await expect
-    .poll(() => page.evaluate(() => window.attn.mail.getConversation('t-metadata-only', false)))
+    .poll(() => page.evaluate(() => window.attn.mail.getConversation('t-metadata-only', false, 'normal')))
     .toMatchObject({ messages: [{ bodyState: 'signed-out' }] })
 })
 

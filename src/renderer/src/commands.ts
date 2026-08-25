@@ -34,9 +34,15 @@ export const COMMAND_SPECS = {
   'theme.midnight': { title: 'Use Midnight theme', context: 'global' },
   'theme.sand': { title: 'Use Sand theme', context: 'global' },
   'view.inbox': { title: 'Go to Inbox', shortcut: 'g i', context: 'global' },
+  'view.allMail': { title: 'Go to All Mail', shortcut: 'g a', context: 'global' },
+  'view.sent': { title: 'Go to Sent', shortcut: 'g t', context: 'global' },
+  'view.starred': { title: 'Go to Starred', shortcut: 'g s', context: 'global' },
   'view.snoozed': { title: 'Go to Snoozed', shortcut: 'g h', context: 'global' },
   'view.drafts': { title: 'Go to Drafts', shortcut: 'g d', context: 'global' },
+  'view.spam': { title: 'Go to Spam', shortcut: 'g p', context: 'global' },
+  'view.trash': { title: 'Go to Trash', shortcut: 'g r', context: 'global' },
   'view.outbox': { title: 'Go to Outbox', shortcut: 'g o', context: 'global' },
+  'layout.sidebar.toggle': { title: 'Toggle sidebar', shortcut: 'Mod+B', context: 'global' },
   'outbox.open': { title: 'Open Outbox message', shortcut: 'Enter', context: 'outbox' },
   'outbox.close': { title: 'Back from Outbox', shortcut: 'Escape', context: 'outbox' },
   'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
@@ -129,9 +135,11 @@ function normalizedKey(event: KeyboardEvent, context: ShortcutContext): string {
 
 function matchesShortcut(event: KeyboardEvent, shortcut: string, context: ShortcutContext): boolean {
   if (shortcut.includes(' ')) return false
-  const normalizedShortcut = shortcut.toLowerCase()
-  const expectsShift = normalizedShortcut.startsWith('shift+')
-  const expectedKey = expectsShift ? normalizedShortcut.slice('shift+'.length) : normalizedShortcut
+  const parts = shortcut.toLowerCase().split('+')
+  const expectedKey = parts.at(-1)
+  const expectsMod = parts.includes('mod')
+  const expectsShift = parts.includes('shift')
+  if (!expectedKey || expectsMod !== (event.metaKey || event.ctrlKey) || event.altKey) return false
   if (expectedKey !== normalizedKey(event, context)) return false
   if (expectsShift) return event.shiftKey
 
@@ -187,7 +195,7 @@ export function findCommandByShortcut(shortcut: string, context: ShortcutContext
 export function matchKey(event: KeyboardEvent, context: ShortcutContext): Command | null {
   // Tab always belongs to native focus traversal. Shortcut-less commands remain
   // available to the future command palette without entering keyboard dispatch.
-  if (event.ctrlKey || event.metaKey || event.altKey || event.key === 'Tab') return null
+  if (event.altKey || event.key === 'Tab') return null
   return (
     commands.find(
       (command) =>

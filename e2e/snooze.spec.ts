@@ -56,7 +56,10 @@ test('snoozes from the picker, navigates to Snoozed, and undoes', async ({ page 
   await expect(rows).toHaveCount(0)
   await page.keyboard.press('g')
   await page.keyboard.press('i')
-  await expect(page.getByTestId('view-title')).toHaveText('Inbox')
+  await expect(page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })).toHaveAttribute(
+    'data-active',
+    'true'
+  )
   await expect(rows).toHaveCount(8)
 })
 
@@ -170,7 +173,10 @@ test('unrelated reader keys disarm a pending go chord', async ({ page }) => {
   await page.keyboard.press('g')
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('h')
-  await expect(page.getByTestId('view-title')).toHaveText('Inbox')
+  await expect(page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })).toHaveAttribute(
+    'data-active',
+    'true'
+  )
   await expect(page.getByTestId('snooze-picker')).toBeVisible()
 })
 
@@ -178,7 +184,7 @@ test('returns a due snooze to the inbox with a returned chip', async ({ page }) 
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await page.evaluate(async () => {
-    const [thread] = await window.attn.mail.listThreads()
+    const [thread] = await window.attn.mail.listThreads('inbox')
     await window.attn.mail.snooze([thread.id], Date.now() + 800)
   })
   await expect(rows).toHaveCount(7)
@@ -195,7 +201,7 @@ test('catches up a snooze that became due while the app was closed', async ({ bo
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await page.evaluate(async () => {
-    const [thread] = await window.attn.mail.listThreads()
+    const [thread] = await window.attn.mail.listThreads('inbox')
     await window.attn.mail.snooze([thread.id], Date.now() + 600)
   })
   await expect(rows).toHaveCount(7)

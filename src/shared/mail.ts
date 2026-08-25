@@ -50,6 +50,12 @@ export interface ConversationMsg {
   id: string
   /** Local outbox projection shown before Gmail returns the confirmed message. */
   pending?: boolean
+  /**
+   * Trashed message kept at its chronological position in a normal or All Mail
+   * reader (SPEC F3). Rendered as a compact marker until revealed; revealing is
+   * reader-local and changes no labels.
+   */
+  trashed?: boolean
   /** RFC Message-ID header, including angle brackets. */
   rfcMessageId: string | null
   /** Canonical RFC message ids from References, or In-Reply-To as a fallback. */
@@ -71,6 +77,36 @@ export interface Conversation {
   threadId: string
   subject: string
   messages: ConversationMsg[]
+}
+
+/**
+ * Mailboxes sharing the list/reading shell (SPEC F3). Outbox stays outside the
+ * union: it is an on-demand operational view, not a mailbox.
+ */
+export type MailboxView = 'inbox' | 'allMail' | 'sent' | 'drafts' | 'starred' | 'snoozed' | 'spam' | 'trash'
+
+/** Views served by the unified mail:listThreads read. Drafts merges outbox rows with cached Gmail drafts instead. */
+export type ThreadListView = Exclude<MailboxView, 'drafts'>
+
+/** Exact local conversation totals for the system mailboxes backed by thread queries. */
+export type SystemMailboxCounts = Record<ThreadListView, number>
+
+export const THREAD_PAGE_SIZE = 100
+
+/** Stable keyset cursor for mailbox rows ordered by timestamp, then Gmail thread id. */
+export interface ThreadPageCursor {
+  at: number
+  id: string
+}
+
+export interface ThreadPage<Row extends ThreadRow = ThreadRow> {
+  rows: Row[]
+  nextCursor: ThreadPageCursor | null
+}
+
+/** A local list read targets one 100-row page of a system mailbox or Gmail user label. */
+export type ThreadListRequest = ({ view: ThreadListView } | { view: 'label'; labelId: string }) & {
+  cursor?: ThreadPageCursor
 }
 
 /** Mailboxes whose membership and reader contents depend on per-message labels. */

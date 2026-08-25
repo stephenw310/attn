@@ -12,12 +12,19 @@ import {
 import { errorMessage } from '../../shared/error'
 import { nonEmptyString } from '../../shared/guards'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../../shared/ipc'
-import type {
-  DownloadAttachmentRequest,
-  DownloadAttachmentResult,
-  InlineImageRepairRequest,
-  InlineImageRequest,
-  InlineImageResult
+import {
+  type ConversationMailbox,
+  type DownloadAttachmentRequest,
+  type DownloadAttachmentResult,
+  type InlineImageRepairRequest,
+  type InlineImageRequest,
+  type InlineImageResult,
+  THREAD_PAGE_SIZE,
+  type ThreadListRequest,
+  type ThreadListView,
+  type ThreadPage,
+  type ThreadPageCursor,
+  type ThreadRow
 } from '../../shared/mail'
 import { isThemePreference } from '../../shared/theme'
 import {
@@ -35,10 +42,13 @@ import { writeAttachment } from '../attachments'
 import type { Db } from '../db'
 import {
   countInboxUnread,
+  countSystemMailboxes,
   getConversation,
   getConversationForDisplay,
   getInlineAttachmentData,
   listInboxThreads,
+  listLabelThreads,
+  listMailboxThreads,
   listSnoozedThreads,
   listUserLabels,
   searchContacts
@@ -143,6 +153,48 @@ function isInlineImageRepairRequest(value: unknown): value is InlineImageRepairR
   if (!value || typeof value !== 'object') return false
   const threadId = (value as Partial<InlineImageRepairRequest>).threadId
   return nonEmptyString(threadId) && threadId.length <= 256
+}
+
+const THREAD_LIST_VIEWS: readonly ThreadListView[] = [
+  'inbox',
+  'allMail',
+  'sent',
+  'starred',
+  'snoozed',
+  'spam',
+  'trash'
+]
+
+function isThreadListRequest(value: unknown): value is ThreadListRequest {
+  if (!value || typeof value !== 'object') return false
+  const request = value as { view?: unknown; labelId?: unknown; cursor?: unknown }
+  if (request.cursor !== undefined && !isThreadPageCursor(request.cursor)) return false
+  if (request.view === 'label') return nonEmptyString(request.labelId)
+  return typeof request.view === 'string' && (THREAD_LIST_VIEWS as readonly string[]).includes(request.view)
+}
+
+function isThreadPageCursor(value: unknown): value is ThreadPageCursor {
+  if (!value || typeof value !== 'object') return false
+  const cursor = value as { at?: unknown; id?: unknown }
+  return typeof cursor.at === 'number' && Number.isFinite(cursor.at) && nonEmptyString(cursor.id)
+}
+
+function threadPage<Row extends ThreadRow>(rows: Row[], snoozed = false): ThreadPage<Row> {
+  const hasMore = rows.length > THREAD_PAGE_SIZE
+  const pageRows = hasMore ? rows.slice(0, THREAD_PAGE_SIZE) : rows
+  const last = pageRows.at(-1)
+  const cursorAt =
+    snoozed && last && 'dueAt' in last && typeof last.dueAt === 'number' ? last.dueAt : last?.lastMsgAt
+  return {
+    rows: pageRows,
+    nextCursor: hasMore && last && cursorAt !== undefined ? { at: cursorAt, id: last.id } : null
+  }
+}
+
+const CONVERSATION_MAILBOXES: readonly ConversationMailbox[] = ['normal', 'all-mail', 'spam', 'trash']
+
+function isConversationMailbox(value: unknown): value is ConversationMailbox {
+  return typeof value === 'string' && (CONVERSATION_MAILBOXES as readonly string[]).includes(value)
 }
 
 function isSnoozeRequest(value: unknown): value is SnoozeRequest {
@@ -313,7 +365,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     return reopenDraft(context.db, requireAccount(context), id)
   })
-  handle(IPC_CHANNELS.draftCreateReply, async (_event, threadId, kind) => {
+  handle(IPC_CHANNELS.draftCreateReply, async (_event, threadId, kind, mailbox) => {
     if (
       typeof threadId !== 'string' ||
       threadId.length === 0 ||
@@ -321,12 +373,13 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     ) {
       return null
     }
+    const replyMailbox = isConversationMailbox(mailbox) ? mailbox : 'normal'
     const account = requireAccount(context)
     const existing = reopenThreadDraft(context.db, account, threadId, kind)
     const shouldUpgradeReplyAll = kind === 'replyAll' && existing?.kind === 'reply'
     if (existing && !shouldUpgradeReplyAll) return existing
     await context.waitForConversation(threadId)
-    let conversation = getConversation(context.db, account, threadId, 'unavailable')
+    let conversation = getConversation(context.db, account, threadId, 'unavailable', replyMailbox)
     if (!conversation || conversation.messages.length === 0) return existing
     if (existing) {
       // Recipient headers are available even when a message body is not. The
@@ -341,7 +394,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       const provider = context.makeProvider()
       if (provider) {
         await bodyHydrator.request(account, threadId, provider)
-        conversation = getConversation(context.db, account, threadId, 'unavailable')
+        conversation = getConversation(context.db, account, threadId, 'unavailable', replyMailbox)
       }
     }
     if (
@@ -557,23 +610,38 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (context.currentAccountId() !== accountId) return false
     return context.acknowledgeRevertedActions(accountId, noticeId)
   })
-  handle(IPC_CHANNELS.mailListThreads, () => {
+  handle(IPC_CHANNELS.mailListThreads, (_event, request) => {
     const account = context.currentAccountId()
-    return account ? listInboxThreads(context.db, account) : []
-  })
-  handle(IPC_CHANNELS.mailListSnoozed, () => {
-    const account = context.currentAccountId()
-    return account ? listSnoozedThreads(context.db, account) : []
+    const input = isThreadListRequest(request) ? request : null
+    if (!account || !input) return threadPage([])
+    const cursor = input.cursor ?? null
+    const limit = THREAD_PAGE_SIZE + 1
+    if (input.view === 'label') {
+      return threadPage(listLabelThreads(context.db, account, input.labelId, limit, cursor))
+    }
+    if (input.view === 'inbox') {
+      return threadPage(listInboxThreads(context.db, account, limit, cursor))
+    }
+    if (input.view === 'snoozed') {
+      return threadPage(listSnoozedThreads(context.db, account, limit, cursor), true)
+    }
+    return threadPage(listMailboxThreads(context.db, account, input.view, limit, cursor))
   })
   handle(IPC_CHANNELS.mailListLabels, () => {
     const account = context.currentAccountId()
     return account ? listUserLabels(context.db, account) : []
   })
+  handle(IPC_CHANNELS.mailGetMailboxCounts, () => {
+    const account = context.currentAccountId()
+    return account
+      ? countSystemMailboxes(context.db, account)
+      : { inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }
+  })
   handle(IPC_CHANNELS.mailGetUnreadCount, () => {
     const account = context.currentAccountId()
     return account ? countInboxUnread(context.db, account) : 0
   })
-  handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration) => {
+  handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration, mailbox) => {
     if (typeof threadId !== 'string') return null
     await context.waitForConversation(threadId)
     const account = context.currentAccountId()
@@ -583,7 +651,9 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       context.db,
       account,
       threadId,
-      attemptState === 'idle' ? idleMissingBodyState(context.isSeeded()) : attemptState
+      attemptState === 'idle' ? idleMissingBodyState(context.isSeeded()) : attemptState,
+      isConversationMailbox(mailbox) ? mailbox : 'normal',
+      true
     )
     if (
       !conversation?.messages.some((message) => message.bodyState !== 'complete') ||

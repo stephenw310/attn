@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { MailLabel } from '../../../shared/mail'
+import type { MailLabel, ThreadListView } from '../../../shared/mail'
 import { dateGroup } from '../dateGroup'
 import type { DisplayThread } from '../mailDisplay'
 
@@ -44,25 +44,32 @@ function labelColor(labelId: string): (typeof LABEL_PALETTE)[number] {
 
 function ThreadLabels({
   labelIds,
-  labelsById
+  labelsById,
+  onOpenLabel
 }: {
   labelIds: readonly string[]
   labelsById: ReadonlyMap<string, MailLabel>
+  onOpenLabel: (labelId: string) => void
 }): React.JSX.Element {
   return (
     <>
       {labelIds.map((labelId) => {
         const label = labelsById.get(labelId)
         return label ? (
-          <span
+          <button
+            type="button"
             key={labelId}
             data-testid="label-chip"
             title={label.name}
-            className="max-w-24 flex-none truncate rounded-[4px] border px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+            className="max-w-24 flex-none cursor-pointer truncate rounded-[4px] border px-1.5 py-0.5 text-[10px] font-semibold leading-none"
             style={labelColor(labelId)}
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpenLabel(labelId)
+            }}
           >
             {label.name}
-          </span>
+          </button>
         ) : null
       })}
     </>
@@ -93,9 +100,24 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
   )
 }
 
+type ThreadListKind = ThreadListView | 'label'
+
+const EMPTY_TEXT: Record<ThreadListKind, string> = {
+  inbox: 'Inbox empty',
+  allMail: 'All Mail is empty',
+  sent: 'Nothing sent yet',
+  starred: 'Nothing starred',
+  snoozed: 'Nothing snoozed',
+  spam: 'Spam is empty',
+  trash: 'Trash is empty',
+  label: 'No conversations with this label'
+}
+
 interface ThreadListProps {
   threads: DisplayThread[]
-  view: 'inbox' | 'snoozed'
+  view: ThreadListKind
+  hasMore?: boolean
+  loadingMore?: boolean
   syncing: boolean
   readerOpen: boolean
   selectedIndex: number
@@ -103,14 +125,18 @@ interface ThreadListProps {
   exitingThreadIds: ReadonlySet<string>
   labelsById: ReadonlyMap<string, MailLabel>
   selectedRowRef: React.RefObject<HTMLDivElement | null>
+  /** The scroll element, owned by the parent so per-view scroll can be saved and restored. */
+  listRef: React.RefObject<HTMLElement | null>
   onExtendSelection: (index: number) => void
+  onLoadMore?: () => void
+  onOpenLabel: (labelId: string) => void
   onOpen: (index: number) => void
 }
 
-const VIRTUALIZE_AT = 500
 const VIRTUAL_ROW_HEIGHT = 46
 const VIRTUAL_GROUP_HEIGHT = 44
 const VIRTUAL_OVERSCAN_PX = VIRTUAL_ROW_HEIGHT * 12
+const NOOP = (): void => {}
 
 interface VirtualThreadEntry {
   index: number
@@ -120,12 +146,13 @@ interface VirtualThreadEntry {
   showGroup: boolean
 }
 
-function virtualLayout(threads: readonly DisplayThread[], view: 'inbox' | 'snoozed'): VirtualThreadEntry[] {
+function virtualLayout(threads: readonly DisplayThread[], view: ThreadListKind): VirtualThreadEntry[] {
   let top = 0
   let previousGroup: ReturnType<typeof dateGroup> | undefined
   return threads.map((thread, index) => {
     const group = dateGroup(thread)
-    const showGroup = view === 'inbox' && group !== previousGroup
+    // Snoozed sorts by due time, so relative-date groups would mislead there.
+    const showGroup = view !== 'snoozed' && group !== previousGroup
     const height = VIRTUAL_ROW_HEIGHT + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
     const entry = { index, top, height, group, showGroup }
     top += height
@@ -163,6 +190,8 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
   const {
     threads,
     view,
+    hasMore = false,
+    loadingMore = false,
     syncing,
     readerOpen,
     selectedIndex,
@@ -170,25 +199,27 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     exitingThreadIds,
     labelsById,
     selectedRowRef,
+    listRef,
     onExtendSelection,
+    onLoadMore = NOOP,
+    onOpenLabel,
     onOpen
   } = props
-  const listRef = useRef<HTMLElement | null>(null)
   const virtualContentRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef<number | null>(null)
   const pendingScrollTopRef = useRef(0)
+  const followedSelectionRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(800)
-  const virtualized = threads.length >= VIRTUALIZE_AT
   const layout = useMemo(() => virtualLayout(threads, view), [threads, view])
   const projected = useMemo(() => {
-    if (!virtualized || exitingThreadIds.size === 0) return null
+    if (exitingThreadIds.size === 0) return null
     const survivingThreads = threads.filter((thread) => !exitingThreadIds.has(thread.id))
     const projectedLayout = virtualLayout(survivingThreads, view)
     const byThreadId = new Map<string, VirtualThreadEntry>()
     for (const entry of projectedLayout) byThreadId.set(survivingThreads[entry.index].id, entry)
     return { threads: survivingThreads, layout: projectedLayout, byThreadId }
-  }, [exitingThreadIds, threads, view, virtualized])
+  }, [exitingThreadIds, threads, view])
   const projectedGroupTops = useMemo(() => {
     const tops = new Map<VirtualThreadEntry['group'], number>()
     for (const entry of projected?.layout ?? []) {
@@ -210,7 +241,6 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       : 0
     : virtualHeight
   const mountedEntries = useMemo(() => {
-    if (!virtualized) return []
     const current = visibleEntries(layout, scrollTop, viewportHeight)
     if (!projected) return current
     const mountedByIndex = new Map(current.map((entry) => [entry.index, entry]))
@@ -220,25 +250,32 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       if (currentEntry) mountedByIndex.set(currentEntry.index, currentEntry)
     }
     return [...mountedByIndex.values()].sort((left, right) => left.index - right.index)
-  }, [layout, layoutByThreadId, projected, scrollTop, viewportHeight, virtualized])
+  }, [layout, layoutByThreadId, projected, scrollTop, viewportHeight])
 
   useEffect(() => {
     const list = listRef.current
-    if (!list || !virtualized) return
+    if (!list) return
     const measure = (): void => setViewportHeight(list.clientHeight || 800)
     measure()
     if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(measure)
     observer.observe(list)
     return () => observer.disconnect()
-  }, [virtualized])
+  }, [listRef])
 
   useLayoutEffect(() => {
+    if (readerOpen) {
+      followedSelectionRef.current = null
+      return
+    }
     const list = listRef.current
     const selectedThread = threads[selectedIndex]
     const selected =
       (selectedThread ? projected?.byThreadId.get(selectedThread.id) : undefined) ?? layout[selectedIndex]
-    if (!list || !selected || !virtualized || readerOpen) return
+    if (!list || !selected) return
+    const selectionKey = `${view}\u0000${selectedThread?.id ?? selectedIndex}`
+    if (followedSelectionRef.current === selectionKey) return
+    followedSelectionRef.current = selectionKey
 
     // The sizer starts inside the list's own padding box. `offsetTop` would
     // measure from the nearest positioned ancestor — <main> is static, so that
@@ -260,7 +297,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     list.scrollTop = nextScrollTop
     pendingScrollTopRef.current = nextScrollTop
     setScrollTop(nextScrollTop)
-  }, [layout, projected, readerOpen, selectedIndex, threads, viewportHeight, virtualized])
+  }, [layout, listRef, projected, readerOpen, selectedIndex, threads, view, viewportHeight])
 
   useEffect(
     () => () => {
@@ -269,39 +306,23 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     []
   )
 
+  useEffect(() => {
+    if (!hasMore || loadingMore || threads.length === 0) return
+    if (selectedIndex >= threads.length - 20) onLoadMore()
+  }, [hasMore, loadingMore, onLoadMore, selectedIndex, threads.length])
+
   const renderThread = (entry: VirtualThreadEntry): React.JSX.Element[] => {
     const { index, group, showGroup } = entry
     const thread = threads[index]
     const selected = index === selectedIndex
     const checked = selectedIds.has(thread.id)
+    const done = view === 'allMail' && !thread.labelIds.includes('INBOX')
     const exiting = exitingThreadIds.has(thread.id)
     const projectedEntry = projected?.byThreadId.get(thread.id)
     const currentRowTop = entry.top + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
     const projectedRowTop = projectedEntry
       ? projectedEntry.top + (projectedEntry.showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
       : undefined
-    let groupSurvives = false
-    if (exiting && showGroup) {
-      for (let nextIndex = index + 1; nextIndex < threads.length; nextIndex++) {
-        if (dateGroup(threads[nextIndex]) !== group) break
-        if (!exitingThreadIds.has(threads[nextIndex].id)) {
-          groupSurvives = true
-          break
-        }
-      }
-    }
-    const collapseGroup = exiting && showGroup && !groupSurvives
-    const groupHeader = showGroup ? (
-      <div
-        key="group"
-        data-testid="thread-date-group"
-        className={`select-none px-8 text-xs font-semibold text-ink-faint ${
-          virtualized ? 'h-[44px] pt-5 pb-2' : 'pt-5 pb-2'
-        }`}
-      >
-        {group}
-      </div>
-    ) : null
     const row = (
       // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global
       // biome-ignore lint/a11y/noStaticElementInteractions: keyboard access is global
@@ -315,12 +336,13 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         data-checked={checked || undefined}
         data-unread={thread.unread || undefined}
         data-starred={thread.starred || undefined}
+        data-done={done || undefined}
         data-exiting={exiting || undefined}
-        className={`flex cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
-          virtualized ? 'h-[46px]' : 'py-[11px]'
-        } ${selected ? 'border-l-accent' : 'border-l-transparent'} ${
-          checked ? 'bg-accent/[0.12]' : selected ? 'bg-accent/[0.07]' : ''
-        } ${exiting ? 'app-thread-exit' : ''}`}
+        className={`flex h-[46px] cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
+          selected ? 'border-l-accent' : 'border-l-transparent'
+        } ${checked ? 'bg-accent/[0.12]' : selected ? 'bg-accent/[0.07]' : ''} ${
+          exiting ? 'app-thread-exit' : ''
+        }`}
         onClick={(event) => (event.shiftKey ? onExtendSelection(index) : onOpen(index))}
       >
         <span className="flex size-4 flex-none items-center justify-center self-center" aria-hidden>
@@ -347,7 +369,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
               Draft
             </span>
           )}
-          <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} />
+          <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} onOpenLabel={onOpenLabel} />
           <span className="app-thread-star flex-none text-star" title="Starred">
             ★
           </span>
@@ -361,99 +383,108 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         <span className="flex flex-none items-center gap-2.5 text-xs">
           <ThreadStatusChips thread={thread} />
           {thread.hasAttachment && <span title="Has attachment">📎</span>}
-          <span className="app-thread-time min-w-[70px] text-right tabular-nums">{thread.at}</span>
+          <span data-testid="thread-time" className="app-thread-time min-w-[70px] text-right tabular-nums">
+            {thread.at}
+          </span>
+          {view === 'allMail' && (
+            <span className="flex size-4 flex-none items-center justify-center">
+              {done && (
+                <span
+                  data-testid="thread-done-indicator"
+                  role="img"
+                  aria-label="Done, not in Inbox"
+                  title="Done, not in Inbox"
+                  className="text-[14px] font-bold text-status-live"
+                >
+                  ✓
+                </span>
+              )}
+            </span>
+          )}
         </span>
       </div>
     )
-    if (virtualized) {
-      const projectedGroupTop = projectedGroupTops.get(group)
-      const groupRemoved = projected !== null && projectedGroupTop === undefined
-      const parts: React.JSX.Element[] = []
-      if (showGroup) {
-        parts.push(
-          <div
-            key={`group:${group}`}
-            data-testid="thread-date-group"
-            className={`absolute right-0 left-0 h-[44px] px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint ${
-              projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''
-            } ${groupRemoved ? 'app-thread-exit' : ''}`}
-            style={{ top: projectedGroupTop ?? entry.top }}
-          >
-            {group}
-          </div>
-        )
-      }
+    const projectedGroupTop = projectedGroupTops.get(group)
+    const groupRemoved = projected !== null && projectedGroupTop === undefined
+    const parts: React.JSX.Element[] = []
+    if (showGroup) {
       parts.push(
         <div
-          key={`thread:${thread.id}`}
-          className={`absolute right-0 left-0 overflow-x-clip ${
-            projectedEntry ? 'app-thread-position-shift' : ''
-          } ${exiting ? 'z-10' : ''}`}
-          style={{
-            top: exiting ? currentRowTop : (projectedRowTop ?? currentRowTop),
-            height: VIRTUAL_ROW_HEIGHT
-          }}
+          key={`group:${group}`}
+          data-testid="thread-date-group"
+          className={`absolute right-0 left-0 h-[44px] px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint ${
+            projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''
+          } ${groupRemoved ? 'app-thread-exit' : ''}`}
+          style={{ top: projectedGroupTop ?? entry.top }}
         >
-          {row}
+          {group}
         </div>
       )
-      return parts
     }
-    return [
-      <div key={thread.id} className="overflow-x-clip">
-        {!collapseGroup && groupHeader}
-        <div
-          className={
-            exiting
-              ? `app-thread-exit-shell ${collapseGroup ? 'app-thread-exit-shell-with-group' : ''}`
-              : undefined
-          }
-        >
-          <div className={exiting ? 'app-thread-exit-content' : undefined}>
-            {collapseGroup && groupHeader}
-            {row}
-          </div>
-        </div>
+    parts.push(
+      <div
+        key={`thread:${thread.id}`}
+        className={`absolute right-0 left-0 overflow-x-clip ${
+          projectedEntry ? 'app-thread-position-shift' : ''
+        } ${exiting ? 'z-10' : ''}`}
+        style={{
+          top: exiting ? currentRowTop : (projectedRowTop ?? currentRowTop),
+          height: VIRTUAL_ROW_HEIGHT
+        }}
+      >
+        {row}
       </div>
-    ]
+    )
+    return parts
   }
 
   return (
     <main
       ref={listRef}
       data-testid="thread-list"
+      data-view={view}
       data-thread-count={threads.length}
-      data-virtualized={virtualized || undefined}
+      data-has-more={hasMore || undefined}
+      data-virtualized="true"
       className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
       aria-label="Conversation list"
-      onScroll={
-        virtualized
-          ? (event) => {
-              pendingScrollTopRef.current = event.currentTarget.scrollTop
-              if (frameRef.current !== null) return
-              frameRef.current = requestAnimationFrame(() => {
-                frameRef.current = null
-                setScrollTop(pendingScrollTopRef.current)
-              })
-            }
-          : undefined
-      }
+      onScroll={(event) => {
+        const list = event.currentTarget
+        pendingScrollTopRef.current = list.scrollTop
+        if (
+          hasMore &&
+          !loadingMore &&
+          list.scrollHeight - list.scrollTop - list.clientHeight <= list.clientHeight * 2
+        ) {
+          onLoadMore()
+        }
+        if (frameRef.current !== null) return
+        frameRef.current = requestAnimationFrame(() => {
+          frameRef.current = null
+          setScrollTop(pendingScrollTopRef.current)
+        })
+      }}
     >
       {threads.length === 0 && (
         <div className="flex h-full items-center justify-center text-ink-faint">
-          {syncing ? 'Syncing your inbox…' : view === 'snoozed' ? 'Nothing snoozed' : 'Inbox empty'}
+          {syncing ? 'Syncing your inbox…' : EMPTY_TEXT[view]}
         </div>
       )}
-      {virtualized ? (
+      <div
+        ref={virtualContentRef}
+        className={`relative ${projected ? 'app-thread-virtual-collapse' : ''}`}
+        style={{ height: projectedVirtualHeight }}
+      >
+        {mountedEntries.flatMap(renderThread)}
+      </div>
+      {loadingMore && (
         <div
-          ref={virtualContentRef}
-          className={`relative ${projected ? 'app-thread-virtual-collapse' : ''}`}
-          style={{ height: projectedVirtualHeight }}
+          data-testid="thread-list-loading"
+          className="flex h-8 items-center justify-center text-xs text-ink-faint"
+          role="status"
         >
-          {mountedEntries.flatMap(renderThread)}
+          Loading more…
         </div>
-      ) : (
-        layout.flatMap(renderThread)
       )}
     </main>
   )

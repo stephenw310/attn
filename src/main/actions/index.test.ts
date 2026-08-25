@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
-import { listMailboxThreadIds } from '../db/queries'
+import { type LabelMailboxView, listMailboxThreads } from '../db/queries'
 import {
   actionQueueStatus,
   clearUndo,
@@ -65,13 +65,15 @@ describe('mailbox triage projection', () => {
          VALUES (?, 'thread', 'INBOX')`
       ).run(ACCOUNT)
 
+      const mailboxIds = (view: LabelMailboxView): string[] =>
+        listMailboxThreads(db, ACCOUNT, view).map((row) => row.id)
       performTriage(db, ACCOUNT, { kind: 'trash', threadIds: ['thread'] }, false)
-      expect(listMailboxThreadIds(db, ACCOUNT, 'all-mail')).toEqual([])
-      expect(listMailboxThreadIds(db, ACCOUNT, 'trash')).toEqual(['thread'])
+      expect(mailboxIds('allMail')).toEqual([])
+      expect(mailboxIds('trash')).toEqual(['thread'])
 
       performTriage(db, ACCOUNT, { kind: 'untrash', threadIds: ['thread'] }, false)
-      expect(listMailboxThreadIds(db, ACCOUNT, 'all-mail')).toEqual(['thread'])
-      expect(listMailboxThreadIds(db, ACCOUNT, 'trash')).toEqual([])
+      expect(mailboxIds('allMail')).toEqual(['thread'])
+      expect(mailboxIds('trash')).toEqual([])
     } finally {
       db.close()
     }

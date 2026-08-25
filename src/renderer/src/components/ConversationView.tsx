@@ -13,14 +13,25 @@ interface ConversationMessagesProps {
   onToast: (message: string) => void
 }
 
+/** The newest message a reader expands: trashed markers stay compact (SPEC F3). */
+function newestReadableIndex(messages: readonly DisplayConversation['messages'][number][]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (!messages[index].trashed) return index
+  }
+  return messages.length - 1
+}
+
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
   const { conversation, account, online, markNewest, onToast } = props
-  const newestIndex = conversation.messages.length - 1
+  const newestIndex = newestReadableIndex(conversation.messages)
   const newestMessageId = conversation.messages[newestIndex]?.id
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
     return new Set(newestMessageId ? [newestMessageId] : [])
   })
   const [expandedTrimIds, setExpandedTrimIds] = useState<Set<string>>(() => new Set())
+  // Reveal state is reader-local by design (SPEC F3): it lives here so closing
+  // the reader unmounts it, and revealing changes no labels and queues nothing.
+  const [revealedTrashedIds, setRevealedTrashedIds] = useState<Set<string>>(() => new Set())
 
   // This component stays mounted while local outbox and sync updates append to
   // the same thread. Every newly newest message starts open, just like the
@@ -59,6 +70,19 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     return registerCommands([createCommand('message.trim.toggle', () => toggleTrim(newestMessage.id))])
   }, [conversation.messages, newestIndex, toggleTrim])
 
+  const revealTrashed = useCallback((messageId: string) => {
+    setRevealedTrashedIds((current) => {
+      const next = new Set(current)
+      next.add(messageId)
+      return next
+    })
+    setExpandedMessageIds((current) => {
+      const next = new Set(current)
+      next.add(messageId)
+      return next
+    })
+  }, [])
+
   return (
     <>
       {conversation.messages.map((message, index) => (
@@ -66,21 +90,41 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           key={message.id}
           data-latest-conversation-item={markNewest && index === newestIndex ? '' : undefined}
         >
-          <MessageCard
-            threadId={conversation.threadId}
-            message={message}
-            account={account}
-            onToast={onToast}
-            bodyHydrationMessage={bodyHydrationStatusMessage(
-              message.bodyState,
-              online,
-              conversation.bodyHydrationFailed
-            )}
-            collapsed={!expandedMessageIds.has(message.id)}
-            onToggleCollapsed={() => toggleMessage(message.id)}
-            trimExpanded={expandedTrimIds.has(message.id)}
-            onToggleTrim={() => toggleTrim(message.id)}
-          />
+          {message.trashed && !revealedTrashedIds.has(message.id) ? (
+            <div
+              data-testid="trashed-message-marker"
+              className="flex items-center gap-2 rounded-lg border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
+            >
+              This message was moved to Trash.
+              <button
+                type="button"
+                data-testid="trashed-message-reveal"
+                onClick={(event) => {
+                  revealTrashed(message.id)
+                  event.currentTarget.blur()
+                }}
+                className="cursor-pointer font-medium text-accent hover:underline"
+              >
+                Show message
+              </button>
+            </div>
+          ) : (
+            <MessageCard
+              threadId={conversation.threadId}
+              message={message}
+              account={account}
+              onToast={onToast}
+              bodyHydrationMessage={bodyHydrationStatusMessage(
+                message.bodyState,
+                online,
+                conversation.bodyHydrationFailed
+              )}
+              collapsed={!expandedMessageIds.has(message.id)}
+              onToggleCollapsed={() => toggleMessage(message.id)}
+              trimExpanded={expandedTrimIds.has(message.id)}
+              onToggleTrim={() => toggleTrim(message.id)}
+            />
+          )}
         </div>
       ))}
     </>
@@ -91,7 +135,8 @@ interface ConversationViewProps {
   selected: DisplayThread
   selectedIndex: number
   threadCount: number
-  view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
+  threadCountExact: boolean
+  mailboxTitle: string
   conversation: DisplayConversation | null
   account: string | null
   online: boolean
@@ -109,7 +154,8 @@ export const ConversationView = memo(function ConversationView(
     selected,
     selectedIndex,
     threadCount,
-    view,
+    threadCountExact,
+    mailboxTitle,
     conversation,
     account,
     online,
@@ -192,14 +238,7 @@ export const ConversationView = memo(function ConversationView(
           className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
           onClick={onClose}
         >
-          <span aria-hidden>←</span>{' '}
-          {view === 'inbox'
-            ? 'Inbox'
-            : view === 'snoozed'
-              ? 'Snoozed'
-              : view === 'outbox'
-                ? 'Outbox'
-                : 'Drafts'}
+          <span aria-hidden>←</span> {mailboxTitle}
         </button>
         <h1
           data-testid="conversation-subject"
@@ -210,6 +249,7 @@ export const ConversationView = memo(function ConversationView(
         <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
           <span data-testid="conversation-position" className="tabular-nums">
             {selectedIndex + 1} of {threadCount}
+            {threadCountExact ? '' : '+'}
           </span>{' '}
           · <Kbd>Esc</Kbd>
         </span>

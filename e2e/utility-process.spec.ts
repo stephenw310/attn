@@ -108,7 +108,10 @@ function runFtsBackfill(
 }
 
 async function conversationExists(page: Page, threadId: string): Promise<boolean> {
-  return page.evaluate(async (id) => (await window.attn.mail.getConversation(id, false)) !== null, threadId)
+  return page.evaluate(
+    async (id) => (await window.attn.mail.getConversation(id, false, 'normal')) !== null,
+    threadId
+  )
 }
 
 test('restarts after a utility crash and resumes the persisted sweep cursor without duplicate rows', async ({

@@ -17,9 +17,11 @@ import type {
   MailLabel,
   MessageAttachment,
   MessageBodyState,
-  MessageMailbox,
   MessageRecipients,
   SnoozedThreadRow,
+  SystemMailboxCounts,
+  ThreadListView,
+  ThreadPageCursor,
   ThreadRow
 } from '../../shared/mail'
 import { messageLabelsMatchMailbox } from '../../shared/mail'
@@ -39,82 +41,310 @@ interface StoredOutboxAttachment {
   inline?: boolean
 }
 
-/** Measured-safe bound; the renderer windows lists above 500 rows. */
+/** Upper bound for internal diagnostics; renderer mailbox reads request one 101-row lookahead page. */
 export const THREAD_LIST_LIMIT = 10_000
+
+function descendingCursorSql(sortExpression: string, cursor: ThreadPageCursor | null): string {
+  return cursor ? `AND (${sortExpression} < ? OR (${sortExpression} = ? AND t.id > ?))` : ''
+}
+
+function ascendingCursorSql(sortExpression: string, cursor: ThreadPageCursor | null): string {
+  return cursor ? `AND (${sortExpression} > ? OR (${sortExpression} = ? AND t.id > ?))` : ''
+}
+
+function cursorValues(cursor: ThreadPageCursor | null): [number, number, string] | [] {
+  return cursor ? [cursor.at, cursor.at, cursor.id] : []
+}
 
 function labelIds(value: string): string[] {
   return value ? value.split('\u001f') : []
 }
 
-function allMailMembershipSql(): string {
-  const threadLabel = (label: string): string => `
+const threadLabelSql = (label: string): string => `
     EXISTS (SELECT 1 FROM thread_labels tl
             WHERE tl.account_id = t.account_id AND tl.thread_id = t.id
               AND tl.label_id = '${label}')`
-  const storedLabel = (label: string): string => `
+const storedLabelSql = (label: string): string => `
     EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = '${label}')`
+const HIDDEN_STORED_LABELS_SQL = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
+  .map((label) => storedLabelSql(label))
+  .join(' OR ')
+const HIDDEN_FALLBACK_LABELS_SQL = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
+  .map((label) => threadLabelSql(label))
+  .join(' OR ')
 
-  const junkThreadLabels = ['SPAM', 'TRASH'].map((label) => threadLabel(label)).join(' OR ')
-  const hiddenStoredLabels = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
-    .map((label) => storedLabel(label))
-    .join(' OR ')
-  const hiddenFallbackLabels = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
-    .map((label) => threadLabel(label))
-    .join(' OR ')
+function allMailMembershipSql(): string {
+  const junkThreadLabels = ['SPAM', 'TRASH'].map((label) => threadLabelSql(label)).join(' OR ')
   return `(NOT (${junkThreadLabels}) AND EXISTS (
       SELECT 1 FROM messages m
       WHERE m.account_id = t.account_id AND m.thread_id = t.id
     )) OR EXISTS (
       SELECT 1 FROM messages m
       WHERE m.account_id = t.account_id AND m.thread_id = t.id
-        AND ((m.labels_json IS NOT NULL AND NOT (${hiddenStoredLabels}))
-             OR (m.labels_json IS NULL AND NOT (${hiddenFallbackLabels})))
+        AND ((m.labels_json IS NOT NULL AND NOT (${HIDDEN_STORED_LABELS_SQL}))
+             OR (m.labels_json IS NULL AND NOT (${HIDDEN_FALLBACK_LABELS_SQL})))
     )`
 }
 
-/** One membership rule for the future All Mail, Spam, and Trash list surfaces. */
-export function listMailboxThreadIds(
-  db: Db,
-  accountId: string,
-  mailbox: MessageMailbox,
-  limit = THREAD_LIST_LIMIT
-): string[] {
-  if (mailbox === 'spam' || mailbox === 'trash') {
-    return (
-      db
-        .prepare(
-          `SELECT t.id,
-                  COALESCE((
-                    SELECT MAX(m.internal_date)
-                    FROM messages m
-                    WHERE m.account_id = t.account_id AND m.thread_id = t.id
-                      AND (m.labels_json IS NULL OR EXISTS (
-                        SELECT 1 FROM json_each(m.labels_json) stored
-                        WHERE stored.value = mailbox.label_id
-                      ))
-                  ), t.last_msg_at, 0) AS mailbox_last_msg_at
-           FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
-           JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
-           WHERE mailbox.account_id = ? AND mailbox.label_id = ?
-           ORDER BY mailbox_last_msg_at DESC, t.id
-           LIMIT ?`
-        )
-        .all(accountId, mailbox.toUpperCase(), limit) as { id: string }[]
-    ).map((row) => row.id)
-  }
-  return (
-    db
-      .prepare(
-        `SELECT t.id FROM threads t
-         WHERE t.account_id = ? AND (${allMailMembershipSql()})
-         ORDER BY t.last_msg_at DESC, t.id
-         LIMIT ?`
-      )
-      .all(accountId, limit) as { id: string }[]
-  ).map((row) => row.id)
+/**
+ * Sent and Starred membership: some message carries the mailbox label and would
+ * render in the normal reader — junk (SPAM/TRASH) and never-rendered (DRAFT and
+ * legacy CHAT) messages do not represent a thread here, so a reply chain whose
+ * only sent copy was trashed leaves Sent. Legacy rows without labels_json fall
+ * back to thread-level labels, mirroring the reader's legacy behavior.
+ */
+function labeledMailboxMembershipSql(): string {
+  return `EXISTS (
+      SELECT 1 FROM messages m
+      WHERE m.account_id = t.account_id AND m.thread_id = t.id
+        AND ((m.labels_json IS NOT NULL
+              AND EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = mailbox.label_id)
+              AND NOT (${HIDDEN_STORED_LABELS_SQL}))
+             OR (m.labels_json IS NULL AND NOT (${HIDDEN_FALLBACK_LABELS_SQL})))
+    )`
 }
 
-export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_LIMIT): ThreadRow[] {
+/** Mailbox list views whose membership derives from label rules rather than a dedicated query. */
+export type LabelMailboxView = Exclude<ThreadListView, 'inbox' | 'snoozed'>
+
+const MAILBOX_LABEL_IDS = {
+  sent: 'SENT',
+  starred: 'STARRED',
+  spam: 'SPAM',
+  trash: 'TRASH'
+} as const
+
+const THREAD_AUXILIARY_PROJECTION_SQL = `EXISTS(SELECT 1 FROM reminders r
+                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
+                       AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
+              EXISTS(SELECT 1 FROM outbox o
+                     WHERE o.account_id = t.account_id AND o.thread_id = t.id
+                       AND o.state IN ('composing', 'drafted')) AS has_draft`
+
+const THREAD_PROJECTION_SQL = `t.account_id, t.id, t.from_display, t.subject, t.snippet,
+                t.is_unread, t.is_starred, t.has_attachment,
+              ${THREAD_AUXILIARY_PROJECTION_SQL}`
+
+interface MailboxThreadQueryRow {
+  account_id: string
+  id: string
+  from_display: string | null
+  subject: string | null
+  snippet: string | null
+  mailbox_last_msg_at: number | null
+  is_unread: number
+  is_starred: number
+  has_attachment: number
+  returned: number
+  has_draft: number
+  label_ids: string
+}
+
+/**
+ * The S2 membership rules as list surfaces (SPEC F3): Spam and Trash include a
+ * thread when any message carries the label and sort by that mailbox's newest
+ * matching message; All Mail includes a thread when any message is outside Spam
+ * and Trash; Sent and Starred apply the normal reader's junk exclusion.
+ */
+export function listMailboxThreads(
+  db: Db,
+  accountId: string,
+  view: LabelMailboxView,
+  limit = THREAD_LIST_LIMIT,
+  cursor: ThreadPageCursor | null = null
+): ThreadRow[] {
+  const wrap = (visibleSql: string): string =>
+    `WITH visible AS (${visibleSql})
+     SELECT v.*,
+            COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
+                      FROM thread_labels tl
+                      WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+     FROM visible v
+     ORDER BY v.mailbox_last_msg_at DESC, v.id`
+  let rows: MailboxThreadQueryRow[]
+  if (view === 'allMail') {
+    const sortExpression = 'COALESCE(t.last_msg_at, 0)'
+    rows = db
+      .prepare(
+        wrap(`SELECT ${THREAD_PROJECTION_SQL}, ${sortExpression} AS mailbox_last_msg_at
+              FROM threads t
+              WHERE t.account_id = ? AND (${allMailMembershipSql()})
+                ${descendingCursorSql(sortExpression, cursor)}
+              ORDER BY mailbox_last_msg_at DESC, t.id
+              LIMIT ?`)
+      )
+      .all(accountId, ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
+  } else if (view === 'spam' || view === 'trash') {
+    const sortExpression = 'summary.mailbox_last_msg_at'
+    rows = db
+      .prepare(
+        `WITH candidate AS (
+           SELECT m.*,
+                  CASE WHEN m.labels_json IS NULL OR EXISTS (
+                    SELECT 1 FROM json_each(m.labels_json) stored
+                    WHERE stored.value = mailbox.label_id
+                  ) THEN 1 ELSE 0 END AS matches_mailbox
+           FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
+           JOIN messages m INDEXED BY idx_messages_thread
+             ON m.account_id = mailbox.account_id AND m.thread_id = mailbox.thread_id
+           WHERE mailbox.account_id = ? AND mailbox.label_id = ?
+         ),
+         classified AS (
+           SELECT candidate.*,
+                  MAX(matches_mailbox) OVER (PARTITION BY account_id, thread_id)
+                    AS has_mailbox_message
+           FROM candidate
+         ),
+         matching AS (
+           SELECT classified.*,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY account_id, thread_id
+                    ORDER BY COALESCE(internal_date, 0) DESC, id DESC
+                  ) AS mailbox_rank
+           FROM classified
+           WHERE matches_mailbox = 1 OR (has_mailbox_message = 0 AND NOT EXISTS (
+             SELECT 1 FROM json_each(COALESCE(labels_json, '[]')) stored
+             WHERE stored.value IN ('DRAFT', 'CHAT')
+           ))
+         ),
+         summary AS (
+           SELECT account_id, thread_id,
+                  MAX(COALESCE(internal_date, 0)) AS mailbox_last_msg_at,
+                  MAX(labels_json IS NULL) AS has_legacy_labels,
+                  MAX(CASE WHEN labels_json IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM json_each(labels_json) stored WHERE stored.value = 'UNREAD'
+                  ) THEN 1 ELSE 0 END) AS is_unread,
+                  MAX(CASE WHEN labels_json IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM json_each(labels_json) stored WHERE stored.value = 'STARRED'
+                  ) THEN 1 ELSE 0 END) AS is_starred,
+                  MAX(CASE WHEN EXISTS (
+                    SELECT 1 FROM json_each(COALESCE(attachments_json, '[]')) attachment
+                    WHERE COALESCE(json_extract(attachment.value, '$.inline'), 0) <> 1
+                  ) THEN 1 ELSE 0 END) AS has_attachment
+           FROM matching
+           GROUP BY account_id, thread_id
+         ),
+         visible AS (
+           SELECT t.account_id, t.id,
+                  CASE
+                    WHEN lower(trim(COALESCE(latest.from_email, ''))) = lower(trim(account.email))
+                      THEN 'Me'
+                    ELSE COALESCE(NULLIF(latest.from_name, ''), latest.from_email, '')
+                  END AS from_display,
+                  t.subject, COALESCE(latest.snippet, '') AS snippet,
+                  CASE WHEN summary.has_legacy_labels = 1 THEN t.is_unread ELSE summary.is_unread END
+                    AS is_unread,
+                  CASE WHEN summary.has_legacy_labels = 1 THEN t.is_starred ELSE summary.is_starred END
+                    AS is_starred,
+                  summary.has_attachment,
+                  ${THREAD_AUXILIARY_PROJECTION_SQL},
+                  summary.mailbox_last_msg_at
+           FROM summary
+           JOIN threads t ON t.account_id = summary.account_id AND t.id = summary.thread_id
+           LEFT JOIN accounts account ON account.id = t.account_id
+           JOIN matching latest
+             ON latest.account_id = summary.account_id AND latest.thread_id = summary.thread_id
+            AND latest.mailbox_rank = 1
+           WHERE 1 = 1 ${descendingCursorSql(sortExpression, cursor)}
+           ORDER BY summary.mailbox_last_msg_at DESC, t.id
+           LIMIT ?
+         )
+         SELECT v.*,
+                COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
+                          FROM thread_labels tl
+                          WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+         FROM visible v
+         ORDER BY v.mailbox_last_msg_at DESC, v.id`
+      )
+      .all(accountId, MAILBOX_LABEL_IDS[view], ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
+  } else {
+    const sortExpression = 'COALESCE(t.last_msg_at, 0)'
+    rows = db
+      .prepare(
+        wrap(`SELECT ${THREAD_PROJECTION_SQL}, ${sortExpression} AS mailbox_last_msg_at
+              FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
+              JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+              WHERE mailbox.account_id = ? AND mailbox.label_id = ?
+                AND (${labeledMailboxMembershipSql()})
+                ${descendingCursorSql(sortExpression, cursor)}
+              ORDER BY mailbox_last_msg_at DESC, t.id
+              LIMIT ?`)
+      )
+      .all(accountId, MAILBOX_LABEL_IDS[view], ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    fromDisplay: r.from_display ?? '',
+    subject: r.subject ?? '(no subject)',
+    snippet: r.snippet ?? '',
+    lastMsgAt: r.mailbox_last_msg_at ?? 0,
+    unread: r.is_unread === 1,
+    starred: r.is_starred === 1,
+    hasAttachment: r.has_attachment === 1,
+    returned: r.returned === 1,
+    hasDraft: r.has_draft === 1,
+    labelIds: labelIds(r.label_ids)
+  }))
+}
+
+/**
+ * User-label views use the same normal-reader rules as Sent and Starred. A
+ * trashed or spammed copy cannot pull an otherwise unrelated conversation into
+ * the view, and the label id must still exist in the account's user catalog.
+ */
+export function listLabelThreads(
+  db: Db,
+  accountId: string,
+  labelId: string,
+  limit = THREAD_LIST_LIMIT,
+  cursor: ThreadPageCursor | null = null
+): ThreadRow[] {
+  const sortExpression = 'COALESCE(t.last_msg_at, 0)'
+  const rows = db
+    .prepare(
+      `WITH visible AS (
+         SELECT ${THREAD_PROJECTION_SQL}, ${sortExpression} AS mailbox_last_msg_at
+         FROM labels catalog
+         JOIN thread_labels mailbox
+           ON mailbox.account_id = catalog.account_id AND mailbox.label_id = catalog.id
+         JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+         WHERE catalog.account_id = ? AND catalog.id = ? AND lower(catalog.type) = 'user'
+           AND (${labeledMailboxMembershipSql()})
+           ${descendingCursorSql(sortExpression, cursor)}
+         ORDER BY mailbox_last_msg_at DESC, t.id
+         LIMIT ?
+       )
+       SELECT v.*,
+              COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
+                        FROM thread_labels tl
+                        WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+       FROM visible v
+       ORDER BY v.mailbox_last_msg_at DESC, v.id`
+    )
+    .all(accountId, labelId, ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
+
+  return rows.map((r) => ({
+    id: r.id,
+    fromDisplay: r.from_display ?? '',
+    subject: r.subject ?? '(no subject)',
+    snippet: r.snippet ?? '',
+    lastMsgAt: r.mailbox_last_msg_at ?? 0,
+    unread: r.is_unread === 1,
+    starred: r.is_starred === 1,
+    hasAttachment: r.has_attachment === 1,
+    returned: r.returned === 1,
+    hasDraft: r.has_draft === 1,
+    labelIds: labelIds(r.label_ids)
+  }))
+}
+
+export function listInboxThreads(
+  db: Db,
+  accountId: string,
+  limit = THREAD_LIST_LIMIT,
+  cursor: ThreadPageCursor | null = null
+): ThreadRow[] {
+  const sortExpression = 'COALESCE(t.last_msg_at, 0)'
   const rows = db
     .prepare(
       `WITH visible AS (
@@ -130,7 +360,8 @@ export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_
          JOIN thread_labels inbox
            ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
          WHERE t.account_id = ? AND t.is_inbox_visible = 1
-         ORDER BY t.last_msg_at DESC
+           ${descendingCursorSql(sortExpression, cursor)}
+         ORDER BY ${sortExpression} DESC, t.id
          LIMIT ?
        )
        SELECT v.*,
@@ -138,9 +369,9 @@ export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_
                         FROM thread_labels tl
                         WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
        FROM visible v
-       ORDER BY v.last_msg_at DESC`
+       ORDER BY COALESCE(v.last_msg_at, 0) DESC, v.id`
     )
-    .all(accountId, limit) as {
+    .all(accountId, ...cursorValues(cursor), limit) as {
     account_id: string
     id: string
     from_display: string | null
@@ -170,7 +401,12 @@ export function listInboxThreads(db: Db, accountId: string, limit = THREAD_LIST_
   }))
 }
 
-export function listSnoozedThreads(db: Db, accountId: string, limit = THREAD_LIST_LIMIT): SnoozedThreadRow[] {
+export function listSnoozedThreads(
+  db: Db,
+  accountId: string,
+  limit = THREAD_LIST_LIMIT,
+  cursor: ThreadPageCursor | null = null
+): SnoozedThreadRow[] {
   const rows = db
     .prepare(
       `WITH visible AS (
@@ -182,7 +418,8 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = THREAD_LIS
          FROM reminders r
          JOIN threads t ON t.account_id = r.account_id AND t.id = r.thread_id
          WHERE r.account_id = ? AND r.kind = 'snooze' AND r.state = 'pending'
-         ORDER BY r.due_at ASC
+           ${ascendingCursorSql('r.due_at', cursor)}
+         ORDER BY r.due_at ASC, t.id
          LIMIT ?
        )
        SELECT v.*,
@@ -190,9 +427,9 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = THREAD_LIS
                         FROM thread_labels tl
                         WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
        FROM visible v
-       ORDER BY v.due_at ASC`
+       ORDER BY v.due_at ASC, v.id`
     )
-    .all(accountId, limit) as {
+    .all(accountId, ...cursorValues(cursor), limit) as {
     account_id: string
     id: string
     from_display: string | null
@@ -221,6 +458,68 @@ export function listSnoozedThreads(db: Db, accountId: string, limit = THREAD_LIS
     labelIds: labelIds(r.label_ids),
     dueAt: r.due_at
   }))
+}
+
+function scalarCount(db: Db, sql: string, ...values: unknown[]): number {
+  return (db.prepare(sql).get(...values) as { count: number }).count
+}
+
+/** Exact local totals using the same membership rules as each system mailbox list. */
+export function countSystemMailboxes(db: Db, accountId: string): SystemMailboxCounts {
+  const labeledCount = (view: Exclude<LabelMailboxView, 'allMail'>): number => {
+    if (view === 'spam' || view === 'trash') {
+      return scalarCount(
+        db,
+        `SELECT COUNT(*) AS count
+         FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
+         JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+         WHERE mailbox.account_id = ? AND mailbox.label_id = ?`,
+        accountId,
+        MAILBOX_LABEL_IDS[view]
+      )
+    }
+    return scalarCount(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
+       JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+       WHERE mailbox.account_id = ? AND mailbox.label_id = ?
+         AND (${labeledMailboxMembershipSql()})`,
+      accountId,
+      MAILBOX_LABEL_IDS[view]
+    )
+  }
+
+  return {
+    inbox: scalarCount(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM threads t
+       JOIN thread_labels inbox
+         ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
+       WHERE t.account_id = ? AND t.is_inbox_visible = 1`,
+      accountId
+    ),
+    allMail: scalarCount(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM threads t
+       WHERE t.account_id = ? AND (${allMailMembershipSql()})`,
+      accountId
+    ),
+    sent: labeledCount('sent'),
+    starred: labeledCount('starred'),
+    snoozed: scalarCount(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM reminders r
+       JOIN threads t ON t.account_id = r.account_id AND t.id = r.thread_id
+       WHERE r.account_id = ? AND r.kind = 'snooze' AND r.state = 'pending'`,
+      accountId
+    ),
+    spam: labeledCount('spam'),
+    trash: labeledCount('trash')
+  }
 }
 
 export function listUserLabels(db: Db, accountId: string): MailLabel[] {
@@ -254,7 +553,8 @@ export function getConversation(
   accountId: string,
   threadId: string,
   missingBodyState: Exclude<MessageBodyState, 'complete'>,
-  mailbox: ConversationMailbox = 'normal'
+  mailbox: ConversationMailbox = 'normal',
+  withTrashedMarkers = false
 ): Conversation | null {
   const thread = db
     .prepare('SELECT subject FROM threads WHERE account_id = ? AND id = ?')
@@ -288,6 +588,7 @@ export function getConversation(
     snippet: string | null
     rfc_message_id: string | null
     references_json: string | null
+    trashed?: boolean
   }[]
   const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
     | { email: string }
@@ -295,8 +596,19 @@ export function getConversation(
   const selfEmail = normalizeEmailKey(account?.email ?? accountId)
 
   const messages: ConversationMsg[] = rows
-    .filter((row) => messageVisibleInMailbox(row.labels_json, fallbackLabels, mailbox))
+    .flatMap((row) => {
+      if (messageVisibleInMailbox(row.labels_json, fallbackLabels, mailbox)) return [row]
+      // Normal and All Mail readers keep each trashed message's chronological
+      // position as a marker (SPEC F3). Spammed messages stay hidden, and a
+      // legacy row without labels_json cannot be identified as trashed.
+      const marks =
+        withTrashedMarkers &&
+        (mailbox === 'normal' || mailbox === 'all-mail') &&
+        messageIsTrashedMarker(row.labels_json)
+      return marks ? [{ ...row, trashed: true }] : []
+    })
     .map((r) => ({
+      ...(r.trashed ? { trashed: true } : {}),
       id: r.id,
       rfcMessageId: r.rfc_message_id,
       references: parseJson(r.references_json, []),
@@ -357,9 +669,10 @@ export function getConversationForDisplay(
   accountId: string,
   threadId: string,
   missingBodyState: Exclude<MessageBodyState, 'complete'>,
-  mailbox: ConversationMailbox = 'normal'
+  mailbox: ConversationMailbox = 'normal',
+  withTrashedMarkers = false
 ): Conversation | null {
-  const conversation = getConversation(db, accountId, threadId, missingBodyState, mailbox)
+  const conversation = getConversation(db, accountId, threadId, missingBodyState, mailbox, withTrashedMarkers)
   if (!conversation) return null
   if (mailbox === 'spam' || mailbox === 'trash') return conversation
 
@@ -623,6 +936,13 @@ export function getInlineAttachmentData(
 }
 
 const EMPTY_RECIPIENTS: MessageRecipients = { to: [], cc: [], bcc: [], replyTo: [] }
+
+/** Trashed but not spammed or never-rendered: the message earns a reader marker. */
+function messageIsTrashedMarker(labelsJson: string | null): boolean {
+  if (labelsJson === null) return false
+  const labels = new Set(parseJson(labelsJson, [] as string[]))
+  return labels.has('TRASH') && !labels.has('SPAM') && !labels.has('DRAFT') && !labels.has('CHAT')
+}
 
 function messageVisibleInMailbox(
   labelsJson: string | null,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuthStatus } from '../../../shared/auth'
 import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
+import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { blurActive } from './blurActive'
 import { Kbd } from './Kbd'
@@ -189,75 +190,62 @@ function AccountMenu({
 }
 
 interface MailHeaderProps {
-  view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
   unreadCount: number | null
   pendingActionCount: number
   pausedActionCount: number
   outboxCount: number
   selectionCount: number
   composerOpen: boolean
+  sidebarCollapsed: boolean
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
   onReconnectActions: () => void
-  onSwitchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
   onOpenOutbox: () => void
+  onToggleSidebar: () => void
 }
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   const {
-    view,
     unreadCount,
     pendingActionCount,
     pausedActionCount,
     outboxCount,
     selectionCount,
     composerOpen,
+    sidebarCollapsed,
     status,
     onStatus,
     onReconnectActions,
-    onSwitchView,
-    onOpenOutbox
+    onOpenOutbox,
+    onToggleSidebar
   } = props
+  const sidebarAction = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+  const sidebarShortcut = `${modKeyLabel()}B`
   return (
-    <header className="app-drag flex items-center gap-6 border-b border-edge px-6 py-3">
-      <div className="text-base font-bold tracking-tight">
-        attn<span className="text-accent">:</span>
-      </div>
-      {!composerOpen && (
-        <nav className="app-no-drag flex gap-1">
-          <button
-            type="button"
-            onClick={() => onSwitchView('inbox')}
-            className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
-              view === 'inbox' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
-            }`}
-          >
-            <span data-testid={view === 'inbox' ? 'view-title' : undefined}>Inbox</span>
-            {unreadCount !== null && unreadCount > 0 && (
-              <span className="ml-1.5 text-xs font-semibold text-accent tabular-nums">{unreadCount}</span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => onSwitchView('snoozed')}
-            className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
-              view === 'snoozed' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
-            }`}
-          >
-            <span data-testid={view === 'snoozed' ? 'view-title' : undefined}>Snoozed</span>
-          </button>
-          <button
-            type="button"
-            data-testid="view-drafts"
-            onClick={() => onSwitchView('drafts')}
-            className={`cursor-pointer rounded-[7px] px-3 py-1.5 text-[13px] font-medium ${
-              view === 'drafts' ? 'bg-active text-ink' : 'text-ink-faint hover:text-ink-dim'
-            }`}
-          >
-            <span data-testid={view === 'drafts' ? 'view-title' : undefined}>Drafts</span>
-          </button>
-        </nav>
-      )}
+    <header
+      data-testid="mail-header"
+      className="app-drag app-titlebar-safe-area flex h-11 flex-none items-center gap-6 border-b border-edge"
+    >
+      <button
+        type="button"
+        data-testid="sidebar-toggle"
+        data-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
+        aria-label={sidebarAction}
+        aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
+        aria-controls="mail-sidebar"
+        aria-expanded={!sidebarCollapsed}
+        title={`${sidebarAction} (${sidebarShortcut})`}
+        onClick={(event) => {
+          onToggleSidebar()
+          event.currentTarget.blur()
+        }}
+        className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
+          <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
+          <path d="M8.5 4v16" strokeWidth="1.75" />
+        </svg>
+      </button>
       <div className="app-no-drag ml-auto flex items-center gap-4">
         {!composerOpen && selectionCount > 0 && (
           <span

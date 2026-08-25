@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, powerMonitor, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { errorMessage } from '../shared/error'
@@ -21,6 +21,7 @@ import {
 } from './service/protocol'
 import { ServiceSupervisor } from './service/supervisor'
 import { TestSeams } from './testIpc'
+import { titleBarOverlayOptions, windowChromeOptions } from './windowChrome'
 
 const testUserData = process.env.ATTN_TEST_USER_DATA
 if (testUserData) {
@@ -132,6 +133,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     icon: appIcon,
     show: false,
     autoHideMenuBar: true,
+    ...windowChromeOptions(process.platform, themePreference, nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -172,6 +174,16 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
   return win
+}
+
+function refreshTitleBarOverlay(): void {
+  if (process.platform === 'darwin') return
+  const options = titleBarOverlayOptions(themePreference, nativeTheme.shouldUseDarkColors)
+  for (const win of BrowserWindow.getAllWindows()) win.setTitleBarOverlay(options)
+}
+
+function handleNativeThemeUpdated(): void {
+  if (themePreference === 'system') refreshTitleBarOverlay()
 }
 
 function publishFocus(): void {
@@ -238,6 +250,7 @@ async function initialize(): Promise<void> {
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
   themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
+  nativeTheme.on('updated', handleNativeThemeUpdated)
   stopIpc = registerIpc({
     service: ownedService,
     authStatus,
@@ -249,6 +262,7 @@ async function initialize(): Promise<void> {
     },
     setThemePreference: (preference) => {
       themePreference = preference
+      refreshTitleBarOverlay()
     },
     pickAttachmentPaths: testUserData ? async () => testSeams.takeAttachmentPickerPaths() : undefined
   })
@@ -286,6 +300,7 @@ async function teardownOwnedResources(): Promise<void> {
   stopIpc?.()
   stopIpc = null
   powerMonitor.removeListener('resume', refreshSchedulersAfterResume)
+  nativeTheme.removeListener('updated', handleNativeThemeUpdated)
   testSeams.dispose()
   mailNotifier?.stop()
   mailNotifier = null

@@ -28,13 +28,19 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
         return
       }
       const target = event.target instanceof Element ? event.target : null
+      const context = readerOpen ? 'reader' : outboxOpen ? 'outbox' : 'list'
+      const modifiedCommand = event.metaKey || event.ctrlKey ? matchKey(event, context) : null
+      if (modifiedCommand?.context === 'global') {
+        event.preventDefault()
+        modifiedCommand.run()
+        return
+      }
       const isTextEntry =
         target instanceof HTMLElement &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       if (isTextEntry) return
       const isInteractive = target?.closest('a, button, input, textarea, select, [contenteditable="true"]')
       if (isInteractive && event.key !== 'Escape') return
-      const context = readerOpen ? 'reader' : outboxOpen ? 'outbox' : 'list'
       const scroll = conversationScrollRef.current
       if (readerOpen && scroll) {
         const scrollDelta = readingScrollDelta(event, scroll.clientHeight)

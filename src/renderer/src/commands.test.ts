@@ -59,9 +59,15 @@ describe('command catalog', () => {
       'theme.midnight',
       'theme.sand',
       'view.inbox',
+      'view.allMail',
+      'view.sent',
+      'view.starred',
       'view.snoozed',
       'view.drafts',
+      'view.spam',
+      'view.trash',
       'view.outbox',
+      'layout.sidebar.toggle',
       'outbox.open',
       'outbox.close',
       'composer.new',
@@ -178,6 +184,15 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('j', { metaKey: true }), 'reader')).toBeNull()
     expect(matchKey(key('j', { ctrlKey: true }), 'list')).toBeNull()
     expect(matchKey(key('j', { altKey: true }), 'list')).toBeNull()
+  })
+
+  test('dispatches the sidebar modifier shortcut without leaking modifiers to bare commands', () => {
+    useCommands([createCommand('layout.sidebar.toggle', () => {}), createCommand('triage.archive', () => {})])
+    expect(matchKey(key('b', { metaKey: true }), 'list')?.id).toBe('layout.sidebar.toggle')
+    expect(matchKey(key('b', { ctrlKey: true }), 'reader')?.id).toBe('layout.sidebar.toggle')
+    expect(matchKey(key('b'), 'list')).toBeNull()
+    expect(matchKey(key('b', { metaKey: true, shiftKey: true }), 'list')).toBeNull()
+    expect(matchKey(key('e', { metaKey: true }), 'list')).toBeNull()
   })
 
   test('dispatches only registered composer modifier shortcuts in composer context', () => {

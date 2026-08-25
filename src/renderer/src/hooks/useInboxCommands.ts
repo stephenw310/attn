@@ -2,13 +2,15 @@ import { useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { DraftKind } from '../../../shared/drafts'
 import { createCommand, registerCommands } from '../commands'
+import type { MailView, NavigableMailView } from '../mailDisplay'
 
 interface Options {
   selected: { id: string } | undefined
   selectedCount: number
   selectedIndex: number
   readerOpen: boolean
-  view: 'inbox' | 'snoozed' | 'drafts' | 'outbox'
+  view: MailView
+  sidebarCollapsed: boolean
   starOn: boolean
   markUnreadOn: boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
@@ -19,9 +21,10 @@ interface Options {
   extendSelection: (index: number) => void
   openSelected: () => void
   closeReader: () => void
-  switchView: (view: 'inbox' | 'snoozed' | 'drafts') => void
+  switchView: (view: NavigableMailView) => void
   openOutbox: () => void
   closeOutbox: () => void
+  toggleSidebar: () => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
   openLabel: () => void
@@ -38,6 +41,7 @@ export function useInboxCommands(options: Options): void {
     selectedIndex,
     readerOpen,
     view,
+    sidebarCollapsed,
     starOn,
     markUnreadOn,
     preserveSelectionOnRefreshRef,
@@ -51,6 +55,7 @@ export function useInboxCommands(options: Options): void {
     switchView,
     openOutbox,
     closeOutbox,
+    toggleSidebar,
     triage,
     openSnooze,
     openLabel,
@@ -79,9 +84,17 @@ export function useInboxCommands(options: Options): void {
             ? [createCommand('outbox.open', openSelected)]
             : [createCommand('conversation.open', openSelected)]),
         createCommand('view.inbox', () => switchView('inbox')),
+        createCommand('view.allMail', () => switchView('allMail')),
+        createCommand('view.sent', () => switchView('sent')),
+        createCommand('view.starred', () => switchView('starred')),
         createCommand('view.snoozed', () => switchView('snoozed')),
         createCommand('view.drafts', () => switchView('drafts')),
+        createCommand('view.spam', () => switchView('spam')),
+        createCommand('view.trash', () => switchView('trash')),
         createCommand('view.outbox', openOutbox),
+        createCommand('layout.sidebar.toggle', toggleSidebar, {
+          title: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+        }),
         createCommand('composer.new', openComposer),
         ...(view !== 'drafts' && selected
           ? [
@@ -157,8 +170,10 @@ export function useInboxCommands(options: Options): void {
       selectedCount,
       selectedIndex,
       showToast,
+      sidebarCollapsed,
       starOn,
       switchView,
+      toggleSidebar,
       toggleSelection,
       triage,
       view

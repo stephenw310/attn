@@ -5,6 +5,7 @@ interface DraftListProps {
   readerOpen: boolean
   selectedIndex: number
   selectedRowRef: React.RefObject<HTMLDivElement | null>
+  listRef: React.RefObject<HTMLElement | null>
   onOpen: (index: number) => void
 }
 
@@ -19,10 +20,12 @@ export function DraftList({
   readerOpen,
   selectedIndex,
   selectedRowRef,
+  listRef,
   onOpen
 }: DraftListProps): React.JSX.Element {
   return (
     <main
+      ref={listRef}
       data-testid="draft-list"
       className={`min-h-0 flex-1 overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
       aria-label="Drafts"

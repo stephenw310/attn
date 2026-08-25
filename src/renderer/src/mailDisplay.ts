@@ -1,5 +1,6 @@
 import type {
   Conversation,
+  MailboxView,
   MessageAttachment,
   MessageBodyState,
   MessageRecipients,
@@ -7,6 +8,55 @@ import type {
   ThreadRow
 } from '../../shared/mail'
 import { formatSnoozeDate } from '../../shared/snooze'
+
+export type UserLabelView = `label:${string}`
+
+/** Every view the shell can host: mailboxes, user labels, and the on-demand Outbox. */
+export type MailView = MailboxView | UserLabelView | 'outbox'
+export type NavigableMailView = Exclude<MailView, 'outbox'>
+export type PagedThreadView = Exclude<NavigableMailView, 'drafts'>
+
+/** Mailbox views whose rows come from the label-driven listMailboxThreads read. */
+export type LabelMailboxView = Exclude<MailboxView, 'inbox' | 'drafts' | 'snoozed'>
+
+/** Views whose ordinary thread rows are cached independently by the renderer. */
+export type CachedThreadView = LabelMailboxView | UserLabelView
+
+export function labelMailboxView(view: MailView): LabelMailboxView | null {
+  return view === 'allMail' || view === 'sent' || view === 'starred' || view === 'spam' || view === 'trash'
+    ? view
+    : null
+}
+
+export function userLabelView(labelId: string): UserLabelView {
+  return `label:${encodeURIComponent(labelId)}`
+}
+
+export function userLabelId(view: MailView): string | null {
+  if (!view.startsWith('label:')) return null
+  try {
+    return decodeURIComponent(view.slice('label:'.length)) || null
+  } catch {
+    return null
+  }
+}
+
+export function cachedThreadView(view: MailView): CachedThreadView | null {
+  return labelMailboxView(view) ?? (userLabelId(view) ? (view as UserLabelView) : null)
+}
+
+/** Display names for every view the list/reading shell can host. */
+export const VIEW_TITLES: Record<MailboxView | 'outbox', string> = {
+  inbox: 'Inbox',
+  allMail: 'All Mail',
+  sent: 'Sent',
+  drafts: 'Drafts',
+  starred: 'Starred',
+  snoozed: 'Snoozed',
+  spam: 'Spam',
+  trash: 'Trash',
+  outbox: 'Outbox'
+}
 
 export interface DisplayThread {
   id: string
@@ -28,6 +78,8 @@ export interface DisplayThread {
 export interface DisplayMessage {
   id: string
   pending: boolean
+  /** Rendered as a compact trashed-message marker until revealed (SPEC F3). */
+  trashed: boolean
   fromName: string
   fromEmail: string
   at: string
@@ -93,6 +145,34 @@ export function displaySnoozedThread(row: SnoozedThreadRow): DisplayThread {
   return { ...displayThread(row), dueAt: row.dueAt, dueLabel: formatSnoozeDate(row.dueAt) }
 }
 
+const EMPTY_DISPLAY_THREADS: DisplayThread[] = []
+const displayThreadsCache = new WeakMap<readonly ThreadRow[], DisplayThread[]>()
+const displaySnoozedThreadsCache = new WeakMap<readonly SnoozedThreadRow[], DisplayThread[]>()
+
+/**
+ * Row-array display mapping, cached by source identity. The refresh layer
+ * already reuses an unchanged rows array (mailDataEquality), so a view switch
+ * back to cached rows must not re-run Intl date formatting across 10,000 rows —
+ * that alone would spend F3's 50 ms switch budget several times over.
+ */
+export function displayThreads(rows: readonly ThreadRow[]): DisplayThread[] {
+  if (rows.length === 0) return EMPTY_DISPLAY_THREADS
+  const cached = displayThreadsCache.get(rows)
+  if (cached) return cached
+  const mapped = rows.map(displayThread)
+  displayThreadsCache.set(rows, mapped)
+  return mapped
+}
+
+export function displaySnoozedThreads(rows: readonly SnoozedThreadRow[]): DisplayThread[] {
+  if (rows.length === 0) return EMPTY_DISPLAY_THREADS
+  const cached = displaySnoozedThreadsCache.get(rows)
+  if (cached) return cached
+  const mapped = rows.map(displaySnoozedThread)
+  displaySnoozedThreadsCache.set(rows, mapped)
+  return mapped
+}
+
 export function displayConversation(conversation: Conversation): DisplayConversation {
   return {
     threadId: conversation.threadId,
@@ -101,6 +181,7 @@ export function displayConversation(conversation: Conversation): DisplayConversa
     messages: conversation.messages.map((message) => ({
       id: message.id,
       pending: message.pending === true,
+      trashed: message.trashed === true,
       fromName: message.fromName,
       fromEmail: message.fromEmail,
       at: formatTime(message.at),

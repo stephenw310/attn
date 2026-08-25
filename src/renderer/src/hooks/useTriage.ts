@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
+import type { MailView } from '../mailDisplay'
 import {
   applyThreadFlag,
   applyThreadFlagToElement,
@@ -8,19 +9,21 @@ import {
   type ThreadFlagSnapshot,
   threadFlagSnapshot
 } from '../optimisticTriage'
+import type { MailboxRowCache } from './useMailData'
 
 interface Options {
   selectedIds: ReadonlySet<string>
   selectedIndex: number
   threads: readonly { id: string; starred: boolean; unread: boolean }[]
   readerOpen: boolean
-  view: 'inbox' | 'snoozed'
+  view: MailView
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
   selectedThreadIdRef: React.RefObject<string | null>
   selectedRowRef: React.RefObject<HTMLDivElement | null>
   setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
   setRealSnoozedThreads: React.Dispatch<React.SetStateAction<SnoozedThreadRow[] | null>>
+  setMailboxRows: React.Dispatch<React.SetStateAction<MailboxRowCache>>
   clearSelection: () => void
   showToast: (message: string) => void
   setExitingThreadIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>
@@ -44,12 +47,28 @@ export function useTriage(options: Options): (action: TriageAction) => void {
     selectedRowRef,
     setRealThreads,
     setRealSnoozedThreads,
+    setMailboxRows,
     clearSelection,
     showToast,
     setExitingThreadIds,
     setSelectedIndex
   } = options
   const flagOwnersRef = useRef(new Map<string, symbol>())
+  const applyFlagToMailboxRows = useCallback(
+    (snapshot: ThreadFlagSnapshot, rollback: boolean) => {
+      setMailboxRows((current) => {
+        let changed = false
+        const next: MailboxRowCache = {}
+        for (const [cachedView, rows] of Object.entries(current) as [string, ThreadRow[]][]) {
+          const updated = rollback ? rollbackThreadFlag(rows, snapshot) : applyThreadFlag(rows, snapshot)
+          if (updated !== rows) changed = true
+          next[cachedView as keyof MailboxRowCache] = updated ?? rows
+        }
+        return changed ? next : current
+      })
+    },
+    [setMailboxRows]
+  )
   return useCallback(
     (action: TriageAction) => {
       if (!window.attn) return
@@ -67,6 +86,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         applyThreadFlagToElement(selectedRowRef.current, flagSnapshot)
         setRealThreads((current) => applyThreadFlag(current, flagSnapshot))
         setRealSnoozedThreads((current) => applyThreadFlag(current, flagSnapshot))
+        applyFlagToMailboxRows(flagSnapshot, false)
       }
       const settleFlag = (rollback: boolean): void => {
         if (!flagSnapshot || !flagOwner) return
@@ -82,6 +102,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         applyThreadFlagToElement(selectedRowRef.current, ownedSnapshot, true)
         setRealThreads((current) => rollbackThreadFlag(current, ownedSnapshot))
         setRealSnoozedThreads((current) => rollbackThreadFlag(current, ownedSnapshot))
+        applyFlagToMailboxRows(ownedSnapshot, true)
       }
       let selectionRollback: { fromId: string; toId: string | null } | null = null
       if (isBulk) clearSelection()
@@ -136,6 +157,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         })
     },
     [
+      applyFlagToMailboxRows,
       clearSelection,
       deferRefreshUntilRef,
       preserveSelectionOnRefreshRef,

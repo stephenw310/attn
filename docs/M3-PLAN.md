@@ -22,7 +22,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | S2 per-message labels | **done**, completed 2026-08-22 | nothing; F3 and S4 are unblocked |
 | S3 all-mail and spam/trash stages | **done**, shipped in #51 | nothing, it is finished |
 | S4 reconcile and expiry recovery | **done**, completed 2026-08-22 | trustworthy mailbox views |
-| T22 mailbox navigation (F3) | **planned**, not started | T27, T24's `in:` operator |
+| T22 mailbox navigation (F3) | **done**, completed 2026-08-23 | nothing; T27 and T24's `in:` operator are unblocked |
 | T23 FTS5 index (F10) | **done**, completed 2026-08-23 | nothing; T24 and T25 are unblocked |
 | T24 search UI and operators (F10) | **planned**, not started | T25 |
 | T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
@@ -413,7 +413,16 @@ touches `persist.ts` and the schema, not the renderer, so the two tracks do not 
 
 ## T22 — System mailbox navigation
 
-**Status: not started.**
+**Status: done, completed 2026-08-23; navigation revised 2026-08-24.** Eight system views render from SQLite through the unified
+`mail:listThreads({ view })` read; `listMailboxThreadIds` grew into `listMailboxThreads` with the Sent and
+Starred junk exclusion; windowing is unconditional (the 500-row threshold and the non-virtual render path are
+deleted); per-view selection and scroll restore on return; normal and All Mail readers keep trashed messages
+as reveal-in-place markers; the five `view.*` chords registered. The follow-up replaces the header mailbox menu
+with a persistent system-mailbox and user-label sidebar, adds local user-label list reads, and keeps the content
+header stable for the future Inbox split strip. The measured cached All Mail switch on
+the 10,000-thread profile is ~4 ms median against the 50 ms budget (the cold first visit is reported
+unbudgeted). One renderer-level decision worth recording: display-row mapping is cached by rows-array
+identity (`displayThreads`), because remapping 10,000 rows through Intl on every switch cost ~176 ms alone.
 
 **Depends on:** S2, S4 (both done) · **Unblocks:** T27, and T24's `in:` operator · **Parallel with:** T23 ·
 **Spec:** F3 system mailbox navigation, §9 #10, §5 `G` chords
@@ -432,10 +441,10 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
 - **One `MailboxView` union in `src/shared/mail.ts`:** `inbox`, `allMail`, `sent`, `drafts`, `starred`,
   `snoozed`, `spam`, `trash`. Outbox stays outside the union. F3 is explicit that Outbox is an on-demand
   operational view, not a mailbox, and T16 already built it that way.
-- **One typed read.** `mail:listThreads({ view })` replaces the `mailListThreads` / `mailListSnoozed` pair
-  in `src/shared/ipc.ts`. Drafts keeps its own row shape (`DraftList` merges outbox rows with cached Gmail
-  drafts) and Snoozed keeps its reminder fields. Every filter and every sort stays in SQL. A renderer that
-  fetches the inbox and filters it for Sent has already lost the 50 ms budget at 10,000 rows.
+- **One paged typed read.** `mail:listThreads({ view, cursor })` returns at most 100 rows plus the next
+  timestamp/thread-id cursor. Drafts keeps its own row shape (`DraftList` merges outbox rows with cached Gmail
+  drafts) and Snoozed keeps its reminder fields. Every filter and every sort stays in SQL. The renderer
+  accumulates pages only as the user approaches the loaded tail.
 - **`listMailboxThreadIds` grows into `listMailboxThreads`**, returning the same projection as
   `listInboxThreads` under the membership rules S2 recorded: Spam and Trash include a thread when any message
   carries the label and sort by that mailbox's newest matching message, All Mail includes a thread when any
@@ -447,9 +456,8 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   closes. Spam and Trash readers keep S2's behavior of showing only their own messages.
 - **Per-view selection and scroll.** Keep one record per view and restore it on return. Switching mailboxes
   closes an open reader, per F3.
-- **Windowing becomes unconditional.** Delete `VIRTUALIZE_AT = 500` (`ThreadList.tsx:86`) and window every
-  list. All Mail at the 10,000-row `THREAD_LIST_LIMIT` is now the ordinary case, and keeping two layout paths
-  keeps two sets of scroll-restore bugs. The row height and overscan constants stay.
+- **Windowing stays unconditional.** Every list uses one fixed-height layout over its accumulated pages. The
+  row height and overscan constants stay, and loading another page does not replace the current rows.
 - **Triage removes a row when it stops matching the active view.** The inbox predicate generalizes per view:
   archiving in All Mail removes nothing, trashing in Inbox removes the row, restoring in Trash removes it
   there. v1 still ships no permanent delete and no empty-folder action in Spam or Trash.
@@ -457,19 +465,25 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   `view.starred` (`g s`), `view.spam` (`g p`), `view.trash` (`g r`) beside the existing four.
   `useKeyboardDispatch.ts:47` already resolves two-key chords from the registry, so nothing in dispatch
   changes. Palette entries stay registry-only until T26.
-- **The list header shows the active mailbox name** (`MailHeader`), which is the whole of F3's answer to not
-  having a sidebar.
+- **Pointer navigation lives in a stable left sidebar.** System mailboxes, Outbox, and the current user-label
+  catalog stay in fixed groups. User-label rows and message-list label chips open local label views. There is
+  no mailbox title/count header. Inbox splits get a separate strip only when configured. The sidebar starts
+  expanded, collapses to zero width, and stores that choice in the local browser profile. Its wordmark lives
+  above the navigation; one persistent top-bar control closes and reopens the whole sidebar. System rows show
+  exact local totals, including zero, without displacing their `G` chords. Large totals are compacted visually.
 
 ### Implementation guide
 
-- Renderer: `Inbox.tsx` view state and `switchView`, `MailHeader`, `ThreadList` windowing, `useMailData`.
+- Renderer: `Inbox.tsx` view state and `switchView`, `MailSidebar`, `ThreadList` windowing and page-tail loading,
+  `useMailData`.
   Route every view transition through `exitConversation()` before changing the view. This checkpoints an
   inline reply before React unmounts its composer.
 - Main: `db/queries.ts` (`listMailboxThreads`), the service handler and protocol operation in
   `src/main/service/`, the preload bridge, and the channel map. All three IPC halves in one commit
   (global rule 2).
-- Testids: `mailbox-title`, `mailbox-row`, `trashed-message-marker`, `trashed-message-reveal`.
-- Screenshot artifacts: `all-mail.png` and `trash-marker.png`. Add both to the `AGENTS.md` list in the same
+- Testids: `mailbox-title`, `sidebar-mailbox`, `sidebar-label`, `sidebar-brand`, `sidebar-toggle`,
+  `trashed-message-marker`, `trashed-message-reveal`.
+- Screenshot artifacts: `all-mail.png`, `sidebar-collapsed.png`, and `trash-marker.png`. Add them to the `AGENTS.md` list in the same
   PR (global rule 8).
 
 **Schema:** none. Every rule this task needs shipped with S2 at revision 16.
@@ -484,8 +498,8 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   trip; a triage verb removes a row from a view it no longer matches; a Drafts row opens the composer; a
   boot with no provider still switches views. Extend `e2e/message-labels.spec.ts` seeds with one Sent-only
   and one Starred-only thread rather than reordering the existing fixture list.
-- **Perf (@perf):** switching to All Mail on the 10,000-thread profile renders under the F3 50 ms budget,
-  and scrolling holds the existing `requestAnimationFrame` interval now that every list is windowed.
+- **Perf (@perf):** the 10,000-thread profile returns 100 rows on first read, loads another 100 at the tail,
+  switches cached mailboxes under the F3 50 ms budget, and holds the scroll-frame interval.
 
 ### Done when
 
@@ -917,10 +931,13 @@ one; that is not the start of F15.
 **Decided 2026-08-22:** the utility process owns SQLite (SPEC §9 #19), and S2 landed before S1. S1's design
 constraints carry the consequences.
 
+**Decided by shipping T22 (2026-08-23):** F3 registered its five `view.*` commands in `COMMAND_SPECS` only;
+T26 builds the palette surface and asserts the inventory. Ratifying the wording in SPEC §9 remains an owner
+call.
+
 | Question | Why it matters | Decide by |
 |---|---|---|
 | Pathological-mailbox posture: pick a design target such as smooth to 250k messages, then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages, and lifetime headers can exceed that | E7's real-mailbox capture in [T20-EVIDENCE.md](T20-EVIDENCE.md), plus T23's measured index size and query latency |
-| Does F3 ship with registry-only palette commands, with T26 building the palette and asserting the inventory? | It decides whether T22 or T26 goes first, and F3's acceptance criteria name the palette | Before T22 starts |
 
 Open defects and coverage gaps live in [KNOWN-ISSUES.md](KNOWN-ISSUES.md). Manual sign-off evidence is ticked
 in [T20-EVIDENCE.md](T20-EVIDENCE.md).

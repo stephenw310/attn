@@ -60,6 +60,7 @@ test('rolls back overlapping failed star and unread actions independently', asyn
       selectedRowRef: { current: null },
       setRealThreads: setRows,
       setRealSnoozedThreads: setSnoozedRows,
+      setMailboxRows: () => {},
       clearSelection: () => {},
       showToast: () => {},
       setExitingThreadIds,

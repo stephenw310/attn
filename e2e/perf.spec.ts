@@ -1,9 +1,9 @@
 import type { ElectronApplication, Page, TestInfo } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
+import { THREAD_PAGE_SIZE } from '../src/shared/mail'
 import { expect, test } from './electron'
 
 const SAMPLE_COUNT = 5
-const THREAD_COUNT = 10_000
 const PERF_TEST_TIMEOUT_MS = 120_000
 const LIST_RENDER_CEILING_MS = 2_000
 const LOCAL_REFRESH_CEILING_MS = 2_000
@@ -42,36 +42,32 @@ test.describe.configure({ retries: 0, timeout: PERF_TEST_TIMEOUT_MS })
 test.describe('@perf focused-row archive motion', () => {
   test.use({ seed: 'fixtures/seed-inbox.json' })
 
-  test('starts moving the replacement row before the exit midpoint', async ({ page }) => {
-    await page.addStyleTag({
-      content: '.app-thread-exit-shell { animation-play-state: paused !important; }'
-    })
+  test('projects the replacement row toward the vacated slot in the archive keydown commit', async ({
+    page
+  }) => {
     const rows = page.getByTestId('thread-row')
     await expect(rows).toHaveCount(8)
     const nextRow = rows.filter({ hasText: 'Northstar Books' })
-    const nextRowStart = await nextRow.evaluate((element) => element.getBoundingClientRect().y)
+    const wrapperTop = await nextRow.evaluate(
+      (element) => element.closest<HTMLElement>('.absolute')?.style.top ?? ''
+    )
 
     await page.keyboard.press('e')
     await expect(rows.first()).toHaveAttribute('data-exiting', 'true')
     await expect(nextRow).toHaveAttribute('data-selected', 'true')
-    const timeline = await rows.first().evaluate((element) => {
-      const shell = element.closest<HTMLElement>('.app-thread-exit-shell')
-      const collapse = shell?.getAnimations().find((animation) => {
-        const effect = animation.effect as KeyframeEffect | null
-        return effect?.getKeyframes().some((keyframe) => keyframe.maxHeight === '0px')
-      })
-      if (!shell || !collapse) throw new Error('collapse animation missing')
-      collapse.currentTime = 130
+    // Every list is windowed, so the replacement motion is a transitioned `top`
+    // on the surviving row's wrapper: the projected target is set immediately
+    // with the transition class, while the exiting row overlays its old slot.
+    const projected = await nextRow.evaluate((element) => {
+      const wrapper = element.closest<HTMLElement>('.absolute')
+      if (!wrapper) throw new Error('windowed row wrapper missing')
       return {
-        currentTime: collapse.currentTime,
-        shellHeight: shell.getBoundingClientRect().height
+        top: wrapper.style.top,
+        shifting: wrapper.classList.contains('app-thread-position-shift')
       }
     })
-    expect(timeline.currentTime).toBe(130)
-    expect(timeline.shellHeight).toBeLessThan(44)
-    expect(await nextRow.evaluate((element) => element.getBoundingClientRect().y)).toBeLessThan(
-      nextRowStart - 2
-    )
+    expect(projected.shifting).toBe(true)
+    expect(Number.parseFloat(projected.top)).toBeLessThan(Number.parseFloat(wrapperTop) - 2)
     await expect(rows).toHaveCount(7)
   })
 })
@@ -134,13 +130,13 @@ async function utilityMemoryKb(app: ElectronApplication): Promise<UtilityMemoryK
 async function measureListRender(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const listIsReady = (): boolean =>
-      document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') === '10000'
+      document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') === '100'
     if (listIsReady()) return performance.now()
 
     return new Promise<number>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         observer.disconnect()
-        reject(new Error('Timed out before the 10,000-thread list became readable'))
+        reject(new Error('Timed out before the first 100-thread page became readable'))
       }, 10_000)
       const observer = new MutationObserver(() => {
         if (!listIsReady()) return
@@ -157,7 +153,7 @@ async function measureLocalMailRefresh(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const started = performance.now()
     await Promise.all([
-      window.attn.mail.listThreads(),
+      window.attn.mail.listThreads('inbox'),
       window.attn.mail.listSnoozed(),
       window.attn.draft.list(),
       window.attn.outbox.listPending(),
@@ -221,6 +217,40 @@ async function measureConversationOpen(page: Page): Promise<number> {
       observer.observe(document.body, { childList: true, subtree: true })
     })
   })
+}
+
+async function measureMailboxSwitch(page: Page, chordKey: string, expectedTitle: string): Promise<number> {
+  return page.evaluate(
+    async ({ pressed, title }) => {
+      const ready = (): boolean =>
+        document.querySelector('[data-testid="mailbox-title"]')?.textContent === title &&
+        document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') === '100'
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }))
+      const started = performance.now()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: pressed, bubbles: true }))
+      if (ready()) return performance.now() - started
+
+      return new Promise<number>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          observer.disconnect()
+          reject(new Error(`Timed out switching to ${title}`))
+        }, 10_000)
+        const observer = new MutationObserver(() => {
+          if (!ready()) return
+          window.clearTimeout(timeout)
+          observer.disconnect()
+          resolve(performance.now() - started)
+        })
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true
+        })
+      })
+    },
+    { pressed: chordKey, title: expectedTitle }
+  )
 }
 
 async function measureTriageFeedback(page: Page): Promise<number> {
@@ -347,7 +377,7 @@ async function measureScrollFrames(page: Page): Promise<number[]> {
   })
 }
 
-test.describe('@perf 10,000-thread inbox', () => {
+test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
   test('renders the list within the CI-safe ceiling', async ({ boot, page }, testInfo) => {
     const samples: number[] = []
     let currentPage = page
@@ -361,12 +391,30 @@ test.describe('@perf 10,000-thread inbox', () => {
     expect(medianMs, 'median navigation start to first readable window').toBeLessThan(LIST_RENDER_CEILING_MS)
   })
 
+  test('loads mailbox rows in 100-conversation pages', async ({ page }) => {
+    const list = page.getByTestId('thread-list')
+    await expect(list).toHaveAttribute('data-thread-count', String(THREAD_PAGE_SIZE))
+    await expect(list).toHaveAttribute('data-has-more', 'true')
+
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight
+      element.dispatchEvent(new Event('scroll', { bubbles: true }))
+    })
+    const scrollTopBeforeAppend = await list.evaluate((element) => element.scrollTop)
+
+    await expect(list).toHaveAttribute('data-thread-count', String(THREAD_PAGE_SIZE * 2))
+    await expect
+      .poll(() => list.evaluate((element) => element.scrollTop))
+      .toBeGreaterThanOrEqual(scrollTopBeforeAppend)
+    expect(await page.getByTestId('thread-row').count()).toBeLessThan(100)
+  })
+
   test('windows the list and sustains scroll-frame pacing inside the memory budget', async ({
     app,
     page
   }, testInfo) => {
     const list = page.getByTestId('thread-list')
-    await expect(list).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    await expect(list).toHaveAttribute('data-thread-count', String(THREAD_PAGE_SIZE))
     await expect(list).toHaveAttribute('data-virtualized', 'true')
     expect(await page.getByTestId('thread-row').count()).toBeLessThan(100)
 
@@ -422,7 +470,10 @@ test.describe('@perf 10,000-thread inbox', () => {
   })
 
   test('answers search index queries within the CI-safe ceiling', async ({ app, page }, testInfo) => {
-    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
     // Realistic MATCH shapes over the generated profile: the broadest term hits
     // every message, the prefix drives as-you-type, the rest are narrow.
     const stats = await app.evaluate(
@@ -469,7 +520,10 @@ test.describe('@perf 10,000-thread inbox', () => {
   })
 
   test('opens mounted conversation content within the CI-safe ceiling', async ({ page }, testInfo) => {
-    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
     const samples: number[] = []
     for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
       samples.push(await measureConversationOpen(page))
@@ -485,8 +539,31 @@ test.describe('@perf 10,000-thread inbox', () => {
     )
   })
 
-  test('refreshes the 10k local mail snapshot within the CI-safe ceiling', async ({ page }, testInfo) => {
-    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+  test('switches to a cached All Mail within the F3 budget', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
+    // The cold first visit queries and transfers one page. Report it separately
+    // so the cached switch budget still catches renderer regressions.
+    const coldMs = await measureMailboxSwitch(page, 'a', 'All Mail')
+    await reportMetric(testInfo, 'mailbox-switch-cold', [coldMs], coldMs)
+
+    const samples: number[] = []
+    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
+      await measureMailboxSwitch(page, 'i', 'Inbox')
+      samples.push(await measureMailboxSwitch(page, 'a', 'All Mail'))
+    }
+    const medianMs = median(samples)
+    await reportMetric(testInfo, 'mailbox-switch', samples, medianMs)
+    expect(medianMs, 'median cached switch to All Mail').toBeLessThan(CONVERSATION_OPEN_CEILING_MS)
+  })
+
+  test('refreshes the first local mail page within the CI-safe ceiling', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
     const samples: number[] = []
     for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
       samples.push(await measureLocalMailRefresh(page))
@@ -494,11 +571,14 @@ test.describe('@perf 10,000-thread inbox', () => {
 
     const medianMs = median(samples)
     await reportMetric(testInfo, 'local-mail-refresh', samples, medianMs)
-    expect(medianMs, 'median full local snapshot refresh').toBeLessThan(LOCAL_REFRESH_CEILING_MS)
+    expect(medianMs, 'median first-page local refresh').toBeLessThan(LOCAL_REFRESH_CEILING_MS)
   })
 
-  test('keeps a keyboard selection fully visible while scrolling the 10k list', async ({ page }) => {
-    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+  test('keeps a keyboard selection fully visible while scrolling a loaded page', async ({ page }) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
 
     // Step past the fold so the list has to scroll, then keep stepping: the
     // follow scroll must converge rather than leaving a constant offset behind.
@@ -527,13 +607,16 @@ test.describe('@perf 10,000-thread inbox', () => {
   })
 
   test('removes triaged rows within the CI-safe ceiling', async ({ page }, testInfo) => {
-    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
     const samples: number[] = []
     for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
       samples.push(await measureTriageFeedback(page))
       await expect(page.getByTestId('thread-list')).toHaveAttribute(
         'data-thread-count',
-        String(THREAD_COUNT - iteration - 1)
+        String(THREAD_PAGE_SIZE)
       )
     }
 
@@ -542,12 +625,15 @@ test.describe('@perf 10,000-thread inbox', () => {
     expect(medianMs, 'median e keydown to selected row removed').toBeLessThan(TRIAGE_FEEDBACK_CEILING_MS)
     await expect(page.getByTestId('thread-list')).toHaveAttribute(
       'data-thread-count',
-      String(THREAD_COUNT - SAMPLE_COUNT)
+      String(THREAD_PAGE_SIZE)
     )
   })
 
   test('shows star and unread feedback within the CI-safe ceiling', async ({ page }, testInfo) => {
-    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
     const samples = [
       await measureThreadFlagFeedback(page, 's', 'data-starred'),
       await measureThreadFlagFeedback(page, 'u', 'data-unread')
@@ -561,7 +647,7 @@ test.describe('@perf 10,000-thread inbox', () => {
     page
   }, testInfo) => {
     const list = page.getByTestId('thread-list')
-    await expect(list).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    await expect(list).toHaveAttribute('data-thread-count', String(THREAD_PAGE_SIZE))
     await page.evaluate(() => {
       window.addEventListener('error', (event) => {
         document.documentElement.dataset.perfReactError = event.error?.stack ?? event.message
@@ -571,20 +657,31 @@ test.describe('@perf 10,000-thread inbox', () => {
     for (let index = 1; index < 100; index++) await page.keyboard.press('Shift+j')
     await expect(page.getByTestId('selection-count')).toHaveText('100 selected')
     expect(await page.locator('html').getAttribute('data-perf-react-error')).toBeNull()
+    const loadedBeforeArchive = Number(await list.getAttribute('data-thread-count'))
+    expect(loadedBeforeArchive).toBeGreaterThanOrEqual(THREAD_PAGE_SIZE)
 
     const feedbackMs = await measureTriageFeedback(page)
     await reportMetric(testInfo, 'bulk-archive-feedback', [feedbackMs], feedbackMs)
     expect(feedbackMs, '100-thread archive visual feedback').toBeLessThan(TRIAGE_FEEDBACK_CEILING_MS)
-    await expect(list).toHaveAttribute('data-thread-count', String(THREAD_COUNT - 100))
+    await expect
+      .poll(async () => Number(await list.getAttribute('data-thread-count')))
+      .toBeGreaterThanOrEqual(THREAD_PAGE_SIZE)
+    const loadedAfterArchive = Number(await list.getAttribute('data-thread-count'))
+    expect(loadedAfterArchive).toBeLessThanOrEqual(loadedBeforeArchive + THREAD_PAGE_SIZE)
     expect(await page.locator('html').getAttribute('data-perf-react-error')).toBeNull()
 
     await page.keyboard.press('z')
-    await expect(list).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    await expect
+      .poll(async () => Number(await list.getAttribute('data-thread-count')))
+      .toBeGreaterThanOrEqual(THREAD_PAGE_SIZE)
     expect(await page.locator('html').getAttribute('data-perf-react-error')).toBeNull()
   })
 
   test('opens and types in the composer within CI-safe ceilings', async ({ page }, testInfo) => {
-    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', String(THREAD_COUNT))
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
 
     // Keep one-time renderer/JIT initialization visible in the metric while
     // enforcing the interaction budget against a stable, repeated hot path.

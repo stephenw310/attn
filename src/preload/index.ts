@@ -15,6 +15,7 @@ import { nonEmptyString } from '../shared/guards'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type {
   Conversation,
+  ConversationMailbox,
   DownloadAttachmentRequest,
   DownloadAttachmentResult,
   InlineImageRepairRequest,
@@ -23,6 +24,11 @@ import type {
   MailLabel,
   SnoozedThreadRow,
   SyncState,
+  SystemMailboxCounts,
+  ThreadListRequest,
+  ThreadListView,
+  ThreadPage,
+  ThreadPageCursor,
   ThreadRow
 } from '../shared/mail'
 import type {
@@ -47,6 +53,10 @@ function invoke<K extends InvokeChannel>(
   return ipcRenderer.invoke(channel, ...args)
 }
 
+function listThreadPage(request: ThreadListRequest): Promise<ThreadPage> {
+  return invoke(IPC_CHANNELS.mailListThreads, request)
+}
+
 const api = {
   platform: process.platform,
   auth: {
@@ -61,12 +71,32 @@ const api = {
       invoke(IPC_CHANNELS.settingsSetTheme, preference)
   },
   mail: {
-    listThreads: (): Promise<ThreadRow[]> => invoke(IPC_CHANNELS.mailListThreads),
-    listSnoozed: (): Promise<SnoozedThreadRow[]> => invoke(IPC_CHANNELS.mailListSnoozed),
+    listThreadPage: (
+      view: Exclude<ThreadListView, 'snoozed'>,
+      cursor?: ThreadPageCursor
+    ): Promise<ThreadPage> => listThreadPage({ view, ...(cursor ? { cursor } : {}) }),
+    listLabelThreadPage: (labelId: string, cursor?: ThreadPageCursor): Promise<ThreadPage> =>
+      listThreadPage({ view: 'label', labelId, ...(cursor ? { cursor } : {}) }),
+    listSnoozedPage: (cursor?: ThreadPageCursor): Promise<ThreadPage<SnoozedThreadRow>> =>
+      listThreadPage({ view: 'snoozed', ...(cursor ? { cursor } : {}) }) as Promise<
+        ThreadPage<SnoozedThreadRow>
+      >,
+    listThreads: (view: Exclude<ThreadListView, 'snoozed'>): Promise<ThreadRow[]> =>
+      listThreadPage({ view }).then((page) => page.rows),
+    listLabelThreads: (labelId: string): Promise<ThreadRow[]> =>
+      listThreadPage({ view: 'label', labelId }).then((page) => page.rows),
+    // The one typed read serves Snoozed too; only that view returns reminder rows.
+    listSnoozed: (): Promise<SnoozedThreadRow[]> =>
+      listThreadPage({ view: 'snoozed' }).then((page) => page.rows as SnoozedThreadRow[]),
     listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
+    getMailboxCounts: (): Promise<SystemMailboxCounts> => invoke(IPC_CHANNELS.mailGetMailboxCounts),
     getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),
-    getConversation: (threadId: string, allowHydration: boolean): Promise<Conversation | null> =>
-      invoke(IPC_CHANNELS.mailGetConversation, threadId, allowHydration),
+    getConversation: (
+      threadId: string,
+      allowHydration: boolean,
+      mailbox: ConversationMailbox
+    ): Promise<Conversation | null> =>
+      invoke(IPC_CHANNELS.mailGetConversation, threadId, allowHydration, mailbox),
     downloadAttachment: (request: DownloadAttachmentRequest): Promise<DownloadAttachmentResult> =>
       invoke(IPC_CHANNELS.mailDownloadAttachment, request),
     getInlineImage: (request: InlineImageRequest): Promise<InlineImageResult> =>
@@ -139,8 +169,11 @@ const api = {
     get: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftGet, id),
     list: (): Promise<Draft[]> => invoke(IPC_CHANNELS.draftList),
     reopen: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftReopen, id),
-    createReply: (threadId: string, kind: Exclude<DraftKind, 'new'>): Promise<Draft | null> =>
-      invoke(IPC_CHANNELS.draftCreateReply, threadId, kind),
+    createReply: (
+      threadId: string,
+      kind: Exclude<DraftKind, 'new'>,
+      mailbox: ConversationMailbox = 'normal'
+    ): Promise<Draft | null> => invoke(IPC_CHANNELS.draftCreateReply, threadId, kind, mailbox),
     pickAttachments: (id: string): Promise<DraftAttachmentMutationResult> =>
       invoke(IPC_CHANNELS.draftPickAttachments, id),
     addDroppedFiles: (id: string, files: File[]): Promise<DraftAttachmentMutationResult> =>

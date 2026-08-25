@@ -1,0 +1,37 @@
+{
+  "account": "seed@attn.test",
+  "labels": [
+    { "id": "INBOX", "name": "Inbox", "type": "system" },
+    { "id": "TRASH", "name": "Trash", "type": "system" }
+  ],
+  "threads": [
+    {
+      "id": "t-junk-reply",
+      "messages": [
+        {
+          "id": "m-normal",
+          "labelIds": ["INBOX", "UNREAD", "STARRED"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:00",
+          "from": "Visible Sender <visible@example.com>",
+          "replyTo": "Visible Alias <visible+reply@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Mixed mailbox reply",
+          "snippet": "This copy belongs in Inbox.",
+          "bodyText": "This copy belongs in Inbox."
+        },
+        {
+          "id": "m-trash",
+          "labelIds": ["TRASH"],
+          "receivedDaysAgo": 1,
+          "receivedAt": "09:00",
+          "from": "Deleted Sender <deleted@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Mixed mailbox reply",
+          "snippet": "This copy belongs in Trash.",
+          "bodyText": "This copy belongs in Trash."
+        }
+      ]
+    }
+  ]
+}

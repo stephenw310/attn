@@ -1,4 +1,7 @@
-export type DateGroup = 'Today' | 'Yesterday' | 'Last 7 days' | 'Earlier this month' | 'Older'
+type RelativeDateGroup = 'Today' | 'Yesterday' | 'Last 7 days' | 'Earlier this month'
+type YearDateGroup = `${number}`
+
+export type DateGroup = RelativeDateGroup | YearDateGroup
 
 export function dateGroup(thread: { lastMsgAt: number }, now = new Date()): DateGroup {
   const messageDate = new Date(thread.lastMsgAt)
@@ -11,5 +14,5 @@ export function dateGroup(thread: { lastMsgAt: number }, now = new Date()): Date
   if (messageDate.getFullYear() === now.getFullYear() && messageDate.getMonth() === now.getMonth()) {
     return 'Earlier this month'
   }
-  return 'Older'
+  return String(messageDate.getFullYear()) as YearDateGroup
 }
