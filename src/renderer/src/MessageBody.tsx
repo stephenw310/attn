@@ -49,7 +49,6 @@ const attn = window.attn
 function frameReset(surface: MailSurface, layout: MailLayout, appearance: ThemeAppearance): string {
   const senderCanvas = surface === 'light'
   const light = senderCanvas || appearance === 'light'
-  const bodyPadding = senderCanvas && layout !== 'full-bleed' ? '12px' : '0'
   return `
   :root { color-scheme: only ${light ? 'light' : 'dark'}; }
   html, body {
@@ -64,7 +63,7 @@ function frameReset(surface: MailSurface, layout: MailLayout, appearance: ThemeA
     font: ${light ? '14px/1.6 Arial, Helvetica, sans-serif' : '15px/1.7 Arial, Helvetica, sans-serif'};
     overflow-wrap: break-word;
     box-sizing: border-box;
-    padding: ${bodyPadding};
+    padding: 0;
   }
   ${
     senderCanvas && layout === 'centered'
@@ -79,6 +78,7 @@ function frameReset(surface: MailSurface, layout: MailLayout, appearance: ThemeA
     senderCanvas
       ? ''
       : `
+  #attn-mail-root#attn-mail-root,
   #attn-mail-body#attn-mail-body,
   #attn-mail-body#attn-mail-body :where(*) {
     background-color: transparent !important;
@@ -263,7 +263,7 @@ function makeSrcDoc(
     trimStart.parentNode?.insertBefore(marker, trimStart)
   }
   const renderedAppearance = surface === 'light' ? 'light' : appearance
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${renderedAppearance}"><base target="_blank"><style>${frameReset(surface, layout, appearance)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
+  return `<!doctype html><html id="attn-mail-root"><head><meta charset="utf-8"><meta name="color-scheme" content="${renderedAppearance}"><base target="_blank"><style>${frameReset(surface, layout, appearance)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
 }
 
 function LinkedMailText({ text, lightSurface }: { text: string; lightSurface: boolean }): React.JSX.Element {
@@ -593,7 +593,7 @@ export function MessageBody({
           expanded={expanded}
           lightSurface={surface === 'light'}
           onToggle={onToggleTrim}
-          className={`absolute z-10 h-7 ${surface === 'light' && layout !== 'full-bleed' ? 'left-3' : 'left-0'}`}
+          className="absolute left-0 z-10 h-7"
           style={{ top: measurement.trimTop }}
         />
       )}

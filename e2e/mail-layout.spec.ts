@@ -5,20 +5,28 @@ import { expect, test } from './electron'
 test.use({ seed: 'fixtures/seed-mail-layout.json' })
 
 test('separates native, centered, and full-bleed sender canvases', async ({ page }, testInfo) => {
-  await expect(page.getByTestId('thread-row')).toHaveCount(7)
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
 
   await page.getByTestId('thread-row').filter({ hasText: 'Plain layout' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
   await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '20px')
   await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '20px')
+  await expect
+    .poll(() =>
+      page.getByTestId('conversation-content').evaluate((content) => {
+        const expectedWidth = Math.min(896, Math.max(576, window.innerWidth * 0.576))
+        return Math.abs(content.getBoundingClientRect().width - expectedWidth)
+      })
+    )
+    .toBeLessThan(1)
 
   await page.keyboard.press('Escape')
   await page.getByTestId('thread-row').filter({ hasText: 'Centered newsletter' }).click()
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'light')
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-layout', 'centered')
-  const paddedBody = page.frameLocator('[data-testid="html-body-frame"]').locator('body')
-  await expect(paddedBody).toHaveCSS('padding-left', '12px')
-  await expect(paddedBody).toHaveCSS('padding-right', '12px')
+  const centeredBody = page.frameLocator('[data-testid="html-body-frame"]').locator('body')
+  await expect(centeredBody).toHaveCSS('padding-left', '0px')
+  await expect(centeredBody).toHaveCSS('padding-right', '0px')
   await expect
     .poll(() =>
       page
@@ -67,8 +75,8 @@ test('separates native, centered, and full-bleed sender canvases', async ({ page
   await page.getByTestId('thread-row').filter({ hasText: 'Discarded wrapper canvas' }).click()
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-layout', 'padded')
   const wrapperBody = page.frameLocator('[data-testid="html-body-frame"]').locator('body')
-  await expect(wrapperBody).toHaveCSS('padding-left', '12px')
-  await expect(wrapperBody).toHaveCSS('padding-right', '12px')
+  await expect(wrapperBody).toHaveCSS('padding-left', '0px')
+  await expect(wrapperBody).toHaveCSS('padding-right', '0px')
 
   await page.keyboard.press('Escape')
   await page.getByTestId('thread-row').filter({ hasText: 'Color-coded reply' }).click()
@@ -95,6 +103,7 @@ test('keeps sender canvases solid and removes native line backgrounds in light t
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'light')
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-layout', 'centered')
   await expect(page.getByTestId('message-content')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(page.getByTestId('message-content')).toHaveCSS('border-radius', '10px')
   await expect(page.getByTestId('html-body-container')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   const centeredNewsletter = page.frameLocator('[data-testid="html-body-frame"]')
   await expect(centeredNewsletter.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
@@ -107,6 +116,15 @@ test('keeps sender canvases solid and removes native line backgrounds in light t
     )
     .toBeLessThan(1)
 
+  await page.keyboard.press('Escape')
+  await page.getByTestId('thread-row').filter({ hasText: 'Print confirmation canvas' }).click()
+  await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'light')
+  await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-layout', 'padded')
+  const printConfirmation = page.frameLocator('[data-testid="html-body-frame"]')
+  await expect(printConfirmation.locator('#print-canvas')).toHaveCSS('background-color', 'rgb(236, 240, 241)')
+  await expect(printConfirmation.locator('#print-summary')).toHaveCSS('background-color', 'rgb(44, 61, 79)')
+  await expect(printConfirmation.locator('#print-summary')).toHaveCSS('color', 'rgb(255, 255, 255)')
+
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
   const path = join(dir, 'mail-layout-light.png')
@@ -118,6 +136,7 @@ test('keeps sender canvases solid and removes native line backgrounds in light t
   await expect(page.getByTestId('conversation-subject')).toHaveText('Neutral line backgrounds')
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'native')
   const nativeMail = page.frameLocator('[data-testid="html-body-frame"]')
+  await expect(nativeMail.locator('html')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(nativeMail.locator('#inline-white')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(nativeMail.locator('#styled-white')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(nativeMail.locator('#styled-white')).toHaveCSS('font-weight', '700')

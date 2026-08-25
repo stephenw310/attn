@@ -167,6 +167,31 @@ describe('mail surface classification', () => {
         '<style>@media (prefers-color-scheme:dark), (max-width:600px){body{background:#fff3d6}}</style><p>Responsive design</p>'
       )
     ).toBe('light')
+    expect(
+      mailSurfaceForHtml(
+        '<style>@media not (prefers-color-scheme:dark){body{background:#fff3d6}}</style><p>Light-only design</p>'
+      )
+    ).toBe('light')
+  })
+
+  it('ignores print-only backgrounds when resolving the screen canvas', () => {
+    expect(
+      mailSurfaceForHtml(
+        '<style>@media print{.receipt{background:#123456}}</style><p class="receipt">Receipt</p>'
+      )
+    ).toBe('native')
+
+    expect(
+      mailSurfaceForHtml(
+        '<style>body{background:#fff}@media print{#receipt{background:#fff!important}#summary{background:#fff!important;color:#000!important}table{background:#fff!important}}</style><div style="display:none">Preview</div><table id="receipt" width="100%" bgcolor="#ecf0f1"><tr><td id="summary" style="background:#2c3d4f;color:#fff">Confirmed order</td></tr></table>'
+      )
+    ).toBe('light')
+
+    expect(
+      mailSurfaceForHtml(
+        '<style>@media print, screen and (prefers-color-scheme:dark){body{background:#111}}</style><p>Screen note</p>'
+      )
+    ).toBe('native')
   })
 
   it('preserves a real authored canvas inside forwarded content', () => {

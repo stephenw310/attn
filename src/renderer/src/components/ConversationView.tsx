@@ -264,7 +264,7 @@ export const ConversationView = memo(function ConversationView(
           <div
             data-testid="conversation-content"
             className="mx-auto flex w-full flex-col gap-3.5"
-            style={{ maxWidth: 'clamp(720px, 72vw, 1120px)' }}
+            style={{ maxWidth: 'clamp(576px, 57.6vw, 896px)' }}
           >
             {conversation ? (
               <ConversationMessages

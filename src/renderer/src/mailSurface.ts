@@ -291,11 +291,27 @@ function splitCssList(prelude: string): string[] {
   return queries.map((query) => query.trim()).filter(Boolean)
 }
 
-function darkSchemeOnly(prelude: string): boolean {
-  const queries = splitCssList(prelude)
-  return (
-    queries.length > 0 && queries.every((query) => DARK_COLOR_SCHEME.test(query) && !/\bnot\b/i.test(query))
-  )
+function mediaQueryCanApplyOnLightScreen(query: string): boolean {
+  let condition = query.trim()
+  if (!condition) return false
+
+  const qualifierMatch = /^(not|only)\b/i.exec(condition)
+  const qualifier = qualifierMatch?.[1].toLowerCase() ?? ''
+  if (qualifierMatch) condition = condition.slice(qualifierMatch[0].length).trim()
+
+  const typeMatch = condition.startsWith('(') ? null : /^([a-z][\w-]*)\b/i.exec(condition)
+  const mediaType = typeMatch?.[1].toLowerCase() ?? 'all'
+  const matchesScreen =
+    qualifier === 'not'
+      ? typeMatch === null || (mediaType !== 'screen' && mediaType !== 'all')
+      : mediaType === 'screen' || mediaType === 'all'
+  if (!matchesScreen) return false
+
+  return !(DARK_COLOR_SCHEME.test(query) && qualifier !== 'not')
+}
+
+function lightScreenMediaCanApply(prelude: string): boolean {
+  return splitCssList(prelude).some(mediaQueryCanApplyOnLightScreen)
 }
 
 interface CssBlock {
@@ -597,7 +613,9 @@ function applyStylesheetBackgrounds(
       const name = atRule[1].toLowerCase()
       const condition = atRule[2].trim()
       if (name === 'media') {
-        if (!darkSchemeOnly(condition)) applyStylesheetBackgrounds(content, document, winners, sourceOrder)
+        if (lightScreenMediaCanApply(condition)) {
+          applyStylesheetBackgrounds(content, document, winners, sourceOrder)
+        }
       } else if (CONDITIONAL_RULE.has(name)) {
         applyStylesheetBackgrounds(content, document, winners, sourceOrder)
       }
@@ -698,8 +716,9 @@ function applyMatchingStyleDeclarations(
       const name = atRule[1].toLowerCase()
       const condition = atRule[2].trim()
       if (name === 'media') {
-        if (!darkSchemeOnly(condition))
+        if (lightScreenMediaCanApply(condition)) {
           applyMatchingStyleDeclarations(content, document, element, declarations)
+        }
       } else if (CONDITIONAL_RULE.has(name)) {
         applyMatchingStyleDeclarations(content, document, element, declarations)
       }
