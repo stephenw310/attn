@@ -106,6 +106,36 @@ test('the sidebar reaches every mailbox by pointer without moving', async ({ pag
   expect(await sidebar.boundingBox()).toEqual(sidebarBox)
 })
 
+test('collapses the sidebar and keeps that choice across relaunch', async ({ boot, page }, testInfo) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  const sidebar = page.getByTestId('mail-sidebar')
+  await expect(sidebar).toHaveAttribute('data-collapsed', 'false')
+  expect((await sidebar.boundingBox())?.width).toBe(216)
+
+  await page.getByTestId('sidebar-collapse').click()
+  await expect(sidebar).toHaveAttribute('data-collapsed', 'true')
+  await expect(page.getByTestId('sidebar-mailbox')).toHaveCount(0)
+  await expect(page.getByTestId('sidebar-expand')).toBeVisible()
+  expect((await sidebar.boundingBox())?.width).toBe(44)
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+
+  const artifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(artifactDirectory, { recursive: true })
+  const path = join(artifactDirectory, 'sidebar-collapsed.png')
+  await page.screenshot({ path })
+  await testInfo.attach('sidebar-collapsed', { path, contentType: 'image/png' })
+
+  const relaunched = await boot.relaunch()
+  const relaunchedSidebar = relaunched.page.getByTestId('mail-sidebar')
+  await expect(relaunchedSidebar).toHaveAttribute('data-collapsed', 'true')
+  await expect(relaunched.page.getByTestId('sidebar-mailbox')).toHaveCount(0)
+
+  await relaunched.page.getByTestId('sidebar-expand').click()
+  await expect(relaunchedSidebar).toHaveAttribute('data-collapsed', 'false')
+  await expect(relaunched.page.getByTestId('sidebar-mailbox')).toHaveCount(8)
+  await expect(relaunched.page.getByTestId('sidebar-label')).toHaveCount(12)
+})
+
 test('opens user-label views from the sidebar and label chips', async ({ page }, testInfo) => {
   const labels = page.getByTestId('sidebar-label')
   await expect(labels).toHaveCount(12)

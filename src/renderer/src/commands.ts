@@ -42,6 +42,7 @@ export const COMMAND_SPECS = {
   'view.spam': { title: 'Go to Spam', shortcut: 'g p', context: 'global' },
   'view.trash': { title: 'Go to Trash', shortcut: 'g r', context: 'global' },
   'view.outbox': { title: 'Go to Outbox', shortcut: 'g o', context: 'global' },
+  'layout.sidebar.toggle': { title: 'Toggle sidebar', context: 'global' },
   'outbox.open': { title: 'Open Outbox message', shortcut: 'Enter', context: 'outbox' },
   'outbox.close': { title: 'Back from Outbox', shortcut: 'Escape', context: 'outbox' },
   'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },

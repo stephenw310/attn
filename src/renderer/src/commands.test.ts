@@ -67,6 +67,7 @@ describe('command catalog', () => {
       'view.spam',
       'view.trash',
       'view.outbox',
+      'layout.sidebar.toggle',
       'outbox.open',
       'outbox.close',
       'composer.new',

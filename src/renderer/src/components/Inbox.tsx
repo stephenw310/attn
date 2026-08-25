@@ -27,6 +27,7 @@ import {
   userLabelView,
   VIEW_TITLES
 } from '../mailDisplay'
+import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
 import { MailFooter } from './MailFooter'
@@ -74,8 +75,17 @@ function titleForView(view: MailView, labelsById: ReadonlyMap<string, MailLabel>
   return VIEW_TITLES[view as keyof typeof VIEW_TITLES]
 }
 
+function sidebarStorage(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
 export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [view, setView] = useState<MailView>('inbox')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(sidebarStorage()))
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
@@ -284,6 +294,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       ? composerDraft
       : null
   const fullWindowComposerDraft = composerDraft && !inlineComposerDraft ? composerDraft : null
+
+  useEffect(() => {
+    writeSidebarCollapsed(sidebarStorage(), sidebarCollapsed)
+  }, [sidebarCollapsed])
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((collapsed) => !collapsed)
+  }, [])
 
   const reopenDraftForThread = useCallback(
     (threadId: string) => {
@@ -801,6 +819,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex,
     readerOpen,
     view,
+    sidebarCollapsed,
     starOn,
     markUnreadOn,
     preserveSelectionOnRefreshRef,
@@ -814,6 +833,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     switchView,
     openOutbox,
     closeOutbox,
+    toggleSidebar,
     triage,
     openSnooze,
     openLabel,
@@ -869,8 +889,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           unreadCount={realUnreadTotal}
           draftCount={realDrafts.length}
           outboxCount={realOutbox.length}
+          collapsed={sidebarCollapsed}
           onSwitchView={switchView}
           onOpenOutbox={openOutbox}
+          onToggleCollapsed={toggleSidebar}
         />
         <div className="flex min-w-0 flex-1 flex-col">
           {!readerOpen && !fullWindowComposerDraft && (

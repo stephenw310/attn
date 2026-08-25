@@ -468,7 +468,8 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
   changes. Palette entries stay registry-only until T26.
 - **Pointer navigation lives in a stable left sidebar.** System mailboxes, Outbox, and the current user-label
   catalog stay in fixed groups. User-label rows and message-list label chips open local label views. Inbox
-  splits remain a separate horizontal strip in the content header.
+  splits remain a separate horizontal strip in the content header. The sidebar starts expanded, collapses to
+  a 44 px reopen rail, and stores that choice in the local browser profile.
 
 ### Implementation guide
 
@@ -479,9 +480,9 @@ This is the task S2 and S4 were paid for. It is also where windowing stops being
 - Main: `db/queries.ts` (`listMailboxThreads`), the service handler and protocol operation in
   `src/main/service/`, the preload bridge, and the channel map. All three IPC halves in one commit
   (global rule 2).
-- Testids: `mailbox-title`, `sidebar-mailbox`, `sidebar-label`, `trashed-message-marker`,
-  `trashed-message-reveal`.
-- Screenshot artifacts: `all-mail.png` and `trash-marker.png`. Add both to the `AGENTS.md` list in the same
+- Testids: `mailbox-title`, `sidebar-mailbox`, `sidebar-label`, `sidebar-collapse`, `sidebar-expand`,
+  `trashed-message-marker`, `trashed-message-reveal`.
+- Screenshot artifacts: `all-mail.png`, `sidebar-collapsed.png`, and `trash-marker.png`. Add them to the `AGENTS.md` list in the same
   PR (global rule 8).
 
 **Schema:** none. Every rule this task needs shipped with S2 at revision 16.

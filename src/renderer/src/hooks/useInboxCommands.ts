@@ -10,6 +10,7 @@ interface Options {
   selectedIndex: number
   readerOpen: boolean
   view: MailView
+  sidebarCollapsed: boolean
   starOn: boolean
   markUnreadOn: boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
@@ -23,6 +24,7 @@ interface Options {
   switchView: (view: NavigableMailView) => void
   openOutbox: () => void
   closeOutbox: () => void
+  toggleSidebar: () => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
   openLabel: () => void
@@ -39,6 +41,7 @@ export function useInboxCommands(options: Options): void {
     selectedIndex,
     readerOpen,
     view,
+    sidebarCollapsed,
     starOn,
     markUnreadOn,
     preserveSelectionOnRefreshRef,
@@ -52,6 +55,7 @@ export function useInboxCommands(options: Options): void {
     switchView,
     openOutbox,
     closeOutbox,
+    toggleSidebar,
     triage,
     openSnooze,
     openLabel,
@@ -88,6 +92,9 @@ export function useInboxCommands(options: Options): void {
         createCommand('view.spam', () => switchView('spam')),
         createCommand('view.trash', () => switchView('trash')),
         createCommand('view.outbox', openOutbox),
+        createCommand('layout.sidebar.toggle', toggleSidebar, {
+          title: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+        }),
         createCommand('composer.new', openComposer),
         ...(view !== 'drafts' && selected
           ? [
@@ -163,8 +170,10 @@ export function useInboxCommands(options: Options): void {
       selectedCount,
       selectedIndex,
       showToast,
+      sidebarCollapsed,
       starOn,
       switchView,
+      toggleSidebar,
       toggleSelection,
       triage,
       view
