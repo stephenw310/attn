@@ -231,7 +231,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       </div>
       <div
         data-testid="message-content"
-        className={`min-w-0 ${htmlSurface ? 'overflow-hidden bg-mail-light-ground' : ''}`}
+        className={`min-w-0 ${htmlSurface ? 'overflow-hidden rounded-[10px] bg-mail-light-ground' : ''}`}
       >
         <MessageBody
           bodyText={message.text}

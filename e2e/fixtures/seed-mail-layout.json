@@ -92,17 +92,32 @@
       ]
     },
     {
+      "id": "t-layout-print-canvas",
+      "messages": [
+        {
+          "id": "m-layout-print-canvas",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "15:00",
+          "from": "Tour Sender <tours@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Print confirmation canvas",
+          "bodyHtml": "<style>body{margin:0;background:#fff}@media print{#print-canvas{background:#fff!important}#print-summary{background:#fff!important;color:#000!important}table{background:#fff!important}}</style><div style=\"display:none;max-height:0;overflow:hidden\">Tour confirmation preview</div><table id=print-canvas width=\"100%\" bgcolor=\"#ecf0f1\" cellpadding=\"0\" cellspacing=\"0\"><tr><td style=\"padding:20px\"><table width=\"640\" bgcolor=\"#ffffff\" cellpadding=\"0\" cellspacing=\"0\"><tr><td id=print-summary style=\"background-color:#2c3d4f;color:#fff;padding:8px;text-align:center\">2 x Sea Cave Kayak Tour</td></tr><tr><td style=\"padding:32px;color:#2c3d4f\"><h2>Confirmed order</h2><p>Your booking is confirmed.</p></td></tr></table></td></tr></table>"
+        }
+      ]
+    },
+    {
       "id": "t-layout-neutral-backgrounds",
       "messages": [
         {
           "id": "m-layout-neutral-backgrounds",
           "labelIds": ["INBOX"],
           "receivedDaysAgo": 0,
-          "receivedAt": "15:00",
+          "receivedAt": "16:00",
           "from": "Coach <coach@example.com>",
           "to": "seed@attn.test",
           "subject": "Neutral line backgrounds",
-          "bodyHtml": "<style>#styled-white{background:#fff!important;font-weight:700}</style><div>Practice is at 5:00.</div><p><span id=inline-white style=\"background:#fff;color:#202124\">Bring a glove and water.</span></p><p id=styled-white>Games start next Saturday.</p>"
+          "bodyHtml": "<style>html{background:#fff!important}#styled-white{background:#fff!important;font-weight:700}</style><div>Practice is at 5:00.</div><p><span id=inline-white style=\"background:#fff;color:#202124\">Bring a glove and water.</span></p><p id=styled-white>Games start next Saturday.</p>"
         }
       ]
     }
