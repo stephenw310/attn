@@ -141,7 +141,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className="rounded-[10px] border border-edge bg-ground"
+        className="rounded-sm border border-edge bg-ground"
       >
         <button
           type="button"
