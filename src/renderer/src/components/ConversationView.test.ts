@@ -34,7 +34,8 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
   const props = {
     selected,
     selectedIndex: 0,
-    threadCount: 1,
+    threadCount: 100,
+    threadCountExact: false,
     view: 'inbox' as const,
     mailboxTitle: 'Inbox',
     conversation: null,
@@ -54,6 +55,7 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     await act(async () => root.render(createElement(ConversationView, props)))
     const readsAfterFirstRender = subjectReads
     expect(readsAfterFirstRender).toBeGreaterThan(0)
+    expect(container.querySelector('[data-testid="conversation-position"]')?.textContent).toBe('1 of 100+')
 
     await act(async () => root.render(createElement(ConversationView, props)))
     expect(subjectReads).toBe(readsAfterFirstRender)
@@ -116,6 +118,7 @@ it('opens a message appended to the current conversation by default', async () =
     selected,
     selectedIndex: 0,
     threadCount: 1,
+    threadCountExact: true,
     view: 'inbox' as const,
     mailboxTitle: 'Inbox',
     account: 'me@example.com',

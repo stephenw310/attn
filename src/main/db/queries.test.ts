@@ -140,6 +140,24 @@ describe('thread list queries', () => {
     insertThread.run('mixed', 'Mixed', 500)
     insertMessage.run('mixed-live', 'mixed', 500, '["INBOX"]')
     insertMessage.run('mixed-trash', 'mixed', 300, '["TRASH"]')
+    insertMessage.run('mixed-trash-older', 'mixed', 250, '["TRASH","UNREAD","STARRED"]')
+    db.prepare(
+      `UPDATE threads
+       SET from_display = 'Visible sender', snippet = 'Visible snippet',
+           is_unread = 0, is_starred = 0, has_attachment = 0
+       WHERE account_id = 'account' AND id = 'mixed'`
+    ).run()
+    db.prepare(
+      `UPDATE messages
+       SET from_name = 'Deleted sender', from_email = 'deleted@example.com',
+           snippet = 'Deleted snippet', attachments_json = '[]'
+       WHERE account_id = 'account' AND id = 'mixed-trash'`
+    ).run()
+    db.prepare(
+      `UPDATE messages
+       SET attachments_json = '[{"attachmentId":"deleted-file","filename":"deleted.pdf","inline":false}]'
+       WHERE account_id = 'account' AND id = 'mixed-trash-older'`
+    ).run()
     insertThread.run('only-trash', 'Only trash', 400)
     insertMessage.run('only-trash-message', 'only-trash', 400, '["TRASH"]')
     insertThread.run('only-spam', 'Only spam', 350)
@@ -167,6 +185,15 @@ describe('thread list queries', () => {
       ['legacy-trash', 325],
       ['mixed', 300]
     ])
+    expect(listMailboxThreads(db, 'account', 'trash').find((row) => row.id === 'mixed')).toEqual(
+      expect.objectContaining({
+        fromDisplay: 'Deleted sender',
+        snippet: 'Deleted snippet',
+        unread: true,
+        starred: true,
+        hasAttachment: true
+      })
+    )
   })
 
   it('applies the normal junk exclusion to Sent and Starred membership', () => {

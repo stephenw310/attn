@@ -137,6 +137,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     refreshCachedThreadView,
     threadPagination,
     loadMoreThreads,
+    focusInboxThread,
     realDrafts,
     realOutbox,
     outboxFailure,
@@ -172,6 +173,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const activeViewTitle = titleForView(view, userLabelsById)
   const pagedView = view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
   const activePageState = pagedView ? threadPagination[pagedView] : undefined
+  const systemPagedView = pagedView && !userLabelId(pagedView) ? (pagedView as ThreadListView) : null
+  const exactSystemThreadCount = systemPagedView ? (realMailboxCounts?.[systemPagedView] ?? null) : null
+  const conversationThreadCount = detachedDraftThread ? 1 : (exactSystemThreadCount ?? threads.length)
+  const conversationThreadCountExact =
+    detachedDraftThread !== null || exactSystemThreadCount !== null || activePageState?.nextCursor === null
   const loadMoreVisibleThreads = useCallback(() => {
     if (pagedView) void loadMoreThreads(pagedView)
   }, [loadMoreThreads, pagedView])
@@ -552,12 +558,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       // an old cursor against Inbox and mutate the wrong thread.
       switchView('inbox', () => {
         clearSelection()
-        void window.attn?.mail
-          .listThreads('inbox')
-          .then((nextThreads) => {
-            const nextIndex = nextThreads.findIndex((thread) => thread.id === threadId)
-            setRealThreads(nextThreads)
-            if (nextIndex < 0) return
+        void focusInboxThread(threadId)
+          .then((nextIndex) => {
+            if (nextIndex === null) return
             // The notification target owns the selection: cancel any saved
             // record the switch queued so it cannot override this focus.
             pendingViewRestoreRef.current = null
@@ -569,7 +572,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           .catch(() => {})
       })
     })
-  }, [activeAccount, clearSelection, setRealThreads, switchView])
+  }, [activeAccount, clearSelection, focusInboxThread, switchView])
 
   const triage = useTriage({
     selectedIds,
@@ -727,7 +730,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       }
       composerOpeningRef.current = true
       void window.attn.draft
-        .createReply(selected.id, kind)
+        .createReply(selected.id, kind, conversationMailboxFor(view))
         .then((draft) => {
           if (draft) {
             setComposerError(null)
@@ -902,9 +905,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         )}
         <div className="flex min-w-0 flex-1 flex-col">
           {!readerOpen && !fullWindowComposerDraft && (
-            <h1 data-testid="mailbox-title" className="sr-only">
-              <span data-testid="view-title">{activeViewTitle}</span>
-            </h1>
+            <div
+              data-testid="mail-view-header"
+              className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
+            >
+              <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
+                <span data-testid="view-title">{activeViewTitle}</span>
+              </h1>
+            </div>
           )}
           <div className="flex min-h-0 flex-1">
             {view === 'drafts' ? (
@@ -963,7 +971,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               <ConversationView
                 selected={selected}
                 selectedIndex={conversationSelectedIndex}
-                threadCount={detachedDraftThread ? 1 : threads.length}
+                threadCount={conversationThreadCount}
+                threadCountExact={conversationThreadCountExact}
                 mailboxTitle={activeViewTitle}
                 conversation={conversation}
                 account={activeAccount}

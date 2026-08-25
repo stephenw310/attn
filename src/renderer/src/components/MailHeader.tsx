@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuthStatus } from '../../../shared/auth'
 import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
+import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { blurActive } from './blurActive'
 import { Kbd } from './Kbd'
@@ -218,6 +219,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     onOpenOutbox,
     onToggleSidebar
   } = props
+  const sidebarAction = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+  const sidebarShortcut = `${modKeyLabel()}B`
   return (
     <header
       data-testid="mail-header"
@@ -227,11 +230,15 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         type="button"
         data-testid="sidebar-toggle"
         data-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
-        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-label={sidebarAction}
+        aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
         aria-controls="mail-sidebar"
         aria-expanded={!sidebarCollapsed}
-        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        onClick={onToggleSidebar}
+        title={`${sidebarAction} (${sidebarShortcut})`}
+        onClick={(event) => {
+          onToggleSidebar()
+          event.currentTarget.blur()
+        }}
         className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">

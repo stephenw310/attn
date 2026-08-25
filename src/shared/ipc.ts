@@ -126,7 +126,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.draftList]: { args: []; result: Draft[] }
   [IPC_CHANNELS.draftReopen]: { args: [id: string]; result: Draft | null }
   [IPC_CHANNELS.draftCreateReply]: {
-    args: [threadId: string, kind: Exclude<DraftKind, 'new'>]
+    args: [threadId: string, kind: Exclude<DraftKind, 'new'>, mailbox: ConversationMailbox]
     result: Draft | null
   }
   [IPC_CHANNELS.draftPickAttachments]: {

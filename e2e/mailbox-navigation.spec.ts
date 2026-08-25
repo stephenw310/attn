@@ -152,14 +152,38 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   await expect(page.getByTestId('sidebar-brand')).toHaveCSS('font-size', '40px')
   expect((await sidebar.boundingBox())?.width).toBe(216)
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Collapse sidebar')
+  await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute(
+    'aria-keyshortcuts',
+    process.platform === 'darwin' ? 'Meta+B' : 'Control+B'
+  )
+  await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute(
+    'title',
+    `Collapse sidebar (${process.platform === 'darwin' ? '⌘' : 'Ctrl'}B)`
+  )
 
   await page.getByTestId('sidebar-toggle').click()
   await expect(sidebar).toHaveCount(0)
   await expect(page.getByTestId('sidebar-mailbox')).toHaveCount(0)
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Expand sidebar')
-  await expect(page.getByTestId('mail-view-header')).toHaveCount(0)
+  await expect(page.getByTestId('mail-view-header')).toBeVisible()
+  await expect(page.getByTestId('mailbox-title')).toHaveText('Inbox')
+  const titleBox = await page.getByTestId('mailbox-title').boundingBox()
+  const senderBox = await page.getByTestId('thread-sender').first().boundingBox()
+  expect(titleBox?.x).toBeCloseTo(senderBox?.x ?? 0, 0)
   expect((await page.getByTestId('thread-list').boundingBox())?.x).toBe(0)
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
+
+  await goTo(page, 'a')
+  await expect(page.getByTestId('mailbox-title')).toHaveText('All Mail')
+  await goTo(page, 'i')
+  await expect(page.getByTestId('mailbox-title')).toHaveText('Inbox')
+
+  await page.keyboard.press('ControlOrMeta+B')
+  await expect(sidebar).toBeVisible()
+  await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Collapse sidebar')
+  await page.keyboard.press('ControlOrMeta+B')
+  await expect(sidebar).toHaveCount(0)
+  await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Expand sidebar')
 
   const artifactDirectory = join(__dirname, '.artifacts')
   mkdirSync(artifactDirectory, { recursive: true })

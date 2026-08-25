@@ -135,6 +135,7 @@ interface ConversationViewProps {
   selected: DisplayThread
   selectedIndex: number
   threadCount: number
+  threadCountExact: boolean
   mailboxTitle: string
   conversation: DisplayConversation | null
   account: string | null
@@ -153,6 +154,7 @@ export const ConversationView = memo(function ConversationView(
     selected,
     selectedIndex,
     threadCount,
+    threadCountExact,
     mailboxTitle,
     conversation,
     account,
@@ -247,6 +249,7 @@ export const ConversationView = memo(function ConversationView(
         <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
           <span data-testid="conversation-position" className="tabular-nums">
             {selectedIndex + 1} of {threadCount}
+            {threadCountExact ? '' : '+'}
           </span>{' '}
           · <Kbd>Esc</Kbd>
         </span>

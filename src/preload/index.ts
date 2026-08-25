@@ -169,8 +169,11 @@ const api = {
     get: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftGet, id),
     list: (): Promise<Draft[]> => invoke(IPC_CHANNELS.draftList),
     reopen: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftReopen, id),
-    createReply: (threadId: string, kind: Exclude<DraftKind, 'new'>): Promise<Draft | null> =>
-      invoke(IPC_CHANNELS.draftCreateReply, threadId, kind),
+    createReply: (
+      threadId: string,
+      kind: Exclude<DraftKind, 'new'>,
+      mailbox: ConversationMailbox = 'normal'
+    ): Promise<Draft | null> => invoke(IPC_CHANNELS.draftCreateReply, threadId, kind, mailbox),
     pickAttachments: (id: string): Promise<DraftAttachmentMutationResult> =>
       invoke(IPC_CHANNELS.draftPickAttachments, id),
     addDroppedFiles: (id: string, files: File[]): Promise<DraftAttachmentMutationResult> =>

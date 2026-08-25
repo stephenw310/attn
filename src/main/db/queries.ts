@@ -114,14 +114,16 @@ const MAILBOX_LABEL_IDS = {
   trash: 'TRASH'
 } as const
 
-const THREAD_PROJECTION_SQL = `t.account_id, t.id, t.from_display, t.subject, t.snippet,
-                t.is_unread, t.is_starred, t.has_attachment,
-              EXISTS(SELECT 1 FROM reminders r
+const THREAD_AUXILIARY_PROJECTION_SQL = `EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
                        AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
               EXISTS(SELECT 1 FROM outbox o
                      WHERE o.account_id = t.account_id AND o.thread_id = t.id
                        AND o.state IN ('composing', 'drafted')) AS has_draft`
+
+const THREAD_PROJECTION_SQL = `t.account_id, t.id, t.from_display, t.subject, t.snippet,
+                t.is_unread, t.is_starred, t.has_attachment,
+              ${THREAD_AUXILIARY_PROJECTION_SQL}`
 
 interface MailboxThreadQueryRow {
   account_id: string
@@ -173,25 +175,86 @@ export function listMailboxThreads(
       )
       .all(accountId, ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
   } else if (view === 'spam' || view === 'trash') {
-    const sortExpression = `COALESCE((
-                       SELECT MAX(m.internal_date)
-                       FROM messages m
-                       WHERE m.account_id = t.account_id AND m.thread_id = t.id
-                         AND (m.labels_json IS NULL OR EXISTS (
-                           SELECT 1 FROM json_each(m.labels_json) stored
-                           WHERE stored.value = mailbox.label_id
-                         ))
-                     ), t.last_msg_at, 0)`
+    const sortExpression = 'summary.mailbox_last_msg_at'
     rows = db
       .prepare(
-        wrap(`SELECT ${THREAD_PROJECTION_SQL},
-                     ${sortExpression} AS mailbox_last_msg_at
-              FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
-              JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
-              WHERE mailbox.account_id = ? AND mailbox.label_id = ?
-                ${descendingCursorSql(sortExpression, cursor)}
-              ORDER BY mailbox_last_msg_at DESC, t.id
-              LIMIT ?`)
+        `WITH candidate AS (
+           SELECT m.*,
+                  CASE WHEN m.labels_json IS NULL OR EXISTS (
+                    SELECT 1 FROM json_each(m.labels_json) stored
+                    WHERE stored.value = mailbox.label_id
+                  ) THEN 1 ELSE 0 END AS matches_mailbox
+           FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
+           JOIN messages m INDEXED BY idx_messages_thread
+             ON m.account_id = mailbox.account_id AND m.thread_id = mailbox.thread_id
+           WHERE mailbox.account_id = ? AND mailbox.label_id = ?
+         ),
+         classified AS (
+           SELECT candidate.*,
+                  MAX(matches_mailbox) OVER (PARTITION BY account_id, thread_id)
+                    AS has_mailbox_message
+           FROM candidate
+         ),
+         matching AS (
+           SELECT classified.*,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY account_id, thread_id
+                    ORDER BY COALESCE(internal_date, 0) DESC, id DESC
+                  ) AS mailbox_rank
+           FROM classified
+           WHERE matches_mailbox = 1 OR (has_mailbox_message = 0 AND NOT EXISTS (
+             SELECT 1 FROM json_each(COALESCE(labels_json, '[]')) stored
+             WHERE stored.value IN ('DRAFT', 'CHAT')
+           ))
+         ),
+         summary AS (
+           SELECT account_id, thread_id,
+                  MAX(COALESCE(internal_date, 0)) AS mailbox_last_msg_at,
+                  MAX(labels_json IS NULL) AS has_legacy_labels,
+                  MAX(CASE WHEN labels_json IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM json_each(labels_json) stored WHERE stored.value = 'UNREAD'
+                  ) THEN 1 ELSE 0 END) AS is_unread,
+                  MAX(CASE WHEN labels_json IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM json_each(labels_json) stored WHERE stored.value = 'STARRED'
+                  ) THEN 1 ELSE 0 END) AS is_starred,
+                  MAX(CASE WHEN EXISTS (
+                    SELECT 1 FROM json_each(COALESCE(attachments_json, '[]')) attachment
+                    WHERE COALESCE(json_extract(attachment.value, '$.inline'), 0) <> 1
+                  ) THEN 1 ELSE 0 END) AS has_attachment
+           FROM matching
+           GROUP BY account_id, thread_id
+         ),
+         visible AS (
+           SELECT t.account_id, t.id,
+                  CASE
+                    WHEN lower(trim(COALESCE(latest.from_email, ''))) = lower(trim(account.email))
+                      THEN 'Me'
+                    ELSE COALESCE(NULLIF(latest.from_name, ''), latest.from_email, '')
+                  END AS from_display,
+                  t.subject, COALESCE(latest.snippet, '') AS snippet,
+                  CASE WHEN summary.has_legacy_labels = 1 THEN t.is_unread ELSE summary.is_unread END
+                    AS is_unread,
+                  CASE WHEN summary.has_legacy_labels = 1 THEN t.is_starred ELSE summary.is_starred END
+                    AS is_starred,
+                  summary.has_attachment,
+                  ${THREAD_AUXILIARY_PROJECTION_SQL},
+                  summary.mailbox_last_msg_at
+           FROM summary
+           JOIN threads t ON t.account_id = summary.account_id AND t.id = summary.thread_id
+           LEFT JOIN accounts account ON account.id = t.account_id
+           JOIN matching latest
+             ON latest.account_id = summary.account_id AND latest.thread_id = summary.thread_id
+            AND latest.mailbox_rank = 1
+           WHERE 1 = 1 ${descendingCursorSql(sortExpression, cursor)}
+           ORDER BY summary.mailbox_last_msg_at DESC, t.id
+           LIMIT ?
+         )
+         SELECT v.*,
+                COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
+                          FROM thread_labels tl
+                          WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+         FROM visible v
+         ORDER BY v.mailbox_last_msg_at DESC, v.id`
       )
       .all(accountId, MAILBOX_LABEL_IDS[view], ...cursorValues(cursor), limit) as MailboxThreadQueryRow[]
   } else {

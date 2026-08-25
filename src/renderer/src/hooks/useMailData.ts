@@ -43,16 +43,22 @@ function listThreadPage(view: PagedThreadView, cursor?: ThreadPageCursor): Promi
     : bridge.mail.listLabelThreadPage(userLabelId(view) ?? '', cursor)
 }
 
-async function listThreadSnapshot(view: PagedThreadView, minimumRows: number): Promise<ThreadPage> {
+async function listThreadSnapshot(
+  view: PagedThreadView,
+  minimumRows: number,
+  targetThreadId?: string
+): Promise<ThreadPage> {
   const rows: ThreadRow[] = []
   let cursor: ThreadPageCursor | undefined
   let nextCursor: ThreadPageCursor | null = null
+  let foundTarget = targetThreadId === undefined
   do {
     const page = await listThreadPage(view, cursor)
     rows.push(...page.rows)
+    if (!foundTarget) foundTarget = page.rows.some((row) => row.id === targetThreadId)
     nextCursor = page.nextCursor
     cursor = page.nextCursor ?? undefined
-  } while (nextCursor && rows.length < Math.max(THREAD_PAGE_SIZE, minimumRows))
+  } while (nextCursor && (rows.length < Math.max(THREAD_PAGE_SIZE, minimumRows) || !foundTarget))
   return { rows, nextCursor }
 }
 
@@ -75,6 +81,7 @@ interface MailDataState {
   refreshCachedThreadView: (view: CachedThreadView) => Promise<void>
   threadPagination: ThreadPagination
   loadMoreThreads: (view: PagedThreadView) => Promise<void>
+  focusInboxThread: (threadId: string) => Promise<number | null>
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
   outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
@@ -527,6 +534,28 @@ export function useMailData(
     }
   }, [])
 
+  const focusInboxThread = useCallback(async (threadId: string): Promise<number | null> => {
+    const account = activeAccountRef.current
+    if (!window.attn || !account) return null
+    const version = (mailboxRefreshVersionRef.current.inbox ?? 0) + 1
+    mailboxRefreshVersionRef.current.inbox = version
+    const page = await listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, threadId)
+    if (
+      !window.attn ||
+      activeAccountRef.current !== account ||
+      mailboxRefreshVersionRef.current.inbox !== version
+    ) {
+      return null
+    }
+    const targetIndex = page.rows.findIndex((row) => row.id === threadId)
+    setRealThreads((current) => reuseThreadRows(current, page.rows))
+    setThreadPagination((current) => ({
+      ...current,
+      inbox: { nextCursor: page.nextCursor, loadingMore: false }
+    }))
+    return targetIndex >= 0 ? targetIndex : null
+  }, [])
+
   return {
     sync,
     networkOnline,
@@ -539,6 +568,7 @@ export function useMailData(
     refreshCachedThreadView,
     threadPagination,
     loadMoreThreads,
+    focusInboxThread,
     realDrafts,
     realOutbox,
     outboxFailure,

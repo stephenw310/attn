@@ -365,7 +365,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     return reopenDraft(context.db, requireAccount(context), id)
   })
-  handle(IPC_CHANNELS.draftCreateReply, async (_event, threadId, kind) => {
+  handle(IPC_CHANNELS.draftCreateReply, async (_event, threadId, kind, mailbox) => {
     if (
       typeof threadId !== 'string' ||
       threadId.length === 0 ||
@@ -373,12 +373,13 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     ) {
       return null
     }
+    const replyMailbox = isConversationMailbox(mailbox) ? mailbox : 'normal'
     const account = requireAccount(context)
     const existing = reopenThreadDraft(context.db, account, threadId, kind)
     const shouldUpgradeReplyAll = kind === 'replyAll' && existing?.kind === 'reply'
     if (existing && !shouldUpgradeReplyAll) return existing
     await context.waitForConversation(threadId)
-    let conversation = getConversation(context.db, account, threadId, 'unavailable')
+    let conversation = getConversation(context.db, account, threadId, 'unavailable', replyMailbox)
     if (!conversation || conversation.messages.length === 0) return existing
     if (existing) {
       // Recipient headers are available even when a message body is not. The
@@ -393,7 +394,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       const provider = context.makeProvider()
       if (provider) {
         await bodyHydrator.request(account, threadId, provider)
-        conversation = getConversation(context.db, account, threadId, 'unavailable')
+        conversation = getConversation(context.db, account, threadId, 'unavailable', replyMailbox)
       }
     }
     if (
