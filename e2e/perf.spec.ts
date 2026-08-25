@@ -12,7 +12,6 @@ const TRIAGE_FEEDBACK_CEILING_MS = 16
 const SCROLL_FRAME_P95_CEILING_MS = 20
 const COMPOSER_OPEN_WARMUP_COUNT = 2
 const COMPOSER_OPEN_CEILING_MS = 50
-// A CI-safe ceiling at 10k messages; T24 owns F10's strict 100 ms budget at 50k.
 const SEARCH_QUERY_CEILING_MS = 100
 const COMPOSER_MUTATION_CEILING_MS = 8
 // Two 60Hz vsync intervals. The paint sample is timed from before the key is
@@ -517,6 +516,40 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     })
     expect(stats.indexBytes, 'FTS index pages exist on disk').toBeGreaterThan(0)
     expect(percentile(samples, 0.95), 'p95 FTS query latency').toBeLessThan(SEARCH_QUERY_CEILING_MS)
+  })
+
+  test.describe('50,000-message search profile', () => {
+    test.use({ seed: '.artifacts/perf-search-seed.json' })
+
+    test('renders local search results within budget', async ({ page }, testInfo) => {
+      test.setTimeout(180_000)
+      await expect(page.getByTestId('thread-list')).toHaveAttribute(
+        'data-thread-count',
+        String(THREAD_PAGE_SIZE)
+      )
+      await page.keyboard.press('/')
+      const input = page.getByTestId('search-input')
+      await expect(input).toBeFocused()
+      const samples: number[] = []
+      for (let run = 0; run < 20; run++) {
+        const address = `sender${42 + run}@example.test`
+        const query = `from:"${address}" has:attachment after:2026-01-01 in:inbox`
+        const started = await page.evaluate(() => performance.now())
+        await input.fill(query)
+        await page.waitForFunction(
+          (completedQuery) =>
+            document.querySelector<HTMLElement>('[data-testid="search-coverage"]')?.dataset.searchQuery ===
+              completedQuery &&
+            document.querySelector<HTMLElement>('[data-testid="thread-list"]')?.dataset.threadCount === '1',
+          query,
+          { polling: 'raf' }
+        )
+        samples.push(await page.evaluate((start) => performance.now() - start, started))
+      }
+      const medianMs = median(samples)
+      await reportMetric(testInfo, 'search-keystroke-to-results', samples, medianMs)
+      expect(percentile(samples, 0.95)).toBeLessThan(SEARCH_QUERY_CEILING_MS)
+    })
   })
 
   test('opens mounted conversation content within the CI-safe ceiling', async ({ page }, testInfo) => {

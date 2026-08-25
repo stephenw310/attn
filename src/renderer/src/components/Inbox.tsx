@@ -2,11 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { ConversationMailbox, MailLabel, ThreadListView } from '../../../shared/mail'
+import { parseSearchQuery } from '../../../shared/searchQuery'
 import { actionReconnectMessage } from '../actionReconnect'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
 import { useInboxCommands } from '../hooks/useInboxCommands'
 import { useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
+import { useLocalSearch } from '../hooks/useLocalSearch'
 import { useMailData } from '../hooks/useMailData'
 import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
 import { useSelectionState } from '../hooks/useSelectionState'
@@ -35,6 +37,7 @@ import { MailFooter } from './MailFooter'
 import { MailHeader } from './MailHeader'
 import { MailSidebar } from './MailSidebar'
 import { OutboxList } from './OutboxList'
+import { SearchHeader, searchCoverageText } from './SearchHeader'
 import { SnoozePicker } from './SnoozePicker'
 import { ThreadList } from './ThreadList'
 import { Toast } from './Toast'
@@ -63,6 +66,24 @@ function conversationMailboxFor(view: MailView): ConversationMailbox {
   return 'normal'
 }
 
+function searchMailboxes(query: string): string[] {
+  return parseSearchQuery(query)
+    .filters.filter((filter) => filter.kind === 'in')
+    .map((filter) => filter.value.toLowerCase().replaceAll(/[\s_-]/g, ''))
+}
+
+function conversationMailboxForSearch(query: string): ConversationMailbox {
+  const mailboxes = searchMailboxes(query)
+  if (mailboxes.includes('spam')) return 'spam'
+  if (mailboxes.includes('trash')) return 'trash'
+  return 'normal'
+}
+
+function searchesDrafts(query: string): boolean {
+  const mailboxes = searchMailboxes(query)
+  return mailboxes.includes('draft') || mailboxes.includes('drafts')
+}
+
 function threadListKind(view: MailView): ThreadListView | 'label' {
   if (userLabelId(view)) return 'label'
   if (view !== 'drafts' && view !== 'outbox') return view as ThreadListView
@@ -85,6 +106,8 @@ function sidebarStorage(): Storage | null {
 
 export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [view, setView] = useState<MailView>('inbox')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(sidebarStorage()))
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
@@ -100,8 +123,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const selectedDraftIdRef = useRef<string | null>(null)
   const activeViewRef = useRef<MailView>('inbox')
   const listElRef = useRef<HTMLElement | null>(null)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const viewStateRef = useRef(new Map<MailView, ViewRecord>())
   const pendingViewRestoreRef = useRef<{ view: MailView; record: ViewRecord } | null>(null)
+  const searchReturnRef = useRef<ViewRecord | null>(null)
+  const searchOpenRef = useRef(false)
+  searchOpenRef.current = searchOpen
   // Render-time mirrors keep the view-switch callbacks referentially stable:
   // effects subscribe on top of switchView, and churning it re-runs them all.
   const selectedIndexRef = useRef(0)
@@ -159,7 +186,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const online = networkOnline && sync.phase !== 'offline'
   const backingMailView = view === 'outbox' ? outboxReturnRef.current.view : view
   const backingCachedView = cachedThreadView(backingMailView)
-  const threads: DisplayThread[] = useMemo(
+  const mailboxThreads: DisplayThread[] = useMemo(
     () =>
       backingMailView === 'inbox'
         ? displayThreads(realThreads ?? [])
@@ -170,14 +197,26 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             : [],
     [backingCachedView, backingMailView, mailboxRows, realSnoozedThreads, realThreads]
   )
+  const search = useLocalSearch(searchOpen, searchQuery, activeAccount, mailRevision)
+  const searchThreads = useMemo(() => displayThreads(search.response?.rows ?? []), [search.response])
+  const searchDrafts = useMemo(() => search.response?.drafts ?? [], [search.response])
+  const searchDraftMode = searchOpen && searchesDrafts(searchQuery)
+  const threads = searchOpen ? searchThreads : mailboxThreads
   const activeViewTitle = titleForView(view, userLabelsById)
-  const pagedView = view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
+  const pagedView = searchOpen || view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
   const activePageState = pagedView ? threadPagination[pagedView] : undefined
   const systemPagedView = pagedView && !userLabelId(pagedView) ? (pagedView as ThreadListView) : null
   const exactSystemThreadCount = systemPagedView ? (realMailboxCounts?.[systemPagedView] ?? null) : null
-  const conversationThreadCount = detachedDraftThread ? 1 : (exactSystemThreadCount ?? threads.length)
+  const conversationThreadCount = detachedDraftThread
+    ? 1
+    : searchOpen
+      ? threads.length
+      : (exactSystemThreadCount ?? threads.length)
   const conversationThreadCountExact =
-    detachedDraftThread !== null || exactSystemThreadCount !== null || activePageState?.nextCursor === null
+    searchOpen ||
+    detachedDraftThread !== null ||
+    exactSystemThreadCount !== null ||
+    activePageState?.nextCursor === null
   const loadMoreVisibleThreads = useCallback(() => {
     if (pagedView) void loadMoreThreads(pagedView)
   }, [loadMoreThreads, pagedView])
@@ -257,6 +296,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (resetAccountRef.current === activeAccount) return
     resetAccountRef.current = activeAccount
     setSelectedIndex(0)
+    setSearchOpen(false)
+    setSearchQuery('')
     setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetIds(null)
@@ -288,8 +329,15 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [composerDraft?.id])
 
   useEffect(() => {
-    const visibleCount =
-      view === 'drafts' ? realDrafts.length : view === 'outbox' ? realOutbox.length : threads.length
+    const visibleCount = searchDraftMode
+      ? searchDrafts.length
+      : searchOpen
+        ? threads.length
+        : view === 'drafts'
+          ? realDrafts.length
+          : view === 'outbox'
+            ? realOutbox.length
+            : threads.length
     setSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(visibleCount - 1, 0))))
     setExitingThreadIds((current) => {
       if (current.size === 0) return current
@@ -297,8 +345,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       const next = new Set([...current].filter((id) => visibleIds.has(id)))
       return next.size === current.size ? current : next
     })
-    if (view !== 'drafts' && threads.length === 0) setReaderOpen(false)
-  }, [realDrafts.length, realOutbox.length, threads, view])
+    if ((searchOpen || view !== 'drafts') && threads.length === 0) setReaderOpen(false)
+  }, [realDrafts.length, realOutbox.length, searchDraftMode, searchDrafts.length, searchOpen, threads, view])
+
+  useEffect(() => {
+    if (!searchOpen || searchDraftMode) return
+    selectedThreadIdRef.current = threads[selectedIndex]?.id ?? null
+  }, [searchDraftMode, searchOpen, selectedIndex, threads])
 
   const selected = detachedDraftThread ?? threads[selectedIndex]
   const conversationThreads = detachedDraftThread ? [detachedDraftThread] : threads
@@ -377,7 +430,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     online,
     account: activeAccount,
     mailRevision,
-    mailbox: conversationMailboxFor(view)
+    mailbox: searchOpen ? conversationMailboxForSearch(searchQuery) : conversationMailboxFor(view)
   })
   const targetedThreads =
     selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
@@ -453,9 +506,18 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const switchViewNow = useCallback(
     (next: NavigableMailView) => {
       const previous = activeViewRef.current
-      if (previous !== next) saveActiveViewRecord()
+      const wasSearching = searchOpenRef.current
+      if (!wasSearching && previous !== next) saveActiveViewRecord()
       activeViewRef.current = next
-      const record = viewStateRef.current.get(next) ?? { rowId: null, index: 0, scrollTop: 0 }
+      const record =
+        wasSearching && previous === next
+          ? (searchReturnRef.current ?? { rowId: null, index: 0, scrollTop: 0 })
+          : (viewStateRef.current.get(next) ?? { rowId: null, index: 0, scrollTop: 0 })
+      if (wasSearching) {
+        searchReturnRef.current = null
+        setSearchOpen(false)
+        setSearchQuery('')
+      }
       selectedDraftIdRef.current = next === 'drafts' ? record.rowId : null
       selectedThreadIdRef.current = next === 'drafts' ? null : record.rowId
       pendingViewRestoreRef.current = { view: next, record }
@@ -522,7 +584,28 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [realDrafts, threads, view, viewRowsLoaded])
 
   const openOutboxNow = useCallback(() => {
-    if (view === 'outbox') return
+    if (view === 'outbox') {
+      if (searchOpenRef.current) {
+        const record = searchReturnRef.current ?? { rowId: null, index: 0, scrollTop: 0 }
+        const restoredIndex = record.rowId ? realOutbox.findIndex((item) => item.id === record.rowId) : -1
+        const nextIndex =
+          restoredIndex >= 0
+            ? restoredIndex
+            : Math.max(0, Math.min(record.index, Math.max(realOutbox.length - 1, 0)))
+        searchReturnRef.current = null
+        setSearchOpen(false)
+        setSearchQuery('')
+        selectedDraftIdRef.current = realOutbox[nextIndex]?.id ?? null
+        selectedThreadIdRef.current = null
+        setSelectedIndex(nextIndex)
+      }
+      return
+    }
+    if (searchOpenRef.current) {
+      searchReturnRef.current = null
+      setSearchOpen(false)
+      setSearchQuery('')
+    }
     outboxReturnRef.current = { view, selectedIndex, readerOpen }
     activeViewRef.current = 'outbox'
     selectedDraftIdRef.current = null
@@ -531,10 +614,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetIds(null)
-  }, [readerOpen, selectedIndex, view])
+  }, [readerOpen, realOutbox, selectedIndex, view])
 
   const openOutbox = useCallback(() => {
-    if (view === 'outbox') return
+    if (view === 'outbox' && !searchOpenRef.current) return
     if (inlineComposerDraft && inlineComposerRef.current) {
       inlineComposerRef.current.exitConversation(openOutboxNow)
       return
@@ -579,7 +662,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex,
     threads,
     readerOpen,
-    view,
+    view: searchOpen ? 'allMail' : view,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef,
     selectedThreadIdRef,
@@ -643,11 +726,22 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [])
 
   const openSelected = useCallback(() => {
-    if (view === 'outbox') {
+    if (searchDraftMode) {
+      const draft = searchDrafts[selectedIndex]
+      if (!draft || !window.attn) return
+      void window.attn.draft
+        .reopen(draft.id)
+        .then((reopened) => {
+          if (reopened) showDraft(reopened)
+        })
+        .catch(() => {})
+      return
+    }
+    if (!searchOpen && view === 'outbox') {
       openOutboxItem(selectedIndex)
       return
     }
-    if (view === 'drafts') {
+    if (!searchOpen && view === 'drafts') {
       const draft = realDrafts[selectedIndex]
       if (!draft || !window.attn) return
       void window.attn.draft
@@ -660,10 +754,28 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     }
     const thread = threads[selectedIndex]
     if (!thread) return
+    if (!searchOpen) {
+      viewStateRef.current.set(view, {
+        rowId: thread.id,
+        index: selectedIndex,
+        scrollTop: listElRef.current?.scrollTop ?? 0
+      })
+    }
     selectedThreadIdRef.current = thread.id
     setReaderOpen(true)
     reopenDraftForThread(thread.id)
-  }, [openOutboxItem, realDrafts, reopenDraftForThread, selectedIndex, showDraft, threads, view])
+  }, [
+    openOutboxItem,
+    realDrafts,
+    reopenDraftForThread,
+    searchDraftMode,
+    searchDrafts,
+    searchOpen,
+    selectedIndex,
+    showDraft,
+    threads,
+    view
+  ])
   const finishReaderClose = useCallback(() => {
     draftOpenRequestRef.current += 1
     draftOpenTargetRef.current = null
@@ -677,6 +789,53 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     }
     finishReaderClose()
   }, [finishReaderClose, inlineComposerDraft])
+  const openSearch = useCallback(() => {
+    if (!searchOpenRef.current) {
+      const rowId =
+        view === 'drafts' || view === 'outbox' ? selectedDraftIdRef.current : selectedThreadIdRef.current
+      const currentRecord = {
+        rowId,
+        index: selectedIndexRef.current,
+        scrollTop: listElRef.current?.scrollTop ?? 0
+      }
+      const record = readerOpenRef.current ? (viewStateRef.current.get(view) ?? currentRecord) : currentRecord
+      searchReturnRef.current = record
+      if (view !== 'outbox') viewStateRef.current.set(view, record)
+      clearSelection()
+      setSelectedIndex(0)
+      selectedThreadIdRef.current = null
+      selectedDraftIdRef.current = null
+      finishReaderClose()
+      setSearchOpen(true)
+    }
+    window.requestAnimationFrame(() => searchInputRef.current?.focus())
+  }, [clearSelection, finishReaderClose, view])
+  const clearSearch = useCallback(() => {
+    if (!searchOpenRef.current) return
+    const record = searchReturnRef.current ?? { rowId: null, index: 0, scrollTop: 0 }
+    searchReturnRef.current = null
+    setSearchOpen(false)
+    setSearchQuery('')
+    clearSelection()
+    if (view === 'outbox') {
+      const restoredIndex = record.rowId ? realOutbox.findIndex((item) => item.id === record.rowId) : -1
+      const nextIndex =
+        restoredIndex >= 0
+          ? restoredIndex
+          : Math.max(0, Math.min(record.index, Math.max(realOutbox.length - 1, 0)))
+      selectedDraftIdRef.current = realOutbox[nextIndex]?.id ?? null
+      selectedThreadIdRef.current = null
+      setSelectedIndex(nextIndex)
+      return
+    }
+    pendingViewRestoreRef.current = { view, record }
+    selectedDraftIdRef.current = view === 'drafts' ? record.rowId : null
+    selectedThreadIdRef.current = view === 'drafts' ? null : record.rowId
+    setSelectedIndex(Math.max(0, record.index))
+  }, [clearSelection, realOutbox, view])
+  useLayoutEffect(() => {
+    if (searchOpen && !readerOpen) searchInputRef.current?.focus({ preventScroll: true })
+  }, [readerOpen, searchOpen])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetIds(null), [])
   const openSnooze = useCallback(() => {
@@ -694,12 +853,19 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       // the identity before that refresh starts; the effect that mirrors index
       // changes is deliberately too late for this transition.
       selectedThreadIdRef.current = thread.id
+      if (!searchOpen) {
+        viewStateRef.current.set(view, {
+          rowId: thread.id,
+          index,
+          scrollTop: listElRef.current?.scrollTop ?? 0
+        })
+      }
       setDetachedDraftThread(null)
       setSelectedIndex(index)
       setReaderOpen(true)
       reopenDraftForThread(thread.id)
     },
-    [reopenDraftForThread, threads]
+    [reopenDraftForThread, searchOpen, threads, view]
   )
   const openComposer = useCallback(() => {
     if (!window.attn || composerOpeningRef.current) return
@@ -720,7 +886,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const openReply = useCallback(
     (kind: Exclude<DraftKind, 'new'>) => {
-      if (!window.attn || !selected || view === 'drafts' || composerOpeningRef.current) return
+      if (!window.attn || !selected || (!searchOpen && view === 'drafts') || composerOpeningRef.current)
+        return
       if (!readerOpen) {
         selectedThreadIdRef.current = selected.id
         setDetachedDraftThread(null)
@@ -729,8 +896,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         setLabelTargetIds(null)
       }
       composerOpeningRef.current = true
+      const replyMailbox = searchOpen
+        ? conversationMailboxForSearch(searchQuery)
+        : conversationMailboxFor(view)
       void window.attn.draft
-        .createReply(selected.id, kind, conversationMailboxFor(view))
+        .createReply(selected.id, kind, replyMailbox)
         .then((draft) => {
           if (draft) {
             setComposerError(null)
@@ -742,7 +912,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           composerOpeningRef.current = false
         })
     },
-    [readerOpen, selected, showDraft, view]
+    [readerOpen, searchOpen, searchQuery, selected, showDraft, view]
   )
 
   const closeComposer = useCallback(() => {
@@ -783,21 +953,28 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     triage({ kind: 'unsnooze', threadIds: [selected.id] })
   }, [closeSnooze, selected, triage])
 
-  const visibleRowCount =
-    view === 'drafts' ? realDrafts.length : view === 'outbox' ? realOutbox.length : threads.length
+  const visibleRowCount = searchDraftMode
+    ? searchDrafts.length
+    : searchOpen
+      ? threads.length
+      : view === 'drafts'
+        ? realDrafts.length
+        : view === 'outbox'
+          ? realOutbox.length
+          : threads.length
 
   // While reading, J/K opens the next/previous conversation at its newest
   // message or restored draft (SPEC §5) — the same entry point Enter and a row
   // click use, so a Draft chip behaves identically however the row is reached.
   const readNextThread = useCallback(
     (index: number) => {
-      if (!readerOpen || view === 'drafts' || view === 'outbox') return
+      if (!readerOpen || (!searchOpen && (view === 'drafts' || view === 'outbox'))) return
       const thread = threads[index]
       if (!thread) return
       selectedThreadIdRef.current = thread.id
       reopenDraftForThread(thread.id)
     },
-    [readerOpen, reopenDraftForThread, threads, view]
+    [readerOpen, reopenDraftForThread, searchOpen, threads, view]
   )
 
   const navigateNext = useCallback(() => {
@@ -830,6 +1007,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex,
     readerOpen,
     view,
+    searchOpen,
     sidebarCollapsed,
     starOn,
     markUnreadOn,
@@ -845,6 +1023,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     openOutbox,
     closeOutbox,
     toggleSidebar,
+    openSearch,
+    clearSearch,
     triage,
     openSnooze,
     openLabel,
@@ -857,7 +1037,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   useKeyboardDispatch({
     blocked: labelTargets !== undefined || composerDraft !== null,
     readerOpen,
-    outboxOpen: view === 'outbox',
+    outboxOpen: !searchOpen && view === 'outbox',
     snoozeOpen,
     onCloseSnooze: closeSnooze,
     conversationScrollRef
@@ -878,7 +1058,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         pendingActionCount={pendingActionCount}
         pausedActionCount={pausedActionCount}
         outboxCount={realOutbox.length}
-        selectionCount={view !== 'drafts' && view !== 'outbox' ? selectedIds.size : 0}
+        selectionCount={searchOpen || (view !== 'drafts' && view !== 'outbox') ? selectedIds.size : 0}
         composerOpen={fullWindowComposerDraft !== null}
         sidebarCollapsed={sidebarCollapsed}
         status={status}
@@ -904,18 +1084,62 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           />
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          {!readerOpen && !fullWindowComposerDraft && (
-            <div
-              data-testid="mail-view-header"
-              className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
-            >
-              <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
-                <span data-testid="view-title">{activeViewTitle}</span>
-              </h1>
-            </div>
-          )}
-          <div className="flex min-h-0 flex-1">
-            {view === 'drafts' ? (
+          {!readerOpen &&
+            !fullWindowComposerDraft &&
+            (searchOpen ? (
+              <SearchHeader
+                inputRef={searchInputRef}
+                query={searchQuery}
+                pending={search.pending}
+                onQuery={setSearchQuery}
+                onClear={clearSearch}
+                onOpen={openSelected}
+              />
+            ) : (
+              <div
+                data-testid="mail-view-header"
+                className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
+              >
+                <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
+                  <span data-testid="view-title">{activeViewTitle}</span>
+                </h1>
+                <button
+                  type="button"
+                  data-testid="search-open"
+                  aria-label="Search mail"
+                  title="Search mail (/)"
+                  onClick={openSearch}
+                  className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
+                    <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
+                    <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  <span>/</span>
+                </button>
+              </div>
+            ))}
+          <div className={`flex min-h-0 flex-1 ${searchOpen && !readerOpen ? 'flex-col' : ''}`}>
+            {searchDraftMode ? (
+              <DraftList
+                drafts={searchDrafts}
+                readerOpen={false}
+                selectedIndex={selectedIndex}
+                selectedRowRef={selectedRowRef}
+                listRef={listElRef}
+                onOpen={(index) => {
+                  setSelectedIndex(index)
+                  const draft = searchDrafts[index]
+                  if (!draft || !window.attn) return
+                  void window.attn.draft
+                    .reopen(draft.id)
+                    .then((reopened) => {
+                      if (reopened) showDraft(reopened)
+                    })
+                    .catch(() => {})
+                }}
+              />
+            ) : !searchOpen && view === 'drafts' ? (
               <DraftList
                 drafts={realDrafts}
                 readerOpen={readerOpen}
@@ -935,7 +1159,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                     .catch(() => {})
                 }}
               />
-            ) : view === 'outbox' ? (
+            ) : !searchOpen && view === 'outbox' ? (
               <OutboxList
                 items={realOutbox}
                 selectedIndex={selectedIndex}
@@ -949,10 +1173,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             ) : (
               <ThreadList
                 threads={threads}
-                view={threadListKind(view)}
-                hasMore={activePageState?.nextCursor !== null && activePageState !== undefined}
-                loadingMore={activePageState?.loadingMore ?? false}
-                syncing={sync.phase === 'syncing'}
+                view={searchOpen ? 'search' : threadListKind(view)}
+                hasMore={!searchOpen && activePageState?.nextCursor !== null && activePageState !== undefined}
+                loadingMore={!searchOpen && (activePageState?.loadingMore ?? false)}
+                syncing={!searchOpen && sync.phase === 'syncing'}
                 readerOpen={readerOpen}
                 selectedIndex={selectedIndex}
                 selectedIds={selectedIds}
@@ -967,13 +1191,28 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               />
             )}
 
+            {searchOpen && !readerOpen && searchQuery.trim() && (
+              <div
+                data-testid="search-coverage"
+                data-search-query={search.completedQuery ?? undefined}
+                role={search.failed ? 'alert' : 'status'}
+                className="flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] text-ink-faint"
+              >
+                {search.failed
+                  ? 'Local search could not be completed'
+                  : search.response
+                    ? searchCoverageText(search.response.coverage)
+                    : 'Searching cached mail…'}
+              </div>
+            )}
+
             {readerOpen && selected && (
               <ConversationView
                 selected={selected}
                 selectedIndex={conversationSelectedIndex}
                 threadCount={conversationThreadCount}
                 threadCountExact={conversationThreadCountExact}
-                mailboxTitle={activeViewTitle}
+                mailboxTitle={searchOpen ? 'Search' : activeViewTitle}
                 conversation={conversation}
                 account={activeAccount}
                 online={online}
@@ -1003,7 +1242,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           {!fullWindowComposerDraft && (
             <MailFooter
               readerOpen={readerOpen}
-              outboxOpen={view === 'outbox'}
+              outboxOpen={!searchOpen && view === 'outbox'}
               composing={inlineComposerDraft !== null}
               sync={sync}
               networkOnline={networkOnline}

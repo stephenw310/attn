@@ -25,6 +25,7 @@ import type {
   ThreadPage
 } from './mail'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
+import type { SearchResponse } from './searchQuery'
 import type { ThemePreference } from './theme'
 
 export const IPC_CHANNELS = {
@@ -57,6 +58,7 @@ export const IPC_CHANNELS = {
   syncGetState: 'sync:getState',
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
+  mailSearch: 'mail:search',
   mailListThreads: 'mail:listThreads',
   mailListLabels: 'mail:listLabels',
   mailGetMailboxCounts: 'mail:getMailboxCounts',
@@ -160,6 +162,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: string | null }
+  [IPC_CHANNELS.mailSearch]: { args: [query: string]; result: SearchResponse }
   // Snoozed rows carry their reminder fields: the result is SnoozedThreadRow[]
   // when view is 'snoozed', which the preload narrows for the renderer.
   [IPC_CHANNELS.mailListThreads]: { args: [request: ThreadListRequest]; result: ThreadPage }

@@ -53,6 +53,8 @@ describe('command catalog', () => {
       'message.trim.toggle',
       'sync.retry',
       'sync.error.copy',
+      'search.open',
+      'search.clear',
       'theme.system',
       'theme.dispatch-dark',
       'theme.dispatch-light',

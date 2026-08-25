@@ -1,0 +1,82 @@
+{
+  "account": "seed@attn.test",
+  "labels": [{ "id": "Label_Search", "name": "search-fixture", "type": "user" }],
+  "threads": [
+    {
+      "id": "t-search-origin",
+      "historyId": "2000",
+      "messages": [
+        {
+          "id": "m-search-origin",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:10",
+          "from": "Morgan Lee <morgan@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Inbox starting point",
+          "snippet": "Return here after search.",
+          "bodyText": "This conversation anchors the inbox selection before search opens."
+        }
+      ]
+    },
+    {
+      "id": "t-search-acme",
+      "historyId": "2001",
+      "messages": [
+        {
+          "id": "m-search-acme",
+          "labelIds": ["Label_Search"],
+          "receivedDaysAgo": 120,
+          "receivedAt": "10:20",
+          "from": "Acme Planning <updates@acme.com>",
+          "to": "seed@attn.test",
+          "subject": "Acme annual roadmap",
+          "snippet": "The 2026 launch plan is attached.",
+          "bodyText": "The 2026 launch plan is attached for review.",
+          "attachments": [
+            {
+              "attachmentId": "att-search-roadmap",
+              "filename": "acme-roadmap.pdf",
+              "mimeType": "application/pdf",
+              "sizeBytes": 16384
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t-search-return",
+      "historyId": "2002",
+      "messages": [
+        {
+          "id": "m-search-return",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 1,
+          "receivedAt": "08:00",
+          "from": "Return Target <return@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Stable return target",
+          "snippet": "Keep this selected when the list changes.",
+          "bodyText": "This row moves when a newer local ghost disappears during search."
+        }
+      ]
+    },
+    {
+      "id": "t-search-trash",
+      "historyId": "2003",
+      "messages": [
+        {
+          "id": "m-search-trash",
+          "labelIds": ["TRASH"],
+          "receivedDaysAgo": 2,
+          "receivedAt": "11:30",
+          "from": "Trash Reply <trash.reply@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Trashed reply source",
+          "snippet": "Reply using the Trash projection.",
+          "bodyText": "This trashed message is the only valid reply source."
+        }
+      ]
+    }
+  ]
+}

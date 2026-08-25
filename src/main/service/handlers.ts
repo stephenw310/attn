@@ -53,6 +53,7 @@ import {
   listUserLabels,
   searchContacts
 } from '../db/queries'
+import { searchThreads } from '../db/search'
 import type { GmailClient } from '../gmail/client'
 import type { GmailMailProvider } from '../gmail/provider'
 import { inlineImageIsTooLarge } from '../inlineImageLimit'
@@ -598,6 +599,23 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.syncRetry, () => {
     context.syncController()?.retry()
     return undefined
+  })
+  handle(IPC_CHANNELS.mailSearch, (_event, query) => {
+    const account = context.currentAccountId()
+    if (!account || typeof query !== 'string') {
+      return {
+        rows: [],
+        drafts: [],
+        coverage: {
+          headersComplete: false,
+          indexComplete: false,
+          attachmentFlagsComplete: false,
+          messagesTotal: 0,
+          messagesWithBody: 0
+        }
+      }
+    }
+    return searchThreads(context.db, account, query.slice(0, 1_000))
   })
   handle(IPC_CHANNELS.mailPeekActionsReverted, (_event, accountId) => {
     const account = context.currentAccountId()

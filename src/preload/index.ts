@@ -38,6 +38,7 @@ import type {
   QueueSendResult,
   ReopenOutboxResult
 } from '../shared/outbox'
+import type { SearchResponse } from '../shared/searchQuery'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
@@ -71,6 +72,7 @@ const api = {
       invoke(IPC_CHANNELS.settingsSetTheme, preference)
   },
   mail: {
+    search: (query: string): Promise<SearchResponse> => invoke(IPC_CHANNELS.mailSearch, query),
     listThreadPage: (
       view: Exclude<ThreadListView, 'snoozed'>,
       cursor?: ThreadPageCursor

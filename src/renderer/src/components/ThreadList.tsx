@@ -100,7 +100,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
   )
 }
 
-type ThreadListKind = ThreadListView | 'label'
+type ThreadListKind = ThreadListView | 'label' | 'search'
 
 const EMPTY_TEXT: Record<ThreadListKind, string> = {
   inbox: 'Inbox empty',
@@ -110,7 +110,8 @@ const EMPTY_TEXT: Record<ThreadListKind, string> = {
   snoozed: 'Nothing snoozed',
   spam: 'Spam is empty',
   trash: 'Trash is empty',
-  label: 'No conversations with this label'
+  label: 'No conversations with this label',
+  search: 'No matching conversations'
 }
 
 interface ThreadListProps {

@@ -24,7 +24,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | S4 reconcile and expiry recovery | **done**, completed 2026-08-22 | trustworthy mailbox views |
 | T22 mailbox navigation (F3) | **done**, completed 2026-08-23 | nothing; T27 and T24's `in:` operator are unblocked |
 | T23 FTS5 index (F10) | **done**, completed 2026-08-23 | nothing; T24 and T25 are unblocked |
-| T24 search UI and operators (F10) | **planned**, not started | T25 |
+| T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
 | T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
 | T26 palette and registry completeness (F5) | **planned**, not started | milestone exit |
 | T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
@@ -638,7 +638,7 @@ relaunch and a supervisor restart, latency and size are recorded, and verify is 
 
 ## T24 — Search UI, operators, and local results
 
-**Status: not started.**
+**Status: done, completed 2026-08-25.**
 
 **Depends on:** T23 · **Unblocks:** T25 · **Spec:** F10, §5 `/`
 
@@ -674,6 +674,15 @@ relaunch and a supervisor restart, latency and size are recorded, and verify is 
 ### Done when
 
 F10's two acceptance criteria are measured rather than asserted, and verify is green.
+
+### Shipped
+
+The shared parser and utility-owned query combine FTS5 terms with mailbox, label, state, attachment, and date
+predicates. Search is a temporary list view with latest-query-wins rendering, a quiet local-coverage line,
+normal conversation reading, and two-step `Esc` restoration. Seeded Electron coverage exercises the accepted
+operator combination. The production app's full keystroke-to-render path measured 75 ms median / 83 ms p95
+across 20 local queries on the generated 10,000-thread, 50,000-message profile; the checked-in gate remains
+strictly below 100 ms.
 
 ---
 

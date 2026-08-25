@@ -10,6 +10,7 @@
 // indexed stripped. The duplicated text is the accepted cost, measured by the
 // perf suite. Deletes are rowid deletes through `message_fts_map`.
 
+import type { SearchCoverage } from '../../shared/searchQuery'
 import type { Db } from '../db'
 import { textFromRaw } from '../gmail/parse'
 
@@ -322,18 +323,6 @@ export function searchMessageIndex(
        LIMIT ?`
     )
     .all(match, accountId, accountId, limit) as SearchIndexHit[]
-}
-
-export interface SearchCoverage {
-  /** Header terms cover the whole account once the lifetime sweep finishes. */
-  headersComplete: boolean
-  /** Every stored message has an index row once the backfill cursor is done. */
-  indexComplete: boolean
-  /** `has:attachment` is trustworthy lifetime-wide after the attachment walk. */
-  attachmentFlagsComplete: boolean
-  messagesTotal: number
-  /** Body terms match only hydrated mail; this is the numerator to say so. */
-  messagesWithBody: number
 }
 
 /** The store-side coverage state the search UI's disclosure line renders (T24). */
