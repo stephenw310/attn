@@ -12,9 +12,15 @@ describe('forceLightMailCss', () => {
     const result = forceLightMailCss(css)
 
     expect(result).not.toMatch(/prefers-color-scheme\s*:\s*dark/i)
-    expect(result).toContain('(prefers-color-scheme: attn-disabled-dark)')
-    expect(result).toContain('(PREFERS-COLOR-SCHEME:attn-disabled-dark), (max-width: 600px)')
+    expect(result).toContain('(width < 0px)')
+    expect(result).toContain('(width < 0px), (max-width: 600px)')
     expect(result).toContain('(prefers-color-scheme: light)')
+  })
+
+  it('keeps a negated dark query true on the forced-light canvas', () => {
+    const css = '@media not screen and (prefers-color-scheme:dark) { .copy { background: #fff3d6; } }'
+
+    expect(forceLightMailCss(css)).toContain('@media not screen and (width < 0px)')
   })
 
   it('does not alter color declarations or prose mentioning dark mode', () => {

@@ -5,7 +5,7 @@ import { expect, test } from './electron'
 test.use({ seed: 'fixtures/seed-mail-layout.json' })
 
 test('separates native, centered, and full-bleed sender canvases', async ({ page }, testInfo) => {
-  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await expect(page.getByTestId('thread-row')).toHaveCount(9)
 
   await page.getByTestId('thread-row').filter({ hasText: 'Plain layout' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
@@ -94,6 +94,7 @@ test('separates native, centered, and full-bleed sender canvases', async ({ page
 test('keeps sender canvases solid and removes native line backgrounds in light themes', async ({
   page
 }, testInfo) => {
+  await page.emulateMedia({ colorScheme: 'light' })
   await page.getByTestId('account-menu').getByRole('button').first().click()
   await page.getByTestId('theme-picker').selectOption('dispatch-light')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dispatch-light')
@@ -130,6 +131,13 @@ test('keeps sender canvases solid and removes native line backgrounds in light t
   const path = join(dir, 'mail-layout-light.png')
   await page.screenshot({ path })
   await testInfo.attach('light mail layout', { path, contentType: 'image/png' })
+
+  await page.keyboard.press('Escape')
+  await page.getByTestId('thread-row').filter({ hasText: 'Negated dark canvas' }).click()
+  await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'light')
+  await expect(
+    page.frameLocator('[data-testid="html-body-frame"]').locator('#negated-dark-canvas')
+  ).toHaveCSS('background-color', 'rgb(255, 243, 214)')
 
   await page.keyboard.press('Escape')
   await page.getByTestId('thread-row').filter({ hasText: 'Neutral line backgrounds' }).click()
