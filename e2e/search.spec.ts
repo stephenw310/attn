@@ -75,6 +75,16 @@ test('enters result browsing and returns to the query with its text intact', asy
   await expect(page.getByTestId('footer-shortcut-search-browse')).toContainText('Enterbrowse results')
   await expect(page.getByTestId('footer-shortcut-navigate')).toHaveCount(0)
 
+  const firstResult = page.locator('[data-testid="thread-row"][data-thread-id="t-search-origin"]')
+  await expect(firstResult).not.toHaveAttribute('data-starred', 'true')
+  await page.getByTestId('search-coverage').click()
+  await page.keyboard.press('s')
+  await expect(firstResult).not.toHaveAttribute('data-starred', 'true')
+  await page.keyboard.press('j')
+  await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveCount(0)
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
+
   await input.press('Enter')
   await expect(list).toBeFocused()
   await expect(list).toHaveCSS('outline-style', 'none')
@@ -237,4 +247,90 @@ test('restores the selected thread by id when the mailbox reorders during search
     'data-thread-id',
     't-search-return'
   )
+})
+
+test('keeps an open search reader pinned while the underlying mailbox refreshes', async ({ app, page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('visualsort')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '3')
+  await input.press('Enter')
+  await page.keyboard.press('j')
+  await page.keyboard.press('j')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Acme annual roadmap')
+
+  const result = await app.evaluate(
+    ({ ipcMain }, request) =>
+      new Promise<{ error?: string }>((resolve) => ipcMain.emit(request.channel, {}, request.input, resolve)),
+    {
+      channel: TEST_CHANNELS.runExistenceSweep,
+      input: {
+        allMailThreadIds: ['t-search-acme', 't-search-return'],
+        spamThreadIds: [],
+        trashThreadIds: ['t-search-trash']
+      }
+    }
+  )
+  if (result.error) throw new Error(result.error)
+
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '2')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Acme annual roadmap')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveAttribute(
+    'data-thread-id',
+    't-search-acme'
+  )
+})
+
+test('restores Outbox scroll after leaving search', async ({ app, page }) => {
+  await app.evaluate(({ ipcMain }, request) => ipcMain.emit(request.channel, {}, request.delay), {
+    channel: TEST_CHANNELS.setUndoSendDelay,
+    delay: 600_000
+  })
+  await page.getByTestId('thread-list').waitFor()
+  await page.evaluate(() => new Promise(requestAnimationFrame))
+  await page.evaluate(() => window.attn.draft.takeRecovered())
+  await page.evaluate(async () => {
+    for (let index = 0; index < 30; index += 1) {
+      const { id } = await window.attn.draft.save({
+        id: null,
+        kind: 'new',
+        to: [{ name: '', email: `queued-${index}@example.test` }],
+        cc: [],
+        bcc: [],
+        subject: `Queued message ${index}`,
+        bodyHtml: '',
+        bodyText: `Pending body ${index}`,
+        attachments: [],
+        threadId: null,
+        sourceMessageId: null,
+        inReplyTo: null,
+        references: [],
+        quoteHtml: '',
+        quoteText: ''
+      })
+      await window.attn.outbox.send(id)
+    }
+  })
+
+  await expect.poll(async () => (await page.evaluate(() => window.attn.outbox.listPending())).length).toBe(30)
+  const outboxCount = page.getByTestId('outbox-count')
+  await expect(outboxCount).toContainText('30 in Outbox')
+  await expect(outboxCount).toBeEnabled()
+  await outboxCount.click()
+  const outbox = page.getByTestId('outbox-list')
+  await expect(page.getByTestId('outbox-row')).toHaveCount(30)
+  const savedScrollTop = await outbox.evaluate((list) => {
+    list.scrollTop = list.scrollHeight
+    return list.scrollTop
+  })
+  expect(savedScrollTop).toBeGreaterThan(0)
+
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.keyboard.press('/')
+  await expect(page.getByTestId('search-input')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(outbox).toBeVisible()
+  await expect.poll(() => outbox.evaluate((list) => list.scrollTop)).toBe(savedScrollTop)
 })

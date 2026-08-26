@@ -74,15 +74,20 @@ export function useInboxCommands(options: Options): void {
     showToast,
     reopenUndoDraft
   } = options
+  const mailCommandsEnabled = !searchOpen || searchBrowsing || readerOpen
   useLayoutEffect(
     () =>
       registerCommands([
         createCommand('search.open', openSearch),
         ...(searchBrowsing ? [createCommand('search.focusQuery', focusSearchQuery)] : []),
         ...(searchOpen && !readerOpen ? [createCommand('search.clear', clearSearch)] : []),
-        createCommand('navigate.next', navigateNext),
-        createCommand('navigate.previous', navigatePrevious),
-        ...(searchOpen || view !== 'drafts'
+        ...(mailCommandsEnabled
+          ? [
+              createCommand('navigate.next', navigateNext),
+              createCommand('navigate.previous', navigatePrevious)
+            ]
+          : []),
+        ...(mailCommandsEnabled && (searchOpen || view !== 'drafts')
           ? [
               createCommand('selection.toggle', toggleSelection),
               createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
@@ -95,11 +100,13 @@ export function useInboxCommands(options: Options): void {
             ]
           : []),
         ...(!searchOpen && view === 'outbox' ? [createCommand('outbox.close', closeOutbox)] : []),
-        ...(readerOpen
-          ? [createCommand('conversation.close', closeReader)]
-          : !searchOpen && view === 'outbox'
-            ? [createCommand('outbox.open', openSelected)]
-            : [createCommand('conversation.open', openSelected)]),
+        ...(mailCommandsEnabled
+          ? readerOpen
+            ? [createCommand('conversation.close', closeReader)]
+            : !searchOpen && view === 'outbox'
+              ? [createCommand('outbox.open', openSelected)]
+              : [createCommand('conversation.open', openSelected)]
+          : []),
         ...(searchOpen && readerOpen ? [createCommand('search.clear', clearSearch)] : []),
         createCommand('view.inbox', () => switchView('inbox')),
         createCommand('view.allMail', () => switchView('allMail')),
@@ -114,7 +121,7 @@ export function useInboxCommands(options: Options): void {
           title: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
         }),
         createCommand('composer.new', openComposer),
-        ...((searchOpen || view !== 'drafts') && selected
+        ...(mailCommandsEnabled && (searchOpen || view !== 'drafts') && selected
           ? [
               createCommand('composer.reply', () => openReply('reply'), {
                 context: readerOpen ? 'reader' : 'list'
@@ -125,7 +132,7 @@ export function useInboxCommands(options: Options): void {
               })
             ]
           : []),
-        ...((searchOpen || view !== 'drafts') && selected
+        ...(mailCommandsEnabled && (searchOpen || view !== 'drafts') && selected
           ? [
               createCommand('triage.archive', () => triage({ kind: 'archive', threadIds: [selected.id] })),
               createCommand('triage.snooze', openSnooze, {
@@ -175,6 +182,7 @@ export function useInboxCommands(options: Options): void {
       extendSelection,
       focusSearchQuery,
       markUnreadOn,
+      mailCommandsEnabled,
       navigateNext,
       navigatePrevious,
       openLabel,

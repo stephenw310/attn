@@ -4,6 +4,7 @@ interface OutboxListProps {
   items: readonly OutboxItem[]
   selectedIndex: number
   selectedRowRef: React.RefObject<HTMLDivElement | null>
+  listRef: React.RefObject<HTMLElement | null>
   onOpen: (index: number) => void
 }
 
@@ -23,10 +24,16 @@ export function OutboxList({
   items,
   selectedIndex,
   selectedRowRef,
+  listRef,
   onOpen
 }: OutboxListProps): React.JSX.Element {
   return (
-    <main data-testid="outbox-list" className="min-h-0 flex-1 overflow-y-auto" aria-label="Outbox">
+    <main
+      ref={listRef}
+      data-testid="outbox-list"
+      className="min-h-0 flex-1 overflow-y-auto"
+      aria-label="Outbox"
+    >
       {items.length === 0 && (
         <div className="flex h-full items-center justify-center text-ink-faint">Outbox is clear</div>
       )}
