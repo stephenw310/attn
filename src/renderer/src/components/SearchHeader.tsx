@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { SearchCoverage } from '../../../shared/searchQuery'
 
 interface SearchHeaderProps {
@@ -7,6 +8,8 @@ interface SearchHeaderProps {
   onQuery: (query: string) => void
   onClear: () => void
   onOpen: () => void
+  onFocusQuery: () => void
+  onFocusResults: () => void
 }
 
 export function SearchHeader({
@@ -15,8 +18,12 @@ export function SearchHeader({
   pending,
   onQuery,
   onClear,
-  onOpen
+  onOpen,
+  onFocusQuery,
+  onFocusResults
 }: SearchHeaderProps): React.JSX.Element {
+  const [queryFocused, setQueryFocused] = useState(false)
+
   return (
     <div
       data-testid="mail-view-header"
@@ -35,11 +42,19 @@ export function SearchHeader({
         aria-label="Search mail"
         autoComplete="off"
         spellCheck={false}
+        onFocus={() => {
+          setQueryFocused(true)
+          onFocusQuery()
+        }}
+        onBlur={() => setQueryFocused(false)}
         onChange={(event) => onQuery(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault()
             onClear()
+          } else if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            onFocusResults()
           } else if (event.key === 'Enter') {
             event.preventDefault()
             onOpen()
@@ -52,6 +67,9 @@ export function SearchHeader({
           Searching…
         </span>
       )}
+      <span className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-medium text-ink-faint">
+        {queryFocused ? '↓ Results' : '/ Search'}
+      </span>
       <span className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-medium text-ink-faint">
         Esc
       </span>

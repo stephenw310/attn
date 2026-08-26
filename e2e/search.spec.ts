@@ -61,6 +61,36 @@ test('sorts text results newest first and keeps their date headers separated', a
   await page.screenshot({ path: join(artifactDirectory, 'search.png') })
 })
 
+test('moves keyboard focus between the query, results, and an open result', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  const list = page.getByTestId('thread-list')
+  await input.fill('visualsort')
+  await expect(list).toHaveAttribute('data-thread-count', '3')
+
+  await input.press('ArrowDown')
+  await expect(list).toBeFocused()
+  await page.keyboard.press('j')
+  await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveAttribute(
+    'data-thread-id',
+    't-search-return'
+  )
+
+  await page.keyboard.press('/')
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('visualsort')
+
+  await input.press('ArrowDown')
+  await page.locator('[data-testid="thread-row"][data-selected="true"]').click()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(list).toBeFocused()
+
+  await page.keyboard.press('/')
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('visualsort')
+})
+
 test('opens an outbox-backed Drafts result in the composer', async ({ page }) => {
   const draftId = await page.evaluate(async () => {
     const { id } = await window.attn.draft.save({

@@ -27,6 +27,7 @@ export function DraftList({
     <main
       ref={listRef}
       data-testid="draft-list"
+      tabIndex={-1}
       className={`min-h-0 flex-1 overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
       aria-label="Drafts"
     >

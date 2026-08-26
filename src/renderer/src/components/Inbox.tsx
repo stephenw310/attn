@@ -95,6 +95,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [view, setView] = useState<MailView>('inbox')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchKeyboardTarget, setSearchKeyboardTarget] = useState<'query' | 'results'>('query')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(sidebarStorage()))
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
@@ -779,6 +780,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     finishReaderClose()
   }, [finishReaderClose, inlineComposerDraft])
   const openSearch = useCallback(() => {
+    setSearchKeyboardTarget('query')
     if (!searchOpenRef.current) {
       const rowId =
         view === 'drafts' || view === 'outbox' ? selectedDraftIdRef.current : selectedThreadIdRef.current
@@ -796,8 +798,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       selectedDraftIdRef.current = null
       finishReaderClose()
       setSearchOpen(true)
+    } else if (readerOpenRef.current) {
+      finishReaderClose()
+    } else {
+      searchInputRef.current?.focus({ preventScroll: true })
     }
-    window.requestAnimationFrame(() => searchInputRef.current?.focus())
   }, [clearSelection, finishReaderClose, view])
   const clearSearch = useCallback(() => {
     if (!searchOpenRef.current) return
@@ -805,6 +810,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     searchReturnRef.current = null
     setSearchOpen(false)
     setSearchQuery('')
+    setSearchKeyboardTarget('query')
     clearSelection()
     if (view === 'outbox') {
       const restoredIndex = record.rowId ? realOutbox.findIndex((item) => item.id === record.rowId) : -1
@@ -823,8 +829,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSelectedIndex(Math.max(0, record.index))
   }, [clearSelection, realOutbox, view])
   useLayoutEffect(() => {
-    if (searchOpen && !readerOpen) searchInputRef.current?.focus({ preventScroll: true })
-  }, [readerOpen, searchOpen])
+    if (!searchOpen || readerOpen || fullWindowComposerDraft) return
+    const target = searchKeyboardTarget === 'query' ? searchInputRef.current : listElRef.current
+    target?.focus({ preventScroll: true })
+  }, [fullWindowComposerDraft, readerOpen, searchKeyboardTarget, searchOpen])
+  const focusSearchResults = useCallback(() => setSearchKeyboardTarget('results'), [])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetIds(null), [])
   const openSnooze = useCallback(() => {
@@ -1083,6 +1092,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 onQuery={setSearchQuery}
                 onClear={clearSearch}
                 onOpen={openSelected}
+                onFocusQuery={openSearch}
+                onFocusResults={focusSearchResults}
               />
             ) : (
               <div
@@ -1117,6 +1128,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 selectedRowRef={selectedRowRef}
                 listRef={listElRef}
                 onOpen={(index) => {
+                  setSearchKeyboardTarget('results')
                   setSelectedIndex(index)
                   const draft = searchDrafts[index]
                   if (!draft || !window.attn) return
@@ -1176,7 +1188,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 onExtendSelection={extendSelectionTo}
                 onLoadMore={loadMoreVisibleThreads}
                 onOpenLabel={(labelId) => switchView(userLabelView(labelId))}
-                onOpen={openThread}
+                onOpen={(index) => {
+                  if (searchOpen) setSearchKeyboardTarget('results')
+                  openThread(index)
+                }}
               />
             )}
 

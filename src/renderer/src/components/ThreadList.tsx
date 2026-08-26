@@ -456,6 +456,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       data-thread-count={threads.length}
       data-has-more={hasMore || undefined}
       data-virtualized="true"
+      tabIndex={-1}
       className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
       aria-label="Conversation list"
       onScroll={(event) => {
