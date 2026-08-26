@@ -112,6 +112,32 @@ test('opens from the composer quoted-history iframe', async ({ page }) => {
   await expect(page.getByTestId('command-palette-input')).toBeFocused()
 })
 
+test('protects an active draft and restores its editor focus after palette dismissal', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  await composer.typeBody('Keep this draft')
+
+  await openPalette(page)
+  await expect(page.locator('[data-command-id="composer.new"]')).toHaveCount(0)
+  await expect(page.locator('[data-command-id="search.open"]')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(composer.editor).toBeFocused()
+  await page.keyboard.type(' after Escape')
+  await expect(composer.editor).toContainText('Keep this draft after Escape')
+
+  await openPalette(page)
+  await page.getByTestId('command-palette-backdrop').click({ position: { x: 10, y: 10 } })
+  await expect(composer.editor).toBeFocused()
+  await page.keyboard.type(' and backdrop')
+  await expect(composer.editor).toContainText('Keep this draft after Escape and backdrop')
+
+  await composer.editor.press('ControlOrMeta+A')
+  await runPaletteCommand(page, 'Bold')
+  await expect(composer.editor).toBeFocused()
+  await expect(composer.editor.locator('strong')).toContainText('Keep this draft after Escape and backdrop')
+})
+
 test('persists command usage across relaunch', async ({ boot, page }) => {
   await runPaletteCommand(page, 'Go to Sent')
   await expect(page.getByTestId('view-title')).toHaveText('Sent')

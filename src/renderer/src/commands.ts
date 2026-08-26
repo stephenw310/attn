@@ -7,10 +7,16 @@ interface CommandSpec {
   shortcut?: string
   shortcutAliases?: readonly string[]
   context: CommandContext
+  allowInComposer?: boolean
 }
 
 export const COMMAND_SPECS = {
-  'palette.open': { title: 'Open command palette', shortcut: 'Mod+K', context: 'global' },
+  'palette.open': {
+    title: 'Open command palette',
+    shortcut: 'Mod+K',
+    context: 'global',
+    allowInComposer: true
+  },
   'navigate.next': { title: 'Next item', shortcut: 'j', context: 'navigation' },
   'navigate.previous': { title: 'Previous item', shortcut: 'k', context: 'navigation' },
   'selection.toggle': { title: 'Toggle selection', shortcut: 'x', context: 'mail' },
@@ -31,8 +37,12 @@ export const COMMAND_SPECS = {
   'message.previous': { title: 'Previous message in conversation', shortcut: 'p', context: 'reader' },
   'message.toggle': { title: 'Expand or collapse message', shortcut: 'o', context: 'reader' },
   'message.trim.toggle': { title: 'Show or hide trimmed message content', context: 'reader' },
-  'sync.retry': { title: 'Retry mail sync', context: 'global' },
-  'sync.error.copy': { title: 'Copy sync error details', context: 'global' },
+  'sync.retry': { title: 'Retry mail sync', context: 'global', allowInComposer: true },
+  'sync.error.copy': {
+    title: 'Copy sync error details',
+    context: 'global',
+    allowInComposer: true
+  },
   'search.open': { title: 'Search mail', shortcut: '/', context: 'global' },
   'search.focusQuery': {
     title: 'Edit search query',
@@ -40,21 +50,79 @@ export const COMMAND_SPECS = {
     context: 'list'
   },
   'search.clear': { title: 'Clear search', context: 'global' },
-  'theme.system': { title: 'Use System theme', context: 'global' },
-  'theme.dispatch-dark': { title: 'Use Dark theme', context: 'global' },
-  'theme.dispatch-light': { title: 'Use Light theme', context: 'global' },
-  'theme.midnight': { title: 'Use Midnight theme', context: 'global' },
-  'theme.sand': { title: 'Use Sand theme', context: 'global' },
-  'view.inbox': { title: 'Go to Inbox', shortcut: 'g i', context: 'global' },
-  'view.allMail': { title: 'Go to All Mail', shortcut: 'g a', context: 'global' },
-  'view.sent': { title: 'Go to Sent', shortcut: 'g t', context: 'global' },
-  'view.starred': { title: 'Go to Starred', shortcut: 'g s', context: 'global' },
-  'view.snoozed': { title: 'Go to Snoozed', shortcut: 'g h', context: 'global' },
-  'view.drafts': { title: 'Go to Drafts', shortcut: 'g d', context: 'global' },
-  'view.spam': { title: 'Go to Spam', shortcut: 'g p', context: 'global' },
-  'view.trash': { title: 'Go to Trash', shortcut: 'g r', context: 'global' },
-  'view.outbox': { title: 'Go to Outbox', shortcut: 'g o', context: 'global' },
-  'layout.sidebar.toggle': { title: 'Toggle sidebar', shortcut: 'Mod+B', context: 'global' },
+  'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
+  'theme.dispatch-dark': {
+    title: 'Use Dark theme',
+    context: 'global',
+    allowInComposer: true
+  },
+  'theme.dispatch-light': {
+    title: 'Use Light theme',
+    context: 'global',
+    allowInComposer: true
+  },
+  'theme.midnight': { title: 'Use Midnight theme', context: 'global', allowInComposer: true },
+  'theme.sand': { title: 'Use Sand theme', context: 'global', allowInComposer: true },
+  'view.inbox': {
+    title: 'Go to Inbox',
+    shortcut: 'g i',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.allMail': {
+    title: 'Go to All Mail',
+    shortcut: 'g a',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.sent': {
+    title: 'Go to Sent',
+    shortcut: 'g t',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.starred': {
+    title: 'Go to Starred',
+    shortcut: 'g s',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.snoozed': {
+    title: 'Go to Snoozed',
+    shortcut: 'g h',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.drafts': {
+    title: 'Go to Drafts',
+    shortcut: 'g d',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.spam': {
+    title: 'Go to Spam',
+    shortcut: 'g p',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.trash': {
+    title: 'Go to Trash',
+    shortcut: 'g r',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.outbox': {
+    title: 'Go to Outbox',
+    shortcut: 'g o',
+    context: 'global',
+    allowInComposer: true
+  },
+  'layout.sidebar.toggle': {
+    title: 'Toggle sidebar',
+    shortcut: 'Mod+B',
+    context: 'global',
+    allowInComposer: true
+  },
   'outbox.open': { title: 'Open Outbox message', shortcut: 'Enter', context: 'outbox' },
   'outbox.close': { title: 'Back from Outbox', shortcut: 'Escape', context: 'outbox' },
   'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
@@ -198,10 +266,14 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string, context: Shortc
 }
 
 export function commandMatchesContext(
-  command: Pick<Command, 'context'>,
+  command: Pick<Command, 'context' | 'allowInComposer'>,
   context: ActiveCommandContext
 ): boolean {
-  if (context === 'composer') return command.context === 'global' || command.context === 'composer'
+  if (context === 'composer') {
+    return (
+      command.context === 'composer' || (command.context === 'global' && command.allowInComposer === true)
+    )
+  }
   return (
     command.context === 'global' ||
     command.context === 'navigation' ||

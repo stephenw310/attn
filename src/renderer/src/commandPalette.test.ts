@@ -38,19 +38,31 @@ describe('command palette ranking', () => {
       createCommand('conversation.open', vi.fn()),
       createCommand('conversation.close', vi.fn()),
       createCommand('composer.send', vi.fn()),
-      createCommand('search.open', vi.fn())
+      createCommand('search.open', vi.fn()),
+      createCommand('search.clear', vi.fn()),
+      createCommand('view.inbox', vi.fn()),
+      createCommand('composer.new', vi.fn()),
+      createCommand('triage.undo', vi.fn())
     ]
 
     expect(rankCommands(commands, 'list', '', {}).map((result) => result.command.id)).toEqual([
       'conversation.open',
-      'search.open'
+      'search.open',
+      'search.clear',
+      'view.inbox',
+      'composer.new',
+      'triage.undo'
     ])
     expect(rankCommands(commands, 'reader', '', {}).map((result) => result.command.id)).toEqual([
       'conversation.close',
-      'search.open'
+      'search.open',
+      'search.clear',
+      'view.inbox',
+      'composer.new',
+      'triage.undo'
     ])
     expect(rankCommands(commands, 'composer', '', {}).map((result) => result.command.id)).toEqual([
-      'search.open',
+      'view.inbox',
       'composer.send'
     ])
   })

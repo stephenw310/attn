@@ -24,6 +24,11 @@ interface CommandPaletteProps {
   context: ActiveCommandContext
 }
 
+interface ReturnFocus {
+  element: HTMLElement
+  range: Range | null
+}
+
 function isPaletteShortcut(event: KeyboardEvent): boolean {
   return (
     event.key.toLocaleLowerCase() === 'k' &&
@@ -55,6 +60,7 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
   const usageRef = useRef(usage)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const paletteRef = useRef<HTMLElement | null>(null)
+  const returnFocusRef = useRef<ReturnFocus | null>(null)
   const registeredCommands = useSyncExternalStore(
     subscribeCommandRegistry,
     getCommandRegistrySnapshot,
@@ -62,11 +68,34 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
   )
 
   const openPalette = useCallback(() => {
+    const activeElement = document.activeElement
+    if (activeElement instanceof HTMLElement && !paletteRef.current?.contains(activeElement)) {
+      const selection = window.getSelection()
+      const selectedRange = selection?.rangeCount ? selection.getRangeAt(0) : null
+      returnFocusRef.current = {
+        element: activeElement,
+        range:
+          selectedRange && activeElement.contains(selectedRange.commonAncestorContainer)
+            ? selectedRange.cloneRange()
+            : null
+      }
+    }
     setQuery('')
     setActiveIndex(0)
     setOpen(true)
   }, [])
-  const closePalette = useCallback(() => setOpen(false), [])
+  const closePalette = useCallback(() => {
+    setOpen(false)
+    const returnFocus = returnFocusRef.current
+    returnFocusRef.current = null
+    if (!returnFocus?.element.isConnected) return
+    returnFocus.element.focus({ preventScroll: true })
+    if (returnFocus.range?.startContainer.isConnected && returnFocus.range.endContainer.isConnected) {
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(returnFocus.range)
+    }
+  }, [])
 
   useLayoutEffect(() => registerCommands([createCommand('palette.open', openPalette)]), [openPalette])
 
@@ -167,7 +196,11 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
     <>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled by the dialog input */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is the pointer dismissal path */}
-      <div className="fixed inset-0 z-[80] bg-overlay" onClick={closePalette} />
+      <div
+        data-testid="command-palette-backdrop"
+        className="fixed inset-0 z-[80] bg-overlay"
+        onClick={closePalette}
+      />
       <section
         ref={paletteRef}
         role="dialog"
