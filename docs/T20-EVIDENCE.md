@@ -92,6 +92,20 @@ The latency samples time `searchMessageIndex` (thread-ranked `MIN(rank)` aggrega
 round-trip cost is excluded — T24 owns the end-to-end keystroke budget. Steady-state memory is unchanged
 from the S1 run: the index lives on disk inside the same SQLite cache budget.
 
+## T24 end-to-end local search profile — 2026-08-25
+
+Command: `npm run e2e:perf:only -- --grep "renders local search results within budget"`, hidden macOS arm64
+app. The generator created 10,000 threads containing 50,000 messages, and the production renderer submitted
+20 distinct exact-sender queries through the normal `/` search field.
+
+| Metric | Result | Budget |
+|---|---:|---:|
+| Search input mutation → completed result render | 74 ms median / 76 ms p95 | <100 ms p95 |
+
+This measurement includes the 25 ms typing debounce, renderer-to-utility IPC, the combined FTS5 and SQL
+operator query, and React rendering. The test waits for both the completed-query marker and the one-row result,
+so an older response or a pending frame cannot satisfy the sample.
+
 ## Quota and bootstrap instrumentation
 
 Gmail requests share one per-account weighted scheduler across authentication generations. A short burst bucket

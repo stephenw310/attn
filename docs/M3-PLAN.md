@@ -24,7 +24,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | S4 reconcile and expiry recovery | **done**, completed 2026-08-22 | trustworthy mailbox views |
 | T22 mailbox navigation (F3) | **done**, completed 2026-08-23 | nothing; T27 and T24's `in:` operator are unblocked |
 | T23 FTS5 index (F10) | **done**, completed 2026-08-23 | nothing; T24 and T25 are unblocked |
-| T24 search UI and operators (F10) | **planned**, not started | T25 |
+| T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
 | T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
 | T26 palette and registry completeness (F5) | **planned**, not started | milestone exit |
 | T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
@@ -638,7 +638,7 @@ relaunch and a supervisor restart, latency and size are recorded, and verify is 
 
 ## T24 — Search UI, operators, and local results
 
-**Status: not started.**
+**Status: done, completed 2026-08-25.**
 
 **Depends on:** T23 · **Unblocks:** T25 · **Spec:** F10, §5 `/`
 
@@ -650,10 +650,15 @@ relaunch and a supervisor restart, latency and size are recorded, and verify is 
   error: a user typing `re: budget` is searching, not writing a malformed query.
 - **Two halves, one query.** Text terms hit FTS5; `is:`, `has:`, `in:`, `before:`, and `after:` become SQL
   predicates over `threads`, `messages`, and `thread_labels`. The utility process runs them as one statement
-  and returns ranked threads. `in:` accepts T22's mailbox names and user labels.
+  and returns matching threads newest first, with the best-message score breaking timestamp ties. `in:`
+  accepts T22's mailbox names and user labels.
 - **Results are a view, not a mode.** `/` focuses a field in the list header; results replace the list using
   the same row component and the same reader behavior. `Esc` returns to the previous mailbox with its
   selection and scroll intact, and a second `Esc` behaves as it does in that mailbox.
+- **Search focus moves both ways.** Results remain a live preview while the query owns the keyboard. `Enter`
+  starts result browsing, where normal J/K and mail commands apply and a second `Enter` opens the row.
+  The row cursor appears only while browsing. `Esc`, `Backspace`, or `/` returns to the unchanged query;
+  `Esc` from the query closes search.
 - **Typing is never blocked.** Debounce, cancel the in-flight query on the next keystroke, and render the
   last complete result set until the next one lands.
 - **One quiet coverage line** under the results states what the store cannot answer yet, driven by T23's
@@ -674,6 +679,15 @@ relaunch and a supervisor restart, latency and size are recorded, and verify is 
 ### Done when
 
 F10's two acceptance criteria are measured rather than asserted, and verify is green.
+
+### Shipped
+
+The shared parser and utility-owned query combine FTS5 terms with mailbox, label, state, attachment, and date
+predicates. Search is a newest-first temporary list view with latest-query-wins rendering, a quiet local-
+coverage line, normal conversation reading, and two-step `Esc` restoration. Seeded Electron coverage exercises
+the accepted operator combination. The production app's full keystroke-to-render path measured 74 ms median /
+76 ms p95 across 20 local queries on the generated 10,000-thread, 50,000-message profile; the checked-in gate
+remains strictly below 100 ms.
 
 ---
 

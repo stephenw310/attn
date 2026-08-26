@@ -4,6 +4,7 @@ interface DraftListProps {
   drafts: readonly Draft[]
   readerOpen: boolean
   selectedIndex: number
+  selectionVisible?: boolean
   selectedRowRef: React.RefObject<HTMLDivElement | null>
   listRef: React.RefObject<HTMLElement | null>
   onOpen: (index: number) => void
@@ -19,6 +20,7 @@ export function DraftList({
   drafts,
   readerOpen,
   selectedIndex,
+  selectionVisible = true,
   selectedRowRef,
   listRef,
   onOpen
@@ -27,7 +29,8 @@ export function DraftList({
     <main
       ref={listRef}
       data-testid="draft-list"
-      className={`min-h-0 flex-1 overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
+      tabIndex={-1}
+      className={`min-h-0 flex-1 overflow-y-auto py-2 outline-none ${readerOpen ? 'hidden' : ''}`}
       aria-label="Drafts"
     >
       {drafts.length === 0 && (
@@ -35,6 +38,7 @@ export function DraftList({
       )}
       {drafts.map((draft, index) => {
         const selected = index === selectedIndex
+        const selectionShown = selectionVisible && selected
         return (
           // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is provided by the command registry
           // biome-ignore lint/a11y/noStaticElementInteractions: keyboard access is provided by the command registry
@@ -43,9 +47,9 @@ export function DraftList({
             ref={selected ? selectedRowRef : null}
             data-testid="draft-row"
             data-draft-id={draft.id}
-            data-selected={selected || undefined}
+            data-selected={selectionShown || undefined}
             className={`flex cursor-default select-none items-center gap-4 border-l-[3px] py-3 pr-7 pl-5 ${
-              selected ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'
+              selectionShown ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'
             }`}
             onClick={() => onOpen(index)}
           >

@@ -100,7 +100,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
   )
 }
 
-type ThreadListKind = ThreadListView | 'label'
+type ThreadListKind = ThreadListView | 'label' | 'search'
 
 const EMPTY_TEXT: Record<ThreadListKind, string> = {
   inbox: 'Inbox empty',
@@ -110,7 +110,8 @@ const EMPTY_TEXT: Record<ThreadListKind, string> = {
   snoozed: 'Nothing snoozed',
   spam: 'Spam is empty',
   trash: 'Trash is empty',
-  label: 'No conversations with this label'
+  label: 'No conversations with this label',
+  search: 'No matching conversations'
 }
 
 interface ThreadListProps {
@@ -121,6 +122,7 @@ interface ThreadListProps {
   syncing: boolean
   readerOpen: boolean
   selectedIndex: number
+  selectionVisible?: boolean
   selectedIds: ReadonlySet<string>
   exitingThreadIds: ReadonlySet<string>
   labelsById: ReadonlyMap<string, MailLabel>
@@ -143,18 +145,26 @@ interface VirtualThreadEntry {
   top: number
   height: number
   group: ReturnType<typeof dateGroup>
+  groupKey: string
   showGroup: boolean
 }
 
 function virtualLayout(threads: readonly DisplayThread[], view: ThreadListKind): VirtualThreadEntry[] {
   let top = 0
   let previousGroup: ReturnType<typeof dateGroup> | undefined
+  let activeGroupKey = ''
+  const groupOccurrences = new Map<ReturnType<typeof dateGroup>, number>()
   return threads.map((thread, index) => {
     const group = dateGroup(thread)
     // Snoozed sorts by due time, so relative-date groups would mislead there.
     const showGroup = view !== 'snoozed' && group !== previousGroup
+    if (showGroup) {
+      const occurrence = groupOccurrences.get(group) ?? 0
+      activeGroupKey = `${group}\0${occurrence}`
+      groupOccurrences.set(group, occurrence + 1)
+    }
     const height = VIRTUAL_ROW_HEIGHT + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
-    const entry = { index, top, height, group, showGroup }
+    const entry = { index, top, height, group, groupKey: activeGroupKey, showGroup }
     top += height
     previousGroup = group
     return entry
@@ -195,6 +205,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     syncing,
     readerOpen,
     selectedIndex,
+    selectionVisible = true,
     selectedIds,
     exitingThreadIds,
     labelsById,
@@ -221,9 +232,9 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     return { threads: survivingThreads, layout: projectedLayout, byThreadId }
   }, [exitingThreadIds, threads, view])
   const projectedGroupTops = useMemo(() => {
-    const tops = new Map<VirtualThreadEntry['group'], number>()
+    const tops = new Map<string, number>()
     for (const entry of projected?.layout ?? []) {
-      if (entry.showGroup) tops.set(entry.group, entry.top)
+      if (entry.showGroup) tops.set(entry.groupKey, entry.top)
     }
     return tops
   }, [projected])
@@ -312,9 +323,10 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
   }, [hasMore, loadingMore, onLoadMore, selectedIndex, threads.length])
 
   const renderThread = (entry: VirtualThreadEntry): React.JSX.Element[] => {
-    const { index, group, showGroup } = entry
+    const { index, group, groupKey, showGroup } = entry
     const thread = threads[index]
     const selected = index === selectedIndex
+    const selectionShown = selectionVisible && selected
     const checked = selectedIds.has(thread.id)
     const done = view === 'allMail' && !thread.labelIds.includes('INBOX')
     const exiting = exitingThreadIds.has(thread.id)
@@ -332,15 +344,16 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         data-testid="thread-row"
         data-thread-index={index}
         data-thread-id={thread.id}
-        data-selected={selected || undefined}
+        data-last-msg-at={thread.lastMsgAt}
+        data-selected={selectionShown || undefined}
         data-checked={checked || undefined}
         data-unread={thread.unread || undefined}
         data-starred={thread.starred || undefined}
         data-done={done || undefined}
         data-exiting={exiting || undefined}
         className={`flex h-[46px] cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
-          selected ? 'border-l-accent' : 'border-l-transparent'
-        } ${checked ? 'bg-accent/[0.12]' : selected ? 'bg-accent/[0.07]' : ''} ${
+          selectionShown ? 'border-l-accent' : 'border-l-transparent'
+        } ${checked ? 'bg-accent/[0.12]' : selectionShown ? 'bg-accent/[0.07]' : ''} ${
           exiting ? 'app-thread-exit' : ''
         }`}
         onClick={(event) => (event.shiftKey ? onExtendSelection(index) : onOpen(index))}
@@ -404,13 +417,13 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         </span>
       </div>
     )
-    const projectedGroupTop = projectedGroupTops.get(group)
+    const projectedGroupTop = projectedGroupTops.get(groupKey)
     const groupRemoved = projected !== null && projectedGroupTop === undefined
     const parts: React.JSX.Element[] = []
     if (showGroup) {
       parts.push(
         <div
-          key={`group:${group}`}
+          key={`group:${groupKey}`}
           data-testid="thread-date-group"
           className={`absolute right-0 left-0 h-[44px] px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint ${
             projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''
@@ -446,7 +459,10 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       data-thread-count={threads.length}
       data-has-more={hasMore || undefined}
       data-virtualized="true"
-      className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
+      tabIndex={-1}
+      className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 outline-none ${
+        readerOpen ? 'hidden' : ''
+      }`}
       aria-label="Conversation list"
       onScroll={(event) => {
         const list = event.currentTarget

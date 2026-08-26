@@ -24,6 +24,7 @@ interface Options {
   setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
   setRealSnoozedThreads: React.Dispatch<React.SetStateAction<SnoozedThreadRow[] | null>>
   setMailboxRows: React.Dispatch<React.SetStateAction<MailboxRowCache>>
+  updateSearchRows?: (updater: (rows: ThreadRow[]) => ThreadRow[]) => void
   clearSelection: () => void
   showToast: (message: string) => void
   setExitingThreadIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>
@@ -48,6 +49,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
     setRealThreads,
     setRealSnoozedThreads,
     setMailboxRows,
+    updateSearchRows,
     clearSelection,
     showToast,
     setExitingThreadIds,
@@ -87,6 +89,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         setRealThreads((current) => applyThreadFlag(current, flagSnapshot))
         setRealSnoozedThreads((current) => applyThreadFlag(current, flagSnapshot))
         applyFlagToMailboxRows(flagSnapshot, false)
+        updateSearchRows?.((rows) => applyThreadFlag(rows, flagSnapshot) ?? rows)
       }
       const settleFlag = (rollback: boolean): void => {
         if (!flagSnapshot || !flagOwner) return
@@ -103,6 +106,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         setRealThreads((current) => rollbackThreadFlag(current, ownedSnapshot))
         setRealSnoozedThreads((current) => rollbackThreadFlag(current, ownedSnapshot))
         applyFlagToMailboxRows(ownedSnapshot, true)
+        updateSearchRows?.((rows) => rollbackThreadFlag(rows, ownedSnapshot) ?? rows)
       }
       let selectionRollback: { fromId: string; toId: string | null } | null = null
       if (isBulk) clearSelection()
@@ -172,6 +176,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       setSelectedIndex,
       showToast,
       threads,
+      updateSearchRows,
       view
     ]
   )

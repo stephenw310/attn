@@ -28,18 +28,21 @@ export function useConversation(options: UseConversationOptions): ConversationSt
   const [conversation, setConversation] = useState<DisplayConversation | null>(null)
   const cache = useRef(new Map<string, DisplayConversation>())
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const conversationCacheKeyRef = useRef<string | null>(null)
   const autoReadThreadRef = useRef<string | null>(null)
   const hydrationTargetRef = useRef<string | null>(null)
   const accountRef = useRef(account)
   const revisionRef = useRef(mailRevision)
   const selectedId = selected?.id
+  const selectedCacheKey = selectedId ? `${mailbox}\0${selectedId}` : null
 
   useEffect(() => {
     if (!window.attn) return
     return window.attn.mail.onBodyHydrationFailed((failedAccount, threadId) => {
       if (accountRef.current !== failedAccount) return
-      const cached = cache.current.get(threadId)
-      if (cached) cache.current.set(threadId, { ...cached, bodyHydrationFailed: true })
+      for (const [key, cached] of cache.current) {
+        if (cached.threadId === threadId) cache.current.set(key, { ...cached, bodyHydrationFailed: true })
+      }
       setConversation((current) =>
         current?.threadId === threadId ? { ...current, bodyHydrationFailed: true } : current
       )
@@ -50,6 +53,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     if (accountRef.current === account) return
     accountRef.current = account
     hydrationTargetRef.current = null
+    conversationCacheKeyRef.current = null
     cache.current.clear()
     setConversation(null)
   }, [account])
@@ -63,6 +67,7 @@ export function useConversation(options: UseConversationOptions): ConversationSt
   useEffect(() => {
     if (!selectedId) {
       hydrationTargetRef.current = null
+      conversationCacheKeyRef.current = null
       setConversation(null)
       return
     }
@@ -79,13 +84,14 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     })
     hydrationTargetRef.current = hydrationDecision.nextTarget
     const { allowHydration } = hydrationDecision
-    const cached = cache.current.get(selectedId)
+    const cached = selectedCacheKey ? cache.current.get(selectedCacheKey) : undefined
     if (cached) {
       const shouldHydrate =
         allowHydration && cached.messages.some((message) => message.bodyState !== 'complete')
       const next =
         shouldHydrate && cached.bodyHydrationFailed ? { ...cached, bodyHydrationFailed: false } : cached
-      if (next !== cached) cache.current.set(selectedId, next)
+      if (next !== cached && selectedCacheKey) cache.current.set(selectedCacheKey, next)
+      conversationCacheKeyRef.current = selectedCacheKey
       setConversation(next)
       if (!shouldHydrate) return
     }
@@ -97,14 +103,15 @@ export function useConversation(options: UseConversationOptions): ConversationSt
       .then((result) => {
         if (cancelled || revisionRef.current !== requestedRevision || !result) return
         const display = displayConversation(result)
-        cache.current.set(selectedId, display)
+        if (selectedCacheKey) cache.current.set(selectedCacheKey, display)
+        conversationCacheKeyRef.current = selectedCacheKey
         setConversation(display)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [account, mailbox, mailRevision, online, prefetch, readerOpen, selectedId])
+  }, [account, mailbox, mailRevision, online, prefetch, readerOpen, selectedCacheKey, selectedId])
 
   useEffect(() => {
     if (!window.attn || !prefetch) return
@@ -112,14 +119,15 @@ export function useConversation(options: UseConversationOptions): ConversationSt
     const requestedRevision = mailRevision
     for (const index of [selectedIndex - 1, selectedIndex + 1]) {
       const thread = threads[index]
-      if (!thread || cache.current.has(thread.id)) continue
+      const cacheKey = thread ? `${mailbox}\0${thread.id}` : null
+      if (!thread || !cacheKey || cache.current.has(cacheKey)) continue
       window.attn.mail
         .getConversation(thread.id, false, mailbox)
         .then((result) => {
           // The revision alone cannot catch a sign-out: it resets to 0, so a
           // preload issued at revision 0 would still look current afterwards.
           if (cancelled || revisionRef.current !== requestedRevision || !result) return
-          cache.current.set(thread.id, displayConversation(result))
+          cache.current.set(cacheKey, displayConversation(result))
         })
         .catch(() => {})
     }
@@ -154,7 +162,10 @@ export function useConversation(options: UseConversationOptions): ConversationSt
   // render too late for the reader: never let the previous thread's subject or
   // body flash under the newly selected thread while its conversation loads.
   return {
-    conversation: conversation?.threadId === selectedId ? conversation : null,
+    conversation:
+      conversation?.threadId === selectedId && conversationCacheKeyRef.current === selectedCacheKey
+        ? conversation
+        : null,
     scrollRef
   }
 }

@@ -73,7 +73,7 @@ const HIDDEN_FALLBACK_LABELS_SQL = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
   .map((label) => threadLabelSql(label))
   .join(' OR ')
 
-function allMailMembershipSql(): string {
+export function allMailMembershipSql(): string {
   const junkThreadLabels = ['SPAM', 'TRASH'].map((label) => threadLabelSql(label)).join(' OR ')
   return `(NOT (${junkThreadLabels}) AND EXISTS (
       SELECT 1 FROM messages m
@@ -93,12 +93,12 @@ function allMailMembershipSql(): string {
  * only sent copy was trashed leaves Sent. Legacy rows without labels_json fall
  * back to thread-level labels, mirroring the reader's legacy behavior.
  */
-function labeledMailboxMembershipSql(): string {
+export function labeledMailboxMembershipSql(labelExpression = 'mailbox.label_id'): string {
   return `EXISTS (
       SELECT 1 FROM messages m
       WHERE m.account_id = t.account_id AND m.thread_id = t.id
         AND ((m.labels_json IS NOT NULL
-              AND EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = mailbox.label_id)
+              AND EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = ${labelExpression})
               AND NOT (${HIDDEN_STORED_LABELS_SQL}))
              OR (m.labels_json IS NULL AND NOT (${HIDDEN_FALLBACK_LABELS_SQL})))
     )`
