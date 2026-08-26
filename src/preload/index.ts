@@ -73,7 +73,10 @@ const api = {
   },
   mail: {
     search: (query: string): Promise<SearchResponse> => invoke(IPC_CHANNELS.mailSearch, query),
-    searchAll: (query: string): Promise<ServerSearchResponse> => invoke(IPC_CHANNELS.mailSearchAll, query),
+    searchAll: (requestId: string, query: string): Promise<ServerSearchResponse> =>
+      invoke(IPC_CHANNELS.mailSearchAll, requestId, query),
+    cancelSearchAll: (requestId: string): Promise<void> =>
+      invoke(IPC_CHANNELS.mailCancelSearchAll, requestId),
     listThreadPage: (
       view: Exclude<ThreadListView, 'snoozed'>,
       cursor?: ThreadPageCursor

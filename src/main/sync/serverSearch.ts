@@ -5,11 +5,15 @@ import type { Db } from '../db'
 import { SEARCH_RESULT_LIMIT, searchRowsByThreadIds, searchThreads } from '../db/search'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import { toGmailSearchQuery } from '../gmail/searchQuery'
+import { hydrateMissingThreadBodies } from './bodies'
 import { isOfflineFailure } from './failure'
 import { fetchAndCacheThread } from './fetchThread'
 import type { MailProvider } from './provider'
 
-export type ServerSearchProvider = Pick<MailProvider, 'listThreadIds' | 'getThread' | 'quotaMetrics'>
+export type ServerSearchProvider = Pick<
+  MailProvider,
+  'listThreadIds' | 'getThread' | 'getAttachmentData' | 'quotaMetrics'
+>
 
 export interface SearchAllGmailResult {
   rows: ThreadRow[]
@@ -18,6 +22,7 @@ export interface SearchAllGmailResult {
 
 export interface SearchAllGmailOptions {
   shouldContinue?: () => boolean
+  signal?: AbortSignal
 }
 
 /** Keep Gmail order, remove repeated ids, and leave existing local results in their original section. */
@@ -57,7 +62,7 @@ export async function searchAllGmail(
   query: string,
   options: SearchAllGmailOptions = {}
 ): Promise<SearchAllGmailResult> {
-  const shouldContinue = options.shouldContinue ?? (() => true)
+  const shouldContinue = (): boolean => !options.signal?.aborted && (options.shouldContinue?.() ?? true)
   const parsed = parseSearchQuery(query)
   const searchesLocalSnoozes = parsed.filters.some(
     (filter) =>
@@ -76,17 +81,25 @@ export async function searchAllGmail(
     const page = await provider.listThreadIds({
       q: gmailQuery.q,
       includeSpamTrash: gmailQuery.includeSpamTrash,
+      ...(options.signal ? { signal: options.signal } : {}),
       priority: 'foreground',
       ...(pageToken ? { pageToken } : {})
     })
+    if (!shouldContinue()) return { rows: [], quotaWaitMs: 0 }
     const candidateIds = newServerThreadIds(excludedIds, page.threadIds)
     for (const threadId of candidateIds) {
       excludedIds.add(threadId)
       try {
-        await fetchAndCacheThread(db, accountId, provider, threadId, {
+        const thread = await fetchAndCacheThread(db, accountId, provider, threadId, {
           format: 'full',
           priority: 'foreground',
+          ...(options.signal ? { signal: options.signal } : {}),
           shouldPersist: shouldContinue
+        })
+        if (!shouldContinue()) return { rows: [], quotaWaitMs: 0 }
+        await hydrateMissingThreadBodies(db, provider, accountId, thread, shouldContinue, {
+          ...(options.signal ? { signal: options.signal } : {}),
+          priority: 'foreground'
         })
         if (!shouldContinue()) return { rows: [], quotaWaitMs: 0 }
         storedIds.push(threadId)

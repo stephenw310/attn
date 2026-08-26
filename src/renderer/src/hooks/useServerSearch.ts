@@ -33,12 +33,20 @@ export function useServerSearch(
   const [state, setState] = useState<ServerSearchState>(INITIAL_STATE)
   const requestVersionRef = useRef(0)
   const requestPendingRef = useRef(false)
+  const activeRequestIdRef = useRef<string | null>(null)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: each identity change supersedes the previous request
   useEffect(() => {
     requestVersionRef.current++
     requestPendingRef.current = false
     setState(INITIAL_STATE)
+    return () => {
+      requestVersionRef.current++
+      requestPendingRef.current = false
+      const requestId = activeRequestIdRef.current
+      activeRequestIdRef.current = null
+      if (requestId && window.attn) void window.attn.mail.cancelSearchAll(requestId).catch(() => {})
+    }
   }, [account, open, query])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a mail mutation moves cached server rows into local results
@@ -55,12 +63,15 @@ export function useServerSearch(
   const run = useCallback((): void => {
     if (!open || !account || !query.trim() || !window.attn || requestPendingRef.current) return
     const version = ++requestVersionRef.current
+    const requestId = crypto.randomUUID()
+    activeRequestIdRef.current = requestId
     requestPendingRef.current = true
     setState({ phase: 'waiting', rows: [], message: null, quotaWaitMs: 0 })
     void window.attn.mail
-      .searchAll(query)
+      .searchAll(requestId, query)
       .then((response) => {
         if (requestVersionRef.current !== version) return
+        activeRequestIdRef.current = null
         requestPendingRef.current = false
         if (response.status === 'ok') {
           setState({
@@ -80,6 +91,7 @@ export function useServerSearch(
       })
       .catch(() => {
         if (requestVersionRef.current !== version) return
+        activeRequestIdRef.current = null
         requestPendingRef.current = false
         setState({
           phase: 'error',

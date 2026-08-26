@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { openDatabase } from '../db'
+import { searchThreads } from '../db/search'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { ensureAccount, persistThread } from './persist'
@@ -72,6 +73,7 @@ describe('searchAllGmail', () => {
           if (!snapshot) throw new Error(`unexpected thread ${id}`)
           return snapshot
         }),
+        getAttachmentData: vi.fn(async () => undefined),
         quotaMetrics: () => ({ requests: 0, units: 0, waitMs })
       }
 
@@ -108,7 +110,8 @@ describe('searchAllGmail', () => {
       ).run(ACCOUNT)
       const provider: ServerSearchProvider = {
         listThreadIds: vi.fn(async () => ({ threadIds: [] })),
-        getThread: vi.fn()
+        getThread: vi.fn(),
+        getAttachmentData: vi.fn()
       }
 
       await searchAllGmail(db, ACCOUNT, provider, 'in:Label_Project')
@@ -127,7 +130,8 @@ describe('searchAllGmail', () => {
       ensureAccount(db, ACCOUNT, ACCOUNT)
       const provider: ServerSearchProvider = {
         listThreadIds: vi.fn(),
-        getThread: vi.fn()
+        getThread: vi.fn(),
+        getAttachmentData: vi.fn()
       }
 
       await expect(searchAllGmail(db, ACCOUNT, provider, query)).resolves.toEqual({
@@ -135,6 +139,86 @@ describe('searchAllGmail', () => {
         quotaWaitMs: 0
       })
       expect(provider.listThreadIds).not.toHaveBeenCalled()
+      expect(provider.getThread).not.toHaveBeenCalled()
+    } finally {
+      db.close()
+    }
+  })
+
+  it('hydrates and indexes out-of-line text bodies before returning a durable result', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, ACCOUNT, ACCOUNT)
+      const controller = new AbortController()
+      const remote: GmailThread = {
+        id: 'external-body',
+        messages: [
+          {
+            id: 'message-external-body',
+            threadId: 'external-body',
+            labelIds: ['INBOX'],
+            internalDate: '500',
+            snippet: 'A remotely matched conversation',
+            payload: {
+              mimeType: 'text/plain',
+              headers: [
+                { name: 'From', value: 'Sender <sender@example.test>' },
+                { name: 'To', value: ACCOUNT },
+                { name: 'Subject', value: 'A remotely matched conversation' }
+              ],
+              body: { attachmentId: 'large-text-part', size: 4_096 }
+            }
+          }
+        ]
+      }
+      const provider: ServerSearchProvider = {
+        listThreadIds: vi.fn(async () => ({ threadIds: [remote.id] })),
+        getThread: vi.fn(async () => remote),
+        getAttachmentData: vi.fn(async () =>
+          Buffer.from('The durable-body-token is only in this large body.').toString('base64url')
+        )
+      }
+
+      const result = await searchAllGmail(db, ACCOUNT, provider, 'durable-body-token', {
+        signal: controller.signal
+      })
+
+      expect(result.rows.map((row) => row.id)).toEqual([remote.id])
+      expect(searchThreads(db, ACCOUNT, 'durable-body-token').rows.map((row) => row.id)).toEqual([remote.id])
+      expect(provider.listThreadIds).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: controller.signal, priority: 'foreground' })
+      )
+      expect(provider.getThread).toHaveBeenCalledWith(remote.id, {
+        format: 'full',
+        signal: controller.signal,
+        priority: 'foreground'
+      })
+      expect(provider.getAttachmentData).toHaveBeenCalledWith('message-external-body', 'large-text-part', {
+        signal: controller.signal,
+        priority: 'foreground'
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('stops before fetching threads when a listing is superseded', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, ACCOUNT, ACCOUNT)
+      const controller = new AbortController()
+      const provider: ServerSearchProvider = {
+        listThreadIds: vi.fn(async () => {
+          controller.abort()
+          return { threadIds: ['stale-result'] }
+        }),
+        getThread: vi.fn(),
+        getAttachmentData: vi.fn()
+      }
+
+      await expect(
+        searchAllGmail(db, ACCOUNT, provider, 'stale', { signal: controller.signal })
+      ).resolves.toEqual({ rows: [], quotaWaitMs: 0 })
       expect(provider.getThread).not.toHaveBeenCalled()
     } finally {
       db.close()

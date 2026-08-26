@@ -342,6 +342,7 @@ export class ServiceRuntime {
           if (!thread) throw new GmailApiError(404, 'seed thread unavailable')
           return thread
         },
+        getAttachmentData: async () => undefined,
         quotaMetrics: () => ({ requests: 0, units: 0, waitMs: 0 })
       }
     }

@@ -316,6 +316,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     registered.set(channel, handler as Handler<InvokeChannel>)
   }
   const attemptedInlineImageRepairs = new Set<string>()
+  const activeServerSearches = new Map<string, AbortController>()
   const bodyHydrator = new OnDemandBodyHydrator(
     context.db,
     context.currentAccountId,
@@ -619,19 +620,29 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     }
     return searchThreads(context.db, account, query.slice(0, 1_000))
   })
-  handle(IPC_CHANNELS.mailSearchAll, async (_event, query) => {
+  handle(IPC_CHANNELS.mailSearchAll, async (_event, requestId, query) => {
     const account = context.currentAccountId()
-    if (!account || typeof query !== 'string' || !query.trim()) {
+    if (
+      !account ||
+      !nonEmptyString(requestId) ||
+      requestId.length > 128 ||
+      typeof query !== 'string' ||
+      !query.trim()
+    ) {
       return { status: 'error', message: 'Enter a search before searching Gmail' }
     }
     const provider = context.makeServerSearchProvider()
     if (!provider) {
       return { status: 'auth-required', message: 'Reconnect Google to search Gmail' }
     }
+    const controller = new AbortController()
+    activeServerSearches.get(requestId)?.abort()
+    activeServerSearches.set(requestId, controller)
     try {
       const result = await context.trackForegroundProviderWork(account, () =>
         searchAllGmail(context.db, account, provider, query.slice(0, 1_000), {
-          shouldContinue: () => context.currentAccountId() === account
+          shouldContinue: () => context.currentAccountId() === account,
+          signal: controller.signal
         })
       )
       if (context.currentAccountId() === account && result.rows.length > 0) {
@@ -639,8 +650,17 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       }
       return { status: 'ok', ...result }
     } catch (error) {
+      if (controller.signal.aborted) return { status: 'ok', rows: [], quotaWaitMs: 0 }
       return serverSearchFailure(error)
+    } finally {
+      if (activeServerSearches.get(requestId) === controller) activeServerSearches.delete(requestId)
     }
+  })
+  handle(IPC_CHANNELS.mailCancelSearchAll, (_event, requestId) => {
+    if (nonEmptyString(requestId) && requestId.length <= 128) {
+      activeServerSearches.get(requestId)?.abort()
+    }
+    return undefined
   })
   handle(IPC_CHANNELS.mailPeekActionsReverted, (_event, accountId) => {
     const account = context.currentAccountId()
@@ -833,7 +853,11 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       if (!handler) throw new Error(`unsupported utility operation: ${channel}`)
       return (await handler(undefined, ...args)) as InvokeChannels[K]['result']
     },
-    stop: () => bodyHydrator.stop()
+    stop: () => {
+      for (const controller of activeServerSearches.values()) controller.abort()
+      activeServerSearches.clear()
+      bodyHydrator.stop()
+    }
   }
 }
 
