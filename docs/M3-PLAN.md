@@ -26,7 +26,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T23 FTS5 index (F10) | **done**, completed 2026-08-23 | nothing; T24 and T25 are unblocked |
 | T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
 | T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
-| T26 palette and registry completeness (F5) | **planned**, not started | milestone exit |
+| T26 palette and registry completeness (F5) | **done**, completed 2026-08-25 | nothing |
 | T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
 | T29 inbox zero (F13) | **planned**, not started | nothing |
@@ -402,8 +402,9 @@ touches `persist.ts` and the schema, not the renderer, so the two tracks do not 
 1. **F3 registers palette commands, T26 builds the palette.** F3's acceptance criteria say every mailbox is
    reachable by palette and keyboard, and no palette exists today (`commands.ts` is a registry whose own
    comment calls the palette "future"). Blocking F3 on the palette would invert the dependency for no gain,
-   so T22 through T25 register their entries in `COMMAND_SPECS` and T26 builds the surface and asserts the
-   inventory. `AGENTS.md` already phrases the rule this way.
+   so T22 through T24 register their entries in `COMMAND_SPECS` and T26 builds the palette and asserts the
+   inventory. T25 extends the existing `search.open` flow, so its server result row needs no second command.
+   `AGENTS.md` already phrases the rule this way.
 2. **Search targets §7's stated budget, and measures for the unanswered one.** The gate is p95 under 100 ms
    at 50,000 messages. The pathological-mailbox question below is still open, so T23 records measured index
    size and query latency at 50k and at the largest profile available, and those numbers answer the question
@@ -731,7 +732,7 @@ and verify is green.
 
 ## T26 — Command palette, registry completeness, and the reader keys
 
-**Status: not started.**
+**Status: done, completed 2026-08-25.**
 
 **Depends on:** T22 and T24 registering their commands · **Spec:** F5, §5, §9 #18d
 
@@ -769,6 +770,19 @@ mouse") is an honor system until a test asserts the inventory.
 
 Every command in the registry is reachable and asserted, the reader keys are bound, F5's two budgets are
 measured, and verify is green.
+
+### Shipped
+
+`Mod+K` opens one context-filtered palette over list, reader, Outbox, and composer state. It renders titles
+and shortcuts from the active command registry, ranks exact prefixes above fuzzy matches, and uses bounded
+per-account frequency and recency data from `settings` to break ties. Inline snooze text uses
+`parseSnoozeText`, the same parser as the snooze picker. `N` and `P` move the active message without changing
+its expansion state, while `O` toggles it. The complete command inventory stays explicit in
+`commands.test.ts`.
+
+The built 10,000-thread Electron profile measured palette open at 1 ms p95 and re-ranking below 1 ms p95.
+Seeded Electron coverage dispatches commands from list, reader, and composer contexts, checks every `G`
+chord entry, persists usage across relaunch, and exercises the reader keys.
 
 ---
 
@@ -945,9 +959,9 @@ one; that is not the start of F15.
 **Decided 2026-08-22:** the utility process owns SQLite (SPEC §9 #19), and S2 landed before S1. S1's design
 constraints carry the consequences.
 
-**Decided by shipping T22 (2026-08-23):** F3 registered its five `view.*` commands in `COMMAND_SPECS` only;
-T26 builds the palette surface and asserts the inventory. Ratifying the wording in SPEC §9 remains an owner
-call.
+**Decided by shipping T22 and T26 (2026-08-25):** F3 registered its five `view.*` commands in
+`COMMAND_SPECS`, and T26 shipped the palette and its inventory assertion. T25 remains part of the existing
+`search.open` flow and needs no separate server-search command.
 
 | Question | Why it matters | Decide by |
 |---|---|---|

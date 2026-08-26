@@ -1,5 +1,6 @@
 export type CommandContext = 'list' | 'reader' | 'outbox' | 'navigation' | 'mail' | 'composer' | 'global'
-type ShortcutContext = 'list' | 'reader' | 'outbox'
+export type ShortcutContext = 'list' | 'reader' | 'outbox'
+export type ActiveCommandContext = ShortcutContext | 'composer'
 
 interface CommandSpec {
   title: string
@@ -9,6 +10,7 @@ interface CommandSpec {
 }
 
 export const COMMAND_SPECS = {
+  'palette.open': { title: 'Open command palette', shortcut: 'Mod+K', context: 'global' },
   'navigate.next': { title: 'Next item', shortcut: 'j', context: 'navigation' },
   'navigate.previous': { title: 'Previous item', shortcut: 'k', context: 'navigation' },
   'selection.toggle': { title: 'Toggle selection', shortcut: 'x', context: 'mail' },
@@ -25,6 +27,9 @@ export const COMMAND_SPECS = {
   'selection.clear': { title: 'Clear selection', shortcut: 'Escape', context: 'list' },
   'conversation.open': { title: 'Open conversation', shortcut: 'Enter', context: 'list' },
   'conversation.close': { title: 'Back to conversation list', shortcut: 'Escape', context: 'reader' },
+  'message.next': { title: 'Next message in conversation', shortcut: 'n', context: 'reader' },
+  'message.previous': { title: 'Previous message in conversation', shortcut: 'p', context: 'reader' },
+  'message.toggle': { title: 'Expand or collapse message', shortcut: 'o', context: 'reader' },
   'message.trim.toggle': { title: 'Show or hide trimmed message content', context: 'reader' },
   'sync.retry': { title: 'Retry mail sync', context: 'global' },
   'sync.error.copy': { title: 'Copy sync error details', context: 'global' },
@@ -93,17 +98,45 @@ export const COMMAND_SPECS = {
 
 export type CommandId = keyof typeof COMMAND_SPECS
 
+export interface CommandArgumentValue {
+  label: string
+  value: unknown
+}
+
+export interface CommandArgument {
+  prefixes: readonly string[]
+  parse: (input: string) => CommandArgumentValue | null
+  run: (value: unknown) => void
+}
+
 export interface Command extends CommandSpec {
   id: CommandId
   run: () => void
+  argument?: CommandArgument
 }
 
 const commands: Command[] = []
+const commandRegistryListeners = new Set<() => void>()
+let commandRegistrySnapshot: readonly Command[] = []
+
+function notifyCommandRegistry(): void {
+  commandRegistrySnapshot = [...commands]
+  for (const listener of commandRegistryListeners) listener()
+}
+
+export function subscribeCommandRegistry(listener: () => void): () => void {
+  commandRegistryListeners.add(listener)
+  return () => commandRegistryListeners.delete(listener)
+}
+
+export function getCommandRegistrySnapshot(): readonly Command[] {
+  return commandRegistrySnapshot
+}
 
 export function createCommand(
   id: CommandId,
   run: () => void,
-  overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'shortcutAliases' | 'context'>> = {}
+  overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'shortcutAliases' | 'context' | 'argument'>> = {}
 ): Command {
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
 }
@@ -117,16 +150,22 @@ export function registerCommands(next: Command[]): () => void {
     nextIds.add(command.id)
   }
   commands.push(...next)
+  notifyCommandRegistry()
   return () => {
+    let changed = false
     for (const command of next) {
       const index = commands.indexOf(command)
-      if (index >= 0) commands.splice(index, 1)
+      if (index >= 0) {
+        commands.splice(index, 1)
+        changed = true
+      }
     }
+    if (changed) notifyCommandRegistry()
   }
 }
 
 export function listCommands(): readonly Command[] {
-  return commands
+  return commandRegistrySnapshot
 }
 
 function normalizedKey(event: KeyboardEvent, context: ShortcutContext): string {
@@ -158,7 +197,11 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string, context: Shortc
   return !isLetter || !event.shiftKey
 }
 
-function matchesContext(command: Command, context: ShortcutContext): boolean {
+export function commandMatchesContext(
+  command: Pick<Command, 'context'>,
+  context: ActiveCommandContext
+): boolean {
+  if (context === 'composer') return command.context === 'global' || command.context === 'composer'
   return (
     command.context === 'global' ||
     command.context === 'navigation' ||
@@ -178,7 +221,7 @@ export function isChordPrefix(key: string, context: ShortcutContext): boolean {
   const prefix = `${key.toLowerCase()} `
   return commands.some(
     (command) =>
-      matchesContext(command, context) &&
+      commandMatchesContext(command, context) &&
       commandShortcuts(command).some((shortcut) => shortcut.toLowerCase().startsWith(prefix))
   )
 }
@@ -193,7 +236,7 @@ export function findCommandByShortcut(shortcut: string, context: ShortcutContext
   return (
     commands.find(
       (command) =>
-        matchesContext(command, context) &&
+        commandMatchesContext(command, context) &&
         commandShortcuts(command).some((candidate) => candidate.toLowerCase() === normalized)
     ) ?? null
   )
@@ -206,7 +249,7 @@ export function matchKey(event: KeyboardEvent, context: ShortcutContext): Comman
   return (
     commands.find(
       (command) =>
-        matchesContext(command, context) &&
+        commandMatchesContext(command, context) &&
         commandShortcuts(command).some((shortcut) => matchesShortcut(event, shortcut, context))
     ) ?? null
   )

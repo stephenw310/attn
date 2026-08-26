@@ -42,6 +42,7 @@ afterEach(() => {
 describe('command catalog', () => {
   test('contains the complete audited M1 semantic command inventory', () => {
     expect(Object.keys(COMMAND_SPECS)).toEqual([
+      'palette.open',
       'navigate.next',
       'navigate.previous',
       'selection.toggle',
@@ -50,6 +51,9 @@ describe('command catalog', () => {
       'selection.clear',
       'conversation.open',
       'conversation.close',
+      'message.next',
+      'message.previous',
+      'message.toggle',
       'message.trim.toggle',
       'sync.retry',
       'sync.error.copy',
@@ -233,6 +237,19 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('Enter'), 'reader')?.id).toBe('composer.replyAll')
     expect(matchKey(key('a'), 'reader')?.id).toBe('composer.replyAll')
     expect(matchKey(key('a'), 'list')).toBeNull()
+  })
+
+  test('binds N, P, and O only in the reader', () => {
+    useCommands([
+      createCommand('message.next', () => {}),
+      createCommand('message.previous', () => {}),
+      createCommand('message.toggle', () => {})
+    ])
+    expect(matchKey(key('n'), 'reader')?.id).toBe('message.next')
+    expect(matchKey(key('p'), 'reader')?.id).toBe('message.previous')
+    expect(matchKey(key('o'), 'reader')?.id).toBe('message.toggle')
+    expect(matchKey(key('n'), 'list')).toBeNull()
+    expect(matchKey(key('p'), 'outbox')).toBeNull()
   })
 
   test('can expose reply and forward in list context for the focused conversation', () => {

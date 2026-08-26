@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { formatActionRevertToast } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
+import type { CommandUsage } from '../shared/commandUsage'
 import type { ContactSearchResult } from '../shared/contacts'
 import type {
   Draft,
@@ -69,7 +70,11 @@ const api = {
     initialTheme,
     getTheme: (): Promise<ThemePreference> => invoke(IPC_CHANNELS.settingsGetTheme),
     setTheme: (preference: ThemePreference): Promise<ThemePreference> =>
-      invoke(IPC_CHANNELS.settingsSetTheme, preference)
+      invoke(IPC_CHANNELS.settingsSetTheme, preference),
+    getCommandUsage: (accountId: string): Promise<CommandUsage> =>
+      invoke(IPC_CHANNELS.settingsGetCommandUsage, accountId),
+    setCommandUsage: (accountId: string, usage: CommandUsage): Promise<CommandUsage> =>
+      invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage)
   },
   mail: {
     search: (query: string): Promise<SearchResponse> => invoke(IPC_CHANNELS.mailSearch, query),

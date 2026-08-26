@@ -36,6 +36,7 @@ import {
   triageViewForSearch
 } from '../searchView'
 import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
+import { CommandPalette } from './CommandPalette'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
 import { MailFooter } from './MailFooter'
@@ -1065,6 +1066,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     clearSearch,
     triage,
     openSnooze,
+    snoozeAt: snoozeSelected,
     openLabel,
     openComposer,
     openReply,
@@ -1317,6 +1319,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           onToggle={toggleLabel}
         />
       )}
+
+      <CommandPalette
+        key={activeAccount ?? 'signed-in'}
+        account={activeAccount}
+        context={composerDraft ? 'composer' : readerOpen ? 'reader' : view === 'outbox' ? 'outbox' : 'list'}
+      />
 
       {fullWindowComposerDraft && activeAccount && (
         <Composer

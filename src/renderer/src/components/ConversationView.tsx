@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useCallback, useLayoutEffect, useState } from 'react'
+import { memo, type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
 import type { DisplayConversation, DisplayThread } from '../mailDisplay'
@@ -10,6 +10,7 @@ interface ConversationMessagesProps {
   account: string | null
   online: boolean
   markNewest: boolean
+  scrollRef: React.RefObject<HTMLDivElement | null>
   onToast: (message: string) => void
 }
 
@@ -22,13 +23,16 @@ function newestReadableIndex(messages: readonly DisplayConversation['messages'][
 }
 
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
-  const { conversation, account, online, markNewest, onToast } = props
+  const { conversation, account, online, markNewest, scrollRef, onToast } = props
   const newestIndex = newestReadableIndex(conversation.messages)
   const newestMessageId = conversation.messages[newestIndex]?.id
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
     return new Set(newestMessageId ? [newestMessageId] : [])
   })
   const [expandedTrimIds, setExpandedTrimIds] = useState<Set<string>>(() => new Set())
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(newestMessageId ?? null)
+  const [readerKeysUsed, setReaderKeysUsed] = useState(false)
+  const messageElementsRef = useRef(new Map<string, HTMLDivElement>())
   // Reveal state is reader-local by design (SPEC F3): it lives here so closing
   // the reader unmounts it, and revealing changes no labels and queues nothing.
   const [revealedTrashedIds, setRevealedTrashedIds] = useState<Set<string>>(() => new Set())
@@ -38,6 +42,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
   // initial newest message, instead of inheriting the older collapsed default.
   useLayoutEffect(() => {
     if (!newestMessageId) return
+    setActiveMessageId(newestMessageId)
     setExpandedMessageIds((current) => {
       if (current.has(newestMessageId)) return current
       const next = new Set(current)
@@ -64,12 +69,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     })
   }, [])
 
-  useLayoutEffect(() => {
-    const newestMessage = conversation.messages[newestIndex]
-    if (!newestMessage) return
-    return registerCommands([createCommand('message.trim.toggle', () => toggleTrim(newestMessage.id))])
-  }, [conversation.messages, newestIndex, toggleTrim])
-
   const revealTrashed = useCallback((messageId: string) => {
     setRevealedTrashedIds((current) => {
       const next = new Set(current)
@@ -83,12 +82,87 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     })
   }, [])
 
+  const alignMessage = useCallback(
+    (messageId: string) => {
+      requestAnimationFrame(() => {
+        const scroll = scrollRef.current
+        const target = messageElementsRef.current.get(messageId)
+        if (!scroll || !target) return
+        const scrollRect = scroll.getBoundingClientRect()
+        const targetRect = target.getBoundingClientRect()
+        const padding = 12
+        if (targetRect.top < scrollRect.top + padding) {
+          scroll.scrollTop += targetRect.top - scrollRect.top - padding
+          return
+        }
+        const targetHeaderBottom = Math.min(targetRect.bottom, targetRect.top + 80)
+        if (targetHeaderBottom > scrollRect.bottom - padding) {
+          scroll.scrollTop += targetHeaderBottom - scrollRect.bottom + padding
+        }
+      })
+    },
+    [scrollRef]
+  )
+
+  const activateMessage = useCallback(
+    (messageId: string) => {
+      setReaderKeysUsed(true)
+      setActiveMessageId(messageId)
+      alignMessage(messageId)
+    },
+    [alignMessage]
+  )
+
+  const moveMessage = useCallback(
+    (offset: number) => {
+      if (conversation.messages.length === 0) return
+      const currentIndex = Math.max(
+        0,
+        conversation.messages.findIndex((message) => message.id === activeMessageId)
+      )
+      const nextIndex = Math.max(0, Math.min(conversation.messages.length - 1, currentIndex + offset))
+      const nextMessage = conversation.messages[nextIndex]
+      if (nextMessage) activateMessage(nextMessage.id)
+    },
+    [activateMessage, activeMessageId, conversation.messages]
+  )
+
+  const toggleActiveMessage = useCallback(() => {
+    const activeMessage = conversation.messages.find((message) => message.id === activeMessageId)
+    if (!activeMessage) return
+    setReaderKeysUsed(true)
+    if (activeMessage.trashed && !revealedTrashedIds.has(activeMessage.id)) {
+      revealTrashed(activeMessage.id)
+    } else toggleMessage(activeMessage.id)
+    alignMessage(activeMessage.id)
+  }, [activeMessageId, alignMessage, conversation.messages, revealTrashed, revealedTrashedIds, toggleMessage])
+
+  useLayoutEffect(() => {
+    if (!activeMessageId) return
+    return registerCommands([
+      createCommand('message.next', () => moveMessage(1)),
+      createCommand('message.previous', () => moveMessage(-1)),
+      createCommand('message.toggle', toggleActiveMessage),
+      createCommand('message.trim.toggle', () => toggleTrim(activeMessageId))
+    ])
+  }, [activeMessageId, moveMessage, toggleActiveMessage, toggleTrim])
+
   return (
     <>
       {conversation.messages.map((message, index) => (
         <div
           key={message.id}
+          ref={(element) => {
+            if (element) messageElementsRef.current.set(message.id, element)
+            else messageElementsRef.current.delete(message.id)
+          }}
+          data-testid="conversation-message"
+          data-active-message={activeMessageId === message.id ? 'true' : undefined}
           data-latest-conversation-item={markNewest && index === newestIndex ? '' : undefined}
+          className={
+            readerKeysUsed && activeMessageId === message.id ? 'rounded-[10px] ring-1 ring-accent/70' : ''
+          }
+          onPointerDownCapture={() => setActiveMessageId(message.id)}
         >
           {message.trashed && !revealedTrashedIds.has(message.id) ? (
             <div
@@ -273,6 +347,7 @@ export const ConversationView = memo(function ConversationView(
                 account={account}
                 online={online}
                 markNewest={inlineComposer === null}
+                scrollRef={scrollRef}
                 onToast={onToast}
               />
             ) : null}

@@ -468,7 +468,12 @@ export function MessageBody({
   )
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
-    if (event.metaKey || event.ctrlKey || event.altKey) return
+    const paletteShortcut =
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.key.toLocaleLowerCase() === 'k'
+    if ((event.metaKey || event.ctrlKey || event.altKey) && !paletteShortcut) return
     // Tab owns focus traversal inside the mail document. Forwarding it to the
     // app would prevent the browser from moving through links in the message.
     if (event.key === 'Tab') return
@@ -480,6 +485,9 @@ export function MessageBody({
       key: event.key,
       code: event.code,
       repeat: event.repeat,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      altKey: event.altKey,
       shiftKey: event.shiftKey,
       bubbles: true,
       cancelable: true
