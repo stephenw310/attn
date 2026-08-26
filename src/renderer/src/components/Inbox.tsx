@@ -1130,6 +1130,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 drafts={searchDrafts}
                 readerOpen={false}
                 selectedIndex={selectedIndex}
+                selectionVisible={searchKeyboardTarget === 'results'}
                 selectedRowRef={selectedRowRef}
                 listRef={listElRef}
                 onOpen={(index) => {
@@ -1185,6 +1186,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 syncing={!searchOpen && sync.phase === 'syncing'}
                 readerOpen={readerOpen}
                 selectedIndex={selectedIndex}
+                selectionVisible={!searchOpen || searchKeyboardTarget === 'results'}
                 selectedIds={selectedIds}
                 exitingThreadIds={exitingThreadIds}
                 labelsById={userLabelsById}

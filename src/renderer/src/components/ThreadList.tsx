@@ -122,6 +122,7 @@ interface ThreadListProps {
   syncing: boolean
   readerOpen: boolean
   selectedIndex: number
+  selectionVisible?: boolean
   selectedIds: ReadonlySet<string>
   exitingThreadIds: ReadonlySet<string>
   labelsById: ReadonlyMap<string, MailLabel>
@@ -204,6 +205,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     syncing,
     readerOpen,
     selectedIndex,
+    selectionVisible = true,
     selectedIds,
     exitingThreadIds,
     labelsById,
@@ -324,6 +326,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     const { index, group, groupKey, showGroup } = entry
     const thread = threads[index]
     const selected = index === selectedIndex
+    const selectionShown = selectionVisible && selected
     const checked = selectedIds.has(thread.id)
     const done = view === 'allMail' && !thread.labelIds.includes('INBOX')
     const exiting = exitingThreadIds.has(thread.id)
@@ -342,15 +345,15 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         data-thread-index={index}
         data-thread-id={thread.id}
         data-last-msg-at={thread.lastMsgAt}
-        data-selected={selected || undefined}
+        data-selected={selectionShown || undefined}
         data-checked={checked || undefined}
         data-unread={thread.unread || undefined}
         data-starred={thread.starred || undefined}
         data-done={done || undefined}
         data-exiting={exiting || undefined}
         className={`flex h-[46px] cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
-          selected ? 'border-l-accent' : 'border-l-transparent'
-        } ${checked ? 'bg-accent/[0.12]' : selected ? 'bg-accent/[0.07]' : ''} ${
+          selectionShown ? 'border-l-accent' : 'border-l-transparent'
+        } ${checked ? 'bg-accent/[0.12]' : selectionShown ? 'bg-accent/[0.07]' : ''} ${
           exiting ? 'app-thread-exit' : ''
         }`}
         onClick={(event) => (event.shiftKey ? onExtendSelection(index) : onOpen(index))}
@@ -457,7 +460,9 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       data-has-more={hasMore || undefined}
       data-virtualized="true"
       tabIndex={-1}
-      className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 ${readerOpen ? 'hidden' : ''}`}
+      className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-2 outline-none ${
+        readerOpen ? 'hidden' : ''
+      }`}
       aria-label="Conversation list"
       onScroll={(event) => {
         const list = event.currentTarget
