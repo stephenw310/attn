@@ -54,6 +54,7 @@ describe('command catalog', () => {
       'sync.retry',
       'sync.error.copy',
       'search.open',
+      'search.focusQuery',
       'search.clear',
       'theme.system',
       'theme.dispatch-dark',

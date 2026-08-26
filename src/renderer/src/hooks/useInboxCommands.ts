@@ -11,6 +11,7 @@ interface Options {
   readerOpen: boolean
   view: MailView
   searchOpen: boolean
+  searchBrowsing: boolean
   sidebarCollapsed: boolean
   starOn: boolean
   markUnreadOn: boolean
@@ -27,6 +28,7 @@ interface Options {
   closeOutbox: () => void
   toggleSidebar: () => void
   openSearch: () => void
+  focusSearchQuery: () => void
   clearSearch: () => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
@@ -45,6 +47,7 @@ export function useInboxCommands(options: Options): void {
     readerOpen,
     view,
     searchOpen,
+    searchBrowsing,
     sidebarCollapsed,
     starOn,
     markUnreadOn,
@@ -61,6 +64,7 @@ export function useInboxCommands(options: Options): void {
     closeOutbox,
     toggleSidebar,
     openSearch,
+    focusSearchQuery,
     clearSearch,
     triage,
     openSnooze,
@@ -74,6 +78,7 @@ export function useInboxCommands(options: Options): void {
     () =>
       registerCommands([
         createCommand('search.open', openSearch),
+        ...(searchBrowsing ? [createCommand('search.focusQuery', focusSearchQuery)] : []),
         ...(searchOpen && !readerOpen ? [createCommand('search.clear', clearSearch)] : []),
         createCommand('navigate.next', navigateNext),
         createCommand('navigate.previous', navigatePrevious),
@@ -82,7 +87,11 @@ export function useInboxCommands(options: Options): void {
               createCommand('selection.toggle', toggleSelection),
               createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
               createCommand('selection.extendPrevious', () => extendSelection(selectedIndex - 1)),
-              ...(selectedCount > 0 ? [createCommand('selection.clear', clearSelection)] : [])
+              ...(searchBrowsing
+                ? [createCommand('selection.clear', focusSearchQuery, { title: 'Edit search query' })]
+                : selectedCount > 0
+                  ? [createCommand('selection.clear', clearSelection)]
+                  : [])
             ]
           : []),
         ...(!searchOpen && view === 'outbox' ? [createCommand('outbox.close', closeOutbox)] : []),
@@ -164,6 +173,7 @@ export function useInboxCommands(options: Options): void {
       closeReader,
       closeOutbox,
       extendSelection,
+      focusSearchQuery,
       markUnreadOn,
       navigateNext,
       navigatePrevious,
@@ -181,6 +191,7 @@ export function useInboxCommands(options: Options): void {
       selectedCount,
       selectedIndex,
       searchOpen,
+      searchBrowsing,
       showToast,
       sidebarCollapsed,
       starOn,

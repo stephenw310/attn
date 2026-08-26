@@ -7,7 +7,6 @@ interface SearchHeaderProps {
   pending: boolean
   onQuery: (query: string) => void
   onClear: () => void
-  onOpen: () => void
   onFocusQuery: () => void
   onFocusResults: () => void
 }
@@ -18,7 +17,6 @@ export function SearchHeader({
   pending,
   onQuery,
   onClear,
-  onOpen,
   onFocusQuery,
   onFocusResults
 }: SearchHeaderProps): React.JSX.Element {
@@ -52,12 +50,9 @@ export function SearchHeader({
           if (event.key === 'Escape') {
             event.preventDefault()
             onClear()
-          } else if (event.key === 'ArrowDown') {
-            event.preventDefault()
-            onFocusResults()
           } else if (event.key === 'Enter') {
             event.preventDefault()
-            onOpen()
+            onFocusResults()
           }
         }}
         className="app-no-drag min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
@@ -68,10 +63,10 @@ export function SearchHeader({
         </span>
       )}
       <span className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-medium text-ink-faint">
-        {queryFocused ? '↓ Results' : '/ Search'}
+        {queryFocused ? 'Enter Browse' : 'Esc Edit'}
       </span>
       <span className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-medium text-ink-faint">
-        Esc
+        {queryFocused ? 'Esc Close' : 'Enter Open'}
       </span>
     </div>
   )

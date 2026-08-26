@@ -29,6 +29,11 @@ export const COMMAND_SPECS = {
   'sync.retry': { title: 'Retry mail sync', context: 'global' },
   'sync.error.copy': { title: 'Copy sync error details', context: 'global' },
   'search.open': { title: 'Search mail', shortcut: '/', context: 'global' },
+  'search.focusQuery': {
+    title: 'Edit search query',
+    shortcut: 'Backspace',
+    context: 'list'
+  },
   'search.clear': { title: 'Clear search', context: 'global' },
   'theme.system': { title: 'Use System theme', context: 'global' },
   'theme.dispatch-dark': { title: 'Use Dark theme', context: 'global' },

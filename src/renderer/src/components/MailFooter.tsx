@@ -22,13 +22,24 @@ const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
   { id: 'undo', keys: ['Z'], label: 'undo' }
 ]
 
-function footerShortcuts(readerOpen: boolean, outboxOpen: boolean, composing: boolean): ShortcutHint[] {
+function footerShortcuts(
+  readerOpen: boolean,
+  outboxOpen: boolean,
+  composing: boolean,
+  searchEditing: boolean
+): ShortcutHint[] {
   // An inline composer keeps the list and reader on screen but owns the
   // keyboard, so advertise the composer's keys rather than dead triage verbs.
   if (composing) {
     return [
       { id: 'send', keys: [modKeyLabel(), 'Enter'], chord: true, label: 'send' },
       { id: 'back', keys: ['Esc'], label: 'save and close' }
+    ]
+  }
+  if (searchEditing) {
+    return [
+      { id: 'search-browse', keys: ['Enter'], label: 'browse results' },
+      { id: 'search-close', keys: ['Esc'], label: 'close search' }
     ]
   }
   if (outboxOpen) {
@@ -78,6 +89,7 @@ interface MailFooterProps {
   readerOpen: boolean
   outboxOpen: boolean
   composing: boolean
+  searchEditing: boolean
   sync: SyncState
   networkOnline: boolean
   onRetry: () => void
@@ -85,14 +97,15 @@ interface MailFooterProps {
 }
 
 export function MailFooter(props: MailFooterProps): React.JSX.Element {
-  const { readerOpen, outboxOpen, composing, sync, networkOnline, onRetry, onCopyError } = props
+  const { readerOpen, outboxOpen, composing, searchEditing, sync, networkOnline, onRetry, onCopyError } =
+    props
   return (
     <footer
       data-testid="mail-footer"
       className="relative z-40 flex min-h-11 items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
     >
       <div data-testid="footer-shortcuts" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
-        {footerShortcuts(readerOpen, outboxOpen, composing).map((shortcut) => (
+        {footerShortcuts(readerOpen, outboxOpen, composing, searchEditing).map((shortcut) => (
           <FooterShortcut key={shortcut.id} {...shortcut} />
         ))}
       </div>

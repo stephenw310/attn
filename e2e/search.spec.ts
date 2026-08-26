@@ -25,9 +25,13 @@ test('searches locally as typed and restores the mailbox after reading a result'
   await expect(page.getByTestId('search-coverage')).toHaveAttribute('data-search-query', combinedQuery)
 
   await input.press('Enter')
+  await expect(page.getByTestId('thread-list')).toBeFocused()
+  await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Acme annual roadmap')
 
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('thread-list')).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(input).toBeFocused()
   await expect(input).toHaveValue(combinedQuery)
@@ -61,32 +65,47 @@ test('sorts text results newest first and keeps their date headers separated', a
   await page.screenshot({ path: join(artifactDirectory, 'search.png') })
 })
 
-test('moves keyboard focus between the query, results, and an open result', async ({ page }) => {
+test('enters result browsing and returns to the query with its text intact', async ({ page }) => {
   await page.getByTestId('search-open').click()
   const input = page.getByTestId('search-input')
   const list = page.getByTestId('thread-list')
   await input.fill('visualsort')
   await expect(list).toHaveAttribute('data-thread-count', '3')
+  await expect(page.getByTestId('footer-shortcut-search-browse')).toContainText('Enterbrowse results')
+  await expect(page.getByTestId('footer-shortcut-navigate')).toHaveCount(0)
 
-  await input.press('ArrowDown')
+  await input.press('Enter')
   await expect(list).toBeFocused()
+  await expect(page.getByTestId('footer-shortcut-search-browse')).toHaveCount(0)
+  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/K/↑/↓navigate')
   await page.keyboard.press('j')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveAttribute(
     'data-thread-id',
     't-search-return'
   )
 
+  await page.keyboard.press('Escape')
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('visualsort')
+  await expect(page.getByTestId('footer-shortcut-search-browse')).toBeVisible()
+
+  await input.press('Enter')
+  await page.keyboard.press('Backspace')
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('visualsort')
+
+  await input.press('Enter')
   await page.keyboard.press('/')
   await expect(input).toBeFocused()
   await expect(input).toHaveValue('visualsort')
 
-  await input.press('ArrowDown')
+  await input.press('Enter')
   await page.locator('[data-testid="thread-row"][data-selected="true"]').click()
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(list).toBeFocused()
 
-  await page.keyboard.press('/')
+  await page.keyboard.press('Escape')
   await expect(input).toBeFocused()
   await expect(input).toHaveValue('visualsort')
 })
@@ -119,6 +138,7 @@ test('opens an outbox-backed Drafts result in the composer', async ({ page }) =>
   await input.fill('in:drafts to:morgan subject:quarterly')
   await expect(page.getByTestId('draft-row')).toHaveAttribute('data-draft-id', draftId)
   await input.press('Enter')
+  await page.keyboard.press('Enter')
 
   const composer = new ComposerPage(page)
   await expect(composer.root).toBeVisible()
@@ -131,6 +151,7 @@ test('plans a reply from the mailbox projection selected by the search query', a
   await input.fill('in:trash subject:"Trashed reply source"')
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
   await input.press('Enter')
+  await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
 
   const composer = new ComposerPage(page)
@@ -144,12 +165,15 @@ test('refetches the same thread when its search mailbox projection changes', asy
   await input.fill('subject:"Projection switch"')
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
   await input.press('Enter')
+  await page.keyboard.press('Enter')
   await expect(page.getByTestId('message-header')).toContainText('Normal Projection')
 
+  await page.keyboard.press('Escape')
   await page.keyboard.press('Escape')
   await input.fill('in:trash subject:"Projection switch"')
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
   await input.press('Enter')
+  await page.keyboard.press('Enter')
   await expect(page.getByTestId('message-header')).toContainText('Trash Projection')
 })
 
@@ -159,7 +183,7 @@ test('updates bulk flags and Inbox exits optimistically in search results', asyn
   await input.fill('in:inbox')
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(2)
-  await input.blur()
+  await input.press('Enter')
 
   await page.keyboard.press('x')
   await page.keyboard.press('Shift+j')

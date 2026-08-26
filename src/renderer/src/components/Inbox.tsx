@@ -779,31 +779,35 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     }
     finishReaderClose()
   }, [finishReaderClose, inlineComposerDraft])
-  const openSearch = useCallback(() => {
+  const focusSearchQuery = useCallback(() => {
     setSearchKeyboardTarget('query')
-    if (!searchOpenRef.current) {
-      const rowId =
-        view === 'drafts' || view === 'outbox' ? selectedDraftIdRef.current : selectedThreadIdRef.current
-      const currentRecord = {
-        rowId,
-        index: selectedIndexRef.current,
-        scrollTop: listElRef.current?.scrollTop ?? 0
-      }
-      const record = readerOpenRef.current ? (viewStateRef.current.get(view) ?? currentRecord) : currentRecord
-      searchReturnRef.current = record
-      if (view !== 'outbox') viewStateRef.current.set(view, record)
-      clearSelection()
-      setSelectedIndex(0)
-      selectedThreadIdRef.current = null
-      selectedDraftIdRef.current = null
-      finishReaderClose()
-      setSearchOpen(true)
-    } else if (readerOpenRef.current) {
-      finishReaderClose()
-    } else {
-      searchInputRef.current?.focus({ preventScroll: true })
+    clearSelection()
+    if (readerOpenRef.current) finishReaderClose()
+    else searchInputRef.current?.focus({ preventScroll: true })
+  }, [clearSelection, finishReaderClose])
+  const openSearch = useCallback(() => {
+    if (searchOpenRef.current) {
+      focusSearchQuery()
+      return
     }
-  }, [clearSelection, finishReaderClose, view])
+    setSearchKeyboardTarget('query')
+    const rowId =
+      view === 'drafts' || view === 'outbox' ? selectedDraftIdRef.current : selectedThreadIdRef.current
+    const currentRecord = {
+      rowId,
+      index: selectedIndexRef.current,
+      scrollTop: listElRef.current?.scrollTop ?? 0
+    }
+    const record = readerOpenRef.current ? (viewStateRef.current.get(view) ?? currentRecord) : currentRecord
+    searchReturnRef.current = record
+    if (view !== 'outbox') viewStateRef.current.set(view, record)
+    clearSelection()
+    setSelectedIndex(0)
+    selectedThreadIdRef.current = null
+    selectedDraftIdRef.current = null
+    finishReaderClose()
+    setSearchOpen(true)
+  }, [clearSelection, finishReaderClose, focusSearchQuery, view])
   const clearSearch = useCallback(() => {
     if (!searchOpenRef.current) return
     const record = searchReturnRef.current ?? { rowId: null, index: 0, scrollTop: 0 }
@@ -1006,6 +1010,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     readerOpen,
     view,
     searchOpen,
+    searchBrowsing: searchOpen && searchKeyboardTarget === 'results' && !readerOpen,
     sidebarCollapsed,
     starOn,
     markUnreadOn,
@@ -1022,6 +1027,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     closeOutbox,
     toggleSidebar,
     openSearch,
+    focusSearchQuery,
     clearSearch,
     triage,
     openSnooze,
@@ -1091,8 +1097,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 pending={search.pending}
                 onQuery={setSearchQuery}
                 onClear={clearSearch}
-                onOpen={openSelected}
-                onFocusQuery={openSearch}
+                onFocusQuery={focusSearchQuery}
                 onFocusResults={focusSearchResults}
               />
             ) : (
@@ -1248,6 +1253,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               readerOpen={readerOpen}
               outboxOpen={!searchOpen && view === 'outbox'}
               composing={inlineComposerDraft !== null}
+              searchEditing={searchOpen && searchKeyboardTarget === 'query' && !readerOpen}
               sync={sync}
               networkOnline={networkOnline}
               onRetry={retrySync}

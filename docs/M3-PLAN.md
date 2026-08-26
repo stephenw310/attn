@@ -655,9 +655,9 @@ relaunch and a supervisor restart, latency and size are recorded, and verify is 
 - **Results are a view, not a mode.** `/` focuses a field in the list header; results replace the list using
   the same row component and the same reader behavior. `Esc` returns to the previous mailbox with its
   selection and scroll intact, and a second `Esc` behaves as it does in that mailbox.
-- **Search focus moves both ways.** `ArrowDown` hands the keyboard from the query to the result list, where
-  normal J/K and mail commands apply. `/` returns to the existing query from the list or an open result.
-  Closing a result restores whichever search target opened it, so mouse navigation does not trap focus.
+- **Search focus moves both ways.** Results remain a live preview while the query owns the keyboard. `Enter`
+  starts result browsing, where normal J/K and mail commands apply and a second `Enter` opens the row.
+  `Esc`, `Backspace`, or `/` returns to the unchanged query; `Esc` from the query closes search.
 - **Typing is never blocked.** Debounce, cancel the in-flight query on the next keystroke, and render the
   last complete result set until the next one lands.
 - **One quiet coverage line** under the results states what the store cannot answer yet, driven by T23's
