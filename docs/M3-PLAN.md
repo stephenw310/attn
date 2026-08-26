@@ -25,7 +25,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T22 mailbox navigation (F3) | **done**, completed 2026-08-23 | nothing; T27 and T24's `in:` operator are unblocked |
 | T23 FTS5 index (F10) | **done**, completed 2026-08-23 | nothing; T24 and T25 are unblocked |
 | T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
-| T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
+| T25 on-demand fetch and server search (F10) | **done**, completed 2026-08-25 | nothing |
 | T26 palette and registry completeness (F5) | **planned**, not started | milestone exit |
 | T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
@@ -693,7 +693,7 @@ remains strictly below 100 ms.
 
 ## T25 — On-demand thread fetch and "Search all of Gmail"
 
-**Status: not started.**
+**Status: done, completed 2026-08-25.**
 
 **Depends on:** T24 · **Spec:** F10
 
@@ -726,6 +726,15 @@ future "open this id" path all want it.
 
 An arbitrary thread id can be fetched and cached by one code path, server results merge without duplicates,
 and verify is green.
+
+### Shipped
+
+One foreground fetch-and-cache path now serves history recovery, inline-image repair, and explicit Gmail
+search. The server row translates eligible shared queries into Gmail syntax, keeps local matches in place, and
+caches new full-thread results below a `More from Gmail` divider. Drafts and local snooze searches omit the row
+because Gmail cannot reproduce their Attn-owned state. Offline, quota wait, retry, and expired-auth states remain
+visible. Unit coverage pins translation, ordering, deduplication, persistence, and failures. The seeded Electron
+test opens a server-only result and proves it becomes a local result after relaunch.
 
 ---
 

@@ -106,5 +106,24 @@
         }
       ]
     }
+  ],
+  "remoteThreads": [
+    {
+      "id": "t-search-server-only",
+      "historyId": "2005",
+      "messages": [
+        {
+          "id": "m-search-server-only",
+          "labelIds": ["INBOX", "UNREAD", "Label_Search"],
+          "receivedDaysAgo": 4,
+          "receivedAt": "14:15",
+          "from": "Remote Archive <remote.archive@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Remote archive result",
+          "snippet": "This conversation starts outside the local store.",
+          "bodyText": "serveronlyneedle remains cached after the explicit Gmail search."
+        }
+      ]
+    }
   ]
 }

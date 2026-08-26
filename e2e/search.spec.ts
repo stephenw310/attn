@@ -44,6 +44,52 @@ test('searches locally as typed and restores the mailbox after reading a result'
   )
 })
 
+test('fetches a server-only result, opens it, and keeps it cached across relaunch', async ({
+  boot
+}, testInfo) => {
+  let page = await boot.app.firstWindow()
+  await page.getByTestId('search-open').click()
+  let input = page.getByTestId('search-input')
+  await input.fill('serveronlyneedle')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
+
+  const searchAll = page.getByTestId('search-all-gmail')
+  await expect(searchAll).toBeEnabled()
+  await searchAll.click()
+  await expect(page.getByTestId('thread-section-divider')).toHaveText('More from Gmail')
+  const remote = page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  await expect(remote).toBeVisible()
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
+  await expect(input).toBeFocused()
+  const serverSearchPath = join(artifactDirectory, 'server-search.png')
+  await page.screenshot({ path: serverSearchPath })
+  await testInfo.attach('server-search', { path: serverSearchPath, contentType: 'image/png' })
+  await input.press('Enter')
+  await expect(remote).toHaveAttribute('data-selected', 'true')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Remote archive result')
+
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await expect(input).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('view-title')).toHaveText('Inbox')
+  await expect(
+    page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  ).toBeVisible()
+  await expect(page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })).toContainText('3')
+
+  ;({ page } = await boot.relaunch())
+  await page.getByTestId('search-open').click()
+  input = page.getByTestId('search-input')
+  await input.fill('serveronlyneedle')
+  await expect(
+    page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  ).toBeVisible()
+  await expect(page.getByTestId('thread-section-divider')).toHaveCount(0)
+  expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
+})
+
 test('sorts text results newest first and keeps their date headers separated', async ({ page }) => {
   await page.getByTestId('search-open').click()
   const input = page.getByTestId('search-input')

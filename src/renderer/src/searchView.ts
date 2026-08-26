@@ -24,6 +24,16 @@ export function searchesDrafts(query: string): boolean {
   return mailboxes.includes('draft') || mailboxes.includes('drafts')
 }
 
+/** Attn snoozes are local reminders, not Gmail's native snooze state. */
+export function searchesLocalSnoozes(query: string): boolean {
+  const parsed = parseSearchQuery(query)
+  return parsed.filters.some(
+    (filter) =>
+      (filter.kind === 'is' && filter.value === 'snoozed') ||
+      (filter.kind === 'in' && filter.value.toLowerCase().replaceAll(/[\s_-]/g, '') === 'snoozed')
+  )
+}
+
 export function triageViewForSearch(query: string): MailView {
   return searchMailboxes(query).includes('inbox') ? 'inbox' : 'allMail'
 }

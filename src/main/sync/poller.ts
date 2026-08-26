@@ -2,12 +2,12 @@ import { EventEmitter } from 'node:events'
 import { errorMessage } from '../../shared/error'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
-import type { GmailThread } from '../gmail/parse'
 import { applyThreadDelta } from '../store/mutate'
 import { replayPendingThreadDeltas } from '../store/replay'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { hydrateMissingThreadBodies } from './bodies'
-import { deleteThread, persistThread } from './persist'
+import { fetchAndCacheThread } from './fetchThread'
+import { deleteThread } from './persist'
 import type { HistoryRecord, MailProvider } from './provider'
 
 export interface NewMail {
@@ -130,12 +130,11 @@ export async function reconcilePurgeableMembership(
 ): Promise<void> {
   for (const threadId of reconcileLabelMembership(db, accountId, labelId, serverThreadIds)) {
     try {
-      const thread = await provider.getThread(threadId, {
+      await (effects.fetchThread ?? fetchAndCacheThread)(db, accountId, provider, threadId, {
         format: 'metadata',
-        priority: 'background'
+        priority: 'background',
+        persistOptions: { metadataOnly: true }
       })
-      if (effects.persist) await effects.persist(thread)
-      else persistThread(db, accountId, thread, { metadataOnly: true })
     } catch (error) {
       if (error instanceof GmailApiError && error.status === 404) {
         if (effects.remove) effects.remove(threadId)
@@ -149,7 +148,8 @@ export async function reconcilePurgeableMembership(
 
 export interface HistoryCycleEffects {
   wakeThread?: (threadId: string) => void
-  persist?: (thread: GmailThread) => Promise<void>
+  fetchThread?: typeof fetchAndCacheThread
+  hydrate?: typeof hydrateMissingThreadBodies
   remove?: (threadId: string) => void
 }
 
@@ -168,16 +168,16 @@ export async function runHistoryCycle(
   const promoteInbox = new Set(plan.promoteInboxThreadIds)
   for (const threadId of plan.refetchThreadIds) {
     try {
-      const thread = await provider.getThread(threadId, { format: 'full', priority: 'polling' })
-      if (effects.persist) await effects.persist(thread)
-      else {
-        persistThread(db, accountId, thread, {
+      const thread = await (effects.fetchThread ?? fetchAndCacheThread)(db, accountId, provider, threadId, {
+        format: 'full',
+        priority: 'polling',
+        persistOptions: {
           inboxVisibility: promoteInbox.has(threadId) ? 'show' : 'preserve'
-        })
-        await hydrateMissingThreadBodies(db, provider, accountId, thread, undefined, {
-          priority: 'polling'
-        })
-      }
+        }
+      })
+      await (effects.hydrate ?? hydrateMissingThreadBodies)(db, provider, accountId, thread, undefined, {
+        priority: 'polling'
+      })
     } catch (error) {
       if (error instanceof GmailApiError && error.status === 404) {
         if (effects.remove) effects.remove(threadId)

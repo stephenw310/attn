@@ -3,6 +3,7 @@ import {
   conversationMailboxForSearch,
   retainedSearchQuery,
   searchesDrafts,
+  searchesLocalSnoozes,
   triageViewForSearch
 } from './searchView'
 
@@ -24,5 +25,9 @@ describe('search result interpretation', () => {
 
   it('treats an Inbox search as an Inbox triage list', () => {
     expect(triageViewForSearch('from:acme in:inbox')).toBe('inbox')
+  })
+
+  it.each(['is:snoozed', 'in:snoozed'])('identifies %s as a local-only snooze search', (query) => {
+    expect(searchesLocalSnoozes(query)).toBe(true)
   })
 })

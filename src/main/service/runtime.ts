@@ -8,7 +8,7 @@ import { ActionRevertNotices } from '../actions/revertNotices'
 import type { TokenSet } from '../auth/googleAuth'
 import { type Db, openDatabase, schemaVersion } from '../db'
 import { countInboxUnread, listMailboxThreads } from '../db/queries'
-import { loadSeed, readSeedThread } from '../dev/seed'
+import { loadSeed, readSeedRemoteThreadIds, readSeedThread } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { GmailMailProvider } from '../gmail/provider'
@@ -26,6 +26,7 @@ import { runLifetimeSweep } from '../sync/lifetimeSweep'
 import { deleteThread, type LabelRow } from '../sync/persist'
 import { historyEvents, type NewMail } from '../sync/poller'
 import type { MailProvider } from '../sync/provider'
+import type { ServerSearchProvider } from '../sync/serverSearch'
 import { SyncController } from '../syncController'
 import { createServiceHandlers, type ServiceHandlers } from './handlers'
 import { candidatesFor, notificationPausedUntil, setNotificationPausedUntil } from './notificationQueries'
@@ -150,6 +151,7 @@ export class ServiceRuntime {
       currentAccountId: () => this.currentAccountId(),
       makeClient: () => this.makeCurrentClient(),
       makeProvider: () => this.makeCurrentProvider(),
+      makeServerSearchProvider: () => this.makeCurrentServerSearchProvider(),
       isSeeded: () => this.seedAccountId !== null,
       executor: () => this.actionExecutor,
       draftMirrorExecutor: () => this.draftMirrorExecutor,
@@ -328,6 +330,22 @@ export class ServiceRuntime {
 
   private makeCurrentProvider(): GmailMailProvider | null {
     return this.makeProvider(this.syncController.getGeneration())
+  }
+
+  private makeCurrentServerSearchProvider(): ServerSearchProvider | null {
+    if (this.seedAccountId && this.input.testSeed) {
+      const seedPath = this.input.testSeed
+      return {
+        listThreadIds: async () => ({ threadIds: readSeedRemoteThreadIds(seedPath) }),
+        getThread: async (threadId) => {
+          const thread = readSeedThread(seedPath, threadId)
+          if (!thread) throw new GmailApiError(404, 'seed thread unavailable')
+          return thread
+        },
+        quotaMetrics: () => ({ requests: 0, units: 0, waitMs: 0 })
+      }
+    }
+    return this.makeCurrentProvider()
   }
 
   private disposeGmailQuotaLimiters(reason: Error): void {
