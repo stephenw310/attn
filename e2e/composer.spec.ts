@@ -346,10 +346,12 @@ test('carries source attachments into a forward draft and preserves them on reop
   await expect(composer.attachmentChips).toContainText('receipt.pdf')
 })
 
-test('discards an untouched forward even when the source has an attachment', async ({ page }) => {
+test('adds a signature and discards an untouched forward with a source attachment', async ({ app, page }) => {
+  await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const receipt = page.getByTestId('thread-row').filter({ hasText: 'Your receipt' })
   await receipt.click()
   await page.keyboard.press('f')
+  await expect(page.getByTestId('composer-gmail-signature')).toContainText('Chao Wu')
   await expect(page.getByTestId('composer-attachment-chip')).toContainText('receipt.pdf')
 
   await page.keyboard.press('Escape')
@@ -1032,12 +1034,14 @@ test('keeps a detached draft escapable when its parent thread is missing', async
   await expect(page.getByTestId('draft-list')).toBeVisible()
 })
 
-test('discards an untouched reply but keeps one the user typed into', async ({ page }) => {
+test('adds a signature, discards an untouched reply, and keeps authored text', async ({ app, page }) => {
+  await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
   const design = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
   await design.click()
   await composer.openReply()
   await expect(composer.root).toBeVisible()
+  await expect(composer.editor.getByTestId('composer-gmail-signature')).toContainText('Chao Wu')
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
 
@@ -1059,7 +1063,8 @@ test('discards an untouched reply but keeps one the user typed into', async ({ p
   await expect(design.getByTestId('chip-draft')).toBeVisible()
 })
 
-test('discards an untouched reply that was upgraded to reply-all', async ({ page }) => {
+test('keeps the signature discardable when a reply becomes reply-all', async ({ app, page }) => {
+  await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
   const design = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
   await design.click()
@@ -1072,6 +1077,7 @@ test('discards an untouched reply that was upgraded to reply-all', async ({ page
   // contributing content, so the draft stays discardable.
   await page.keyboard.press('a')
   await expect(composer.root).toHaveAttribute('data-draft-kind', 'replyAll')
+  await expect(composer.editor.getByTestId('composer-gmail-signature')).toContainText('Chao Wu')
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(design.getByTestId('chip-draft')).toHaveCount(0)

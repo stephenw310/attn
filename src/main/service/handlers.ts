@@ -468,7 +468,14 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       quoteHtml: plan.quoteHtml,
       quoteText: plan.quoteText
     }
-    const id = saveDraft(context.db, account, input)
+    const prepared = prepareDraftWithCachedPrimarySignature(context.db, account, input)
+    const id = saveDraft(
+      context.db,
+      account,
+      prepared.draft,
+      Date.now(),
+      prepared.defaultSignatureFingerprint
+    )
     context.broadcastMailChanged()
     return getDraft(context.db, account, id)
   })

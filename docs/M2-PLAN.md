@@ -1007,13 +1007,13 @@ created or renamed in Gmail web appears in Attn within one poll interval, verify
 **Status: implemented 2026-08-27.** · **Depends on:** T14C and T21's poll effect shape · **Spec:** F6
 
 Attn reads the primary `users.settings.sendAs` resource under the existing `gmail.modify` scope. It caches
-the display name and Gmail's sanitized HTML signature at sync start and during each poll cycle. New-message
-draft creation reads only this local cache, so opening the composer stays local-first and works offline. The
-signature enters the editor inside Gmail's structural signature wrapper and follows T14C's existing import,
-editing, sanitization, plain-text alternative, draft mirror, and send paths.
+the display name and Gmail's sanitized HTML signature at sync start and during each poll cycle. Every local
+composer reads only this cache, so opening a new message, reply, reply-all, or forward stays local-first and
+works offline. The signature enters the editor inside Gmail's structural signature wrapper and follows
+T14C's existing import, editing, sanitization, plain-text alternative, draft mirror, and send paths.
 
 Each local draft records a semantic fingerprint of the default signature inserted when that draft was
-created. Empty-draft classification compares against that immutable per-draft fingerprint, not the mutable
+created. Draft lifecycle checks compare against that immutable per-draft fingerprint, not the mutable
 account cache, so a Gmail signature change cannot expose, mirror, or retain an untouched older default.
 This additive schema v19 change is eligible for the manual local-upgrade procedure in `AGENTS.md` with the
 following task-specific DDL, applied with the version bump in one transaction:
@@ -1024,14 +1024,15 @@ PRAGMA user_version = 19;
 ```
 
 Google documents the resource's signature as a new-mail default. The resource does not report the Gmail
-UI's separate reply or forward choice, so Attn does not add this signature to a reply or forward. Imported
-Gmail drafts still keep any signature already in their body. A new draft that contains only the cached
-default remains empty for autosave and mirroring purposes, which prevents a bare signature from appearing
-in Drafts.
+UI's separate reply or forward choice. Attn therefore uses the primary signature for every local composer
+instead of inventing an unavailable per-kind setting. Imported Gmail drafts keep any signature already in
+their body. A draft that contains only the planned reply or forward fields and its cached signature remains
+untouched for close and mirroring purposes. A bare signature never leaves a Drafts row behind.
 
-Unit coverage pins sanitization, cache refresh, new-mail-only insertion, empty-draft handling, poll failure
-isolation, and sender refresh. Seeded Electron coverage proves that the signature is editable and survives
-serialization, and that closing a signature-only composer discards it.
+Unit coverage pins sanitization, cache refresh, insertion across all composer kinds, untouched-draft
+handling, poll failure isolation, and sender refresh. Seeded Electron coverage proves that the signature is
+editable and survives serialization, and that closing a signature-only new message, reply, or forward
+discards it.
 
 ---
 

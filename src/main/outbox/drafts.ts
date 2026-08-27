@@ -231,16 +231,21 @@ function isEffectivelyEmptyDraft(
  * Gmail does not keep a reply or forward the user never contributed to, and
  * neither should we — but such a draft is not blank: `planReply` fills the
  * quote, a `Re:`/`Fwd:` subject, and a reply's recipients. So test the fields
- * the plan never writes instead. It fills `to`/`cc` only for replies, never
- * `bcc` or a body. Attachments marked `planned` came from the source message;
- * ordinary attachments came from the user. The marker remains main-process
- * only and survives remote-locator refreshes.
+ * the plan never writes instead. It fills `to`/`cc` only for replies and never
+ * fills `bcc`. Signature preparation may fill the body with the saved default.
+ * Attachments marked `planned` came from the source message; ordinary attachments
+ * came from the user. The marker remains main-process only and survives
+ * remote-locator refreshes.
  */
-export function isUntouchedThreadDraft(draft: DraftSaveInput, forwardEditedSincePlan = false): boolean {
+export function isUntouchedThreadDraft(
+  draft: DraftSaveInput,
+  forwardEditedSincePlan = false,
+  defaultSignatureFingerprint?: string | null
+): boolean {
   if (draft.kind === 'new') return false
   return (
     !forwardEditedSincePlan &&
-    !hasAuthoredBody(draft) &&
+    (!hasAuthoredBody(draft) || hasOnlyDefaultPrimarySignature(draft, defaultSignatureFingerprint)) &&
     !draft.attachments.some(
       (attachment) => !attachment.inline && !('planned' in attachment && attachment.planned === true)
     ) &&
@@ -330,7 +335,8 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
   const draft = db
     .prepare(
       `SELECT to_json, cc_json, bcc_json, subject, body_html, body_text, attachments_json,
-              quote_html, quote_text, default_signature_fingerprint
+              thread_id, source_message_id, in_reply_to, references_json, kind, quote_html, quote_text,
+              local_revision, default_signature_fingerprint
        FROM outbox
        WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')
          AND local_revision > mirror_revision`
@@ -345,37 +351,40 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
         | 'body_html'
         | 'body_text'
         | 'attachments_json'
+        | 'thread_id'
+        | 'source_message_id'
+        | 'in_reply_to'
+        | 'references_json'
+        | 'kind'
         | 'quote_html'
         | 'quote_text'
+        | 'local_revision'
         | 'default_signature_fingerprint'
       >
     | undefined
-  if (
-    !draft ||
-    isEffectivelyEmptyDraft(
-      {
-        id: draftId,
-        to: parseJson<MailAddress[]>(draft.to_json),
-        cc: parseJson<MailAddress[]>(draft.cc_json),
-        bcc: parseJson<MailAddress[]>(draft.bcc_json),
-        subject: draft.subject,
-        bodyHtml: draft.body_html,
-        bodyText: draft.body_text,
-        attachments: publicDraftAttachments(parseStoredDraftAttachments(draft.attachments_json)),
-        threadId: null,
-        inReplyTo: null,
-        references: [],
-        kind: 'new',
-        sourceMessageId: null,
-        quoteHtml: draft.quote_html,
-        quoteText: draft.quote_text
-      },
-      draft.default_signature_fingerprint
-    )
-  ) {
-    return false
+  if (!draft) return false
+  const input: DraftSaveInput = {
+    id: draftId,
+    to: parseJson<MailAddress[]>(draft.to_json),
+    cc: parseJson<MailAddress[]>(draft.cc_json),
+    bcc: parseJson<MailAddress[]>(draft.bcc_json),
+    subject: draft.subject,
+    bodyHtml: draft.body_html,
+    bodyText: draft.body_text,
+    attachments: parseStoredDraftAttachments(draft.attachments_json),
+    threadId: draft.thread_id,
+    inReplyTo: draft.in_reply_to,
+    references: parseJson<string[]>(draft.references_json),
+    kind: draft.kind,
+    sourceMessageId: draft.source_message_id,
+    quoteHtml: draft.quote_html,
+    quoteText: draft.quote_text
   }
-  return true
+  const forwardEditedSincePlan = input.kind === 'forward' && draft.local_revision > 1
+  return (
+    !isEffectivelyEmptyDraft(input, draft.default_signature_fingerprint) &&
+    !isUntouchedThreadDraft(input, forwardEditedSincePlan, draft.default_signature_fingerprint)
+  )
 }
 
 export function closeDraft(db: Db, accountId: string, id: string, now = Date.now()): 'saved' | 'discarded' {
@@ -396,7 +405,7 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
   const forwardEditedSincePlan = row.kind === 'forward' && row.local_revision > 1
   if (
     !isEffectivelyEmptyDraft(input, row.default_signature_fingerprint) &&
-    !isUntouchedThreadDraft(input, forwardEditedSincePlan)
+    !isUntouchedThreadDraft(input, forwardEditedSincePlan, row.default_signature_fingerprint)
   ) {
     db.prepare("UPDATE outbox SET state = 'drafted', updated_at = ? WHERE account_id = ? AND id = ?").run(
       now,

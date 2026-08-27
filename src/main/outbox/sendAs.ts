@@ -71,13 +71,13 @@ export function cachedPrimarySignature(db: Db, accountId: string): DraftSignatur
   }
 }
 
-/** Gmail exposes its saved signature as a new-mail default, not a reply/forward default. */
+/** Apply the primary saved signature to an empty composer of any kind. */
 export function prepareDraftWithCachedPrimarySignature(
   db: Db,
   accountId: string,
   draft: DraftSaveInput
 ): PreparedPrimarySignatureDraft {
-  if (draft.kind !== 'new' || draft.bodyHtml.trim() || draft.bodyText.trim()) {
+  if (draft.bodyHtml.trim() || draft.bodyText.trim()) {
     return { draft, defaultSignatureFingerprint: null }
   }
   const signature = cachedPrimarySignature(db, accountId)
@@ -245,7 +245,6 @@ export function hasOnlyDefaultPrimarySignature(
   draft: Pick<DraftSaveInput, 'kind' | 'bodyHtml' | 'bodyText'>,
   defaultSignatureFingerprint: string | null | undefined
 ): boolean {
-  if (draft.kind !== 'new') return false
   if (!draft.bodyHtml.includes('gmail_signature')) return false
   if (!defaultSignatureFingerprint) return false
   const { JSDOM } = require('jsdom') as typeof import('jsdom')

@@ -40,19 +40,18 @@ describe('primary Gmail send-as settings', () => {
     }
   })
 
-  it('adds the saved signature only to an empty new message', () => {
+  it('adds the saved signature to every empty composer kind', () => {
     const db = openDatabase(':memory:')
     try {
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
-      expect(prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).draft.bodyHtml).toContain(
-        'Best,'
-      )
-      expect(
-        prepareDraftWithCachedPrimarySignature(db, ACCOUNT, {
-          ...emptyDraftInput(),
-          kind: 'reply'
-        }).draft.bodyHtml
-      ).toBe('')
+      for (const kind of ['new', 'reply', 'replyAll', 'forward'] as const) {
+        expect(
+          prepareDraftWithCachedPrimarySignature(db, ACCOUNT, {
+            ...emptyDraftInput(),
+            kind
+          }).draft.bodyHtml
+        ).toContain('Best,')
+      }
       expect(
         prepareDraftWithCachedPrimarySignature(db, ACCOUNT, {
           ...emptyDraftInput(),
@@ -172,6 +171,35 @@ describe('primary Gmail send-as settings', () => {
       expect(requestDraftMirror(db, ACCOUNT, id)).toBe(false)
       expect(closeDraft(db, ACCOUNT, id, 20)).toBe('discarded')
       expect(db.prepare('SELECT id FROM outbox WHERE id = ?').get(id)).toBeUndefined()
+    } finally {
+      db.close()
+    }
+  })
+
+  it('does not mirror or retain an untouched reply or forward with the default signature', () => {
+    const db = openDatabase(':memory:')
+    try {
+      cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
+      for (const kind of ['reply', 'forward'] as const) {
+        const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, {
+          ...emptyDraftInput(),
+          kind,
+          to: kind === 'reply' ? [{ name: 'Maya', email: 'maya@example.com' }] : [],
+          subject: kind === 'reply' ? 'Re: Design notes' : 'Fwd: Design notes',
+          threadId: 'thread-1',
+          sourceMessageId: 'message-1',
+          quoteHtml: '<blockquote>Original</blockquote>',
+          quoteText: '> Original'
+        })
+        const id = saveDraft(db, ACCOUNT, prepared.draft, 10, prepared.defaultSignatureFingerprint)
+
+        cachePrimarySendAs(db, ACCOUNT, {
+          sendAsEmail: ACCOUNT,
+          signature: '<div>Changed</div>'
+        })
+        expect(requestDraftMirror(db, ACCOUNT, id)).toBe(false)
+        expect(closeDraft(db, ACCOUNT, id, 20)).toBe('discarded')
+      }
     } finally {
       db.close()
     }
