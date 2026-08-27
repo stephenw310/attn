@@ -1012,6 +1012,17 @@ draft creation reads only this local cache, so opening the composer stays local-
 signature enters the editor inside Gmail's structural signature wrapper and follows T14C's existing import,
 editing, sanitization, plain-text alternative, draft mirror, and send paths.
 
+Each local draft records a semantic fingerprint of the default signature inserted when that draft was
+created. Empty-draft classification compares against that immutable per-draft fingerprint, not the mutable
+account cache, so a Gmail signature change cannot expose, mirror, or retain an untouched older default.
+This additive schema v19 change is eligible for the manual local-upgrade procedure in `AGENTS.md` with the
+following task-specific DDL, applied with the version bump in one transaction:
+
+```sql
+ALTER TABLE outbox ADD COLUMN default_signature_fingerprint TEXT;
+PRAGMA user_version = 19;
+```
+
 Google documents the resource's signature as a new-mail default. The resource does not report the Gmail
 UI's separate reply or forward choice, so Attn does not add this signature to a reply or forward. Imported
 Gmail drafts still keep any signature already in their body. A new draft that contains only the cached

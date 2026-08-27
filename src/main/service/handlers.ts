@@ -76,7 +76,7 @@ import { addInlineImage, isSupportedInlineImageMimeType } from '../outbox/inline
 import type { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from '../outbox/queue'
 import { planReply } from '../outbox/replyPlan'
-import { applyCachedPrimarySignature } from '../outbox/sendAs'
+import { prepareDraftWithCachedPrimarySignature } from '../outbox/sendAs'
 import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
@@ -363,12 +363,14 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const account = requireAccount(context)
     const canonical = canonicalizeRendererDraft(context.db, account, draft)
     const prepared =
-      canonical.id === null ? applyCachedPrimarySignature(context.db, account, canonical) : canonical
+      canonical.id === null
+        ? prepareDraftWithCachedPrimarySignature(context.db, account, canonical)
+        : { draft: canonical, defaultSignatureFingerprint: null }
     const now = Date.now()
-    const id = saveDraft(context.db, account, prepared, now)
+    const id = saveDraft(context.db, account, prepared.draft, now, prepared.defaultSignatureFingerprint)
     return {
       id,
-      draft: prepared.id === null ? { ...prepared, id, createdAt: now, updatedAt: now } : null
+      draft: prepared.draft.id === null ? { ...prepared.draft, id, createdAt: now, updatedAt: now } : null
     }
   })
   handle(IPC_CHANNELS.draftGet, (_event, id) => {

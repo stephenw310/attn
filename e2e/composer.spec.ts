@@ -264,11 +264,14 @@ test('inserts the saved Gmail signature into new mail as editable content', asyn
   expect(saved?.text).toContain('Best,')
 })
 
-test('discards new mail that contains only the saved Gmail signature', async ({ app, page }) => {
+test('discards signature-only new mail after the saved Gmail signature changes', async ({ app, page }) => {
   await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
   await composer.openNew()
   await expect(composer.editor.getByTestId('composer-gmail-signature')).toBeVisible()
+  await expect.poll(() => page.evaluate(async () => (await window.attn.draft.list()).length)).toBe(0)
+
+  await setSendAsSignature(app, '<div>Regards,</div><div>Chao Wu</div>')
   await expect.poll(() => page.evaluate(async () => (await window.attn.draft.list()).length)).toBe(0)
 
   await page.keyboard.press('Escape')

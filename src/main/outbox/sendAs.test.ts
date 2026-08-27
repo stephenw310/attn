@@ -4,9 +4,9 @@ import { openDatabase } from '../db'
 import { readAccountSetting } from '../settings'
 import { closeDraft, listDrafts, requestDraftMirror, saveDraft } from './drafts'
 import {
-  applyCachedPrimarySignature,
   cachePrimarySendAs,
-  hasOnlyCachedPrimarySignature,
+  hasOnlyDefaultPrimarySignature,
+  prepareDraftWithCachedPrimarySignature,
   SEND_AS_DISPLAY_NAME_SETTING,
   syncPrimarySendAs
 } from './sendAs'
@@ -29,7 +29,7 @@ describe('primary Gmail send-as settings', () => {
 
       expect(getSendAs).toHaveBeenCalledWith(ACCOUNT, { priority: 'polling' })
       expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Chao Wu')
-      const draft = applyCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      const { draft } = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
       expect(draft.bodyHtml).toContain('class="gmail_signature"')
       expect(draft.bodyHtml).toContain('Best,')
       expect(draft.bodyHtml).toContain('color:#123456')
@@ -44,38 +44,40 @@ describe('primary Gmail send-as settings', () => {
     const db = openDatabase(':memory:')
     try {
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
-      expect(applyCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).bodyHtml).toContain('Best,')
+      expect(prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).draft.bodyHtml).toContain(
+        'Best,'
+      )
       expect(
-        applyCachedPrimarySignature(db, ACCOUNT, {
+        prepareDraftWithCachedPrimarySignature(db, ACCOUNT, {
           ...emptyDraftInput(),
           kind: 'reply'
-        }).bodyHtml
+        }).draft.bodyHtml
       ).toBe('')
       expect(
-        applyCachedPrimarySignature(db, ACCOUNT, {
+        prepareDraftWithCachedPrimarySignature(db, ACCOUNT, {
           ...emptyDraftInput(),
           bodyHtml: '<p>Existing</p>',
           bodyText: 'Existing'
-        }).bodyHtml
+        }).draft.bodyHtml
       ).toBe('<p>Existing</p>')
 
       cachePrimarySendAs(db, ACCOUNT, {
         sendAsEmail: ACCOUNT,
         signature: '<div class="gmail_signature">Nested marker</div>'
       })
-      const nested = applyCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
-      expect(hasOnlyCachedPrimarySignature(db, ACCOUNT, nested)).toBe(true)
+      const nested = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(hasOnlyDefaultPrimarySignature(nested.draft, nested.defaultSignatureFingerprint)).toBe(true)
 
       cachePrimarySendAs(db, ACCOUNT, {
         sendAsEmail: ACCOUNT,
         signature: '<ol><li>First</li><li>Second</li></ol>'
       })
-      const listed = applyCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      const listed = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
       expect(
-        hasOnlyCachedPrimarySignature(db, ACCOUNT, {
-          ...listed,
-          bodyText: '\n1. First\n2. Second'
-        })
+        hasOnlyDefaultPrimarySignature(
+          { ...listed.draft, bodyText: '\n1. First\n2. Second' },
+          listed.defaultSignatureFingerprint
+        )
       ).toBe(true)
     } finally {
       db.close()
@@ -89,44 +91,57 @@ describe('primary Gmail send-as settings', () => {
         sendAsEmail: ACCOUNT,
         signature: '<div style="color:#123456">Best,</div><div><a href="https://attn.test">Chao</a></div>'
       })
+      const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
       const normalized = {
         ...emptyDraftInput(),
         bodyHtml:
           '<p><br></p><div class="gmail_signature" data-smartmail="gmail_signature"><p><span style="color: rgb(18, 52, 86)">Best,</span></p><p><a href="https://attn.test">Chao</a></p></div>',
         bodyText: '\nBest,\nChao'
       }
-      expect(hasOnlyCachedPrimarySignature(db, ACCOUNT, normalized)).toBe(true)
+      expect(hasOnlyDefaultPrimarySignature(normalized, prepared.defaultSignatureFingerprint)).toBe(true)
       expect(
-        hasOnlyCachedPrimarySignature(db, ACCOUNT, {
-          ...normalized,
-          bodyHtml: normalized.bodyHtml.replace('https://attn.test', 'https://edited.test')
-        })
+        hasOnlyDefaultPrimarySignature(
+          {
+            ...normalized,
+            bodyHtml: normalized.bodyHtml.replace('https://attn.test', 'https://edited.test')
+          },
+          prepared.defaultSignatureFingerprint
+        )
       ).toBe(false)
       expect(
-        hasOnlyCachedPrimarySignature(db, ACCOUNT, {
-          ...normalized,
-          bodyHtml: normalized.bodyHtml.replace(
-            '<p><span style="color: rgb(18, 52, 86)">Best,</span></p>',
-            '<ul><li><span style="color: rgb(18, 52, 86)">Best,</span></li></ul>'
-          ),
-          bodyText: '\n- Best,\nChao'
-        })
+        hasOnlyDefaultPrimarySignature(
+          {
+            ...normalized,
+            bodyHtml: normalized.bodyHtml.replace(
+              '<p><span style="color: rgb(18, 52, 86)">Best,</span></p>',
+              '<ul><li><span style="color: rgb(18, 52, 86)">Best,</span></li></ul>'
+            ),
+            bodyText: '\n- Best,\nChao'
+          },
+          prepared.defaultSignatureFingerprint
+        )
       ).toBe(false)
       expect(
-        hasOnlyCachedPrimarySignature(db, ACCOUNT, {
-          ...normalized,
-          bodyHtml: `<p>Authored</p>${normalized.bodyHtml}`,
-          bodyText: `Authored\n${normalized.bodyText}`
-        })
+        hasOnlyDefaultPrimarySignature(
+          {
+            ...normalized,
+            bodyHtml: `<p>Authored</p>${normalized.bodyHtml}`,
+            bodyText: `Authored\n${normalized.bodyText}`
+          },
+          prepared.defaultSignatureFingerprint
+        )
       ).toBe(false)
       expect(
-        hasOnlyCachedPrimarySignature(db, ACCOUNT, {
-          ...normalized,
-          bodyHtml: normalized.bodyHtml.replace(
-            '<span style="color: rgb(18, 52, 86)">Best,</span>',
-            '<strong><span style="color: rgb(18, 52, 86)">Best,</span></strong>'
-          )
-        })
+        hasOnlyDefaultPrimarySignature(
+          {
+            ...normalized,
+            bodyHtml: normalized.bodyHtml.replace(
+              '<span style="color: rgb(18, 52, 86)">Best,</span>',
+              '<strong><span style="color: rgb(18, 52, 86)">Best,</span></strong>'
+            )
+          },
+          prepared.defaultSignatureFingerprint
+        )
       ).toBe(false)
     } finally {
       db.close()
@@ -138,7 +153,7 @@ describe('primary Gmail send-as settings', () => {
     try {
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Old</div>' })
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '' })
-      expect(applyCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).bodyHtml).toBe('')
+      expect(prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).draft.bodyHtml).toBe('')
     } finally {
       db.close()
     }
@@ -148,8 +163,10 @@ describe('primary Gmail send-as settings', () => {
     const db = openDatabase(':memory:')
     try {
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
-      const input = applyCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
-      const id = saveDraft(db, ACCOUNT, input, 10)
+      const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      const id = saveDraft(db, ACCOUNT, prepared.draft, 10, prepared.defaultSignatureFingerprint)
+
+      cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Changed</div>' })
 
       expect(listDrafts(db, ACCOUNT)).toEqual([])
       expect(requestDraftMirror(db, ACCOUNT, id)).toBe(false)

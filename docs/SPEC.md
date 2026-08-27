@@ -302,7 +302,9 @@ footer is absent and the composer owns its action footer, so editing controls ca
   inserts it as editable content when a new-message draft opens. The cache refreshes at sync start and once
   per poll cycle, so compose never waits on the network and the last fetched signature remains available
   offline. A new composer that still contains only this default is empty: closing it discards the row and
-  the draft mirror skips it. Gmail exposes this field as a new-mail default only. Attn does not invent a
+  the draft mirror skips it. That decision uses the default applied to that draft rather than the latest
+  account cache, so changing the Gmail setting while a composer is open does not turn its old default into
+  authored content. Gmail exposes this field as a new-mail default only. Attn does not invent a
   reply or forward default that the API does not report. A signature already present in an imported Gmail
   draft remains editable and round-trips with that draft.
 - **Recipient autocomplete** ranked by interaction frequency + recency, built locally from synced sent mail. First suggestion accepted with `Tab`/`Enter`.

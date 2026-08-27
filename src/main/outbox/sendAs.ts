@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { DraftSaveInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import { textFromRaw } from '../gmail/parse'
@@ -13,6 +14,11 @@ export const SEND_AS_SIGNATURE_TEXT_SETTING = 'sendAsSignatureText'
 export interface DraftSignature {
   bodyHtml: string
   bodyText: string
+}
+
+export interface PreparedPrimarySignatureDraft {
+  draft: DraftSaveInput
+  defaultSignatureFingerprint: string | null
 }
 
 function signatureBody(rawHtml: string): DraftSignature {
@@ -66,14 +72,20 @@ export function cachedPrimarySignature(db: Db, accountId: string): DraftSignatur
 }
 
 /** Gmail exposes its saved signature as a new-mail default, not a reply/forward default. */
-export function applyCachedPrimarySignature(
+export function prepareDraftWithCachedPrimarySignature(
   db: Db,
   accountId: string,
   draft: DraftSaveInput
-): DraftSaveInput {
-  if (draft.kind !== 'new' || draft.bodyHtml.trim() || draft.bodyText.trim()) return draft
+): PreparedPrimarySignatureDraft {
+  if (draft.kind !== 'new' || draft.bodyHtml.trim() || draft.bodyText.trim()) {
+    return { draft, defaultSignatureFingerprint: null }
+  }
   const signature = cachedPrimarySignature(db, accountId)
-  return signature ? { ...draft, bodyHtml: signature.bodyHtml, bodyText: signature.bodyText } : draft
+  if (!signature) return { draft, defaultSignatureFingerprint: null }
+  return {
+    draft: { ...draft, bodyHtml: signature.bodyHtml, bodyText: signature.bodyText },
+    defaultSignatureFingerprint: signatureFingerprint(signature.bodyHtml)
+  }
 }
 
 interface SignatureSemantics {
@@ -200,6 +212,16 @@ function semantics(element: Element): SignatureSemantics {
   }
 }
 
+function signatureFingerprint(bodyHtml: string): string | null {
+  const { JSDOM } = require('jsdom') as typeof import('jsdom')
+  const document = new JSDOM(bodyHtml).window.document
+  const signature = signatureElement(document.body)
+  if (!signature) return null
+  return createHash('sha256')
+    .update(JSON.stringify(semantics(signature)))
+    .digest('hex')
+}
+
 function signatureElement(root: ParentNode): Element | null {
   return root.querySelector('.gmail_signature, [data-smartmail="gmail_signature"]')
 }
@@ -213,27 +235,28 @@ function hasContentOutsideSignature(document: Document): boolean {
 }
 
 /**
- * Treat the untouched default as empty composer state without relying on Lexical's HTML serialization.
- * Visible text, formatting, link targets, and images must still match, so editing the signature turns it
- * into authored content. HTML is authoritative because Lexical's plain-text list markers differ from the
- * text fallback derived from Gmail's HTML.
+ * Treat the untouched default as empty composer state without relying on Lexical's HTML serialization or
+ * the mutable account cache. The fingerprint belongs to the signature inserted into this draft, so a
+ * later Gmail settings refresh cannot reclassify it. Visible text, formatting, link targets, and images
+ * must still match, so editing the signature turns it into authored content. HTML is authoritative because
+ * Lexical's plain-text list markers differ from the text fallback derived from Gmail's HTML.
  */
-export function hasOnlyCachedPrimarySignature(
-  db: Db,
-  accountId: string,
-  draft: Pick<DraftSaveInput, 'kind' | 'bodyHtml' | 'bodyText'>
+export function hasOnlyDefaultPrimarySignature(
+  draft: Pick<DraftSaveInput, 'kind' | 'bodyHtml' | 'bodyText'>,
+  defaultSignatureFingerprint: string | null | undefined
 ): boolean {
   if (draft.kind !== 'new') return false
   if (!draft.bodyHtml.includes('gmail_signature')) return false
-  const cached = cachedPrimarySignature(db, accountId)
-  if (!cached) return false
+  if (!defaultSignatureFingerprint) return false
   const { JSDOM } = require('jsdom') as typeof import('jsdom')
   const currentDocument = new JSDOM(draft.bodyHtml).window.document
-  const cachedDocument = new JSDOM(cached.bodyHtml).window.document
   const currentSignature = signatureElement(currentDocument.body)
-  const expectedSignature = signatureElement(cachedDocument.body)
-  if (!currentSignature || !expectedSignature || hasContentOutsideSignature(currentDocument)) {
+  if (!currentSignature || hasContentOutsideSignature(currentDocument)) {
     return false
   }
-  return JSON.stringify(semantics(currentSignature)) === JSON.stringify(semantics(expectedSignature))
+  return (
+    createHash('sha256')
+      .update(JSON.stringify(semantics(currentSignature)))
+      .digest('hex') === defaultSignatureFingerprint
+  )
 }
