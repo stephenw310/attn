@@ -1,4 +1,5 @@
 import type { Draft } from '../../shared/drafts'
+import type { ThreadRow } from '../../shared/mail'
 import {
   type ParsedSearchQuery,
   parseSearchQuery,
@@ -26,6 +27,22 @@ interface SearchThreadRow {
   returned: number
   has_draft: number
   label_ids: string
+}
+
+function toThreadRow(row: SearchThreadRow): ThreadRow {
+  return {
+    id: row.id,
+    fromDisplay: row.from_display ?? '',
+    subject: row.subject ?? '(no subject)',
+    snippet: row.snippet ?? '',
+    lastMsgAt: row.last_msg_at ?? 0,
+    unread: row.is_unread === 1,
+    starred: row.is_starred === 1,
+    hasAttachment: row.has_attachment === 1,
+    returned: row.returned === 1,
+    hasDraft: row.has_draft === 1,
+    labelIds: labelIds(row.label_ids)
+  }
 }
 
 function systemMailboxName(value: string): string {
@@ -186,6 +203,14 @@ function draftLocationOnly(parsed: ParsedSearchQuery): boolean {
   )
 }
 
+function searchesDrafts(parsed: ParsedSearchQuery): boolean {
+  return parsed.filters.some((filter) => {
+    if (filter.kind !== 'in') return false
+    const mailbox = systemMailboxName(filter.value)
+    return mailbox === 'draft' || mailbox === 'drafts'
+  })
+}
+
 function draftText(draft: Draft, field: SearchTextTerm['field'], accountId: string): string {
   const recipients = [...draft.to, ...draft.cc, ...draft.bcc]
     .flatMap((address) => [address.name, address.email])
@@ -273,6 +298,73 @@ function threadProjectionSql(junkLabel: 'SPAM' | 'TRASH' | null): string {
           ) AS has_attachment`
 }
 
+/** Project provider-ordered thread ids into the same row shape as local search. */
+export function searchRowsByThreadIds(
+  db: Db,
+  accountId: string,
+  threadIds: readonly string[],
+  query: string
+): ThreadRow[] {
+  const orderedIds = [...new Set(threadIds)].slice(0, SEARCH_RESULT_LIMIT)
+  if (orderedIds.length === 0) return []
+  const requested = orderedIds.map(() => '(?, ?)').join(', ')
+  const requestedValues = orderedIds.flatMap((id, position) => [id, position])
+  const projection = threadProjectionSql(junkProjection(parseSearchQuery(query)))
+  const rows = db
+    .prepare(
+      `WITH requested(id, position) AS (VALUES ${requested})
+       SELECT t.id, ${projection},
+              EXISTS (
+                SELECT 1 FROM reminders returned_reminder
+                WHERE returned_reminder.account_id = t.account_id
+                  AND returned_reminder.thread_id = t.id
+                  AND returned_reminder.kind = 'snooze' AND returned_reminder.state = 'returned'
+              ) AS returned,
+              EXISTS (
+                SELECT 1 FROM outbox draft
+                WHERE draft.account_id = t.account_id AND draft.thread_id = t.id
+                  AND draft.state IN ('composing', 'drafted')
+              ) AS has_draft,
+              COALESCE((
+                SELECT GROUP_CONCAT(labels.label_id, char(31))
+                FROM thread_labels labels
+                WHERE labels.account_id = t.account_id AND labels.thread_id = t.id
+              ), '') AS label_ids
+       FROM requested
+       JOIN threads t ON t.account_id = ? AND t.id = requested.id
+       ORDER BY requested.position`
+    )
+    .all(...requestedValues, accountId) as SearchThreadRow[]
+  return rows.map(toThreadRow)
+}
+
+/** Return only requested ids that the current local index already matches. */
+export function matchingStoredThreadIds(
+  db: Db,
+  accountId: string,
+  query: string,
+  threadIds: readonly string[]
+): Set<string> {
+  const requestedIds = [...new Set(threadIds)].slice(0, SEARCH_RESULT_LIMIT)
+  if (requestedIds.length === 0) return new Set()
+  const parsed = parseSearchQuery(query)
+  const match = searchMatchExpression(parsed)
+  if ((!match && parsed.filters.length === 0) || searchesDrafts(parsed)) return new Set()
+
+  const values: unknown[] = []
+  const candidates = candidateSql(parsed, match, accountId, values)
+  const requested = requestedIds.map(() => '(?)').join(', ')
+  const rows = db
+    .prepare(
+      `WITH search_candidates AS (${candidates}), requested(id) AS (VALUES ${requested})
+       SELECT candidates.thread_id AS id
+       FROM search_candidates candidates
+       JOIN requested ON requested.id = candidates.thread_id`
+    )
+    .all(...values, ...requestedIds) as Array<{ id: string }>
+  return new Set(rows.map((row) => row.id))
+}
+
 /** Run local thread and Drafts search over their authoritative stores. */
 export function searchThreads(
   db: Db,
@@ -286,12 +378,7 @@ export function searchThreads(
   const resultLimit = Math.max(1, Math.min(Math.trunc(limit), SEARCH_RESULT_LIMIT))
   if (!query.trim() || (!match && parsed.filters.length === 0)) return { rows: [], drafts: [], coverage }
 
-  const searchesDrafts = parsed.filters.some((filter) => {
-    if (filter.kind !== 'in') return false
-    const mailbox = systemMailboxName(filter.value)
-    return mailbox === 'draft' || mailbox === 'drafts'
-  })
-  if (searchesDrafts) {
+  if (searchesDrafts(parsed)) {
     return { rows: [], drafts: searchDraftRows(db, accountId, parsed, resultLimit), coverage }
   }
 
@@ -328,19 +415,7 @@ export function searchThreads(
     .all(...values) as SearchThreadRow[]
 
   return {
-    rows: rows.map((row) => ({
-      id: row.id,
-      fromDisplay: row.from_display ?? '',
-      subject: row.subject ?? '(no subject)',
-      snippet: row.snippet ?? '',
-      lastMsgAt: row.last_msg_at ?? 0,
-      unread: row.is_unread === 1,
-      starred: row.is_starred === 1,
-      hasAttachment: row.has_attachment === 1,
-      returned: row.returned === 1,
-      hasDraft: row.has_draft === 1,
-      labelIds: labelIds(row.label_ids)
-    })),
+    rows: rows.map(toThreadRow),
     drafts: [],
     coverage
   }

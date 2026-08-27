@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
+import type { fetchAndCacheThread } from './fetchThread'
 import {
   BACKGROUND_POLL_MS,
   type FetchedHistoryPlan,
@@ -55,6 +56,17 @@ function checkpointDb(lastHistoryId = '10'): { db: Db; checkpoint: () => string 
     })
   } as unknown as Db
   return { db, checkpoint: () => checkpoint }
+}
+
+function providerFetch(): typeof fetchAndCacheThread {
+  return vi.fn(async (_db, _accountId, provider, threadId, options = {}) => ({
+    thread: await provider.getThread(threadId, {
+      ...(options.format ? { format: options.format } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.priority ? { priority: options.priority } : {})
+    }),
+    persisted: true
+  }))
 }
 
 function pollerOptions(overrides: Partial<HistoryPollerOptions> = {}): HistoryPollerOptions {
@@ -126,12 +138,21 @@ describe('stateful history application', () => {
     vi.mocked(provider.getThread)
       .mockResolvedValueOnce({ id: 'keep', messages: [] })
       .mockRejectedValueOnce(new GmailApiError(404, 'gone'))
-    const persist = vi.fn(async () => {})
+    const fetchThread = providerFetch()
+    const hydrate = vi.fn(async () => {})
     const remove = vi.fn()
 
-    await runHistoryCycle(db, 'test@example.com', provider, { persist, remove })
+    await runHistoryCycle(db, 'test@example.com', provider, { fetchThread, hydrate, remove })
 
-    expect(persist).toHaveBeenCalledWith({ id: 'keep', messages: [] })
+    expect(fetchThread).toHaveBeenCalledTimes(2)
+    expect(hydrate).toHaveBeenCalledWith(
+      db,
+      provider,
+      'test@example.com',
+      { id: 'keep', messages: [] },
+      undefined,
+      { priority: 'polling' }
+    )
     expect(remove).toHaveBeenCalledWith('gone')
     expect(checkpoint()).toBe('11')
   })
@@ -242,11 +263,11 @@ describe('stateful history application', () => {
     vi.mocked(provider.getThread)
       .mockResolvedValueOnce({ id: 'relabeled', messages: [] })
       .mockRejectedValueOnce(new GmailApiError(404, 'gone'))
-    const persist = vi.fn(async () => {})
+    const fetchThread = providerFetch()
     const remove = vi.fn()
 
     await reconcilePurgeableMembership(db, 'test@example.com', provider, 'TRASH', ['listed'], {
-      persist,
+      fetchThread,
       remove
     })
 
@@ -257,7 +278,11 @@ describe('stateful history application', () => {
       format: 'metadata',
       priority: 'background'
     })
-    expect(persist).toHaveBeenCalledWith({ id: 'relabeled', messages: [] })
+    expect(fetchThread).toHaveBeenNthCalledWith(1, db, 'test@example.com', provider, 'relabeled', {
+      format: 'metadata',
+      priority: 'background',
+      persistOptions: { metadataOnly: true }
+    })
     expect(remove).toHaveBeenCalledWith('purged')
   })
 })

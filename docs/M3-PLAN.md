@@ -25,7 +25,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T22 mailbox navigation (F3) | **done**, completed 2026-08-23 | nothing; T27 and T24's `in:` operator are unblocked |
 | T23 FTS5 index (F10) | **done**, completed 2026-08-23 | nothing; T24 and T25 are unblocked |
 | T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
-| T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
+| T25 on-demand fetch and server search (F10) | **done**, completed 2026-08-25 | nothing |
 | T26 palette and registry completeness (F5) | **done**, completed 2026-08-25 | nothing |
 | T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
@@ -402,9 +402,9 @@ touches `persist.ts` and the schema, not the renderer, so the two tracks do not 
 1. **F3 registers palette commands, T26 builds the palette.** F3's acceptance criteria say every mailbox is
    reachable by palette and keyboard, and no palette exists today (`commands.ts` is a registry whose own
    comment calls the palette "future"). Blocking F3 on the palette would invert the dependency for no gain,
-   so T22 through T24 register their entries in `COMMAND_SPECS` and T26 builds the palette and asserts the
-   inventory. T25 extends the existing `search.open` flow, so its server result row needs no second command.
-   `AGENTS.md` already phrases the rule this way.
+   so T22 through T25 register their entries in `COMMAND_SPECS` and T26 builds the palette and asserts the
+   inventory. T25 registers `search.allGmail` because submitting the current query to Gmail is a separate
+   action from opening local search. `AGENTS.md` already phrases the rule this way.
 2. **Search targets §7's stated budget, and measures for the unanswered one.** The gate is p95 under 100 ms
    at 50,000 messages. The pathological-mailbox question below is still open, so T23 records measured index
    size and query latency at 50k and at the largest profile available, and those numbers answer the question
@@ -694,7 +694,7 @@ remains strictly below 100 ms.
 
 ## T25 — On-demand thread fetch and "Search all of Gmail"
 
-**Status: not started.**
+**Status: done, completed 2026-08-25.**
 
 **Depends on:** T24 · **Spec:** F10
 
@@ -710,23 +710,35 @@ future "open this id" path all want it.
   format, persists it through `persistThread`, and returns the stored thread. Foreground priority, through
   the quota limiter, honoring the same auth-pause behavior as every other provider call. Recovery paths in
   `poller.ts` already do a version of this; factor them onto the new function rather than leaving two.
-- **Server search reuses the parsed query.** Translate the parsed structure into Gmail `q=` syntax, run it,
-  and merge ids under a divider below the local results. A thread present locally keeps its local row. Threads
-  the server returns are persisted through the normal write path and stay cached, which F10 requires.
-- **Failure is visible.** Offline disables the row and says why. A quota wait shows as a wait, not as an empty
-  result. An auth pause routes into the existing reconnect surface.
+- **Server search reuses the parsed query.** Local results update while the user types. Enter submits the
+  current query to Gmail once and moves focus to the results. The app translates the parsed structure into
+  Gmail `q=` syntax and merges ids under a divider below the local results. A passive row reports pending,
+  offline, auth, quota-wait, and completion states. A thread present locally keeps its local row. Threads the
+  server returns are persisted through the normal write path and stay cached, which F10 requires.
+- **Failure is visible.** The passive row says why Gmail search is unavailable offline. A quota wait shows as
+  a wait, not as an empty result. An auth pause routes into the existing reconnect surface.
 
 ### Testing
 
 - **Unit:** query translation to Gmail syntax; merge and dedupe ordering; the fetch primitive against a mock
   provider, including a 404 and a transient error, asserting one persisted thread and no duplicate rows.
-- **E2e (seeded):** the seeded provider serves one thread absent from the local store; invoking the row
-  persists it, opens it, and it survives `boot.relaunch()`.
+- **E2e (seeded):** the seeded provider serves one thread absent from the local store. Enter submits the
+  query, persists the thread, and opens it. The thread survives `boot.relaunch()`.
 
 ### Done when
 
 An arbitrary thread id can be fetched and cached by one code path, server results merge without duplicates,
 and verify is green.
+
+### Shipped
+
+One foreground fetch-and-cache path now serves history recovery, inline-image repair, and Gmail search. Local
+results update while the user types. Enter submits one eligible query to Gmail and moves focus to the results.
+The passive server row reports progress while fetched full-thread results appear below a `More from Gmail`
+divider and stay cached. Draft and local snooze searches omit the row because Gmail cannot reproduce their
+Attn-owned state. Offline, quota wait, retry, and expired-auth states remain visible. Unit coverage pins
+translation, ordering, deduplication, persistence, and failures. The seeded Electron test opens a server-only
+result and proves that it becomes a local result after relaunch.
 
 ---
 
@@ -781,8 +793,9 @@ its expansion state, while `O` toggles it. The complete command inventory stays 
 `commands.test.ts`.
 
 The built 10,000-thread Electron profile measured palette open at 1 ms p95 and re-ranking below 1 ms p95.
-Seeded Electron coverage dispatches commands from list, reader, and composer contexts, checks every `G`
-chord entry, persists usage across relaunch, and exercises the reader keys.
+Seeded Electron coverage dispatches commands from list, reader, composer, and local-search contexts, checks
+every `G` chord entry, persists usage across relaunch, and exercises the reader keys. The T25 integration
+coverage dispatches `search.allGmail` through the palette and keeps it out of an active composer.
 
 ---
 
@@ -959,9 +972,8 @@ one; that is not the start of F15.
 **Decided 2026-08-22:** the utility process owns SQLite (SPEC §9 #19), and S2 landed before S1. S1's design
 constraints carry the consequences.
 
-**Decided by shipping T22 and T26 (2026-08-25):** F3 registered its five `view.*` commands in
-`COMMAND_SPECS`, and T26 shipped the palette and its inventory assertion. T25 remains part of the existing
-`search.open` flow and needs no separate server-search command.
+**Decided by shipping T22, T25, and T26 (2026-08-25):** F3 registered its five `view.*` commands,
+T25 registered `search.allGmail`, and T26 shipped the palette and its inventory assertion.
 
 | Question | Why it matters | Decide by |
 |---|---|---|

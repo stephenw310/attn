@@ -39,6 +39,7 @@ describe('command palette ranking', () => {
       createCommand('conversation.close', vi.fn()),
       createCommand('composer.send', vi.fn()),
       createCommand('search.open', vi.fn()),
+      createCommand('search.allGmail', vi.fn()),
       createCommand('search.clear', vi.fn()),
       createCommand('view.inbox', vi.fn()),
       createCommand('composer.new', vi.fn()),
@@ -48,6 +49,7 @@ describe('command palette ranking', () => {
     expect(rankCommands(commands, 'list', '', {}).map((result) => result.command.id)).toEqual([
       'conversation.open',
       'search.open',
+      'search.allGmail',
       'search.clear',
       'view.inbox',
       'composer.new',
@@ -56,6 +58,7 @@ describe('command palette ranking', () => {
     expect(rankCommands(commands, 'reader', '', {}).map((result) => result.command.id)).toEqual([
       'conversation.close',
       'search.open',
+      'search.allGmail',
       'search.clear',
       'view.inbox',
       'composer.new',

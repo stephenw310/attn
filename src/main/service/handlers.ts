@@ -83,8 +83,9 @@ import type { SnoozeScheduler } from '../scheduler'
 import { readAccountSetting, readSetting, writeAccountSetting, writeSetting } from '../settings'
 import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
+import { fetchAndCacheThread } from '../sync/fetchThread'
 import { OnDemandBodyHydrator } from '../sync/onDemandBodies'
-import { persistThread } from '../sync/persist'
+import { type ServerSearchProvider, searchAllGmail, serverSearchFailure } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
 
 /**
@@ -106,13 +107,14 @@ export interface ServiceHandlerContext {
   currentAccountId: () => string | null
   makeClient: () => GmailClient | null
   makeProvider: () => GmailMailProvider | null
+  makeServerSearchProvider: () => ServerSearchProvider | null
   isSeeded: () => boolean
   executor: () => ActionExecutor | null
   draftMirrorExecutor: () => DraftMirrorExecutor | null
   outboxSender: () => OutboxSender | null
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
-  broadcastMailChanged: () => void
+  broadcastMailChanged: (serverSearchRequestId?: string) => void
   broadcastOutboxChanged: (change: import('../../shared/outbox').OutboxChanged) => void
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
   trackForegroundProviderWork: <T>(accountId: string, work: () => Promise<T>) => Promise<T>
@@ -315,6 +317,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     registered.set(channel, handler as Handler<InvokeChannel>)
   }
   const attemptedInlineImageRepairs = new Set<string>()
+  const activeServerSearches = new Map<string, AbortController>()
   const bodyHydrator = new OnDemandBodyHydrator(
     context.db,
     context.currentAccountId,
@@ -630,6 +633,47 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     }
     return searchThreads(context.db, account, query.slice(0, 1_000))
   })
+  handle(IPC_CHANNELS.mailSearchAll, async (_event, requestId, query) => {
+    const account = context.currentAccountId()
+    const boundedQuery = typeof query === 'string' ? query.trim().slice(0, 1_000) : ''
+    if (!account || !nonEmptyString(requestId) || requestId.length > 128 || !boundedQuery) {
+      return { status: 'error', message: 'Enter a search before searching Gmail' }
+    }
+    const provider = context.makeServerSearchProvider()
+    if (!provider) {
+      return { status: 'auth-required', message: 'Reconnect Google to search Gmail' }
+    }
+    const controller = new AbortController()
+    activeServerSearches.get(requestId)?.abort()
+    activeServerSearches.set(requestId, controller)
+    let storeChanged = false
+    try {
+      const result = await context.trackForegroundProviderWork(account, () =>
+        searchAllGmail(context.db, account, provider, boundedQuery, {
+          shouldContinue: () => context.currentAccountId() === account,
+          signal: controller.signal,
+          onStoreChanged: () => {
+            storeChanged = true
+          }
+        })
+      )
+      return { status: 'ok', ...result }
+    } catch (error) {
+      if (controller.signal.aborted) return { status: 'ok', rows: [], quotaWaitMs: 0 }
+      return serverSearchFailure(error)
+    } finally {
+      if (storeChanged && context.currentAccountId() === account) {
+        context.broadcastMailChanged(requestId)
+      }
+      if (activeServerSearches.get(requestId) === controller) activeServerSearches.delete(requestId)
+    }
+  })
+  handle(IPC_CHANNELS.mailCancelSearchAll, (_event, requestId) => {
+    if (nonEmptyString(requestId) && requestId.length <= 128) {
+      activeServerSearches.get(requestId)?.abort()
+    }
+    return undefined
+  })
   handle(IPC_CHANNELS.mailPeekActionsReverted, (_event, accountId) => {
     const account = context.currentAccountId()
     return typeof accountId === 'string' && accountId === account
@@ -740,9 +784,18 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     attemptedInlineImageRepairs.add(repairKey)
     try {
       return await context.trackForegroundProviderWork(accountId, async () => {
-        const thread = await provider.getThread(request.threadId, { format: 'full' })
+        const { thread, persisted } = await fetchAndCacheThread(
+          context.db,
+          accountId,
+          provider,
+          request.threadId,
+          {
+            format: 'full',
+            shouldPersist: () => context.currentAccountId() === accountId
+          }
+        )
         if (context.currentAccountId() !== accountId) return false
-        persistThread(context.db, accountId, thread)
+        if (!persisted) return false
         await hydrateMissingThreadBodies(context.db, provider, accountId, thread)
         if (context.currentAccountId() === accountId) context.broadcastMailChanged()
         return true
@@ -819,7 +872,11 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       if (!handler) throw new Error(`unsupported utility operation: ${channel}`)
       return (await handler(undefined, ...args)) as InvokeChannels[K]['result']
     },
-    stop: () => bodyHydrator.stop()
+    stop: () => {
+      for (const controller of activeServerSearches.values()) controller.abort()
+      activeServerSearches.clear()
+      bodyHydrator.stop()
+    }
   }
 }
 

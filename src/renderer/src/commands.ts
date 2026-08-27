@@ -49,6 +49,7 @@ export const COMMAND_SPECS = {
     shortcut: 'Backspace',
     context: 'list'
   },
+  'search.allGmail': { title: 'Search all of Gmail', context: 'global' },
   'search.clear': { title: 'Clear search', context: 'global' },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {

@@ -59,6 +59,7 @@ describe('command catalog', () => {
       'sync.error.copy',
       'search.open',
       'search.focusQuery',
+      'search.allGmail',
       'search.clear',
       'theme.system',
       'theme.dispatch-dark',

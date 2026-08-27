@@ -133,10 +133,12 @@ interface ThreadListProps {
   onLoadMore?: () => void
   onOpenLabel: (labelId: string) => void
   onOpen: (index: number) => void
+  sectionDivider?: { beforeIndex: number; label: string }
 }
 
 const VIRTUAL_ROW_HEIGHT = 46
 const VIRTUAL_GROUP_HEIGHT = 44
+const VIRTUAL_SECTION_DIVIDER_HEIGHT = 34
 const VIRTUAL_OVERSCAN_PX = VIRTUAL_ROW_HEIGHT * 12
 const NOOP = (): void => {}
 
@@ -147,14 +149,21 @@ interface VirtualThreadEntry {
   group: ReturnType<typeof dateGroup>
   groupKey: string
   showGroup: boolean
+  dividerHeight: number
 }
 
-function virtualLayout(threads: readonly DisplayThread[], view: ThreadListKind): VirtualThreadEntry[] {
+function virtualLayout(
+  threads: readonly DisplayThread[],
+  view: ThreadListKind,
+  dividerBeforeIndex?: number
+): VirtualThreadEntry[] {
   let top = 0
   let previousGroup: ReturnType<typeof dateGroup> | undefined
   let activeGroupKey = ''
   const groupOccurrences = new Map<ReturnType<typeof dateGroup>, number>()
   return threads.map((thread, index) => {
+    const dividerHeight = index === dividerBeforeIndex ? VIRTUAL_SECTION_DIVIDER_HEIGHT : 0
+    if (dividerHeight > 0) previousGroup = undefined
     const group = dateGroup(thread)
     // Snoozed sorts by due time, so relative-date groups would mislead there.
     const showGroup = view !== 'snoozed' && group !== previousGroup
@@ -163,8 +172,8 @@ function virtualLayout(threads: readonly DisplayThread[], view: ThreadListKind):
       activeGroupKey = `${group}\0${occurrence}`
       groupOccurrences.set(group, occurrence + 1)
     }
-    const height = VIRTUAL_ROW_HEIGHT + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
-    const entry = { index, top, height, group, groupKey: activeGroupKey, showGroup }
+    const height = VIRTUAL_ROW_HEIGHT + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0) + dividerHeight
+    const entry = { index, top, height, group, groupKey: activeGroupKey, showGroup, dividerHeight }
     top += height
     previousGroup = group
     return entry
@@ -214,7 +223,8 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     onExtendSelection,
     onLoadMore = NOOP,
     onOpenLabel,
-    onOpen
+    onOpen,
+    sectionDivider
   } = props
   const virtualContentRef = useRef<HTMLDivElement | null>(null)
   const frameRef = useRef<number | null>(null)
@@ -222,19 +232,39 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
   const followedSelectionRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(800)
-  const layout = useMemo(() => virtualLayout(threads, view), [threads, view])
+  const dividerBeforeIndex =
+    sectionDivider && sectionDivider.beforeIndex >= 0 && sectionDivider.beforeIndex < threads.length
+      ? sectionDivider.beforeIndex
+      : undefined
+  const layout = useMemo(
+    () => virtualLayout(threads, view, dividerBeforeIndex),
+    [dividerBeforeIndex, threads, view]
+  )
   const projected = useMemo(() => {
     if (exitingThreadIds.size === 0) return null
     const survivingThreads = threads.filter((thread) => !exitingThreadIds.has(thread.id))
-    const projectedLayout = virtualLayout(survivingThreads, view)
+    const projectedRowsBeforeDivider =
+      dividerBeforeIndex === undefined
+        ? undefined
+        : threads.slice(0, dividerBeforeIndex).filter((thread) => !exitingThreadIds.has(thread.id)).length
+    const projectedDividerBeforeIndex =
+      projectedRowsBeforeDivider !== undefined && projectedRowsBeforeDivider < survivingThreads.length
+        ? projectedRowsBeforeDivider
+        : undefined
+    const projectedLayout = virtualLayout(survivingThreads, view, projectedDividerBeforeIndex)
     const byThreadId = new Map<string, VirtualThreadEntry>()
     for (const entry of projectedLayout) byThreadId.set(survivingThreads[entry.index].id, entry)
-    return { threads: survivingThreads, layout: projectedLayout, byThreadId }
-  }, [exitingThreadIds, threads, view])
+    return {
+      threads: survivingThreads,
+      layout: projectedLayout,
+      byThreadId,
+      dividerBeforeIndex: projectedDividerBeforeIndex
+    }
+  }, [dividerBeforeIndex, exitingThreadIds, threads, view])
   const projectedGroupTops = useMemo(() => {
     const tops = new Map<string, number>()
     for (const entry of projected?.layout ?? []) {
-      if (entry.showGroup) tops.set(entry.groupKey, entry.top)
+      if (entry.showGroup) tops.set(entry.groupKey, entry.top + entry.dividerHeight)
     }
     return tops
   }, [projected])
@@ -331,9 +361,11 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     const done = view === 'allMail' && !thread.labelIds.includes('INBOX')
     const exiting = exitingThreadIds.has(thread.id)
     const projectedEntry = projected?.byThreadId.get(thread.id)
-    const currentRowTop = entry.top + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
+    const currentRowTop = entry.top + entry.dividerHeight + (showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
     const projectedRowTop = projectedEntry
-      ? projectedEntry.top + (projectedEntry.showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
+      ? projectedEntry.top +
+        projectedEntry.dividerHeight +
+        (projectedEntry.showGroup ? VIRTUAL_GROUP_HEIGHT : 0)
       : undefined
     const row = (
       // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is global
@@ -428,7 +460,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           className={`absolute right-0 left-0 h-[44px] px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint ${
             projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''
           } ${groupRemoved ? 'app-thread-exit' : ''}`}
-          style={{ top: projectedGroupTop ?? entry.top }}
+          style={{ top: projectedGroupTop ?? entry.top + entry.dividerHeight }}
         >
           {group}
         </div>
@@ -491,6 +523,25 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         className={`relative ${projected ? 'app-thread-virtual-collapse' : ''}`}
         style={{ height: projectedVirtualHeight }}
       >
+        {dividerBeforeIndex !== undefined && sectionDivider && (
+          <div
+            data-testid="thread-section-divider"
+            data-section="gmail"
+            className={`absolute right-0 left-0 flex h-[34px] items-center gap-3 px-7 text-[11px] font-semibold tracking-wide text-ink-faint uppercase ${
+              projected?.dividerBeforeIndex !== undefined ? 'app-thread-position-shift' : ''
+            }`}
+            style={{
+              top:
+                projected?.dividerBeforeIndex === undefined
+                  ? layout[dividerBeforeIndex]?.top
+                  : projected.layout[projected.dividerBeforeIndex]?.top
+            }}
+          >
+            <span className="h-px flex-1 bg-edge" />
+            <span>{sectionDivider.label}</span>
+            <span className="h-px flex-1 bg-edge" />
+          </div>
+        )}
         {mountedEntries.flatMap(renderThread)}
       </div>
       {loadingMore && (

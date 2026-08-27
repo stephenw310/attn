@@ -44,6 +44,106 @@ test('searches locally as typed and restores the mailbox after reading a result'
   )
 })
 
+test('fetches a server-only result, opens it, and keeps it cached across relaunch', async ({
+  boot
+}, testInfo) => {
+  let page = await boot.app.firstWindow()
+  await page.getByTestId('search-open').click()
+  let input = page.getByTestId('search-input')
+  await input.fill('serveronlyneedle')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
+
+  const searchStatus = page.getByTestId('search-all-gmail')
+  await expect(searchStatus).toHaveText('Press Enter to search all of Gmail')
+  await expect(searchStatus).toHaveRole('status')
+  await input.press('Enter')
+  await expect(page.getByTestId('thread-section-divider')).toHaveText('More from Gmail')
+  await expect(searchStatus).toContainText('1 more conversation from Gmail')
+  const remote = page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  await expect(remote).toBeVisible()
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
+  await expect(page.getByTestId('thread-list')).toBeFocused()
+  await expect(page.getByTestId('search-coverage')).not.toContainText('Searching cached mail')
+  const serverSearchPath = join(artifactDirectory, 'server-search.png')
+  await page.screenshot({ path: serverSearchPath })
+  await testInfo.attach('server-search', { path: serverSearchPath, contentType: 'image/png' })
+  await expect(remote).toHaveAttribute('data-selected', 'true')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Remote archive result')
+
+  await page.keyboard.press('Escape')
+  await expect(remote).not.toHaveAttribute('data-unread', 'true')
+  await page.keyboard.press('Escape')
+  await expect(input).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('view-title')).toHaveText('Inbox')
+  await expect(
+    page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  ).toBeVisible()
+  await expect(page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })).toContainText('3')
+
+  ;({ page } = await boot.relaunch())
+  await page.getByTestId('search-open').click()
+  input = page.getByTestId('search-input')
+  await input.fill('serveronlyneedle')
+  await expect(
+    page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  ).toBeVisible()
+  await expect(page.getByTestId('thread-section-divider')).toHaveCount(0)
+  expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
+})
+
+test('submits Gmail search from the command palette', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  await page.getByTestId('search-input').fill('serveronlyneedle')
+  await page.keyboard.press('ControlOrMeta+K')
+  const paletteInput = page.getByTestId('command-palette-input')
+  await expect(paletteInput).toBeFocused()
+  await paletteInput.fill('Search all of Gmail')
+  await expect(page.locator('[data-command-id="search.allGmail"]')).toHaveCount(1)
+  await paletteInput.press('Enter')
+
+  await expect(page.getByTestId('command-palette')).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toBeFocused()
+  await expect(page.getByTestId('thread-section-divider')).toHaveText('More from Gmail')
+  await expect(
+    page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  ).toBeVisible()
+})
+
+test('hides the Gmail search command while a composer is active', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  await page.getByTestId('search-input').fill('serveronlyneedle')
+  await page.keyboard.press('ControlOrMeta+K')
+  let paletteInput = page.getByTestId('command-palette-input')
+  await paletteInput.fill('New message')
+  await paletteInput.press('Enter')
+
+  const composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await composer.editor.click()
+  await composer.typeBody('Keep this search draft')
+  await page.keyboard.press('ControlOrMeta+K')
+  paletteInput = page.getByTestId('command-palette-input')
+  await paletteInput.fill('Search all of Gmail')
+  await expect(page.locator('[data-command-id="search.allGmail"]')).toHaveCount(0)
+  await paletteInput.press('Escape')
+  await expect(composer.editor).toBeFocused()
+  await page.keyboard.type(' intact')
+  await expect(composer.editor).toContainText('Keep this search draft intact')
+})
+
+test('does not fabricate Gmail results for an unmatched seeded query', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('definitely-not-remote')
+  await input.press('Enter')
+
+  await expect(page.getByTestId('search-all-gmail')).toHaveText('No more matches in Gmail')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
+  await expect(page.getByTestId('thread-section-divider')).toHaveCount(0)
+})
+
 test('sorts text results newest first and keeps their date headers separated', async ({ page }) => {
   await page.getByTestId('search-open').click()
   const input = page.getByTestId('search-input')
@@ -72,7 +172,7 @@ test('enters result browsing and returns to the query with its text intact', asy
   await input.fill('visualsort')
   await expect(list).toHaveAttribute('data-thread-count', '3')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveCount(0)
-  await expect(page.getByTestId('footer-shortcut-search-browse')).toContainText('Enterbrowse results')
+  await expect(page.getByTestId('footer-shortcut-search-browse')).toContainText('Entersearch')
   await expect(page.getByTestId('footer-shortcut-navigate')).toHaveCount(0)
 
   const firstResult = page.locator('[data-testid="thread-row"][data-thread-id="t-search-origin"]')
@@ -204,6 +304,8 @@ test('updates bulk flags and Inbox exits optimistically in search results', asyn
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(2)
   await input.press('Enter')
+  const remote = page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  await expect(remote).toBeVisible()
 
   await page.keyboard.press('x')
   await page.keyboard.press('Shift+j')
@@ -213,7 +315,25 @@ test('updates bulk flags and Inbox exits optimistically in search results', asyn
 
   await page.keyboard.press('e')
   await expect(page.locator('[data-testid="thread-row"][data-exiting="true"]')).toHaveCount(1)
-  await expect(rows).toHaveCount(1)
+  await expect(rows).toHaveCount(2)
+  await expect(remote).toBeVisible()
+})
+
+test('removes a cached Gmail result after it stops matching the query', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('serveronlyneedle in:inbox')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
+
+  await input.press('Enter')
+  const remote = page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  await expect(remote).toBeVisible()
+  await expect(remote).toHaveAttribute('data-selected', 'true')
+
+  await page.keyboard.press('e')
+  await expect(remote).toHaveAttribute('data-exiting', 'true')
+  await expect(remote).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
 })
 
 test('restores the selected thread by id when the mailbox reorders during search', async ({ app, page }) => {

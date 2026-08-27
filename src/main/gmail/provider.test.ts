@@ -24,9 +24,16 @@ describe('GmailMailProvider.listThreadIds', () => {
   it('passes explicit labels without silently adding INBOX', async () => {
     const get = vi.fn(async () => ({ threads: [{ id: 'sent-1' }], resultSizeEstimate: 42 }))
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
+    const controller = new AbortController()
 
     await expect(
-      provider.listThreadIds({ labelIds: ['SENT'], q: 'newer_than:12m', pageToken: 'next' })
+      provider.listThreadIds({
+        labelIds: ['SENT'],
+        q: 'newer_than:12m',
+        pageToken: 'next',
+        signal: controller.signal,
+        priority: 'foreground'
+      })
     ).resolves.toEqual({
       threadIds: ['sent-1'],
       nextPageToken: undefined,
@@ -40,7 +47,7 @@ describe('GmailMailProvider.listThreadIds', () => {
         labelIds: ['SENT'],
         pageToken: 'next'
       },
-      { priority: undefined }
+      { signal: controller.signal, priority: 'foreground' }
     )
   })
 
@@ -56,11 +63,15 @@ describe('GmailMailProvider.listThreadIds', () => {
         labelIds: ['SPAM'],
         includeSpamTrash: 'true'
       },
-      { priority: undefined }
+      { signal: undefined, priority: undefined }
     )
 
     await provider.listThreadIds({})
-    expect(get).toHaveBeenLastCalledWith('/threads', { maxResults: '100' }, { priority: undefined })
+    expect(get).toHaveBeenLastCalledWith(
+      '/threads',
+      { maxResults: '100' },
+      { signal: undefined, priority: undefined }
+    )
   })
 })
 

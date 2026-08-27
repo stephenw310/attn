@@ -52,7 +52,7 @@ export interface ServiceReady {
 }
 
 export type ServiceEvent =
-  | { kind: 'mail-changed' }
+  | { kind: 'mail-changed'; serverSearchRequestId?: string }
   | { kind: 'outbox-changed'; payload: import('../../shared/outbox').OutboxChanged }
   | { kind: 'outbox-progress'; payload: import('../../shared/outbox').OutboxProgress | null }
   | { kind: 'sync-state'; payload: import('../../shared/mail').SyncState }

@@ -39,7 +39,7 @@ import type {
   QueueSendResult,
   ReopenOutboxResult
 } from '../shared/outbox'
-import type { SearchResponse } from '../shared/searchQuery'
+import type { SearchResponse, ServerSearchResponse } from '../shared/searchQuery'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
@@ -78,6 +78,10 @@ const api = {
   },
   mail: {
     search: (query: string): Promise<SearchResponse> => invoke(IPC_CHANNELS.mailSearch, query),
+    searchAll: (requestId: string, query: string): Promise<ServerSearchResponse> =>
+      invoke(IPC_CHANNELS.mailSearchAll, requestId, query),
+    cancelSearchAll: (requestId: string): Promise<void> =>
+      invoke(IPC_CHANNELS.mailCancelSearchAll, requestId),
     listThreadPage: (
       view: Exclude<ThreadListView, 'snoozed'>,
       cursor?: ThreadPageCursor
@@ -117,8 +121,9 @@ const api = {
     undo: (): Promise<TriageResult | null> => invoke(IPC_CHANNELS.mailUndo),
     getPendingActionCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetPendingActionCount),
     getActionQueueStatus: () => invoke(IPC_CHANNELS.mailGetActionQueueStatus),
-    onChanged: (cb: () => void): (() => void) => {
-      const listener = (): void => cb()
+    onChanged: (cb: (serverSearchRequestId: string | null) => void): (() => void) => {
+      const listener = (_event: unknown, payload: { serverSearchRequestId?: unknown } | undefined): void =>
+        cb(typeof payload?.serverSearchRequestId === 'string' ? payload.serverSearchRequestId : null)
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },

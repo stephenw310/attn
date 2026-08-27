@@ -14,7 +14,7 @@ import type { MailProvider, ProviderRequestOptions } from './provider'
 /** Fetch only out-of-line body parts that are not already complete locally. */
 export async function hydrateMissingThreadBodies(
   db: Db,
-  provider: MailProvider,
+  provider: Pick<MailProvider, 'getAttachmentData'>,
   accountId: string,
   thread: GmailThread,
   shouldContinue: () => boolean = () => true,
