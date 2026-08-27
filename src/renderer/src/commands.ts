@@ -1,14 +1,22 @@
 export type CommandContext = 'list' | 'reader' | 'outbox' | 'navigation' | 'mail' | 'composer' | 'global'
-type ShortcutContext = 'list' | 'reader' | 'outbox'
+export type ShortcutContext = 'list' | 'reader' | 'outbox'
+export type ActiveCommandContext = ShortcutContext | 'composer'
 
 interface CommandSpec {
   title: string
   shortcut?: string
   shortcutAliases?: readonly string[]
   context: CommandContext
+  allowInComposer?: boolean
 }
 
 export const COMMAND_SPECS = {
+  'palette.open': {
+    title: 'Open command palette',
+    shortcut: 'Mod+K',
+    context: 'global',
+    allowInComposer: true
+  },
   'navigate.next': { title: 'Next item', shortcut: 'j', context: 'navigation' },
   'navigate.previous': { title: 'Previous item', shortcut: 'k', context: 'navigation' },
   'selection.toggle': { title: 'Toggle selection', shortcut: 'x', context: 'mail' },
@@ -25,9 +33,16 @@ export const COMMAND_SPECS = {
   'selection.clear': { title: 'Clear selection', shortcut: 'Escape', context: 'list' },
   'conversation.open': { title: 'Open conversation', shortcut: 'Enter', context: 'list' },
   'conversation.close': { title: 'Back to conversation list', shortcut: 'Escape', context: 'reader' },
+  'message.next': { title: 'Next message in conversation', shortcut: 'n', context: 'reader' },
+  'message.previous': { title: 'Previous message in conversation', shortcut: 'p', context: 'reader' },
+  'message.toggle': { title: 'Expand or collapse message', shortcut: 'o', context: 'reader' },
   'message.trim.toggle': { title: 'Show or hide trimmed message content', context: 'reader' },
-  'sync.retry': { title: 'Retry mail sync', context: 'global' },
-  'sync.error.copy': { title: 'Copy sync error details', context: 'global' },
+  'sync.retry': { title: 'Retry mail sync', context: 'global', allowInComposer: true },
+  'sync.error.copy': {
+    title: 'Copy sync error details',
+    context: 'global',
+    allowInComposer: true
+  },
   'search.open': { title: 'Search mail', shortcut: '/', context: 'global' },
   'search.focusQuery': {
     title: 'Edit search query',
@@ -36,23 +51,82 @@ export const COMMAND_SPECS = {
   },
   'search.allGmail': { title: 'Search all of Gmail', context: 'global' },
   'search.clear': { title: 'Clear search', context: 'global' },
-  'theme.system': { title: 'Use System theme', context: 'global' },
-  'theme.dispatch-dark': { title: 'Use Dark theme', context: 'global' },
-  'theme.dispatch-light': { title: 'Use Light theme', context: 'global' },
-  'theme.midnight': { title: 'Use Midnight theme', context: 'global' },
-  'theme.sand': { title: 'Use Sand theme', context: 'global' },
-  'view.inbox': { title: 'Go to Inbox', shortcut: 'g i', context: 'global' },
-  'view.allMail': { title: 'Go to All Mail', shortcut: 'g a', context: 'global' },
-  'view.sent': { title: 'Go to Sent', shortcut: 'g t', context: 'global' },
-  'view.starred': { title: 'Go to Starred', shortcut: 'g s', context: 'global' },
-  'view.snoozed': { title: 'Go to Snoozed', shortcut: 'g h', context: 'global' },
-  'view.drafts': { title: 'Go to Drafts', shortcut: 'g d', context: 'global' },
-  'view.spam': { title: 'Go to Spam', shortcut: 'g p', context: 'global' },
-  'view.trash': { title: 'Go to Trash', shortcut: 'g r', context: 'global' },
-  'view.outbox': { title: 'Go to Outbox', shortcut: 'g o', context: 'global' },
-  'layout.sidebar.toggle': { title: 'Toggle sidebar', shortcut: 'Mod+B', context: 'global' },
+  'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
+  'theme.dispatch-dark': {
+    title: 'Use Dark theme',
+    context: 'global',
+    allowInComposer: true
+  },
+  'theme.dispatch-light': {
+    title: 'Use Light theme',
+    context: 'global',
+    allowInComposer: true
+  },
+  'theme.midnight': { title: 'Use Midnight theme', context: 'global', allowInComposer: true },
+  'theme.sand': { title: 'Use Sand theme', context: 'global', allowInComposer: true },
+  'view.inbox': {
+    title: 'Go to Inbox',
+    shortcut: 'g i',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.allMail': {
+    title: 'Go to All Mail',
+    shortcut: 'g a',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.sent': {
+    title: 'Go to Sent',
+    shortcut: 'g t',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.starred': {
+    title: 'Go to Starred',
+    shortcut: 'g s',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.snoozed': {
+    title: 'Go to Snoozed',
+    shortcut: 'g h',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.drafts': {
+    title: 'Go to Drafts',
+    shortcut: 'g d',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.spam': {
+    title: 'Go to Spam',
+    shortcut: 'g p',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.trash': {
+    title: 'Go to Trash',
+    shortcut: 'g r',
+    context: 'global',
+    allowInComposer: true
+  },
+  'view.outbox': {
+    title: 'Go to Outbox',
+    shortcut: 'g o',
+    context: 'global',
+    allowInComposer: true
+  },
+  'layout.sidebar.toggle': {
+    title: 'Toggle sidebar',
+    shortcut: 'Mod+B',
+    context: 'global',
+    allowInComposer: true
+  },
   'outbox.open': { title: 'Open Outbox message', shortcut: 'Enter', context: 'outbox' },
   'outbox.close': { title: 'Back from Outbox', shortcut: 'Escape', context: 'outbox' },
+  'draft.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'list' },
   'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
   'composer.reply': { title: 'Reply', shortcut: 'r', context: 'reader' },
   'composer.replyAll': {
@@ -63,7 +137,7 @@ export const COMMAND_SPECS = {
   },
   'composer.forward': { title: 'Forward', shortcut: 'f', context: 'reader' },
   'composer.close': { title: 'Save and close draft', shortcut: 'Escape', context: 'composer' },
-  'composer.discard': { title: 'Discard draft', context: 'composer' },
+  'composer.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'composer' },
   'composer.send': { title: 'Send message', shortcut: 'Mod+Enter', context: 'composer' },
   'composer.attach': { title: 'Attach files', context: 'composer' },
   'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },
@@ -94,17 +168,45 @@ export const COMMAND_SPECS = {
 
 export type CommandId = keyof typeof COMMAND_SPECS
 
+export interface CommandArgumentValue {
+  label: string
+  value: unknown
+}
+
+export interface CommandArgument {
+  prefixes: readonly string[]
+  parse: (input: string) => CommandArgumentValue | null
+  run: (value: unknown) => void
+}
+
 export interface Command extends CommandSpec {
   id: CommandId
   run: () => void
+  argument?: CommandArgument
 }
 
 const commands: Command[] = []
+const commandRegistryListeners = new Set<() => void>()
+let commandRegistrySnapshot: readonly Command[] = []
+
+function notifyCommandRegistry(): void {
+  commandRegistrySnapshot = [...commands]
+  for (const listener of commandRegistryListeners) listener()
+}
+
+export function subscribeCommandRegistry(listener: () => void): () => void {
+  commandRegistryListeners.add(listener)
+  return () => commandRegistryListeners.delete(listener)
+}
+
+export function getCommandRegistrySnapshot(): readonly Command[] {
+  return commandRegistrySnapshot
+}
 
 export function createCommand(
   id: CommandId,
   run: () => void,
-  overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'shortcutAliases' | 'context'>> = {}
+  overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'shortcutAliases' | 'context' | 'argument'>> = {}
 ): Command {
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
 }
@@ -118,16 +220,22 @@ export function registerCommands(next: Command[]): () => void {
     nextIds.add(command.id)
   }
   commands.push(...next)
+  notifyCommandRegistry()
   return () => {
+    let changed = false
     for (const command of next) {
       const index = commands.indexOf(command)
-      if (index >= 0) commands.splice(index, 1)
+      if (index >= 0) {
+        commands.splice(index, 1)
+        changed = true
+      }
     }
+    if (changed) notifyCommandRegistry()
   }
 }
 
 export function listCommands(): readonly Command[] {
-  return commands
+  return commandRegistrySnapshot
 }
 
 function normalizedKey(event: KeyboardEvent, context: ShortcutContext): string {
@@ -159,7 +267,15 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string, context: Shortc
   return !isLetter || !event.shiftKey
 }
 
-function matchesContext(command: Command, context: ShortcutContext): boolean {
+export function commandMatchesContext(
+  command: Pick<Command, 'context' | 'allowInComposer'>,
+  context: ActiveCommandContext
+): boolean {
+  if (context === 'composer') {
+    return (
+      command.context === 'composer' || (command.context === 'global' && command.allowInComposer === true)
+    )
+  }
   return (
     command.context === 'global' ||
     command.context === 'navigation' ||
@@ -179,7 +295,7 @@ export function isChordPrefix(key: string, context: ShortcutContext): boolean {
   const prefix = `${key.toLowerCase()} `
   return commands.some(
     (command) =>
-      matchesContext(command, context) &&
+      commandMatchesContext(command, context) &&
       commandShortcuts(command).some((shortcut) => shortcut.toLowerCase().startsWith(prefix))
   )
 }
@@ -194,7 +310,7 @@ export function findCommandByShortcut(shortcut: string, context: ShortcutContext
   return (
     commands.find(
       (command) =>
-        matchesContext(command, context) &&
+        commandMatchesContext(command, context) &&
         commandShortcuts(command).some((candidate) => candidate.toLowerCase() === normalized)
     ) ?? null
   )
@@ -207,7 +323,7 @@ export function matchKey(event: KeyboardEvent, context: ShortcutContext): Comman
   return (
     commands.find(
       (command) =>
-        matchesContext(command, context) &&
+        commandMatchesContext(command, context) &&
         commandShortcuts(command).some((shortcut) => matchesShortcut(event, shortcut, context))
     ) ?? null
   )

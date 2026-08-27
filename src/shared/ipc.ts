@@ -1,6 +1,7 @@
 import type { ActionRevertNotice } from './actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from './actions'
 import type { AuthSignInResult, AuthStatus } from './auth'
+import type { CommandUsage } from './commandUsage'
 import type { ContactSearchResult } from './contacts'
 import type {
   Draft,
@@ -34,6 +35,8 @@ export const IPC_CHANNELS = {
   authSignOut: 'auth:signOut',
   settingsGetTheme: 'settings:getTheme',
   settingsSetTheme: 'settings:setTheme',
+  settingsGetCommandUsage: 'settings:getCommandUsage',
+  settingsSetCommandUsage: 'settings:setCommandUsage',
   contactsSearch: 'contacts:search',
   draftSave: 'draft:save',
   draftGet: 'draft:get',
@@ -121,6 +124,11 @@ export interface InvokeChannels {
   [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.settingsGetTheme]: { args: []; result: ThemePreference }
   [IPC_CHANNELS.settingsSetTheme]: { args: [preference: ThemePreference]; result: ThemePreference }
+  [IPC_CHANNELS.settingsGetCommandUsage]: { args: [accountId: string]; result: CommandUsage }
+  [IPC_CHANNELS.settingsSetCommandUsage]: {
+    args: [accountId: string, usage: CommandUsage]
+    result: CommandUsage
+  }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {
     args: [draft: DraftSaveInput]
@@ -154,7 +162,10 @@ export interface InvokeChannels {
     result: InlineImageResult
   }
   [IPC_CHANNELS.draftClose]: { args: [id: string]; result: 'saved' | 'discarded' }
-  [IPC_CHANNELS.draftDiscard]: { args: [id: string]; result: undefined }
+  [IPC_CHANNELS.draftDiscard]: {
+    args: [id: string, expectedState?: 'composing' | 'drafted']
+    result: undefined
+  }
   [IPC_CHANNELS.draftMirror]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftTakeRecovered]: { args: []; result: Draft | null }
   [IPC_CHANNELS.outboxSend]: { args: [draftId: string]; result: QueueSendResult }

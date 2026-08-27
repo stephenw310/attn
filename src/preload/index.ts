@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { formatActionRevertToast } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
+import type { CommandUsage } from '../shared/commandUsage'
 import type { ContactSearchResult } from '../shared/contacts'
 import type {
   Draft,
@@ -69,7 +70,11 @@ const api = {
     initialTheme,
     getTheme: (): Promise<ThemePreference> => invoke(IPC_CHANNELS.settingsGetTheme),
     setTheme: (preference: ThemePreference): Promise<ThemePreference> =>
-      invoke(IPC_CHANNELS.settingsSetTheme, preference)
+      invoke(IPC_CHANNELS.settingsSetTheme, preference),
+    getCommandUsage: (accountId: string): Promise<CommandUsage> =>
+      invoke(IPC_CHANNELS.settingsGetCommandUsage, accountId),
+    setCommandUsage: (accountId: string, usage: CommandUsage): Promise<CommandUsage> =>
+      invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage)
   },
   mail: {
     search: (query: string): Promise<SearchResponse> => invoke(IPC_CHANNELS.mailSearch, query),
@@ -196,7 +201,8 @@ const api = {
     getInlineImage: (id: string, contentId: string): Promise<InlineImageResult> =>
       invoke(IPC_CHANNELS.draftGetInlineImage, id, contentId),
     close: (id: string): Promise<'saved' | 'discarded'> => invoke(IPC_CHANNELS.draftClose, id),
-    discard: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftDiscard, id),
+    discard: (id: string, expectedState: 'composing' | 'drafted' = 'composing'): Promise<void> =>
+      invoke(IPC_CHANNELS.draftDiscard, id, expectedState),
     mirror: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftMirror, id),
     takeRecovered: (): Promise<Draft | null> => invoke(IPC_CHANNELS.draftTakeRecovered)
   },

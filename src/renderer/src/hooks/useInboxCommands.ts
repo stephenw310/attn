@@ -1,6 +1,7 @@
 import { useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { DraftKind } from '../../../shared/drafts'
+import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
 import { createCommand, registerCommands } from '../commands'
 import type { MailView, NavigableMailView } from '../mailDisplay'
 
@@ -26,6 +27,7 @@ interface Options {
   switchView: (view: NavigableMailView) => void
   openOutbox: () => void
   closeOutbox: () => void
+  discardSelectedDraft: (() => void) | null
   toggleSidebar: () => void
   openSearch: () => void
   focusSearchQuery: () => void
@@ -34,6 +36,7 @@ interface Options {
   clearSearch: () => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
+  snoozeAt: (dueAt: number) => void
   openLabel: () => void
   openComposer: () => void
   openReply: (kind: Exclude<DraftKind, 'new'>) => void
@@ -64,6 +67,7 @@ export function useInboxCommands(options: Options): void {
     switchView,
     openOutbox,
     closeOutbox,
+    discardSelectedDraft,
     toggleSidebar,
     openSearch,
     focusSearchQuery,
@@ -72,6 +76,7 @@ export function useInboxCommands(options: Options): void {
     clearSearch,
     triage,
     openSnooze,
+    snoozeAt,
     openLabel,
     openComposer,
     openReply,
@@ -107,6 +112,7 @@ export function useInboxCommands(options: Options): void {
             ]
           : []),
         ...(!searchOpen && view === 'outbox' ? [createCommand('outbox.close', closeOutbox)] : []),
+        ...(discardSelectedDraft ? [createCommand('draft.discard', discardSelectedDraft)] : []),
         ...(mailCommandsEnabled
           ? readerOpen
             ? [createCommand('conversation.close', closeReader)]
@@ -143,7 +149,19 @@ export function useInboxCommands(options: Options): void {
           ? [
               createCommand('triage.archive', () => triage({ kind: 'archive', threadIds: [selected.id] })),
               createCommand('triage.snooze', openSnooze, {
-                title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later'
+                title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later',
+                argument: {
+                  prefixes: ['remind me', 'snooze'],
+                  parse: (input) => {
+                    const dueAt = parseSnoozeText(input)
+                    return dueAt !== null && dueAt > Date.now()
+                      ? { label: `Snooze until ${formatSnoozeDate(dueAt)}`, value: dueAt }
+                      : null
+                  },
+                  run: (value) => {
+                    if (typeof value === 'number') snoozeAt(value)
+                  }
+                }
               }),
               createCommand('triage.trash', () => triage({ kind: 'trash', threadIds: [selected.id] })),
               createCommand('triage.spam', () => triage({ kind: 'spam', threadIds: [selected.id] })),
@@ -186,6 +204,7 @@ export function useInboxCommands(options: Options): void {
       clearSearch,
       closeReader,
       closeOutbox,
+      discardSelectedDraft,
       extendSelection,
       focusSearchQuery,
       markUnreadOn,
@@ -205,6 +224,7 @@ export function useInboxCommands(options: Options): void {
       selected,
       selectedCount,
       selectedIndex,
+      snoozeAt,
       searchOpen,
       searchAll,
       searchAllEnabled,

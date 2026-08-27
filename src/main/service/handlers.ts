@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { ActionRevertNotice } from '../../shared/actionRevert'
 import { isValidEmail } from '../../shared/address'
+import { parseStoredCommandUsage, sanitizeCommandUsage } from '../../shared/commandUsage'
 import {
   type DraftAttachment,
   type DraftInlineImageInput,
@@ -79,7 +80,7 @@ import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
 import type { SnoozeScheduler } from '../scheduler'
-import { readSetting, writeSetting } from '../settings'
+import { readAccountSetting, readSetting, writeAccountSetting, writeSetting } from '../settings'
 import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
 import { fetchAndCacheThread } from '../sync/fetchThread'
@@ -343,6 +344,18 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     writeSetting(context.db, 'theme', preference)
     return preference
   })
+  handle(IPC_CHANNELS.settingsGetCommandUsage, (_event, accountId) => {
+    const account = requireAccount(context)
+    if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
+    return parseStoredCommandUsage(readAccountSetting(context.db, account, 'commandPaletteUsage'))
+  })
+  handle(IPC_CHANNELS.settingsSetCommandUsage, (_event, accountId, usage) => {
+    const account = requireAccount(context)
+    if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
+    const sanitized = sanitizeCommandUsage(usage)
+    writeAccountSetting(context.db, account, 'commandPaletteUsage', JSON.stringify(sanitized))
+    return sanitized
+  })
   handle(IPC_CHANNELS.draftSave, (_event, draft) => {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')
     if (context.consumeTestDraftSaveFailure()) throw new Error('injected draft save failure')
@@ -550,9 +563,14 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     }
     return result
   })
-  handle(IPC_CHANNELS.draftDiscard, (_event, id) => {
+  handle(IPC_CHANNELS.draftDiscard, (_event, id, expectedState = 'composing') => {
     if (!nonEmptyString(id)) throw new Error('invalid draft id')
-    if (!discardDraft(context.db, requireAccount(context), id)) throw new Error('draft is unavailable')
+    if (expectedState !== 'composing' && expectedState !== 'drafted') {
+      throw new Error('invalid draft state')
+    }
+    if (!discardDraft(context.db, requireAccount(context), id, expectedState)) {
+      throw new Error('draft is unavailable')
+    }
     cleanOutboxSpool(context.userDataPath, id)
     context.broadcastMailChanged()
     void context.draftMirrorExecutor()?.trigger()

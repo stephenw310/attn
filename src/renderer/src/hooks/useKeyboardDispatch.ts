@@ -30,7 +30,7 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
       const target = event.target instanceof Element ? event.target : null
       const context = readerOpen ? 'reader' : outboxOpen ? 'outbox' : 'list'
       const modifiedCommand = event.metaKey || event.ctrlKey ? matchKey(event, context) : null
-      if (modifiedCommand?.context === 'global') {
+      if (modifiedCommand) {
         event.preventDefault()
         modifiedCommand.run()
         return

@@ -167,13 +167,22 @@ function InlineQuote({ draftId, html }: { draftId: string; html: string }): Reac
   const keyDocumentRef = useRef<Document | null>(null)
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
-    if (event.metaKey || event.ctrlKey || event.altKey || event.key === 'Tab') return
+    const paletteShortcut =
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.key.toLocaleLowerCase() === 'k'
+    if ((event.metaKey || event.ctrlKey || event.altKey) && !paletteShortcut) return
+    if (event.key === 'Tab') return
     const target = event.target as HTMLElement | null
     if (event.key === 'Enter' && target?.closest?.('a, button, input, textarea, select')) return
     const forwarded = new KeyboardEvent('keydown', {
       key: event.key,
       code: event.code,
       repeat: event.repeat,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      altKey: event.altKey,
       shiftKey: event.shiftKey,
       bubbles: true,
       cancelable: true
@@ -1053,7 +1062,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
                   data-testid="composer-discard"
                   aria-label="Discard draft"
-                  title="Discard draft"
+                  title={`Discard draft (${modKeyLabel()}⇧D)`}
                   disabled={attaching || closing}
                   onClick={discard}
                 >

@@ -42,6 +42,7 @@ afterEach(() => {
 describe('command catalog', () => {
   test('contains the complete audited M1 semantic command inventory', () => {
     expect(Object.keys(COMMAND_SPECS)).toEqual([
+      'palette.open',
       'navigate.next',
       'navigate.previous',
       'selection.toggle',
@@ -50,6 +51,9 @@ describe('command catalog', () => {
       'selection.clear',
       'conversation.open',
       'conversation.close',
+      'message.next',
+      'message.previous',
+      'message.toggle',
       'message.trim.toggle',
       'sync.retry',
       'sync.error.copy',
@@ -74,6 +78,7 @@ describe('command catalog', () => {
       'layout.sidebar.toggle',
       'outbox.open',
       'outbox.close',
+      'draft.discard',
       'composer.new',
       'composer.reply',
       'composer.replyAll',
@@ -201,11 +206,17 @@ describe('keyboard dispatch', () => {
 
   test('dispatches only registered composer modifier shortcuts in composer context', () => {
     useCommands([
+      createCommand('draft.discard', () => {}),
       createCommand('composer.close', () => {}),
+      createCommand('composer.discard', () => {}),
       createCommand('composer.send', () => {}),
       createCommand('composer.link', () => {})
     ])
+    expect(matchKey(key('d', { metaKey: true, shiftKey: true }), 'list')?.id).toBe('draft.discard')
+    expect(matchKey(key('d', { ctrlKey: true, shiftKey: true }), 'reader')).toBeNull()
     expect(matchComposerKey(key('Escape'))?.id).toBe('composer.close')
+    expect(matchComposerKey(key('d', { metaKey: true, shiftKey: true }))?.id).toBe('composer.discard')
+    expect(matchComposerKey(key('d', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.discard')
     expect(matchComposerKey(key('Enter', { metaKey: true }))?.id).toBe('composer.send')
     expect(matchComposerKey(key('k', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.link')
     expect(matchComposerKey(key('k', { ctrlKey: true }))).toBeNull()
@@ -234,6 +245,19 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('Enter'), 'reader')?.id).toBe('composer.replyAll')
     expect(matchKey(key('a'), 'reader')?.id).toBe('composer.replyAll')
     expect(matchKey(key('a'), 'list')).toBeNull()
+  })
+
+  test('binds N, P, and O only in the reader', () => {
+    useCommands([
+      createCommand('message.next', () => {}),
+      createCommand('message.previous', () => {}),
+      createCommand('message.toggle', () => {})
+    ])
+    expect(matchKey(key('n'), 'reader')?.id).toBe('message.next')
+    expect(matchKey(key('p'), 'reader')?.id).toBe('message.previous')
+    expect(matchKey(key('o'), 'reader')?.id).toBe('message.toggle')
+    expect(matchKey(key('n'), 'list')).toBeNull()
+    expect(matchKey(key('p'), 'outbox')).toBeNull()
   })
 
   test('can expose reply and forward in list context for the focused conversation', () => {

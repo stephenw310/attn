@@ -1,7 +1,37 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
+
+test('moves between messages with N and P and toggles the active message with O', async ({
+  page
+}, testInfo) => {
+  await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).click()
+  const messages = page.getByTestId('conversation-message')
+  const cards = page.getByTestId('message-card')
+  await expect(messages).toHaveCount(3)
+  await expect(messages.nth(1)).toHaveAttribute('data-active-message', 'true')
+  await expect(cards.first()).toHaveAttribute('data-collapsed', 'true')
+
+  await page.keyboard.press('p')
+  await expect(messages.first()).toHaveAttribute('data-active-message', 'true')
+  await expect(cards.first()).toHaveAttribute('data-collapsed', 'true')
+  await expect(messages.first()).toHaveCSS('box-shadow', 'none')
+  const artifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(artifactDirectory, { recursive: true })
+  const readerControlsPath = join(artifactDirectory, 'reader-controls.png')
+  await page.screenshot({ path: readerControlsPath })
+  await testInfo.attach('reader-controls', { path: readerControlsPath, contentType: 'image/png' })
+  await page.keyboard.press('o')
+  await expect(cards.first()).toHaveAttribute('data-collapsed', 'false')
+
+  await page.keyboard.press('n')
+  await expect(messages.nth(1)).toHaveAttribute('data-active-message', 'true')
+  await page.keyboard.press('o')
+  await expect(cards.last()).toHaveAttribute('data-collapsed', 'true')
+})
 
 test('invalidates viewed conversation data when local mail changes', async ({ app, page }) => {
   await page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' }).click()

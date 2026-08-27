@@ -93,6 +93,46 @@ test('fetches a server-only result, opens it, and keeps it cached across relaunc
   expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
 })
 
+test('submits Gmail search from the command palette', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  await page.getByTestId('search-input').fill('serveronlyneedle')
+  await page.keyboard.press('ControlOrMeta+K')
+  const paletteInput = page.getByTestId('command-palette-input')
+  await expect(paletteInput).toBeFocused()
+  await paletteInput.fill('Search all of Gmail')
+  await expect(page.locator('[data-command-id="search.allGmail"]')).toHaveCount(1)
+  await paletteInput.press('Enter')
+
+  await expect(page.getByTestId('command-palette')).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toBeFocused()
+  await expect(page.getByTestId('thread-section-divider')).toHaveText('More from Gmail')
+  await expect(
+    page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  ).toBeVisible()
+})
+
+test('hides the Gmail search command while a composer is active', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  await page.getByTestId('search-input').fill('serveronlyneedle')
+  await page.keyboard.press('ControlOrMeta+K')
+  let paletteInput = page.getByTestId('command-palette-input')
+  await paletteInput.fill('New message')
+  await paletteInput.press('Enter')
+
+  const composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await composer.editor.click()
+  await composer.typeBody('Keep this search draft')
+  await page.keyboard.press('ControlOrMeta+K')
+  paletteInput = page.getByTestId('command-palette-input')
+  await paletteInput.fill('Search all of Gmail')
+  await expect(page.locator('[data-command-id="search.allGmail"]')).toHaveCount(0)
+  await paletteInput.press('Escape')
+  await expect(composer.editor).toBeFocused()
+  await page.keyboard.type(' intact')
+  await expect(composer.editor).toContainText('Keep this search draft intact')
+})
+
 test('does not fabricate Gmail results for an unmatched seeded query', async ({ page }) => {
   await page.getByTestId('search-open').click()
   const input = page.getByTestId('search-input')

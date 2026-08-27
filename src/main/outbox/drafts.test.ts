@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
-import type { Db } from '../db'
+import { type Db, openDatabase } from '../db'
 import { publicDraftAttachment, type StoredDraftAttachment } from './draftAttachments'
 import {
   canonicalizeRendererDraft,
+  closeDraft,
   discardDraft,
   isEmptyDraft,
   isUntouchedThreadDraft,
-  requestDraftMirror
+  listDrafts,
+  requestDraftMirror,
+  saveDraft
 } from './drafts'
 
 const stored: StoredDraftAttachment = {
@@ -59,20 +62,22 @@ describe('draft attachment trust boundary', () => {
 })
 
 describe('draft lifecycle guards', () => {
-  it('reports whether discard actually transitioned an open composer', () => {
-    const discarded = vi.fn(() => ({ changes: 1 }))
-    const unavailable = vi.fn(() => ({ changes: 0 }))
+  it('discards open and closed drafts without touching unavailable rows', () => {
+    const db = openDatabase(':memory:')
+    try {
+      const openId = saveDraft(db, 'account', { ...emptyDraftInput(), subject: 'Open' }, 10)
+      const closedId = saveDraft(db, 'account', { ...emptyDraftInput(), subject: 'Closed' }, 20)
+      expect(closeDraft(db, 'account', closedId, 30)).toBe('saved')
+      expect(listDrafts(db, 'account').map((draft) => draft.id)).toEqual([closedId, openId])
 
-    expect(
-      discardDraft({ prepare: vi.fn(() => ({ run: discarded })) } as unknown as Db, 'account', 'open-draft')
-    ).toBe(true)
-    expect(
-      discardDraft(
-        { prepare: vi.fn(() => ({ run: unavailable })) } as unknown as Db,
-        'account',
-        'closed-draft'
-      )
-    ).toBe(false)
+      expect(discardDraft(db, 'account', openId)).toBe(true)
+      expect(discardDraft(db, 'account', closedId)).toBe(false)
+      expect(discardDraft(db, 'account', closedId, 'drafted')).toBe(true)
+      expect(discardDraft(db, 'account', 'missing')).toBe(false)
+      expect(listDrafts(db, 'account')).toEqual([])
+    } finally {
+      db.close()
+    }
   })
 
   it('treats HTML and plain-text quote content as meaningful mirror work', () => {

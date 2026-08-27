@@ -13,6 +13,8 @@ const SCROLL_FRAME_P95_CEILING_MS = 20
 const COMPOSER_OPEN_WARMUP_COUNT = 2
 const COMPOSER_OPEN_CEILING_MS = 50
 const SEARCH_QUERY_CEILING_MS = 100
+const PALETTE_OPEN_CEILING_MS = 50
+const PALETTE_RERANK_CEILING_MS = 30
 const COMPOSER_MUTATION_CEILING_MS = 8
 // Two 60Hz vsync intervals. The paint sample is timed from before the key is
 // dispatched, so on its own it carries CDP dispatch latency plus a wait for the
@@ -216,6 +218,60 @@ async function measureConversationOpen(page: Page): Promise<number> {
       observer.observe(document.body, { childList: true, subtree: true })
     })
   })
+}
+
+async function measurePaletteOpen(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const started = performance.now()
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'k',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true
+      })
+    )
+    if (document.querySelector('[data-testid="command-palette"]')) return performance.now() - started
+    return new Promise<number>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        observer.disconnect()
+        reject(new Error('Timed out opening the command palette'))
+      }, 5_000)
+      const observer = new MutationObserver(() => {
+        if (!document.querySelector('[data-testid="command-palette"]')) return
+        window.clearTimeout(timeout)
+        observer.disconnect()
+        resolve(performance.now() - started)
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
+    })
+  })
+}
+
+async function measurePaletteRerank(page: Page, query: string): Promise<number> {
+  return page.evaluate(async (nextQuery) => {
+    const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]')
+    const results = document.querySelector<HTMLElement>('[data-testid="command-palette-results"]')
+    if (!input || !results) throw new Error('command palette is not open')
+    const started = performance.now()
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setValue?.call(input, nextQuery)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    if (results.dataset.paletteQuery === nextQuery) return performance.now() - started
+    return new Promise<number>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        observer.disconnect()
+        reject(new Error('Timed out re-ranking command palette results'))
+      }, 5_000)
+      const observer = new MutationObserver(() => {
+        if (results.dataset.paletteQuery !== nextQuery) return
+        window.clearTimeout(timeout)
+        observer.disconnect()
+        resolve(performance.now() - started)
+      })
+      observer.observe(results, { attributes: true, attributeFilter: ['data-palette-query'] })
+    })
+  }, query)
 }
 
 async function measureMailboxSwitch(page: Page, chordKey: string, expectedTitle: string): Promise<number> {
@@ -570,6 +626,29 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     expect(medianMs, 'median Enter to conversation content mounted').toBeLessThan(
       CONVERSATION_OPEN_CEILING_MS
     )
+  })
+
+  test('opens and re-ranks the command palette within F5 budgets', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
+    const openSamples: number[] = []
+    for (let iteration = 0; iteration < 20; iteration++) {
+      openSamples.push(await measurePaletteOpen(page))
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('command-palette')).toHaveCount(0)
+    }
+    await reportMetric(testInfo, 'command-palette-open', openSamples, median(openSamples))
+    expect(percentile(openSamples, 0.95)).toBeLessThan(PALETTE_OPEN_CEILING_MS)
+
+    await measurePaletteOpen(page)
+    const rerankSamples: number[] = []
+    for (let iteration = 0; iteration < 20; iteration++) {
+      rerankSamples.push(await measurePaletteRerank(page, `go to ${iteration}`))
+    }
+    await reportMetric(testInfo, 'command-palette-rerank', rerankSamples, median(rerankSamples))
+    expect(percentile(rerankSamples, 0.95)).toBeLessThan(PALETTE_RERANK_CEILING_MS)
   })
 
   test('switches to a cached All Mail within the F3 budget', async ({ page }, testInfo) => {
