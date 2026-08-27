@@ -994,15 +994,24 @@ semantics would leave mail in Inbox and would not advance the queue.
   user-label catalog before it writes and rejects an action whose source equals its destination. The planned
   delta always removes `INBOX`. It also removes `sourceLabelId` when the command came from a user-label view.
   A non-null destination is added. The delta does not touch other user labels, `STARRED`, `UNREAD`, or `SENT`.
+- Read each target's snooze reminder before applying Move. In the same SQLite transaction as the label delta,
+  change a pending reminder to `canceled` and a returned reminder to `done`, matching archive. Store the prior
+  reminder snapshot in the queued payload so permanent-failure recovery restores both labels and reminder
+  state. This rule applies even when the target came from All Mail, Starred, a user-label view, or search.
 - Keep the durable operation as the existing `modifyLabels` queue kind. Add `move` to action validation,
   action labels, the queue payload's `RevertedActionKind`, permanent-failure copy, and every exhaustive
-  switch. No schema, provider, preload, IPC-channel, or executor change is needed.
-- Skip a thread whose planned delta changes none of its labels. Do not enqueue that thread or add it to the
-  undo entry. If no target changes, return `Already there` and do not push an empty undo entry. Disable Done
-  when every target already lacks both `INBOX` and a source user label.
-- Compute each undo from that thread's pre-state. Undo re-adds only labels that Move removed and removes the
-  destination only when the thread did not already have it. A bulk move stays one undo-stack entry even when
-  the selected threads began with different labels.
+  switch. The executor already restores the optional reminder snapshot on permanent failure. No schema,
+  provider, preload, IPC-channel, or new executor behavior is needed.
+- Skip a thread only when Move changes neither its labels nor its reminder state. Do not enqueue that thread
+  or add it to the undo entry. If no target changes, return `Already there` and do not push an empty undo
+  entry. Disable Done only when every target already lacks both `INBOX` and a source user label and no target
+  has a pending or returned reminder.
+- Compute each undo from that thread's label and reminder pre-state. Add an internal Move undo entry that
+  carries the inverse label delta plus the prior reminder snapshot; `undoLast` applies both in one SQLite
+  transaction. Do not represent this case as `snoozeAt`, which cannot remove a destination label. Undo
+  re-adds only labels that Move removed, removes the destination only when the thread did not already have
+  it, and restores the prior reminder state and due time. A bulk move stays one undo-stack entry even when
+  the selected threads began with different labels or only some had reminders.
 - Refactor the renderer's archive-only exit path into a pure view-membership plan used by archive and Move.
   Inbox, Inbox-split, and active-user-label rows leave immediately. Advance the list or open reader to the
   next surviving conversation. All Mail, Sent, and Starred rows remain because Move preserves the labels
@@ -1019,15 +1028,19 @@ semantics would leave mail in Inbox and would not advance the queue.
 - **Unit:** the Move planner for Inbox, a user-label source, Done, All Mail, and search; preservation of
   unrelated labels and status labels; rejection of system or missing label ids; precise inverse deltas for
   mixed bulk pre-state; action decoding and permanent-failure copy for `move`; the view-membership and
-  selection plan at the first, middle, and last row.
+  selection plan at the first, middle, and last row. With a real in-memory store and injectable scheduler,
+  prove that Move cancels a pending reminder reached through an ordinary search, that the due scheduler does
+  not return it to Inbox, and that undo restores its exact labels, reminder state, and due time. Also prove
+  that permanent-failure recovery restores the same snapshot.
 - **Component:** destination filtering, keyboard wrap, one-shot Enter, Escape, Done with an empty catalog,
   exclusion of the active user label, a bulk target snapshot that survives selection clearing, and isolation
   of typed letters from global shortcuts.
 - **E2e (seeded):** move one Inbox thread into a user label and auto-advance; open that label and move the
   thread to Done; move three selected Inbox threads and restore all three with one `Z`; move from All Mail
-  without losing `STARRED`, `UNREAD`, or an unrelated label; prove that `V` and the palette command are absent
-  in Drafts, Snoozed, Spam, Trash, and Outbox. Assert pending-row counts so the local action cannot pass
-  without entering the durable queue.
+  without losing `STARRED`, `UNREAD`, or an unrelated label. Reach a pending-snooze thread through an allowed
+  user-label view, move it, and prove that it leaves Snoozed. Undo and prove that its original due time returns.
+  Prove that `V` and the palette command are absent in Drafts, Snoozed, Spam, Trash, and Outbox. Assert
+  pending-row counts so the local action cannot pass without entering the durable queue.
 - **T27 integration:** if T31 lands first, T27 adds one split e2e that invokes `V` and proves that Move uses
   Inbox semantics. If T27 lands first, add that assertion here. The second task to land owns the test.
 - **Screenshot artifact:** `move-picker.png`, added to the visual self-check list in `AGENTS.md` when the task
@@ -1035,9 +1048,9 @@ semantics would leave mail in Inbox and would not advance the queue.
 
 ### Done when
 
-Move and Label remain distinct commands, every allowed context follows F4's destination rules, bulk undo is
-exact, failed actions converge through the existing recovery path, the affected screenshots have been
-reviewed, and `npm run verify` is green.
+Move and Label remain distinct commands, every allowed context follows F4's destination rules, and Move
+cannot leave a pending reminder that later adds `INBOX`. Bulk undo is exact, failed actions converge through
+the existing recovery path, the affected screenshots have been reviewed, and `npm run verify` is green.
 
 ---
 
