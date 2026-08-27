@@ -28,12 +28,14 @@ export function useServerSearch(
   query: string,
   account: string | null,
   mailRevision: number,
+  mailChangeSource: string | null,
   online: boolean
 ): ServerSearch {
   const [state, setState] = useState<ServerSearchState>(INITIAL_STATE)
   const requestVersionRef = useRef(0)
   const requestPendingRef = useRef(false)
   const activeRequestIdRef = useRef<string | null>(null)
+  const ownedRequestIdsRef = useRef(new Set<string>())
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: each identity change supersedes the previous request
   useEffect(() => {
@@ -49,12 +51,15 @@ export function useServerSearch(
     }
   }, [account, open, query])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a mail mutation moves cached server rows into local results
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keep this request's cache refresh, then release its rows on a later mail mutation
   useEffect(() => {
     setState((current) =>
-      current.phase === 'waiting' || current.phase === 'complete' ? current : INITIAL_STATE
+      current.phase === 'waiting' ||
+      (mailChangeSource !== null && ownedRequestIdsRef.current.has(mailChangeSource))
+        ? current
+        : INITIAL_STATE
     )
-  }, [mailRevision])
+  }, [mailChangeSource, mailRevision])
 
   useEffect(() => {
     if (online) setState((current) => (current.phase === 'offline' ? INITIAL_STATE : current))
@@ -65,6 +70,11 @@ export function useServerSearch(
     const version = ++requestVersionRef.current
     const requestId = crypto.randomUUID()
     activeRequestIdRef.current = requestId
+    ownedRequestIdsRef.current.add(requestId)
+    if (ownedRequestIdsRef.current.size > 32) {
+      const oldestRequestId = ownedRequestIdsRef.current.values().next().value
+      if (oldestRequestId) ownedRequestIdsRef.current.delete(oldestRequestId)
+    }
     requestPendingRef.current = true
     setState({ phase: 'waiting', rows: [], message: null, quotaWaitMs: 0 })
     void window.attn.mail

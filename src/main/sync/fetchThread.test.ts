@@ -39,7 +39,10 @@ describe('fetchAndCacheThread', () => {
       const snapshot = thread('remote')
       const provider = { getThread: vi.fn(async () => snapshot) }
 
-      await expect(fetchAndCacheThread(db, ACCOUNT, provider, 'remote')).resolves.toBe(snapshot)
+      await expect(fetchAndCacheThread(db, ACCOUNT, provider, 'remote')).resolves.toEqual({
+        thread: snapshot,
+        persisted: true
+      })
       await fetchAndCacheThread(db, ACCOUNT, provider, 'remote')
 
       expect(provider.getThread).toHaveBeenNthCalledWith(1, 'remote', {
@@ -100,10 +103,32 @@ describe('fetchAndCacheThread', () => {
         })
       }
 
-      await fetchAndCacheThread(db, ACCOUNT, provider, 'superseded', {
-        shouldPersist: () => current
-      })
+      await expect(
+        fetchAndCacheThread(db, ACCOUNT, provider, 'superseded', {
+          shouldPersist: () => current
+        })
+      ).resolves.toEqual({ thread: expect.objectContaining({ id: 'superseded' }), persisted: false })
 
+      expect(db.prepare('SELECT COUNT(*) AS count FROM threads').get()).toEqual({ count: 0 })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('reports when the authoritative snapshot is intentionally absent from the mail store', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, ACCOUNT, ACCOUNT)
+      const snapshot = thread('chat')
+      snapshot.messages?.forEach((message) => {
+        message.labelIds = ['CHAT']
+      })
+      const provider = { getThread: vi.fn(async () => snapshot) }
+
+      await expect(fetchAndCacheThread(db, ACCOUNT, provider, 'chat')).resolves.toEqual({
+        thread: snapshot,
+        persisted: false
+      })
       expect(db.prepare('SELECT COUNT(*) AS count FROM threads').get()).toEqual({ count: 0 })
     } finally {
       db.close()

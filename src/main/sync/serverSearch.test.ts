@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { openDatabase } from '../db'
-import { searchThreads } from '../db/search'
+import { SEARCH_RESULT_LIMIT, searchThreads } from '../db/search'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { ensureAccount, persistThread } from './persist'
@@ -13,14 +13,14 @@ import {
 
 const ACCOUNT = 'search@example.test'
 
-function thread(id: string, at: number): GmailThread {
+function thread(id: string, at: number, labelIds: string[] = ['INBOX']): GmailThread {
   return {
     id,
     messages: [
       {
         id: `message-${id}`,
         threadId: id,
-        labelIds: ['INBOX'],
+        labelIds,
         internalDate: String(at),
         snippet: `Remote match ${id}`,
         payload: {
@@ -124,7 +124,89 @@ describe('searchAllGmail', () => {
     }
   })
 
-  it.each(['is:snoozed', 'in:snoozed'])('does not substitute Gmail snooze state for %s', async (query) => {
+  it('skips locally matching ids beyond the visible local result limit', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, ACCOUNT, ACCOUNT)
+      const localIds = Array.from({ length: SEARCH_RESULT_LIMIT * 2 }, (_, index) => `local-${index}`)
+      for (const [index, id] of localIds.entries()) {
+        persistThread(db, ACCOUNT, thread(id, 10_000 - index))
+      }
+      const overflowLocalIds = localIds.slice(SEARCH_RESULT_LIMIT)
+      const remote = thread('remote-after-local-page', 20_000)
+      const provider: ServerSearchProvider = {
+        listThreadIds: vi
+          .fn()
+          .mockResolvedValueOnce({ threadIds: overflowLocalIds, nextPageToken: 'page-2' })
+          .mockResolvedValueOnce({ threadIds: [remote.id] }),
+        getThread: vi.fn(async (id) => {
+          if (id !== remote.id) throw new Error(`unexpected refetch of local thread ${id}`)
+          return remote
+        }),
+        getAttachmentData: vi.fn(async () => undefined)
+      }
+
+      const result = await searchAllGmail(db, ACCOUNT, provider, 'Remote')
+
+      expect(provider.listThreadIds).toHaveBeenCalledTimes(2)
+      expect(provider.getThread).toHaveBeenCalledOnce()
+      expect(provider.getThread).toHaveBeenCalledWith(remote.id, expect.anything())
+      expect(result.rows.map((row) => row.id)).toEqual([remote.id])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('does not count non-persisted Gmail snapshots toward the result limit', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, ACCOUNT, ACCOUNT)
+      const chatIds = Array.from({ length: SEARCH_RESULT_LIMIT }, (_, index) => `chat-${index}`)
+      const remote = thread('normal-after-chat-page', 20_000)
+      const provider: ServerSearchProvider = {
+        listThreadIds: vi
+          .fn()
+          .mockResolvedValueOnce({ threadIds: chatIds, nextPageToken: 'page-2' })
+          .mockResolvedValueOnce({ threadIds: [remote.id] }),
+        getThread: vi.fn(async (id) => (id === remote.id ? remote : thread(id, 10_000, ['CHAT']))),
+        getAttachmentData: vi.fn(async () => undefined)
+      }
+
+      const result = await searchAllGmail(db, ACCOUNT, provider, 'Remote')
+
+      expect(provider.listThreadIds).toHaveBeenCalledTimes(2)
+      expect(provider.getThread).toHaveBeenCalledTimes(SEARCH_RESULT_LIMIT + 1)
+      expect(result.rows.map((row) => row.id)).toEqual([remote.id])
+    } finally {
+      db.close()
+    }
+  })
+
+  it.each(['is:snoozed', 'in:snoozed', 'in:drafts subject:budget'])(
+    'keeps local-only state out of Gmail search for %s',
+    async (query) => {
+      const db = openDatabase(':memory:')
+      try {
+        ensureAccount(db, ACCOUNT, ACCOUNT)
+        const provider: ServerSearchProvider = {
+          listThreadIds: vi.fn(),
+          getThread: vi.fn(),
+          getAttachmentData: vi.fn()
+        }
+
+        await expect(searchAllGmail(db, ACCOUNT, provider, query)).resolves.toEqual({
+          rows: [],
+          quotaWaitMs: 0
+        })
+        expect(provider.listThreadIds).not.toHaveBeenCalled()
+        expect(provider.getThread).not.toHaveBeenCalled()
+      } finally {
+        db.close()
+      }
+    }
+  )
+
+  it('does not expand a quote-only query into a mailbox-wide Gmail search', async () => {
     const db = openDatabase(':memory:')
     try {
       ensureAccount(db, ACCOUNT, ACCOUNT)
@@ -134,7 +216,7 @@ describe('searchAllGmail', () => {
         getAttachmentData: vi.fn()
       }
 
-      await expect(searchAllGmail(db, ACCOUNT, provider, query)).resolves.toEqual({
+      await expect(searchAllGmail(db, ACCOUNT, provider, '""')).resolves.toEqual({
         rows: [],
         quotaWaitMs: 0
       })

@@ -174,6 +174,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     pendingActionCount,
     pausedActionCount,
     mailRevision,
+    mailChangeSource,
     invalidateConversations,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
@@ -200,7 +201,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [backingCachedView, backingMailView, mailboxRows, realSnoozedThreads, realThreads]
   )
   const search = useLocalSearch(searchOpen, searchQuery, activeAccount, mailRevision)
-  const serverSearch = useServerSearch(searchOpen, searchQuery, activeAccount, mailRevision, online)
+  const serverSearch = useServerSearch(
+    searchOpen,
+    searchQuery,
+    activeAccount,
+    mailRevision,
+    mailChangeSource,
+    online
+  )
   const localSearchThreads = useMemo(() => displayThreads(search.response?.rows ?? []), [search.response])
   const serverSearchThreads = useMemo(() => displayThreads(serverSearch.rows), [serverSearch.rows])
   const serverSearchThreadIds = useMemo(
@@ -931,6 +939,17 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (serverSearch.phase === 'auth-required') reconnectSearch()
     else serverSearch.run()
   }, [focusSearchResults, online, reconnectSearch, searchQuery, serverSearch.phase, serverSearch.run])
+  useEffect(() => {
+    if (
+      searchOpen &&
+      !readerOpen &&
+      (serverSearch.phase === 'auth-required' ||
+        serverSearch.phase === 'offline' ||
+        serverSearch.phase === 'error')
+    ) {
+      setSearchKeyboardTarget('query')
+    }
+  }, [readerOpen, searchOpen, serverSearch.phase])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetIds(null), [])
   const openSnooze = useCallback(() => {
@@ -1127,9 +1146,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       Boolean(searchQuery.trim()) &&
       online &&
       serverSearch.phase !== 'waiting' &&
-      serverSearch.phase !== 'complete' &&
-      serverSearch.phase !== 'auth-required',
-    searchAll: serverSearch.run,
+      serverSearch.phase !== 'complete',
+    searchAll: submitSearch,
     clearSearch,
     triage,
     openSnooze,

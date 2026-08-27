@@ -211,7 +211,7 @@ export interface InvokeChannels {
 export interface BroadcastChannels {
   [IPC_CHANNELS.outboxChanged]: OutboxChanged
   [IPC_CHANNELS.outboxProgress]: import('./outbox').OutboxProgress | null
-  [IPC_CHANNELS.mailChanged]: undefined
+  [IPC_CHANNELS.mailChanged]: { serverSearchRequestId?: string }
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined

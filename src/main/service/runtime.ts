@@ -158,7 +158,7 @@ export class ServiceRuntime {
       outboxSender: () => this.outboxSender,
       scheduler: () => this.snoozeScheduler,
       syncController: () => this.syncController,
-      broadcastMailChanged: () => this.broadcastMailChanged(),
+      broadcastMailChanged: (serverSearchRequestId) => this.broadcastMailChanged(serverSearchRequestId),
       broadcastOutboxChanged: (payload) => this.emit({ kind: 'outbox-changed', payload }),
       broadcastBodyHydrationFailed: (accountId, threadId) =>
         this.emit({ kind: 'body-hydration-failed', accountId, threadId }),
@@ -336,7 +336,9 @@ export class ServiceRuntime {
     if (this.seedAccountId && this.input.testSeed) {
       const seedPath = this.input.testSeed
       return {
-        listThreadIds: async () => ({ threadIds: readSeedRemoteThreadIds(seedPath) }),
+        listThreadIds: async (options = {}) => ({
+          threadIds: readSeedRemoteThreadIds(seedPath, options.q ?? '')
+        }),
         getThread: async (threadId) => {
           const thread = readSeedThread(seedPath, threadId)
           if (!thread) throw new GmailApiError(404, 'seed thread unavailable')
@@ -365,8 +367,11 @@ export class ServiceRuntime {
     }
   }
 
-  private broadcastMailChanged(): void {
-    this.emit({ kind: 'mail-changed' })
+  private broadcastMailChanged(serverSearchRequestId?: string): void {
+    this.emit({
+      kind: 'mail-changed',
+      ...(serverSearchRequestId ? { serverSearchRequestId } : {})
+    })
     this.broadcastBadge()
   }
 

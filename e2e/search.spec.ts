@@ -58,10 +58,12 @@ test('fetches a server-only result, opens it, and keeps it cached across relaunc
   await expect(searchStatus).toHaveRole('status')
   await input.press('Enter')
   await expect(page.getByTestId('thread-section-divider')).toHaveText('More from Gmail')
+  await expect(searchStatus).toContainText('1 more conversation from Gmail')
   const remote = page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
   await expect(remote).toBeVisible()
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
   await expect(page.getByTestId('thread-list')).toBeFocused()
+  await expect(page.getByTestId('search-coverage')).not.toContainText('Searching cached mail')
   const serverSearchPath = join(artifactDirectory, 'server-search.png')
   await page.screenshot({ path: serverSearchPath })
   await testInfo.attach('server-search', { path: serverSearchPath, contentType: 'image/png' })
@@ -70,6 +72,7 @@ test('fetches a server-only result, opens it, and keeps it cached across relaunc
   await expect(page.getByTestId('conversation-subject')).toHaveText('Remote archive result')
 
   await page.keyboard.press('Escape')
+  await expect(remote).not.toHaveAttribute('data-unread', 'true')
   await page.keyboard.press('Escape')
   await expect(input).toBeFocused()
   await page.keyboard.press('Escape')
@@ -88,6 +91,17 @@ test('fetches a server-only result, opens it, and keeps it cached across relaunc
   ).toBeVisible()
   await expect(page.getByTestId('thread-section-divider')).toHaveCount(0)
   expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
+})
+
+test('does not fabricate Gmail results for an unmatched seeded query', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('definitely-not-remote')
+  await input.press('Enter')
+
+  await expect(page.getByTestId('search-all-gmail')).toHaveText('No more matches in Gmail')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
+  await expect(page.getByTestId('thread-section-divider')).toHaveCount(0)
 })
 
 test('sorts text results newest first and keeps their date headers separated', async ({ page }) => {
@@ -265,6 +279,23 @@ test('updates bulk flags and Inbox exits optimistically in search results', asyn
   await expect(remote).toBeVisible()
 })
 
+test('removes a cached Gmail result after it stops matching the query', async ({ page }) => {
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('serveronlyneedle in:inbox')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
+
+  await input.press('Enter')
+  const remote = page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  await expect(remote).toBeVisible()
+  await expect(remote).toHaveAttribute('data-selected', 'true')
+
+  await page.keyboard.press('e')
+  await expect(remote).toHaveAttribute('data-exiting', 'true')
+  await expect(remote).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
+})
+
 test('restores the selected thread by id when the mailbox reorders during search', async ({ app, page }) => {
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '2')
   await page.keyboard.press('j')
@@ -304,9 +335,6 @@ test('keeps an open search reader pinned while the underlying mailbox refreshes'
   await input.fill('visualsort')
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '3')
   await input.press('Enter')
-  await expect(
-    page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
-  ).toBeVisible()
   await page.keyboard.press('j')
   await page.keyboard.press('j')
   await page.keyboard.press('Enter')
@@ -326,7 +354,7 @@ test('keeps an open search reader pinned while the underlying mailbox refreshes'
   )
   if (result.error) throw new Error(result.error)
 
-  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '3')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '2')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Acme annual roadmap')
   await page.keyboard.press('Escape')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveAttribute(

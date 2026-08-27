@@ -168,13 +168,19 @@ export async function runHistoryCycle(
   const promoteInbox = new Set(plan.promoteInboxThreadIds)
   for (const threadId of plan.refetchThreadIds) {
     try {
-      const thread = await (effects.fetchThread ?? fetchAndCacheThread)(db, accountId, provider, threadId, {
-        format: 'full',
-        priority: 'polling',
-        persistOptions: {
-          inboxVisibility: promoteInbox.has(threadId) ? 'show' : 'preserve'
+      const { thread } = await (effects.fetchThread ?? fetchAndCacheThread)(
+        db,
+        accountId,
+        provider,
+        threadId,
+        {
+          format: 'full',
+          priority: 'polling',
+          persistOptions: {
+            inboxVisibility: promoteInbox.has(threadId) ? 'show' : 'preserve'
+          }
         }
-      })
+      )
       await (effects.hydrate ?? hydrateMissingThreadBodies)(db, provider, accountId, thread, undefined, {
         priority: 'polling'
       })

@@ -116,8 +116,9 @@ const api = {
     undo: (): Promise<TriageResult | null> => invoke(IPC_CHANNELS.mailUndo),
     getPendingActionCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetPendingActionCount),
     getActionQueueStatus: () => invoke(IPC_CHANNELS.mailGetActionQueueStatus),
-    onChanged: (cb: () => void): (() => void) => {
-      const listener = (): void => cb()
+    onChanged: (cb: (serverSearchRequestId: string | null) => void): (() => void) => {
+      const listener = (_event: unknown, payload: { serverSearchRequestId?: unknown } | undefined): void =>
+        cb(typeof payload?.serverSearchRequestId === 'string' ? payload.serverSearchRequestId : null)
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },

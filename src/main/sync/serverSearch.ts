@@ -2,7 +2,7 @@ import type { ThreadRow } from '../../shared/mail'
 import type { ServerSearchResponse } from '../../shared/searchQuery'
 import { parseSearchQuery } from '../../shared/searchQuery'
 import type { Db } from '../db'
-import { SEARCH_RESULT_LIMIT, searchRowsByThreadIds, searchThreads } from '../db/search'
+import { matchingStoredThreadIds, SEARCH_RESULT_LIMIT, searchRowsByThreadIds } from '../db/search'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import { toGmailSearchQuery } from '../gmail/searchQuery'
 import { hydrateMissingThreadBodies } from './bodies'
@@ -23,6 +23,7 @@ export interface SearchAllGmailResult {
 export interface SearchAllGmailOptions {
   shouldContinue?: () => boolean
   signal?: AbortSignal
+  onStoreChanged?: () => void
 }
 
 /** Keep Gmail order, remove repeated ids, and leave existing local results in their original section. */
@@ -64,16 +65,18 @@ export async function searchAllGmail(
 ): Promise<SearchAllGmailResult> {
   const shouldContinue = (): boolean => !options.signal?.aborted && (options.shouldContinue?.() ?? true)
   const parsed = parseSearchQuery(query)
-  const searchesLocalSnoozes = parsed.filters.some(
+  const searchesLocalOnlyState = parsed.filters.some(
     (filter) =>
+      (filter.kind === 'in' && ['draft', 'drafts'].includes(filter.value.toLowerCase())) ||
       (filter.kind === 'is' && filter.value === 'snoozed') ||
       (filter.kind === 'in' && filter.value.toLowerCase().replaceAll(/[\s_-]/g, '') === 'snoozed')
   )
-  if (searchesLocalSnoozes) return { rows: [], quotaWaitMs: 0 }
+  if ((parsed.terms.length === 0 && parsed.filters.length === 0) || searchesLocalOnlyState) {
+    return { rows: [], quotaWaitMs: 0 }
+  }
   const gmailQuery = toGmailSearchQuery(parsed, { resolveLabelName: labelResolver(db, accountId) })
-  const localIds = searchThreads(db, accountId, query).rows.map((row) => row.id)
   const waitStartedAt = provider.quotaMetrics?.().waitMs ?? 0
-  const excludedIds = new Set(localIds)
+  const excludedIds = new Set<string>()
   const storedIds: string[] = []
   let pageToken: string | undefined
   do {
@@ -86,17 +89,22 @@ export async function searchAllGmail(
       ...(pageToken ? { pageToken } : {})
     })
     if (!shouldContinue()) return { rows: [], quotaWaitMs: 0 }
+    for (const threadId of matchingStoredThreadIds(db, accountId, query, page.threadIds)) {
+      excludedIds.add(threadId)
+    }
     const candidateIds = newServerThreadIds(excludedIds, page.threadIds)
     for (const threadId of candidateIds) {
       excludedIds.add(threadId)
       try {
-        const thread = await fetchAndCacheThread(db, accountId, provider, threadId, {
+        const { thread, persisted } = await fetchAndCacheThread(db, accountId, provider, threadId, {
           format: 'full',
           priority: 'foreground',
           ...(options.signal ? { signal: options.signal } : {}),
           shouldPersist: shouldContinue
         })
         if (!shouldContinue()) return { rows: [], quotaWaitMs: 0 }
+        options.onStoreChanged?.()
+        if (!persisted) continue
         await hydrateMissingThreadBodies(db, provider, accountId, thread, shouldContinue, {
           ...(options.signal ? { signal: options.signal } : {}),
           priority: 'foreground'

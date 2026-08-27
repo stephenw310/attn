@@ -52,6 +52,8 @@ interface SeedFixture {
   threads: SeedThread[]
   /** E2E-only Gmail snapshots that are not imported until an explicit server search fetches them. */
   remoteThreads?: SeedThread[]
+  /** Exact Gmail q= responses for the remote snapshots, keeping the provider seam query-aware. */
+  remoteSearches?: Record<string, string[]>
 }
 
 export interface SeedLoadOptions {
@@ -161,9 +163,12 @@ export function readSeedThread(path: string, threadId: string, now = Date.now())
   return thread ? gmailThreadFor(thread, now) : null
 }
 
-/** List the snapshots reserved for the seeded server-search provider. */
-export function readSeedRemoteThreadIds(path: string): string[] {
-  return (readSeedFixture(path).remoteThreads ?? []).map((thread) => thread.id)
+/** List the snapshots returned by the seeded server-search provider for one Gmail query. */
+export function readSeedRemoteThreadIds(path: string, query: string): string[] {
+  const fixture = readSeedFixture(path)
+  const remoteIds = new Set((fixture.remoteThreads ?? []).map((thread) => thread.id))
+  const configured = fixture.remoteSearches?.[query] ?? []
+  return [...new Set(configured)].filter((threadId) => remoteIds.has(threadId))
 }
 
 export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): SeedLoadResult {

@@ -203,6 +203,14 @@ function draftLocationOnly(parsed: ParsedSearchQuery): boolean {
   )
 }
 
+function searchesDrafts(parsed: ParsedSearchQuery): boolean {
+  return parsed.filters.some((filter) => {
+    if (filter.kind !== 'in') return false
+    const mailbox = systemMailboxName(filter.value)
+    return mailbox === 'draft' || mailbox === 'drafts'
+  })
+}
+
 function draftText(draft: Draft, field: SearchTextTerm['field'], accountId: string): string {
   const recipients = [...draft.to, ...draft.cc, ...draft.bcc]
     .flatMap((address) => [address.name, address.email])
@@ -330,6 +338,33 @@ export function searchRowsByThreadIds(
   return rows.map(toThreadRow)
 }
 
+/** Return only requested ids that the current local index already matches. */
+export function matchingStoredThreadIds(
+  db: Db,
+  accountId: string,
+  query: string,
+  threadIds: readonly string[]
+): Set<string> {
+  const requestedIds = [...new Set(threadIds)].slice(0, SEARCH_RESULT_LIMIT)
+  if (requestedIds.length === 0) return new Set()
+  const parsed = parseSearchQuery(query)
+  const match = searchMatchExpression(parsed)
+  if ((!match && parsed.filters.length === 0) || searchesDrafts(parsed)) return new Set()
+
+  const values: unknown[] = []
+  const candidates = candidateSql(parsed, match, accountId, values)
+  const requested = requestedIds.map(() => '(?)').join(', ')
+  const rows = db
+    .prepare(
+      `WITH search_candidates AS (${candidates}), requested(id) AS (VALUES ${requested})
+       SELECT candidates.thread_id AS id
+       FROM search_candidates candidates
+       JOIN requested ON requested.id = candidates.thread_id`
+    )
+    .all(...values, ...requestedIds) as Array<{ id: string }>
+  return new Set(rows.map((row) => row.id))
+}
+
 /** Run local thread and Drafts search over their authoritative stores. */
 export function searchThreads(
   db: Db,
@@ -343,12 +378,7 @@ export function searchThreads(
   const resultLimit = Math.max(1, Math.min(Math.trunc(limit), SEARCH_RESULT_LIMIT))
   if (!query.trim() || (!match && parsed.filters.length === 0)) return { rows: [], drafts: [], coverage }
 
-  const searchesDrafts = parsed.filters.some((filter) => {
-    if (filter.kind !== 'in') return false
-    const mailbox = systemMailboxName(filter.value)
-    return mailbox === 'draft' || mailbox === 'drafts'
-  })
-  if (searchesDrafts) {
+  if (searchesDrafts(parsed)) {
     return { rows: [], drafts: searchDraftRows(db, accountId, parsed, resultLimit), coverage }
   }
 

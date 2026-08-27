@@ -10,6 +10,12 @@ export interface FetchAndCacheThreadOptions extends GetThreadOptions {
   shouldPersist?: () => boolean
 }
 
+export interface FetchAndCacheThreadResult {
+  thread: GmailThread
+  /** Whether the authoritative snapshot leaves a non-draft, non-Chat thread in the local store. */
+  persisted: boolean
+}
+
 /** Fetch one authoritative Gmail thread snapshot and cache it through persistThread. */
 export async function fetchAndCacheThread(
   db: Db,
@@ -17,17 +23,17 @@ export async function fetchAndCacheThread(
   provider: ThreadFetchProvider,
   threadId: string,
   options: FetchAndCacheThreadOptions = {}
-): Promise<GmailThread> {
+): Promise<FetchAndCacheThreadResult> {
   const format = options.format ?? 'full'
   const thread = await provider.getThread(threadId, {
     format,
     priority: options.priority ?? 'foreground',
     ...(options.signal ? { signal: options.signal } : {})
   })
-  if (options.shouldPersist && !options.shouldPersist()) return thread
-  persistThread(db, accountId, thread, {
+  if (options.shouldPersist && !options.shouldPersist()) return { thread, persisted: false }
+  const persisted = persistThread(db, accountId, thread, {
     ...options.persistOptions,
     ...(format === 'metadata' ? { metadataOnly: true } : {})
   })
-  return thread
+  return { thread, persisted }
 }

@@ -125,5 +125,10 @@
         }
       ]
     }
-  ]
+  ],
+  "remoteSearches": {
+    "serveronlyneedle -in:drafts": ["t-search-server-only"],
+    "serveronlyneedle in:inbox -in:drafts": ["t-search-server-only"],
+    "in:inbox -in:drafts": ["t-search-server-only"]
+  }
 }

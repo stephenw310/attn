@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '../db'
-import { loadSeed, resolveInternalDate } from './seed'
+import { loadSeed, readSeedRemoteThreadIds, resolveInternalDate } from './seed'
 
 const base = { id: 'm1', from: 'a@b.test', to: 'c@d.test', subject: 's' }
 
@@ -59,5 +59,16 @@ describe('loadSeed', () => {
     } finally {
       db.close()
     }
+  })
+})
+
+describe('readSeedRemoteThreadIds', () => {
+  it('returns only the remote snapshots configured for the exact Gmail query', () => {
+    const fixturePath = fileURLToPath(new URL('../../../e2e/fixtures/seed-search.json', import.meta.url))
+
+    expect(readSeedRemoteThreadIds(fixturePath, 'serveronlyneedle -in:drafts')).toEqual([
+      't-search-server-only'
+    ])
+    expect(readSeedRemoteThreadIds(fixturePath, 'visualsort -in:drafts')).toEqual([])
   })
 })

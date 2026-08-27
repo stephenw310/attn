@@ -59,13 +59,14 @@ function checkpointDb(lastHistoryId = '10'): { db: Db; checkpoint: () => string 
 }
 
 function providerFetch(): typeof fetchAndCacheThread {
-  return vi.fn(async (_db, _accountId, provider, threadId, options = {}) =>
-    provider.getThread(threadId, {
+  return vi.fn(async (_db, _accountId, provider, threadId, options = {}) => ({
+    thread: await provider.getThread(threadId, {
       ...(options.format ? { format: options.format } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.priority ? { priority: options.priority } : {})
-    })
-  )
+    }),
+    persisted: true
+  }))
 }
 
 function pollerOptions(overrides: Partial<HistoryPollerOptions> = {}): HistoryPollerOptions {

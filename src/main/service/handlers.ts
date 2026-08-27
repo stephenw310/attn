@@ -113,7 +113,7 @@ export interface ServiceHandlerContext {
   outboxSender: () => OutboxSender | null
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
-  broadcastMailChanged: () => void
+  broadcastMailChanged: (serverSearchRequestId?: string) => void
   broadcastOutboxChanged: (change: import('../../shared/outbox').OutboxChanged) => void
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
   trackForegroundProviderWork: <T>(accountId: string, work: () => Promise<T>) => Promise<T>
@@ -622,13 +622,8 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.mailSearchAll, async (_event, requestId, query) => {
     const account = context.currentAccountId()
-    if (
-      !account ||
-      !nonEmptyString(requestId) ||
-      requestId.length > 128 ||
-      typeof query !== 'string' ||
-      !query.trim()
-    ) {
+    const boundedQuery = typeof query === 'string' ? query.trim().slice(0, 1_000) : ''
+    if (!account || !nonEmptyString(requestId) || requestId.length > 128 || !boundedQuery) {
       return { status: 'error', message: 'Enter a search before searching Gmail' }
     }
     const provider = context.makeServerSearchProvider()
@@ -638,21 +633,25 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const controller = new AbortController()
     activeServerSearches.get(requestId)?.abort()
     activeServerSearches.set(requestId, controller)
+    let storeChanged = false
     try {
       const result = await context.trackForegroundProviderWork(account, () =>
-        searchAllGmail(context.db, account, provider, query.slice(0, 1_000), {
+        searchAllGmail(context.db, account, provider, boundedQuery, {
           shouldContinue: () => context.currentAccountId() === account,
-          signal: controller.signal
+          signal: controller.signal,
+          onStoreChanged: () => {
+            storeChanged = true
+          }
         })
       )
-      if (context.currentAccountId() === account && result.rows.length > 0) {
-        context.broadcastMailChanged()
-      }
       return { status: 'ok', ...result }
     } catch (error) {
       if (controller.signal.aborted) return { status: 'ok', rows: [], quotaWaitMs: 0 }
       return serverSearchFailure(error)
     } finally {
+      if (storeChanged && context.currentAccountId() === account) {
+        context.broadcastMailChanged(requestId)
+      }
       if (activeServerSearches.get(requestId) === controller) activeServerSearches.delete(requestId)
     }
   })
@@ -772,11 +771,18 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     attemptedInlineImageRepairs.add(repairKey)
     try {
       return await context.trackForegroundProviderWork(accountId, async () => {
-        const thread = await fetchAndCacheThread(context.db, accountId, provider, request.threadId, {
-          format: 'full',
-          shouldPersist: () => context.currentAccountId() === accountId
-        })
+        const { thread, persisted } = await fetchAndCacheThread(
+          context.db,
+          accountId,
+          provider,
+          request.threadId,
+          {
+            format: 'full',
+            shouldPersist: () => context.currentAccountId() === accountId
+          }
+        )
         if (context.currentAccountId() !== accountId) return false
+        if (!persisted) return false
         await hydrateMissingThreadBodies(context.db, provider, accountId, thread)
         if (context.currentAccountId() === accountId) context.broadcastMailChanged()
         return true
