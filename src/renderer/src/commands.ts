@@ -51,6 +51,9 @@ export const COMMAND_SPECS = {
   },
   'search.allGmail': { title: 'Search all of Gmail', context: 'global' },
   'search.clear': { title: 'Clear search', context: 'global' },
+  'split.previous': { title: 'Previous inbox split', shortcut: 'ArrowLeft', context: 'list' },
+  'split.next': { title: 'Next inbox split', shortcut: 'ArrowRight', context: 'list' },
+  'split.manage': { title: 'Manage inbox splits', context: 'global' },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
     title: 'Use Dark theme',
@@ -166,7 +169,8 @@ export const COMMAND_SPECS = {
   'triage.undo': { title: 'Undo', shortcut: 'z', context: 'global' }
 } as const satisfies Record<string, CommandSpec>
 
-export type CommandId = keyof typeof COMMAND_SPECS
+export type StaticCommandId = keyof typeof COMMAND_SPECS
+export type CommandId = StaticCommandId | `split.goto:${string}`
 
 export interface CommandArgumentValue {
   label: string
@@ -204,11 +208,26 @@ export function getCommandRegistrySnapshot(): readonly Command[] {
 }
 
 export function createCommand(
-  id: CommandId,
+  id: StaticCommandId,
   run: () => void,
   overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'shortcutAliases' | 'context' | 'argument'>> = {}
 ): Command {
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
+}
+
+export function createDynamicSplitCommand(
+  splitId: string,
+  title: string,
+  run: () => void,
+  shortcut?: string
+): Command {
+  return {
+    id: `split.goto:${splitId}`,
+    title,
+    ...(shortcut ? { shortcut } : {}),
+    context: 'navigation',
+    run
+  }
 }
 
 export function registerCommands(next: Command[]): () => void {

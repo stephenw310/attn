@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Db } from './db'
+import { type Db, openDatabase } from './db'
 import {
   applyUnreadBadge,
   applyUnreadBadgeToWindow,
@@ -158,7 +158,7 @@ describe('takePendingFocus', () => {
 
 describe('candidatesFor', () => {
   it('excludes mail with no stored message from both the detail list and the count', () => {
-    const db = fakeMailDb([
+    const db = mailDb([
       { messageId: 'message-one', threadId: 'one' },
       { messageId: 'message-two', threadId: 'two' },
       { messageId: 'message-three', threadId: 'three' }
@@ -181,7 +181,7 @@ describe('candidatesFor', () => {
       messageId: `message-${threadId}`,
       threadId
     }))
-    const db = fakeMailDb(stored)
+    const db = mailDb(stored)
 
     // Guards the coupling between the two SUMMARY_THRESHOLD uses: hydration is
     // skipped here, so a threshold raised only in planNotifications would plan
@@ -190,29 +190,63 @@ describe('candidatesFor', () => {
       { title: 'Attn', body: '4 new conversations' }
     ])
   })
+
+  it('filters muted splits before deciding whether to summarize', () => {
+    const stored = ['eligible', 'muted-one', 'muted-two', 'muted-three'].map((threadId) => ({
+      messageId: `message-${threadId}`,
+      threadId,
+      important: threadId === 'eligible'
+    }))
+    const db = mailDb(stored)
+
+    expect(planNotifications(candidatesFor(db, 'user@attn.test', stored), { focused: false })).toEqual([
+      {
+        threadId: 'eligible',
+        title: 'Sender eligible · Subject eligible',
+        body: 'Snippet eligible'
+      }
+    ])
+  })
 })
 
-function fakeMailDb(inboxMessages: readonly { messageId: string; threadId: string }[]): Db {
-  const byMessageId = new Map(inboxMessages.map((message) => [message.messageId, message]))
-  return {
-    prepare: () => ({
-      all: (_accountId: string, ...messageIds: string[]) =>
-        messageIds.flatMap((messageId) => {
-          const message = byMessageId.get(messageId)
-          return message ? [{ message_id: messageId, thread_id: message.threadId }] : []
-        }),
-      get: (_accountId: string, messageId: string) => {
-        const message = byMessageId.get(messageId)
-        if (!message) return undefined
-        return {
-          from_name: `Sender ${message.threadId}`,
-          from_email: null,
-          snippet: `Snippet ${message.threadId}`,
-          subject: `Subject ${message.threadId}`
-        }
-      }
-    })
-  } as unknown as Db
+function mailDb(inboxMessages: readonly { messageId: string; threadId: string; important?: boolean }[]): Db {
+  const db = openDatabase(':memory:')
+  db.prepare(
+    "INSERT INTO accounts (id, email, created_at) VALUES ('user@attn.test', 'user@attn.test', 0)"
+  ).run()
+  const insertThread = db.prepare(
+    `INSERT INTO threads
+     (account_id, id, subject, snippet, last_msg_at, from_display, is_unread, is_inbox_visible)
+     VALUES ('user@attn.test', ?, ?, ?, 1, ?, 1, 1)`
+  )
+  const insertMessage = db.prepare(
+    `INSERT INTO messages
+     (account_id, id, thread_id, from_name, from_email, snippet, labels_json, attachments_json)
+     VALUES ('user@attn.test', ?, ?, ?, ?, ?, ?, '[]')`
+  )
+  const insertInbox = db.prepare(
+    `INSERT INTO thread_labels (account_id, thread_id, label_id)
+     VALUES ('user@attn.test', ?, 'INBOX')`
+  )
+  for (const message of inboxMessages) {
+    const important = message.important !== false
+    insertThread.run(
+      message.threadId,
+      `Subject ${message.threadId}`,
+      `Snippet ${message.threadId}`,
+      `Sender ${message.threadId}`
+    )
+    insertMessage.run(
+      message.messageId,
+      message.threadId,
+      `Sender ${message.threadId}`,
+      `sender-${message.threadId}@example.com`,
+      `Snippet ${message.threadId}`,
+      JSON.stringify(important ? ['IMPORTANT'] : [])
+    )
+    insertInbox.run(message.threadId)
+  }
+  return db
 }
 
 function fakeSettingsDb(): { db: Db; values: Map<string, string> } {

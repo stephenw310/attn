@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type { Db } from '../db'
 import type { GmailPart, GmailThread } from '../gmail/parse'
+import { ensureSplitSetup } from '../splits'
 import { ensureAccount, type LabelRow, persistThread, upsertLabels } from '../sync/persist'
 
 interface SeedMessage {
@@ -22,6 +23,8 @@ interface SeedMessage {
   cc?: string
   bcc?: string
   replyTo?: string
+  /** Optional List-Id header for split-inbox fixtures. */
+  listId?: string
   /** RFC Message-ID header, preferably in canonical angle-bracket form. */
   messageId?: string
   /** RFC References chain, written as one folded-capable header value. */
@@ -54,6 +57,8 @@ interface SeedFixture {
   remoteThreads?: SeedThread[]
   /** Exact Gmail q= responses for the remote snapshots, keeping the provider seam query-aware. */
   remoteSearches?: Record<string, string[]>
+  /** Opt into production split initialization. Existing broad fixtures stay unsplit. */
+  splitSetup?: boolean
 }
 
 export interface SeedLoadOptions {
@@ -95,6 +100,7 @@ function payloadFor(message: SeedMessage): GmailPart {
       ...(message.cc ? [{ name: 'Cc', value: message.cc }] : []),
       ...(message.bcc ? [{ name: 'Bcc', value: message.bcc }] : []),
       ...(message.replyTo ? [{ name: 'Reply-To', value: message.replyTo }] : []),
+      ...(message.listId ? [{ name: 'List-Id', value: message.listId }] : []),
       ...(message.messageId ? [{ name: 'Message-ID', value: message.messageId }] : []),
       ...(message.references?.length
         ? [{ name: 'References', value: message.references.join('\r\n\t') }]
@@ -180,6 +186,7 @@ export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): S
     // Same write path as real sync (persist.ts) — the seam must never grow
     // parallel SQL that can drift from what production writes.
     ensureAccount(db, fixture.account, fixture.account)
+    if (fixture.splitSetup) ensureSplitSetup(db, fixture.account)
     labelsChanged = upsertLabels(db, fixture.account, options.labels ?? fixture.labels ?? [])
     for (const thread of fixture.threads) {
       persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))

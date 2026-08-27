@@ -102,12 +102,15 @@ export interface ThreadPageCursor {
 export interface ThreadPage<Row extends ThreadRow = ThreadRow> {
   rows: Row[]
   nextCursor: ThreadPageCursor | null
+  /** Present for split-filtered Inbox reads. Pages from another rule revision must not be mixed. */
+  splitRevision?: number
 }
 
 /** A local list read targets one 100-row page of a system mailbox or Gmail user label. */
-export type ThreadListRequest = ({ view: ThreadListView } | { view: 'label'; labelId: string }) & {
-  cursor?: ThreadPageCursor
-}
+export type ThreadListRequest =
+  | { view: 'inbox'; splitId?: string; cursor?: ThreadPageCursor }
+  | { view: Exclude<ThreadListView, 'inbox'>; cursor?: ThreadPageCursor }
+  | { view: 'label'; labelId: string; cursor?: ThreadPageCursor }
 
 /** Mailboxes whose membership and reader contents depend on per-message labels. */
 export type MessageMailbox = 'all-mail' | 'spam' | 'trash'

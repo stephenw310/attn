@@ -15,6 +15,8 @@ const COMPOSER_OPEN_CEILING_MS = 50
 const SEARCH_QUERY_CEILING_MS = 100
 const PALETTE_OPEN_CEILING_MS = 50
 const PALETTE_RERANK_CEILING_MS = 30
+const SPLIT_SWITCH_CEILING_MS = 50
+const SPLIT_REBUCKET_CEILING_MS = 1_000
 const COMPOSER_MUTATION_CEILING_MS = 8
 // Two 60Hz vsync intervals. The paint sample is timed from before the key is
 // dispatched, so on its own it carries CDP dispatch latency plus a wait for the
@@ -308,6 +310,42 @@ async function measureMailboxSwitch(page: Page, chordKey: string, expectedTitle:
   )
 }
 
+async function measureSplitSwitch(
+  page: Page,
+  position: number,
+  splitId: string,
+  expectedCount: number
+): Promise<number> {
+  return page.evaluate(
+    async ({ digit, expectedSplitId, count }) => {
+      const ready = (): boolean =>
+        document
+          .querySelector(`[data-testid="split-tab"][data-split-id="${expectedSplitId}"]`)
+          ?.getAttribute('aria-selected') === 'true' &&
+        document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') ===
+          String(count)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }))
+      const started = performance.now()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: String(digit), bubbles: true }))
+      if (ready()) return performance.now() - started
+      return new Promise<number>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          observer.disconnect()
+          reject(new Error(`Timed out switching to split ${expectedSplitId}`))
+        }, 10_000)
+        const observer = new MutationObserver(() => {
+          if (!ready()) return
+          window.clearTimeout(timeout)
+          observer.disconnect()
+          resolve(performance.now() - started)
+        })
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true })
+      })
+    },
+    { digit: position, expectedSplitId: splitId, count: expectedCount }
+  )
+}
+
 async function measureTriageFeedback(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const selected = document.querySelector<HTMLElement>('[data-testid="thread-row"][data-selected="true"]')
@@ -462,6 +500,40 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
       .poll(() => list.evaluate((element) => element.scrollTop))
       .toBeGreaterThanOrEqual(scrollTopBeforeAppend)
     expect(await page.getByTestId('thread-row').count()).toBeLessThan(100)
+  })
+
+  test('re-buckets 10,000 threads and switches splits within the F11 budgets', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
+    const mutation = await page.evaluate(async () => {
+      const started = performance.now()
+      const state = await window.attn.splits.save({
+        name: 'Generated mail',
+        operator: 'any',
+        conditions: [{ type: 'senderDomain', value: 'example.test' }],
+        notify: false
+      })
+      const split = state.splits.find((candidate) => candidate.name === 'Generated mail')
+      if (!split) throw new Error('Generated split was not created')
+      return { durationMs: performance.now() - started, splitId: split.id }
+    })
+    await reportMetric(testInfo, 'split-rule-rebucket', [mutation.durationMs], mutation.durationMs)
+    expect(mutation.durationMs, 'rule mutation and 10,000-thread re-bucket').toBeLessThan(
+      SPLIT_REBUCKET_CEILING_MS
+    )
+    await expect(page.getByTestId('split-tab')).toHaveCount(6)
+
+    const coldMs = await measureSplitSwitch(page, 5, mutation.splitId, THREAD_PAGE_SIZE)
+    await reportMetric(testInfo, 'split-switch-cold', [coldMs], coldMs)
+    const samples: number[] = []
+    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
+      await measureSplitSwitch(page, 4, 'base:important', 0)
+      samples.push(await measureSplitSwitch(page, 5, mutation.splitId, THREAD_PAGE_SIZE))
+    }
+    await reportMetric(testInfo, 'split-switch', samples, median(samples))
+    expect(percentile(samples, 0.95), 'p95 split switch').toBeLessThan(SPLIT_SWITCH_CEILING_MS)
   })
 
   test('windows the list and sustains scroll-frame pacing inside the memory budget', async ({

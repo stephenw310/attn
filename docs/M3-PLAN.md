@@ -27,7 +27,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
 | T25 on-demand fetch and server search (F10) | **done**, completed 2026-08-25 | nothing |
 | T26 palette and registry completeness (F5) | **done**, completed 2026-08-25 | nothing |
-| T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
+| T27 splits and per-split notifications (F11, F12) | **done**, completed 2026-08-27 | nothing; T28 and T29 are unblocked |
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
 | T29 inbox zero (F13) | **planned**, not started | nothing |
 | T30 built-in themes (F14) | **done**, completed 2026-08-23 | nothing |
@@ -803,7 +803,7 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
 
 ## T27 — Split inbox, rules, and per-split notifications
 
-**Status: not started.**
+**Status: done, completed 2026-08-27.**
 
 **Depends on:** T22 · **Unblocks:** T28's digit completions, T29's remaining-split counts ·
 **Spec:** F11, F12 (the per-split slice), §5 `←`/`→` and `G` `1`–`9`
@@ -927,6 +927,23 @@ COMMIT;
 
 F11's acceptance criteria are measured, starter presets remain user-owned after setup, per-split notification
 and badge behavior is covered, and verify is green.
+
+### Shipped
+
+Revision 19 stores canonical `List-Id` values, cached calendar-part flags, durable rule rows, and a separate
+one-time setup marker. One parameterized SQLite classifier now owns ordered assignment for keyset pages,
+exact counts, notification eligibility, badge counts, and notification click-through. Calendar, GitHub, and
+Newsletters start as editable presets; changes and deletions persist, and Restore is explicit.
+
+The Inbox strip supports pointer selection, `←`/`→`, configured `G` digits, per-split selection and scroll,
+revision-aware page caching, quiet zero counts, and an overflow menu past eight visible tabs. The rule manager
+creates, renames, edits, reorders, deletes, restores, and configures notifications. It is available from the
+account menu and command palette. Seeded Electron coverage exercises the full path and captures
+`split-inbox.png` and `split-rules.png`.
+
+On the built 10,000-thread profile, a rule mutation plus exact re-bucketing measured 59 ms against the 1 s
+budget. A cold split switch measured 44 ms, and revision-valid cached switches measured 3 ms p95 against the
+50 ms budget.
 
 ---
 

@@ -9,10 +9,12 @@ import {
   extractThreadingHeaders,
   type GmailMessage,
   type GmailThread,
+  hasCalendarPart,
   header,
   parseAddress,
   parseAddressList
 } from '../gmail/parse'
+import { canonicalListId } from '../splits'
 import { replaySnoozeReminderDelta } from '../store/reminders'
 import { replayPendingThreadDeltas } from '../store/replay'
 import { indexThreadMessages, removeThreadFromIndex } from './fts'
@@ -119,10 +121,11 @@ export function persistThread(
   const upsertMsg = db.prepare(
     `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
                            body_text, body_html, recipients_json, attachments_json, labels_json,
-                           rfc_message_id, references_json)
+                           list_id, has_calendar_part, rfc_message_id, references_json)
      VALUES (@account_id, @id, @thread_id, @from_name, @from_email, @snippet, @internal_date,
              @body_text, @body_html, @recipients_json,
-             @attachments_json, @labels_json, @rfc_message_id, @references_json)
+             @attachments_json, @labels_json, @list_id, @has_calendar_part,
+             @rfc_message_id, @references_json)
      ON CONFLICT(account_id, id) DO UPDATE SET
        snippet = excluded.snippet,
        body_text = CASE WHEN messages.body_text IS NULL OR messages.body_text = ''
@@ -132,6 +135,9 @@ export function persistThread(
        recipients_json = excluded.recipients_json,
        attachments_json = CASE WHEN @metadata_only = 1
                                THEN messages.attachments_json ELSE excluded.attachments_json END,
+       list_id = excluded.list_id,
+       has_calendar_part = CASE WHEN @metadata_only = 1
+                                THEN messages.has_calendar_part ELSE excluded.has_calendar_part END,
        labels_json = excluded.labels_json,
        rfc_message_id = excluded.rfc_message_id,
        references_json = excluded.references_json`
@@ -205,6 +211,8 @@ export function persistThread(
         recipients_json: JSON.stringify(recipients),
         attachments_json: JSON.stringify(attachments),
         labels_json: JSON.stringify(msg.labelIds ?? []),
+        list_id: canonicalListId(header(msg, 'List-Id')),
+        has_calendar_part: hasCalendarPart(msg.payload) ? 1 : 0,
         rfc_message_id: threading.rfcMessageId,
         references_json: JSON.stringify(threading.references),
         metadata_only: options.metadataOnly ? 1 : 0

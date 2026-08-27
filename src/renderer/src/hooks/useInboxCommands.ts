@@ -2,7 +2,7 @@ import { useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { DraftKind } from '../../../shared/drafts'
 import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
-import { createCommand, registerCommands } from '../commands'
+import { createCommand, createDynamicSplitCommand, registerCommands } from '../commands'
 import type { MailView, NavigableMailView } from '../mailDisplay'
 
 interface Options {
@@ -42,6 +42,12 @@ interface Options {
   openReply: (kind: Exclude<DraftKind, 'new'>) => void
   showToast: (message: string) => void
   reopenUndoDraft: (id: string) => void
+  splitCommands: {
+    previous: () => void
+    next: () => void
+    manage: () => void
+    goTo: readonly { id: string; name: string; run: () => void }[]
+  } | null
 }
 
 export function useInboxCommands(options: Options): void {
@@ -81,7 +87,8 @@ export function useInboxCommands(options: Options): void {
     openComposer,
     openReply,
     showToast,
-    reopenUndoDraft
+    reopenUndoDraft,
+    splitCommands
   } = options
   const mailCommandsEnabled = !searchOpen || searchBrowsing || readerOpen
   useLayoutEffect(
@@ -93,6 +100,25 @@ export function useInboxCommands(options: Options): void {
           ? [createCommand('search.allGmail', searchAll)]
           : []),
         ...(searchOpen && !readerOpen ? [createCommand('search.clear', clearSearch)] : []),
+        ...(splitCommands
+          ? [
+              createCommand('split.manage', splitCommands.manage),
+              ...(!readerOpen && !searchOpen && view === 'inbox'
+                ? [
+                    createCommand('split.previous', splitCommands.previous),
+                    createCommand('split.next', splitCommands.next)
+                  ]
+                : []),
+              ...splitCommands.goTo.map((split, index) =>
+                createDynamicSplitCommand(
+                  split.id,
+                  `Go to: ${split.name}`,
+                  split.run,
+                  index < 9 ? `g ${index + 1}` : undefined
+                )
+              )
+            ]
+          : []),
         ...(mailCommandsEnabled
           ? [
               createCommand('navigate.next', navigateNext),
@@ -231,6 +257,7 @@ export function useInboxCommands(options: Options): void {
       searchBrowsing,
       showToast,
       sidebarCollapsed,
+      splitCommands,
       starOn,
       switchView,
       toggleSidebar,

@@ -19,6 +19,7 @@ import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
 import { readSetting, settingEnabled, writeSetting } from '../settings'
+import { countNotificationEnabledUnread, hasSplitSetup } from '../splits'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
 import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
 import { runFtsBackfill } from '../sync/ftsBackfill'
@@ -377,7 +378,15 @@ export class ServiceRuntime {
 
   private broadcastBadge(): void {
     const accountId = this.currentAccountId()
-    this.emit({ kind: 'badge', unreadCount: accountId ? countInboxUnread(this.db, accountId) : 0 })
+    const legacySeed = accountId && this.input.testMode && !hasSplitSetup(this.db, accountId)
+    this.emit({
+      kind: 'badge',
+      unreadCount: accountId
+        ? legacySeed
+          ? countInboxUnread(this.db, accountId)
+          : countNotificationEnabledUnread(this.db, accountId)
+        : 0
+    })
   }
 
   private broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {

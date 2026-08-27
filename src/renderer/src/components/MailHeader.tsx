@@ -80,10 +80,12 @@ function QueueReadout({
 
 function AccountMenu({
   status,
-  onStatus
+  onStatus,
+  onManageSplits
 }: {
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
+  onManageSplits: () => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -168,9 +170,12 @@ function AccountMenu({
           </button>
           <button
             type="button"
-            disabled
-            title="Split rules land at M3"
-            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim opacity-45"
+            data-testid="account-split-rules"
+            onClick={() => {
+              closeMenu()
+              onManageSplits()
+            }}
+            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
           >
             Split rules…
           </button>
@@ -202,6 +207,7 @@ interface MailHeaderProps {
   onReconnectActions: () => void
   onOpenOutbox: () => void
   onToggleSidebar: () => void
+  onManageSplits: () => void
 }
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
@@ -217,7 +223,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     onStatus,
     onReconnectActions,
     onOpenOutbox,
-    onToggleSidebar
+    onToggleSidebar,
+    onManageSplits
   } = props
   const sidebarAction = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
   const sidebarShortcut = `${modKeyLabel()}B`
@@ -263,7 +270,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           onReconnect={onReconnectActions}
           onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
         />
-        <AccountMenu status={status} onStatus={onStatus} />
+        <AccountMenu status={status} onStatus={onStatus} onManageSplits={onManageSplits} />
       </div>
     </header>
   )
