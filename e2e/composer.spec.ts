@@ -236,6 +236,11 @@ test('inserts the saved Gmail signature into new mail as editable content', asyn
 
   const signature = composer.editor.getByTestId('composer-gmail-signature')
   await expect(signature).toHaveCount(1)
+  await expect(composer.editor).toHaveCSS('font-family', 'Arial, sans-serif')
+  await expect(composer.editor).toHaveCSS('font-size', '13px')
+  await expect(composer.editor).toHaveCSS('line-height', '20px')
+  await expect(signature.locator('p').first()).toHaveCSS('margin-bottom', '0px')
+  await expect(signature.locator('p').first()).toHaveCSS('min-height', '20px')
   await expect(signature.getByText('Best,')).toBeVisible()
   await expect(signature.getByText('Chao Wu')).toBeVisible()
   await expect(signature.getByRole('link', { name: 'chaowu.xyz' })).toHaveAttribute(
