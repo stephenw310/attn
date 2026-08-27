@@ -24,6 +24,7 @@ interface SearchThreadRow {
   is_unread: number
   is_starred: number
   has_attachment: number
+  snoozed: number
   returned: number
   has_draft: number
   label_ids: string
@@ -39,6 +40,7 @@ function toThreadRow(row: SearchThreadRow): ThreadRow {
     unread: row.is_unread === 1,
     starred: row.is_starred === 1,
     hasAttachment: row.has_attachment === 1,
+    snoozed: row.snoozed === 1,
     returned: row.returned === 1,
     hasDraft: row.has_draft === 1,
     labelIds: labelIds(row.label_ids)
@@ -314,6 +316,7 @@ export function searchRowsByThreadIds(
     .prepare(
       `WITH requested(id, position) AS (VALUES ${requested})
        SELECT t.id, ${projection},
+              ${pendingSnoozeSql()} AS snoozed,
               EXISTS (
                 SELECT 1 FROM reminders returned_reminder
                 WHERE returned_reminder.account_id = t.account_id
@@ -390,6 +393,7 @@ export function searchThreads(
     .prepare(
       `WITH search_candidates AS (${candidates})
        SELECT t.id, ${projection},
+              ${pendingSnoozeSql()} AS snoozed,
               EXISTS (
                 SELECT 1 FROM reminders returned_reminder
                 WHERE returned_reminder.account_id = t.account_id

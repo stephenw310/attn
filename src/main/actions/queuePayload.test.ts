@@ -13,6 +13,11 @@ describe('action queue payloads', () => {
       remove: ['SPAM'],
       actionKind: 'undo'
     })
+    expect(decodeLabelDelta('{"add":["Label_2"],"remove":["INBOX"],"actionKind":"move"}')).toEqual({
+      add: ['Label_2'],
+      remove: ['INBOX'],
+      actionKind: 'move'
+    })
   })
 
   it('round-trips the reminder snapshot needed for local snooze recovery', () => {

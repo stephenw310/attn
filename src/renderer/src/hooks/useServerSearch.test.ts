@@ -117,6 +117,7 @@ test('keeps its own cache refresh and releases rows after a later mail mutation'
           unread: false,
           starred: false,
           hasAttachment: false,
+          snoozed: false,
           returned: false,
           hasDraft: false,
           labelIds: ['INBOX']

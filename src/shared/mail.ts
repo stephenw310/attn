@@ -12,6 +12,8 @@ export interface ThreadRow {
   unread: boolean
   starred: boolean
   hasAttachment: boolean
+  /** The thread has a pending local snooze reminder, even when another view exposes it. */
+  snoozed: boolean
   returned: boolean
   hasDraft: boolean
   labelIds: string[]

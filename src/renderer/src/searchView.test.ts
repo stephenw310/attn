@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   conversationMailboxForSearch,
   retainedSearchQuery,
+  searchAllowsMove,
   searchesDrafts,
   searchesLocalSnoozes,
+  searchRetainsMovedThread,
   triageViewForSearch
 } from './searchView'
 
@@ -29,5 +31,30 @@ describe('search result interpretation', () => {
 
   it.each(['is:snoozed', 'in:snoozed'])('identifies %s as a local-only snooze search', (query) => {
     expect(searchesLocalSnoozes(query)).toBe(true)
+  })
+
+  it('allows Move only for ordinary search contexts', () => {
+    expect(searchAllowsMove('from:maya in:inbox')).toBe(true)
+    expect(searchAllowsMove('in:starred subject:roadmap')).toBe(true)
+    expect(searchAllowsMove('in:"Project Alpha"')).toBe(true)
+    for (const query of ['in:drafts', 'is:snoozed', 'in:snoozed', 'in:spam', 'in:trash', 'in:outbox']) {
+      expect(searchAllowsMove(query)).toBe(false)
+    }
+  })
+
+  it('re-evaluates Move against the completed search filters', () => {
+    const moved = {
+      hasAttachment: true,
+      labelIds: ['STARRED', 'project-alpha'],
+      snoozed: false,
+      starred: true,
+      unread: true
+    }
+    const labels = [{ id: 'project-alpha', name: 'Project Alpha', type: 'user' }]
+
+    expect(searchRetainsMovedThread('from:maya in:inbox', moved, labels)).toBe(false)
+    expect(searchRetainsMovedThread('in:starred has:attachment', moved, labels)).toBe(true)
+    expect(searchRetainsMovedThread('in:"Project Alpha" is:unread', moved, labels)).toBe(true)
+    expect(searchRetainsMovedThread('is:snoozed', moved, labels)).toBe(false)
   })
 })

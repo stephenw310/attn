@@ -67,6 +67,7 @@ export interface DisplayThread {
   unread: boolean
   starred: boolean
   hasAttachment: boolean
+  snoozed: boolean
   returned: boolean
   hasDraft: boolean
   dueAt?: number
@@ -134,6 +135,7 @@ export function displayThread(row: ThreadRow): DisplayThread {
     unread: row.unread,
     starred: row.starred,
     hasAttachment: row.hasAttachment,
+    snoozed: row.snoozed,
     returned: row.returned,
     hasDraft: row.hasDraft,
     labelIds: row.labelIds,

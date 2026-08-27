@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { type AuthSignInResult, type AuthStatus, isSignInCanceled } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
-import type { ConversationMailbox, MailLabel, ThreadListView } from '../../../shared/mail'
+import type { ConversationMailbox, MailLabel, ThreadListView, ThreadRow } from '../../../shared/mail'
 import { actionReconnectMessage } from '../actionReconnect'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
@@ -16,6 +16,7 @@ import { useSyncActions } from '../hooks/useSyncActions'
 import { useToast } from '../hooks/useToast'
 import { useTriage } from '../hooks/useTriage'
 import { type LabelCheckState, LabelPicker } from '../LabelPicker'
+import { MovePicker, type MoveTarget } from '../MovePicker'
 import {
   cachedThreadView,
   type DisplayThread,
@@ -33,8 +34,10 @@ import {
 import {
   conversationMailboxForSearch,
   retainedSearchQuery,
+  searchAllowsMove,
   searchesDrafts,
   searchesLocalSnoozes,
+  searchRetainsMovedThread,
   triageViewForSearch
 } from '../searchView'
 import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
@@ -61,6 +64,11 @@ interface ViewRecord {
   rowId: string | null
   index: number
   scrollTop: number
+}
+
+interface MoveRequest {
+  targets: readonly MoveTarget[]
+  sourceLabelId: string | null
 }
 
 /**
@@ -105,6 +113,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [labelTargetIds, setLabelTargetIds] = useState<readonly string[] | null>(null)
+  const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
   const [detachedDraftThread, setDetachedDraftThread] = useState<DisplayThread | null>(null)
   const [composerError, setComposerError] = useState<string | null>(null)
@@ -236,12 +245,37 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const searchResultQuery = retainedSearchQuery(searchQuery, search.completedQuery)
   const searchDraftMode = searchOpen && searchesDrafts(searchResultQuery)
   const searchSnoozeMode = searchOpen && searchesLocalSnoozes(searchResultQuery)
+  const moveAllowed = searchOpen
+    ? searchAllowsMove(searchResultQuery)
+    : view === 'inbox' ||
+      view === 'allMail' ||
+      view === 'sent' ||
+      view === 'starred' ||
+      userLabelId(view) !== null
   const searchRowIds = useMemo(
     () =>
       searchDraftMode ? searchDrafts.map((draft) => draft.id) : searchThreads.map((thread) => thread.id),
     [searchDraftMode, searchDrafts, searchThreads]
   )
   const threads = searchOpen ? searchThreads : mailboxThreads
+  const moveCacheRows = useMemo<ThreadRow[]>(
+    () =>
+      threads.map((thread) => ({
+        id: thread.id,
+        fromDisplay: thread.from,
+        subject: thread.subject,
+        snippet: thread.snippet,
+        lastMsgAt: thread.lastMsgAt,
+        unread: thread.unread,
+        starred: thread.starred,
+        hasAttachment: thread.hasAttachment,
+        snoozed: thread.snoozed,
+        returned: thread.returned,
+        hasDraft: thread.hasDraft,
+        labelIds: [...thread.labelIds]
+      })),
+    [threads]
+  )
   const activeViewTitle = titleForView(view, userLabelsById)
   const pagedView = searchOpen || view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
   const activePageState = pagedView ? threadPagination[pagedView] : undefined
@@ -284,6 +318,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           unread: false,
           starred: false,
           hasAttachment: false,
+          snoozed: false,
           returned: false,
           hasDraft: true,
           labelIds: [],
@@ -341,6 +376,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetIds(null)
+    setMoveRequest(null)
     setComposerDraft(null)
     setDetachedDraftThread(null)
     setComposerError(null)
@@ -515,6 +551,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [labelTargetIds, labelTargets])
 
   useEffect(() => {
+    if (composerDraft) setMoveRequest(null)
+  }, [composerDraft])
+
+  useEffect(() => {
     if (!searchOpen && view !== 'drafts' && view !== 'outbox') {
       selectedThreadIdRef.current = selected?.id ?? null
     }
@@ -606,6 +646,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       setReaderOpen(false)
       setSnoozeOpen(false)
       setLabelTargetIds(null)
+      setMoveRequest(null)
       setDetachedDraftThread(null)
     },
     [clearSelection, invalidateConversations, refreshCachedThreadView, saveActiveViewRecord]
@@ -691,6 +732,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setReaderOpen(false)
     setSnoozeOpen(false)
     setLabelTargetIds(null)
+    setMoveRequest(null)
   }, [readerOpen, selectedIndex, view])
 
   const openOutbox = useCallback(() => {
@@ -741,19 +783,30 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     },
     [search.updateRows, serverSearch.updateRows]
   )
+  const searchMoveRetains = useCallback(
+    (thread: Parameters<typeof searchRetainsMovedThread>[1]) =>
+      searchRetainsMovedThread(searchResultQuery, thread, labels),
+    [labels, searchResultQuery]
+  )
 
   const triage = useTriage({
     selectedIds,
     selectedIndex,
     threads,
+    moveCacheRows,
     readerOpen,
     view: searchOpen ? triageViewForSearch(searchResultQuery) : view,
+    searchOpen,
+    searchMoveRetains: searchOpen ? searchMoveRetains : undefined,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef,
     selectedThreadIdRef,
     selectedRowRef,
+    realThreads,
     setRealThreads,
+    realSnoozedThreads,
     setRealSnoozedThreads,
+    mailboxRows,
     setMailboxRows,
     updateSearchRows: searchOpen ? updateSearchRows : undefined,
     clearSelection,
@@ -903,6 +956,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedThreadIdRef.current = null
     selectedDraftIdRef.current = null
     finishReaderClose()
+    setMoveRequest(null)
     setSearchOpen(true)
   }, [clearSelection, finishReaderClose, focusSearchQuery, view])
   const clearSearch = useCallback(() => {
@@ -912,6 +966,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSearchOpen(false)
     setSearchQuery('')
     setSearchKeyboardTarget('query')
+    setMoveRequest(null)
     clearSelection()
     pendingViewRestoreRef.current = { view, record }
     const draftLikeView = view === 'drafts' || view === 'outbox'
@@ -954,6 +1009,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [readerOpen, searchOpen, serverSearch.phase])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetIds(null), [])
+  const closeMove = useCallback(() => setMoveRequest(null), [])
   const openSnooze = useCallback(() => {
     if (selected) setSnoozeOpen(true)
   }, [selected])
@@ -961,6 +1017,31 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (!selected) return
     setLabelTargetIds(selectedIds.size > 0 ? [...selectedIds] : [selected.id])
   }, [selected, selectedIds])
+  const openMove = useCallback(() => {
+    if (!selected || !moveAllowed) return
+    setMoveRequest({
+      targets: targetedThreads.map((thread) => ({
+        id: thread.id,
+        labelIds: [...thread.labelIds],
+        snoozed: thread.snoozed,
+        returned: thread.returned
+      })),
+      sourceLabelId: searchOpen ? null : userLabelId(view)
+    })
+  }, [moveAllowed, searchOpen, selected, targetedThreads, view])
+  const moveSelected = useCallback(
+    (destinationLabelId: string | null) => {
+      if (!moveRequest) return
+      setMoveRequest(null)
+      triage({
+        kind: 'move',
+        threadIds: moveRequest.targets.map((target) => target.id),
+        destinationLabelId,
+        sourceLabelId: moveRequest.sourceLabelId
+      })
+    },
+    [moveRequest, triage]
+  )
   const openThread = useCallback(
     (index: number) => {
       const thread = threads[index]
@@ -1147,6 +1228,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     sidebarCollapsed,
     starOn,
     markUnreadOn,
+    moveAllowed,
     preserveSelectionOnRefreshRef,
     navigateNext,
     navigatePrevious,
@@ -1175,6 +1257,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     openSnooze,
     snoozeAt: snoozeSelected,
     openLabel,
+    openMove,
     openComposer,
     openReply,
     showToast,
@@ -1182,7 +1265,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   })
 
   useKeyboardDispatch({
-    blocked: labelTargets !== undefined || composerDraft !== null,
+    blocked: labelTargets !== undefined || moveRequest !== null || composerDraft !== null,
     readerOpen,
     outboxOpen: !searchOpen && view === 'outbox',
     snoozeOpen,
@@ -1411,6 +1494,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               outboxOpen={!searchOpen && view === 'outbox'}
               composing={inlineComposerDraft !== null}
               searchEditing={searchOpen && searchKeyboardTarget === 'query' && !readerOpen}
+              moveAllowed={moveAllowed}
               sync={sync}
               networkOnline={networkOnline}
               onRetry={retrySync}
@@ -1435,6 +1519,16 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           targets={labelTargets.map((target) => ({ id: target.id, labelIds: target.labelIds }))}
           onClose={closeLabel}
           onToggle={toggleLabel}
+        />
+      )}
+
+      {!composerDraft && moveRequest && (
+        <MovePicker
+          labels={labels}
+          targets={moveRequest.targets}
+          sourceLabelId={moveRequest.sourceLabelId}
+          onClose={closeMove}
+          onMove={moveSelected}
         />
       )}
 

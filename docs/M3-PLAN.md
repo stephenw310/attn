@@ -31,7 +31,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
 | T29 inbox zero (F13) | **planned**, not started | nothing |
 | T30 built-in themes (F14) | **done**, completed 2026-08-23 | nothing |
-| T31 move to a label (F4) | **planned**, not started | nothing |
+| T31 move to a label (F4) | **done**, completed 2026-08-27 | nothing |
 
 S2 settled the store shape needed for F3 mailbox views and S4, S1 moved that store into the utility process,
 and S4 closed the last sync correctness gap. The feature tasks are written up below, under
@@ -965,7 +965,7 @@ relaunch, System reacts to OS changes without a reload, and verify is green.
 
 ## T31 — Move to a label (`V`)
 
-**Status: not started.**
+**Status: done.**
 
 **Depends on:** T22 · **Parallel with:** T27, T28, and T29 · **Spec:** F4 Move, F5 `V`
 

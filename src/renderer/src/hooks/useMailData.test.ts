@@ -30,6 +30,7 @@ function thread(id: string): ThreadRow {
     unread: false,
     starred: false,
     hasAttachment: false,
+    snoozed: false,
     returned: false,
     hasDraft: false,
     labelIds: []

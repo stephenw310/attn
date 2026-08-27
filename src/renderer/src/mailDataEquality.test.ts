@@ -11,6 +11,7 @@ const row = (overrides: Partial<ThreadRow> = {}): ThreadRow => ({
   unread: false,
   starred: false,
   hasAttachment: false,
+  snoozed: false,
   returned: false,
   hasDraft: false,
   labelIds: ['INBOX'],

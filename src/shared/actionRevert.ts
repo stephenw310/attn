@@ -13,6 +13,7 @@ export type RevertedActionKind =
   | 'markRead'
   | 'markUnread'
   | 'labels'
+  | 'move'
 
 export interface RevertedAction {
   threadId: string
@@ -41,7 +42,8 @@ const actionPhrase: Record<RevertedActionKind, string> = {
   unstar: 'unstar',
   markRead: 'mark as read',
   markUnread: 'mark as unread',
-  labels: 'update labels for'
+  labels: 'update labels for',
+  move: 'move'
 }
 
 export function formatActionRevertToast(actions: readonly RevertedAction[]): string | null {

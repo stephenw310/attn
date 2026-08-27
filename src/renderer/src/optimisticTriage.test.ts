@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
 
 import { expect, test } from 'vitest'
+import type { TriageAction } from '../../shared/actions'
 import type { ThreadRow } from '../../shared/mail'
 import {
   applyThreadFlag,
   applyThreadFlagToElement,
+  applyThreadMove,
+  applyThreadMoveMembership,
+  movedThreadIdsOutsideView,
+  moveExitsView,
   rollbackThreadFlag,
-  threadFlagSnapshot
+  rollbackThreadMove,
+  rollbackThreadMoveMembership,
+  selectionAfterExit,
+  threadFlagSnapshot,
+  threadMoveSnapshot
 } from './optimisticTriage'
 
 function row(id: string, unread: boolean, starred: boolean): ThreadRow {
@@ -19,6 +28,7 @@ function row(id: string, unread: boolean, starred: boolean): ThreadRow {
     unread,
     starred,
     hasAttachment: false,
+    snoozed: false,
     returned: false,
     hasDraft: false,
     labelIds: []
@@ -68,4 +78,121 @@ test('updates the focused row data attribute synchronously', () => {
   expect(element.dataset.unread).toBe('true')
   applyThreadFlagToElement(element, snapshot, true)
   expect(element.dataset.unread).toBeUndefined()
+})
+
+test('applies and exactly rolls back move labels and snooze state', () => {
+  const rows = [
+    {
+      ...row('one', false, false),
+      labelIds: ['INBOX', 'source', 'keep'],
+      snoozed: true,
+      returned: true
+    },
+    row('two', true, true)
+  ]
+  const snapshot = threadMoveSnapshot(
+    {
+      kind: 'move',
+      threadIds: ['one'],
+      destinationLabelId: 'destination',
+      sourceLabelId: 'source'
+    },
+    rows
+  )
+  expect(snapshot).not.toBeNull()
+  if (!snapshot) return
+
+  const optimistic = applyThreadMove(rows, snapshot)
+  expect(optimistic?.[0]).toMatchObject({
+    labelIds: ['keep', 'destination'],
+    snoozed: false,
+    returned: false
+  })
+  expect(optimistic?.[1]).toBe(rows[1])
+  expect(rollbackThreadMove(optimistic, snapshot)).toEqual(rows)
+})
+
+test('does not let an older move rollback overwrite newer move state', () => {
+  const rows = [{ ...row('one', false, false), labelIds: ['INBOX'] }]
+  const first = threadMoveSnapshot(
+    { kind: 'move', threadIds: ['one'], destinationLabelId: 'first', sourceLabelId: null },
+    rows
+  )
+  expect(first).not.toBeNull()
+  if (!first) return
+  const afterFirst = applyThreadMove(rows, first)
+  const second = threadMoveSnapshot(
+    { kind: 'move', threadIds: ['one'], destinationLabelId: 'second', sourceLabelId: null },
+    afterFirst ?? []
+  )
+  expect(second).not.toBeNull()
+  if (!second) return
+  const afterSecond = applyThreadMove(afterFirst, second)
+
+  expect(rollbackThreadMove(afterSecond, first)?.[0].labelIds).toEqual(['first', 'second'])
+  expect(rollbackThreadMove(afterSecond, second)?.[0].labelIds).toEqual(['first'])
+})
+
+test('removes moved rows from an inactive cache and restores their exact position on rejection', () => {
+  const rows = [
+    { ...row('one', false, false), labelIds: ['INBOX', 'keep'] },
+    { ...row('two', true, true), labelIds: ['INBOX'] }
+  ]
+  const snapshot = threadMoveSnapshot(
+    { kind: 'move', threadIds: ['one'], destinationLabelId: 'destination', sourceLabelId: null },
+    rows
+  )
+  expect(snapshot).not.toBeNull()
+  if (!snapshot) return
+
+  const optimistic = applyThreadMoveMembership(rows, snapshot, (candidate) =>
+    candidate.labelIds.includes('INBOX')
+  )
+  expect(optimistic?.map((candidate) => candidate.id)).toEqual(['two'])
+  expect(rollbackThreadMoveMembership(optimistic, rows, snapshot)).toEqual(rows)
+})
+
+test('computes search exits from each row after the Move delta', () => {
+  const rows = [
+    { ...row('one', false, false), labelIds: ['INBOX'] },
+    { ...row('two', false, false), labelIds: ['INBOX', 'keep'] }
+  ]
+  const snapshot = threadMoveSnapshot(
+    { kind: 'move', threadIds: ['one', 'two'], destinationLabelId: 'destination', sourceLabelId: null },
+    rows
+  )
+  expect(snapshot).not.toBeNull()
+  if (!snapshot) return
+
+  expect(
+    movedThreadIdsOutsideView(rows, snapshot, (candidate) => candidate.labelIds.includes('keep'))
+  ).toEqual(['one'])
+})
+
+test('moves exit Inbox and their source label, but stay in All Mail', () => {
+  const move: TriageAction = {
+    kind: 'move',
+    threadIds: ['one'],
+    destinationLabelId: 'destination',
+    sourceLabelId: 'source'
+  }
+  expect(moveExitsView(move, 'inbox')).toBe(true)
+  expect(moveExitsView(move, 'label:source')).toBe(true)
+  expect(moveExitsView(move, 'allMail')).toBe(false)
+  expect(moveExitsView({ kind: 'archive', threadIds: ['one'] }, 'inbox')).toBe(false)
+})
+
+test('chooses the next surviving row, then falls back above the removed block', () => {
+  const rows = ['one', 'two', 'three', 'four'].map((id) => ({ id }))
+  expect(selectionAfterExit(rows, ['one'], 0)).toEqual({ fromId: 'one', toId: 'two', nextIndex: 1 })
+  expect(selectionAfterExit(rows, ['two', 'three'], 1)).toEqual({
+    fromId: 'two',
+    toId: 'four',
+    nextIndex: 3
+  })
+  expect(selectionAfterExit(rows, ['three', 'four'], 3)).toEqual({
+    fromId: 'four',
+    toId: 'two',
+    nextIndex: 1
+  })
 })

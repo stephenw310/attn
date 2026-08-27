@@ -143,6 +143,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
     for (const [id, text] of [
       ['done', 'Edone'],
+      ['move', 'Vmove'],
       ['trash', '#trash'],
       ['star', 'Sstar'],
       ['unread', 'Uunread'],
@@ -211,6 +212,7 @@ test.describe('seeded inbox smoke coverage', () => {
         'select',
         'done',
         'snooze',
+        'move',
         'label',
         'trash',
         'star',

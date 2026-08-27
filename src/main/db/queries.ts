@@ -116,6 +116,9 @@ const MAILBOX_LABEL_IDS = {
 
 const THREAD_AUXILIARY_PROJECTION_SQL = `EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
+                       AND r.kind = 'snooze' AND r.state = 'pending') AS snoozed,
+              EXISTS(SELECT 1 FROM reminders r
+                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
                        AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
               EXISTS(SELECT 1 FROM outbox o
                      WHERE o.account_id = t.account_id AND o.thread_id = t.id
@@ -135,6 +138,7 @@ interface MailboxThreadQueryRow {
   is_unread: number
   is_starred: number
   has_attachment: number
+  snoozed: number
   returned: number
   has_draft: number
   label_ids: string
@@ -281,6 +285,7 @@ export function listMailboxThreads(
     unread: r.is_unread === 1,
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
+    snoozed: r.snoozed === 1,
     returned: r.returned === 1,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids)
@@ -332,6 +337,7 @@ export function listLabelThreads(
     unread: r.is_unread === 1,
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
+    snoozed: r.snoozed === 1,
     returned: r.returned === 1,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids)
@@ -350,6 +356,9 @@ export function listInboxThreads(
       `WITH visible AS (
          SELECT t.account_id, t.id, t.from_display, t.subject, t.snippet, t.last_msg_at,
                 t.is_unread, t.is_starred, t.has_attachment,
+              EXISTS(SELECT 1 FROM reminders r
+                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
+                       AND r.kind = 'snooze' AND r.state = 'pending') AS snoozed,
               EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
                        AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
@@ -381,6 +390,7 @@ export function listInboxThreads(
     is_unread: number
     is_starred: number
     has_attachment: number
+    snoozed: number
     returned: number
     has_draft: number
     label_ids: string
@@ -395,6 +405,7 @@ export function listInboxThreads(
     unread: r.is_unread === 1,
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
+    snoozed: r.snoozed === 1,
     returned: r.returned === 1,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids)
@@ -453,6 +464,7 @@ export function listSnoozedThreads(
     unread: r.is_unread === 1,
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
+    snoozed: true,
     returned: false,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids),

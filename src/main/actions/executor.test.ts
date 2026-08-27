@@ -503,6 +503,35 @@ describe('action executor', () => {
     ])
   })
 
+  it('restores the pending reminder when Gmail rejects Move', async () => {
+    const move = row(1, 'a@example.com', 'move')
+    move.payload = JSON.stringify({
+      add: ['Label_2'],
+      remove: ['INBOX'],
+      actionKind: 'move',
+      reminderBefore: { dueAt: 20_000, state: 'pending' }
+    })
+    const reminders = new Map<string, SnoozeReminderSnapshot>([
+      ['move', { dueAt: 20_000, state: 'canceled' }]
+    ])
+    const actionProvider = provider(vi.fn().mockRejectedValue(new GmailApiError(400, 'bad move')))
+    vi.mocked(actionProvider.getThread).mockResolvedValue(snapshot('move', []))
+    const onReverted = vi.fn()
+    const executor = new ActionExecutor(
+      fakeDb([move], { reminders }),
+      () => 'a@example.com',
+      () => actionProvider,
+      { notifyReverted: onReverted }
+    )
+
+    await executor.trigger()
+
+    expect(reminders.get('move')).toEqual({ dueAt: 20_000, state: 'pending' })
+    expect(onReverted).toHaveBeenCalledWith('a@example.com', [
+      expect.objectContaining({ kind: 'move', returnedToInbox: false, resolution: 'restored' })
+    ])
+  })
+
   it('keeps a rejected automatic snooze return visible in the local inbox', async () => {
     const returned = row(1, 'a@example.com', 'returned')
     returned.payload = JSON.stringify({

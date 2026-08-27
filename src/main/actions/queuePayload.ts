@@ -46,7 +46,8 @@ const actionKinds = new Set<RevertedActionKind>([
   'unstar',
   'markRead',
   'markUnread',
-  'labels'
+  'labels',
+  'move'
 ])
 
 function validReminder(value: unknown): value is SnoozeReminderSnapshot | null {

@@ -33,6 +33,12 @@ export function planAction(action: TriageAction): ThreadActionPlan {
       }
     case 'label':
       return { add: action.add, remove: action.remove, queueKind: 'modifyLabels' }
+    case 'move':
+      return {
+        add: action.destinationLabelId ? [action.destinationLabelId] : [],
+        remove: [...new Set(['INBOX', ...(action.sourceLabelId ? [action.sourceLabelId] : [])])],
+        queueKind: 'modifyLabels'
+      }
   }
 }
 
@@ -62,6 +68,8 @@ export function actionLabel(action: TriageAction, count = action.threadIds.lengt
       return action.on ? plural('Marked unread', 'marked unread') : plural('Marked read', 'marked read')
     case 'label':
       return plural('Labels updated', 'labels updated')
+    case 'move':
+      return plural('Moved', 'moved')
   }
 }
 
@@ -99,5 +107,14 @@ export function inverseForThread(
         add: action.remove.filter((label) => labels.has(label)),
         remove: action.add.filter((label) => !labels.has(label))
       }
+    case 'move': {
+      const plan = planAction(action)
+      return {
+        kind: 'label',
+        threadIds: [threadId],
+        add: plan.remove.filter((label) => labels.has(label)),
+        remove: plan.add.filter((label) => !labels.has(label))
+      }
+    }
   }
 }

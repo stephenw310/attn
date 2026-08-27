@@ -14,6 +14,7 @@ function sameThread(left: ThreadRow, right: ThreadRow): boolean {
     left.unread === right.unread &&
     left.starred === right.starred &&
     left.hasAttachment === right.hasAttachment &&
+    left.snoozed === right.snoozed &&
     left.returned === right.returned &&
     left.hasDraft === right.hasDraft &&
     sameStrings(left.labelIds, right.labelIds)
