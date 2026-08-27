@@ -967,13 +967,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <RichTextPlugin
                 contentEditable={
                   <ContentEditable
-                    className="min-h-full px-5 py-5 font-[Arial,sans-serif] text-[13px] leading-5 text-ink outline-none"
+                    className="min-h-full px-5 py-5 text-[13px] leading-5 text-ink outline-none"
                     data-testid="composer-editor"
                     aria-label="Message body"
                   />
                 }
                 placeholder={
-                  <div className="pointer-events-none absolute left-5 top-5 font-[Arial,sans-serif] text-[13px] leading-5 text-ink-faint">
+                  <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
                     Write a message…
                   </div>
                 }
