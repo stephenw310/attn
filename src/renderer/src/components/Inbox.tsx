@@ -269,7 +269,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const pagedView = searchOpen || view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
   const activePageState = pagedView ? threadPagination[pagedView] : undefined
   const systemPagedView = pagedView && !userLabelId(pagedView) ? (pagedView as ThreadListView) : null
-  const exactSystemThreadCount = systemPagedView ? (realMailboxCounts?.[systemPagedView] ?? null) : null
+  const exactSystemThreadCount =
+    systemPagedView === 'inbox' && splits.activeSplitId
+      ? (splits.state?.splits.find((split) => split.id === splits.activeSplitId)?.total ?? null)
+      : systemPagedView
+        ? (realMailboxCounts?.[systemPagedView] ?? null)
+        : null
   const conversationThreadCount = detachedDraftThread
     ? 1
     : searchOpen
@@ -372,6 +377,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedThreadIdRef.current = null
     selectedDraftIdRef.current = null
     splitViewStateRef.current.clear()
+    pendingSplitRestoreRef.current = null
     resetSelection()
   }, [activeAccount, resetSelection])
 
@@ -819,6 +825,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             // The notification target owns the selection: cancel any saved
             // record the switch queued so it cannot override this focus.
             pendingViewRestoreRef.current = null
+            pendingSplitRestoreRef.current = null
             selectedThreadIdRef.current = threadId
             setDetachedDraftThread(null)
             setSelectedIndex(nextIndex)

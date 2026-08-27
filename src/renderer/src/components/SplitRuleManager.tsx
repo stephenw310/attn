@@ -281,8 +281,8 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               Show native notifications for this split
             </label>
             <p className="mt-4 rounded-md border border-edge bg-ground/60 p-3 text-[11px] leading-5 text-ink-faint">
-              Attachment rules use cached message metadata. Older mail can move into this split after Attn
-              downloads its body during normal use. Reading a split never starts a network request.
+              Attachment rules use cached message metadata. After a database upgrade, Attn refreshes older
+              Inbox metadata in the background. Reading a split never starts a network request.
             </p>
             {error && (
               <p role="alert" className="mt-3 text-xs text-danger">

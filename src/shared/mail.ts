@@ -175,9 +175,9 @@ export type SyncState =
     }
   | {
       phase: 'indexing'
-      // 'lifetime' walks account headers; 'attachments' is the short ids-only
-      // tail that flags which stored threads carry an attachment (SPEC §9 #18c).
-      stage: 'lifetime' | 'attachments'
+      // The account-wide header walk is followed by two derived-metadata
+      // passes before the local FTS backfill starts.
+      stage: 'lifetime' | 'attachments' | 'split-metadata'
       threadsDone: number
       threadsTotal?: number
       messagesTotal?: number

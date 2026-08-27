@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Page } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-splits.json' })
@@ -14,6 +15,13 @@ async function openSplitRules(page: Page): Promise<void> {
   await page.getByTestId('account-menu').getByRole('button').first().click()
   await page.getByTestId('account-split-rules').click()
   await expect(page.getByTestId('split-rules')).toBeVisible()
+}
+
+async function emitFocusThread(app: ElectronApplication, threadId: string): Promise<void> {
+  await app.evaluate(({ ipcMain }, { channel, id }) => ipcMain.emit(channel, {}, id), {
+    channel: TEST_CHANNELS.focusThread,
+    id: threadId
+  })
 }
 
 test('classifies once, navigates locally, and restores each split selection', async ({ page }, testInfo) => {
@@ -68,6 +76,7 @@ test('classifies once, navigates locally, and restores each split selection', as
 
   await rows.first().click()
   await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await expect(page.getByTestId('conversation-position')).toHaveText('1 of 2')
   await expect(strip).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(strip).toBeVisible()
@@ -159,4 +168,32 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await expect(
     relaunchedPage.locator('[data-testid="split-tab"][data-split-id="preset:github"]')
   ).toContainText('GitHub')
+})
+
+test('notification focus owns selection over a queued split restore', async ({ app, page }) => {
+  const calendar = page.locator('[data-testid="split-tab"][data-split-id="preset:calendar"]')
+  const important = page.locator('[data-testid="split-tab"][data-split-id="base:important"]')
+  const rows = page.getByTestId('thread-row')
+
+  await calendar.click()
+  await expect(rows).toHaveCount(2)
+  await page.keyboard.press('j')
+  await expect(rows.filter({ hasText: 'Quarterly planning invite' })).toHaveAttribute('data-selected', 'true')
+
+  await important.click()
+  await expect(rows).toContainText('Board memo needs approval')
+  await page.evaluate(() => {
+    const tab = document.querySelector<HTMLElement>(
+      '[data-testid="split-tab"][data-split-id="preset:calendar"]'
+    )
+    if (!tab) throw new Error('Calendar split tab is missing')
+    tab.click()
+  })
+  await emitFocusThread(app, 't-calendar-sender')
+
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Planning check-in tomorrow')
+  await expect(rows.filter({ hasText: 'Planning check-in tomorrow' })).toHaveAttribute(
+    'data-selected',
+    'true'
+  )
 })

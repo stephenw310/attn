@@ -17,6 +17,7 @@ import type { ThreadExistenceSweepResult } from './sync/existenceSweep'
 import type { FtsBackfillCallbacks, FtsBackfillOptions, FtsBackfillResult } from './sync/ftsBackfill'
 import type { LifetimeSweepCallbacks, LifetimeSweepOptions, LifetimeSweepResult } from './sync/lifetimeSweep'
 import type { HistoryPollerOptions } from './sync/poller'
+import type { SplitMetadataCallbacks, SplitMetadataOptions, SplitMetadataResult } from './sync/splitMetadata'
 
 const mocks = vi.hoisted(() => {
   class FakePoller {
@@ -42,6 +43,7 @@ const mocks = vi.hoisted(() => {
     runInboxBackfill: vi.fn(),
     runLifetimeSweep: vi.fn(),
     runAttachmentFlagWalk: vi.fn(),
+    runSplitMetadataRebuild: vi.fn(),
     runFtsBackfill: vi.fn(),
     reconcileThreadExistence: vi.fn(),
     syncLabelCatalog: vi.fn(),
@@ -72,6 +74,10 @@ vi.mock('./sync/labels', () => ({ syncLabelCatalog: mocks.syncLabelCatalog }))
 vi.mock('./sync/attachmentFlags', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync/attachmentFlags')>()),
   runAttachmentFlagWalk: mocks.runAttachmentFlagWalk
+}))
+vi.mock('./sync/splitMetadata', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./sync/splitMetadata')>()),
+  runSplitMetadataRebuild: mocks.runSplitMetadataRebuild
 }))
 vi.mock('./sync/ftsBackfill', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync/ftsBackfill')>()),
@@ -125,6 +131,11 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     options: AttachmentFlagOptions
     result: Deferred<AttachmentFlagResult | null>
   }> = []
+  const splitMetadataRebuilds: Array<{
+    callbacks: SplitMetadataCallbacks
+    options: SplitMetadataOptions
+    result: Deferred<SplitMetadataResult | null>
+  }> = []
   const ftsBackfills: Array<{
     accountId: string
     callbacks: FtsBackfillCallbacks
@@ -158,6 +169,13 @@ function harness(options: { backfillCursor?: string | null } = {}) {
       return result.promise
     }
   )
+  mocks.runSplitMetadataRebuild.mockImplementation(
+    (_db, _provider, _accountId, callbacks: SplitMetadataCallbacks, rebuildOptions: SplitMetadataOptions) => {
+      const result = deferred<SplitMetadataResult | null>()
+      splitMetadataRebuilds.push({ callbacks, options: rebuildOptions, result })
+      return result.promise
+    }
+  )
   mocks.runFtsBackfill.mockImplementation(
     (_db, accountId: string, callbacks: FtsBackfillCallbacks, backfillOptions: FtsBackfillOptions) => {
       const result = deferred<FtsBackfillResult | null>()
@@ -181,6 +199,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     makeProvider: vi.fn(() => provider),
     isForeground: () => false,
     hasForegroundProviderWork: () => foregroundWork.providerActive,
+    mailRevision: () => 0,
     broadcastState: (state) => states.push(state),
     broadcastMailChanged,
     getActionExecutor: () =>
@@ -203,6 +222,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
     backfills,
     lifetimeSweeps,
     attachmentWalks,
+    splitMetadataRebuilds,
     ftsBackfills,
     trigger,
     mirrorTrigger,
@@ -218,6 +238,7 @@ beforeEach(() => {
   mocks.runInboxBackfill.mockReset()
   mocks.runLifetimeSweep.mockReset()
   mocks.runAttachmentFlagWalk.mockReset()
+  mocks.runSplitMetadataRebuild.mockReset()
   mocks.runFtsBackfill.mockReset()
   mocks.reconcileThreadExistence.mockReset()
   mocks.reconcileThreadExistence.mockResolvedValue({ listedThreadCount: 0, deletedThreadIds: [] })
@@ -455,9 +476,14 @@ describe('backfill to poller handoff', () => {
   })
 
   it('publishes lifetime progress as live indexing and restores it after a history cycle', async () => {
-    const { controller, lifetimeSweeps, attachmentWalks, states, broadcastMailChanged } = harness({
-      backfillCursor: 'done'
-    })
+    const {
+      controller,
+      lifetimeSweeps,
+      attachmentWalks,
+      splitMetadataRebuilds,
+      states,
+      broadcastMailChanged
+    } = harness({ backfillCursor: 'done' })
     controller.retry()
     const sweep = lifetimeSweeps[0]
 
@@ -521,13 +547,21 @@ describe('backfill to poller handoff', () => {
     expect(states.at(-1)).not.toEqual({ phase: 'idle' })
     attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
     await flush()
+    expect(states.at(-1)).not.toEqual({ phase: 'idle' })
+    splitMetadataRebuilds[0].result.resolve({ threadsRefreshed: 0 })
+    await flush()
     expect(states.at(-1)).toEqual({ phase: 'idle' })
   })
 
-  it('runs the ids-only attachment index after the sweep, under the same pacing', async () => {
-    const { controller, lifetimeSweeps, attachmentWalks, states, broadcastMailChanged } = harness({
-      backfillCursor: 'done'
-    })
+  it('runs the derived metadata passes after the sweep under the same pacing', async () => {
+    const {
+      controller,
+      lifetimeSweeps,
+      attachmentWalks,
+      splitMetadataRebuilds,
+      states,
+      broadcastMailChanged
+    } = harness({ backfillCursor: 'done' })
     controller.onSignIn()
     expect(attachmentWalks).toHaveLength(0)
 
@@ -550,17 +584,33 @@ describe('backfill to poller handoff', () => {
 
     attachmentWalks[0].result.resolve({ threadsFlagged: 3 })
     await flush()
+    expect(splitMetadataRebuilds).toHaveLength(1)
+    expect(splitMetadataRebuilds[0].options.shouldYield).toBe(lifetimeSweeps[0].options.shouldYield)
+    splitMetadataRebuilds[0].callbacks.onProgress({
+      threadsDone: 4,
+      reason: 'running',
+      mailChanged: true
+    })
+    expect(states.at(-1)).toEqual({
+      phase: 'indexing',
+      stage: 'split-metadata',
+      threadsDone: 4,
+      reason: 'running'
+    })
+    splitMetadataRebuilds[0].result.resolve({ threadsRefreshed: 4 })
+    await flush()
     expect(states.at(-1)).toEqual({ phase: 'idle' })
   })
 
   it('starts the new account FTS pass after a stale account pass exits', async () => {
-    const { controller, session, lifetimeSweeps, attachmentWalks, ftsBackfills } = harness({
-      backfillCursor: 'done'
-    })
+    const { controller, session, lifetimeSweeps, attachmentWalks, splitMetadataRebuilds, ftsBackfills } =
+      harness({ backfillCursor: 'done' })
     controller.onSignIn()
     lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
     await flush()
     attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await flush()
+    splitMetadataRebuilds[0].result.resolve({ threadsRefreshed: 0 })
     await flush()
     expect(ftsBackfills.map((run) => run.accountId)).toEqual(['user@example.com'])
 
@@ -569,6 +619,8 @@ describe('backfill to poller handoff', () => {
     lifetimeSweeps[1].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
     await flush()
     attachmentWalks[1].result.resolve({ threadsFlagged: 0 })
+    await flush()
+    splitMetadataRebuilds[1].result.resolve({ threadsRefreshed: 0 })
     await flush()
 
     expect(ftsBackfills).toHaveLength(1)
@@ -603,6 +655,31 @@ describe('backfill to poller handoff', () => {
       stage: 'attachments',
       reason: 'retry-wait',
       threadsDone: 1
+    })
+  })
+
+  it('keeps a paused split metadata rebuild reporting its own stage', async () => {
+    const { controller, lifetimeSweeps, attachmentWalks, splitMetadataRebuilds, states } = harness({
+      backfillCursor: 'done'
+    })
+    controller.onSignIn()
+    lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
+    await flush()
+    attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await flush()
+
+    splitMetadataRebuilds[0].callbacks.onProgress({
+      threadsDone: 2,
+      reason: 'running',
+      mailChanged: false
+    })
+    splitMetadataRebuilds[0].callbacks.onError(new GmailApiError(429, 'quota', true))
+
+    expect(states.at(-1)).toMatchObject({
+      phase: 'indexing',
+      stage: 'split-metadata',
+      reason: 'retry-wait',
+      threadsDone: 2
     })
   })
 
@@ -830,13 +907,15 @@ describe('offline retry', () => {
 
   it('retries a failed FTS pass without replaying the completed Gmail indexers', async () => {
     vi.useFakeTimers()
-    const { controller, lifetimeSweeps, attachmentWalks, ftsBackfills } = harness({
+    const { controller, lifetimeSweeps, attachmentWalks, splitMetadataRebuilds, ftsBackfills } = harness({
       backfillCursor: 'done'
     })
     controller.retry()
     lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
     await vi.advanceTimersByTimeAsync(0)
     attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+    splitMetadataRebuilds[0].result.resolve({ threadsRefreshed: 0 })
     await vi.advanceTimersByTimeAsync(0)
     expect(ftsBackfills).toHaveLength(1)
 
@@ -849,17 +928,20 @@ describe('offline retry', () => {
     expect(ftsBackfills).toHaveLength(2)
     expect(mocks.runLifetimeSweep).toHaveBeenCalledOnce()
     expect(mocks.runAttachmentFlagWalk).toHaveBeenCalledOnce()
+    expect(mocks.runSplitMetadataRebuild).toHaveBeenCalledOnce()
   })
 
   it('does not retry an FTS pass canceled without an error', async () => {
     vi.useFakeTimers()
-    const { controller, lifetimeSweeps, attachmentWalks, ftsBackfills } = harness({
+    const { controller, lifetimeSweeps, attachmentWalks, splitMetadataRebuilds, ftsBackfills } = harness({
       backfillCursor: 'done'
     })
     controller.retry()
     lifetimeSweeps[0].result.resolve({ threadCount: 0, elapsedMs: 0, quotaWaitMs: 0 })
     await vi.advanceTimersByTimeAsync(0)
     attachmentWalks[0].result.resolve({ threadsFlagged: 0 })
+    await vi.advanceTimersByTimeAsync(0)
+    splitMetadataRebuilds[0].result.resolve({ threadsRefreshed: 0 })
     await vi.advanceTimersByTimeAsync(0)
 
     ftsBackfills[0].result.resolve(null)

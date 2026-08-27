@@ -57,6 +57,7 @@ export class ServiceRuntime {
   private seedAccountId: string | null = null
   private focused: boolean
   private stopped = false
+  private mailRevision = 0
   private draftSaveFailures = 0
   private conversationDelay: { threadId: string; delayMs: number } | null = null
   private draftReopenDelayMs = 0
@@ -140,6 +141,7 @@ export class ServiceRuntime {
       makeProvider: (generation) => this.makeProvider(generation),
       isForeground: () => this.focused,
       hasForegroundProviderWork: (accountId) => (this.foregroundProviderWork.get(accountId) ?? 0) > 0,
+      mailRevision: () => this.mailRevision,
       broadcastState: (payload) => this.emit({ kind: 'sync-state', payload }),
       broadcastMailChanged: () => this.broadcastMailChanged(),
       getActionExecutor: () => this.actionExecutor,
@@ -369,6 +371,7 @@ export class ServiceRuntime {
   }
 
   private broadcastMailChanged(serverSearchRequestId?: string): void {
+    this.mailRevision += 1
     this.emit({
       kind: 'mail-changed',
       ...(serverSearchRequestId ? { serverSearchRequestId } : {})
@@ -540,7 +543,7 @@ export class ServiceRuntime {
         : 0
       const cursors = this.db
         .prepare(
-          `SELECT backfill_cursor, sweep_cursor, attachment_cursor, fts_cursor
+          `SELECT backfill_cursor, sweep_cursor, attachment_cursor, split_metadata_cursor, fts_cursor
            FROM sync_state WHERE account_id = ?`
         )
         .get(accountId)

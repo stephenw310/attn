@@ -111,7 +111,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 ## Global rules (carried from M2, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative
-   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 18. Throwaway profiles may be
+   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 20. Throwaway profiles may be
    deleted and re-synced. A real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and every
    schema-changing task publishes its exact DDL.
 2. **IPC has three parts**: main handler, preload bridge, and the typed channel map in `src/shared/`. All in
@@ -847,8 +847,9 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
 - **User rules match sender address, sender domain, `List-Id`, `List-Id` presence, label, or calendar-invite
   attachment metadata.** `List-Id` is not stored. Add
   `messages.list_id` and add `List-Id` to `METADATA_HEADERS` in `gmail/provider.ts`. Existing rows stay
-  `NULL` until an ordinary refetch fills them, exactly as S2's legacy labels do, so address, domain, and label
-  rules work on day one while list rules ramp. Canonicalize a non-empty header to the lowercased identifier
+  `NULL` until a full payload persist fills them. A resumable upgrade rebuild refreshes stored Inbox threads,
+  so address, domain, and label rules work immediately while List-Id rules fill in page by page. Canonicalize
+  a non-empty header to the lowercased identifier
   inside angle brackets, or to its unfolded, lowercased value when no brackets exist; absence stays `NULL`.
   Normalize sender addresses, domains, MIME types, and filename suffixes by trimming and lowercasing them on
   write; labels retain their exact Gmail id. Reject empty condition values. Say that in the rule editor rather
@@ -859,9 +860,16 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
   `text/calendar` part exists; a metadata-only persist must preserve the last known value. During first sync,
   known Calendar senders match in the metadata stage; `.ics` and `text/calendar` conditions become complete
   as the Inbox bodies stage stores full-payload metadata. History polling already fetches changed threads in
-  full, so new calendar invitations classify before T27 plans their notification. The rule editor must
-  explain that attachment conditions can re-bucket older unhydrated mail later. A split read never starts a
+  full, so new calendar invitations classify before T27 plans their notification. A split read never starts a
   network request.
+- **Upgraded profiles rebuild split metadata once.** A stopped pre-T27 profile gets
+  `sync_state.split_metadata_cursor = 'split-metadata'` in the task-specific manual DDL. After the lifetime and
+  attachment passes, a low-priority worker pages remote Inbox ids, re-fetches stored Inbox threads in full,
+  and persists them through the ordinary authoritative write path. It checkpoints each complete Gmail page,
+  restarts once when a saved page token expires, yields to foreground work, and broadcasts after each changed
+  page. Fresh profiles default this cursor to `done` because the Inbox bodies stage already recorded the same
+  fields. This path covers filename-less `text/calendar` parts that neither `attachments_json` nor Gmail's
+  filename search can reconstruct locally.
 - **The strip follows D6:** a horizontal top-bar strip, unread counts on hot splits, overflow behind `···`
   past about eight. `←`/`→` moves between splits, `G` then `1`–`9` jumps by configured order, and each split
   keeps its own selection. `mail:listThreads({ view: 'inbox', splitId, cursor })` filters and applies the
@@ -876,7 +884,7 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
 - **The rule manager is minimal.** F15's settings surface is M4. T27 ships preset restore plus rule creation,
   renaming, condition editing, ordering, and deletion, reachable by palette command, and no more.
 
-**Schema revision 19.** For a stopped revision-18 profile:
+**Schema revision 20.** For a stopped revision-18 profile:
 
 ```sql
 BEGIN IMMEDIATE;
@@ -898,7 +906,21 @@ CREATE TABLE split_config (
   initialized INTEGER NOT NULL DEFAULT 0,
   revision    INTEGER NOT NULL DEFAULT 0
 );
-PRAGMA user_version = 19;
+ALTER TABLE sync_state
+  ADD COLUMN split_metadata_cursor TEXT NOT NULL DEFAULT 'done';
+UPDATE sync_state SET split_metadata_cursor = 'split-metadata';
+PRAGMA user_version = 20;
+COMMIT;
+```
+
+For a stopped revision-19 profile created while this PR was under review:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE sync_state
+  ADD COLUMN split_metadata_cursor TEXT NOT NULL DEFAULT 'done';
+UPDATE sync_state SET split_metadata_cursor = 'split-metadata';
+PRAGMA user_version = 20;
 COMMIT;
 ```
 
@@ -909,6 +931,8 @@ COMMIT;
   `.ics` matching, a malformed or unknown-version rule being skipped, and `NULL` `list_id` falling through.
   Prove that full-payload parsing records a filename-less `text/calendar` part without exposing it as a
   downloadable attachment, and that a later metadata-only persist preserves the flag.
+  Cover the revision-18 upgrade shape with a completed normal backfill, cached bodies, defaulted split fields,
+  and a resumable full-payload rebuild that fills both `List-Id` and filename-less calendar MIME metadata.
   Exercise the SQL classifier against real in-memory SQLite and prove that a split's paged rows, exact total
   and unread counts, and notification lookup agree. Cover keyset continuation within a split and revision
   changes between pages. Cover the notification planner honoring per-split flags and the badge counting only

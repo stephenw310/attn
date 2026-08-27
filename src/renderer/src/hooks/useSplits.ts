@@ -35,8 +35,11 @@ export function useSplits(account: string | null): SplitData {
   const activeSplitIdRef = useRef(activeSplitId)
   activeSplitIdRef.current = activeSplitId
   const requestRef = useRef(0)
+  const appliedRevisionRef = useRef(-1)
 
   const applyState = useCallback((next: SplitState): void => {
+    if (next.revision < appliedRevisionRef.current) return
+    appliedRevisionRef.current = next.revision
     setState(next)
     setActiveSplitIdState((current) => {
       const candidate = current ?? activeSplitIdRef.current
@@ -56,6 +59,7 @@ export function useSplits(account: string | null): SplitData {
 
   useEffect(() => {
     requestRef.current += 1
+    appliedRevisionRef.current = -1
     setState(null)
     setActiveSplitIdState(null)
     if (!window.attn || !account) return

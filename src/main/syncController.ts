@@ -16,6 +16,7 @@ import { syncLabelCatalog } from './sync/labels'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
 import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
+import { runSplitMetadataRebuild, type SplitMetadataProgress } from './sync/splitMetadata'
 import { sameSyncState } from './sync/state'
 
 const LIFETIME_RETRY_MS = 15_000
@@ -31,6 +32,7 @@ interface SyncControllerContext {
   isForeground: () => boolean
   /** True while an interactive body or attachment request is using Gmail for this account. */
   hasForegroundProviderWork: (accountId: string) => boolean
+  mailRevision: () => number
   broadcastState: (state: SyncState) => void
   broadcastMailChanged: () => void
   getActionExecutor: () => ActionExecutor | null
@@ -414,7 +416,8 @@ export class SyncController {
     // yield-to-foreground rule, and the same retry ladder.
     const pacing = {
       shouldContinue: () => !this.stopped && active() && this.context.currentAccountId() === accountId,
-      shouldYield: () => this.shouldYieldLifetime(accountId)
+      shouldYield: () => this.shouldYieldLifetime(accountId),
+      snapshotRevision: this.context.mailRevision
     }
     const pause = (error: unknown, prefix: string): void => {
       failed = true
@@ -474,8 +477,34 @@ export class SyncController {
           pacing
         )
         if (!active()) return
+        if (!flags || failed) {
+          this.lifetimeRunning = false
+          return
+        }
+        const splitMetadata = await runSplitMetadataRebuild(
+          this.context.db,
+          provider,
+          accountId,
+          {
+            onProgress: (progress) => {
+              if (!active()) return
+              this.publishSplitMetadataProgress(progress)
+            },
+            onError: (error) => {
+              if (!active()) return
+              pause(error, '[sync] split metadata rebuild failed')
+            }
+          },
+          pacing
+        )
+        if (!active()) return
         this.lifetimeRunning = false
-        if (!flags || failed) return
+        if (!splitMetadata || failed) return
+        if (splitMetadata.threadsRefreshed > 0) {
+          console.log(
+            `[sync] split metadata rebuild done: ${splitMetadata.threadsRefreshed} threads refreshed for ${accountId}`
+          )
+        }
         this.lifetimeProgress = null
         this.publishSettledState()
         if (flags.threadsFlagged > 0) {
@@ -483,7 +512,7 @@ export class SyncController {
             `[sync] attachment index done: ${flags.threadsFlagged} threads flagged for ${accountId}`
           )
         }
-        // The purely local FTS backfill runs behind all three Gmail cursors.
+        // The purely local FTS backfill runs behind every Gmail-backed cursor.
         this.startFtsBackfill(accountId, generation)
       })
       .catch((error) => {
@@ -579,6 +608,19 @@ export class SyncController {
       this.setState(this.lifetimeProgress)
     }
     // Raising the flag repaints attachment chips in the already-rendered list.
+    if (mailChanged) this.context.broadcastMailChanged()
+  }
+
+  private publishSplitMetadataProgress(progress: SplitMetadataProgress): void {
+    const { mailChanged, ...details } = progress
+    this.lifetimeProgress = {
+      phase: 'indexing',
+      stage: 'split-metadata',
+      ...details
+    }
+    if (!this.running && !this.pollerRunning && !this.foregroundFailure) {
+      this.setState(this.lifetimeProgress)
+    }
     if (mailChanged) this.context.broadcastMailChanged()
   }
 
