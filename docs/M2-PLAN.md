@@ -1002,6 +1002,28 @@ created or renamed in Gmail web appears in Attn within one poll interval, verify
 
 ---
 
+## M2 follow-up: primary Gmail signature
+
+**Status: implemented 2026-08-27.** · **Depends on:** T14C and T21's poll effect shape · **Spec:** F6
+
+Attn reads the primary `users.settings.sendAs` resource under the existing `gmail.modify` scope. It caches
+the display name and Gmail's sanitized HTML signature at sync start and during each poll cycle. New-message
+draft creation reads only this local cache, so opening the composer stays local-first and works offline. The
+signature enters the editor inside Gmail's structural signature wrapper and follows T14C's existing import,
+editing, sanitization, plain-text alternative, draft mirror, and send paths.
+
+Google documents the resource's signature as a new-mail default. The resource does not report the Gmail
+UI's separate reply or forward choice, so Attn does not add this signature to a reply or forward. Imported
+Gmail drafts still keep any signature already in their body. A new draft that contains only the cached
+default remains empty for autosave and mirroring purposes, which prevents a bare signature from appearing
+in Drafts.
+
+Unit coverage pins sanitization, cache refresh, new-mail-only insertion, empty-draft handling, poll failure
+isolation, and sender refresh. Seeded Electron coverage proves that the signature is editable and survives
+serialization, and that closing a signature-only composer discards it.
+
+---
+
 ## Accepted-risk register (decisions made by this plan — don't relitigate ad hoc)
 
 | Decision | Rationale | Revisit |

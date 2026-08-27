@@ -15,6 +15,7 @@ import { GmailMailProvider } from '../gmail/provider'
 import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE, GmailQuotaLimiter } from '../gmail/quota'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
+import { cachePrimarySendAs } from '../outbox/sendAs'
 import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
@@ -445,6 +446,17 @@ export class ServiceRuntime {
         refreshMessageBodyFromStore(this.db, accountId, messageId)
       })()
       this.broadcastMailChanged()
+      return undefined
+    }
+    if (channel === TEST_CHANNELS.setSendAsSignature) {
+      const signature = args[0]
+      if (!accountId || typeof signature !== 'string') throw new Error('invalid send-as signature')
+      cachePrimarySendAs(this.db, accountId, {
+        sendAsEmail: accountId,
+        signature,
+        isPrimary: true,
+        isDefault: true
+      })
       return undefined
     }
     if (channel === TEST_CHANNELS.failNextDraftSave) {

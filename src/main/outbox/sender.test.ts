@@ -526,6 +526,7 @@ describe('OutboxSender effect layer', () => {
       const getSendAs = vi.fn(async () => ({
         sendAsEmail: 'me@example.com',
         displayName: 'Chao Zhou',
+        signature: '<div>Best, Chao</div>',
         isPrimary: true
       }))
       const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
@@ -585,6 +586,11 @@ describe('OutboxSender effect layer', () => {
           .prepare("SELECT value FROM settings WHERE account_id = ? AND key = 'sendAsDisplayName'")
           .get('me@example.com')
       ).toEqual({ value: 'Chao Zhou' })
+      expect(
+        db
+          .prepare("SELECT value FROM settings WHERE account_id = ? AND key = 'sendAsSignatureHtml'")
+          .get('me@example.com')
+      ).toEqual({ value: expect.stringContaining('Best, Chao') })
       expect(db.prepare('SELECT body_text FROM messages WHERE id = ?').get('sent-message')).toEqual({
         body_text: 'Fresh reply'
       })

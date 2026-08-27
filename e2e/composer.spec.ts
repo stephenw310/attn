@@ -33,6 +33,15 @@ async function setAttachmentPickerFiles(app: ElectronApplication, paths: string[
   })
 }
 
+async function setSendAsSignature(app: ElectronApplication, signature: string): Promise<void> {
+  const error = await app.evaluate(
+    ({ ipcMain }, input) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(input.channel, {}, input.signature, resolve)),
+    { channel: TEST_CHANNELS.setSendAsSignature, signature }
+  )
+  if (error) throw new Error(error)
+}
+
 async function pasteVisiblePng(composer: ComposerPage): Promise<void> {
   await composer.editor.evaluate(async (editor) => {
     const canvas = document.createElement('canvas')
@@ -215,6 +224,73 @@ function remotePlainDraft(id: string, subject: string, text: string): object {
 test('opens the first-class Drafts view with g d', async ({ page }) => {
   await goToDrafts(page)
   await expect(page.getByTestId('view-title')).toHaveText('Drafts')
+})
+
+test('inserts the saved Gmail signature into new mail as editable content', async ({ app, page }) => {
+  await setSendAsSignature(
+    app,
+    '<div style="color:#2457a6">Best,</div><div>Chao Wu</div><div><a href="https://chaowu.xyz">chaowu.xyz</a></div>'
+  )
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+
+  const signature = composer.editor.getByTestId('composer-gmail-signature')
+  await expect(signature).toHaveCount(1)
+  await expect(signature.getByText('Best,')).toBeVisible()
+  await expect(signature.getByText('Chao Wu')).toBeVisible()
+  await expect(signature.getByRole('link', { name: 'chaowu.xyz' })).toHaveAttribute(
+    'href',
+    'https://chaowu.xyz'
+  )
+  await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+
+  await composer.addRecipient('recipient@example.com')
+  await composer.subject.fill('Signature check')
+  await composer.editor.click({ position: { x: 24, y: 14 } })
+  await page.keyboard.type('Hello from Attn')
+  await composer.expectSaved()
+
+  const saved = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (candidate) => candidate.subject === 'Signature check'
+    )
+    return draft ? { html: draft.bodyHtml, text: draft.bodyText } : null
+  })
+  expect(saved?.html).toContain('Hello from Attn')
+  expect(saved?.html).toContain('class="gmail_signature"')
+  expect(saved?.html.indexOf('Hello from Attn')).toBeLessThan(saved?.html.indexOf('Best,') ?? -1)
+  expect(saved?.text).toContain('Hello from Attn')
+  expect(saved?.text).toContain('Best,')
+})
+
+test('discards new mail that contains only the saved Gmail signature', async ({ app, page }) => {
+  await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await expect(composer.editor.getByTestId('composer-gmail-signature')).toBeVisible()
+  await expect.poll(() => page.evaluate(async () => (await window.attn.draft.list()).length)).toBe(0)
+
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await expect.poll(() => page.evaluate(async () => (await window.attn.draft.list()).length)).toBe(0)
+})
+
+test('keeps formatting edits made inside the saved Gmail signature', async ({ app, page }) => {
+  await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+
+  await composer.editor.getByText('Best,').selectText()
+  await page.getByRole('button', { name: 'Bold' }).click()
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+
+  const drafts = await page.evaluate(async () => window.attn.draft.list())
+  expect(drafts).toHaveLength(1)
+  expect(drafts[0]?.bodyHtml).toContain('Best,')
+  expect(drafts[0]?.bodyHtml).toMatch(/<(?:b|strong)\b/)
 })
 
 test('opens reply and forward from the selected inbox row', async ({ page }) => {

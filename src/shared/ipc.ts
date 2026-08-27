@@ -101,6 +101,7 @@ export const TEST_CHANNELS = {
   delayDraftReopen: 'attn:test:delayDraftReopen',
   delayDraftInlineImage: 'attn:test:delayDraftInlineImage',
   updateMessageBody: 'attn:test:updateMessageBody',
+  setSendAsSignature: 'attn:test:setSendAsSignature',
   failNextDraftSave: 'attn:test:failNextDraftSave',
   markDraftMirrored: 'attn:test:markDraftMirrored',
   failNextAction: 'attn:test:failNextAction',

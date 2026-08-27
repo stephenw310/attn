@@ -215,6 +215,7 @@ export interface HistoryPollerOptions {
   wakeThread?: (threadId: string) => void
   kickExecutor?: () => void
   syncLabels?: () => Promise<boolean | undefined>
+  syncSendAs?: () => Promise<void>
   syncDrafts?: () => Promise<boolean | undefined>
   runCycle?: typeof runHistoryCycle
   time?: SchedulerTime
@@ -295,6 +296,13 @@ export class HistoryPoller {
           labelsChanged = (await this.options.syncLabels()) === true
         } catch (error) {
           console.warn(`[sync] label catalog refresh failed: ${errorMessage(error)}`)
+        }
+      }
+      if (!this.stopped && this.options.syncSendAs) {
+        try {
+          await this.options.syncSendAs()
+        } catch (error) {
+          console.warn(`[sync] send-as refresh failed: ${errorMessage(error)}`)
         }
       }
       let draftsChanged = false

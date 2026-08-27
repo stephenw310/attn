@@ -76,6 +76,7 @@ import { addInlineImage, isSupportedInlineImageMimeType } from '../outbox/inline
 import type { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from '../outbox/queue'
 import { planReply } from '../outbox/replyPlan'
+import { applyCachedPrimarySignature } from '../outbox/sendAs'
 import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
@@ -361,11 +362,13 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (context.consumeTestDraftSaveFailure()) throw new Error('injected draft save failure')
     const account = requireAccount(context)
     const canonical = canonicalizeRendererDraft(context.db, account, draft)
+    const prepared =
+      canonical.id === null ? applyCachedPrimarySignature(context.db, account, canonical) : canonical
     const now = Date.now()
-    const id = saveDraft(context.db, account, canonical, now)
+    const id = saveDraft(context.db, account, prepared, now)
     return {
       id,
-      draft: canonical.id === null ? { ...canonical, id, createdAt: now, updatedAt: now } : null
+      draft: prepared.id === null ? { ...prepared, id, createdAt: now, updatedAt: now } : null
     }
   })
   handle(IPC_CHANNELS.draftGet, (_event, id) => {
