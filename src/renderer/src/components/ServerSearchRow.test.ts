@@ -2,7 +2,7 @@
 
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it } from 'vitest'
 import { ServerSearchRow } from './ServerSearchRow'
 
 let previousActEnvironment: boolean | undefined
@@ -18,7 +18,7 @@ afterEach(() => {
   environment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
 })
 
-it('disables the Gmail row offline and names the reason', async () => {
+it('reports why Gmail search is unavailable offline', async () => {
   const container = document.createElement('div')
   const root = createRoot(container)
   try {
@@ -29,39 +29,34 @@ it('disables the Gmail row offline and names the reason', async () => {
           resultCount: 0,
           message: null,
           quotaWaitMs: 0,
-          online: false,
-          onSearch: vi.fn(),
-          onReconnect: vi.fn(),
-          onFocusQuery: vi.fn()
+          online: false
         })
       )
     )
-    const button = container.querySelector('button')
-    expect(button?.disabled).toBe(true)
-    expect(button?.textContent).toContain('back online')
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('back online')
+    expect(container.querySelector('button')).toBeNull()
   } finally {
     await act(async () => root.unmount())
   }
 })
 
-it('routes an auth pause to reconnect and reports a quota-delayed completion', async () => {
+it('reports an auth pause and a quota-delayed completion', async () => {
   const container = document.createElement('div')
   const root = createRoot(container)
-  const reconnect = vi.fn()
   const base = {
     resultCount: 0,
     message: 'Google authorization expired',
     quotaWaitMs: 0,
-    online: true,
-    onSearch: vi.fn(),
-    onReconnect: reconnect,
-    onFocusQuery: vi.fn()
+    online: true
   }
   try {
     await act(async () => root.render(createElement(ServerSearchRow, { ...base, phase: 'auth-required' })))
-    const button = container.querySelector('button')
-    button?.click()
-    expect(reconnect).toHaveBeenCalledOnce()
+    expect(container.textContent).toContain('Press Enter to reconnect Google and search Gmail')
+
+    await act(async () =>
+      root.render(createElement(ServerSearchRow, { ...base, phase: 'auth-required', online: false }))
+    )
+    expect(container.textContent).toContain('when you are back online')
 
     await act(async () =>
       root.render(
@@ -80,36 +75,24 @@ it('routes an auth pause to reconnect and reports a quota-delayed completion', a
   }
 })
 
-it('allows an online retry after a connection failure and returns keyboard focus to the query', async () => {
+it('reports idle and retry states without becoming a second search action', async () => {
   const container = document.createElement('div')
   const root = createRoot(container)
-  const search = vi.fn()
-  const focusQuery = vi.fn()
+  const base = {
+    resultCount: 0,
+    message: null,
+    quotaWaitMs: 0,
+    online: true
+  }
   try {
-    await act(async () =>
-      root.render(
-        createElement(ServerSearchRow, {
-          phase: 'offline',
-          resultCount: 0,
-          message: 'Connection failed',
-          quotaWaitMs: 0,
-          online: true,
-          onSearch: search,
-          onReconnect: vi.fn(),
-          onFocusQuery: focusQuery
-        })
-      )
-    )
-    const button = container.querySelector('button')
-    expect(button?.disabled).toBe(false)
-    expect(button?.textContent).toContain('Try again')
-    button?.click()
-    expect(search).toHaveBeenCalledOnce()
+    await act(async () => root.render(createElement(ServerSearchRow, { ...base, phase: 'idle' })))
+    expect(container.textContent).toContain('Press Enter to search all of Gmail')
+    expect(container.querySelector('button')).toBeNull()
 
-    for (const key of ['Escape', 'Backspace', '/']) {
-      button?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
-    }
-    expect(focusQuery).toHaveBeenCalledTimes(3)
+    await act(async () =>
+      root.render(createElement(ServerSearchRow, { ...base, phase: 'error', message: 'Connection failed' }))
+    )
+    expect(container.textContent).toContain('Press Enter to try again')
   } finally {
     await act(async () => root.unmount())
   }

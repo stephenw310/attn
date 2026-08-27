@@ -53,18 +53,18 @@ test('fetches a server-only result, opens it, and keeps it cached across relaunc
   await input.fill('serveronlyneedle')
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '0')
 
-  const searchAll = page.getByTestId('search-all-gmail')
-  await expect(searchAll).toBeEnabled()
-  await searchAll.click()
+  const searchStatus = page.getByTestId('search-all-gmail')
+  await expect(searchStatus).toHaveText('Press Enter to search all of Gmail')
+  await expect(searchStatus).toHaveRole('status')
+  await input.press('Enter')
   await expect(page.getByTestId('thread-section-divider')).toHaveText('More from Gmail')
   const remote = page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
   await expect(remote).toBeVisible()
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '1')
-  await expect(input).toBeFocused()
+  await expect(page.getByTestId('thread-list')).toBeFocused()
   const serverSearchPath = join(artifactDirectory, 'server-search.png')
   await page.screenshot({ path: serverSearchPath })
   await testInfo.attach('server-search', { path: serverSearchPath, contentType: 'image/png' })
-  await input.press('Enter')
   await expect(remote).toHaveAttribute('data-selected', 'true')
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Remote archive result')
@@ -118,7 +118,7 @@ test('enters result browsing and returns to the query with its text intact', asy
   await input.fill('visualsort')
   await expect(list).toHaveAttribute('data-thread-count', '3')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveCount(0)
-  await expect(page.getByTestId('footer-shortcut-search-browse')).toContainText('Enterbrowse results')
+  await expect(page.getByTestId('footer-shortcut-search-browse')).toContainText('Entersearch')
   await expect(page.getByTestId('footer-shortcut-navigate')).toHaveCount(0)
 
   const firstResult = page.locator('[data-testid="thread-row"][data-thread-id="t-search-origin"]')
@@ -250,6 +250,8 @@ test('updates bulk flags and Inbox exits optimistically in search results', asyn
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(2)
   await input.press('Enter')
+  const remote = page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  await expect(remote).toBeVisible()
 
   await page.keyboard.press('x')
   await page.keyboard.press('Shift+j')
@@ -259,7 +261,8 @@ test('updates bulk flags and Inbox exits optimistically in search results', asyn
 
   await page.keyboard.press('e')
   await expect(page.locator('[data-testid="thread-row"][data-exiting="true"]')).toHaveCount(1)
-  await expect(rows).toHaveCount(1)
+  await expect(rows).toHaveCount(2)
+  await expect(remote).toBeVisible()
 })
 
 test('restores the selected thread by id when the mailbox reorders during search', async ({ app, page }) => {
@@ -301,6 +304,9 @@ test('keeps an open search reader pinned while the underlying mailbox refreshes'
   await input.fill('visualsort')
   await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '3')
   await input.press('Enter')
+  await expect(
+    page.locator('[data-testid="thread-row"][data-thread-id="t-search-server-only"]')
+  ).toBeVisible()
   await page.keyboard.press('j')
   await page.keyboard.press('j')
   await page.keyboard.press('Enter')
@@ -320,7 +326,7 @@ test('keeps an open search reader pinned while the underlying mailbox refreshes'
   )
   if (result.error) throw new Error(result.error)
 
-  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '2')
+  await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '3')
   await expect(page.getByTestId('conversation-subject')).toHaveText('Acme annual roadmap')
   await page.keyboard.press('Escape')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveAttribute(

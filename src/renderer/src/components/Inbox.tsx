@@ -915,6 +915,22 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     target?.focus({ preventScroll: true })
   }, [fullWindowComposerDraft, readerOpen, searchKeyboardTarget, searchOpen])
   const focusSearchResults = useCallback(() => setSearchKeyboardTarget('results'), [])
+  const submitSearch = useCallback(() => {
+    focusSearchResults()
+    const query = searchQuery.trim()
+    if (
+      !query ||
+      searchesDrafts(query) ||
+      searchesLocalSnoozes(query) ||
+      !online ||
+      serverSearch.phase === 'waiting' ||
+      serverSearch.phase === 'complete'
+    ) {
+      return
+    }
+    if (serverSearch.phase === 'auth-required') reconnectSearch()
+    else serverSearch.run()
+  }, [focusSearchResults, online, reconnectSearch, searchQuery, serverSearch.phase, serverSearch.run])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetIds(null), [])
   const openSnooze = useCallback(() => {
@@ -1184,7 +1200,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 onQuery={setSearchQuery}
                 onClear={clearSearch}
                 onFocusQuery={focusSearchQuery}
-                onFocusResults={focusSearchResults}
+                onSubmit={submitSearch}
               />
             ) : (
               <div
@@ -1297,9 +1313,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 message={serverSearch.message}
                 quotaWaitMs={serverSearch.quotaWaitMs}
                 online={online}
-                onSearch={serverSearch.run}
-                onReconnect={reconnectSearch}
-                onFocusQuery={focusSearchQuery}
               />
             )}
 
