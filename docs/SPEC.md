@@ -354,17 +354,32 @@ When sending, optionally set "remind me if no reply" (composer control or palett
 
 The inbox is divided into **splits** — tabs above the list, each an independently triaged queue:
 
-- Defaults: **Important** (Gmail's importance/category signals) and **Other**.
-- User-defined splits match rules on: sender address, sender domain, mailing-list (`List-Id`), or label. First matching split wins (user orders them); every thread appears in exactly one split. Splits are views — mail is never moved by splitting.
+- Base splits: **Important** (Gmail's `IMPORTANT` label) and **Other**.
+- The first split setup also creates **Calendar**, **GitHub**, and **Newsletters** from starter presets.
+  Calendar matches known calendar-notification senders, locally stored `.ics` attachments, or a cached
+  `text/calendar` MIME part. GitHub matches the `github.com` sender domain. Newsletters matches messages with
+  a `List-Id` or Gmail's Promotions label.
+- Starter presets become user-owned rules after setup. Users can rename them, change their conditions,
+  reorder them, or delete them. Attn never recreates a changed or deleted preset during launch, sync, or an
+  app update. The rule manager can restore a preset only after an explicit user action.
+- A split expression combines conditions with **any** or **all**. Conditions match a sender address, a sender
+  domain, an exact `List-Id`, `List-Id` presence, a label, an attachment MIME type, or an attachment filename
+  suffix. A thread matches when at least one message satisfies the whole expression. Under **all**, the same
+  message must satisfy every condition. First matching split wins in the user's configured order. **Other**
+  is the final fallback and cannot move ahead of a matching split, so every Inbox thread appears exactly
+  once. Splits are views, so splitting never moves mail.
 - Navigate: `←`/`→` between splits; `G` then `1`–`9` jumps by configured split order. Each split
-  keeps its own selection and unread count, and the context-aware shortcut footer shows the valid digit
-  completions while the `G` chord is active.
+  keeps its own selection and exact local unread count, and the context-aware shortcut footer shows the valid
+  digit completions while the `G` chord is active.
 - **Strip scaling (D6):** when splits exist, they render as a horizontal strip above the Inbox list. Hot splits show unread counts, cold ones stay quiet, and past ~8 the strip scrolls with overflow behind `···`. The full jump-list lives in the palette ("Go to: <split>"). No strip renders for an unsplit Inbox.
 - Per-split notification settings (see F12): by default only Important notifies.
 
 **Acceptance criteria**
 - Split switch < 50ms with selection preserved per split.
 - Rule changes re-bucket the inbox in < 1s for 10k threads, with no thread appearing in two splits.
+- Users can edit or delete every starter preset. A changed or deleted preset stays changed or deleted after
+  relaunch, sync, and an app update. Deleting all starter presets does not seed them again. Users can restore
+  each preset explicitly.
 
 ### F12 — Notifications & badging
 
@@ -537,7 +552,7 @@ Guardrails:
 - **One reducer, two sources:** server history events and local optimistic actions flow through the same state-transition code, which is what keeps optimistic UI and sync convergent.
 - **Scheduler** owns every timer (snooze due-times, follow-up deadlines, undo-send windows); on launch it executes anything that came due while the app was closed (catch-up, D2).
 
-**Local schema (core tables):** `accounts`, `threads`, `messages` (bodies, recipients, attachment metadata), `bodies` (FTS5 external-content), `labels`, `thread_labels`, `contacts` (with frequency/recency stats), `splits`, `snippets`, `reminders` (snooze + follow-up), `outbox`, `action_queue`, `sync_state`, `settings`. Every row keyed by `account_id` (D4).
+**Target v1 local schema (core tables; see §8 for shipped status):** `accounts`, `threads`, `messages` (bodies, recipients, attachment metadata), `bodies` (FTS5 external-content), `labels`, `thread_labels`, `contacts` (with frequency/recency stats), `split_rules`, `split_config`, `snippets`, `reminders` (snooze + follow-up), `outbox`, `action_queue`, `sync_state`, `settings`. Every row keyed by `account_id` (D4).
 
 **Security & privacy:** OAuth tokens and LLM API keys via `safeStorage` (Keychain/DPAPI); DB under the OS user profile; TLS to Google only — plus the opt-in LLM provider (F17), which receives content solely on explicit invocation; **no telemetry, no other third-party services** in v1. Remote images in HTML mail load directly (no proxy without a server, D2), with a global "block remote images" toggle and per-sender overrides — default is load (decision log, §9).
 
