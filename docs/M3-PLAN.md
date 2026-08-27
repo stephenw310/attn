@@ -796,6 +796,8 @@ The built 10,000-thread Electron profile measured palette open at 1 ms p95 and r
 Seeded Electron coverage dispatches commands from list, reader, composer, and local-search contexts, checks
 every `G` chord entry, persists usage across relaunch, and exercises the reader keys. The T25 integration
 coverage dispatches `search.allGmail` through the palette and keeps it out of an active composer.
+The follow-up replaces the active-message outline with a compact accent marker, keeps keyboard palette
+selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both the composer and Drafts.
 
 ---
 

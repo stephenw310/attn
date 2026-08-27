@@ -395,7 +395,12 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
   return 'discarded'
 }
 
-export function discardDraft(db: Db, accountId: string, id: string): boolean {
+export function discardDraft(
+  db: Db,
+  accountId: string,
+  id: string,
+  expectedState: 'composing' | 'drafted' = 'composing'
+): boolean {
   return (
     db
       .prepare(
@@ -403,8 +408,8 @@ export function discardDraft(db: Db, accountId: string, id: string): boolean {
        subject = '', body_html = '', body_text = '', attachments_json = '[]', thread_id = NULL,
        source_message_id = NULL, in_reply_to = NULL, references_json = '[]', quote_html = '',
        quote_text = '', updated_at = ?
-     WHERE account_id = ? AND id = ? AND state = 'composing'`
+     WHERE account_id = ? AND id = ? AND state = ?`
       )
-      .run(Date.now(), accountId, id).changes > 0
+      .run(Date.now(), accountId, id, expectedState).changes > 0
   )
 }

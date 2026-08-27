@@ -563,9 +563,14 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     }
     return result
   })
-  handle(IPC_CHANNELS.draftDiscard, (_event, id) => {
+  handle(IPC_CHANNELS.draftDiscard, (_event, id, expectedState = 'composing') => {
     if (!nonEmptyString(id)) throw new Error('invalid draft id')
-    if (!discardDraft(context.db, requireAccount(context), id)) throw new Error('draft is unavailable')
+    if (expectedState !== 'composing' && expectedState !== 'drafted') {
+      throw new Error('invalid draft state')
+    }
+    if (!discardDraft(context.db, requireAccount(context), id, expectedState)) {
+      throw new Error('draft is unavailable')
+    }
     cleanOutboxSpool(context.userDataPath, id)
     context.broadcastMailChanged()
     void context.draftMirrorExecutor()?.trigger()

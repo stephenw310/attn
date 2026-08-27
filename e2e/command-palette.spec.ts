@@ -77,7 +77,10 @@ test('runs an inline snooze argument through the palette', async ({ page }) => {
   await expect(page.getByTestId('toast')).toHaveText('Snoozed')
 })
 
-test('keeps focus and keyboard commands inside the open palette', async ({ page }) => {
+test('keeps focus, selection, and keyboard commands inside the open palette', async ({ app, page }) => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setContentSize(1000, 420)
+  })
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await openPalette(page)
   const palette = page.getByTestId('command-palette')
@@ -98,6 +101,35 @@ test('keeps focus and keyboard commands inside the open palette', async ({ page 
   await expect(input).toBeFocused()
   await expect(palette).toBeVisible()
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
+
+  const results = page.getByTestId('command-palette-results')
+  const resultCount = await page.getByTestId('command-palette-result').count()
+  for (let index = 1; index < resultCount; index++) await page.keyboard.press('ArrowDown')
+  await expect.poll(() => results.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  await expect
+    .poll(() =>
+      results.evaluate((element) => {
+        const active = element.querySelector<HTMLElement>('[aria-selected="true"]')
+        if (!active) return false
+        const listBounds = element.getBoundingClientRect()
+        const activeBounds = active.getBoundingClientRect()
+        return activeBounds.top >= listBounds.top && activeBounds.bottom <= listBounds.bottom
+      })
+    )
+    .toBe(true)
+
+  for (let index = 1; index < resultCount; index++) await page.keyboard.press('ArrowUp')
+  await expect
+    .poll(() =>
+      results.evaluate((element) => {
+        const active = element.querySelector<HTMLElement>('[aria-selected="true"]')
+        if (!active) return false
+        const listBounds = element.getBoundingClientRect()
+        const activeBounds = active.getBoundingClientRect()
+        return activeBounds.top >= listBounds.top && activeBounds.bottom <= listBounds.bottom
+      })
+    )
+    .toBe(true)
 })
 
 test('opens from the composer quoted-history iframe', async ({ page }) => {

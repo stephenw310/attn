@@ -1062,7 +1062,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
                   data-testid="composer-discard"
                   aria-label="Discard draft"
-                  title="Discard draft"
+                  title={`Discard draft (${modKeyLabel()}⇧D)`}
                   disabled={attaching || closing}
                   onClick={discard}
                 >

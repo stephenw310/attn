@@ -160,7 +160,9 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           data-active-message={activeMessageId === message.id ? 'true' : undefined}
           data-latest-conversation-item={markNewest && index === newestIndex ? '' : undefined}
           className={
-            readerKeysUsed && activeMessageId === message.id ? 'rounded-[10px] ring-1 ring-accent/70' : ''
+            readerKeysUsed && activeMessageId === message.id
+              ? 'relative before:pointer-events-none before:absolute before:top-2 before:-left-3 before:h-8 before:w-0.5 before:rounded-full before:bg-accent'
+              : ''
           }
           onPointerDownCapture={() => setActiveMessageId(message.id)}
         >

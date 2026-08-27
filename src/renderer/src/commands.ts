@@ -126,6 +126,7 @@ export const COMMAND_SPECS = {
   },
   'outbox.open': { title: 'Open Outbox message', shortcut: 'Enter', context: 'outbox' },
   'outbox.close': { title: 'Back from Outbox', shortcut: 'Escape', context: 'outbox' },
+  'draft.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'list' },
   'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
   'composer.reply': { title: 'Reply', shortcut: 'r', context: 'reader' },
   'composer.replyAll': {
@@ -136,7 +137,7 @@ export const COMMAND_SPECS = {
   },
   'composer.forward': { title: 'Forward', shortcut: 'f', context: 'reader' },
   'composer.close': { title: 'Save and close draft', shortcut: 'Escape', context: 'composer' },
-  'composer.discard': { title: 'Discard draft', context: 'composer' },
+  'composer.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'composer' },
   'composer.send': { title: 'Send message', shortcut: 'Mod+Enter', context: 'composer' },
   'composer.attach': { title: 'Attach files', context: 'composer' },
   'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },

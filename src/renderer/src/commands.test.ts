@@ -78,6 +78,7 @@ describe('command catalog', () => {
       'layout.sidebar.toggle',
       'outbox.open',
       'outbox.close',
+      'draft.discard',
       'composer.new',
       'composer.reply',
       'composer.replyAll',
@@ -205,11 +206,17 @@ describe('keyboard dispatch', () => {
 
   test('dispatches only registered composer modifier shortcuts in composer context', () => {
     useCommands([
+      createCommand('draft.discard', () => {}),
       createCommand('composer.close', () => {}),
+      createCommand('composer.discard', () => {}),
       createCommand('composer.send', () => {}),
       createCommand('composer.link', () => {})
     ])
+    expect(matchKey(key('d', { metaKey: true, shiftKey: true }), 'list')?.id).toBe('draft.discard')
+    expect(matchKey(key('d', { ctrlKey: true, shiftKey: true }), 'reader')).toBeNull()
     expect(matchComposerKey(key('Escape'))?.id).toBe('composer.close')
+    expect(matchComposerKey(key('d', { metaKey: true, shiftKey: true }))?.id).toBe('composer.discard')
+    expect(matchComposerKey(key('d', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.discard')
     expect(matchComposerKey(key('Enter', { metaKey: true }))?.id).toBe('composer.send')
     expect(matchComposerKey(key('k', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.link')
     expect(matchComposerKey(key('k', { ctrlKey: true }))).toBeNull()

@@ -498,6 +498,7 @@ Guardrails:
 | Keys | Action |
 |---|---|
 | `Mod+Enter` | Send |
+| `Mod+Shift+D` | Discard the active composer draft or the selected row in Drafts |
 | `Mod+B` / `Mod+I` / `Mod+U` | Bold / italic / underline |
 | `Mod+Shift+K` | Insert link (`Mod+K` stays reserved for the palette everywhere) |
 | `Mod+;` | Insert snippet |

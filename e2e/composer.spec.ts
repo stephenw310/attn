@@ -762,6 +762,43 @@ test('discards an empty draft on close', async ({ page }) => {
   await expect(page.getByTestId('draft-row')).toHaveCount(0)
 })
 
+test('discards a draft with Mod+Shift+D from the composer and Drafts list', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Discard from composer')
+  await page.keyboard.press('ControlOrMeta+Shift+d')
+  await expect(composer.root).toHaveCount(0)
+  await expect(page.getByTestId('toast')).toContainText('Draft discarded')
+
+  await composer.openNew()
+  await composer.subject.fill('Keep in Drafts')
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await composer.openNew()
+  await composer.subject.fill('Discard from Drafts')
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await goToDrafts(page)
+
+  const rows = page.getByTestId('draft-row')
+  await expect(rows).toHaveCount(2)
+  await expect(rows.first()).toHaveAttribute('data-selected', 'true')
+  await expect(rows.first()).toContainText('Discard from Drafts')
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByTestId('command-palette-input').fill('Discard draft')
+  await expect(page.locator('[data-command-id="draft.discard"]')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('command-palette')).toHaveCount(0)
+  await page.keyboard.press('ControlOrMeta+Shift+d')
+  await expect(page.getByTestId('toast')).toContainText('Draft discarded')
+
+  await expect(rows).toHaveCount(1)
+  await expect(rows).not.toContainText('Discard from Drafts')
+  await expect(rows.first()).toContainText('Keep in Drafts')
+  await expect(rows.first()).toHaveAttribute('data-selected', 'true')
+})
+
 test('opens reply, reply-all, and forward drafts from the reader and reuses the reply draft', async ({
   page
 }, testInfo) => {

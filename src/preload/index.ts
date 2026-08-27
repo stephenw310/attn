@@ -201,7 +201,8 @@ const api = {
     getInlineImage: (id: string, contentId: string): Promise<InlineImageResult> =>
       invoke(IPC_CHANNELS.draftGetInlineImage, id, contentId),
     close: (id: string): Promise<'saved' | 'discarded'> => invoke(IPC_CHANNELS.draftClose, id),
-    discard: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftDiscard, id),
+    discard: (id: string, expectedState: 'composing' | 'drafted' = 'composing'): Promise<void> =>
+      invoke(IPC_CHANNELS.draftDiscard, id, expectedState),
     mirror: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftMirror, id),
     takeRecovered: (): Promise<Draft | null> => invoke(IPC_CHANNELS.draftTakeRecovered)
   },

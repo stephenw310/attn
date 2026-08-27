@@ -60,6 +60,7 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
   const usageRef = useRef(usage)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const paletteRef = useRef<HTMLElement | null>(null)
+  const resultsRef = useRef<HTMLDivElement | null>(null)
   const returnFocusRef = useRef<ReturnFocus | null>(null)
   const registeredCommands = useSyncExternalStore(
     subscribeCommandRegistry,
@@ -173,6 +174,13 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
     setActiveIndex((current) => Math.max(0, Math.min(current, results.length - 1)))
   }, [results.length])
 
+  const activeResult = results[activeIndex]
+  useLayoutEffect(() => {
+    if (!activeResult) return
+    const activeOption = resultsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
+    activeOption?.scrollIntoView?.({ block: 'nearest' })
+  }, [activeResult])
+
   const runResult = useCallback(
     (result: PaletteResult) => {
       if (usageLoaded && account) {
@@ -190,7 +198,6 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
   )
 
   if (!open) return null
-  const activeResult = results[activeIndex]
 
   return (
     <>
@@ -250,6 +257,7 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
           <Kbd>Esc</Kbd>
         </div>
         <div
+          ref={resultsRef}
           id="command-palette-results"
           role="listbox"
           data-testid="command-palette-results"

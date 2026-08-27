@@ -162,7 +162,10 @@ export interface InvokeChannels {
     result: InlineImageResult
   }
   [IPC_CHANNELS.draftClose]: { args: [id: string]; result: 'saved' | 'discarded' }
-  [IPC_CHANNELS.draftDiscard]: { args: [id: string]; result: undefined }
+  [IPC_CHANNELS.draftDiscard]: {
+    args: [id: string, expectedState?: 'composing' | 'drafted']
+    result: undefined
+  }
   [IPC_CHANNELS.draftMirror]: { args: [id: string]; result: undefined }
   [IPC_CHANNELS.draftTakeRecovered]: { args: []; result: Draft | null }
   [IPC_CHANNELS.outboxSend]: { args: [draftId: string]; result: QueueSendResult }

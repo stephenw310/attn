@@ -27,6 +27,7 @@ interface Options {
   switchView: (view: NavigableMailView) => void
   openOutbox: () => void
   closeOutbox: () => void
+  discardSelectedDraft: (() => void) | null
   toggleSidebar: () => void
   openSearch: () => void
   focusSearchQuery: () => void
@@ -66,6 +67,7 @@ export function useInboxCommands(options: Options): void {
     switchView,
     openOutbox,
     closeOutbox,
+    discardSelectedDraft,
     toggleSidebar,
     openSearch,
     focusSearchQuery,
@@ -110,6 +112,7 @@ export function useInboxCommands(options: Options): void {
             ]
           : []),
         ...(!searchOpen && view === 'outbox' ? [createCommand('outbox.close', closeOutbox)] : []),
+        ...(discardSelectedDraft ? [createCommand('draft.discard', discardSelectedDraft)] : []),
         ...(mailCommandsEnabled
           ? readerOpen
             ? [createCommand('conversation.close', closeReader)]
@@ -201,6 +204,7 @@ export function useInboxCommands(options: Options): void {
       clearSearch,
       closeReader,
       closeOutbox,
+      discardSelectedDraft,
       extendSelection,
       focusSearchQuery,
       markUnreadOn,

@@ -145,6 +145,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const composerOpeningRef = useRef(false)
   const draftOpenRequestRef = useRef(0)
   const draftOpenTargetRef = useRef<{ request: number; draftId: string } | null>(null)
+  const discardingDraftIdRef = useRef<string | null>(null)
   const activeComposerDraftIdRef = useRef<string | null>(null)
   const inlineComposerRef = useRef<ComposerHandle | null>(null)
 
@@ -1116,6 +1117,25 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     if (previous !== selectedIndex) readNextThread(previous)
   }, [closeReader, detachedDraftThread, finishReaderClose, readNextThread, readerOpen, selectedIndex])
 
+  const discardSelectedDraft = useCallback(() => {
+    if (searchOpen || view !== 'drafts' || !window.attn || discardingDraftIdRef.current) return
+    const draft = realDrafts[selectedIndex]
+    if (!draft) return
+    discardingDraftIdRef.current = draft.id
+    void window.attn.draft
+      .discard(draft.id, 'drafted')
+      .then(() => {
+        showToast('Draft discarded')
+        void refreshMailRows().catch(() => {
+          void refreshDrafts().catch(() => {})
+        })
+      })
+      .catch(() => showToast('Draft could not be discarded'))
+      .finally(() => {
+        discardingDraftIdRef.current = null
+      })
+  }, [realDrafts, refreshDrafts, refreshMailRows, searchOpen, selectedIndex, showToast, view])
+
   useInboxCommands({
     selected,
     selectedCount: selectedIds.size,
@@ -1138,6 +1158,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     switchView,
     openOutbox,
     closeOutbox,
+    discardSelectedDraft: !searchOpen && view === 'drafts' ? discardSelectedDraft : null,
     toggleSidebar,
     openSearch,
     focusSearchQuery,
