@@ -18,6 +18,7 @@ interface MoveUndoAction {
   add: string[]
   remove: string[]
   reminderBefore: SnoozeReminderSnapshot | null
+  revertsQueueId?: number
 }
 
 type UndoAction = TriageAction | MoveUndoAction | { kind: 'snoozeAt'; threadIds: string[]; dueAt: number }
@@ -54,6 +55,33 @@ function labelsFor(db: Db, accountId: string, threadId: string): Set<string> {
   return new Set(rows.map((row) => row.label_id))
 }
 
+function labelsOnEveryMessageFor(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  threadLabels: ReadonlySet<string>
+): Set<string> {
+  const rows = db
+    .prepare('SELECT labels_json FROM messages WHERE account_id = ? AND thread_id = ?')
+    .all(accountId, threadId) as Array<{ labels_json: string | null }>
+  if (rows.length === 0) return new Set(threadLabels)
+  let common: Set<string> | null = null
+  for (const row of rows) {
+    // A manually upgraded legacy row cannot prove per-message membership. A
+    // redundant provider add is safer than leaving the destination partial.
+    if (row.labels_json === null) return new Set()
+    const labels = new Set(JSON.parse(row.labels_json) as string[])
+    if (common === null) {
+      common = labels
+      continue
+    }
+    for (const label of common) {
+      if (!labels.has(label)) common.delete(label)
+    }
+  }
+  return common ?? new Set()
+}
+
 function pendingSnoozeFor(db: Db, accountId: string, threadId: string): { dueAt: number } | undefined {
   return db
     .prepare(
@@ -70,10 +98,11 @@ interface ApplyResult {
 
 function effectiveLabelDelta(
   plan: ReturnType<typeof planAction>,
-  labels: ReadonlySet<string>
+  labels: ReadonlySet<string>,
+  labelsOnEveryMessage: ReadonlySet<string> = labels
 ): { add: string[]; remove: string[] } {
   return {
-    add: plan.add.filter((label) => !labels.has(label)),
+    add: plan.add.filter((label) => !labelsOnEveryMessage.has(label)),
     remove: plan.remove.filter((label) => labels.has(label))
   }
 }
@@ -110,6 +139,15 @@ function apply(
   const labelsBefore = new Map(
     action.threadIds.map((threadId) => [threadId, labelsFor(db, accountId, threadId)] as const)
   )
+  const labelsOnEveryMessageBefore =
+    action.kind === 'move'
+      ? new Map(
+          action.threadIds.map((threadId) => [
+            threadId,
+            labelsOnEveryMessageFor(db, accountId, threadId, labelsBefore.get(threadId) ?? new Set())
+          ])
+        )
+      : null
   const remindersBefore = new Map(
     action.threadIds.map((threadId) => [threadId, snoozeReminderSnapshot(db, accountId, threadId)] as const)
   )
@@ -133,24 +171,27 @@ function apply(
       if (action.kind === 'move') {
         const labels = labelsBefore.get(threadId) ?? new Set<string>()
         const reminderBefore = remindersBefore.get(threadId) ?? null
-        const delta = effectiveLabelDelta(plan, labels)
+        const delta = effectiveLabelDelta(plan, labels, labelsOnEveryMessageBefore?.get(threadId) ?? labels)
         if (delta.add.length === 0 && delta.remove.length === 0 && !moveChangesReminder(reminderBefore)) {
           continue
         }
-        undo.push({
+        const moveUndo: MoveUndoAction = {
           kind: 'moveUndo',
           threadIds: [threadId],
           add: [...delta.remove],
-          remove: [...delta.add],
+          remove: plan.add.filter((label) => !labels.has(label)),
           reminderBefore
-        })
+        }
         db.prepare(
           `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
            WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'
              AND state IN ('pending', 'returned')`
         ).run(accountId, threadId)
         applyThreadDelta(db, accountId, { threadId, ...delta })
-        if (delta.add.length === 0 && delta.remove.length === 0) continue
+        if (delta.add.length === 0 && delta.remove.length === 0) {
+          undo.push(moveUndo)
+          continue
+        }
         const queued = enqueue.run(
           accountId,
           plan.queueKind,
@@ -162,6 +203,8 @@ function apply(
             ...(moveChangesReminder(reminderBefore) ? { reminderBefore } : {})
           })
         )
+        moveUndo.revertsQueueId = Number(queued.lastInsertRowid)
+        undo.push(moveUndo)
         refs.push(
           queueIntentRef(
             { kind: 'modifyLabels', threadId, add: delta.add, remove: delta.remove },
@@ -233,7 +276,8 @@ function applyMoveUndo(db: Db, accountId: string, action: MoveUndoAction): void 
         add: action.add,
         remove: action.remove,
         actionKind: 'undo',
-        reminderBefore: reminderBeforeUndo
+        reminderBefore: reminderBeforeUndo,
+        ...(action.revertsQueueId ? { revertsQueueId: action.revertsQueueId } : {})
       })
     )
   }
@@ -314,8 +358,8 @@ export function performTriage(
   recordUndo = true
 ): TriageResult {
   if (action.kind === 'move') validateMoveLabels(db, accountId, action)
-  const label = actionLabel(action)
   const { undo, refs } = apply(db, accountId, action)
+  const label = actionLabel(action, action.kind === 'move' ? undo.length : action.threadIds.length)
   if (recordUndo && undo.length > 0) {
     const undoStack = undoStackFor(accountId)
     undoStack.push({

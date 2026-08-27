@@ -36,6 +36,9 @@ describe('action queue payloads', () => {
       remove: ['INBOX'],
       reminderBefore: null
     })
+    expect(decodeLabelDelta('{"add":["INBOX"],"remove":[],"actionKind":"undo","revertsQueueId":42}')).toEqual(
+      { add: ['INBOX'], remove: [], actionKind: 'undo', revertsQueueId: 42 }
+    )
   })
 
   it('rejects malformed JSON and non-string label arrays', () => {
@@ -44,5 +47,8 @@ describe('action queue payloads', () => {
     expect(() =>
       decodeLabelDelta('{"add":[],"remove":[],"reminderBefore":{"dueAt":"soon","state":"pending"}}')
     ).toThrow('reminder snapshot')
+    expect(() => decodeLabelDelta('{"add":[],"remove":[],"revertsQueueId":0}')).toThrow(
+      'reverted action queue id'
+    )
   })
 })

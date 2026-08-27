@@ -7,6 +7,7 @@ export interface LabelDeltaPayload {
   remove: string[]
   actionKind?: RevertedActionKind
   reminderBefore?: SnoozeReminderSnapshot | null
+  revertsQueueId?: number
 }
 
 export function decodeLabelDelta(payload: string): LabelDeltaPayload {
@@ -24,11 +25,18 @@ export function decodeLabelDelta(payload: string): LabelDeltaPayload {
   if (candidate.reminderBefore !== undefined && !validReminder(candidate.reminderBefore)) {
     throw new Error('Invalid action queue reminder snapshot')
   }
+  if (
+    candidate.revertsQueueId !== undefined &&
+    (!Number.isSafeInteger(candidate.revertsQueueId) || candidate.revertsQueueId <= 0)
+  ) {
+    throw new Error('Invalid reverted action queue id')
+  }
   return {
     add,
     remove,
     ...(candidate.actionKind ? { actionKind: candidate.actionKind } : {}),
-    ...(candidate.reminderBefore !== undefined ? { reminderBefore: candidate.reminderBefore } : {})
+    ...(candidate.reminderBefore !== undefined ? { reminderBefore: candidate.reminderBefore } : {}),
+    ...(candidate.revertsQueueId !== undefined ? { revertsQueueId: candidate.revertsQueueId } : {})
   }
 }
 

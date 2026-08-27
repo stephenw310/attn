@@ -122,6 +122,11 @@ function fakeDb(rows: FakeRow[], options: FakeDbOptions = {}): Db {
         return undefined
       },
       all: (accountId?: unknown, threadId?: unknown) => {
+        if (sql.includes('SELECT id, payload FROM action_queue') && sql.includes('id > ?')) {
+          return rows.filter(
+            (row) => row.account_id === accountId && row.state === 'pending' && row.id > Number(threadId)
+          )
+        }
         if (sql.includes('SELECT payload FROM action_queue')) {
           return rows.filter(
             (row) =>
@@ -530,6 +535,41 @@ describe('action executor', () => {
     expect(onReverted).toHaveBeenCalledWith('a@example.com', [
       expect.objectContaining({ kind: 'move', returnedToInbox: false, resolution: 'restored' })
     ])
+  })
+
+  it('drops a queued Move inverse when the original Move is permanently rejected', async () => {
+    const move = row(1, 'a@example.com', 'move-undo')
+    move.payload = JSON.stringify({
+      add: ['Label_Destination'],
+      remove: ['INBOX', 'Label_Source'],
+      actionKind: 'move',
+      reminderBefore: { dueAt: 20_000, state: 'pending' }
+    })
+    const undo = row(2, 'a@example.com', 'move-undo')
+    undo.payload = JSON.stringify({
+      add: ['INBOX', 'Label_Source'],
+      remove: ['Label_Destination'],
+      actionKind: 'undo',
+      reminderBefore: { dueAt: 20_000, state: 'canceled' },
+      revertsQueueId: 1
+    })
+    const rows = [move, undo]
+    const reminders = new Map<string, SnoozeReminderSnapshot>([
+      ['move-undo', { dueAt: 20_000, state: 'pending' }]
+    ])
+    const actionProvider = provider(vi.fn().mockRejectedValue(new GmailApiError(400, 'bad move')))
+    vi.mocked(actionProvider.getThread).mockResolvedValue(snapshot('move-undo', ['INBOX', 'Label_Source']))
+    const executor = new ActionExecutor(
+      fakeDb(rows, { reminders }),
+      () => 'a@example.com',
+      () => actionProvider
+    )
+
+    await executor.trigger()
+
+    expect(actionProvider.modifyThread).toHaveBeenCalledOnce()
+    expect(reminders.get('move-undo')).toEqual({ dueAt: 20_000, state: 'pending' })
+    expect(rows).toEqual([])
   })
 
   it('keeps a rejected automatic snooze return visible in the local inbox', async () => {
