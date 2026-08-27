@@ -74,6 +74,21 @@ function inlineImageSourcesToCid(html: string): string {
   return template.innerHTML
 }
 
+/** Gmail composes logical rows as divs; paragraphs acquire large margins when it opens a draft. */
+function paragraphsToGmailRows(html: string): string {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  for (const paragraph of template.content.querySelectorAll<HTMLParagraphElement>('p')) {
+    const row = document.createElement('div')
+    for (const attribute of paragraph.attributes) {
+      row.setAttribute(attribute.name, attribute.value)
+    }
+    while (paragraph.firstChild) row.append(paragraph.firstChild)
+    paragraph.replaceWith(row)
+  }
+  return template.innerHTML
+}
+
 export function editorStateToPlainText(state: SerializedEditorState): string {
   return childrenOf(state.root)
     .map(blockText)
@@ -90,7 +105,7 @@ export function serializeEditorState(
   editorState.read(
     () => {
       bodyHtml = restoreOpaqueHtml(
-        inlineImageSourcesToCid(sanitizeOutgoingHtml($generateHtmlFromNodes(editor)))
+        inlineImageSourcesToCid(paragraphsToGmailRows(sanitizeOutgoingHtml($generateHtmlFromNodes(editor))))
       )
     },
     { editor }

@@ -10,6 +10,25 @@ import { prepareHtmlForEditor } from './preserve'
 import { editorStateToPlainText, serializeEditorState } from './serialize'
 
 describe('plain-text alternative', () => {
+  it('exports editor paragraphs as Gmail div rows', () => {
+    const editor = createHeadlessEditor()
+    editor.update(
+      () => {
+        $getRoot().append(
+          $createParagraphNode().append($createTextNode('First row')),
+          $createParagraphNode(),
+          $createParagraphNode().append($createTextNode('Second row'))
+        )
+      },
+      { discrete: true }
+    )
+
+    const { bodyHtml } = serializeEditorState(editor.getEditorState(), editor)
+    const document = new DOMParser().parseFromString(bodyHtml, 'text/html')
+    expect([...document.body.children].map((element) => element.tagName)).toEqual(['DIV', 'DIV', 'DIV'])
+    expect(document.body.children[1]?.innerHTML).toBe('<br>')
+  })
+
   it('serializes inline images to CID without leaking the private marker', () => {
     const editor = createHeadlessEditor({ nodes: [ImageNode] })
     editor.update(

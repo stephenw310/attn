@@ -6,6 +6,31 @@ import {
   type ParagraphNode
 } from 'lexical'
 
+/** Keep Gmail's `<div><br></div>` separators from disappearing during DOM import. */
+export function preserveBlankLineBlocks(document: Document): void {
+  for (const block of document.querySelectorAll<HTMLDivElement>('div')) {
+    let hasBreak = false
+    let blank = true
+    for (const child of block.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE && !child.textContent?.trim()) continue
+      if (child instanceof HTMLBRElement) {
+        hasBreak = true
+        continue
+      }
+      blank = false
+      break
+    }
+    if (!blank || !hasBreak) continue
+
+    const paragraph = document.createElement('p')
+    for (const attribute of block.attributes) {
+      paragraph.setAttribute(attribute.name, attribute.value)
+    }
+    while (block.firstChild) paragraph.append(block.firstChild)
+    block.replaceWith(paragraph)
+  }
+}
+
 /**
  * `RootNode` accepts only element and decorator children, but mail HTML puts
  * inline content at the top level all the time — a `<br>` between a signature

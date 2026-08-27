@@ -51,7 +51,7 @@ import { editorConfig } from './editorConfig'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
-import { rootLevelNodes } from './rootNodes'
+import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
 import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
@@ -314,6 +314,7 @@ function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string })
     if (!html) return
     let cancelled = false
     const document = new DOMParser().parseFromString(html, 'text/html')
+    preserveBlankLineBlocks(document)
     const contentIds = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
       const source = image.getAttribute('src') ?? ''
       if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
@@ -415,6 +416,7 @@ function PasteContentPlugin({
         const prepared = prepareHtmlForEditor(html)
         if (prepared.issues.length > 0) onPreservedContent()
         const document = new DOMParser().parseFromString(prepared.html, 'text/html')
+        preserveBlankLineBlocks(document)
         for (const image of document.querySelectorAll<HTMLImageElement>('img[src]')) {
           const source = image.getAttribute('src') ?? ''
           if (!source.toLowerCase().startsWith('data:')) continue

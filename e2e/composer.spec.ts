@@ -265,8 +265,15 @@ test('inserts the saved Gmail signature into new mail as editable content', asyn
     return draft ? { html: draft.bodyHtml, text: draft.bodyText } : null
   })
   expect(saved?.html).toContain('Hello from Attn')
+  expect(saved?.html).not.toContain('<p')
   expect(saved?.html).toContain('class="gmail_signature"')
   expect(saved?.html.indexOf('Hello from Attn')).toBeLessThan(saved?.html.indexOf('Best,') ?? -1)
+  expect(
+    await page.evaluate((html) => {
+      const document = new DOMParser().parseFromString(html ?? '', 'text/html')
+      return document.querySelector('.gmail_signature')?.textContent ?? ''
+    }, saved?.html)
+  ).not.toContain('Hello from Attn')
   expect(saved?.text).toContain('Hello from Attn')
   expect(saved?.text).toContain('Best,')
 })
@@ -1449,7 +1456,7 @@ test('hydrates Gmail CID images and imports its signature as editable composer c
   page
 }, testInfo) => {
   const gmailHtml =
-    '<div dir="ltr"><div>Draft from Gmail</div><div><img data-surl="cid:remote-inline" src="cid:remote-inline" alt="Gmail inline image" width="180"></div><div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><div>Best,</div><div>Chao Wu</div><div><a href="https://chaowu.xyz" target="_blank">https://chaowu.xyz</a></div></div></div>'
+    '<div dir="ltr"><div>Draft from Gmail</div><div><img data-surl="cid:remote-inline" src="cid:remote-inline" alt="Gmail inline image" width="180"></div><div><br></div><div><div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><div>Best,</div><div>Chao Wu</div><div><a href="https://chaowu.xyz" target="_blank">https://chaowu.xyz</a></div></div></div></div>'
   const inlineImageBase64 = await visiblePngBase64(page)
   const error = await app.evaluate(
     ({ ipcMain }, args) =>
@@ -1477,6 +1484,12 @@ test('hydrates Gmail CID images and imports its signature as editable composer c
   )
   const signature = composer.editor.getByTestId('composer-gmail-signature')
   await expect(signature).toHaveCount(1)
+  expect(
+    await signature.evaluate((element) => {
+      const previous = element.previousElementSibling
+      return previous?.tagName === 'P' && !previous.textContent?.trim()
+    })
+  ).toBe(true)
   await expect(signature.getByText('Best,')).toBeVisible()
   await expect(signature.getByText('Chao Wu')).toBeVisible()
   await expect(signature).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
@@ -1503,6 +1516,7 @@ test('hydrates Gmail CID images and imports its signature as editable composer c
     return draft?.bodyHtml ?? ''
   })
   expect(savedHtml).toContain('data-surl="cid:remote-inline"')
+  expect(savedHtml).not.toContain('<p')
   expect(savedHtml).toContain('<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr">')
   expect(savedHtml).toContain('Chao Wu — edited')
 })
