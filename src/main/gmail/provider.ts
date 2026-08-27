@@ -241,7 +241,7 @@ export class GmailMailProvider implements MailProvider {
       threads?: { id: string }[]
       nextPageToken?: string
       resultSizeEstimate?: number
-    }>('/threads', params, { priority: options.priority })
+    }>('/threads', params, { signal: options.signal, priority: options.priority })
     return {
       threadIds: (result.threads ?? []).map((thread) => thread.id),
       nextPageToken: result.nextPageToken,

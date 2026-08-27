@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
+import { type AuthSignInResult, type AuthStatus, isSignInCanceled } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { ConversationMailbox, MailLabel, ThreadListView } from '../../../shared/mail'
 import { actionReconnectMessage } from '../actionReconnect'
@@ -11,6 +11,7 @@ import { useLocalSearch } from '../hooks/useLocalSearch'
 import { useMailData } from '../hooks/useMailData'
 import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
 import { useSelectionState } from '../hooks/useSelectionState'
+import { useServerSearch } from '../hooks/useServerSearch'
 import { useSyncActions } from '../hooks/useSyncActions'
 import { useToast } from '../hooks/useToast'
 import { useTriage } from '../hooks/useTriage'
@@ -33,6 +34,7 @@ import {
   conversationMailboxForSearch,
   retainedSearchQuery,
   searchesDrafts,
+  searchesLocalSnoozes,
   triageViewForSearch
 } from '../searchView'
 import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
@@ -43,6 +45,7 @@ import { MailHeader } from './MailHeader'
 import { MailSidebar } from './MailSidebar'
 import { OutboxList } from './OutboxList'
 import { SearchHeader, searchCoverageText } from './SearchHeader'
+import { ServerSearchRow } from './ServerSearchRow'
 import { SnoozePicker } from './SnoozePicker'
 import { ThreadList } from './ThreadList'
 import { Toast } from './Toast'
@@ -171,6 +174,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     pendingActionCount,
     pausedActionCount,
     mailRevision,
+    mailChangeSource,
     invalidateConversations,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef
@@ -197,10 +201,39 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [backingCachedView, backingMailView, mailboxRows, realSnoozedThreads, realThreads]
   )
   const search = useLocalSearch(searchOpen, searchQuery, activeAccount, mailRevision)
-  const searchThreads = useMemo(() => displayThreads(search.response?.rows ?? []), [search.response])
+  const serverSearch = useServerSearch(
+    searchOpen,
+    searchQuery,
+    activeAccount,
+    mailRevision,
+    mailChangeSource,
+    online
+  )
+  const localSearchThreads = useMemo(() => displayThreads(search.response?.rows ?? []), [search.response])
+  const serverSearchThreads = useMemo(() => displayThreads(serverSearch.rows), [serverSearch.rows])
+  const serverSearchThreadIds = useMemo(
+    () => new Set(serverSearchThreads.map((thread) => thread.id)),
+    [serverSearchThreads]
+  )
+  const visibleLocalSearchThreads = useMemo(
+    () => localSearchThreads.filter((thread) => !serverSearchThreadIds.has(thread.id)),
+    [localSearchThreads, serverSearchThreadIds]
+  )
+  const searchThreads = useMemo(
+    () => [...visibleLocalSearchThreads, ...serverSearchThreads],
+    [serverSearchThreads, visibleLocalSearchThreads]
+  )
+  const searchSectionDivider = useMemo(
+    () =>
+      serverSearchThreads.length > 0
+        ? { beforeIndex: visibleLocalSearchThreads.length, label: 'More from Gmail' }
+        : undefined,
+    [serverSearchThreads.length, visibleLocalSearchThreads.length]
+  )
   const searchDrafts = useMemo(() => search.response?.drafts ?? [], [search.response])
   const searchResultQuery = retainedSearchQuery(searchQuery, search.completedQuery)
   const searchDraftMode = searchOpen && searchesDrafts(searchResultQuery)
+  const searchSnoozeMode = searchOpen && searchesLocalSnoozes(searchResultQuery)
   const searchRowIds = useMemo(
     () =>
       searchDraftMode ? searchDrafts.map((draft) => draft.id) : searchThreads.map((thread) => thread.id),
@@ -502,20 +535,30 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     return window.attn.mail.onActionsReverted(activeAccount, showToast)
   }, [activeAccount, showToast])
 
-  const reconnectActions = useCallback(() => {
-    if (!window.attn) return
-    void window.attn.auth
-      .signIn()
-      .then((result) => {
-        onStatus(result.status)
-        void showToast(actionReconnectMessage(activeAccount ?? '', result))
-      })
-      .catch((reason: unknown) => {
-        // A canceled or superseded sign-in is not a failure worth a toast.
-        if (isSignInCanceled(reason)) return
+  const reconnectGoogle = useCallback(async (): Promise<AuthSignInResult | null> => {
+    if (!window.attn) return null
+    try {
+      const result = await window.attn.auth.signIn()
+      onStatus(result.status)
+      return result
+    } catch (reason) {
+      // A canceled or superseded sign-in is not a failure worth a toast.
+      if (!isSignInCanceled(reason)) {
         void showToast(reason instanceof Error ? reason.message : 'Could not reconnect Google')
-      })
-  }, [activeAccount, onStatus, showToast])
+      }
+      return null
+    }
+  }, [onStatus, showToast])
+  const reconnectActions = useCallback(() => {
+    void reconnectGoogle().then((result) => {
+      if (result) void showToast(actionReconnectMessage(activeAccount ?? '', result))
+    })
+  }, [activeAccount, reconnectGoogle, showToast])
+  const reconnectSearch = useCallback(() => {
+    void reconnectGoogle().then((result) => {
+      if (result?.status.signedIn) serverSearch.run()
+    })
+  }, [reconnectGoogle, serverSearch.run])
 
   const saveActiveViewRecord = useCallback(() => {
     const current = activeViewRef.current
@@ -689,6 +732,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     })
   }, [activeAccount, clearSelection, focusInboxThread, switchView])
 
+  const updateSearchRows = useCallback(
+    (updater: Parameters<typeof search.updateRows>[0]) => {
+      search.updateRows(updater)
+      serverSearch.updateRows(updater)
+    },
+    [search.updateRows, serverSearch.updateRows]
+  )
+
   const triage = useTriage({
     selectedIds,
     selectedIndex,
@@ -702,7 +753,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setRealThreads,
     setRealSnoozedThreads,
     setMailboxRows,
-    updateSearchRows: searchOpen ? search.updateRows : undefined,
+    updateSearchRows: searchOpen ? updateSearchRows : undefined,
     clearSelection,
     showToast,
     setExitingThreadIds,
@@ -872,6 +923,33 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     target?.focus({ preventScroll: true })
   }, [fullWindowComposerDraft, readerOpen, searchKeyboardTarget, searchOpen])
   const focusSearchResults = useCallback(() => setSearchKeyboardTarget('results'), [])
+  const submitSearch = useCallback(() => {
+    focusSearchResults()
+    const query = searchQuery.trim()
+    if (
+      !query ||
+      searchesDrafts(query) ||
+      searchesLocalSnoozes(query) ||
+      !online ||
+      serverSearch.phase === 'waiting' ||
+      serverSearch.phase === 'complete'
+    ) {
+      return
+    }
+    if (serverSearch.phase === 'auth-required') reconnectSearch()
+    else serverSearch.run()
+  }, [focusSearchResults, online, reconnectSearch, searchQuery, serverSearch.phase, serverSearch.run])
+  useEffect(() => {
+    if (
+      searchOpen &&
+      !readerOpen &&
+      (serverSearch.phase === 'auth-required' ||
+        serverSearch.phase === 'offline' ||
+        serverSearch.phase === 'error')
+    ) {
+      setSearchKeyboardTarget('query')
+    }
+  }, [readerOpen, searchOpen, serverSearch.phase])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetIds(null), [])
   const openSnooze = useCallback(() => {
@@ -1062,6 +1140,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     toggleSidebar,
     openSearch,
     focusSearchQuery,
+    searchAllEnabled:
+      !searchDraftMode &&
+      !searchSnoozeMode &&
+      Boolean(searchQuery.trim()) &&
+      online &&
+      serverSearch.phase !== 'waiting' &&
+      serverSearch.phase !== 'complete',
+    searchAll: submitSearch,
     clearSearch,
     triage,
     openSnooze,
@@ -1132,7 +1218,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 onQuery={setSearchQuery}
                 onClear={clearSearch}
                 onFocusQuery={focusSearchQuery}
-                onFocusResults={focusSearchResults}
+                onSubmit={submitSearch}
               />
             ) : (
               <div
@@ -1234,6 +1320,17 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                   if (searchOpen) setSearchKeyboardTarget('results')
                   openThread(index)
                 }}
+                sectionDivider={searchOpen ? searchSectionDivider : undefined}
+              />
+            )}
+
+            {searchOpen && !readerOpen && !searchDraftMode && !searchSnoozeMode && searchQuery.trim() && (
+              <ServerSearchRow
+                phase={serverSearch.phase}
+                resultCount={serverSearchThreads.length}
+                message={serverSearch.message}
+                quotaWaitMs={serverSearch.quotaWaitMs}
+                online={online}
               />
             )}
 

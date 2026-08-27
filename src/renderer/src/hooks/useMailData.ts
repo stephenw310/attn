@@ -95,6 +95,7 @@ interface MailDataState {
   pendingActionCount: number
   pausedActionCount: number
   mailRevision: number
+  mailChangeSource: string | null
   invalidateConversations: () => void
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   deferRefreshUntilRef: React.RefObject<number>
@@ -123,7 +124,11 @@ export function useMailData(
   const [pendingActionCount, setPendingActionCount] = useState(0)
   const [pausedActionCount, setPausedActionCount] = useState(0)
   const [mailRevision, setMailRevision] = useState(0)
-  const invalidateConversations = useCallback(() => setMailRevision((revision) => revision + 1), [])
+  const [mailChangeSource, setMailChangeSource] = useState<string | null>(null)
+  const invalidateConversations = useCallback(() => {
+    setMailChangeSource(null)
+    setMailRevision((revision) => revision + 1)
+  }, [])
   const preserveSelectionOnRefreshRef = useRef(true)
   const deferRefreshUntilRef = useRef(0)
   const deferGateRef = useRef<Promise<void> | null>(null)
@@ -179,6 +184,7 @@ export function useMailData(
     setPendingActionCount(0)
     setPausedActionCount(0)
     setMailRevision(0)
+    setMailChangeSource(null)
     mailboxRefreshVersionRef.current = {}
     loadMoreInFlightRef.current.clear()
     loadedRowCountsRef.current = {}
@@ -188,6 +194,7 @@ export function useMailData(
     let cancelled = false
     let deferredRefreshTimer: number | null = null
     let mailChangedPending = false
+    let pendingMailChangeSource: string | null | undefined
     let refreshInFlight = false
     let refreshQueued = false
     const refresh = (): void => {
@@ -208,6 +215,8 @@ export function useMailData(
       // animation holding the refresh, invalidates once instead of per event.
       if (mailChangedPending) {
         mailChangedPending = false
+        setMailChangeSource(pendingMailChangeSource ?? null)
+        pendingMailChangeSource = undefined
         setMailRevision((revision) => revision + 1)
       }
       const preserveSelection = preserveSelectionOnRefreshRef.current
@@ -329,7 +338,12 @@ export function useMailData(
         })
     }
     refresh()
-    const offMail = bridge.mail.onChanged(() => {
+    const offMail = bridge.mail.onChanged((serverSearchRequestId) => {
+      pendingMailChangeSource = mailChangedPending
+        ? pendingMailChangeSource === serverSearchRequestId
+          ? pendingMailChangeSource
+          : null
+        : serverSearchRequestId
       mailChangedPending = true
       refresh()
     })
@@ -337,6 +351,7 @@ export function useMailData(
       if (change.kind === 'failed') setOutboxFailure(change)
       // Reply/forward rows are projected into the open conversation while
       // queued, so outbox transitions invalidate that cache as well as lists.
+      pendingMailChangeSource = null
       mailChangedPending = true
       refresh()
     })
@@ -582,6 +597,7 @@ export function useMailData(
     pendingActionCount,
     pausedActionCount,
     mailRevision,
+    mailChangeSource,
     invalidateConversations,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef

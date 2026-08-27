@@ -40,10 +40,20 @@ interface SeedMessage {
   }[]
 }
 
+interface SeedThread {
+  id: string
+  historyId?: string
+  messages: SeedMessage[]
+}
+
 interface SeedFixture {
   account: string
   labels?: LabelRow[]
-  threads: { id: string; historyId?: string; messages: SeedMessage[] }[]
+  threads: SeedThread[]
+  /** E2E-only Gmail snapshots that are not imported until an explicit server search fetches them. */
+  remoteThreads?: SeedThread[]
+  /** Exact Gmail q= responses for the remote snapshots, keeping the provider seam query-aware. */
+  remoteSearches?: Record<string, string[]>
 }
 
 export interface SeedLoadOptions {
@@ -129,7 +139,7 @@ export function resolveInternalDate(message: SeedMessage, now = Date.now()): str
   return String(at.getTime())
 }
 
-function gmailThreadFor(thread: SeedFixture['threads'][number], importedAt: number): GmailThread {
+function gmailThreadFor(thread: SeedThread, importedAt: number): GmailThread {
   return {
     id: thread.id,
     historyId: thread.historyId,
@@ -147,8 +157,18 @@ function gmailThreadFor(thread: SeedFixture['threads'][number], importedAt: numb
 /** Read one authoritative seeded snapshot for an e2e provider seam. */
 export function readSeedThread(path: string, threadId: string, now = Date.now()): GmailThread | null {
   const fixture = readSeedFixture(path)
-  const thread = fixture.threads.find((candidate) => candidate.id === threadId)
+  const thread = [...fixture.threads, ...(fixture.remoteThreads ?? [])].find(
+    (candidate) => candidate.id === threadId
+  )
   return thread ? gmailThreadFor(thread, now) : null
+}
+
+/** List the snapshots returned by the seeded server-search provider for one Gmail query. */
+export function readSeedRemoteThreadIds(path: string, query: string): string[] {
+  const fixture = readSeedFixture(path)
+  const remoteIds = new Set((fixture.remoteThreads ?? []).map((thread) => thread.id))
+  const configured = fixture.remoteSearches?.[query] ?? []
+  return [...new Set(configured)].filter((threadId) => remoteIds.has(threadId))
 }
 
 export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): SeedLoadResult {

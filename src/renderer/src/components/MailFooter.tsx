@@ -38,7 +38,7 @@ function footerShortcuts(
   }
   if (searchEditing) {
     return [
-      { id: 'search-browse', keys: ['Enter'], label: 'browse results' },
+      { id: 'search-browse', keys: ['Enter'], label: 'search' },
       { id: 'search-close', keys: ['Esc'], label: 'close search' }
     ]
   }

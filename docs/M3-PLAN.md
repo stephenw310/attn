@@ -25,7 +25,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T22 mailbox navigation (F3) | **done**, completed 2026-08-23 | nothing; T27 and T24's `in:` operator are unblocked |
 | T23 FTS5 index (F10) | **done**, completed 2026-08-23 | nothing; T24 and T25 are unblocked |
 | T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
-| T25 on-demand fetch and server search (F10) | **planned**, not started | nothing |
+| T25 on-demand fetch and server search (F10) | **done**, completed 2026-08-25 | nothing |
 | T26 palette and registry completeness (F5) | **planned**, not started | milestone exit |
 | T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
@@ -693,7 +693,7 @@ remains strictly below 100 ms.
 
 ## T25 — On-demand thread fetch and "Search all of Gmail"
 
-**Status: not started.**
+**Status: done, completed 2026-08-25.**
 
 **Depends on:** T24 · **Spec:** F10
 
@@ -709,23 +709,35 @@ future "open this id" path all want it.
   format, persists it through `persistThread`, and returns the stored thread. Foreground priority, through
   the quota limiter, honoring the same auth-pause behavior as every other provider call. Recovery paths in
   `poller.ts` already do a version of this; factor them onto the new function rather than leaving two.
-- **Server search reuses the parsed query.** Translate the parsed structure into Gmail `q=` syntax, run it,
-  and merge ids under a divider below the local results. A thread present locally keeps its local row. Threads
-  the server returns are persisted through the normal write path and stay cached, which F10 requires.
-- **Failure is visible.** Offline disables the row and says why. A quota wait shows as a wait, not as an empty
-  result. An auth pause routes into the existing reconnect surface.
+- **Server search reuses the parsed query.** Local results update while the user types. Enter submits the
+  current query to Gmail once and moves focus to the results. The app translates the parsed structure into
+  Gmail `q=` syntax and merges ids under a divider below the local results. A passive row reports pending,
+  offline, auth, quota-wait, and completion states. A thread present locally keeps its local row. Threads the
+  server returns are persisted through the normal write path and stay cached, which F10 requires.
+- **Failure is visible.** The passive row says why Gmail search is unavailable offline. A quota wait shows as
+  a wait, not as an empty result. An auth pause routes into the existing reconnect surface.
 
 ### Testing
 
 - **Unit:** query translation to Gmail syntax; merge and dedupe ordering; the fetch primitive against a mock
   provider, including a 404 and a transient error, asserting one persisted thread and no duplicate rows.
-- **E2e (seeded):** the seeded provider serves one thread absent from the local store; invoking the row
-  persists it, opens it, and it survives `boot.relaunch()`.
+- **E2e (seeded):** the seeded provider serves one thread absent from the local store. Enter submits the
+  query, persists the thread, and opens it. The thread survives `boot.relaunch()`.
 
 ### Done when
 
 An arbitrary thread id can be fetched and cached by one code path, server results merge without duplicates,
 and verify is green.
+
+### Shipped
+
+One foreground fetch-and-cache path now serves history recovery, inline-image repair, and Gmail search. Local
+results update while the user types. Enter submits one eligible query to Gmail and moves focus to the results.
+The passive server row reports progress while fetched full-thread results appear below a `More from Gmail`
+divider and stay cached. Draft and local snooze searches omit the row because Gmail cannot reproduce their
+Attn-owned state. Offline, quota wait, retry, and expired-auth states remain visible. Unit coverage pins
+translation, ordering, deduplication, persistence, and failures. The seeded Electron test opens a server-only
+result and proves that it becomes a local result after relaunch.
 
 ---
 

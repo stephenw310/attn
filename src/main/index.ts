@@ -194,8 +194,11 @@ function publishFocus(): void {
 }
 
 function handleServiceEvent(event: ServiceEvent): void {
-  if (event.kind === 'mail-changed') broadcast(IPC_CHANNELS.mailChanged, undefined)
-  else if (event.kind === 'outbox-changed') broadcast(IPC_CHANNELS.outboxChanged, event.payload)
+  if (event.kind === 'mail-changed') {
+    broadcast(IPC_CHANNELS.mailChanged, {
+      ...(event.serverSearchRequestId ? { serverSearchRequestId: event.serverSearchRequestId } : {})
+    })
+  } else if (event.kind === 'outbox-changed') broadcast(IPC_CHANNELS.outboxChanged, event.payload)
   else if (event.kind === 'outbox-progress') broadcast(IPC_CHANNELS.outboxProgress, event.payload)
   else if (event.kind === 'sync-state') broadcast(IPC_CHANNELS.syncState, event.payload)
   else if (event.kind === 'body-hydration-failed') {

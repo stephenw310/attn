@@ -35,6 +35,10 @@ export interface SearchResponse {
   coverage: SearchCoverage
 }
 
+export type ServerSearchResponse =
+  | { status: 'ok'; rows: ThreadRow[]; quotaWaitMs: number }
+  | { status: 'offline' | 'auth-required' | 'error'; message: string }
+
 interface QueryToken {
   value: string
   quoted: boolean

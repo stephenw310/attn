@@ -57,6 +57,7 @@ export interface ListThreadIdsOptions {
   pageToken?: string
   /** Gmail excludes SPAM/TRASH from listings unless asked, even when labelIds targets them. */
   includeSpamTrash?: boolean
+  signal?: AbortSignal
   priority?: ProviderRequestPriority
 }
 
