@@ -1,4 +1,7 @@
-import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { closestCenter, DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { type ButtonHTMLAttributes, type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IMPORTANT_SPLIT_ID,
   OTHER_SPLIT_ID,
@@ -6,7 +9,8 @@ import {
   type SplitCondition,
   type SplitPresetId,
   type SplitRule,
-  type SplitState
+  type SplitState,
+  type SplitSummary
 } from '../../../shared/splits'
 
 interface SplitRuleManagerProps {
@@ -49,12 +53,9 @@ interface DraftCondition {
   condition: SplitCondition
 }
 
-interface DropTarget {
-  id: string
-  after: boolean
-}
-
 let nextConditionKey = 0
+
+const noop = (): void => undefined
 
 function draftCondition(condition: SplitCondition): DraftCondition {
   nextConditionKey += 1
@@ -84,75 +85,264 @@ function conditionNeedsValue(
   return condition.type !== 'listIdPresent'
 }
 
+interface SplitRuleRowProps {
+  split: SplitSummary
+  index: number
+  busy: boolean
+  rowRef?: (element: HTMLLIElement | null) => void
+  rowStyle?: CSSProperties
+  handleRef?: (element: HTMLButtonElement | null) => void
+  handleProps?: ButtonHTMLAttributes<HTMLButtonElement>
+  isDragSource?: boolean
+  isDropTarget?: boolean
+  isOverlay?: boolean
+  onNotify: (notify: boolean) => void
+  onEdit: () => void
+  onDelete: () => void
+  onMove: (direction: -1 | 1) => void
+}
+
+function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
+  const {
+    split,
+    index,
+    busy,
+    rowRef,
+    rowStyle,
+    handleRef,
+    handleProps,
+    isDragSource = false,
+    isDropTarget = false,
+    isOverlay = false,
+    onNotify,
+    onEdit,
+    onDelete,
+    onMove
+  } = props
+  const fallback = split.id === OTHER_SPLIT_ID
+  const readOnlyMatch = split.id === IMPORTANT_SPLIT_ID || fallback
+
+  return (
+    <li
+      ref={rowRef}
+      data-testid={isOverlay ? 'split-rule-drag-overlay' : 'split-rule'}
+      data-split-id={split.id}
+      data-dragging={isDragSource ? 'true' : 'false'}
+      data-drop-target={isDropTarget ? 'true' : 'false'}
+      aria-hidden={isOverlay || undefined}
+      inert={isOverlay || undefined}
+      style={rowStyle}
+      className={`relative grid min-h-[72px] grid-cols-[36px_minmax(0,1fr)_96px_112px] items-center gap-3 rounded-lg border px-3 transition-[border-color,background-color,box-shadow,opacity] ${
+        isOverlay
+          ? 'z-70 cursor-grabbing border-accent bg-raised shadow-dialog'
+          : isDragSource
+            ? 'opacity-0'
+            : isDropTarget
+              ? 'border-accent bg-active'
+              : 'border-edge bg-ground/45'
+      }`}
+    >
+      {!fallback ? (
+        <button
+          {...handleProps}
+          ref={handleRef}
+          type="button"
+          data-testid="split-rule-drag-handle"
+          aria-label={`Reorder ${split.name}`}
+          aria-describedby="split-reorder-help"
+          disabled={busy}
+          tabIndex={isOverlay ? -1 : handleProps?.tabIndex}
+          onKeyDown={(event) => {
+            handleProps?.onKeyDown?.(event)
+            if (event.defaultPrevented) return
+            if (isDragSource) return
+            if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              onMove(-1)
+            } else if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              onMove(1)
+            }
+          }}
+          className="flex size-8 touch-none cursor-grab items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink active:cursor-grabbing disabled:cursor-default disabled:opacity-30"
+        >
+          <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 fill-current">
+            <circle cx="5" cy="3" r="1.25" />
+            <circle cx="11" cy="3" r="1.25" />
+            <circle cx="5" cy="8" r="1.25" />
+            <circle cx="11" cy="8" r="1.25" />
+            <circle cx="5" cy="13" r="1.25" />
+            <circle cx="11" cy="13" r="1.25" />
+          </svg>
+        </button>
+      ) : (
+        <span aria-hidden="true" className="size-8" />
+      )}
+      <div data-testid="split-rule-summary" className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-semibold text-ink">{split.name}</span>
+          <span className="text-[10px] tabular-nums text-ink-faint">
+            {split.total.toLocaleString()} total · {split.unread.toLocaleString()} unread
+          </span>
+        </div>
+        <p className="truncate text-[11px] text-ink-faint">
+          {fallback
+            ? 'Everything that did not match an earlier split'
+            : `${split.match.operator === 'all' ? 'All' : 'Any'} of ${split.match.conditions.length} conditions`}
+        </p>
+      </div>
+      <label className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink-dim">
+        <input
+          data-testid="split-rule-notify"
+          type="checkbox"
+          checked={split.notify}
+          disabled={busy}
+          onChange={(event) => onNotify(event.target.checked)}
+        />
+        Notify
+      </label>
+      {readOnlyMatch ? (
+        <span data-testid="split-rule-action" className="w-28 text-right text-[10px] text-ink-faint">
+          {fallback ? 'Always last' : 'Built in'}
+        </span>
+      ) : (
+        <div data-testid="split-rule-action" className="flex w-28 items-center justify-end gap-1">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="h-8 cursor-pointer rounded-md px-2 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            data-testid="split-rule-delete"
+            aria-label={`Delete ${split.name}`}
+            disabled={busy}
+            onClick={onDelete}
+            className="size-8 cursor-pointer rounded-md text-ink-faint hover:bg-danger hover:text-on-danger"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      <span className="sr-only">Position {index + 1}</span>
+    </li>
+  )
+}
+
+function SortableSplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
+  const {
+    attributes,
+    isDragging,
+    isOver,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition
+  } = useSortable({ id: props.split.id, disabled: props.busy })
+  return (
+    <SplitRuleRow
+      {...props}
+      rowRef={setNodeRef}
+      rowStyle={{ transform: CSS.Transform.toString(transform), transition }}
+      handleRef={setActivatorNodeRef}
+      handleProps={{ ...attributes, ...listeners }}
+      isDragSource={isDragging}
+      isDropTarget={isOver && !isDragging}
+    />
+  )
+}
+
 export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Element {
   const { state, onSave, onNotify, onDelete, onReorder, onRestore, onClose } = props
   const [draft, setDraft] = useState<RuleDraft | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
-  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
   const nameInputRef = useRef<HTMLInputElement>(null)
   const matchingSplits = useMemo(
     () => state.splits.filter((split) => split.id !== OTHER_SPLIT_ID),
     [state.splits]
   )
+  const authoritativeOrder = useMemo(() => matchingSplits.map((split) => split.id), [matchingSplits])
+  const authoritativeOrderKey = authoritativeOrder.join('\u0000')
+  const [orderedIds, setOrderedIds] = useState(authoritativeOrder)
+  const authoritativeOrderRef = useRef(authoritativeOrder)
+  authoritativeOrderRef.current = authoritativeOrder
+  const orderedIdsRef = useRef(orderedIds)
+  orderedIdsRef.current = orderedIds
+  const draggingIdRef = useRef(draggingId)
+  draggingIdRef.current = draggingId
+  const splitById = useMemo(() => new Map(matchingSplits.map((split) => [split.id, split])), [matchingSplits])
+  const orderedSplits = useMemo(() => {
+    const ordered = orderedIds.flatMap((id) => {
+      const split = splitById.get(id)
+      return split ? [split] : []
+    })
+    const seen = new Set(ordered.map((split) => split.id))
+    return [...ordered, ...matchingSplits.filter((split) => !seen.has(split.id))]
+  }, [matchingSplits, orderedIds, splitById])
+  const fallbackSplit = state.splits.find((split) => split.id === OTHER_SPLIT_ID)
+  const draggedSplit = draggingId ? splitById.get(draggingId) : undefined
+
+  useEffect(() => {
+    if (draggingIdRef.current) return
+    const nextOrder = authoritativeOrderKey ? authoritativeOrderKey.split('\u0000') : []
+    setOrderedIds((current) => {
+      if (current.length === nextOrder.length && current.every((id, index) => id === nextOrder[index])) {
+        return current
+      }
+      return nextOrder
+    })
+  }, [authoritativeOrderKey])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || draggingId) return
       event.preventDefault()
       if (draft) setDraft(null)
       else onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [draft, onClose])
+  }, [draft, draggingId, onClose])
 
   useEffect(() => {
     if (draft) nameInputRef.current?.focus()
   }, [draft])
 
-  const run = async (operation: () => Promise<void>): Promise<void> => {
+  const run = async (operation: () => Promise<void>): Promise<boolean> => {
     setBusy(true)
     setError(null)
     try {
       await operation()
+      return true
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not update splits')
+      return false
     } finally {
       setBusy(false)
     }
   }
 
+  const persistOrder = (ids: string[]): void => {
+    setOrderedIds(ids)
+    void run(() => onReorder(ids)).then((saved) => {
+      if (!saved) setOrderedIds(authoritativeOrderRef.current)
+    })
+  }
+
   const move = (id: string, direction: -1 | 1): void => {
-    const ids = matchingSplits.map((split) => split.id)
+    if (busy) return
+    const ids = [...orderedIdsRef.current]
     const index = ids.indexOf(id)
     const target = index + direction
     if (index < 0 || target < 0 || target >= ids.length) return
     ;[ids[index], ids[target]] = [ids[target], ids[index]]
-    void run(() => onReorder(ids))
-  }
-
-  const drop = (id: string, targetId: string, after: boolean): void => {
-    const currentIds = matchingSplits.map((split) => split.id)
-    if (!currentIds.includes(id)) return
-    const ids = currentIds.filter((candidate) => candidate !== id)
-    const targetIndex = targetId === OTHER_SPLIT_ID ? ids.length : ids.indexOf(targetId)
-    if (targetIndex < 0) return
-    ids.splice(targetIndex + (targetId === OTHER_SPLIT_ID || !after ? 0 : 1), 0, id)
-    if (ids.every((candidate, index) => candidate === currentIds[index])) return
-    void run(() => onReorder(ids))
-  }
-
-  const dragOver = (event: DragEvent<HTMLLIElement>, splitId: string, fallback: boolean): void => {
-    if (!draggingId || draggingId === splitId || busy) return
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
-    const bounds = event.currentTarget.getBoundingClientRect()
-    setDropTarget({
-      id: splitId,
-      after: !fallback && event.clientY >= bounds.top + bounds.height / 2
-    })
+    persistOrder(ids)
   }
 
   return (
@@ -341,131 +531,67 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
             <p id="split-reorder-help" className="sr-only">
               Drag a handle to reorder splits. With a handle focused, use the Up and Down arrow keys.
             </p>
-            <ol className="flex flex-col gap-2">
-              {state.splits.map((split, index) => {
-                const fallback = split.id === OTHER_SPLIT_ID
-                const readOnlyMatch = split.id === IMPORTANT_SPLIT_ID || fallback
-                const matchingIndex = matchingSplits.findIndex((candidate) => candidate.id === split.id)
-                return (
-                  <li
-                    key={split.id}
-                    data-testid="split-rule"
-                    data-split-id={split.id}
-                    data-dragging={draggingId === split.id ? 'true' : 'false'}
-                    onDragOver={(event) => dragOver(event, split.id, fallback)}
-                    onDrop={(event) => {
-                      event.preventDefault()
-                      const id = draggingId ?? event.dataTransfer.getData('text/plain')
-                      const bounds = event.currentTarget.getBoundingClientRect()
-                      const after = !fallback && event.clientY >= bounds.top + bounds.height / 2
-                      setDraggingId(null)
-                      setDropTarget(null)
-                      if (id) drop(id, split.id, after)
-                    }}
-                    className={`relative grid min-h-[72px] grid-cols-[minmax(0,1fr)_96px_36px_112px] items-center gap-3 rounded-lg border bg-ground/45 px-3 transition-[border-color,opacity] ${
-                      draggingId === split.id ? 'opacity-45' : 'opacity-100'
-                    } ${dropTarget?.id === split.id ? 'border-accent' : 'border-edge'}`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-semibold text-ink">{split.name}</span>
-                        <span className="text-[10px] tabular-nums text-ink-faint">
-                          {split.total.toLocaleString()} total · {split.unread.toLocaleString()} unread
-                        </span>
-                      </div>
-                      <p className="truncate text-[11px] text-ink-faint">
-                        {fallback
-                          ? 'Everything that did not match an earlier split'
-                          : `${split.match.operator === 'all' ? 'All' : 'Any'} of ${split.match.conditions.length} conditions`}
-                      </p>
-                    </div>
-                    <label className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink-dim">
-                      <input
-                        data-testid="split-rule-notify"
-                        type="checkbox"
-                        checked={split.notify}
-                        disabled={busy}
-                        onChange={(event) => void run(() => onNotify(split.id, event.target.checked))}
-                      />
-                      Notify
-                    </label>
-                    {!fallback ? (
-                      <button
-                        type="button"
-                        draggable={!busy}
-                        data-testid="split-rule-drag-handle"
-                        aria-label={`Reorder ${split.name}`}
-                        aria-describedby="split-reorder-help"
-                        disabled={busy}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = 'move'
-                          event.dataTransfer.setData('text/plain', split.id)
-                          setDraggingId(split.id)
-                          setDropTarget(null)
-                        }}
-                        onDragEnd={() => {
-                          setDraggingId(null)
-                          setDropTarget(null)
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === 'ArrowUp' && matchingIndex > 0) {
-                            event.preventDefault()
-                            move(split.id, -1)
-                          } else if (event.key === 'ArrowDown' && matchingIndex < matchingSplits.length - 1) {
-                            event.preventDefault()
-                            move(split.id, 1)
-                          }
-                        }}
-                        className="flex size-8 cursor-grab items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink active:cursor-grabbing disabled:cursor-default disabled:opacity-30"
-                      >
-                        <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 fill-current">
-                          <circle cx="5" cy="3" r="1.25" />
-                          <circle cx="11" cy="3" r="1.25" />
-                          <circle cx="5" cy="8" r="1.25" />
-                          <circle cx="11" cy="8" r="1.25" />
-                          <circle cx="5" cy="13" r="1.25" />
-                          <circle cx="11" cy="13" r="1.25" />
-                        </svg>
-                      </button>
-                    ) : (
-                      <span aria-hidden="true" className="size-8" />
-                    )}
-                    {readOnlyMatch ? (
-                      <span
-                        data-testid="split-rule-action"
-                        className="w-28 text-right text-[10px] text-ink-faint"
-                      >
-                        {fallback ? 'Always last' : 'Built in'}
-                      </span>
-                    ) : (
-                      <div
-                        data-testid="split-rule-action"
-                        className="flex w-28 items-center justify-end gap-1"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setDraft(draftFor(split))}
-                          className="h-8 cursor-pointer rounded-md px-2 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="split-rule-delete"
-                          aria-label={`Delete ${split.name}`}
-                          disabled={busy}
-                          onClick={() => void run(() => onDelete(split.id))}
-                          className="size-8 cursor-pointer rounded-md text-ink-faint hover:bg-danger hover:text-on-danger"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    )}
-                    <span className="sr-only">Position {index + 1}</span>
-                  </li>
-                )
-              })}
-            </ol>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={(event) => setDraggingId(String(event.active.id))}
+              onDragCancel={() => {
+                setDraggingId(null)
+                setOrderedIds(authoritativeOrderRef.current)
+              }}
+              onDragEnd={(event) => {
+                setDraggingId(null)
+                if (!event.over || event.active.id === event.over.id) return
+                const currentIds = orderedIdsRef.current
+                const from = currentIds.indexOf(String(event.active.id))
+                const to = currentIds.indexOf(String(event.over.id))
+                if (from < 0 || to < 0) return
+                const ids = arrayMove(currentIds, from, to)
+                persistOrder(ids)
+              }}
+            >
+              <ol className="flex flex-col gap-2">
+                <SortableContext items={orderedIds} strategy={verticalListSortingStrategy}>
+                  {orderedSplits.map((split, index) => (
+                    <SortableSplitRuleRow
+                      key={split.id}
+                      split={split}
+                      index={index}
+                      busy={busy}
+                      onNotify={(notify) => void run(() => onNotify(split.id, notify))}
+                      onEdit={() => setDraft(draftFor(split))}
+                      onDelete={() => void run(() => onDelete(split.id))}
+                      onMove={(direction) => move(split.id, direction)}
+                    />
+                  ))}
+                </SortableContext>
+                {fallbackSplit && (
+                  <SplitRuleRow
+                    split={fallbackSplit}
+                    index={orderedSplits.length}
+                    busy={busy}
+                    onNotify={(notify) => void run(() => onNotify(fallbackSplit.id, notify))}
+                    onEdit={noop}
+                    onDelete={noop}
+                    onMove={noop}
+                  />
+                )}
+              </ol>
+              <DragOverlay adjustScale={false} dropAnimation={{ duration: 180, easing: 'ease-out' }}>
+                {draggedSplit ? (
+                  <SplitRuleRow
+                    split={draggedSplit}
+                    index={Math.max(0, orderedIds.indexOf(draggedSplit.id))}
+                    busy={true}
+                    isOverlay={true}
+                    onNotify={noop}
+                    onEdit={noop}
+                    onDelete={noop}
+                    onMove={noop}
+                  />
+                ) : null}
+              </DragOverlay>
+            </DndContext>
 
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-edge pt-4">
               <button

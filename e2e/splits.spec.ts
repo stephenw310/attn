@@ -132,10 +132,15 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await testInfo.attach('split-rules', { path: rulesPath, contentType: 'image/png' })
   const alignedColumns = await page.getByTestId('split-rule').evaluateAll((rows) =>
     rows.map((row) => ({
+      handle: row.querySelector('[data-testid="split-rule-drag-handle"]')?.getBoundingClientRect().x ?? -1,
+      summary: row.querySelector('[data-testid="split-rule-summary"]')?.getBoundingClientRect().x ?? -1,
       notify: row.querySelector('input[type="checkbox"]')?.getBoundingClientRect().x ?? -1,
       action: row.querySelector('[data-testid="split-rule-action"]')?.getBoundingClientRect().x ?? -1
     }))
   )
+  const handles = alignedColumns.map(({ handle }) => handle).filter((handle) => handle >= 0)
+  expect(spread(handles)).toBeLessThan(1)
+  expect(Math.max(...handles)).toBeLessThan(Math.min(...alignedColumns.map(({ summary }) => summary)))
   expect(spread(alignedColumns.map(({ notify }) => notify))).toBeLessThan(1)
   expect(spread(alignedColumns.map(({ action }) => action))).toBeLessThan(1)
 
@@ -154,13 +159,43 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await expect(github).toContainText('Code reviews')
 
   const newsletters = page.locator('[data-testid="split-rule"][data-split-id="preset:newsletters"]')
-  await newsletters.getByTestId('split-rule-drag-handle').dragTo(github, {
-    targetPosition: { x: 24, y: 4 }
-  })
+  const newslettersHandle = newsletters.getByTestId('split-rule-drag-handle')
+  const handleBox = await newslettersHandle.boundingBox()
+  const newslettersBox = await newsletters.boundingBox()
+  const githubBox = await github.boundingBox()
+  if (!handleBox || !newslettersBox || !githubBox) throw new Error('Split drag geometry is unavailable')
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2)
+  await page.mouse.down()
+  const pointerY = githubBox.y + githubBox.height / 2
+  await page.mouse.move(handleBox.x + handleBox.width / 2, pointerY, { steps: 8 })
+  const draggedNewsletter = page.locator(
+    '[data-testid="split-rule"][data-split-id="preset:newsletters"][data-dragging="true"]'
+  )
+  const dragOverlay = page.locator(
+    '[data-testid="split-rule-drag-overlay"][data-split-id="preset:newsletters"]'
+  )
+  await expect(draggedNewsletter).toHaveCount(1)
+  await expect(dragOverlay).toBeVisible()
+  const overlayBox = await dragOverlay.boundingBox()
+  expect(overlayBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(pointerY)
+  expect((overlayBox?.y ?? 0) + (overlayBox?.height ?? 0)).toBeGreaterThan(pointerY)
+  await expect
+    .poll(async () => Math.abs(((await github.boundingBox())?.y ?? 0) - newslettersBox.y))
+    .toBeLessThan(2)
+  const dragPath = join(artifactDirectory, 'split-rules-drag.png')
+  await page.screenshot({ path: dragPath })
+  await testInfo.attach('split-rules-drag', { path: dragPath, contentType: 'image/png' })
+  await page.mouse.up()
+  await expect(draggedNewsletter).toHaveCount(0)
+  await expect(dragOverlay).toHaveCount(0)
+  await expect(newsletters).toHaveCount(1)
+  // dnd-kit intentionally suppresses click events for 50 ms after a pointer drag.
+  await page.waitForTimeout(60)
   await expect(page.getByTestId('split-rule').nth(1)).toHaveAttribute('data-split-id', 'preset:newsletters')
-  await newsletters.getByTestId('split-rule-drag-handle').press('ArrowDown')
+  await newslettersHandle.press('ArrowDown')
   await expect(page.getByTestId('split-rule').nth(2)).toHaveAttribute('data-split-id', 'preset:newsletters')
-  await newsletters.getByTestId('split-rule-drag-handle').press('ArrowUp')
+  await expect(newslettersHandle).toBeEnabled()
+  await newslettersHandle.press('ArrowUp')
   await expect(page.getByTestId('split-rule').nth(1)).toHaveAttribute('data-split-id', 'preset:newsletters')
 
   await github.getByTestId('split-rule-delete').click()
