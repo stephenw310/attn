@@ -118,3 +118,44 @@ test('guides G completions and clears on every dismissal route', async ({ page }
   await page.keyboard.press('a')
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')
 })
+
+test('cancels pending chords before overlays stop keyboard propagation', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  const guide = page.getByTestId('footer-chord-guide')
+
+  await page.keyboard.press('g')
+  await expect(guide).toBeVisible()
+  await page.getByTestId('account-menu').getByRole('button').first().click()
+  await expect(page.getByTestId('theme-picker')).toBeVisible()
+  await expect(guide).toHaveCount(0)
+
+  await page.keyboard.press('g')
+  await expect(guide).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('theme-picker')).toHaveCount(0)
+  await expect(guide).toHaveCount(0)
+  await page.keyboard.press('o')
+  await expect(page.getByTestId('view-title')).toHaveText('Inbox')
+
+  await page.keyboard.press('g')
+  await expect(guide).toBeVisible()
+  // MessageBody and quoted-history iframes forward the palette shortcut from
+  // their frame element, so no standalone modifier keydown reaches the parent.
+  await page.evaluate(() => {
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'k',
+        code: 'KeyK',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      })
+    )
+  })
+  await expect(page.getByTestId('command-palette')).toBeVisible()
+  await expect(guide).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('command-palette')).toHaveCount(0)
+  await page.keyboard.press('o')
+  await expect(page.getByTestId('view-title')).toHaveText('Inbox')
+})

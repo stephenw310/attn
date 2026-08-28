@@ -66,6 +66,24 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
   )
 
   useLayoutEffect(() => {
+    const cancelOnKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        clearPendingChord()
+      }
+    }
+    const cancelOnPointerDown = (): void => clearPendingChord()
+    // Overlays consume Escape during capture, before the bubble dispatcher can
+    // observe it. Cancel at the window boundary so every overlay shares the
+    // same chord state without knowing about the keyboard dispatcher.
+    window.addEventListener('keydown', cancelOnKeyDown, true)
+    window.addEventListener('pointerdown', cancelOnPointerDown, true)
+    return () => {
+      window.removeEventListener('keydown', cancelOnKeyDown, true)
+      window.removeEventListener('pointerdown', cancelOnPointerDown, true)
+    }
+  }, [clearPendingChord])
+
+  useLayoutEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       const key = chordKey(event)
       const pendingChord = pendingChordRef.current
