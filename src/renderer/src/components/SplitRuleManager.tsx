@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IMPORTANT_SPLIT_ID,
   OTHER_SPLIT_ID,
@@ -49,6 +49,11 @@ interface DraftCondition {
   condition: SplitCondition
 }
 
+interface DropTarget {
+  id: string
+  after: boolean
+}
+
 let nextConditionKey = 0
 
 function draftCondition(condition: SplitCondition): DraftCondition {
@@ -84,6 +89,8 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
   const [draft, setDraft] = useState<RuleDraft | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const matchingSplits = useMemo(
     () => state.splits.filter((split) => split.id !== OTHER_SPLIT_ID),
@@ -124,6 +131,28 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
     if (index < 0 || target < 0 || target >= ids.length) return
     ;[ids[index], ids[target]] = [ids[target], ids[index]]
     void run(() => onReorder(ids))
+  }
+
+  const drop = (id: string, targetId: string, after: boolean): void => {
+    const currentIds = matchingSplits.map((split) => split.id)
+    if (!currentIds.includes(id)) return
+    const ids = currentIds.filter((candidate) => candidate !== id)
+    const targetIndex = targetId === OTHER_SPLIT_ID ? ids.length : ids.indexOf(targetId)
+    if (targetIndex < 0) return
+    ids.splice(targetIndex + (targetId === OTHER_SPLIT_ID || !after ? 0 : 1), 0, id)
+    if (ids.every((candidate, index) => candidate === currentIds[index])) return
+    void run(() => onReorder(ids))
+  }
+
+  const dragOver = (event: DragEvent<HTMLLIElement>, splitId: string, fallback: boolean): void => {
+    if (!draggingId || draggingId === splitId || busy) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const bounds = event.currentTarget.getBoundingClientRect()
+    setDropTarget({
+      id: splitId,
+      after: !fallback && event.clientY >= bounds.top + bounds.height / 2
+    })
   }
 
   return (
@@ -309,17 +338,33 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
           </form>
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            <div className="flex flex-col gap-2">
+            <p id="split-reorder-help" className="sr-only">
+              Drag a handle to reorder splits. With a handle focused, use the Up and Down arrow keys.
+            </p>
+            <ol className="flex flex-col gap-2">
               {state.splits.map((split, index) => {
                 const fallback = split.id === OTHER_SPLIT_ID
                 const readOnlyMatch = split.id === IMPORTANT_SPLIT_ID || fallback
                 const matchingIndex = matchingSplits.findIndex((candidate) => candidate.id === split.id)
                 return (
-                  <div
+                  <li
                     key={split.id}
                     data-testid="split-rule"
                     data-split-id={split.id}
-                    className="flex min-h-12 items-center gap-2 rounded-lg border border-edge bg-ground/45 px-3"
+                    data-dragging={draggingId === split.id ? 'true' : 'false'}
+                    onDragOver={(event) => dragOver(event, split.id, fallback)}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const id = draggingId ?? event.dataTransfer.getData('text/plain')
+                      const bounds = event.currentTarget.getBoundingClientRect()
+                      const after = !fallback && event.clientY >= bounds.top + bounds.height / 2
+                      setDraggingId(null)
+                      setDropTarget(null)
+                      if (id) drop(id, split.id, after)
+                    }}
+                    className={`relative grid min-h-[72px] grid-cols-[minmax(0,1fr)_96px_36px_112px] items-center gap-3 rounded-lg border bg-ground/45 px-3 transition-[border-color,opacity] ${
+                      draggingId === split.id ? 'opacity-45' : 'opacity-100'
+                    } ${dropTarget?.id === split.id ? 'border-accent' : 'border-edge'}`}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
@@ -334,7 +379,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                           : `${split.match.operator === 'all' ? 'All' : 'Any'} of ${split.match.conditions.length} conditions`}
                       </p>
                     </div>
-                    <label className="flex items-center gap-1.5 text-[11px] text-ink-dim">
+                    <label className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink-dim">
                       <input
                         data-testid="split-rule-notify"
                         type="checkbox"
@@ -344,61 +389,83 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                       />
                       Notify
                     </label>
-                    {!fallback && (
-                      <>
-                        <button
-                          type="button"
-                          data-testid="split-rule-move-up"
-                          aria-label={`Move ${split.name} up`}
-                          disabled={busy || matchingIndex <= 0}
-                          onClick={() => move(split.id, -1)}
-                          className="size-8 cursor-pointer rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:opacity-25"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="split-rule-move-down"
-                          aria-label={`Move ${split.name} down`}
-                          disabled={busy || matchingIndex === matchingSplits.length - 1}
-                          onClick={() => move(split.id, 1)}
-                          className="size-8 cursor-pointer rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:opacity-25"
-                        >
-                          ↓
-                        </button>
-                        {readOnlyMatch ? (
-                          <span className="w-[120px] text-right text-[10px] text-ink-faint">Built in</span>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => setDraft(draftFor(split))}
-                              className="h-8 cursor-pointer rounded-md px-2 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              data-testid="split-rule-delete"
-                              aria-label={`Delete ${split.name}`}
-                              disabled={busy}
-                              onClick={() => void run(() => onDelete(split.id))}
-                              className="size-8 cursor-pointer rounded-md text-ink-faint hover:bg-danger hover:text-on-danger"
-                            >
-                              ×
-                            </button>
-                          </>
-                        )}
-                      </>
+                    {!fallback ? (
+                      <button
+                        type="button"
+                        draggable={!busy}
+                        data-testid="split-rule-drag-handle"
+                        aria-label={`Reorder ${split.name}`}
+                        aria-describedby="split-reorder-help"
+                        disabled={busy}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'move'
+                          event.dataTransfer.setData('text/plain', split.id)
+                          setDraggingId(split.id)
+                          setDropTarget(null)
+                        }}
+                        onDragEnd={() => {
+                          setDraggingId(null)
+                          setDropTarget(null)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'ArrowUp' && matchingIndex > 0) {
+                            event.preventDefault()
+                            move(split.id, -1)
+                          } else if (event.key === 'ArrowDown' && matchingIndex < matchingSplits.length - 1) {
+                            event.preventDefault()
+                            move(split.id, 1)
+                          }
+                        }}
+                        className="flex size-8 cursor-grab items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink active:cursor-grabbing disabled:cursor-default disabled:opacity-30"
+                      >
+                        <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 fill-current">
+                          <circle cx="5" cy="3" r="1.25" />
+                          <circle cx="11" cy="3" r="1.25" />
+                          <circle cx="5" cy="8" r="1.25" />
+                          <circle cx="11" cy="8" r="1.25" />
+                          <circle cx="5" cy="13" r="1.25" />
+                          <circle cx="11" cy="13" r="1.25" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <span aria-hidden="true" className="size-8" />
                     )}
-                    {fallback && (
-                      <span className="w-[120px] text-right text-[10px] text-ink-faint">Always last</span>
+                    {readOnlyMatch ? (
+                      <span
+                        data-testid="split-rule-action"
+                        className="w-28 text-right text-[10px] text-ink-faint"
+                      >
+                        {fallback ? 'Always last' : 'Built in'}
+                      </span>
+                    ) : (
+                      <div
+                        data-testid="split-rule-action"
+                        className="flex w-28 items-center justify-end gap-1"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setDraft(draftFor(split))}
+                          className="h-8 cursor-pointer rounded-md px-2 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="split-rule-delete"
+                          aria-label={`Delete ${split.name}`}
+                          disabled={busy}
+                          onClick={() => void run(() => onDelete(split.id))}
+                          className="size-8 cursor-pointer rounded-md text-ink-faint hover:bg-danger hover:text-on-danger"
+                        >
+                          ×
+                        </button>
+                      </div>
                     )}
                     <span className="sr-only">Position {index + 1}</span>
-                  </div>
+                  </li>
                 )
               })}
-            </div>
+            </ol>
 
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-edge pt-4">
               <button

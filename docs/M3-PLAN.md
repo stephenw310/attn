@@ -961,9 +961,9 @@ Newsletters start as editable presets; changes and deletions persist, and Restor
 
 The Inbox strip supports pointer selection, `←`/`→`, configured `G` digits, per-split selection and scroll,
 revision-aware page caching, quiet zero counts, and an overflow menu past eight visible tabs. The rule manager
-creates, renames, edits, reorders, deletes, restores, and configures notifications. It is available from the
-account menu and command palette. Seeded Electron coverage exercises the full path and captures
-`split-inbox.png` and `split-rules.png`.
+creates, renames, edits, reorders with drag handles, deletes, restores, and configures notifications. A focused
+handle accepts Up and Down as its keyboard path. It is available from the account menu and command palette.
+Seeded Electron coverage exercises the full path and captures `split-inbox.png` and `split-rules.png`.
 
 On the built 10,000-thread profile, a rule mutation plus exact re-bucketing measured 59 ms against the 1 s
 budget. A cold split switch measured 44 ms, and revision-valid cached switches measured 3 ms p95 against the

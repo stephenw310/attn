@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
+import type { MailChangeReason } from '../../../shared/ipc'
 import {
   type MailLabel,
   type SnoozedThreadRow,
@@ -35,6 +36,10 @@ export type ThreadPagination = Record<string, ThreadPaginationState | undefined>
 interface InboxSplitCacheEntry {
   rows: ThreadRow[]
   pagination: ThreadPaginationState
+}
+
+export function shouldClearInactiveSplitCache(reason: MailChangeReason | null): boolean {
+  return reason !== 'split-metadata'
 }
 
 function listThreadPage(
@@ -414,11 +419,15 @@ export function useMailData(
         })
     }
     refresh()
-    const offMail = bridge.mail.onChanged((serverSearchRequestId) => {
+    const offMail = bridge.mail.onChanged((serverSearchRequestId, reason) => {
       // Rows in inactive splits can change without a rule revision. Keep the
       // active page visible while it refreshes, but never paint an inactive
-      // split's pre-change cache on the next switch.
-      inboxSplitCacheRef.current.clear()
+      // split's pre-change cache after ordinary mail writes. The one-time
+      // split-metadata rebuild is different: it can run for hours and emits a
+      // checkpoint after each Gmail page. Keep those cached pages visible and
+      // revalidate the selected split behind them instead of turning every tab
+      // switch into a cold SQLite read.
+      if (shouldClearInactiveSplitCache(reason)) inboxSplitCacheRef.current.clear()
       pendingMailChangeSource = mailChangedPending
         ? pendingMailChangeSource === serverSearchRequestId
           ? pendingMailChangeSource

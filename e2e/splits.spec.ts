@@ -24,6 +24,10 @@ async function emitFocusThread(app: ElectronApplication, threadId: string): Prom
   })
 }
 
+function spread(values: number[]): number {
+  return Math.max(...values) - Math.min(...values)
+}
+
 test('classifies once, navigates locally, and restores each split selection', async ({ page }, testInfo) => {
   const strip = page.getByTestId('split-strip')
   const tabs = page.getByTestId('split-tab')
@@ -126,6 +130,14 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   const rulesPath = join(artifactDirectory, 'split-rules.png')
   await page.screenshot({ path: rulesPath })
   await testInfo.attach('split-rules', { path: rulesPath, contentType: 'image/png' })
+  const alignedColumns = await page.getByTestId('split-rule').evaluateAll((rows) =>
+    rows.map((row) => ({
+      notify: row.querySelector('input[type="checkbox"]')?.getBoundingClientRect().x ?? -1,
+      action: row.querySelector('[data-testid="split-rule-action"]')?.getBoundingClientRect().x ?? -1
+    }))
+  )
+  expect(spread(alignedColumns.map(({ notify }) => notify))).toBeLessThan(1)
+  expect(spread(alignedColumns.map(({ action }) => action))).toBeLessThan(1)
 
   await page.getByRole('button', { name: 'New split' }).click()
   await page.getByTestId('split-rule-name').fill('Personal')
@@ -142,7 +154,13 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await expect(github).toContainText('Code reviews')
 
   const newsletters = page.locator('[data-testid="split-rule"][data-split-id="preset:newsletters"]')
-  await newsletters.getByTestId('split-rule-move-up').click()
+  await newsletters.getByTestId('split-rule-drag-handle').dragTo(github, {
+    targetPosition: { x: 24, y: 4 }
+  })
+  await expect(page.getByTestId('split-rule').nth(1)).toHaveAttribute('data-split-id', 'preset:newsletters')
+  await newsletters.getByTestId('split-rule-drag-handle').press('ArrowDown')
+  await expect(page.getByTestId('split-rule').nth(2)).toHaveAttribute('data-split-id', 'preset:newsletters')
+  await newsletters.getByTestId('split-rule-drag-handle').press('ArrowUp')
   await expect(page.getByTestId('split-rule').nth(1)).toHaveAttribute('data-split-id', 'preset:newsletters')
 
   await github.getByTestId('split-rule-delete').click()

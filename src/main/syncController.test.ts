@@ -597,6 +597,7 @@ describe('backfill to poller handoff', () => {
       threadsDone: 4,
       reason: 'running'
     })
+    expect(broadcastMailChanged).toHaveBeenLastCalledWith('split-metadata')
     splitMetadataRebuilds[0].result.resolve({ threadsRefreshed: 4 })
     await flush()
     expect(states.at(-1)).toEqual({ phase: 'idle' })

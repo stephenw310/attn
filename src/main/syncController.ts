@@ -1,3 +1,4 @@
+import type { MailChangeReason } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
@@ -34,7 +35,7 @@ interface SyncControllerContext {
   hasForegroundProviderWork: (accountId: string) => boolean
   mailRevision: () => number
   broadcastState: (state: SyncState) => void
-  broadcastMailChanged: () => void
+  broadcastMailChanged: (reason?: MailChangeReason) => void
   getActionExecutor: () => ActionExecutor | null
   getDraftMirrorExecutor: () => DraftMirrorExecutor | null
   getOutboxSender: () => OutboxSender | null
@@ -621,7 +622,7 @@ export class SyncController {
     if (!this.running && !this.pollerRunning && !this.foregroundFailure) {
       this.setState(this.lifetimeProgress)
     }
-    if (mailChanged) this.context.broadcastMailChanged()
+    if (mailChanged) this.context.broadcastMailChanged('split-metadata')
   }
 
   private publishSettledState(): void {

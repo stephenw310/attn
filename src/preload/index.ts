@@ -13,7 +13,7 @@ import type {
   DraftSaveInput
 } from '../shared/drafts'
 import { nonEmptyString } from '../shared/guards'
-import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
+import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS, type MailChangeReason } from '../shared/ipc'
 import type {
   Conversation,
   ConversationMailbox,
@@ -134,9 +134,17 @@ const api = {
     undo: (): Promise<TriageResult | null> => invoke(IPC_CHANNELS.mailUndo),
     getPendingActionCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetPendingActionCount),
     getActionQueueStatus: () => invoke(IPC_CHANNELS.mailGetActionQueueStatus),
-    onChanged: (cb: (serverSearchRequestId: string | null) => void): (() => void) => {
-      const listener = (_event: unknown, payload: { serverSearchRequestId?: unknown } | undefined): void =>
-        cb(typeof payload?.serverSearchRequestId === 'string' ? payload.serverSearchRequestId : null)
+    onChanged: (
+      cb: (serverSearchRequestId: string | null, reason: MailChangeReason | null) => void
+    ): (() => void) => {
+      const listener = (
+        _event: unknown,
+        payload: { serverSearchRequestId?: unknown; reason?: unknown } | undefined
+      ): void =>
+        cb(
+          typeof payload?.serverSearchRequestId === 'string' ? payload.serverSearchRequestId : null,
+          payload?.reason === 'split-metadata' ? payload.reason : null
+        )
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },

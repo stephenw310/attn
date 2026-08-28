@@ -101,6 +101,8 @@ export const IPC_CHANNELS = {
   syncState: 'sync:state'
 } as const
 
+export type MailChangeReason = 'split-metadata'
+
 /**
  * E2E-only channels, registered by the main process solely under
  * ATTN_TEST_USER_DATA. They live here so main and the specs share one literal
@@ -249,7 +251,7 @@ export interface InvokeChannels {
 export interface BroadcastChannels {
   [IPC_CHANNELS.outboxChanged]: OutboxChanged
   [IPC_CHANNELS.outboxProgress]: import('./outbox').OutboxProgress | null
-  [IPC_CHANNELS.mailChanged]: { serverSearchRequestId?: string }
+  [IPC_CHANNELS.mailChanged]: { serverSearchRequestId?: string; reason?: MailChangeReason }
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
-import { type InvokeChannel, TEST_CHANNELS } from '../../shared/ipc'
+import { type InvokeChannel, type MailChangeReason, TEST_CHANNELS } from '../../shared/ipc'
 import type { MessageMailbox, SyncState } from '../../shared/mail'
 import { clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
@@ -143,7 +143,7 @@ export class ServiceRuntime {
       hasForegroundProviderWork: (accountId) => (this.foregroundProviderWork.get(accountId) ?? 0) > 0,
       mailRevision: () => this.mailRevision,
       broadcastState: (payload) => this.emit({ kind: 'sync-state', payload }),
-      broadcastMailChanged: () => this.broadcastMailChanged(),
+      broadcastMailChanged: (reason) => this.broadcastMailChanged(undefined, reason),
       getActionExecutor: () => this.actionExecutor,
       getDraftMirrorExecutor: () => this.draftMirrorExecutor,
       getOutboxSender: () => this.outboxSender,
@@ -370,11 +370,12 @@ export class ServiceRuntime {
     }
   }
 
-  private broadcastMailChanged(serverSearchRequestId?: string): void {
+  private broadcastMailChanged(serverSearchRequestId?: string, reason?: MailChangeReason): void {
     this.mailRevision += 1
     this.emit({
       kind: 'mail-changed',
-      ...(serverSearchRequestId ? { serverSearchRequestId } : {})
+      ...(serverSearchRequestId ? { serverSearchRequestId } : {}),
+      ...(reason ? { reason } : {})
     })
     this.broadcastBadge()
   }

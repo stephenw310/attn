@@ -360,8 +360,9 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   `text/calendar` MIME part. GitHub matches the `github.com` sender domain. Newsletters matches messages with
   a `List-Id` or Gmail's Promotions label.
 - Starter presets become user-owned rules after setup. Users can rename them, change their conditions,
-  reorder them, or delete them. Attn never recreates a changed or deleted preset during launch, sync, or an
-  app update. The rule manager can restore a preset only after an explicit user action.
+  reorder them with drag handles, or delete them. A focused drag handle also accepts Up and Down for keyboard
+  access. Attn never recreates a changed or deleted preset during launch, sync, or an app update. The rule
+  manager can restore a preset only after an explicit user action.
 - A split expression combines conditions with **any** or **all**. Conditions match a sender address, a sender
   domain, an exact `List-Id`, `List-Id` presence, a label, an attachment MIME type, or an attachment filename
   suffix. A thread matches when at least one message satisfies the whole expression. Under **all**, the same

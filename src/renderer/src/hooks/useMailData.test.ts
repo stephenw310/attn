@@ -10,7 +10,7 @@ import {
   type ThreadRow
 } from '../../../shared/mail'
 import type { MailView } from '../mailDisplay'
-import { useMailData } from './useMailData'
+import { shouldClearInactiveSplitCache, useMailData } from './useMailData'
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void
@@ -58,6 +58,11 @@ afterEach(() => {
 })
 
 describe('useMailData mailbox refreshes', () => {
+  it('keeps warm split pages during the one-time metadata rebuild only', () => {
+    expect(shouldClearInactiveSplitCache('split-metadata')).toBe(false)
+    expect(shouldClearInactiveSplitCache(null)).toBe(true)
+  })
+
   it('does not let an older Inbox snapshot erase rows loaded after switching mailboxes', async () => {
     const initialInbox = deferred<ThreadPage>()
     const allMailRows = [thread('all-mail-row')]
