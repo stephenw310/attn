@@ -45,14 +45,17 @@ describe('plain-text alternative', () => {
       { discrete: true }
     )
 
-    const { bodyHtml } = serializeEditorState(editor.getEditorState(), editor)
+    const { bodyHtml, bodyText } = serializeEditorState(editor.getEditorState(), editor)
     const document = new DOMParser().parseFromString(bodyHtml, 'text/html')
     const signature = document.querySelector('.gmail_signature')
+    const wrapper = signature?.parentElement
     expect(signature?.getAttribute('dir')).toBe('ltr')
-    expect(signature?.parentElement?.tagName).toBe('DIV')
-    expect(signature?.parentElement?.parentElement?.getAttribute('dir')).toBe('ltr')
-    expect(signature?.parentElement?.parentElement?.parentElement).toBe(document.body)
-    expect(signature?.parentElement?.children).toHaveLength(1)
+    expect(wrapper?.tagName).toBe('DIV')
+    expect(wrapper?.previousElementSibling?.innerHTML).toBe('<br>')
+    expect(wrapper?.parentElement?.getAttribute('dir')).toBe('ltr')
+    expect(wrapper?.parentElement?.parentElement).toBe(document.body)
+    expect(wrapper?.children).toHaveLength(1)
+    expect(bodyText).toBe('Hello\n\nBest,\nChao Wu')
   })
 
   it('serializes inline images to CID without leaking the private marker', () => {
@@ -209,6 +212,6 @@ describe('plain-text alternative', () => {
           version: 1
         }
       } as unknown as SerializedEditorState)
-    ).toBe('Best,\nChao Wu\nhttps://chaowu.xyz')
+    ).toBe('\nBest,\nChao Wu\nhttps://chaowu.xyz')
   })
 })

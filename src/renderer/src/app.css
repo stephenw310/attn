@@ -390,6 +390,10 @@
   color: var(--color-ink-dim);
 }
 
+[data-testid="composer-gmail-signature"] {
+  margin-block-start: 1.25rem;
+}
+
 .gmail_signature[data-attn-signature-collapsed="true"] {
   display: block;
   width: fit-content;

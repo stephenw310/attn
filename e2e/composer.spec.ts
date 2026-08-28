@@ -253,6 +253,7 @@ test('inserts the saved Gmail signature collapsed and reveals it for editing', a
   await expect(composer.editor).toHaveCSS('font-size', '13px')
   await expect(composer.editor).toHaveCSS('line-height', '20px')
   await composer.revealSignature()
+  await expect(signature).toHaveCSS('margin-top', '20px')
   await expect(signature.locator('p').first()).toHaveCSS('margin-bottom', '0px')
   await expect(signature.locator('p').first()).toHaveCSS('min-height', '20px')
   await expect(signature.getByText('Best,')).toBeVisible()
@@ -293,10 +294,16 @@ test('inserts the saved Gmail signature collapsed and reveals it for editing', a
           signature?.parentElement?.tagName === 'DIV' &&
           signature.parentElement.parentElement?.getAttribute('dir') === 'ltr' &&
           signature.parentElement.parentElement?.parentElement === document.body &&
-          signature.parentElement.children.length === 1
+          signature.parentElement.children.length === 1,
+        spacer: signature?.parentElement?.previousElementSibling?.innerHTML ?? ''
       }
     }, saved?.html)
-  ).toEqual({ text: 'Best,Chao Wuchaowu.xyz', direction: 'ltr', dedicatedWrapper: true })
+  ).toEqual({
+    text: 'Best,Chao Wuchaowu.xyz',
+    direction: 'ltr',
+    dedicatedWrapper: true,
+    spacer: '<br>'
+  })
   expect(saved?.text).toContain('Hello from Attn')
   expect(saved?.text).toContain('Best,')
 })
@@ -390,7 +397,7 @@ test('adds a signature and discards an untouched forward with a source attachmen
   const receipt = page.getByTestId('thread-row').filter({ hasText: 'Your receipt' })
   await receipt.click()
   await page.keyboard.press('f')
-  await composer.expectSignatureCollapsed()
+  await composer.expectSignatureAndQuoteCollapsed()
   await expect(page.getByTestId('composer-attachment-chip')).toContainText('receipt.pdf')
 
   await page.keyboard.press('Escape')
@@ -1073,14 +1080,26 @@ test('keeps a detached draft escapable when its parent thread is missing', async
   await expect(page.getByTestId('draft-list')).toBeVisible()
 })
 
-test('adds a signature, discards an untouched reply, and keeps authored text', async ({ app, page }) => {
+test('uses one control for the signature and quote, then discards an untouched reply', async ({
+  app,
+  page
+}, testInfo) => {
   await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
   const design = page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
   await design.click()
   await composer.openReply()
   await expect(composer.root).toBeVisible()
-  await composer.expectSignatureCollapsed()
+  await composer.expectSignatureAndQuoteCollapsed()
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'composer-signature-quote-collapsed.png')
+  await page.screenshot({ path })
+  await testInfo.attach('composer-signature-quote-collapsed', { path, contentType: 'image/png' })
+
+  await composer.revealSignature()
+  await expect(composer.signature).toContainText('Chao Wu')
+  await expect(composer.quote).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
 
@@ -1116,7 +1135,7 @@ test('keeps the signature discardable when a reply becomes reply-all', async ({ 
   // contributing content, so the draft stays discardable.
   await page.keyboard.press('a')
   await expect(composer.root).toHaveAttribute('data-draft-kind', 'replyAll')
-  await composer.expectSignatureCollapsed()
+  await composer.expectSignatureAndQuoteCollapsed()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(design.getByTestId('chip-draft')).toHaveCount(0)

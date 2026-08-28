@@ -89,6 +89,22 @@ function paragraphsToGmailRows(html: string): string {
   return template.innerHTML
 }
 
+function previousMeaningfulSibling(node: Node): ChildNode | null {
+  let previous = node.previousSibling
+  while (previous?.nodeType === Node.TEXT_NODE && !previous.textContent?.trim()) {
+    previous = previous.previousSibling
+  }
+  return previous
+}
+
+function isBlankGmailRow(node: ChildNode | null): boolean {
+  if (!(node instanceof HTMLElement) || node.tagName !== 'DIV' || node.textContent?.trim()) return false
+  return [...node.childNodes].every(
+    (child) =>
+      (child.nodeType === Node.TEXT_NODE && !child.textContent?.trim()) || child instanceof HTMLBRElement
+  )
+}
+
 /** Match the wrapper Gmail emits around a signature so recipient clients can classify it. */
 function wrapGmailSignatures(html: string): string {
   const template = document.createElement('template')
@@ -106,11 +122,16 @@ function wrapGmailSignatures(html: string): string {
       [...parent.childNodes].every(
         (child) => child === signature || (child.nodeType === Node.TEXT_NODE && !child.textContent?.trim())
       )
-    if (dedicatedWrapper) continue
-
-    const wrapper = document.createElement('div')
-    signature.replaceWith(wrapper)
-    wrapper.append(signature)
+    const wrapper = dedicatedWrapper ? parent : document.createElement('div')
+    if (!dedicatedWrapper) {
+      signature.replaceWith(wrapper)
+      wrapper.append(signature)
+    }
+    if (!isBlankGmailRow(previousMeaningfulSibling(wrapper))) {
+      const spacer = document.createElement('div')
+      spacer.append(document.createElement('br'))
+      wrapper.before(spacer)
+    }
   }
   return template.innerHTML
 }
@@ -123,8 +144,16 @@ function wrapGmailBody(html: string): string {
 }
 
 export function editorStateToPlainText(state: SerializedEditorState): string {
+  let hasAuthoredText = false
   return childrenOf(state.root)
-    .map(blockText)
+    .map((node, index) => {
+      const text = blockText(node)
+      if (node.type === 'gmail-signature') {
+        return hasAuthoredText || index === 0 ? `\n${text}` : text
+      }
+      if (text.trim()) hasAuthoredText = true
+      return text
+    })
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trimEnd()

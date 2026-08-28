@@ -40,7 +40,13 @@ export class ComposerPage {
   }
 
   get signatureToggle(): Locator {
-    return this.editor.getByRole('button', { name: 'Show signature' })
+    return this.editor.getByRole('button', {
+      name: /^Show signature(?: and quoted history)?$/
+    })
+  }
+
+  get quote(): Locator {
+    return this.page.getByTestId('composer-quote')
   }
 
   get attachments(): Locator {
@@ -103,6 +109,13 @@ export class ComposerPage {
   async expectSignatureCollapsed(): Promise<void> {
     await expect(this.signature).toHaveAttribute('data-attn-signature-collapsed', 'true')
     await expect(this.signatureToggle).toBeVisible()
+  }
+
+  async expectSignatureAndQuoteCollapsed(): Promise<void> {
+    await this.expectSignatureCollapsed()
+    await expect(this.signatureToggle).toHaveAccessibleName('Show signature and quoted history')
+    await expect(this.page.getByTestId('composer-quote-toggle')).toHaveCount(0)
+    await expect(this.quote).toHaveCount(0)
   }
 
   async revealSignature(): Promise<void> {
