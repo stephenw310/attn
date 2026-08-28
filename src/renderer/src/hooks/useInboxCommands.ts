@@ -33,7 +33,7 @@ interface Options {
   openSearch: () => void
   focusSearchQuery: () => void
   searchAllEnabled: boolean
-  searchAll: () => void
+  submitSearch: () => void
   clearSearch: () => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
@@ -81,7 +81,7 @@ export function useInboxCommands(options: Options): void {
     openSearch,
     focusSearchQuery,
     searchAllEnabled,
-    searchAll,
+    submitSearch,
     clearSearch,
     triage,
     openSnooze,
@@ -99,9 +99,12 @@ export function useInboxCommands(options: Options): void {
     () =>
       registerCommands([
         createCommand('search.open', openSearch),
+        ...(searchOpen && !readerOpen && !searchBrowsing
+          ? [createCommand('search.submit', submitSearch)]
+          : []),
         ...(searchBrowsing ? [createCommand('search.focusQuery', focusSearchQuery)] : []),
         ...(searchOpen && !readerOpen && searchAllEnabled
-          ? [createCommand('search.allGmail', searchAll)]
+          ? [createCommand('search.allGmail', submitSearch)]
           : []),
         ...(searchOpen && !readerOpen ? [createCommand('search.clear', clearSearch)] : []),
         ...(splitCommands
@@ -261,7 +264,7 @@ export function useInboxCommands(options: Options): void {
       selectedIndex,
       snoozeAt,
       searchOpen,
-      searchAll,
+      submitSearch,
       searchAllEnabled,
       searchBrowsing,
       showToast,

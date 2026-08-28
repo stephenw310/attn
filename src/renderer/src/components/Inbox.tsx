@@ -110,6 +110,7 @@ function sidebarStorage(): Storage | null {
 
 export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [view, setView] = useState<MailView>('inbox')
+  const [pendingChord, setPendingChord] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchKeyboardTarget, setSearchKeyboardTarget] = useState<'query' | 'results'>('query')
@@ -1386,7 +1387,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       online &&
       serverSearch.phase !== 'waiting' &&
       serverSearch.phase !== 'complete',
-    searchAll: submitSearch,
+    submitSearch,
     clearSearch,
     triage,
     openSnooze,
@@ -1406,6 +1407,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     outboxOpen: !searchOpen && view === 'outbox',
     snoozeOpen,
     onCloseSnooze: closeSnooze,
+    viewKey: `${view}:${readerOpen ? 'reader' : 'list'}:${
+      searchOpen ? searchKeyboardTarget : 'mail'
+    }:${splits.activeSplitId ?? ''}`,
+    onPendingChordChange: setPendingChord,
     conversationScrollRef
   })
 
@@ -1632,22 +1637,29 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               />
             )}
           </div>
-
-          {!fullWindowComposerDraft && (
-            <MailFooter
-              readerOpen={readerOpen}
-              outboxOpen={!searchOpen && view === 'outbox'}
-              composing={inlineComposerDraft !== null}
-              searchEditing={searchOpen && searchKeyboardTarget === 'query' && !readerOpen}
-              moveAllowed={moveAllowed}
-              sync={sync}
-              networkOnline={networkOnline}
-              onRetry={retrySync}
-              onCopyError={copySyncError}
-            />
-          )}
         </div>
       </div>
+
+      {!fullWindowComposerDraft && (
+        <MailFooter
+          context={
+            inlineComposerDraft
+              ? 'composer'
+              : searchOpen && searchKeyboardTarget === 'query' && !readerOpen
+                ? 'search'
+                : readerOpen
+                  ? 'reader'
+                  : !searchOpen && view === 'outbox'
+                    ? 'outbox'
+                    : 'list'
+          }
+          pendingChord={pendingChord}
+          sync={sync}
+          networkOnline={networkOnline}
+          onRetry={retrySync}
+          onCopyError={copySyncError}
+        />
+      )}
 
       {!composerDraft && snoozeOpen && selected && (
         <SnoozePicker

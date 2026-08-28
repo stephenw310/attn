@@ -6,7 +6,9 @@ import {
   createDynamicSplitCommand,
   findCommandByShortcut,
   isChordPrefix,
+  listChordCompletions,
   listCommands,
+  listFooterHints,
   matchComposerKey,
   matchKey,
   readingScrollDelta,
@@ -23,7 +25,9 @@ function useCommands(commands: Parameters<typeof registerCommands>[0]): () => vo
 
 function key(
   value: string,
-  options: Partial<Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'metaKey' | 'shiftKey'>> = {}
+  options: Partial<
+    Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'metaKey' | 'repeat' | 'shiftKey'>
+  > = {}
 ): KeyboardEvent {
   return {
     key: value,
@@ -31,6 +35,7 @@ function key(
     altKey: options.altKey ?? false,
     ctrlKey: options.ctrlKey ?? false,
     metaKey: options.metaKey ?? false,
+    repeat: options.repeat ?? false,
     shiftKey: options.shiftKey ?? false
   } as KeyboardEvent
 }
@@ -61,6 +66,7 @@ describe('command catalog', () => {
       'search.open',
       'search.focusQuery',
       'search.allGmail',
+      'search.submit',
       'search.clear',
       'split.previous',
       'split.next',
@@ -320,6 +326,52 @@ describe('keyboard dispatch', () => {
     expect(findCommandByShortcut('g 6', 'reader')?.id).toBe('split.goto:custom:news')
   })
 
+  test('derives ordered chord-guide completions from active registry commands', () => {
+    useCommands([
+      createCommand('view.trash', () => {}),
+      createCommand('view.inbox', () => {}),
+      createCommand('view.drafts', () => {}),
+      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}, 'g 2'),
+      createDynamicSplitCommand('custom:news', 'Go to: News', () => {}, 'g 6')
+    ])
+
+    expect(listChordCompletions('g', 'list')).toEqual([
+      { commandId: 'view.inbox', key: 'i', label: 'Inbox' },
+      { commandId: 'view.drafts', key: 'd', label: 'Drafts' },
+      { commandId: 'view.trash', key: 'r', label: 'Trash' },
+      { commandId: 'split.goto:preset:github', key: '2', label: 'GitHub' },
+      { commandId: 'split.goto:custom:news', key: '6', label: 'News' }
+    ])
+  })
+
+  test('omits split digits from a chord guide when no split command is active', () => {
+    useCommands([createCommand('view.inbox', () => {}), createCommand('view.allMail', () => {})])
+    expect(listChordCompletions('g', 'reader')).toEqual([
+      { commandId: 'view.inbox', key: 'i', label: 'Inbox' },
+      { commandId: 'view.allMail', key: 'a', label: 'All Mail' }
+    ])
+  })
+
+  test('derives minimal footer hints and groups paired navigation commands', () => {
+    useCommands([
+      createCommand('navigate.next', () => {}),
+      createCommand('navigate.previous', () => {}),
+      createCommand('conversation.open', () => {}),
+      createCommand('triage.archive', () => {}),
+      createCommand('triage.snooze', () => {}),
+      createCommand('triage.move', () => {}),
+      createCommand('triage.undo', () => {})
+    ])
+    expect(listFooterHints('list')).toEqual([
+      { id: 'navigate', label: 'navigate', order: 10, shortcuts: ['j', 'k'] },
+      { id: 'open', label: 'open', order: 20, shortcuts: ['Enter'] },
+      { id: 'done', label: 'done', order: 30, shortcuts: ['e'] },
+      { id: 'snooze', label: 'snooze', order: 40, shortcuts: ['h'] },
+      { id: 'move', label: 'move', order: 50, shortcuts: ['v'] },
+      { id: 'undo', label: 'undo', order: 60, shortcuts: ['z'] }
+    ])
+  })
+
   test('requires unmodified keys for chord prefixes and completions', () => {
     expect(chordKey(key('g'))).toBe('g')
     expect(chordKey(key('G', { shiftKey: true }))).toBeNull()
@@ -327,6 +379,7 @@ describe('keyboard dispatch', () => {
     expect(chordKey(key('h', { ctrlKey: true }))).toBeNull()
     expect(chordKey(key('h', { metaKey: true }))).toBeNull()
     expect(chordKey(key('h', { altKey: true }))).toBeNull()
+    expect(chordKey(key('g', { repeat: true }))).toBeNull()
   })
 
   test('keeps scrolling as an explicit non-command reader primitive', () => {
