@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef } from 'react'
 import { chordKey, findCommandByShortcut, isChordPrefix, matchKey, readingScrollDelta } from '../commands'
 
-export const CHORD_TIMEOUT_MS = 2_000
+export const CHORD_TIMEOUT_MS = 3_000
 
 interface KeyboardDispatchOptions {
   blocked: boolean

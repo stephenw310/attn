@@ -354,6 +354,7 @@ describe('keyboard dispatch', () => {
 
   test('derives minimal footer hints and groups paired navigation commands', () => {
     useCommands([
+      createCommand('composer.new', () => {}),
       createCommand('navigate.next', () => {}),
       createCommand('navigate.previous', () => {}),
       createCommand('conversation.open', () => {}),
@@ -363,11 +364,58 @@ describe('keyboard dispatch', () => {
       createCommand('triage.undo', () => {})
     ])
     expect(listFooterHints('list')).toEqual([
+      { id: 'compose', label: 'compose', order: 5, shortcuts: ['c'] },
       { id: 'navigate', label: 'navigate', order: 10, shortcuts: ['j', 'k'] },
       { id: 'open', label: 'open', order: 20, shortcuts: ['Enter'] },
       { id: 'done', label: 'done', order: 30, shortcuts: ['e'] },
       { id: 'snooze', label: 'snooze', order: 40, shortcuts: ['h'] },
       { id: 'move', label: 'move', order: 50, shortcuts: ['v'] },
+      { id: 'undo', label: 'undo', order: 60, shortcuts: ['z'] }
+    ])
+  })
+
+  test('shows primary reader and Drafts actions only in their registered contexts', () => {
+    const disposeReader = useCommands([
+      createCommand('composer.reply', () => {}),
+      createCommand('composer.replyAll', () => {}),
+      createCommand('composer.forward', () => {}),
+      createCommand('triage.archive', () => {}),
+      createCommand('triage.snooze', () => {}),
+      createCommand('triage.move', () => {}),
+      createCommand('navigate.next', () => {}),
+      createCommand('navigate.previous', () => {}),
+      createCommand('conversation.close', () => {})
+    ])
+    expect(listFooterHints('reader')).toEqual([
+      { id: 'reply', label: 'reply', order: 10, shortcuts: ['r'] },
+      { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] },
+      { id: 'forward', label: 'forward', order: 12, shortcuts: ['f'] },
+      { id: 'done', label: 'done', order: 20, shortcuts: ['e'] },
+      { id: 'snooze', label: 'snooze', order: 30, shortcuts: ['h'] },
+      { id: 'move', label: 'move', order: 40, shortcuts: ['v'] },
+      { id: 'navigate', label: 'next / previous', order: 50, shortcuts: ['j', 'k'] },
+      { id: 'back', label: 'back to list', order: 60, shortcuts: ['Escape'] }
+    ])
+    disposeReader()
+
+    useCommands([
+      createCommand('composer.new', () => {}),
+      createCommand('navigate.next', () => {}),
+      createCommand('navigate.previous', () => {}),
+      createCommand('conversation.open', () => {}),
+      createCommand('draft.discard', () => {}),
+      createCommand('triage.undo', () => {})
+    ])
+    expect(listFooterHints('list')).toEqual([
+      { id: 'compose', label: 'compose', order: 5, shortcuts: ['c'] },
+      { id: 'navigate', label: 'navigate', order: 10, shortcuts: ['j', 'k'] },
+      { id: 'open', label: 'open', order: 20, shortcuts: ['Enter'] },
+      {
+        id: 'delete-draft',
+        label: 'delete draft',
+        order: 30,
+        shortcuts: ['Mod+Shift+D']
+      },
       { id: 'undo', label: 'undo', order: 60, shortcuts: ['z'] }
     ])
   })

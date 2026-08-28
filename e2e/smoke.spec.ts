@@ -159,7 +159,7 @@ test.describe('seeded inbox smoke coverage', () => {
             )
           )
       )
-      .toEqual(['navigate', 'open', 'done', 'snooze', 'move', 'undo'])
+      .toEqual(['compose', 'navigate', 'open', 'done', 'snooze', 'move', 'undo'])
   })
 
   test('J/K and arrow keys move list selection without opening a conversation', async ({ page }) => {
@@ -213,7 +213,7 @@ test.describe('seeded inbox smoke coverage', () => {
             )
           )
       )
-      .toEqual(['reply', 'done', 'snooze', 'move', 'navigate', 'back'])
+      .toEqual(['reply', 'reply-all', 'forward', 'done', 'snooze', 'move', 'navigate', 'back'])
     await expect(page.getByTestId('message-card')).toHaveCount(2)
     await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
     await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')

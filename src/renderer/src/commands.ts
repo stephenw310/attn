@@ -214,8 +214,18 @@ export const COMMAND_SPECS = {
     context: 'outbox',
     footer: { outbox: { id: 'back', label: 'back', order: 30 } }
   },
-  'draft.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'list' },
-  'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
+  'draft.discard': {
+    title: 'Discard draft',
+    shortcut: 'Mod+Shift+D',
+    context: 'list',
+    footer: { list: { id: 'delete-draft', label: 'delete draft', order: 30 } }
+  },
+  'composer.new': {
+    title: 'New message',
+    shortcut: 'c',
+    context: 'global',
+    footer: { list: { id: 'compose', label: 'compose', order: 5 } }
+  },
   'composer.reply': {
     title: 'Reply',
     shortcut: 'r',
@@ -226,9 +236,15 @@ export const COMMAND_SPECS = {
     title: 'Reply all',
     shortcut: 'a',
     shortcutAliases: ['Enter'],
-    context: 'reader'
+    context: 'reader',
+    footer: { reader: { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] } }
   },
-  'composer.forward': { title: 'Forward', shortcut: 'f', context: 'reader' },
+  'composer.forward': {
+    title: 'Forward',
+    shortcut: 'f',
+    context: 'reader',
+    footer: { reader: { id: 'forward', label: 'forward', order: 12 } }
+  },
   'composer.close': {
     title: 'Save and close draft',
     shortcut: 'Escape',

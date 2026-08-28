@@ -16,15 +16,28 @@ async function footerHintIds(page: import('@playwright/test').Page): Promise<(st
 
 test('shows the minimal registry-derived footer for each keyboard context', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
-  await expect.poll(() => footerHintIds(page)).toEqual(['navigate', 'open', 'done', 'snooze', 'move', 'undo'])
+  await expect
+    .poll(() => footerHintIds(page))
+    .toEqual(['compose', 'navigate', 'open', 'done', 'snooze', 'move', 'undo'])
+  await expect(page.getByTestId('footer-shortcut-compose')).toBeInViewport()
 
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await expect
     .poll(() => footerHintIds(page))
-    .toEqual(['reply', 'done', 'snooze', 'move', 'navigate', 'back'])
+    .toEqual(['reply', 'reply-all', 'forward', 'done', 'snooze', 'move', 'navigate', 'back'])
+  await expect(page.getByTestId('footer-shortcut-reply-all')).toBeInViewport()
+  await expect(page.getByTestId('footer-shortcut-forward')).toBeInViewport()
 
   await page.keyboard.press('Escape')
+  await page.keyboard.press('g')
+  await page.keyboard.press('d')
+  await expect(page.getByTestId('view-title')).toHaveText('Drafts')
+  await expect
+    .poll(() => footerHintIds(page))
+    .toEqual(['compose', 'navigate', 'open', 'delete-draft', 'undo'])
+  await expect(page.getByTestId('footer-shortcut-delete-draft')).toBeInViewport()
+
   await page.keyboard.press('g')
   await page.keyboard.press('o')
   await expect(page.getByTestId('view-title')).toHaveText('Outbox')
@@ -37,6 +50,7 @@ test('guides G completions and clears on every dismissal route', async ({ page }
 
   await page.keyboard.press('g')
   await expect(guide).toHaveAttribute('data-prefix', 'g')
+  await expect(guide).not.toContainText('→')
   await expect(page.getByTestId('footer-shortcut-navigate')).toHaveCount(0)
   await expect
     .poll(() =>
@@ -113,7 +127,7 @@ test('guides G completions and clears on every dismissal route', async ({ page }
 
   await page.keyboard.press('g')
   await expect(guide).toBeVisible()
-  await page.waitForTimeout(2_100)
+  await page.waitForTimeout(3_100)
   await expect(guide).toHaveCount(0)
   await page.keyboard.press('a')
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')

@@ -68,11 +68,7 @@ function ChordGuide({ prefix, context }: { prefix: string; context: FooterContex
       className="flex flex-none items-center gap-2 whitespace-nowrap text-[11px]"
       aria-live="polite"
     >
-      <span className="flex items-center gap-1 text-ink-faint">
-        <Kbd compact>{keyLabel(prefix)}</Kbd>
-        <span className="sr-only">then</span>
-        <span aria-hidden>→</span>
-      </span>
+      <span className="sr-only">Go to</span>
       {completions.map((completion) => (
         <span
           key={`${completion.commandId}:${completion.key}`}

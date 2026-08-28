@@ -1035,7 +1035,8 @@ budget. A cold split switch measured 44 ms, and revision-valid cached switches m
   mailbox letters from T22, and split digits from T27's configured order.
 - **Reconcile the two timeouts before writing UI.** Dispatch holds a pending chord for 500 ms
   (`useKeyboardDispatch.ts:56`) and §9 #14 wants the guide visible for 2 to 3 seconds. A guide that outlives
-  the chord it describes is a lie the user acts on. Pick one number, 2 seconds, and use it in both places.
+  the chord it describes is a lie the user acts on. Use one number in both places. T28 initially shipped at
+  2 seconds; dogfood lengthened it to 3 seconds.
   Raising the dispatch window is a behavior change to a shipped key path, so it needs its own test.
 - The guide clears on completion, `Esc`, a view change, or that timeout. The palette and the cheat sheet stay
   the exhaustive references.
@@ -1058,7 +1059,7 @@ Command specs now hold the footer metadata for list, reader, Outbox, search, and
 non-wrapping line across the full window. A pending `G` replaces that line with the active mailbox and split
 completions from the same registry.
 
-`useKeyboardDispatch` owns the guide state and one 2-second timer. Completion, `Esc`, a view change, and the
+`useKeyboardDispatch` owns the guide state and one 3-second timer. Completion, `Esc`, a view change, and the
 timer all clear the same state. Registered prefixes work while a sidebar control has focus. Held-key repeats
 cannot create a phantom prefix, and pressing `G` again restarts the chord instead of swallowing the key.
 Seeded Electron coverage pins all dismissal routes, a 700 ms `G R`, an immediate second mailbox chord, and
