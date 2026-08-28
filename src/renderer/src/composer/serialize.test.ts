@@ -5,6 +5,7 @@ import { $createListItemNode, $createListNode, ListItemNode, ListNode } from '@l
 import { $createQuoteNode, QuoteNode } from '@lexical/rich-text'
 import { $createParagraphNode, $createTextNode, $getRoot, type SerializedEditorState } from 'lexical'
 import { describe, expect, it } from 'vitest'
+import { GmailSignatureNode } from './nodes/GmailSignatureNode'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { editorStateToPlainText, serializeEditorState } from './serialize'
@@ -25,8 +26,33 @@ describe('plain-text alternative', () => {
 
     const { bodyHtml } = serializeEditorState(editor.getEditorState(), editor)
     const document = new DOMParser().parseFromString(bodyHtml, 'text/html')
-    expect([...document.body.children].map((element) => element.tagName)).toEqual(['DIV', 'DIV', 'DIV'])
-    expect(document.body.children[1]?.innerHTML).toBe('<br>')
+    const root = document.body.firstElementChild
+    expect(root?.getAttribute('dir')).toBe('ltr')
+    expect([...(root?.children ?? [])].map((element) => element.tagName)).toEqual(['DIV', 'DIV', 'DIV'])
+    expect(root?.children[1]?.innerHTML).toBe('<br>')
+  })
+
+  it('wraps a marked signature in the dedicated block Gmail sends', () => {
+    const editor = createHeadlessEditor({ nodes: [GmailSignatureNode] })
+    editor.update(
+      () => {
+        const signature = new GmailSignatureNode().append(
+          $createParagraphNode().append($createTextNode('Best,')),
+          $createParagraphNode().append($createTextNode('Chao Wu'))
+        )
+        $getRoot().append($createParagraphNode().append($createTextNode('Hello')), signature)
+      },
+      { discrete: true }
+    )
+
+    const { bodyHtml } = serializeEditorState(editor.getEditorState(), editor)
+    const document = new DOMParser().parseFromString(bodyHtml, 'text/html')
+    const signature = document.querySelector('.gmail_signature')
+    expect(signature?.getAttribute('dir')).toBe('ltr')
+    expect(signature?.parentElement?.tagName).toBe('DIV')
+    expect(signature?.parentElement?.parentElement?.getAttribute('dir')).toBe('ltr')
+    expect(signature?.parentElement?.parentElement?.parentElement).toBe(document.body)
+    expect(signature?.parentElement?.children).toHaveLength(1)
   })
 
   it('serializes inline images to CID without leaking the private marker', () => {

@@ -21,27 +21,76 @@ export interface PreparedPrimarySignatureDraft {
   defaultSignatureFingerprint: string | null
 }
 
+function hasCurrentSignatureEnvelope(bodyHtml: string): boolean {
+  const { JSDOM } = require('jsdom') as typeof import('jsdom')
+  const document = new JSDOM(bodyHtml).window.document
+  const root = document.body.firstElementChild
+  const signature = document.querySelector('.gmail_signature[data-smartmail="gmail_signature"]')
+  return (
+    root?.tagName === 'DIV' &&
+    root.getAttribute('dir') === 'ltr' &&
+    signature?.getAttribute('dir') === 'ltr' &&
+    signature.parentElement?.tagName === 'DIV' &&
+    signature.parentElement.parentElement === root &&
+    signature.parentElement.children.length === 1
+  )
+}
+
 function signatureBody(rawHtml: string): DraftSignature {
   const sanitized = sanitizeQuoteHtml(rawHtml).trim()
   if (!sanitized) return { bodyHtml: '', bodyText: '' }
   const text = textFromRaw('text/html', sanitized)
   return {
-    bodyHtml: `<div><br></div><div class="gmail_signature" data-smartmail="gmail_signature">${sanitized}</div>`,
+    bodyHtml: `<div dir="ltr"><div><br></div><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">${sanitized}</div></div></div>`,
     bodyText: text ? `\n${text}` : ''
   }
 }
 
+/** Gmail leaves the primary send-as name empty when it uses the Google profile name. */
+export function primarySenderDisplayName(
+  db: Db,
+  accountId: string,
+  sendAsDisplayName?: string | null
+): string {
+  const explicit = sendAsDisplayName?.trim()
+  if (explicit) return explicit
+
+  const localPart = accountId.slice(0, accountId.indexOf('@')).trim().toLowerCase()
+  const row = db
+    .prepare(
+      `SELECT from_name
+       FROM messages
+       WHERE account_id = ? AND lower(from_email) = lower(?)
+         AND labels_json LIKE '%"SENT"%' AND trim(COALESCE(from_name, '')) <> ''
+         AND lower(trim(from_name)) <> ?
+       ORDER BY internal_date DESC
+       LIMIT 1`
+    )
+    .get(accountId, accountId, localPart) as { from_name: string } | undefined
+  if (row) return row.from_name.trim()
+
+  return readAccountSetting(db, accountId, SEND_AS_DISPLAY_NAME_SETTING)?.trim() ?? ''
+}
+
 export function cachePrimarySendAs(db: Db, accountId: string, sendAs: ProviderSendAs): DraftSignature {
   const source = sendAs.signature ?? ''
+  const displayName = primarySenderDisplayName(db, accountId, sendAs.displayName)
   const cachedSource = readAccountSetting(db, accountId, SEND_AS_SIGNATURE_SOURCE_SETTING)
   const cachedHtml = readAccountSetting(db, accountId, SEND_AS_SIGNATURE_HTML_SETTING)
   const cachedText = readAccountSetting(db, accountId, SEND_AS_SIGNATURE_TEXT_SETTING)
-  const signature =
-    cachedSource === source && cachedHtml !== undefined && cachedText !== undefined
-      ? { bodyHtml: cachedHtml, bodyText: cachedText }
-      : signatureBody(source)
+  let signature: DraftSignature
+  if (
+    cachedSource === source &&
+    cachedHtml !== undefined &&
+    cachedText !== undefined &&
+    (source ? hasCurrentSignatureEnvelope(cachedHtml) : cachedHtml === '' && cachedText === '')
+  ) {
+    signature = { bodyHtml: cachedHtml, bodyText: cachedText }
+  } else {
+    signature = signatureBody(source)
+  }
   db.transaction(() => {
-    writeAccountSetting(db, accountId, SEND_AS_DISPLAY_NAME_SETTING, sendAs.displayName?.trim() ?? '')
+    writeAccountSetting(db, accountId, SEND_AS_DISPLAY_NAME_SETTING, displayName)
     writeAccountSetting(db, accountId, SEND_AS_SIGNATURE_SOURCE_SETTING, source)
     writeAccountSetting(db, accountId, SEND_AS_SIGNATURE_HTML_SETTING, signature.bodyHtml)
     writeAccountSetting(db, accountId, SEND_AS_SIGNATURE_TEXT_SETTING, signature.bodyText)

@@ -89,6 +89,39 @@ function paragraphsToGmailRows(html: string): string {
   return template.innerHTML
 }
 
+/** Match the wrapper Gmail emits around a signature so recipient clients can classify it. */
+function wrapGmailSignatures(html: string): string {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  for (const signature of template.content.querySelectorAll<HTMLElement>(
+    '.gmail_signature, [data-smartmail="gmail_signature"]'
+  )) {
+    if (!signature.hasAttribute('dir')) {
+      const direction = signature.querySelector<HTMLElement>('[dir]')?.getAttribute('dir')
+      signature.setAttribute('dir', direction === 'rtl' ? 'rtl' : 'ltr')
+    }
+    const parent = signature.parentElement
+    const dedicatedWrapper =
+      parent?.tagName === 'DIV' &&
+      [...parent.childNodes].every(
+        (child) => child === signature || (child.nodeType === Node.TEXT_NODE && !child.textContent?.trim())
+      )
+    if (dedicatedWrapper) continue
+
+    const wrapper = document.createElement('div')
+    signature.replaceWith(wrapper)
+    wrapper.append(signature)
+  }
+  return template.innerHTML
+}
+
+function wrapGmailBody(html: string): string {
+  const root = document.createElement('div')
+  root.setAttribute('dir', 'ltr')
+  root.innerHTML = html
+  return root.outerHTML
+}
+
 export function editorStateToPlainText(state: SerializedEditorState): string {
   return childrenOf(state.root)
     .map(blockText)
@@ -101,14 +134,20 @@ export function serializeEditorState(
   editorState: EditorState,
   editor: LexicalEditor
 ): { bodyHtml: string; bodyText: string } {
+  const serializedState = editorState.toJSON()
+  const rootChildren = childrenOf(serializedState.root)
+  const preserveExactOpaqueBody = rootChildren.length === 1 && rootChildren[0]?.type === 'opaque-html'
   let bodyHtml = ''
   editorState.read(
     () => {
+      const normalizedHtml = wrapGmailSignatures(
+        paragraphsToGmailRows(sanitizeOutgoingHtml($generateHtmlFromNodes(editor)))
+      )
       bodyHtml = restoreOpaqueHtml(
-        inlineImageSourcesToCid(paragraphsToGmailRows(sanitizeOutgoingHtml($generateHtmlFromNodes(editor))))
+        inlineImageSourcesToCid(preserveExactOpaqueBody ? normalizedHtml : wrapGmailBody(normalizedHtml))
       )
     },
     { editor }
   )
-  return { bodyHtml, bodyText: editorStateToPlainText(editorState.toJSON()) }
+  return { bodyHtml, bodyText: editorStateToPlainText(serializedState) }
 }

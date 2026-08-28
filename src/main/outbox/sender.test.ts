@@ -504,6 +504,11 @@ describe('OutboxSender effect layer', () => {
         'me@example.com',
         NOW
       )
+      db.prepare(
+        `INSERT INTO messages
+           (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
+         VALUES (?, 'gmail-sent', 'identity-thread', 'Chao Zhou', ?, ?, '["SENT"]')`
+      ).run('me@example.com', 'me@example.com', NOW - 1)
       const id = saveDraft(
         db,
         'me@example.com',
@@ -525,7 +530,7 @@ describe('OutboxSender effect layer', () => {
       )
       const getSendAs = vi.fn(async () => ({
         sendAsEmail: 'me@example.com',
-        displayName: 'Chao Zhou',
+        displayName: '',
         signature: '<div>Best, Chao</div>',
         isPrimary: true
       }))

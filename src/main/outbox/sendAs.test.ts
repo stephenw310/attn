@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import { openDatabase } from '../db'
-import { readAccountSetting } from '../settings'
+import { readAccountSetting, writeAccountSetting } from '../settings'
 import { closeDraft, listDrafts, requestDraftMirror, saveDraft } from './drafts'
 import {
   cachePrimarySendAs,
   hasOnlyDefaultPrimarySignature,
   prepareDraftWithCachedPrimarySignature,
   SEND_AS_DISPLAY_NAME_SETTING,
+  SEND_AS_SIGNATURE_HTML_SETTING,
+  SEND_AS_SIGNATURE_SOURCE_SETTING,
+  SEND_AS_SIGNATURE_TEXT_SETTING,
   syncPrimarySendAs
 } from './sendAs'
 
@@ -30,11 +33,70 @@ describe('primary Gmail send-as settings', () => {
       expect(getSendAs).toHaveBeenCalledWith(ACCOUNT, { priority: 'polling' })
       expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Chao Wu')
       const { draft } = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(draft.bodyHtml).toContain(
+        '<div dir="ltr"><div><br></div><div><div dir="ltr" class="gmail_signature"'
+      )
       expect(draft.bodyHtml).toContain('class="gmail_signature"')
       expect(draft.bodyHtml).toContain('Best,')
       expect(draft.bodyHtml).toContain('color:#123456')
       expect(draft.bodyHtml).not.toMatch(/position|script|alert/i)
       expect(draft.bodyText).toBe('\nBest,\nChao')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('uses the latest Gmail-sent name when the primary send-as name is empty', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare(
+        `INSERT INTO messages
+           (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
+         VALUES (?, 'gmail-sent', 'thread-1', 'Chao Wu', ?, 10, '["SENT"]')`
+      ).run(ACCOUNT, ACCOUNT)
+      const insertAttnSent = db.prepare(
+        `INSERT INTO messages
+           (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
+         VALUES (?, ?, ?, 'me', ?, ?, '["SENT"]')`
+      )
+      for (let index = 0; index < 25; index += 1) {
+        insertAttnSent.run(ACCOUNT, `attn-sent-${index}`, `thread-${index + 2}`, ACCOUNT, 20 + index)
+      }
+
+      cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, displayName: '', signature: '' })
+      expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Chao Wu')
+
+      cachePrimarySendAs(db, ACCOUNT, {
+        sendAsEmail: ACCOUNT,
+        displayName: 'Updated Name',
+        signature: ''
+      })
+      expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Updated Name')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('rebuilds a legacy cached signature envelope without a Gmail settings change', () => {
+    const db = openDatabase(':memory:')
+    const source = '<div dir="ltr">Best,<div>Chao Wu</div></div>'
+    try {
+      writeAccountSetting(db, ACCOUNT, SEND_AS_SIGNATURE_SOURCE_SETTING, source)
+      writeAccountSetting(
+        db,
+        ACCOUNT,
+        SEND_AS_SIGNATURE_HTML_SETTING,
+        `<div><br></div><div class="gmail_signature" data-smartmail="gmail_signature">${source}</div>`
+      )
+      writeAccountSetting(db, ACCOUNT, SEND_AS_SIGNATURE_TEXT_SETTING, '\nBest,\nChao Wu')
+
+      const signature = cachePrimarySendAs(db, ACCOUNT, {
+        sendAsEmail: ACCOUNT,
+        signature: source
+      })
+      expect(signature.bodyHtml).toContain(
+        '<div dir="ltr"><div><br></div><div><div dir="ltr" class="gmail_signature"'
+      )
     } finally {
       db.close()
     }
@@ -94,7 +156,7 @@ describe('primary Gmail send-as settings', () => {
       const normalized = {
         ...emptyDraftInput(),
         bodyHtml:
-          '<p><br></p><div class="gmail_signature" data-smartmail="gmail_signature"><p><span style="color: rgb(18, 52, 86)">Best,</span></p><p><a href="https://attn.test">Chao</a></p></div>',
+          '<p><br></p><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature"><p><span style="color: rgb(18, 52, 86)">Best,</span></p><p><a href="https://attn.test">Chao</a></p></div></div>',
         bodyText: '\nBest,\nChao'
       }
       expect(hasOnlyDefaultPrimarySignature(normalized, prepared.defaultSignatureFingerprint)).toBe(true)

@@ -271,9 +271,18 @@ test('inserts the saved Gmail signature into new mail as editable content', asyn
   expect(
     await page.evaluate((html) => {
       const document = new DOMParser().parseFromString(html ?? '', 'text/html')
-      return document.querySelector('.gmail_signature')?.textContent ?? ''
+      const signature = document.querySelector('.gmail_signature')
+      return {
+        text: signature?.textContent ?? '',
+        direction: signature?.getAttribute('dir'),
+        dedicatedWrapper:
+          signature?.parentElement?.tagName === 'DIV' &&
+          signature.parentElement.parentElement?.getAttribute('dir') === 'ltr' &&
+          signature.parentElement.parentElement?.parentElement === document.body &&
+          signature.parentElement.children.length === 1
+      }
     }, saved?.html)
-  ).not.toContain('Hello from Attn')
+  ).toEqual({ text: 'Best,Chao Wuchaowu.xyz', direction: 'ltr', dedicatedWrapper: true })
   expect(saved?.text).toContain('Hello from Attn')
   expect(saved?.text).toContain('Best,')
 })

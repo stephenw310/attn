@@ -15,7 +15,7 @@ import { parseStoredDraftAttachments } from './draftAttachments'
 import { planTransition } from './machine'
 import { buildMime, mimeByteLength, streamMime } from './mime'
 import { DraftAttachmentSourceError, prepareDraftMimeAttachments } from './mirror'
-import { SEND_AS_DISPLAY_NAME_SETTING, syncPrimarySendAs } from './sendAs'
+import { primarySenderDisplayName, SEND_AS_DISPLAY_NAME_SETTING, syncPrimarySendAs } from './sendAs'
 import { validateAttachmentCap } from './spool'
 
 const SECONDARY_CHECK_MS = 10_000
@@ -620,13 +620,12 @@ export class OutboxSender {
         signal,
         priority: 'send'
       })
-      const displayName = sendAs?.displayName?.trim() ?? ''
-      return displayName
+      return primarySenderDisplayName(this.db, accountId, sendAs?.displayName)
     } catch (error) {
       if (signal?.aborted) throw error
       if (cached === undefined) throw error
       console.warn(`[outbox] send-as refresh failed for ${accountId}: ${errorMessage(error)}`)
-      return cached
+      return primarySenderDisplayName(this.db, accountId, cached)
     }
   }
 
