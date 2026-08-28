@@ -8,14 +8,15 @@ import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../
 import type { ThemePreference } from '../shared/theme'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
-import { clearTokens, loadTokens, saveTokens } from './auth/tokenStore'
+import { accountIdForTokens, type StoredAccount } from './auth/tokenFile'
+import { loadAccounts, removeAccountTokens, saveAccountTokens } from './auth/tokenStore'
 import { isCurrentTokenUpdate } from './auth/tokenUpdate'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { registerIpc } from './ipc'
 import { MailNotifier, type PendingFocus } from './notify'
 import {
   SERVICE_PROTOCOL_VERSION,
-  type ServiceAuth,
+  type ServiceAccountsState,
   type ServiceEvent,
   type ServiceReady
 } from './service/protocol'
@@ -41,11 +42,13 @@ if (testUserData) {
 }
 
 let service: ServiceSupervisor | null = null
-let seedAccountId: string | null = null
+let seedAccountIds: string[] = []
+let storedAccounts: StoredAccount[] = []
+let activeAccountId: string | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
 let signInInFlight = false
-let authGeneration = 0
+const authGenerations = new Map<string, number>()
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 let themePreference: ThemePreference = 'system'
@@ -70,17 +73,38 @@ function oauthSearchDirs(): string[] {
   return oauthConfigSearchDirs(app.getAppPath(), app.getPath('userData'), Boolean(testUserData))
 }
 
-function authStatus(): AuthStatus {
-  if (seedAccountId) return { configured: false, signedIn: true, email: seedAccountId }
-  const config = loadOAuthConfig(oauthSearchDirs())
-  const tokens = loadTokens(app.getPath('userData'))
-  return { configured: config !== null, signedIn: tokens !== null, email: tokens?.email }
+function rosterAccountIds(): string[] {
+  return seedAccountIds.length > 0 ? seedAccountIds : storedAccounts.map((account) => account.id)
 }
 
-function currentServiceAuth(): ServiceAuth | null {
-  const tokens = loadTokens(app.getPath('userData'))
-  if (!tokens) return null
-  return { config: loadOAuthConfig(oauthSearchDirs()), tokens, generation: authGeneration }
+function authStatus(): AuthStatus {
+  const accounts = rosterAccountIds().map((id) => ({ id, email: emailFor(id) }))
+  const active = accounts.find((account) => account.id === activeAccountId) ?? null
+  return {
+    configured: seedAccountIds.length === 0 && loadOAuthConfig(oauthSearchDirs()) !== null,
+    signedIn: accounts.length > 0,
+    ...(active ? { email: active.email } : {}),
+    accounts,
+    activeAccountId: active?.id ?? null
+  }
+}
+
+function emailFor(accountId: string): string {
+  const stored = storedAccounts.find((account) => account.id === accountId)
+  return stored?.tokens.email ?? accountId
+}
+
+function serviceAccountsState(): ServiceAccountsState {
+  return {
+    config: loadOAuthConfig(oauthSearchDirs()),
+    accounts: storedAccounts.map((account) => ({
+      id: account.id,
+      tokens: account.tokens,
+      generation: authGenerations.get(account.id) ?? 0
+    })),
+    activeAccountId,
+    ...(testUserData ? { seedAccountIds } : {})
+  }
 }
 
 async function signIn(): Promise<AuthSignInResult> {
@@ -94,14 +118,17 @@ async function signIn(): Promise<AuthSignInResult> {
   let resumedActions = 0
   try {
     const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
-    authGeneration++
-    saveTokens(app.getPath('userData'), tokens)
-    seedAccountId = null
+    const accountId = accountIdForTokens(tokens)
+    if (!accountId) throw new Error('Google did not return an email address for this account')
+    const refreshed = storedAccounts.some((account) => account.id === accountId)
+    storedAccounts = saveAccountTokens(app.getPath('userData'), tokens)
+    authGenerations.set(accountId, (authGenerations.get(accountId) ?? 0) + 1)
+    activeAccountId = accountId
     pendingFocus = null
-    mailNotifier?.setAccountId(tokens.email ?? null)
-    service?.setAuth({ config, tokens, generation: authGeneration })
+    mailNotifier?.setAccountId(accountId)
+    service?.setAccounts(serviceAccountsState())
     resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
-    console.log(`[auth] signed in as ${tokens.email ?? 'unknown'}`)
+    console.log(`[auth] ${refreshed ? 'reconnected' : 'added account'} ${tokens.email ?? accountId}`)
   } catch (error) {
     console.error(`[auth] sign-in failed: ${errorMessage(error)}`)
     throw error
@@ -111,15 +138,32 @@ async function signIn(): Promise<AuthSignInResult> {
   return { status: authStatus(), resumedActions }
 }
 
+/** Remove the active account's tokens; local rows stay cached (F18, D3 Keep). */
 function signOut(): AuthStatus {
   cancelActiveSignIn()
-  authGeneration++
-  service?.signOut()
-  seedAccountId = null
-  clearTokens(app.getPath('userData'))
+  const removed = activeAccountId
+  if (removed) {
+    if (seedAccountIds.length > 0) seedAccountIds = seedAccountIds.filter((id) => id !== removed)
+    else storedAccounts = removeAccountTokens(app.getPath('userData'), removed)
+    authGenerations.delete(removed)
+  }
+  activeAccountId = rosterAccountIds()[0] ?? null
   pendingFocus = null
-  mailNotifier?.setAccountId(null)
-  console.log('[auth] signed out')
+  mailNotifier?.setAccountId(activeAccountId)
+  service?.setAccounts(serviceAccountsState())
+  console.log(`[auth] signed out ${removed ?? '(no account)'}`)
+  return authStatus()
+}
+
+async function setActiveAccount(accountId: string): Promise<AuthStatus> {
+  if (!rosterAccountIds().includes(accountId)) throw new Error('unknown account')
+  // The utility owns the flip: the response guarantees every later read the
+  // renderer issues is answered for the new account.
+  const result = await service?.internal('set-active-account', accountId)
+  activeAccountId = typeof result === 'string' ? result : accountId
+  service?.noteActiveAccount(activeAccountId)
+  pendingFocus = null
+  mailNotifier?.setAccountId(activeAccountId)
   return authStatus()
 }
 
@@ -214,19 +258,25 @@ function handleServiceEvent(event: ServiceEvent): void {
     mailNotifier?.notify(event.accountId, event.candidates, event.pausedUntil)
   } else if (event.kind === 'token-update') {
     const userDataPath = app.getPath('userData')
-    if (!isCurrentTokenUpdate(authGeneration, loadTokens(userDataPath), event)) {
-      console.warn(`[auth] ignored stale token update from generation ${event.generation}`)
+    const stored = loadAccounts(userDataPath).find((account) => account.id === event.accountId)
+    if (!isCurrentTokenUpdate(authGenerations.get(event.accountId), stored, event)) {
+      console.warn(
+        `[auth] ignored stale token update for ${event.accountId} (generation ${event.generation})`
+      )
       return
     }
-    saveTokens(userDataPath, event.tokens)
-    service?.cacheTokens(event.tokens)
+    storedAccounts = saveAccountTokens(userDataPath, event.tokens)
+    service?.cacheTokens(event.accountId, event.tokens)
   } else if (event.kind === 'log') console[event.level](event.message)
 }
 
 async function initialize(): Promise<void> {
   const userDataPath = app.getPath('userData')
-  const initialTokens = loadTokens(userDataPath)
-  const ownedNotifier = new MailNotifier(initialTokens?.email ?? null, showMainWindow, focusInboxThread)
+  storedAccounts = loadAccounts(userDataPath)
+  for (const account of storedAccounts) {
+    if (!authGenerations.has(account.id)) authGenerations.set(account.id, 0)
+  }
+  const ownedNotifier = new MailNotifier(null, showMainWindow, focusInboxThread)
   mailNotifier = ownedNotifier
   ownedNotifier.start()
   const ownedService = new ServiceSupervisor(join(__dirname, 'service/utility.js'), {
@@ -236,7 +286,15 @@ async function initialize(): Promise<void> {
     downloadsPath: app.getPath('downloads'),
     testMode: Boolean(testUserData),
     ...(testUserData && process.env.ATTN_TEST_SEED ? { testSeed: process.env.ATTN_TEST_SEED } : {}),
-    auth: currentServiceAuth(),
+    accounts: {
+      config: loadOAuthConfig(oauthSearchDirs()),
+      accounts: storedAccounts.map((account) => ({
+        id: account.id,
+        tokens: account.tokens,
+        generation: authGenerations.get(account.id) ?? 0
+      })),
+      activeAccountId: null
+    },
     focused: false
   })
   service = ownedService
@@ -249,8 +307,15 @@ async function initialize(): Promise<void> {
     throw error
   }
   if (service !== ownedService || mailNotifier !== ownedNotifier) return
-  seedAccountId = testUserData && process.env.ATTN_TEST_SEED ? ready.accountId : null
-  ownedNotifier.setAccountId(ready.accountId)
+  // The utility resolved the roster (seed sessions included) and the persisted
+  // active pointer; main mirrors that resolution rather than re-deriving it.
+  seedAccountIds =
+    testUserData && process.env.ATTN_TEST_SEED
+      ? ready.accountIds.filter((id) => !storedAccounts.some((account) => account.id === id))
+      : []
+  activeAccountId = ready.activeAccountId
+  ownedService.noteActiveAccount(activeAccountId)
+  ownedNotifier.setAccountId(ready.activeAccountId)
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
   themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
@@ -260,6 +325,7 @@ async function initialize(): Promise<void> {
     authStatus,
     signIn,
     signOut,
+    setActiveAccount,
     pendingFocus: () => pendingFocus,
     clearPendingFocus: () => {
       pendingFocus = null

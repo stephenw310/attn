@@ -5,7 +5,6 @@ import type { MessageMailbox, SyncState } from '../../shared/mail'
 import { clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
-import type { TokenSet } from '../auth/googleAuth'
 import { type Db, openDatabase, schemaVersion } from '../db'
 import { countInboxUnread, listMailboxThreads } from '../db/queries'
 import { loadSeed, readSeedRemoteThreadIds, readSeedThread } from '../dev/seed'
@@ -19,7 +18,7 @@ import { cachePrimarySendAs } from '../outbox/sendAs'
 import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
-import { readSetting, settingEnabled, writeSetting } from '../settings'
+import { deleteSetting, readSetting, settingEnabled, writeSetting } from '../settings'
 import { countNotificationEnabledUnread, hasSplitSetup } from '../splits'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
 import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
@@ -33,7 +32,8 @@ import { SyncController } from '../syncController'
 import { createServiceHandlers, type ServiceHandlers } from './handlers'
 import { candidatesFor, notificationPausedUntil, setNotificationPausedUntil } from './notificationQueries'
 import type {
-  ServiceAuth,
+  ServiceAccountAuth,
+  ServiceAccountsState,
   ServiceControl,
   ServiceEvent,
   ServiceInitialize,
@@ -43,21 +43,86 @@ import type {
 
 export type ServiceEventSink = (event: ServiceEvent) => void
 
+const ACTIVE_ACCOUNT_SETTING = 'activeAccountId'
+
+/**
+ * One signed-in account's live machinery (F18). Every worker is bound to this
+ * account through its `accountId()` callback, so the executor classes stay
+ * exactly as single-account as they were — the runtime holds one set per
+ * account instead of one total.
+ */
+interface AccountSession {
+  readonly id: string
+  /** Null for seeded e2e accounts, which never talk to Gmail. */
+  auth: ServiceAccountAuth | null
+  readonly seeded: boolean
+  readonly syncController: SyncController
+  readonly actionExecutor: ActionExecutor
+  readonly draftMirrorExecutor: DraftMirrorExecutor
+  readonly outboxSender: OutboxSender
+  readonly snoozeScheduler: SnoozeScheduler
+}
+
+/**
+ * Serializes the Gmail-heavy historical chain across accounts: one holder at a
+ * time, and a waiting active account is granted before waiting inactive ones.
+ * The chain's durable cursors are what make this safe — a queued account
+ * simply resumes where its cursor points once granted.
+ */
+class IndexingSlot {
+  private holder: string | null = null
+  private queue: Array<{ accountId: string; grant: (release: () => void) => void }> = []
+
+  constructor(private readonly isPriority: (accountId: string) => boolean) {}
+
+  acquire(accountId: string): Promise<() => void> {
+    return new Promise((grant) => {
+      if (!this.holder) {
+        this.holder = accountId
+        grant(this.makeRelease(accountId))
+        return
+      }
+      const entry = { accountId, grant }
+      if (this.isPriority(accountId)) {
+        const index = this.queue.findIndex((queued) => !this.isPriority(queued.accountId))
+        if (index >= 0) this.queue.splice(index, 0, entry)
+        else this.queue.push(entry)
+      } else {
+        this.queue.push(entry)
+      }
+    })
+  }
+
+  private makeRelease(accountId: string): () => void {
+    let released = false
+    return () => {
+      if (released || this.holder !== accountId) return
+      released = true
+      const next = this.queue.shift()
+      if (!next) {
+        this.holder = null
+        return
+      }
+      this.holder = next.accountId
+      next.grant(this.makeRelease(next.accountId))
+    }
+  }
+}
+
 export class ServiceRuntime {
   private readonly db: Db
   private readonly actionRevertNotices = new ActionRevertNotices()
   private readonly foregroundProviderWork = new Map<string, number>()
   private readonly gmailQuotaLimiters = new Map<string, GmailQuotaLimiter>()
   private readonly handlers: ServiceHandlers
-  private readonly actionExecutor: ActionExecutor
-  private readonly draftMirrorExecutor: DraftMirrorExecutor
-  private readonly outboxSender: OutboxSender
-  private readonly snoozeScheduler: SnoozeScheduler
-  private readonly syncController: SyncController
-  private auth: ServiceAuth | null
-  private seedAccountId: string | null = null
+  private readonly sessions = new Map<string, AccountSession>()
+  private readonly accountOrder: string[] = []
+  private readonly indexingSlot = new IndexingSlot((accountId) => accountId === this.activeAccountId)
+  private config: ServiceAccountsState['config']
+  private activeAccountId: string | null = null
   private focused: boolean
   private stopped = false
+  private schedulersStarted = false
   private mailRevision = 0
   private draftSaveFailures = 0
   private conversationDelay: { threadId: string; delayMs: number } | null = null
@@ -65,9 +130,10 @@ export class ServiceRuntime {
   private draftInlineImageDelayMs = 0
   private actionProvider: ActionRecoveryProvider | null = null
 
-  private readonly onNewMail = (newMail: NewMail[]): void => {
-    const accountId = this.currentAccountId()
-    if (!accountId) return
+  private readonly onNewMail = (accountId: string, newMail: NewMail[]): void => {
+    // Notification routing for inactive accounts is A4 scope; until then only
+    // the active account's poll cycles surface candidates.
+    if (accountId !== this.activeAccountId || !this.sessions.has(accountId)) return
     this.emit({
       kind: 'notification-candidates',
       accountId,
@@ -86,83 +152,32 @@ export class ServiceRuntime {
     private readonly input: ServiceInitialize,
     private readonly emit: ServiceEventSink
   ) {
-    this.auth = input.auth
+    this.config = input.accounts.config
     this.focused = input.focused
     this.db = openDatabase(input.dbPath)
+
+    let seedIds: string[] = []
     if (input.testSeed) {
-      const existing = this.db.prepare('SELECT id FROM accounts ORDER BY created_at LIMIT 1').get() as
-        | { id: string }
-        | undefined
-      if (existing) this.seedAccountId = existing.id
-      else {
-        this.seedAccountId = loadSeed(this.db, input.testSeed).accountId
-      }
-      this.log('log', `[sync] backfill stages skipped for seeded account ${this.seedAccountId}`)
+      const existing = this.db.prepare('SELECT id FROM accounts ORDER BY rowid').all() as { id: string }[]
+      seedIds =
+        existing.length > 0 ? existing.map((row) => row.id) : loadSeed(this.db, input.testSeed).accountIds
+      this.log('log', `[sync] backfill stages skipped for seeded accounts ${seedIds.join(', ')}`)
     }
 
-    this.actionExecutor = new ActionExecutor(
-      this.db,
-      () => this.currentAccountId(),
-      () => this.actionProvider ?? this.makeCurrentProvider(),
-      {
-        notify: () => this.broadcastMailChanged(),
-        notifyReverted: (accountId, actions) => this.broadcastActionsReverted(accountId, actions)
-      }
-    )
-    this.draftMirrorExecutor = new DraftMirrorExecutor(
-      this.db,
-      () => this.currentAccountId(),
-      () => this.makeCurrentProvider(),
-      { spoolRoot: join(input.userDataPath, 'outbox') }
-    )
-    this.outboxSender = new OutboxSender(
-      this.db,
-      () => this.currentAccountId(),
-      () => this.makeCurrentProvider(),
-      (payload) => this.emit({ kind: 'outbox-changed', payload }),
-      {
-        beforeRemote: (signal) => this.draftMirrorExecutor.waitForIdle(signal),
-        spoolRoot: join(input.userDataPath, 'outbox'),
-        cleanSpool: (id) => cleanOutboxSpool(input.userDataPath, id),
-        progress: (payload) => this.emit({ kind: 'outbox-progress', payload }),
-        mailChanged: () => this.broadcastMailChanged()
-      }
-    )
-    this.snoozeScheduler = new SnoozeScheduler(
-      this.db,
-      () => this.currentAccountId(),
-      () => this.broadcastMailChanged(),
-      () => void this.actionExecutor.trigger()
-    )
-    this.syncController = new SyncController({
-      db: this.db,
-      currentAccountId: () => this.currentAccountId(),
-      isSignedIn: () => this.isSignedIn(),
-      isSeeded: () => this.seedAccountId !== null,
-      makeProvider: (generation) => this.makeProvider(generation),
-      isForeground: () => this.focused,
-      hasForegroundProviderWork: (accountId) => (this.foregroundProviderWork.get(accountId) ?? 0) > 0,
-      mailRevision: () => this.mailRevision,
-      broadcastState: (payload) => this.emit({ kind: 'sync-state', payload }),
-      broadcastMailChanged: (reason) => this.broadcastMailChanged(undefined, reason),
-      getActionExecutor: () => this.actionExecutor,
-      getDraftMirrorExecutor: () => this.draftMirrorExecutor,
-      getOutboxSender: () => this.outboxSender,
-      getSnoozeScheduler: () => this.snoozeScheduler
-    })
     this.handlers = createServiceHandlers({
       db: this.db,
-      currentAccountId: () => this.currentAccountId(),
-      makeClient: () => this.makeCurrentClient(),
-      makeProvider: () => this.makeCurrentProvider(),
+      currentAccountId: () => this.activeAccountId,
+      makeClient: () => this.makeClientForActive(),
+      makeProvider: () => this.makeProviderForActive(),
       makeServerSearchProvider: () => this.makeCurrentServerSearchProvider(),
-      isSeeded: () => this.seedAccountId !== null,
-      executor: () => this.actionExecutor,
-      draftMirrorExecutor: () => this.draftMirrorExecutor,
-      outboxSender: () => this.outboxSender,
-      scheduler: () => this.snoozeScheduler,
-      syncController: () => this.syncController,
-      broadcastMailChanged: (serverSearchRequestId) => this.broadcastMailChanged(serverSearchRequestId),
+      isSeeded: () => this.activeSession()?.seeded ?? false,
+      executor: () => this.activeSession()?.actionExecutor ?? null,
+      draftMirrorExecutor: () => this.activeSession()?.draftMirrorExecutor ?? null,
+      outboxSender: () => this.activeSession()?.outboxSender ?? null,
+      scheduler: () => this.activeSession()?.snoozeScheduler ?? null,
+      syncController: () => this.activeSession()?.syncController ?? null,
+      broadcastMailChanged: (serverSearchRequestId) =>
+        this.broadcastMailChanged(this.activeAccountId, serverSearchRequestId),
       broadcastOutboxChanged: (payload) => this.emit({ kind: 'outbox-changed', payload }),
       broadcastBodyHydrationFailed: (accountId, threadId) =>
         this.emit({ kind: 'body-hydration-failed', accountId, threadId }),
@@ -178,11 +193,17 @@ export class ServiceRuntime {
       userDataPath: input.userDataPath,
       downloadsPath: input.downloadsPath
     })
+
+    for (const auth of input.accounts.accounts) this.createSession(auth.id, auth, false)
+    for (const seedId of seedIds) this.createSession(seedId, null, true)
+    this.activeAccountId = this.resolveActiveAccount(input.accounts.activeAccountId, 'initialize')
+    this.persistActiveAccount()
   }
 
   ready(): ServiceReady {
     return {
-      accountId: this.currentAccountId(),
+      activeAccountId: this.activeAccountId,
+      accountIds: [...this.accountOrder],
       schemaVersion: schemaVersion(this.db),
       background: {
         launchAtLogin: settingEnabled(this.db, 'launchAtLogin', true),
@@ -197,11 +218,19 @@ export class ServiceRuntime {
 
   async internal(operation: ServiceOperation, args: unknown[]): Promise<unknown> {
     if (operation === 'resume-auth-failures') {
-      const accountId = this.currentAccountId()
-      if (!accountId) return 0
-      const resumed = this.actionExecutor.resumeAuthFailures(accountId)
-      if (resumed > 0) void this.syncController.resumeOnlineWork()
+      const session = this.activeSession()
+      if (!session) return 0
+      const resumed = session.actionExecutor.resumeAuthFailures(session.id)
+      if (resumed > 0) void session.syncController.resumeOnlineWork()
       return resumed
+    }
+    if (operation === 'set-active-account') {
+      const accountId = args[0]
+      if (typeof accountId !== 'string' || !this.sessions.has(accountId)) {
+        throw new Error('unknown account')
+      }
+      this.setActiveAccount(accountId)
+      return this.activeAccountId
     }
     if (operation === 'mark-login-item-registered') {
       writeSetting(this.db, 'loginItemRegistered', 'true')
@@ -220,32 +249,8 @@ export class ServiceRuntime {
   }
 
   control(control: ServiceControl): void {
-    if (control.kind === 'auth') {
-      const previousAccount = this.currentAccountId()
-      this.auth = control.auth
-      const nextAccount = this.currentAccountId()
-      this.disposeGmailQuotaLimiters(new Error(control.auth ? 'authentication changed' : 'signed out'))
-      if (control.auth) this.syncController.onSignIn()
-      else this.syncController.onSignOut()
-      if (previousAccount && previousAccount !== nextAccount) this.actionRevertNotices.clear(previousAccount)
-      this.snoozeScheduler.refresh()
-      this.outboxSender.refresh()
-      this.broadcastBadge()
-      return
-    }
-    if (control.kind === 'sign-out') {
-      const previousAccount = this.currentAccountId()
-      this.auth = null
-      this.seedAccountId = null
-      this.disposeGmailQuotaLimiters(new Error('signed out'))
-      this.syncController.onSignOut()
-      if (previousAccount) {
-        this.actionRevertNotices.clear(previousAccount)
-        clearUndo(previousAccount)
-      }
-      this.snoozeScheduler.refresh()
-      this.outboxSender.refresh()
-      this.broadcastBadge()
+    if (control.kind === 'accounts') {
+      this.applyAccounts(control.accounts)
       return
     }
     if (control.kind === 'focus') {
@@ -253,12 +258,14 @@ export class ServiceRuntime {
       return
     }
     if (control.kind === 'resume') {
-      void this.syncController.resumeOnlineWork()
+      for (const session of this.sessions.values()) void session.syncController.resumeOnlineWork()
       return
     }
     if (control.kind === 'refresh-schedulers') {
-      this.snoozeScheduler.refresh()
-      this.outboxSender.refresh()
+      for (const session of this.sessions.values()) {
+        session.snoozeScheduler.refresh()
+        session.outboxSender.refresh()
+      }
       return
     }
     if (control.kind === 'stop') void this.stop()
@@ -269,10 +276,14 @@ export class ServiceRuntime {
     this.stopped = true
     historyEvents.off('newMail', this.onNewMail)
     this.handlers.stop()
-    this.syncController.stop()
-    this.actionExecutor.stop()
-    this.snoozeScheduler.stop()
-    const stopped = await Promise.allSettled([this.draftMirrorExecutor.stop(), this.outboxSender.stop()])
+    const workers: Promise<unknown>[] = []
+    for (const session of this.sessions.values()) {
+      session.syncController.stop()
+      session.actionExecutor.stop()
+      session.snoozeScheduler.stop()
+      workers.push(session.draftMirrorExecutor.stop(), session.outboxSender.stop())
+    }
+    const stopped = await Promise.allSettled(workers)
     for (const result of stopped) {
       if (result.status === 'rejected')
         this.log('error', `[shutdown] worker stop failed: ${String(result.reason)}`)
@@ -285,66 +296,247 @@ export class ServiceRuntime {
   private async start(): Promise<void> {
     await reconcileOutboxSpool(this.db, this.input.userDataPath)
     historyEvents.on('newMail', this.onNewMail)
-    this.snoozeScheduler.start()
-    this.outboxSender.start()
+    this.schedulersStarted = true
+    for (const session of this.sessions.values()) {
+      session.snoozeScheduler.start()
+      session.outboxSender.start()
+    }
     this.broadcastBadge()
-    if (this.isSignedIn()) void this.syncController.resumeOnlineWork()
+    for (const session of this.sessions.values()) void session.syncController.resumeOnlineWork()
   }
 
-  private currentAccountId(): string | null {
-    return this.seedAccountId ?? this.auth?.tokens.email ?? null
+  private activeSession(): AccountSession | null {
+    return this.activeAccountId ? (this.sessions.get(this.activeAccountId) ?? null) : null
   }
 
-  private isSignedIn(): boolean {
-    return this.seedAccountId !== null || this.auth !== null
+  private createSession(id: string, auth: ServiceAccountAuth | null, seeded: boolean): AccountSession {
+    const actionExecutor = new ActionExecutor(
+      this.db,
+      () => (this.sessions.get(id) ? id : null),
+      () => (id === this.activeAccountId ? this.actionProvider : null) ?? this.makeProviderFor(id),
+      {
+        notify: () => this.broadcastMailChanged(id),
+        notifyReverted: (accountId, actions) => this.broadcastActionsReverted(accountId, actions)
+      }
+    )
+    const draftMirrorExecutor = new DraftMirrorExecutor(
+      this.db,
+      () => (this.sessions.get(id) ? id : null),
+      () => this.makeProviderFor(id),
+      { spoolRoot: join(this.input.userDataPath, 'outbox') }
+    )
+    const outboxSender = new OutboxSender(
+      this.db,
+      () => (this.sessions.get(id) ? id : null),
+      () => this.makeProviderFor(id),
+      (payload) => this.emitForAccount(id, { kind: 'outbox-changed', payload }),
+      {
+        beforeRemote: (signal) => draftMirrorExecutor.waitForIdle(signal),
+        spoolRoot: join(this.input.userDataPath, 'outbox'),
+        cleanSpool: (outboxId) => cleanOutboxSpool(this.input.userDataPath, outboxId),
+        progress: (payload) => this.emitForAccount(id, { kind: 'outbox-progress', payload }),
+        mailChanged: () => this.broadcastMailChanged(id)
+      }
+    )
+    const snoozeScheduler = new SnoozeScheduler(
+      this.db,
+      () => (this.sessions.get(id) ? id : null),
+      () => this.broadcastMailChanged(id),
+      () => void actionExecutor.trigger()
+    )
+    const syncController = new SyncController({
+      db: this.db,
+      currentAccountId: () => (this.sessions.get(id) ? id : null),
+      isSignedIn: () => this.sessions.has(id),
+      isSeeded: () => seeded,
+      makeProvider: () => this.makeProviderFor(id),
+      // Inactive accounts always poll at the 60s background cadence (F18).
+      isForeground: () => this.focused && this.activeAccountId === id,
+      hasForegroundProviderWork: (accountId) =>
+        this.foregroundProviderWork.size > 0 || this.otherAccountWorkBusy(accountId),
+      mailRevision: () => this.mailRevision,
+      broadcastState: (payload) => this.emitForAccount(id, { kind: 'sync-state', payload }),
+      broadcastMailChanged: (reason) => this.broadcastMailChanged(id, undefined, reason),
+      getActionExecutor: () => actionExecutor,
+      getDraftMirrorExecutor: () => draftMirrorExecutor,
+      getOutboxSender: () => outboxSender,
+      getSnoozeScheduler: () => snoozeScheduler,
+      acquireIndexingSlot: (accountId) => this.indexingSlot.acquire(accountId)
+    })
+    const session: AccountSession = {
+      id,
+      auth,
+      seeded,
+      syncController,
+      actionExecutor,
+      draftMirrorExecutor,
+      outboxSender,
+      snoozeScheduler
+    }
+    this.sessions.set(id, session)
+    this.accountOrder.push(id)
+    if (!seeded) syncController.onSignIn()
+    if (this.schedulersStarted) {
+      snoozeScheduler.start()
+      outboxSender.start()
+      void syncController.resumeOnlineWork()
+    }
+    return session
   }
 
-  private makeClient(generation: number): GmailClient | null {
-    const auth = this.auth
-    if (!auth?.config) return null
-    const quotaAccount = auth.tokens.email ?? 'unknown-account'
-    let quotaLimiter = this.gmailQuotaLimiters.get(quotaAccount)
+  private teardownSession(session: AccountSession): void {
+    this.sessions.delete(session.id)
+    const orderIndex = this.accountOrder.indexOf(session.id)
+    if (orderIndex >= 0) this.accountOrder.splice(orderIndex, 1)
+    session.syncController.stop()
+    session.actionExecutor.stop()
+    session.snoozeScheduler.stop()
+    void Promise.allSettled([session.draftMirrorExecutor.stop(), session.outboxSender.stop()]).then(
+      (results) => {
+        for (const result of results) {
+          if (result.status === 'rejected')
+            this.log('error', `[accounts] worker stop failed: ${String(result.reason)}`)
+        }
+      }
+    )
+    const limiter = this.gmailQuotaLimiters.get(session.id)
+    if (limiter) {
+      limiter.dispose(new Error('account removed'))
+      this.gmailQuotaLimiters.delete(session.id)
+    }
+    this.actionRevertNotices.clear(session.id)
+    clearUndo(session.id)
+  }
+
+  private applyAccounts(state: ServiceAccountsState): void {
+    if (this.stopped) return
+    this.config = state.config
+    const currentSeedIds = [...this.sessions.values()]
+      .filter((session) => session.seeded)
+      .map((session) => session.id)
+    const wantedSeedIds = this.input.testSeed ? (state.seedAccountIds ?? currentSeedIds) : []
+    const wantedIds = new Set([...state.accounts.map((auth) => auth.id), ...wantedSeedIds])
+    for (const session of [...this.sessions.values()]) {
+      if (!wantedIds.has(session.id)) this.teardownSession(session)
+    }
+    for (const auth of state.accounts) {
+      const existing = this.sessions.get(auth.id)
+      if (!existing) {
+        this.createSession(auth.id, auth, false)
+        continue
+      }
+      const reauthenticated = existing.auth?.generation !== auth.generation
+      existing.auth = auth
+      if (reauthenticated) {
+        // A fresh interactive sign-in replaces whatever a stuck client was
+        // waiting on; new providers pick the new tokens up on creation.
+        this.gmailQuotaLimiters.get(auth.id)?.dispose(new Error('authentication changed'))
+        this.gmailQuotaLimiters.delete(auth.id)
+        void existing.syncController.resumeOnlineWork()
+      }
+    }
+    const nextActive = this.resolveActiveAccount(state.activeAccountId, 'control')
+    if (nextActive !== this.activeAccountId) this.setActiveAccount(nextActive, { force: true })
+    else this.persistActiveAccount()
+    this.broadcastBadge()
+  }
+
+  /**
+   * `initialize` prefers the persisted choice — main's snapshot may predate the
+   * last switch — while a `control` payload is the newer intent and wins.
+   */
+  private resolveActiveAccount(requested: string | null, source: 'initialize' | 'control'): string | null {
+    const valid = (candidate: string | null | undefined): string | null =>
+      candidate && this.sessions.has(candidate) ? candidate : null
+    const persisted = valid(readSetting(this.db, ACTIVE_ACCOUNT_SETTING))
+    const fallback = this.accountOrder.length > 0 ? (this.accountOrder[0] ?? null) : null
+    if (source === 'initialize') return persisted ?? valid(requested) ?? fallback
+    return valid(requested) ?? valid(this.activeAccountId) ?? persisted ?? fallback
+  }
+
+  private setActiveAccount(accountId: string | null, options: { force?: boolean } = {}): void {
+    if (!options.force && accountId === this.activeAccountId) return
+    this.activeAccountId = accountId
+    this.persistActiveAccount()
+    const session = this.activeSession()
+    // The footer must describe the account now on screen, immediately.
+    this.emit({ kind: 'sync-state', payload: session?.syncController.getState() ?? { phase: 'idle' } })
+    this.broadcastBadge()
+    if (session) {
+      void session.actionExecutor.trigger()
+      void session.draftMirrorExecutor.trigger()
+      void session.outboxSender.trigger()
+    }
+  }
+
+  private persistActiveAccount(): void {
+    if (this.activeAccountId) writeSetting(this.db, ACTIVE_ACCOUNT_SETTING, this.activeAccountId)
+    else deleteSetting(this.db, ACTIVE_ACCOUNT_SETTING)
+  }
+
+  private otherAccountWorkBusy(accountId: string): boolean {
+    for (const session of this.sessions.values()) {
+      if (session.id === accountId) continue
+      if (
+        session.actionExecutor.isRunning() ||
+        session.draftMirrorExecutor.isRunning() ||
+        session.outboxSender.isRunning()
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private makeClientFor(id: string): GmailClient | null {
+    const session = this.sessions.get(id)
+    const auth = session?.auth
+    if (!session || !auth || !this.config) return null
+    let quotaLimiter = this.gmailQuotaLimiters.get(id)
     if (!quotaLimiter) {
       quotaLimiter = new GmailQuotaLimiter({
-        unitsPerMinute: auth.config.quota_units_per_minute ?? DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE
+        unitsPerMinute: this.config.quota_units_per_minute ?? DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE
       })
-      this.gmailQuotaLimiters.set(quotaAccount, quotaLimiter)
+      this.gmailQuotaLimiters.set(id, quotaLimiter)
     }
     return new GmailClient(
-      auth.config,
+      this.config,
       auth.tokens,
-      (tokens: TokenSet) => {
-        if (generation !== this.syncController.getGeneration()) return
-        this.auth = { config: auth.config, tokens, generation: auth.generation }
-        this.emit({ kind: 'token-update', tokens, generation: auth.generation })
+      (tokens) => {
+        // Stale after removal or a newer interactive sign-in of this account.
+        if (this.sessions.get(id) !== session || session.auth !== auth) return
+        session.auth = { ...auth, tokens }
+        this.emit({ kind: 'token-update', accountId: id, tokens, generation: auth.generation })
       },
       { quotaLimiter }
     )
   }
 
-  private makeCurrentClient(): GmailClient | null {
-    return this.makeClient(this.syncController.getGeneration())
+  private makeClientForActive(): GmailClient | null {
+    return this.activeAccountId ? this.makeClientFor(this.activeAccountId) : null
   }
 
-  private makeProvider(generation: number): GmailMailProvider | null {
-    if (this.seedAccountId) return null
-    const client = this.makeClient(generation)
+  private makeProviderFor(id: string): GmailMailProvider | null {
+    if (this.sessions.get(id)?.seeded) return null
+    const client = this.makeClientFor(id)
     return client ? new GmailMailProvider(client) : null
   }
 
-  private makeCurrentProvider(): GmailMailProvider | null {
-    return this.makeProvider(this.syncController.getGeneration())
+  private makeProviderForActive(): GmailMailProvider | null {
+    return this.activeAccountId ? this.makeProviderFor(this.activeAccountId) : null
   }
 
   private makeCurrentServerSearchProvider(): ServerSearchProvider | null {
-    if (this.seedAccountId && this.input.testSeed) {
+    const session = this.activeSession()
+    if (session?.seeded && this.input.testSeed) {
       const seedPath = this.input.testSeed
+      const accountId = session.id
       return {
         listThreadIds: async (options = {}) => ({
-          threadIds: readSeedRemoteThreadIds(seedPath, options.q ?? '')
+          threadIds: readSeedRemoteThreadIds(seedPath, options.q ?? '', accountId)
         }),
         getThread: async (threadId) => {
-          const thread = readSeedThread(seedPath, threadId)
+          const thread = readSeedThread(seedPath, threadId, Date.now(), accountId)
           if (!thread) throw new GmailApiError(404, 'seed thread unavailable')
           return thread
         },
@@ -352,7 +544,7 @@ export class ServiceRuntime {
         quotaMetrics: () => ({ requests: 0, units: 0, waitMs: 0 })
       }
     }
-    return this.makeCurrentProvider()
+    return this.makeProviderForActive()
   }
 
   private disposeGmailQuotaLimiters(reason: Error): void {
@@ -371,27 +563,37 @@ export class ServiceRuntime {
     }
   }
 
-  private broadcastMailChanged(serverSearchRequestId?: string, reason?: MailChangeReason): void {
+  /** Renderer-facing events describe the active account only; others are noise there. */
+  private emitForAccount(accountId: string, event: ServiceEvent): void {
+    if (accountId !== this.activeAccountId) return
+    this.emit(event)
+  }
+
+  private broadcastMailChanged(
+    accountId: string | null,
+    serverSearchRequestId?: string,
+    reason?: MailChangeReason
+  ): void {
     this.mailRevision += 1
-    this.emit({
-      kind: 'mail-changed',
-      ...(serverSearchRequestId ? { serverSearchRequestId } : {}),
-      ...(reason ? { reason } : {})
-    })
+    if (accountId === null || accountId === this.activeAccountId) {
+      this.emit({
+        kind: 'mail-changed',
+        ...(serverSearchRequestId ? { serverSearchRequestId } : {}),
+        ...(reason ? { reason } : {})
+      })
+    }
     this.broadcastBadge()
   }
 
   private broadcastBadge(): void {
-    const accountId = this.currentAccountId()
-    const legacySeed = accountId && this.input.testMode && !hasSplitSetup(this.db, accountId)
-    this.emit({
-      kind: 'badge',
-      unreadCount: accountId
-        ? legacySeed
-          ? countInboxUnread(this.db, accountId)
-          : countNotificationEnabledUnread(this.db, accountId)
-        : 0
-    })
+    let unreadCount = 0
+    for (const session of this.sessions.values()) {
+      const legacySeed = this.input.testMode && !hasSplitSetup(this.db, session.id)
+      unreadCount += legacySeed
+        ? countInboxUnread(this.db, session.id)
+        : countNotificationEnabledUnread(this.db, session.id)
+    }
+    this.emit({ kind: 'badge', unreadCount })
   }
 
   private broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {
@@ -413,9 +615,9 @@ export class ServiceRuntime {
   private async handleTest(channel: unknown, args: unknown[]): Promise<unknown> {
     if (typeof channel !== 'string') throw new Error('invalid test channel')
     if (!this.input.testMode) throw new Error('test operations are disabled')
-    const accountId = this.currentAccountId()
+    const accountId = this.activeAccountId
     if (channel === TEST_CHANNELS.setSyncState) {
-      this.syncController.setStateForTest(args[0] as SyncState)
+      this.activeSession()?.syncController.setStateForTest(args[0] as SyncState)
       return undefined
     }
     if (channel === TEST_CHANNELS.reloadSeed) {
@@ -423,7 +625,7 @@ export class ServiceRuntime {
       const labels = args[0]
       if (labels !== undefined && !isLabelRows(labels)) throw new Error('invalid authoritative label catalog')
       const result = loadSeed(this.db, this.input.testSeed, labels === undefined ? {} : { labels })
-      if (result.labelsChanged) this.broadcastMailChanged()
+      if (result.labelsChanged) this.broadcastMailChanged(this.activeAccountId)
       return undefined
     }
     if (channel === TEST_CHANNELS.deleteThread) {
@@ -458,7 +660,7 @@ export class ServiceRuntime {
         // Keep the seam on the production invariant: body and index move together.
         refreshMessageBodyFromStore(this.db, accountId, messageId)
       })()
-      this.broadcastMailChanged()
+      this.broadcastMailChanged(this.activeAccountId)
       return undefined
     }
     if (channel === TEST_CHANNELS.setSendAsSignature) {
@@ -517,7 +719,7 @@ export class ServiceRuntime {
       const remote = args[0]
       if (!accountId || !remote || typeof remote !== 'object') throw new Error('invalid remote draft')
       await reconcileRemoteDraft(this.db, accountId, remote as Parameters<typeof reconcileRemoteDraft>[2])
-      this.broadcastMailChanged()
+      this.broadcastMailChanged(this.activeAccountId)
       return undefined
     }
     if (channel === TEST_CHANNELS.listMailboxThreadIds) {
@@ -609,7 +811,7 @@ export class ServiceRuntime {
   }
 
   private async runTestLifetimeSweep(value: unknown): Promise<unknown> {
-    const accountId = this.currentAccountId()
+    const accountId = this.activeAccountId
     if (!accountId || !isLifetimeSweepRequest(value)) throw new Error('invalid lifetime sweep request')
     if (value.resetCursor) {
       this.db
@@ -672,7 +874,7 @@ export class ServiceRuntime {
   }
 
   private async runTestFtsBackfill(value: unknown): Promise<unknown> {
-    const accountId = this.currentAccountId()
+    const accountId = this.activeAccountId
     if (!accountId || !isFtsBackfillRequest(value)) throw new Error('invalid FTS backfill request')
     if (value.resetIndex) {
       // Reproduce the manual revision-18 upgrade state: stored messages with an
@@ -725,7 +927,7 @@ export class ServiceRuntime {
   }
 
   private testSearchIndexStats(value: unknown): unknown {
-    const accountId = this.currentAccountId()
+    const accountId = this.activeAccountId
     if (!accountId || !isSearchIndexStatsRequest(value)) throw new Error('invalid search stats request')
     const runsPerQuery = value.runsPerQuery ?? 1
     const limit = value.limit ?? 50
@@ -748,7 +950,7 @@ export class ServiceRuntime {
   }
 
   private async runTestExistenceSweep(value: unknown): Promise<unknown> {
-    const accountId = this.currentAccountId()
+    const accountId = this.activeAccountId
     if (!accountId || !isExistenceSweepRequest(value)) throw new Error('invalid existence sweep request')
     const provider: Pick<MailProvider, 'listThreadIds' | 'getThread'> = {
       listThreadIds: async (options = {}) => {
@@ -763,7 +965,7 @@ export class ServiceRuntime {
       }
     }
     const result = await reconcileThreadExistence(this.db, accountId, provider)
-    if (result?.deletedThreadIds.length) this.broadcastMailChanged()
+    if (result?.deletedThreadIds.length) this.broadcastMailChanged(this.activeAccountId)
     return result
   }
 

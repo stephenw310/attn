@@ -166,7 +166,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const activeComposerDraftIdRef = useRef<string | null>(null)
   const inlineComposerRef = useRef<ComposerHandle | null>(null)
 
-  const activeAccount = status.email ?? null
+  // The normalized account id — the key the utility uses for revert notices,
+  // command usage, and every account-scoped row. `status.email` is display-only.
+  const activeAccount = status.activeAccountId ?? status.email ?? null
   const splits = useSplits(activeAccount)
   const setActiveSplitForFocusRef = useRef(splits.setActiveSplitId)
   setActiveSplitForFocusRef.current = splits.setActiveSplitId
@@ -630,6 +632,32 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       if (result?.status.signedIn) serverSearch.run()
     })
   }, [reconnectGoogle, serverSearch.run])
+
+  // Adding an account is the same OAuth flow as reconnecting: an existing
+  // address refreshes its tokens, a new one joins the roster and becomes
+  // active (F18). The account-change reset effect below handles the swap.
+  const addAccount = useCallback(() => {
+    void reconnectGoogle()
+  }, [reconnectGoogle])
+  const switchAccount = useCallback(
+    (accountId: string) => {
+      if (!window.attn || accountId === status.activeAccountId) return
+      void window.attn.auth
+        .setActiveAccount(accountId)
+        .then(onStatus)
+        .catch(() => void showToast('Could not switch accounts'))
+    },
+    [onStatus, showToast, status.activeAccountId]
+  )
+  const accountCommands = useMemo(
+    () => ({
+      accounts: status.accounts,
+      activeAccountId: status.activeAccountId,
+      switchTo: switchAccount,
+      add: addAccount
+    }),
+    [addAccount, status.accounts, status.activeAccountId, switchAccount]
+  )
 
   const saveActiveViewRecord = useCallback(() => {
     const current = activeViewRef.current
@@ -1397,7 +1425,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     openReply,
     showToast,
     reopenUndoDraft,
-    splitCommands
+    splitCommands,
+    accountCommands
   })
 
   useKeyboardDispatch({
@@ -1433,6 +1462,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         onOpenOutbox={openOutbox}
         onToggleSidebar={toggleSidebar}
         onManageSplits={() => setSplitRulesOpen(true)}
+        onSwitchAccount={switchAccount}
+        onAddAccount={addAccount}
       />
 
       <div

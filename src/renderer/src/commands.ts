@@ -64,6 +64,7 @@ export const COMMAND_SPECS = {
     context: 'list'
   },
   'split.manage': { title: 'Manage inbox splits', context: 'global' },
+  'account.add': { title: 'Add account…', context: 'global' },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
     title: 'Use Dark theme',
@@ -181,7 +182,7 @@ export const COMMAND_SPECS = {
 } as const satisfies Record<string, CommandSpec>
 
 export type StaticCommandId = keyof typeof COMMAND_SPECS
-export type CommandId = StaticCommandId | `split.goto:${string}`
+export type CommandId = StaticCommandId | `split.goto:${string}` | `account.switch:${string}`
 
 export interface CommandArgumentValue {
   label: string
@@ -237,6 +238,22 @@ export function createDynamicSplitCommand(
     title,
     ...(shortcut ? { shortcut } : {}),
     context: 'navigation',
+    run
+  }
+}
+
+/** Switch to a signed-in account (F18). `Mod+1..9` rides the switcher order. */
+export function createAccountSwitchCommand(
+  accountId: string,
+  title: string,
+  run: () => void,
+  shortcut?: string
+): Command {
+  return {
+    id: `account.switch:${accountId}`,
+    title,
+    ...(shortcut ? { shortcut } : {}),
+    context: 'global',
     run
   }
 }

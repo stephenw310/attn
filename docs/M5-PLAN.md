@@ -88,10 +88,10 @@ already takes an account id. What remains:
 
 These are the load-bearing choices from §9 #21(g)(h); every task below assumes them.
 
-- **The utility process owns the roster and the active pointer.** The account list (ordered), each
-  account's auth state, and `activeAccountId` live in the utility, persisted in SQLite (`accounts.position`,
-  `__app__` settings key `activeAccountId`). Main relays token material; the renderer only ever *asks* to
-  switch.
+- **The utility process owns the active pointer; main owns the roster.** Main holds the ordered roster in
+  the encrypted token file and relays it whole on every change; the utility persists `activeAccountId` as
+  an `__app__` setting, and at initialize the persisted choice wins over main's snapshot so a crash-restart
+  lands on the last switch. The renderer only ever *asks* to switch.
 - **One sync session per account.** `SyncController` stays almost exactly as it is — one instance *per
   account* held by a small registry, instead of one instance reused across sign-ins. Its `generation`
   guard becomes per-account-session. Per-account cursors already exist in `sync_state`.
@@ -113,10 +113,10 @@ These are the load-bearing choices from §9 #21(g)(h); every task below assumes 
 
 | Task | State | Blocks |
 |---|---|---|
-| A1 token roster + auth sessions (main) | **planned** | everything below |
-| A2 utility runtime: session-per-account + executors | **planned** | A3, A4, A5 |
-| A3 active-account switching: tagging, shell, switcher UI | **planned** | A4, A5, A6 |
-| A4 notifications, badge, focus routing | **planned** | nothing |
+| A1 token roster + auth sessions (main) | **done**, 2026-08-28 | nothing |
+| A2 utility runtime: session-per-account + executors | **mostly done**, 2026-08-28 — liveness unit tests + slot preemption remain | A4, A5 |
+| A3 active-account switching: shell + switcher UI | **done**, 2026-08-28 — per-account last-view restore remains | A4, A5, A6 |
+| A4 notifications, badge, focus routing | **planned** (badge sum shipped with A2) | nothing |
 | A5 composer/outbox/reconnect per-account correctness | **planned** | nothing |
 | A6 remove account | **planned** | nothing |
 | A7 multi-account perf + isolation audit | **planned** | v1 sign-off |
@@ -124,11 +124,37 @@ These are the load-bearing choices from §9 #21(g)(h); every task below assumes 
 A1 → A2 → A3 is a strict sequence; A4, A5, A6 are independent of each other after A3; A7 closes the
 milestone.
 
+### What the 2026-08-28 switch-account slice shipped, and where it deviated
+
+Add account, switch account (menu / palette / `Mod+1..9`), per-account sign-out with survivor fallback,
+per-account sync sessions with 60s background polling for inactive accounts, badge summed across the
+roster, durable active-account persistence, multi-account seed fixtures, and the `accounts.spec.ts` +
+`runtime.test.ts` coverage. Deviations from the task text above, all deliberate:
+
+- **No schema bump.** Switcher order lives in the encrypted token file (a v2 ordered roster) beside the
+  tokens it orders, so `accounts.position` and the 21 → 22 DDL were unnecessary. The schema stays at 21.
+- **Executors were not rewritten to iterate accounts** — the runtime holds one executor *set per account*,
+  each bound through its existing `accountId()` callback. The classes stay single-account; cross-account
+  liveness holds by construction. The A2 "Done when" liveness tests (inactive-account send deadline,
+  inactive snooze return, offline drain of a non-active queue) still need to be written against this shape.
+- **Events are filtered, not tagged.** Renderer-facing events (`sync-state`, `mail-changed`, `outbox-*`)
+  describe only the active account — the runtime drops the rest — while `token-update`,
+  `actions-reverted`, `body-hydration-failed`, and `notification-candidates` carry `account_id`. The
+  renderer's existing account-change reset owns the swap; no remount key was needed.
+- **The indexing slot serializes without mid-run preemption.** A waiting active account is granted before
+  waiting inactive ones, but a running inactive chain finishes or pauses on its own retry ladder first.
+  Interactive work still preempts everything through the pacing hooks, which now also yield to other
+  accounts' foreground provider work and executors. Page-boundary preemption stays open under A2.
+- **`accounts:setActive` resolves through the utility** (an internal op, not a broadcast), so its response
+  guarantees every later renderer read is answered for the new account — the race the tagging design
+  existed to prevent.
+
 ---
 
 ### A1 — Token roster and auth sessions (main process)
 
-**Status: planned.** Spec F1, F18.
+**Status: done, 2026-08-28** (shipped with the switch-account slice; the `accounts` table is untouched —
+see the deviations note above). Spec F1, F18.
 
 Replace the single-`TokenSet` world with an account roster, without touching the utility yet (the runtime
 keeps receiving one `ServiceAuth`-shaped session per account through the existing control channel until A2
@@ -139,9 +165,9 @@ replaces it — this PR keeps today's single-active behavior end-to-end green).
   set without an email is dropped with a logged warning — it was unusable anyway) and rewrites the file
   once. Use `normalizeEmailKey` (`src/shared/address.ts`) as the map key everywhere; the display string
   keeps its original casing in the `TokenSet`.
-- `accounts` table gains `position INTEGER NOT NULL DEFAULT 0`; schema version 21 → 22.
-  Manual dogfood DDL: `ALTER TABLE accounts ADD COLUMN position INTEGER NOT NULL DEFAULT 0;`
-  then `PRAGMA user_version = 22;` in one `BEGIN IMMEDIATE … COMMIT`.
+- ~~`accounts` table gains `position INTEGER NOT NULL DEFAULT 0`~~ — dropped in implementation: switcher
+  order is the token-file roster order, so there is no schema change and no dogfood DDL for this milestone
+  so far.
 - `index.ts`: `authGeneration` becomes a per-account counter (`Map<accountId, number>`); `signIn()`
   becomes **add-or-refresh** — an existing normalized address updates its tokens in place, a new one
   appends at the end of the order; nothing signs out. Token-update events from the utility carry
@@ -161,7 +187,11 @@ existing e2e suite passes with the reshaped `AuthStatus`.
 
 ### A2 — Utility runtime: one sync session per account, executors drain all accounts
 
-**Status: planned.** Spec F2, F18, §9 #21(b)(g).
+**Status: mostly done, 2026-08-28** — shipped as per-account executor sets (deviations note above). Still
+open from "Done when": the mock-provider liveness tests (a queued send on the *inactive* account leaving
+on deadline, a snooze return firing on the inactive account, an offline queue on a non-active account
+draining after relaunch, add-account leaving the first account's cursors byte-identical) and indexing-slot
+preemption at a page boundary. Spec F2, F18, §9 #21(b)(g).
 
 - Protocol: the `auth` control message becomes `accounts` — the full roster (config + token sets +
   per-account generations) plus `activeAccountId`. `sign-out` becomes per-account removal-from-roster
@@ -200,7 +230,10 @@ only).
 
 ### A3 — Active-account switching: IPC tagging, renderer shell, switcher UI
 
-**Status: planned.** Spec F18, F3, F5, F15, §7, §9 #21(h).
+**Status: done, 2026-08-28** — with events filtered active-only instead of tagged (deviations note above).
+Still open: per-account last-view/selection restore on switch (a switch currently keeps the view kind and
+resets selection), the per-account one-line sync status in the account menu, the reconnect mark (A5 owns
+its state), and the §7 100ms switch measurement (A7's perf job). Spec F18, F3, F5, F15, §7, §9 #21(h).
 
 - Tag every mail-facing read result and broadcast with `accountId` (`mail:changed`, `sync:state`,
   `outbox:changed`/`outbox:progress`, list/conversation/draft/outbox/search results). The renderer holds

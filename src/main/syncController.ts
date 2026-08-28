@@ -41,6 +41,14 @@ interface SyncControllerContext {
   getDraftMirrorExecutor: () => DraftMirrorExecutor | null
   getOutboxSender: () => OutboxSender | null
   getSnoozeScheduler: () => SnoozeScheduler | null
+  /**
+   * Gate for the Gmail-heavy historical chain (lifetime sweep → attachment
+   * flags → split metadata). With several accounts, the runtime serializes
+   * these across accounts, active account first (F18); the resolved release
+   * callback must be called exactly once when the chain settles. Absent → run
+   * immediately (single-account tests).
+   */
+  acquireIndexingSlot?: (accountId: string) => Promise<() => void>
 }
 
 interface FtsBackfillRun {
@@ -418,6 +426,30 @@ export class SyncController {
     this.lifetimeRetry.clear()
     this.lifetimeRunning = true
     const lifetimeRunId = ++this.lifetimeRunId
+    const acquireSlot = this.context.acquireIndexingSlot
+    if (!acquireSlot) {
+      // No cross-account gate configured: start synchronously, as always.
+      this.runLifetimeChain(accountId, provider, generation, lifetimeRunId, () => {})
+      return
+    }
+    void acquireSlot(accountId).then((release) => {
+      // The session can end while this account waited its turn for the slot.
+      if (this.stopped || generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) {
+        if (lifetimeRunId === this.lifetimeRunId) this.lifetimeRunning = false
+        release()
+        return
+      }
+      this.runLifetimeChain(accountId, provider, generation, lifetimeRunId, release)
+    })
+  }
+
+  private runLifetimeChain(
+    accountId: string,
+    provider: GmailMailProvider,
+    generation: number,
+    lifetimeRunId: number,
+    releaseSlot: () => void
+  ): void {
     let failed = false
     console.log(`[sync] lifetime header sweep started for ${accountId}`)
     const active = (): boolean => generation === this.generation && lifetimeRunId === this.lifetimeRunId
@@ -531,6 +563,9 @@ export class SyncController {
           this.scheduleLifetimeRetry(accountId, provider, generation)
         }
       })
+      // Release on every settle — completion, pause, or cancellation. A paused
+      // chain re-acquires when its retry ladder re-enters startLifetimeSweep.
+      .finally(releaseSlot)
   }
 
   private startFtsBackfill(accountId: string, generation: number): void {

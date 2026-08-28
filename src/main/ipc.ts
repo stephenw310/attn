@@ -27,6 +27,7 @@ export interface IpcContext {
   authStatus: () => AuthStatus
   signIn: () => Promise<AuthSignInResult>
   signOut: () => AuthStatus
+  setActiveAccount: (accountId: string) => Promise<AuthStatus>
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
   setThemePreference: (preference: ThemePreference) => void
@@ -38,6 +39,7 @@ export function registerIpc(context: IpcContext): () => void {
     IPC_CHANNELS.authGetStatus,
     IPC_CHANNELS.authSignIn,
     IPC_CHANNELS.authSignOut,
+    IPC_CHANNELS.accountsSetActive,
     IPC_CHANNELS.draftPickAttachments,
     IPC_CHANNELS.mailDownloadAttachment,
     IPC_CHANNELS.mailTakePendingFocus,
@@ -47,6 +49,10 @@ export function registerIpc(context: IpcContext): () => void {
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
   handle(IPC_CHANNELS.authSignOut, () => context.signOut())
+  handle(IPC_CHANNELS.accountsSetActive, (_event, accountId) => {
+    if (typeof accountId !== 'string' || accountId.length === 0) throw new Error('invalid account id')
+    return context.setActiveAccount(accountId)
+  })
   handle(IPC_CHANNELS.settingsSetTheme, (_event, preference) => {
     if (!isThemePreference(preference)) throw new Error('invalid theme preference')
     context.setThemePreference(preference)

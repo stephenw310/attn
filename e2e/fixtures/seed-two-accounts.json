@@ -1,0 +1,83 @@
+{
+  "accounts": [
+    {
+      "account": "primary@attn.test",
+      "labels": [
+        { "id": "Label_A1", "name": "receipts", "type": "user" },
+        { "id": "Label_A2", "name": "engineering", "type": "user" }
+      ],
+      "threads": [
+        {
+          "id": "t-alpha-roadmap",
+          "messages": [
+            {
+              "id": "m-alpha-roadmap",
+              "labelIds": ["INBOX", "UNREAD"],
+              "receivedDaysAgo": 0,
+              "receivedAt": "09:41",
+              "from": "Maya Lin <maya@example.com>",
+              "to": "primary@attn.test",
+              "subject": "Alpha roadmap review",
+              "snippet": "The alpha roadmap is ready for review.",
+              "bodyText": "Here is the first draft of the alpha roadmap."
+            }
+          ]
+        },
+        {
+          "id": "t-alpha-invoice",
+          "messages": [
+            {
+              "id": "m-alpha-invoice",
+              "labelIds": ["INBOX"],
+              "receivedDaysAgo": 1,
+              "receivedAt": "16:05",
+              "from": "Billing <billing@example.com>",
+              "to": "primary@attn.test",
+              "subject": "Alpha invoice attached",
+              "snippet": "Your March invoice is attached.",
+              "bodyText": "Invoice body for the primary account."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "account": "second@attn.test",
+      "labels": [{ "id": "Label_B1", "name": "launches", "type": "user" }],
+      "threads": [
+        {
+          "id": "t-beta-launch",
+          "messages": [
+            {
+              "id": "m-beta-launch",
+              "labelIds": ["INBOX", "UNREAD"],
+              "receivedDaysAgo": 0,
+              "receivedAt": "08:12",
+              "from": "Priya Raman <priya@example.com>",
+              "to": "second@attn.test",
+              "subject": "Beta launch checklist",
+              "snippet": "The beta launch checklist needs an owner.",
+              "bodyText": "Checklist body for the second account."
+            }
+          ]
+        },
+        {
+          "id": "t-beta-digest",
+          "messages": [
+            {
+              "id": "m-beta-digest",
+              "labelIds": ["INBOX", "UNREAD"],
+              "receivedDaysAgo": 1,
+              "receivedAt": "07:30",
+              "from": "Weekly Digest <digest@example.com>",
+              "to": "second@attn.test",
+              "subject": "Beta weekly digest",
+              "snippet": "What shipped in beta this week.",
+              "bodyText": "Digest body for the second account."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

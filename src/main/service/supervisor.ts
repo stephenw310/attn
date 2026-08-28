@@ -6,7 +6,7 @@ import type { TokenSet } from '../auth/googleAuth'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import type {
   MainToServiceMessage,
-  ServiceAuth,
+  ServiceAccountsState,
   ServiceControl,
   ServiceEvent,
   ServiceInitialize,
@@ -139,7 +139,9 @@ export class ServiceSupervisor {
   }
 
   control(payload: ServiceControl): void {
-    if (payload.kind === 'auth') this.initialize.auth = payload.auth
+    // Mirror auth and focus state into the initialize payload so a restarted
+    // utility resumes from the latest roster rather than the boot-time one.
+    if (payload.kind === 'accounts') this.initialize.accounts = payload.accounts
     if (payload.kind === 'focus') this.initialize.focused = payload.focused
     if (!this.child || !this.readyState) {
       this.queueControl(payload)
@@ -152,17 +154,22 @@ export class ServiceSupervisor {
     }
   }
 
-  setAuth(auth: ServiceAuth | null): void {
-    this.control({ kind: 'auth', auth })
+  setAccounts(accounts: ServiceAccountsState): void {
+    this.control({ kind: 'accounts', accounts })
   }
 
-  cacheTokens(tokens: TokenSet): void {
-    if (this.initialize.auth) this.initialize.auth = { ...this.initialize.auth, tokens }
+  cacheTokens(accountId: string, tokens: TokenSet): void {
+    this.initialize.accounts = {
+      ...this.initialize.accounts,
+      accounts: this.initialize.accounts.accounts.map((account) =>
+        account.id === accountId ? { ...account, tokens } : account
+      )
+    }
   }
 
-  signOut(): void {
-    this.initialize.auth = null
-    this.control({ kind: 'sign-out' })
+  /** Keep the restart snapshot's active pointer in step with a completed switch. */
+  noteActiveAccount(activeAccountId: string | null): void {
+    this.initialize.accounts = { ...this.initialize.accounts, activeAccountId }
   }
 
   async crashForTest(): Promise<ServiceReady> {
@@ -368,10 +375,8 @@ export class ServiceSupervisor {
   }
 
   private queueControl(payload: ServiceControl): void {
-    if (payload.kind === 'auth' || payload.kind === 'sign-out') {
-      this.queuedControls = this.queuedControls.filter(
-        (queued) => queued.kind !== 'auth' && queued.kind !== 'sign-out'
-      )
+    if (payload.kind === 'accounts') {
+      this.queuedControls = this.queuedControls.filter((queued) => queued.kind !== 'accounts')
     } else if (payload.kind === 'focus') {
       this.queuedControls = this.queuedControls.filter((queued) => queued.kind !== 'focus')
     } else if (this.queuedControls.some((queued) => queued.kind === payload.kind)) {

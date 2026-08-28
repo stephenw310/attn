@@ -160,6 +160,11 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   boot,
   page
 }, testInfo) => {
+  // Pointer drag + two screenshots + a full relaunch put this test right at
+  // the 30s budget under software rendering — it times out mid-restore there
+  // on unmodified main (verified 2026-08-28). Triple the budget; fast machines
+  // finish long before it matters.
+  testInfo.slow()
   await openSplitRules(page)
   await expect(page.getByTestId('split-rule')).toHaveCount(5)
 

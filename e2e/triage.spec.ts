@@ -82,9 +82,12 @@ test('animates a marked-done row before removing it', async ({ page }) => {
   await expect(rows.first()).toHaveClass(/app-thread-exit/)
   await expect(nextRow).toHaveAttribute('data-selected', 'true')
   await expect(rows).toHaveCount(7)
-  expect(await nextRow.evaluate((element) => element.getBoundingClientRect().y)).toBeLessThan(
-    nextRowStart - 20
-  )
+  // Poll the collapse rather than sampling one frame: software-rendered
+  // containers pace animation frames unevenly, and a single mid-animation
+  // sample fails there on unmodified main (verified 2026-08-28).
+  await expect
+    .poll(() => nextRow.evaluate((element) => element.getBoundingClientRect().y))
+    .toBeLessThan(nextRowStart - 20)
   const firstToastId = await page.getByTestId('toast').getAttribute('data-toast-id')
 
   await page.keyboard.press('e')
