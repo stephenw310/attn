@@ -807,8 +807,8 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
 
 **Status: done, completed 2026-08-27.**
 
-**Depends on:** T22 · **Unblocks:** T28's digit completions, T29's remaining-split counts ·
-**Spec:** F11, F12 (the per-split slice), §5 `Tab`, `Shift+Tab`, `←`, `→`, and `G` `1`–`9`
+**Depends on:** T22 · **Unblocks:** T28's footer guide, T29's remaining-split counts ·
+**Spec:** F11, F12 (the per-split slice), §5 `Tab`, `Shift+Tab`, `←`, and `→`
 
 ### Design (decided)
 
@@ -1006,7 +1006,7 @@ one-time setup marker. One parameterized SQLite classifier now owns ordered assi
 exact counts, notification eligibility, badge counts, and notification click-through. Calendar, GitHub, and
 Newsletters start as editable presets; changes and deletions persist, and Restore is explicit.
 
-The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, `→`, configured `G` digits,
+The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, and `→`,
 per-split selection and scroll, revision-aware page caching, quiet zero counts, and an overflow menu past eight
 visible tabs. Outside Inbox, `Tab` returns to Inbox. The rule manager creates, renames, edits, reorders with
 leading drag handles, deletes, restores, and configures notifications.
@@ -1031,8 +1031,8 @@ budget. A cold split switch measured 44 ms, and revision-valid cached switches m
 
 - The footer's default state is one non-wrapping line of commands relevant to the active view, derived from
   the registry rather than from a hand-kept list in `MailFooter`.
-- A pending chord prefix replaces that line with the valid completions, again from the registry: fixed
-  mailbox letters from T22, and split digits from T27's configured order.
+- A pending chord prefix replaces that line with the visible completions from the registry. The `G` guide
+  shows fixed mailbox letters from T22. Split navigation stays on `Tab` and `Shift+Tab`.
 - **Reconcile the two timeouts before writing UI.** Dispatch holds a pending chord for 500 ms
   (`useKeyboardDispatch.ts:56`) and §9 #14 wants the guide visible for 2 to 3 seconds. A guide that outlives
   the chord it describes is a lie the user acts on. Use one number in both places. T28 initially shipped at
@@ -1043,8 +1043,8 @@ budget. A cold split switch measured 44 ms, and revision-valid cached switches m
 
 ### Testing
 
-- **Unit:** completions derived from the registry for each context, including a view with no split digits.
-- **E2e (seeded):** the default line per view; `G` showing mailbox letters and split digits; dismissal by
+- **Unit:** completions derived from the registry for each context, with dynamic split commands excluded.
+- **E2e (seeded):** the default line per view; `G` showing fixed mailbox letters; dismissal by
   each of the four routes; the raised chord window still completing `g i` and still expiring.
 - **Screenshot artifact:** `chord-guide.png`, added to the `AGENTS.md` list.
 

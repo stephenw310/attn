@@ -30,7 +30,8 @@ export const COMMAND_SPECS = {
     title: 'Open command palette',
     shortcut: 'Mod+K',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    footer: { list: { id: 'palette', label: 'command palette', order: 50 } }
   },
   'navigate.next': {
     title: 'Next item',
@@ -224,7 +225,7 @@ export const COMMAND_SPECS = {
     title: 'New message',
     shortcut: 'c',
     context: 'global',
-    footer: { list: { id: 'compose', label: 'compose', order: 5 } }
+    footer: { list: { id: 'compose', label: 'compose', order: 40 } }
   },
   'composer.reply': {
     title: 'Reply',
@@ -289,7 +290,6 @@ export const COMMAND_SPECS = {
     shortcut: 'h',
     context: 'mail',
     footer: {
-      list: { id: 'snooze', label: 'snooze', order: 40 },
       reader: { id: 'snooze', label: 'snooze', order: 30 }
     }
   },
@@ -302,7 +302,6 @@ export const COMMAND_SPECS = {
     shortcut: 'v',
     context: 'mail',
     footer: {
-      list: { id: 'move', label: 'move', order: 50 },
       reader: { id: 'move', label: 'move', order: 40 }
     }
   },
@@ -312,7 +311,6 @@ export const COMMAND_SPECS = {
     shortcut: 'z',
     context: 'global',
     footer: {
-      list: { id: 'undo', label: 'undo', order: 60 },
       outbox: { id: 'undo', label: 'undo', order: 40 }
     }
   }
@@ -364,24 +362,10 @@ export function createCommand(
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
 }
 
-export function createDynamicSplitCommand(
-  splitId: string,
-  title: string,
-  run: () => void,
-  shortcut?: string
-): Command {
+export function createDynamicSplitCommand(splitId: string, title: string, run: () => void): Command {
   return {
     id: `split.goto:${splitId}`,
     title,
-    ...(shortcut
-      ? {
-          shortcut,
-          chordGuide: {
-            label: title.replace(/^Go to:\s*/, ''),
-            order: 100 + Number(shortcut.split(' ').at(-1))
-          }
-        }
-      : {}),
     context: 'navigation',
     run
   }

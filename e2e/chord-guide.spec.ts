@@ -16,10 +16,9 @@ async function footerHintIds(page: import('@playwright/test').Page): Promise<(st
 
 test('shows the minimal registry-derived footer for each keyboard context', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
-  await expect
-    .poll(() => footerHintIds(page))
-    .toEqual(['compose', 'navigate', 'open', 'done', 'snooze', 'move', 'undo'])
+  await expect.poll(() => footerHintIds(page)).toEqual(['navigate', 'open', 'done', 'compose', 'palette'])
   await expect(page.getByTestId('footer-shortcut-compose')).toBeInViewport()
+  await expect(page.getByTestId('footer-shortcut-palette')).toContainText('command palette')
 
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
@@ -35,7 +34,7 @@ test('shows the minimal registry-derived footer for each keyboard context', asyn
   await expect(page.getByTestId('view-title')).toHaveText('Drafts')
   await expect
     .poll(() => footerHintIds(page))
-    .toEqual(['compose', 'navigate', 'open', 'delete-draft', 'undo'])
+    .toEqual(['navigate', 'open', 'delete-draft', 'compose', 'palette'])
   await expect(page.getByTestId('footer-shortcut-delete-draft')).toBeInViewport()
 
   await page.keyboard.press('g')
@@ -77,12 +76,7 @@ test('guides G completions and clears on every dismissal route', async ({ page }
       ['h', 'HSnoozed'],
       ['p', 'PSpam'],
       ['r', 'RTrash'],
-      ['o', 'OOutbox'],
-      ['1', '1Calendar'],
-      ['2', '2GitHub'],
-      ['3', '3Newsletters'],
-      ['4', '4Important'],
-      ['5', '5Other']
+      ['o', 'OOutbox']
     ])
 
   const artifactDirectory = join(__dirname, '.artifacts')
@@ -174,9 +168,9 @@ test('cancels pending chords before overlays stop keyboard propagation', async (
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')
 })
 
-test('keeps the footer height fixed when shortcut content overflows', async ({ app, page }) => {
+test('keeps the footer height fixed when reader shortcuts overflow', async ({ app, page }) => {
   await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.setContentSize(700, 420)
+    BrowserWindow.getAllWindows()[0]?.setContentSize(900, 420)
   })
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
   const footer = page.getByTestId('mail-footer')
@@ -195,21 +189,10 @@ test('keeps the footer height fixed when shortcut content overflows', async ({ a
         scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
       }))
     )
-    .toEqual({ overflows: true, scrollbarHeight: 0 })
-
-  await shortcuts.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth
-  })
-  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+    .toEqual({ overflows: false, scrollbarHeight: 0 })
   await page.keyboard.press('Escape')
   await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)
 
-  await page.keyboard.press('g')
-  await expect(page.getByTestId('footer-chord-guide')).toBeVisible()
-  await shortcuts.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth
-  })
-  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
   await page.getByTestId('thread-row').first().click()
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)
@@ -224,4 +207,12 @@ test('keeps the footer height fixed when shortcut content overflows', async ({ a
       }))
     )
     .toEqual({ overflows: true, scrollbarHeight: 0 })
+
+  await shortcuts.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth
+  })
+  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
+  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)
 })

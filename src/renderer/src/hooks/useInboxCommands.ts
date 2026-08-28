@@ -116,13 +116,8 @@ export function useInboxCommands(options: Options): void {
                     createCommand('split.next', splitCommands.next)
                   ]
                 : []),
-              ...splitCommands.goTo.map((split, index) =>
-                createDynamicSplitCommand(
-                  split.id,
-                  `Go to: ${split.name}`,
-                  split.run,
-                  index < 9 ? `g ${index + 1}` : undefined
-                )
+              ...splitCommands.goTo.map((split) =>
+                createDynamicSplitCommand(split.id, `Go to: ${split.name}`, split.run)
               )
             ]
           : []),

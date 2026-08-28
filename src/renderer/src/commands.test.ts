@@ -316,14 +316,18 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('m'), 'list')).toBeNull()
   })
 
-  test('dispatches configured split chords through dynamic command ids', () => {
+  test('keeps dynamic split commands palette-only', () => {
     useCommands([
-      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}, 'g 2'),
-      createDynamicSplitCommand('custom:news', 'Go to: News', () => {}, 'g 6')
+      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}),
+      createDynamicSplitCommand('custom:news', 'Go to: News', () => {})
     ])
-    expect(isChordPrefix('g', 'list')).toBe(true)
-    expect(findCommandByShortcut('g 2', 'list')?.id).toBe('split.goto:preset:github')
-    expect(findCommandByShortcut('g 6', 'reader')?.id).toBe('split.goto:custom:news')
+    expect(listCommands().map((command) => command.id)).toEqual([
+      'split.goto:preset:github',
+      'split.goto:custom:news'
+    ])
+    expect(isChordPrefix('g', 'list')).toBe(false)
+    expect(findCommandByShortcut('g 2', 'list')).toBeNull()
+    expect(findCommandByShortcut('g 6', 'reader')).toBeNull()
   })
 
   test('derives ordered chord-guide completions from active registry commands', () => {
@@ -331,20 +335,18 @@ describe('keyboard dispatch', () => {
       createCommand('view.trash', () => {}),
       createCommand('view.inbox', () => {}),
       createCommand('view.drafts', () => {}),
-      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}, 'g 2'),
-      createDynamicSplitCommand('custom:news', 'Go to: News', () => {}, 'g 6')
+      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}),
+      createDynamicSplitCommand('custom:news', 'Go to: News', () => {})
     ])
 
     expect(listChordCompletions('g', 'list')).toEqual([
       { commandId: 'view.inbox', key: 'i', label: 'Inbox' },
       { commandId: 'view.drafts', key: 'd', label: 'Drafts' },
-      { commandId: 'view.trash', key: 'r', label: 'Trash' },
-      { commandId: 'split.goto:preset:github', key: '2', label: 'GitHub' },
-      { commandId: 'split.goto:custom:news', key: '6', label: 'News' }
+      { commandId: 'view.trash', key: 'r', label: 'Trash' }
     ])
   })
 
-  test('omits split digits from a chord guide when no split command is active', () => {
+  test('lists only registered fixed-mailbox completions', () => {
     useCommands([createCommand('view.inbox', () => {}), createCommand('view.allMail', () => {})])
     expect(listChordCompletions('g', 'reader')).toEqual([
       { commandId: 'view.inbox', key: 'i', label: 'Inbox' },
@@ -354,6 +356,7 @@ describe('keyboard dispatch', () => {
 
   test('derives minimal footer hints and groups paired navigation commands', () => {
     useCommands([
+      createCommand('palette.open', () => {}),
       createCommand('composer.new', () => {}),
       createCommand('navigate.next', () => {}),
       createCommand('navigate.previous', () => {}),
@@ -364,13 +367,11 @@ describe('keyboard dispatch', () => {
       createCommand('triage.undo', () => {})
     ])
     expect(listFooterHints('list')).toEqual([
-      { id: 'compose', label: 'compose', order: 5, shortcuts: ['c'] },
       { id: 'navigate', label: 'navigate', order: 10, shortcuts: ['j', 'k'] },
       { id: 'open', label: 'open', order: 20, shortcuts: ['Enter'] },
       { id: 'done', label: 'done', order: 30, shortcuts: ['e'] },
-      { id: 'snooze', label: 'snooze', order: 40, shortcuts: ['h'] },
-      { id: 'move', label: 'move', order: 50, shortcuts: ['v'] },
-      { id: 'undo', label: 'undo', order: 60, shortcuts: ['z'] }
+      { id: 'compose', label: 'compose', order: 40, shortcuts: ['c'] },
+      { id: 'palette', label: 'command palette', order: 50, shortcuts: ['Mod+K'] }
     ])
   })
 
@@ -399,6 +400,7 @@ describe('keyboard dispatch', () => {
     disposeReader()
 
     useCommands([
+      createCommand('palette.open', () => {}),
       createCommand('composer.new', () => {}),
       createCommand('navigate.next', () => {}),
       createCommand('navigate.previous', () => {}),
@@ -407,7 +409,6 @@ describe('keyboard dispatch', () => {
       createCommand('triage.undo', () => {})
     ])
     expect(listFooterHints('list')).toEqual([
-      { id: 'compose', label: 'compose', order: 5, shortcuts: ['c'] },
       { id: 'navigate', label: 'navigate', order: 10, shortcuts: ['j', 'k'] },
       { id: 'open', label: 'open', order: 20, shortcuts: ['Enter'] },
       {
@@ -416,7 +417,8 @@ describe('keyboard dispatch', () => {
         order: 30,
         shortcuts: ['Mod+Shift+D']
       },
-      { id: 'undo', label: 'undo', order: 60, shortcuts: ['z'] }
+      { id: 'compose', label: 'compose', order: 40, shortcuts: ['c'] },
+      { id: 'palette', label: 'command palette', order: 50, shortcuts: ['Mod+K'] }
     ])
   })
 
