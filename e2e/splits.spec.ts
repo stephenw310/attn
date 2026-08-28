@@ -24,11 +24,31 @@ async function emitFocusThread(app: ElectronApplication, threadId: string): Prom
   })
 }
 
+async function updateMessageBody(
+  app: ElectronApplication,
+  messageId: string,
+  bodyText: string
+): Promise<void> {
+  await app.evaluate(
+    ({ ipcMain }, { channel, id, body }) =>
+      new Promise<void>((resolve, reject) => {
+        ipcMain.emit(channel, {}, id, body, (error?: string) => {
+          if (error) reject(new Error(error))
+          else resolve()
+        })
+      }),
+    { channel: TEST_CHANNELS.updateMessageBody, id: messageId, body: bodyText }
+  )
+}
+
 function spread(values: number[]): number {
   return Math.max(...values) - Math.min(...values)
 }
 
-test('classifies once, navigates locally, and restores each split selection', async ({ page }, testInfo) => {
+test('classifies once, navigates locally, and restores each split selection', async ({
+  app,
+  page
+}, testInfo) => {
   const strip = page.getByTestId('split-strip')
   const tabs = page.getByTestId('split-tab')
   const rows = page.getByTestId('thread-row')
@@ -42,6 +62,24 @@ test('classifies once, navigates locally, and restores each split selection', as
   )
   await expect(rows).toHaveCount(1)
   await expect(rows).toContainText('Board memo needs approval')
+
+  await page.evaluate(() => {
+    const appWindow = window as typeof window & {
+      splitEmptyObserver?: MutationObserver
+      splitEmptyPaints?: number
+    }
+    const threadList = document.querySelector('[data-testid="thread-list"]')
+    if (!threadList) throw new Error('Thread list is unavailable')
+    appWindow.splitEmptyPaints = 0
+    appWindow.splitEmptyObserver = new MutationObserver(() => {
+      if (threadList.textContent?.includes('Inbox empty')) appWindow.splitEmptyPaints = 1
+    })
+    appWindow.splitEmptyObserver.observe(threadList, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    })
+  })
 
   await page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]').click()
   await expect(rows).toHaveCount(2)
@@ -79,12 +117,67 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(rows).toHaveCount(2)
   await expect(rows).toContainText(['The systems issue', 'A special offer for members'])
   await expect(rows.filter({ hasText: 'Review requested on PR #87' })).toHaveCount(0)
+  const splitEmptyPaints = await page.evaluate(() => {
+    const appWindow = window as typeof window & {
+      splitEmptyObserver?: MutationObserver
+      splitEmptyPaints?: number
+    }
+    appWindow.splitEmptyObserver?.disconnect()
+    return appWindow.splitEmptyPaints ?? 0
+  })
+  expect(splitEmptyPaints).toBe(0)
 
   const artifactDirectory = join(__dirname, '.artifacts')
   mkdirSync(artifactDirectory, { recursive: true })
   const inboxPath = join(artifactDirectory, 'split-inbox.png')
   await page.screenshot({ path: inboxPath })
   await testInfo.attach('split-inbox', { path: inboxPath, contentType: 'image/png' })
+
+  await page.evaluate(() => {
+    const appWindow = window as typeof window & {
+      splitTransitionObserver?: MutationObserver
+      splitTransitionStates?: string[]
+    }
+    appWindow.splitTransitionObserver?.disconnect()
+    appWindow.splitTransitionStates = []
+    const threadList = document.querySelector('[data-testid="thread-list"]')
+    if (!threadList) throw new Error('Thread list is unavailable')
+    const recordTransientState = (): void => {
+      for (const copy of ['Inbox empty', 'Loading conversations…']) {
+        if (threadList.textContent?.includes(copy)) appWindow.splitTransitionStates?.push(copy)
+      }
+    }
+    appWindow.splitTransitionObserver = new MutationObserver(recordTransientState)
+    appWindow.splitTransitionObserver.observe(threadList, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    })
+  })
+  const mailChanged = page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const off = window.attn.mail.onChanged(() => {
+          off()
+          resolve()
+        })
+      })
+  )
+  await updateMessageBody(app, 'm-calendar-sender', 'A locally refreshed calendar invitation.')
+  await mailChanged
+  await goToSplit(page, 2)
+  await expect(rows).toContainText('Review requested on PR #87')
+  const transientStates = await page.evaluate(() => {
+    const appWindow = window as typeof window & {
+      splitTransitionObserver?: MutationObserver
+      splitTransitionStates?: string[]
+    }
+    appWindow.splitTransitionObserver?.disconnect()
+    return appWindow.splitTransitionStates ?? []
+  })
+  expect(transientStates).toEqual([])
+  await goToSplit(page, 3)
+  await expect(rows).toContainText(['The systems issue', 'A special offer for members'])
 
   await rows.first().click()
   await expect(page.getByTestId('conversation-view')).toBeVisible()
@@ -128,7 +221,9 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(page.locator('[data-command-id^="split.goto:"]')).toHaveCount(9)
 })
 
-test('moves between Important and Other by changing Gmail importance', async ({ page }) => {
+test('changes Gmail importance without presenting splits as move destinations', async ({
+  page
+}, testInfo) => {
   const rows = page.getByTestId('thread-row')
   const boardMemo = rows.filter({ hasText: 'Board memo needs approval' })
   await expect(boardMemo).toBeVisible()
@@ -136,8 +231,15 @@ test('moves between Important and Other by changing Gmail importance', async ({ 
   await page.getByTestId('thread-list').focus()
   await page.keyboard.press('v')
   await expect(page.getByTestId('move-picker')).toBeVisible()
-  await expect(page.getByTestId('move-important')).toBeDisabled()
-  await page.getByTestId('move-other').click()
+  await expect(page.getByTestId('move-section-importance')).toHaveText('Importance')
+  await expect(page.getByTestId('move-mark-important')).toHaveCount(0)
+  await expect(page.getByTestId('move-mark-not-important')).toHaveText(/Mark as not important/)
+  const artifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(artifactDirectory, { recursive: true })
+  const pickerPath = join(artifactDirectory, 'move-picker.png')
+  await page.screenshot({ path: pickerPath })
+  await testInfo.attach('move-picker', { path: pickerPath, contentType: 'image/png' })
+  await page.getByTestId('move-mark-not-important').click()
   await expect(boardMemo).toHaveCount(0)
   await expect(page.getByTestId('pending-count')).toContainText('1 pending')
 
@@ -147,8 +249,9 @@ test('moves between Important and Other by changing Gmail importance', async ({ 
   await expect(boardMemo).toHaveAttribute('data-selected', 'true')
   await page.getByTestId('thread-list').focus()
   await page.keyboard.press('v')
-  await expect(page.getByTestId('move-other')).toBeDisabled()
-  await page.getByTestId('move-important').click()
+  await expect(page.getByTestId('move-mark-not-important')).toHaveCount(0)
+  await expect(page.getByTestId('move-mark-important')).toHaveText(/Mark as important/)
+  await page.getByTestId('move-mark-important').click()
   await expect(boardMemo).toHaveCount(0)
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
 

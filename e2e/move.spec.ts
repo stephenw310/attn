@@ -1,5 +1,3 @@
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from './electron'
 
@@ -30,9 +28,7 @@ async function expectMovePaletteCount(page: Page, count: number): Promise<void> 
   await page.keyboard.press('Escape')
 }
 
-test('moves from Inbox to a label, auto-advances, and moves that label to Done', async ({
-  page
-}, testInfo) => {
+test('moves from Inbox to a label, auto-advances, and moves that label to Done', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await expect(rows.first()).toContainText('Q3 roadmap review')
@@ -40,12 +36,6 @@ test('moves from Inbox to a label, auto-advances, and moves that label to Done',
   await openMove(page)
   await expect(page.getByTestId('move-done')).toHaveText(/Done/)
   await expect(page.getByTestId('move-option')).toHaveCount(12)
-
-  const artifactDirectory = join(__dirname, '.artifacts')
-  mkdirSync(artifactDirectory, { recursive: true })
-  const path = join(artifactDirectory, 'move-picker.png')
-  await page.screenshot({ path })
-  await testInfo.attach('move-picker', { path, contentType: 'image/png' })
 
   await page.getByTestId('move-search').fill('v')
   await expect(page.getByTestId('move-picker')).toBeVisible()
@@ -102,6 +92,7 @@ test('keeps All Mail membership, status, and unrelated labels after Move', async
   await page.keyboard.press('j')
   await expect(design).toHaveAttribute('data-selected', 'true')
   await openMove(page)
+  await expect(page.getByTestId('move-section-importance')).toHaveCount(0)
   await chooseMoveLabel(page, 'receipts')
 
   await expect(design).toBeVisible()

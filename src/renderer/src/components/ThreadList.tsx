@@ -119,6 +119,7 @@ interface ThreadListProps {
   view: ThreadListKind
   hasMore?: boolean
   loadingMore?: boolean
+  loadingInitial?: boolean
   syncing: boolean
   readerOpen: boolean
   selectedIndex: number
@@ -211,6 +212,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     view,
     hasMore = false,
     loadingMore = false,
+    loadingInitial = false,
     syncing,
     readerOpen,
     selectedIndex,
@@ -514,8 +516,12 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       }}
     >
       {threads.length === 0 && (
-        <div className="flex h-full items-center justify-center text-ink-faint">
-          {syncing ? 'Syncing your inbox…' : EMPTY_TEXT[view]}
+        <div
+          data-testid={loadingInitial ? 'thread-list-loading-initial' : undefined}
+          className="flex h-full items-center justify-center text-ink-faint"
+          role={loadingInitial ? 'status' : undefined}
+        >
+          {loadingInitial ? 'Loading conversations…' : syncing ? 'Syncing your inbox…' : EMPTY_TEXT[view]}
         </div>
       )}
       <div

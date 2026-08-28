@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { MailLabel } from '../../shared/mail'
 import { type MoveDestination, moveLabelDelta } from '../../shared/move'
 
@@ -13,7 +13,7 @@ interface MovePickerProps {
   labels: readonly MailLabel[]
   targets: readonly MoveTarget[]
   sourceLabelId: string | null
-  showSplitDestinations: boolean
+  showImportanceActions: boolean
   onClose: () => void
   onMove: (destination: MoveDestination) => void
 }
@@ -22,9 +22,20 @@ interface MoveOption {
   id: string
   label: string
   destination: MoveDestination
+  group: 'destinations' | 'importance' | 'labels'
   labelId?: string
   icon: string
   disabled: boolean
+}
+
+function importanceActionApplies(destination: MoveDestination, targets: readonly MoveTarget[]): boolean {
+  if (destination.kind === 'important') {
+    return targets.some((target) => !target.labelIds.includes('IMPORTANT'))
+  }
+  if (destination.kind === 'other') {
+    return targets.some((target) => target.labelIds.includes('IMPORTANT'))
+  }
+  return false
 }
 
 function destinationIsDisabled(
@@ -45,7 +56,7 @@ export function MovePicker({
   labels,
   targets,
   sourceLabelId,
-  showSplitDestinations,
+  showImportanceActions,
   onClose,
   onMove
 }: MovePickerProps): React.JSX.Element {
@@ -63,39 +74,72 @@ export function MovePicker({
   }, [labels, normalizedQuery, sourceLabelId])
   const options = useMemo<readonly MoveOption[]>(() => {
     const systemOptions: Array<Omit<MoveOption, 'disabled'>> = [
-      { id: 'done', label: 'Done', destination: { kind: 'done' }, icon: '✓' },
-      { id: 'inbox', label: 'Inbox', destination: { kind: 'inbox' }, icon: '→' },
-      ...(showSplitDestinations
-        ? [
-            {
-              id: 'important',
-              label: 'Important',
-              destination: { kind: 'important' } as const,
-              icon: '→'
-            },
-            { id: 'other', label: 'Other', destination: { kind: 'other' } as const, icon: '→' }
-          ]
-        : []),
-      { id: 'spam', label: 'Spam', destination: { kind: 'spam' }, icon: '→' },
-      { id: 'trash', label: 'Trash', destination: { kind: 'trash' }, icon: '→' }
+      {
+        id: 'done',
+        label: 'Done',
+        destination: { kind: 'done' },
+        group: 'destinations',
+        icon: '✓'
+      },
+      {
+        id: 'inbox',
+        label: 'Inbox',
+        destination: { kind: 'inbox' },
+        group: 'destinations',
+        icon: '→'
+      },
+      { id: 'spam', label: 'Spam', destination: { kind: 'spam' }, group: 'destinations', icon: '→' },
+      {
+        id: 'trash',
+        label: 'Trash',
+        destination: { kind: 'trash' },
+        group: 'destinations',
+        icon: '→'
+      }
     ]
-    return [
-      ...systemOptions
-        .filter((option) => !normalizedQuery || option.label.toLocaleLowerCase().includes(normalizedQuery))
-        .map((option) => ({
-          ...option,
-          disabled: destinationIsDisabled(option.destination, targets, sourceLabelId)
-        })),
-      ...filteredLabels.map((label) => ({
-        id: label.id,
-        label: label.name,
-        destination: { kind: 'label' as const, labelId: label.id },
-        labelId: label.id,
-        icon: '→',
-        disabled: destinationIsDisabled({ kind: 'label', labelId: label.id }, targets, sourceLabelId)
+    const destinationOptions: MoveOption[] = systemOptions
+      .filter((option) => !normalizedQuery || option.label.toLocaleLowerCase().includes(normalizedQuery))
+      .map((option) => ({
+        ...option,
+        disabled: destinationIsDisabled(option.destination, targets, sourceLabelId)
       }))
-    ]
-  }, [filteredLabels, normalizedQuery, showSplitDestinations, sourceLabelId, targets])
+    const labelOptions: MoveOption[] = filteredLabels.map((label) => ({
+      id: label.id,
+      label: label.name,
+      destination: { kind: 'label' as const, labelId: label.id },
+      group: 'labels' as const,
+      labelId: label.id,
+      icon: '→',
+      disabled: destinationIsDisabled({ kind: 'label', labelId: label.id }, targets, sourceLabelId)
+    }))
+    const importanceOptions: MoveOption[] = showImportanceActions
+      ? (
+          [
+            {
+              id: 'mark-important',
+              label: 'Mark as important',
+              destination: { kind: 'important' },
+              group: 'importance',
+              icon: '!',
+              disabled: false
+            },
+            {
+              id: 'mark-not-important',
+              label: 'Mark as not important',
+              destination: { kind: 'other' },
+              group: 'importance',
+              icon: '−',
+              disabled: false
+            }
+          ] satisfies MoveOption[]
+        ).filter(
+          (option) =>
+            (!normalizedQuery || option.label.toLocaleLowerCase().includes(normalizedQuery)) &&
+            importanceActionApplies(option.destination, targets)
+        )
+      : []
+    return [...destinationOptions, ...importanceOptions, ...labelOptions]
+  }, [filteredLabels, normalizedQuery, showImportanceActions, sourceLabelId, targets])
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -123,7 +167,7 @@ export function MovePicker({
       <section
         data-testid="move-picker"
         role="dialog"
-        aria-label="Move conversations"
+        aria-label="Move or mark conversations"
         aria-modal="true"
         className="fixed top-[18vh] left-1/2 z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
         onKeyDownCapture={(event) => {
@@ -157,52 +201,70 @@ export function MovePicker({
                 moveHighlighted()
               }
             }}
-            placeholder="Move to…"
+            placeholder="Search…"
             className="w-full rounded-lg border border-edge bg-ground px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent"
           />
         </div>
         <div data-testid="move-options" className="max-h-[320px] overflow-y-auto p-1.5">
-          {options.map((option, index) => (
-            <button
-              key={option.id}
-              ref={(element) => {
-                if (element) optionRefs.current.set(option.id, element)
-                else optionRefs.current.delete(option.id)
-              }}
-              type="button"
-              data-testid={option.labelId ? 'move-option' : `move-${option.id}`}
-              data-label-id={option.labelId}
-              data-destination-kind={option.destination.kind}
-              data-highlighted={index === highlightedIndex || undefined}
-              disabled={option.disabled}
-              onMouseEnter={() => setHighlightedIndex(index)}
-              onClick={() => onMove(option.destination)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
-                index === highlightedIndex ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
-              }`}
-            >
-              <span
-                className={`flex size-4 items-center justify-center text-sm ${
-                  option.id === 'done' ? 'text-positive' : 'text-ink-faint'
-                }`}
-                aria-hidden
-              >
-                {option.icon}
-              </span>
-              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{option.label}</span>
-            </button>
-          ))}
+          {options.map((option, index) => {
+            const startsGroup = index === 0 || options[index - 1]?.group !== option.group
+            return (
+              <Fragment key={option.id}>
+                {startsGroup && (
+                  <div
+                    data-testid={`move-section-${option.group}`}
+                    className={`px-3 pb-1 text-[10px] font-semibold tracking-[0.14em] text-ink-faint uppercase ${
+                      index === 0 ? 'pt-1' : 'mt-1 border-t border-edge pt-2.5'
+                    }`}
+                  >
+                    {option.group === 'destinations'
+                      ? 'Move to'
+                      : option.group === 'importance'
+                        ? 'Importance'
+                        : 'Labels'}
+                  </div>
+                )}
+                <button
+                  ref={(element) => {
+                    if (element) optionRefs.current.set(option.id, element)
+                    else optionRefs.current.delete(option.id)
+                  }}
+                  type="button"
+                  data-testid={option.labelId ? 'move-option' : `move-${option.id}`}
+                  data-label-id={option.labelId}
+                  data-destination-kind={option.destination.kind}
+                  data-highlighted={index === highlightedIndex || undefined}
+                  disabled={option.disabled}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onClick={() => onMove(option.destination)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                    index === highlightedIndex ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
+                  }`}
+                >
+                  <span
+                    className={`flex size-4 items-center justify-center text-sm ${
+                      option.id === 'done' ? 'text-positive' : 'text-ink-faint'
+                    }`}
+                    aria-hidden
+                  >
+                    {option.icon}
+                  </span>
+                  <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{option.label}</span>
+                </button>
+              </Fragment>
+            )
+          })}
           {filteredLabels.length === 0 && labels.length === 0 && (
             <div className="px-3 py-4 text-center text-xs text-ink-faint">
               Create labels in Gmail to add more destinations.
             </div>
           )}
           {options.length === 0 && query.trim() && (
-            <div className="px-3 py-4 text-center text-xs text-ink-faint">No matching destinations</div>
+            <div className="px-3 py-4 text-center text-xs text-ink-faint">No matching options</div>
           )}
         </div>
         <div className="border-t border-edge px-4 py-2 text-xs text-ink-faint">
-          ↑↓ navigate · Enter move · Esc close
+          ↑↓ navigate · Enter choose · Esc close
         </div>
       </section>
     </>

@@ -1010,6 +1010,9 @@ The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, 
 per-split selection and scroll, revision-aware page caching, quiet zero counts, and an overflow menu past eight
 visible tabs. Outside Inbox, `Tab` returns to Inbox. The rule manager creates, renames, edits, reorders with
 leading drag handles, deletes, restores, and configures notifications.
+Inactive first pages warm after startup. A cached page now activates in the same renderer state transition as
+its tab, remains available across ordinary mail changes, and revalidates against SQLite in the background. A
+cold page shows loading instead of briefly claiming the split is empty.
 The dragged row follows the pointer while nearby rows move to reveal the nearest drop position. A focused handle
 accepts Up and Down as its keyboard path. It is available from the account menu and command palette. Seeded
 Electron coverage exercises the full path and captures `split-inbox.png`, `split-rules.png`, and

@@ -6,6 +6,42 @@ import { expect, it, vi } from 'vitest'
 import type { DisplayThread } from '../mailDisplay'
 import { ThreadList } from './ThreadList'
 
+it('does not call an unresolved Inbox split empty', async () => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  const props = {
+    threads: [],
+    view: 'inbox' as const,
+    syncing: false,
+    readerOpen: false,
+    selectedIndex: 0,
+    selectedIds: new Set<string>(),
+    exitingThreadIds: new Set<string>(),
+    labelsById: new Map(),
+    selectedRowRef: { current: null },
+    listRef: { current: null },
+    onExtendSelection: (): void => {},
+    onOpenLabel: (): void => {},
+    onOpen: (): void => {}
+  }
+
+  try {
+    await act(async () => root.render(createElement(ThreadList, { ...props, loadingInitial: true })))
+    expect(container.textContent).toContain('Loading conversations…')
+    expect(container.textContent).not.toContain('Inbox empty')
+    expect(container.querySelector('[data-testid="thread-list-loading-initial"]')).not.toBeNull()
+
+    await act(async () => root.render(createElement(ThreadList, { ...props, loadingInitial: false })))
+    expect(container.textContent).toContain('Inbox empty')
+  } finally {
+    await act(async () => root.unmount())
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+  }
+})
+
 it('loads the next page when keyboard selection approaches the loaded tail', async () => {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
