@@ -105,6 +105,7 @@ docs/SPEC.md         Product & technical spec — source of truth for behavior
 docs/M1-PLAN.md      M1 task guide: triage core
 docs/M2-PLAN.md      M2 task guide: composer, drafts, send, exactly-once outbox
 docs/M3-PLAN.md      M3 task guide: sync restructure + find & focus
+docs/M5-PLAN.md      M5 task guide: multi-account
 docs/KNOWN-ISSUES.md Live triage list: open bugs, coverage gaps, refactor proposals
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies
