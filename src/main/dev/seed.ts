@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type { Db } from '../db'
 import type { GmailPart, GmailThread } from '../gmail/parse'
+import { ensureSplitSetup } from '../splits'
 import { ensureAccount, type LabelRow, persistThread, upsertLabels } from '../sync/persist'
 
 interface SeedMessage {
@@ -22,6 +23,8 @@ interface SeedMessage {
   cc?: string
   bcc?: string
   replyTo?: string
+  /** Optional List-Id header for split-inbox fixtures. */
+  listId?: string
   /** RFC Message-ID header, preferably in canonical angle-bracket form. */
   messageId?: string
   /** RFC References chain, written as one folded-capable header value. */
@@ -54,6 +57,8 @@ interface SeedFixture {
   remoteThreads?: SeedThread[]
   /** Exact Gmail q= responses for the remote snapshots, keeping the provider seam query-aware. */
   remoteSearches?: Record<string, string[]>
+  /** Opt into production split initialization. Existing broad fixtures stay unsplit. */
+  splitSetup?: boolean
 }
 
 export interface SeedLoadOptions {
@@ -95,6 +100,7 @@ function payloadFor(message: SeedMessage): GmailPart {
       ...(message.cc ? [{ name: 'Cc', value: message.cc }] : []),
       ...(message.bcc ? [{ name: 'Bcc', value: message.bcc }] : []),
       ...(message.replyTo ? [{ name: 'Reply-To', value: message.replyTo }] : []),
+      ...(message.listId ? [{ name: 'List-Id', value: message.listId }] : []),
       ...(message.messageId ? [{ name: 'Message-ID', value: message.messageId }] : []),
       ...(message.references?.length
         ? [{ name: 'References', value: message.references.join('\r\n\t') }]
@@ -180,19 +186,22 @@ export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): S
     // Same write path as real sync (persist.ts) — the seam must never grow
     // parallel SQL that can drift from what production writes.
     ensureAccount(db, fixture.account, fixture.account)
+    if (fixture.splitSetup) ensureSplitSetup(db, fixture.account)
     labelsChanged = upsertLabels(db, fixture.account, options.labels ?? fixture.labels ?? [])
     for (const thread of fixture.threads) {
       persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))
     }
     // Seeded stores are complete local snapshots and never contact Gmail. Mark
-    // foreground backfill, lifetime indexing, and the FTS backfill complete so
-    // relaunches stay settled; persistThread above indexed every seeded row.
+    // foreground backfill, derived metadata passes, and the FTS backfill
+    // complete so relaunches stay settled; persistThread indexed every row.
     db.prepare(
-      `INSERT INTO sync_state (account_id, backfill_cursor, sweep_cursor, fts_cursor)
-       VALUES (?, 'done', 'done', 'done')
+      `INSERT INTO sync_state
+       (account_id, backfill_cursor, sweep_cursor, split_metadata_cursor, fts_cursor)
+       VALUES (?, 'done', 'done', 'done', 'done')
        ON CONFLICT(account_id) DO UPDATE SET
          backfill_cursor = excluded.backfill_cursor,
          sweep_cursor = COALESCE(sync_state.sweep_cursor, excluded.sweep_cursor),
+         split_metadata_cursor = COALESCE(sync_state.split_metadata_cursor, excluded.split_metadata_cursor),
          fts_cursor = COALESCE(sync_state.fts_cursor, excluded.fts_cursor)`
     ).run(fixture.account)
   })()

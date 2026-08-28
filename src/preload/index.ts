@@ -13,7 +13,7 @@ import type {
   DraftSaveInput
 } from '../shared/drafts'
 import { nonEmptyString } from '../shared/guards'
-import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
+import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS, type MailChangeReason } from '../shared/ipc'
 import type {
   Conversation,
   ConversationMailbox,
@@ -40,6 +40,13 @@ import type {
   ReopenOutboxResult
 } from '../shared/outbox'
 import type { SearchResponse, ServerSearchResponse } from '../shared/searchQuery'
+import type {
+  ReorderSplitsInput,
+  SaveSplitInput,
+  SplitPresetId,
+  SplitState,
+  SplitThreadLocation
+} from '../shared/splits'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
@@ -84,8 +91,14 @@ const api = {
       invoke(IPC_CHANNELS.mailCancelSearchAll, requestId),
     listThreadPage: (
       view: Exclude<ThreadListView, 'snoozed'>,
-      cursor?: ThreadPageCursor
-    ): Promise<ThreadPage> => listThreadPage({ view, ...(cursor ? { cursor } : {}) }),
+      cursor?: ThreadPageCursor,
+      splitId?: string
+    ): Promise<ThreadPage> =>
+      listThreadPage({
+        view,
+        ...(cursor ? { cursor } : {}),
+        ...(view === 'inbox' && splitId ? { splitId } : {})
+      }),
     listLabelThreadPage: (labelId: string, cursor?: ThreadPageCursor): Promise<ThreadPage> =>
       listThreadPage({ view: 'label', labelId, ...(cursor ? { cursor } : {}) }),
     listSnoozedPage: (cursor?: ThreadPageCursor): Promise<ThreadPage<SnoozedThreadRow>> =>
@@ -121,9 +134,17 @@ const api = {
     undo: (): Promise<TriageResult | null> => invoke(IPC_CHANNELS.mailUndo),
     getPendingActionCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetPendingActionCount),
     getActionQueueStatus: () => invoke(IPC_CHANNELS.mailGetActionQueueStatus),
-    onChanged: (cb: (serverSearchRequestId: string | null) => void): (() => void) => {
-      const listener = (_event: unknown, payload: { serverSearchRequestId?: unknown } | undefined): void =>
-        cb(typeof payload?.serverSearchRequestId === 'string' ? payload.serverSearchRequestId : null)
+    onChanged: (
+      cb: (serverSearchRequestId: string | null, reason: MailChangeReason | null) => void
+    ): (() => void) => {
+      const listener = (
+        _event: unknown,
+        payload: { serverSearchRequestId?: unknown; reason?: unknown } | undefined
+      ): void =>
+        cb(
+          typeof payload?.serverSearchRequestId === 'string' ? payload.serverSearchRequestId : null,
+          payload?.reason === 'split-metadata' ? payload.reason : null
+        )
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },
@@ -158,7 +179,14 @@ const api = {
     onFocusThread: (cb: (threadId: string) => void): (() => void) => {
       let active = true
       const takePendingFocus = async (): Promise<void> => {
-        const threadId = await invoke(IPC_CHANNELS.mailTakePendingFocus)
+        let threadId: string | null = null
+        try {
+          threadId = await invoke(IPC_CHANNELS.mailTakePendingFocus)
+        } catch {
+          // App shutdown can race the best-effort pending-focus pull after the
+          // main process has already removed its IPC handlers.
+          return
+        }
         if (active && nonEmptyString(threadId)) cb(threadId)
       }
       const listener = (): void => void takePendingFocus()
@@ -171,6 +199,17 @@ const api = {
         ipcRenderer.removeListener(IPC_CHANNELS.mailFocusThreadAvailable, listener)
       }
     }
+  },
+  splits: {
+    getState: (): Promise<SplitState> => invoke(IPC_CHANNELS.splitsGetState),
+    getThreadLocation: (threadId: string): Promise<SplitThreadLocation | null> =>
+      invoke(IPC_CHANNELS.splitsGetThreadLocation, threadId),
+    save: (input: SaveSplitInput): Promise<SplitState> => invoke(IPC_CHANNELS.splitsSave, input),
+    setNotify: (id: string, notify: boolean): Promise<SplitState> =>
+      invoke(IPC_CHANNELS.splitsSetNotify, id, notify),
+    delete: (id: string): Promise<SplitState> => invoke(IPC_CHANNELS.splitsDelete, id),
+    reorder: (input: ReorderSplitsInput): Promise<SplitState> => invoke(IPC_CHANNELS.splitsReorder, input),
+    restorePreset: (id: SplitPresetId): Promise<SplitState> => invoke(IPC_CHANNELS.splitsRestorePreset, id)
   },
   contacts: {
     search: (query: string): Promise<ContactSearchResult[]> => invoke(IPC_CHANNELS.contactsSearch, query)

@@ -102,7 +102,9 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
               ? `Indexing paused · ${indexedLifetimeCount}`
               : sync.stage === 'attachments'
                 ? `Attachment index · ${lifetimeCount} flagged`
-                : `${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
+                : sync.stage === 'split-metadata'
+                  ? `Split inbox metadata · ${lifetimeCount} refreshed`
+                  : `${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
   const quotaEvidence =
     sync.phase === 'indexing' && sync.quotaWaitMs !== undefined && sync.quotaWaitMs >= 1_000
       ? ` · ${Math.round(sync.quotaWaitMs / 1000).toLocaleString()}s quota wait`

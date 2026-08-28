@@ -10,6 +10,8 @@ export interface ProviderProfile {
 export interface ProviderSendAs {
   sendAsEmail: string
   displayName?: string
+  /** Gmail's primary HTML signature for this address. */
+  signature?: string
   isPrimary?: boolean
   isDefault?: boolean
 }

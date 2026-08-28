@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 18
+export const CURRENT_SCHEMA_VERSION = 21
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -46,11 +46,31 @@ CREATE TABLE messages (
   recipients_json  TEXT,
   attachments_json TEXT,
   labels_json      TEXT,
+  list_id          TEXT,
+  has_calendar_part INTEGER NOT NULL DEFAULT 0,
   rfc_message_id   TEXT,
   references_json  TEXT,
   PRIMARY KEY (account_id, id)
 );
 CREATE INDEX idx_messages_thread ON messages (account_id, thread_id, internal_date);
+
+CREATE TABLE split_rules (
+  account_id TEXT NOT NULL,
+  id         TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  match_json TEXT NOT NULL DEFAULT '{"version":1,"operator":"any","conditions":[]}',
+  notify     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, id)
+);
+CREATE INDEX idx_split_rules_order ON split_rules (account_id, position);
+
+CREATE TABLE split_config (
+  account_id  TEXT PRIMARY KEY,
+  initialized INTEGER NOT NULL DEFAULT 0,
+  revision    INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE thread_labels (
   account_id  TEXT NOT NULL,
@@ -68,6 +88,7 @@ CREATE TABLE sync_state (
   sweep_threads_done INTEGER NOT NULL DEFAULT 0,
   sweep_threads_total INTEGER,
   attachment_cursor  TEXT,
+  split_metadata_cursor TEXT NOT NULL DEFAULT 'done',
   fts_cursor         TEXT
 );
 
@@ -189,6 +210,7 @@ CREATE TABLE outbox (
   updated_at        INTEGER NOT NULL,
   local_revision    INTEGER NOT NULL DEFAULT 0,
   mirror_revision   INTEGER NOT NULL DEFAULT 0,
+  default_signature_fingerprint TEXT,
   remote_updated_at INTEGER,
   remote_fingerprint TEXT,
   rfc_message_id   TEXT,

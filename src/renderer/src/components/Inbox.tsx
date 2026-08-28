@@ -12,6 +12,7 @@ import { useMailData } from '../hooks/useMailData'
 import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
 import { useSelectionState } from '../hooks/useSelectionState'
 import { useServerSearch } from '../hooks/useServerSearch'
+import { useSplits } from '../hooks/useSplits'
 import { useSyncActions } from '../hooks/useSyncActions'
 import { useToast } from '../hooks/useToast'
 import { useTriage } from '../hooks/useTriage'
@@ -51,6 +52,8 @@ import { OutboxList } from './OutboxList'
 import { SearchHeader, searchCoverageText } from './SearchHeader'
 import { ServerSearchRow } from './ServerSearchRow'
 import { SnoozePicker } from './SnoozePicker'
+import { SplitRuleManager } from './SplitRuleManager'
+import { SplitStrip } from './SplitStrip'
 import { ThreadList } from './ThreadList'
 import { Toast } from './Toast'
 
@@ -112,6 +115,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
+  const [splitRulesOpen, setSplitRulesOpen] = useState(false)
   const [labelTargetIds, setLabelTargetIds] = useState<readonly string[] | null>(null)
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
@@ -128,6 +132,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const searchSelectedRowIdRef = useRef<string | null>(null)
   const previousSearchRowIdsRef = useRef<readonly string[]>([])
   const viewStateRef = useRef(new Map<MailView, ViewRecord>())
+  const splitViewStateRef = useRef(new Map<string, ViewRecord>())
+  const pendingSplitRestoreRef = useRef<{ id: string; record: ViewRecord } | null>(null)
   const pendingViewRestoreRef = useRef<{ view: MailView; record: ViewRecord } | null>(null)
   const searchReturnRef = useRef<ViewRecord | null>(null)
   const searchOpenRef = useRef(false)
@@ -159,11 +165,15 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const inlineComposerRef = useRef<ComposerHandle | null>(null)
 
   const activeAccount = status.email ?? null
+  const splits = useSplits(activeAccount)
+  const setActiveSplitForFocusRef = useRef(splits.setActiveSplitId)
+  setActiveSplitForFocusRef.current = splits.setActiveSplitId
   const {
     sync,
     networkOnline,
     realThreads,
     setRealThreads,
+    loadedInboxSplitId,
     realSnoozedThreads,
     setRealSnoozedThreads,
     mailboxRows,
@@ -191,6 +201,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     deferRefreshUntilRef
   } = useMailData(
     activeAccount,
+    splits.activeSplitId,
+    splits.activeSplitId ? (splits.state?.revision ?? null) : null,
     activeViewRef,
     selectedThreadIdRef,
     selectedDraftIdRef,
@@ -203,13 +215,24 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const mailboxThreads: DisplayThread[] = useMemo(
     () =>
       backingMailView === 'inbox'
-        ? displayThreads(realThreads ?? [])
+        ? displayThreads(
+            splits.state && loadedInboxSplitId === splits.activeSplitId ? (realThreads ?? []) : []
+          )
         : backingMailView === 'snoozed'
           ? displaySnoozedThreads(realSnoozedThreads ?? [])
           : backingCachedView
             ? displayThreads(mailboxRows[backingCachedView] ?? [])
             : [],
-    [backingCachedView, backingMailView, mailboxRows, realSnoozedThreads, realThreads]
+    [
+      backingCachedView,
+      backingMailView,
+      loadedInboxSplitId,
+      mailboxRows,
+      realSnoozedThreads,
+      realThreads,
+      splits.activeSplitId,
+      splits.state
+    ]
   )
   const search = useLocalSearch(searchOpen, searchQuery, activeAccount, mailRevision)
   const serverSearch = useServerSearch(
@@ -280,7 +303,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const pagedView = searchOpen || view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
   const activePageState = pagedView ? threadPagination[pagedView] : undefined
   const systemPagedView = pagedView && !userLabelId(pagedView) ? (pagedView as ThreadListView) : null
-  const exactSystemThreadCount = systemPagedView ? (realMailboxCounts?.[systemPagedView] ?? null) : null
+  const exactSystemThreadCount =
+    systemPagedView === 'inbox' && splits.activeSplitId
+      ? (splits.state?.splits.find((split) => split.id === splits.activeSplitId)?.total ?? null)
+      : systemPagedView
+        ? (realMailboxCounts?.[systemPagedView] ?? null)
+        : null
   const conversationThreadCount = detachedDraftThread
     ? 1
     : searchOpen
@@ -375,6 +403,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSearchQuery('')
     setReaderOpen(false)
     setSnoozeOpen(false)
+    setSplitRulesOpen(false)
     setLabelTargetIds(null)
     setMoveRequest(null)
     setComposerDraft(null)
@@ -383,6 +412,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setExitingThreadIds(new Set())
     selectedThreadIdRef.current = null
     selectedDraftIdRef.current = null
+    splitViewStateRef.current.clear()
+    pendingSplitRestoreRef.current = null
     resetSelection()
   }, [activeAccount, resetSelection])
 
@@ -451,6 +482,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [searchDraftMode, searchOpen, searchRowIds, selectedIndex])
 
   const selected = detachedDraftThread ?? threads[selectedIndex]
+  // Split and mailbox switches snapshot selection synchronously inside the same
+  // key turn that can move the cursor. Mirror the visible thread id at render
+  // time so a fast ArrowDown → split switch saves the new row, not the prior one.
+  if (!searchOpen && view !== 'drafts' && view !== 'outbox') {
+    selectedThreadIdRef.current = selected?.id ?? null
+  }
   const conversationThreads = detachedDraftThread ? [detachedDraftThread] : threads
   const conversationSelectedIndex = detachedDraftThread ? 0 : selectedIndex
   const inlineComposerDraft =
@@ -553,12 +590,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   useEffect(() => {
     if (composerDraft) setMoveRequest(null)
   }, [composerDraft])
-
-  useEffect(() => {
-    if (!searchOpen && view !== 'drafts' && view !== 'outbox') {
-      selectedThreadIdRef.current = selected?.id ?? null
-    }
-  }, [searchOpen, selected?.id, view])
 
   useEffect(() => {
     if (searchOpen) return
@@ -667,6 +698,52 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [inlineComposerDraft, switchViewNow]
   )
 
+  const switchSplit = useCallback(
+    (id: string) => {
+      const splitState = splits.state
+      if (!splitState?.splits.some((split) => split.id === id)) return
+      const currentId = splits.activeSplitId
+      if (!searchOpenRef.current && activeViewRef.current === 'inbox' && currentId === id) return
+      if (!searchOpenRef.current && activeViewRef.current === 'inbox' && currentId) {
+        splitViewStateRef.current.set(currentId, {
+          // Read the selected row from this render. The mirror ref updates in a
+          // passive effect and can still point at the previous row if a user
+          // presses J and immediately clicks another split.
+          rowId: mailboxThreads[selectedIndexRef.current]?.id ?? selectedThreadIdRef.current,
+          index: selectedIndexRef.current,
+          scrollTop: readerOpenRef.current
+            ? (splitViewStateRef.current.get(currentId)?.scrollTop ?? 0)
+            : (listElRef.current?.scrollTop ?? 0)
+        })
+      }
+      if (activeViewRef.current !== 'inbox' || searchOpenRef.current) switchViewNow('inbox')
+      const record = splitViewStateRef.current.get(id) ?? { rowId: null, index: 0, scrollTop: 0 }
+      pendingSplitRestoreRef.current = { id, record }
+      selectedThreadIdRef.current = record.rowId
+      selectedDraftIdRef.current = null
+      clearSelection()
+      setReaderOpen(false)
+      setSnoozeOpen(false)
+      setLabelTargetIds(null)
+      setSelectedIndex(Math.max(0, record.index))
+      splits.setActiveSplitId(id)
+    },
+    [clearSelection, mailboxThreads, splits, switchViewNow]
+  )
+
+  const moveSplit = useCallback(
+    (direction: -1 | 1) => {
+      const splitState = splits.state
+      const currentId = splits.activeSplitId
+      if (!splitState || !currentId) return
+      const current = splitState.splits.findIndex((split) => split.id === currentId)
+      if (current < 0) return
+      const next = (current + direction + splitState.splits.length) % splitState.splits.length
+      switchSplit(splitState.splits[next].id)
+    },
+    [splits.activeSplitId, splits.state, switchSplit]
+  )
+
   const viewRowsLoaded =
     view === 'outbox'
       ? true
@@ -704,6 +781,30 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     const list = listElRef.current
     if (list) list.scrollTop = record.scrollTop
   }, [realDrafts, realOutbox, threads, view, viewRowsLoaded])
+
+  useLayoutEffect(() => {
+    const pending = pendingSplitRestoreRef.current
+    if (
+      !pending ||
+      view !== 'inbox' ||
+      splits.activeSplitId !== pending.id ||
+      loadedInboxSplitId !== pending.id ||
+      realThreads === null
+    ) {
+      return
+    }
+    pendingSplitRestoreRef.current = null
+    const restoredIndex = pending.record.rowId
+      ? realThreads.findIndex((thread) => thread.id === pending.record.rowId)
+      : -1
+    const nextIndex =
+      restoredIndex >= 0
+        ? restoredIndex
+        : Math.max(0, Math.min(pending.record.index, Math.max(0, realThreads.length - 1)))
+    selectedThreadIdRef.current = realThreads[nextIndex]?.id ?? null
+    setSelectedIndex(nextIndex)
+    if (listElRef.current) listElRef.current.scrollTop = pending.record.scrollTop
+  }, [loadedInboxSplitId, realThreads, splits.activeSplitId, view])
 
   const openOutboxNow = useCallback(() => {
     if (view === 'outbox') {
@@ -754,24 +855,45 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (!window.attn || !activeAccount) return
-    return window.attn.mail.onFocusThread((threadId) => {
+    const bridge = window.attn
+    if (!bridge || !activeAccount) return
+    return bridge.mail.onFocusThread((threadId) => {
       // Close the old reader before changing lists so auto-read cannot observe
       // an old cursor against Inbox and mutate the wrong thread.
       switchView('inbox', () => {
         clearSelection()
-        void focusInboxThread(threadId)
-          .then((nextIndex) => {
-            if (nextIndex === null) return
+        void (async () => {
+          const openTarget = (nextIndex: number): void => {
             // The notification target owns the selection: cancel any saved
             // record the switch queued so it cannot override this focus.
             pendingViewRestoreRef.current = null
+            pendingSplitRestoreRef.current = null
             selectedThreadIdRef.current = threadId
             setDetachedDraftThread(null)
             setSelectedIndex(nextIndex)
             setReaderOpen(true)
-          })
-          .catch(() => {})
+          }
+          // A rule edit can land between location lookup and page fetch. Retry
+          // once with a fresh atomic split id + revision instead of dropping the
+          // native notification click.
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            const location = await bridge.splits.getThreadLocation(threadId)
+            if (!location) {
+              // The deterministic legacy test profile intentionally has no
+              // split setup. Preserve its whole-Inbox notification path.
+              const nextIndex = await focusInboxThread(threadId, null).catch(() => null)
+              if (nextIndex !== null) openTarget(nextIndex)
+              return
+            }
+            setActiveSplitForFocusRef.current(location.splitId)
+            const nextIndex = await focusInboxThread(threadId, location.splitId, location.revision).catch(
+              () => null
+            )
+            if (nextIndex === null) continue
+            openTarget(nextIndex)
+            return
+          }
+        })().catch(() => {})
       })
     })
   }, [activeAccount, clearSelection, focusInboxThread, switchView])
@@ -1217,6 +1339,20 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       })
   }, [realDrafts, refreshDrafts, refreshMailRows, searchOpen, selectedIndex, showToast, view])
 
+  const splitCommands = useMemo(() => {
+    if (!splits.state || splits.state.splits.length === 0) return null
+    return {
+      previous: () => moveSplit(-1),
+      next: () => moveSplit(1),
+      manage: () => setSplitRulesOpen(true),
+      goTo: splits.state.splits.map((split) => ({
+        id: split.id,
+        name: split.name,
+        run: () => switchSplit(split.id)
+      }))
+    }
+  }, [moveSplit, splits.state, switchSplit])
+
   useInboxCommands({
     selected,
     selectedCount: selectedIds.size,
@@ -1261,11 +1397,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     openComposer,
     openReply,
     showToast,
-    reopenUndoDraft
+    reopenUndoDraft,
+    splitCommands
   })
 
   useKeyboardDispatch({
-    blocked: labelTargets !== undefined || moveRequest !== null || composerDraft !== null,
+    blocked: labelTargets !== undefined || moveRequest !== null || composerDraft !== null || splitRulesOpen,
     readerOpen,
     outboxOpen: !searchOpen && view === 'outbox',
     snoozeOpen,
@@ -1296,6 +1433,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         onReconnectActions={reconnectActions}
         onOpenOutbox={openOutbox}
         onToggleSidebar={toggleSidebar}
+        onManageSplits={() => setSplitRulesOpen(true)}
       />
 
       <div
@@ -1350,6 +1488,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 </button>
               </div>
             ))}
+          {!readerOpen && !fullWindowComposerDraft && !searchOpen && view === 'inbox' && splits.state && (
+            <SplitStrip
+              splits={splits.state.splits}
+              activeSplitId={splits.activeSplitId}
+              onSelect={switchSplit}
+              onManage={() => setSplitRulesOpen(true)}
+            />
+          )}
           <div className={`flex min-h-0 flex-1 ${searchOpen && !readerOpen ? 'flex-col' : ''}`}>
             {searchDraftMode ? (
               <DraftList
@@ -1529,6 +1675,18 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           sourceLabelId={moveRequest.sourceLabelId}
           onClose={closeMove}
           onMove={moveSelected}
+        />
+      )}
+
+      {!composerDraft && splitRulesOpen && splits.state && (
+        <SplitRuleManager
+          state={splits.state}
+          onSave={splits.save}
+          onNotify={splits.setNotify}
+          onDelete={splits.remove}
+          onReorder={(ids) => splits.reorder({ ids })}
+          onRestore={splits.restorePreset}
+          onClose={() => setSplitRulesOpen(false)}
         />
       )}
 

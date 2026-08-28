@@ -35,6 +35,20 @@ export class ComposerPage {
     return this.page.getByTestId('composer-editor')
   }
 
+  get signature(): Locator {
+    return this.editor.getByTestId('composer-gmail-signature')
+  }
+
+  get signatureToggle(): Locator {
+    return this.editor.getByRole('button', {
+      name: /^Show signature(?: and quoted history)?$/
+    })
+  }
+
+  get quote(): Locator {
+    return this.page.getByTestId('composer-quote')
+  }
+
   get attachments(): Locator {
     return this.page.getByTestId('composer-attachments')
   }
@@ -90,6 +104,31 @@ export class ComposerPage {
 
   async typeBody(text: string): Promise<void> {
     await this.editor.pressSequentially(text)
+  }
+
+  async expectSignatureCollapsed(): Promise<void> {
+    await expect(this.signature).toHaveAttribute('data-attn-signature-collapsed', 'true')
+    await expect(this.signatureToggle).toBeVisible()
+  }
+
+  async expectSignatureAndQuoteCollapsed(): Promise<void> {
+    await this.expectSignatureCollapsed()
+    await expect(this.signatureToggle).toHaveAccessibleName('Show signature and quoted history')
+    await expect(this.page.getByTestId('composer-quote-toggle')).toHaveCount(0)
+    await expect(this.quote).toHaveCount(0)
+  }
+
+  async revealSignature(): Promise<void> {
+    await this.signatureToggle.click()
+    await expect(this.signature).not.toHaveAttribute('data-attn-signature-collapsed')
+    await expect(this.signatureToggle).toHaveCount(0)
+  }
+
+  async revealSignatureWithKeyboard(): Promise<void> {
+    await this.signatureToggle.focus()
+    await this.signatureToggle.press('Enter')
+    await expect(this.signature).not.toHaveAttribute('data-attn-signature-collapsed')
+    await expect(this.signatureToggle).toHaveCount(0)
   }
 
   async pickAttachments(): Promise<void> {

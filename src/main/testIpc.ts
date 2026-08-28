@@ -41,6 +41,7 @@ export class TestSeams {
     for (const channel of [
       TEST_CHANNELS.deleteThread,
       TEST_CHANNELS.updateMessageBody,
+      TEST_CHANNELS.setSendAsSignature,
       TEST_CHANNELS.markDraftMirrored,
       TEST_CHANNELS.failOutbox,
       TEST_CHANNELS.remoteDraft

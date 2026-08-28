@@ -4,6 +4,7 @@ import {
   extractBodyText,
   extractThreadingHeaders,
   hasAttachment,
+  hasCalendarPart,
   parseAddress,
   parseAddressList,
   parseMessageIds
@@ -108,6 +109,19 @@ describe('Gmail message parsing', () => {
       }
     ])
     expect(hasAttachment(payload)).toBe(false)
+  })
+
+  it('finds filename-less calendar MIME parts without exposing them as downloads', () => {
+    const payload = {
+      mimeType: 'multipart/alternative',
+      parts: [
+        { mimeType: 'text/plain', body: { data: Buffer.from('Invite').toString('base64url') } },
+        { mimeType: 'text/calendar', body: { attachmentId: 'calendar-body', size: 120 } }
+      ]
+    }
+
+    expect(hasCalendarPart(payload)).toBe(true)
+    expect(collectAttachments(payload)).toEqual([])
   })
 
   it('splits address lists only on top-level commas', () => {

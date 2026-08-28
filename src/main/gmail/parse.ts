@@ -123,6 +123,13 @@ export function collectAttachments(payload: GmailPart | undefined): ParsedAttach
   return attachments
 }
 
+/** Whether a cached full payload contains any calendar MIME part, including filename-less invites. */
+export function hasCalendarPart(payload: GmailPart | undefined): boolean {
+  if (!payload) return false
+  if (payload.mimeType?.trim().toLowerCase() === 'text/calendar') return true
+  return payload.parts?.some(hasCalendarPart) ?? false
+}
+
 /** Recursive walk: text/plain wins, text/html (stripped) is the fallback. */
 export function extractBodyText(payload: GmailPart | undefined): string {
   if (!payload) return ''

@@ -51,6 +51,19 @@ export const COMMAND_SPECS = {
   },
   'search.allGmail': { title: 'Search all of Gmail', context: 'global' },
   'search.clear': { title: 'Clear search', context: 'global' },
+  'split.previous': {
+    title: 'Previous inbox split',
+    shortcut: 'Shift+Tab',
+    shortcutAliases: ['ArrowLeft'],
+    context: 'list'
+  },
+  'split.next': {
+    title: 'Next inbox split',
+    shortcut: 'Tab',
+    shortcutAliases: ['ArrowRight'],
+    context: 'list'
+  },
+  'split.manage': { title: 'Manage inbox splits', context: 'global' },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
     title: 'Use Dark theme',
@@ -167,7 +180,8 @@ export const COMMAND_SPECS = {
   'triage.undo': { title: 'Undo', shortcut: 'z', context: 'global' }
 } as const satisfies Record<string, CommandSpec>
 
-export type CommandId = keyof typeof COMMAND_SPECS
+export type StaticCommandId = keyof typeof COMMAND_SPECS
+export type CommandId = StaticCommandId | `split.goto:${string}`
 
 export interface CommandArgumentValue {
   label: string
@@ -205,11 +219,26 @@ export function getCommandRegistrySnapshot(): readonly Command[] {
 }
 
 export function createCommand(
-  id: CommandId,
+  id: StaticCommandId,
   run: () => void,
   overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'shortcutAliases' | 'context' | 'argument'>> = {}
 ): Command {
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
+}
+
+export function createDynamicSplitCommand(
+  splitId: string,
+  title: string,
+  run: () => void,
+  shortcut?: string
+): Command {
+  return {
+    id: `split.goto:${splitId}`,
+    title,
+    ...(shortcut ? { shortcut } : {}),
+    context: 'navigation',
+    run
+  }
 }
 
 export function registerCommands(next: Command[]): () => void {
@@ -259,6 +288,7 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string, context: Shortc
   if (!expectedKey || expectsMod !== (event.metaKey || event.ctrlKey) || event.altKey) return false
   if (expectedKey !== normalizedKey(event, context)) return false
   if (expectsShift) return event.shiftKey
+  if (expectedKey === 'tab' && event.shiftKey) return false
 
   // Shift is part of the keystroke for printable symbols such as # and !, but it
   // distinguishes J/K navigation from Shift+J/K range selection. Bare-letter
@@ -318,9 +348,9 @@ export function findCommandByShortcut(shortcut: string, context: ShortcutContext
 }
 
 export function matchKey(event: KeyboardEvent, context: ShortcutContext): Command | null {
-  // Tab always belongs to native focus traversal. Shortcut-less commands remain
-  // available to the future command palette without entering keyboard dispatch.
-  if (event.altKey || event.key === 'Tab') return null
+  // The dispatcher preserves native Tab inside interactive controls and text
+  // entry. A registered list command can therefore use it from the mail canvas.
+  if (event.altKey) return null
   return (
     commands.find(
       (command) =>

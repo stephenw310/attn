@@ -1,0 +1,143 @@
+{
+  "account": "splits@attn.test",
+  "splitSetup": true,
+  "threads": [
+    {
+      "id": "t-calendar-sender",
+      "messages": [
+        {
+          "id": "m-calendar-sender",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "11:30",
+          "from": "Google Calendar <calendar-notification@google.com>",
+          "to": "splits@attn.test",
+          "subject": "Planning check-in tomorrow",
+          "snippet": "Mina invited you to a planning check-in.",
+          "bodyText": "Planning check-in tomorrow at 10:00."
+        }
+      ]
+    },
+    {
+      "id": "t-github-newsletter",
+      "messages": [
+        {
+          "id": "m-github-newsletter",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "11:15",
+          "from": "GitHub <notifications@github.com>",
+          "to": "splits@attn.test",
+          "listId": "GitHub notifications <notifications.github.com>",
+          "subject": "Review requested on PR #87",
+          "snippet": "You were requested as a reviewer.",
+          "bodyText": "A review was requested on configurable split inboxes."
+        }
+      ]
+    },
+    {
+      "id": "t-calendar-mime",
+      "messages": [
+        {
+          "id": "m-calendar-mime",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:45",
+          "from": "Ari Chen <ari@example.com>",
+          "to": "splits@attn.test",
+          "subject": "Quarterly planning invite",
+          "snippet": "Calendar invitation attached.",
+          "bodyText": "Please join the quarterly planning session.",
+          "attachments": [
+            {
+              "attachmentId": "att-calendar-part",
+              "mimeType": "text/calendar",
+              "sizeBytes": 512
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t-newsletter-list",
+      "messages": [
+        {
+          "id": "m-newsletter-list",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:30",
+          "from": "The Pragmatic Engineer <newsletter@pragmatic.example>",
+          "to": "splits@attn.test",
+          "listId": "The Pragmatic Engineer <weekly.pragmatic.example>",
+          "subject": "The systems issue",
+          "snippet": "A practical guide to reliable systems.",
+          "bodyText": "This week's practical guide to reliable systems."
+        }
+      ]
+    },
+    {
+      "id": "t-important",
+      "messages": [
+        {
+          "id": "m-important",
+          "labelIds": ["INBOX", "UNREAD", "IMPORTANT"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:00",
+          "from": "Maya Lin <maya@example.com>",
+          "to": "splits@attn.test",
+          "subject": "Board memo needs approval",
+          "snippet": "Please approve the final memo.",
+          "bodyText": "Please approve the final board memo by noon."
+        }
+      ]
+    },
+    {
+      "id": "t-newsletter-promotions",
+      "messages": [
+        {
+          "id": "m-newsletter-promotions",
+          "labelIds": ["INBOX", "CATEGORY_PROMOTIONS"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:50",
+          "from": "Field Notes <hello@fieldnotes.example>",
+          "to": "splits@attn.test",
+          "subject": "A special offer for members",
+          "snippet": "Your member offer is ready.",
+          "bodyText": "Your member offer is ready."
+        }
+      ]
+    },
+    {
+      "id": "t-other-unread",
+      "messages": [
+        {
+          "id": "m-other-unread",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:30",
+          "from": "Sam Rivera <sam@example.com>",
+          "to": "splits@attn.test",
+          "subject": "Dinner Friday?",
+          "snippet": "Does seven work for you?",
+          "bodyText": "Does seven work for you on Friday?"
+        }
+      ]
+    },
+    {
+      "id": "t-other-read",
+      "messages": [
+        {
+          "id": "m-other-read",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:00",
+          "from": "Jo Park <jo@example.com>",
+          "to": "splits@attn.test",
+          "subject": "Weekend walk",
+          "snippet": "The trail should be quiet.",
+          "bodyText": "The trail should be quiet this weekend."
+        }
+      ]
+    }
+  ]
+}
