@@ -317,9 +317,10 @@ The shortcut footer is a context-aware guide. Its default state is a single,
 non-wrapping line of only the commands relevant to the active view. Footer hints are explicit command
 metadata, not automatic ranking. They favor frequent or view-defining actions, appear only while that
 command is registered, and group equivalent keys under one label. The main list orders `J/K` Navigate,
-`Enter` Open, `E` Done, `C` Compose, and `Mod+K` Command palette. Pressing a chord prefix such as `G`
-temporarily replaces that line with the visible completions from the same command registry. The guide shows
-only the completion keys and labels, without repeating the prefix. Fixed mailboxes use
+`Enter` Open, `E` Done, `C` Compose, `Z` Undo, `H` Snooze, `V` Move, and `Mod+K` Command palette.
+Pressing a chord prefix such as `G` temporarily replaces that line with the visible completions from the
+same command registry. The guide shows only the completion keys and labels, without repeating the prefix.
+Fixed mailboxes use
 `I/A/T/D/S/H/P/R/O`. Inbox splits remain in the command palette and use `Tab` or `Shift+Tab` for direct
 navigation. The guide remains visible until completion, `Esc`, a view change, or a 3-second timeout. The
 command palette (`Mod+K`) and cheat sheet (`Mod+/`) remain the exhaustive discovery surfaces. Narrow windows

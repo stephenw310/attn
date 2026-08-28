@@ -143,7 +143,10 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
     for (const [id, text] of [
       ['done', 'Edone'],
-      ['compose', 'Ccompose']
+      ['compose', 'Ccompose'],
+      ['undo', 'Zundo'],
+      ['snooze', 'Hsnooze'],
+      ['move', 'Vmove']
     ]) {
       await expect(page.getByTestId(`footer-shortcut-${id}`)).toContainText(text)
     }
@@ -158,7 +161,7 @@ test.describe('seeded inbox smoke coverage', () => {
             )
           )
       )
-      .toEqual(['navigate', 'open', 'done', 'compose', 'palette'])
+      .toEqual(['navigate', 'open', 'done', 'compose', 'undo', 'snooze', 'move', 'palette'])
   })
 
   test('J/K and arrow keys move list selection without opening a conversation', async ({ page }) => {

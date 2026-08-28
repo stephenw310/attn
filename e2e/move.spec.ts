@@ -239,9 +239,9 @@ test('cancels a snooze reached through a user label and restores its exact due t
   await expect(snoozedReceipt.getByTestId('chip-snooze-due')).toHaveText(originalDue ?? '')
 })
 
-test('keeps Move in the palette only for message destinations', async ({ page }) => {
+test('offers Move in the footer and palette for message destinations', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  await expect(page.getByTestId('footer-shortcut-move')).toHaveCount(0)
+  await expect(page.getByTestId('footer-shortcut-move')).toContainText('Vmove')
   await expectMovePaletteCount(page, 1)
 
   for (const shortcut of ['d', 'h', 'o']) {
@@ -251,13 +251,13 @@ test('keeps Move in the palette only for message destinations', async ({ page })
   }
 
   await goTo(page, 'r')
-  await expect(page.getByTestId('footer-shortcut-move')).toHaveCount(0)
+  await expect(page.getByTestId('footer-shortcut-move')).toContainText('Vmove')
   await expectMovePaletteCount(page, 1)
 
   await goTo(page, 'i')
   await page.keyboard.press('/')
   await page.getByTestId('search-input').fill('in:trash')
   await page.getByTestId('search-input').press('Enter')
-  await expect(page.getByTestId('footer-shortcut-move')).toHaveCount(0)
+  await expect(page.getByTestId('footer-shortcut-move')).toContainText('Vmove')
   await expectMovePaletteCount(page, 1)
 })

@@ -16,7 +16,9 @@ async function footerHintIds(page: import('@playwright/test').Page): Promise<(st
 
 test('shows the minimal registry-derived footer for each keyboard context', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
-  await expect.poll(() => footerHintIds(page)).toEqual(['navigate', 'open', 'done', 'compose', 'palette'])
+  await expect
+    .poll(() => footerHintIds(page))
+    .toEqual(['navigate', 'open', 'done', 'compose', 'undo', 'snooze', 'move', 'palette'])
   await expect(page.getByTestId('footer-shortcut-compose')).toBeInViewport()
   await expect(page.getByTestId('footer-shortcut-palette')).toContainText('command palette')
 
@@ -34,7 +36,7 @@ test('shows the minimal registry-derived footer for each keyboard context', asyn
   await expect(page.getByTestId('view-title')).toHaveText('Drafts')
   await expect
     .poll(() => footerHintIds(page))
-    .toEqual(['navigate', 'open', 'delete-draft', 'compose', 'palette'])
+    .toEqual(['navigate', 'open', 'delete-draft', 'compose', 'undo', 'palette'])
   await expect(page.getByTestId('footer-shortcut-delete-draft')).toBeInViewport()
 
   await page.keyboard.press('g')
@@ -176,6 +178,15 @@ test('keeps the footer height fixed when reader shortcuts overflow', async ({ ap
   const footer = page.getByTestId('mail-footer')
   const shortcuts = page.getByTestId('footer-shortcuts')
   const initialHeight = await footer.evaluate((element) => element.getBoundingClientRect().height)
+
+  await expect
+    .poll(() =>
+      shortcuts.evaluate((element) => ({
+        overflows: element.scrollWidth > element.clientWidth,
+        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
+      }))
+    )
+    .toEqual({ overflows: true, scrollbarHeight: 0 })
 
   await page.keyboard.press('g')
   await expect(page.getByTestId('footer-chord-guide')).toBeVisible()

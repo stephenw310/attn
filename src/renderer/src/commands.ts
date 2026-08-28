@@ -31,7 +31,7 @@ export const COMMAND_SPECS = {
     shortcut: 'Mod+K',
     context: 'global',
     allowInComposer: true,
-    footer: { list: { id: 'palette', label: 'command palette', order: 50 } }
+    footer: { list: { id: 'palette', label: 'command palette', order: 80 } }
   },
   'navigate.next': {
     title: 'Next item',
@@ -290,6 +290,7 @@ export const COMMAND_SPECS = {
     shortcut: 'h',
     context: 'mail',
     footer: {
+      list: { id: 'snooze', label: 'snooze', order: 60 },
       reader: { id: 'snooze', label: 'snooze', order: 30 }
     }
   },
@@ -302,6 +303,7 @@ export const COMMAND_SPECS = {
     shortcut: 'v',
     context: 'mail',
     footer: {
+      list: { id: 'move', label: 'move', order: 70 },
       reader: { id: 'move', label: 'move', order: 40 }
     }
   },
@@ -311,6 +313,7 @@ export const COMMAND_SPECS = {
     shortcut: 'z',
     context: 'global',
     footer: {
+      list: { id: 'undo', label: 'undo', order: 50 },
       outbox: { id: 'undo', label: 'undo', order: 40 }
     }
   }

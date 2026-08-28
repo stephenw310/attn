@@ -371,7 +371,10 @@ describe('keyboard dispatch', () => {
       { id: 'open', label: 'open', order: 20, shortcuts: ['Enter'] },
       { id: 'done', label: 'done', order: 30, shortcuts: ['e'] },
       { id: 'compose', label: 'compose', order: 40, shortcuts: ['c'] },
-      { id: 'palette', label: 'command palette', order: 50, shortcuts: ['Mod+K'] }
+      { id: 'undo', label: 'undo', order: 50, shortcuts: ['z'] },
+      { id: 'snooze', label: 'snooze', order: 60, shortcuts: ['h'] },
+      { id: 'move', label: 'move', order: 70, shortcuts: ['v'] },
+      { id: 'palette', label: 'command palette', order: 80, shortcuts: ['Mod+K'] }
     ])
   })
 
@@ -418,7 +421,8 @@ describe('keyboard dispatch', () => {
         shortcuts: ['Mod+Shift+D']
       },
       { id: 'compose', label: 'compose', order: 40, shortcuts: ['c'] },
-      { id: 'palette', label: 'command palette', order: 50, shortcuts: ['Mod+K'] }
+      { id: 'undo', label: 'undo', order: 50, shortcuts: ['z'] },
+      { id: 'palette', label: 'command palette', order: 80, shortcuts: ['Mod+K'] }
     ])
   })
 
