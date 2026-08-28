@@ -16,6 +16,7 @@ interface Options {
   sidebarCollapsed: boolean
   starOn: boolean
   markUnreadOn: boolean
+  moveAllowed: boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   navigateNext: () => void
   navigatePrevious: () => void
@@ -38,6 +39,7 @@ interface Options {
   openSnooze: () => void
   snoozeAt: (dueAt: number) => void
   openLabel: () => void
+  openMove: () => void
   openComposer: () => void
   openReply: (kind: Exclude<DraftKind, 'new'>) => void
   showToast: (message: string) => void
@@ -62,6 +64,7 @@ export function useInboxCommands(options: Options): void {
     sidebarCollapsed,
     starOn,
     markUnreadOn,
+    moveAllowed,
     preserveSelectionOnRefreshRef,
     navigateNext,
     navigatePrevious,
@@ -84,6 +87,7 @@ export function useInboxCommands(options: Options): void {
     openSnooze,
     snoozeAt,
     openLabel,
+    openMove,
     openComposer,
     openReply,
     showToast,
@@ -208,6 +212,7 @@ export function useInboxCommands(options: Options): void {
                   }),
                 { title: markUnreadOn ? 'Mark unread' : 'Mark read' }
               ),
+              ...(moveAllowed ? [createCommand('triage.move', openMove)] : []),
               createCommand('triage.label', openLabel)
             ]
           : []),
@@ -236,10 +241,12 @@ export function useInboxCommands(options: Options): void {
       extendSelection,
       focusSearchQuery,
       markUnreadOn,
+      moveAllowed,
       mailCommandsEnabled,
       navigateNext,
       navigatePrevious,
       openLabel,
+      openMove,
       openComposer,
       openOutbox,
       openReply,

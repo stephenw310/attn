@@ -1,14 +1,28 @@
 import type { RevertedActionKind } from '../../shared/actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from '../../shared/actions'
 import { stringArray } from '../../shared/guards'
+import { isMoveDestination } from '../../shared/move'
 import type { Db } from '../db'
 import { applyThreadDelta } from '../store/mutate'
-import { type SnoozeReminderSnapshot, snoozeReminderSnapshot } from '../store/reminders'
+import {
+  restoreSnoozeReminder,
+  type SnoozeReminderSnapshot,
+  snoozeReminderSnapshot
+} from '../store/reminders'
 import { isStoredAuthActionError } from './execute'
 import { actionLabel, inverseForThread, planAction } from './plan'
 import { dropRevertedUndoEntries, type QueuedActionRef, queueIntentRef } from './revert'
 
-type UndoAction = TriageAction | { kind: 'snoozeAt'; threadIds: string[]; dueAt: number }
+interface MoveUndoAction {
+  kind: 'moveUndo'
+  threadIds: string[]
+  add: string[]
+  remove: string[]
+  reminderBefore: SnoozeReminderSnapshot | null
+  revertsQueueId?: number
+}
+
+type UndoAction = TriageAction | MoveUndoAction | { kind: 'snoozeAt'; threadIds: string[]; dueAt: number }
 
 interface TriageUndoEntry {
   kind: 'triage'
@@ -42,6 +56,33 @@ function labelsFor(db: Db, accountId: string, threadId: string): Set<string> {
   return new Set(rows.map((row) => row.label_id))
 }
 
+function labelsOnEveryMessageFor(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  threadLabels: ReadonlySet<string>
+): Set<string> {
+  const rows = db
+    .prepare('SELECT labels_json FROM messages WHERE account_id = ? AND thread_id = ?')
+    .all(accountId, threadId) as Array<{ labels_json: string | null }>
+  if (rows.length === 0) return new Set(threadLabels)
+  let common: Set<string> | null = null
+  for (const row of rows) {
+    // A manually upgraded legacy row cannot prove per-message membership. A
+    // redundant provider add is safer than leaving the destination partial.
+    if (row.labels_json === null) return new Set()
+    const labels = new Set(JSON.parse(row.labels_json) as string[])
+    if (common === null) {
+      common = labels
+      continue
+    }
+    for (const label of common) {
+      if (!labels.has(label)) common.delete(label)
+    }
+  }
+  return common ?? new Set()
+}
+
 function pendingSnoozeFor(db: Db, accountId: string, threadId: string): { dueAt: number } | undefined {
   return db
     .prepare(
@@ -56,6 +97,44 @@ interface ApplyResult {
   refs: QueuedActionRef[]
 }
 
+function effectiveLabelDelta(
+  plan: ReturnType<typeof planAction>,
+  labels: ReadonlySet<string>,
+  labelsOnEveryMessage: ReadonlySet<string> = labels
+): { add: string[]; remove: string[] } {
+  return {
+    add: plan.add.filter((label) => !labelsOnEveryMessage.has(label)),
+    remove: plan.remove.filter((label) => labels.has(label))
+  }
+}
+
+function moveChangesReminder(reminder: SnoozeReminderSnapshot | null): boolean {
+  return reminder?.state === 'pending' || reminder?.state === 'returned'
+}
+
+function movesToMailbox(action: TriageAction): boolean {
+  return action.kind === 'move' || action.kind === 'spam' || action.kind === 'trash'
+}
+
+function validateMoveLabels(
+  db: Db,
+  accountId: string,
+  action: Extract<TriageAction, { kind: 'move' }>
+): void {
+  const destinationLabelId = action.destination.kind === 'label' ? action.destination.labelId : null
+  if (action.sourceLabelId !== null && action.sourceLabelId === destinationLabelId) {
+    throw new Error('Move source and destination must differ')
+  }
+  const findUserLabel = db.prepare(
+    "SELECT 1 FROM labels WHERE account_id = ? AND id = ? AND lower(type) = 'user'"
+  )
+  for (const labelId of [action.sourceLabelId, destinationLabelId]) {
+    if (labelId !== null && !findUserLabel.get(accountId, labelId)) {
+      throw new Error('Move label is unavailable')
+    }
+  }
+}
+
 function apply(
   db: Db,
   accountId: string,
@@ -66,16 +145,26 @@ function apply(
   const labelsBefore = new Map(
     action.threadIds.map((threadId) => [threadId, labelsFor(db, accountId, threadId)] as const)
   )
+  const labelsOnEveryMessageBefore = movesToMailbox(action)
+    ? new Map(
+        action.threadIds.map((threadId) => [
+          threadId,
+          labelsOnEveryMessageFor(db, accountId, threadId, labelsBefore.get(threadId) ?? new Set())
+        ])
+      )
+    : null
   const remindersBefore = new Map(
     action.threadIds.map((threadId) => [threadId, snoozeReminderSnapshot(db, accountId, threadId)] as const)
   )
-  const undo = action.threadIds.map((id): UndoAction => {
-    if (action.kind === 'unsnooze' || action.kind === 'archive') {
-      const reminder = pendingSnoozeFor(db, accountId, id)
-      if (reminder) return { kind: 'snoozeAt', threadIds: [id], dueAt: reminder.dueAt }
-    }
-    return inverseForThread(action, labelsBefore.get(id) ?? new Set(), id)
-  })
+  const undo: UndoAction[] = movesToMailbox(action)
+    ? []
+    : action.threadIds.map((id): UndoAction => {
+        if (action.kind === 'unsnooze' || action.kind === 'archive') {
+          const reminder = pendingSnoozeFor(db, accountId, id)
+          if (reminder) return { kind: 'snoozeAt', threadIds: [id], dueAt: reminder.dueAt }
+        }
+        return inverseForThread(action, labelsBefore.get(id) ?? new Set(), id)
+      })
   const enqueue = db.prepare(
     `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
      VALUES (?, ?, ?, ?, 'pending')`
@@ -83,6 +172,55 @@ function apply(
   const refs: QueuedActionRef[] = []
   db.transaction(() => {
     for (const threadId of action.threadIds) {
+      if (movesToMailbox(action)) {
+        const labels = labelsBefore.get(threadId) ?? new Set<string>()
+        const reminderBefore = remindersBefore.get(threadId) ?? null
+        const delta = effectiveLabelDelta(plan, labels, labelsOnEveryMessageBefore?.get(threadId) ?? labels)
+        if (delta.add.length === 0 && delta.remove.length === 0 && !moveChangesReminder(reminderBefore)) {
+          continue
+        }
+        const moveUndo: MoveUndoAction = {
+          kind: 'moveUndo',
+          threadIds: [threadId],
+          add: [...delta.remove],
+          // Reverse the labels that the forward thread mutation actually
+          // added. Thread-level Gmail operations cannot recreate partial
+          // per-message membership, so checking the thread-label union here
+          // would leave the destination applied to the whole thread.
+          remove: [...delta.add],
+          reminderBefore
+        }
+        db.prepare(
+          `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
+           WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'
+             AND state IN ('pending', 'returned')`
+        ).run(accountId, threadId)
+        applyThreadDelta(db, accountId, { threadId, ...delta })
+        if (delta.add.length === 0 && delta.remove.length === 0) {
+          undo.push(moveUndo)
+          continue
+        }
+        const queued = enqueue.run(
+          accountId,
+          plan.queueKind,
+          threadId,
+          JSON.stringify({
+            add: delta.add,
+            remove: delta.remove,
+            actionKind,
+            ...(moveChangesReminder(reminderBefore) ? { reminderBefore } : {})
+          })
+        )
+        moveUndo.revertsQueueId = Number(queued.lastInsertRowid)
+        undo.push(moveUndo)
+        refs.push(
+          queueIntentRef(
+            { kind: 'modifyLabels', threadId, add: delta.add, remove: delta.remove },
+            Number(queued.lastInsertRowid)
+          )
+        )
+        continue
+      }
       if (action.kind === 'unsnooze') {
         db.prepare("DELETE FROM reminders WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'").run(
           accountId,
@@ -128,6 +266,30 @@ function apply(
     }
   })()
   return { undo, refs }
+}
+
+function applyMoveUndo(db: Db, accountId: string, action: MoveUndoAction): void {
+  const [threadId] = action.threadIds
+  if (!threadId) return
+  const reminderBeforeUndo = snoozeReminderSnapshot(db, accountId, threadId)
+  if (action.add.length > 0 || action.remove.length > 0) {
+    applyThreadDelta(db, accountId, { threadId, add: action.add, remove: action.remove })
+    db.prepare(
+      `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
+       VALUES (?, 'modifyLabels', ?, ?, 'pending')`
+    ).run(
+      accountId,
+      threadId,
+      JSON.stringify({
+        add: action.add,
+        remove: action.remove,
+        actionKind: 'undo',
+        reminderBefore: reminderBeforeUndo,
+        ...(action.revertsQueueId ? { revertsQueueId: action.revertsQueueId } : {})
+      })
+    )
+  }
+  restoreSnoozeReminder(db, accountId, threadId, action.reminderBefore)
 }
 
 function applySnooze(
@@ -203,9 +365,10 @@ export function performTriage(
   action: TriageAction,
   recordUndo = true
 ): TriageResult {
-  const label = actionLabel(action)
+  if (action.kind === 'move') validateMoveLabels(db, accountId, action)
   const { undo, refs } = apply(db, accountId, action)
-  if (recordUndo) {
+  const label = actionLabel(action, movesToMailbox(action) ? undo.length : action.threadIds.length)
+  if (recordUndo && undo.length > 0) {
     const undoStack = undoStackFor(accountId)
     undoStack.push({
       kind: 'triage',
@@ -216,7 +379,7 @@ export function performTriage(
     })
     if (undoStack.length > 50) undoStack.shift()
   }
-  return { label }
+  return { label: undo.length > 0 ? label : 'Already there' }
 }
 
 export function undoLast(db: Db, accountId: string): TriageResult | null {
@@ -234,6 +397,7 @@ export function undoLast(db: Db, accountId: string): TriageResult | null {
   db.transaction(() => {
     for (const action of entry.undo) {
       if (action.kind === 'snoozeAt') applySnooze(db, accountId, action.threadIds, action.dueAt, 'undo')
+      else if (action.kind === 'moveUndo') applyMoveUndo(db, accountId, action)
       else apply(db, accountId, action, 'undo')
     }
   })()
@@ -299,6 +463,12 @@ export function isTriageAction(value: unknown): value is TriageAction {
       return typeof action.on === 'boolean'
     case 'label':
       return stringArray(action.add) && stringArray(action.remove)
+    case 'move':
+      return (
+        isMoveDestination(action.destination) &&
+        (typeof action.sourceLabelId === 'string' || action.sourceLabelId === null) &&
+        (action.destination.kind !== 'label' || action.destination.labelId !== action.sourceLabelId)
+      )
     default:
       return false
   }
@@ -337,7 +507,10 @@ function recoveryReminderForAction(
   reminder: SnoozeReminderSnapshot | null
 ): SnoozeReminderSnapshot | null | undefined {
   if (action.kind === 'unsnooze') return reminder
-  if (action.kind === 'archive' && (reminder?.state === 'pending' || reminder?.state === 'returned')) {
+  if (
+    (action.kind === 'archive' || action.kind === 'move') &&
+    (reminder?.state === 'pending' || reminder?.state === 'returned')
+  ) {
     return reminder
   }
   return reminder?.state === 'returned' ? reminder : undefined
@@ -358,5 +531,7 @@ function noticeKindForAction(action: TriageAction): RevertedActionKind {
       return action.on ? 'markUnread' : 'markRead'
     case 'label':
       return 'labels'
+    case 'move':
+      return 'move'
   }
 }

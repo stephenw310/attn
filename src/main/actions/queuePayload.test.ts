@@ -13,6 +13,11 @@ describe('action queue payloads', () => {
       remove: ['SPAM'],
       actionKind: 'undo'
     })
+    expect(decodeLabelDelta('{"add":["Label_2"],"remove":["INBOX"],"actionKind":"move"}')).toEqual({
+      add: ['Label_2'],
+      remove: ['INBOX'],
+      actionKind: 'move'
+    })
   })
 
   it('round-trips the reminder snapshot needed for local snooze recovery', () => {
@@ -31,6 +36,9 @@ describe('action queue payloads', () => {
       remove: ['INBOX'],
       reminderBefore: null
     })
+    expect(decodeLabelDelta('{"add":["INBOX"],"remove":[],"actionKind":"undo","revertsQueueId":42}')).toEqual(
+      { add: ['INBOX'], remove: [], actionKind: 'undo', revertsQueueId: 42 }
+    )
   })
 
   it('rejects malformed JSON and non-string label arrays', () => {
@@ -39,5 +47,8 @@ describe('action queue payloads', () => {
     expect(() =>
       decodeLabelDelta('{"add":[],"remove":[],"reminderBefore":{"dueAt":"soon","state":"pending"}}')
     ).toThrow('reminder snapshot')
+    expect(() => decodeLabelDelta('{"add":[],"remove":[],"revertsQueueId":0}')).toThrow(
+      'reverted action queue id'
+    )
   })
 })

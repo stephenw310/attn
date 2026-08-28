@@ -175,6 +175,7 @@ export const COMMAND_SPECS = {
   'triage.spam': { title: 'Mark as spam', shortcut: '!', context: 'mail' },
   'triage.star': { title: 'Star', shortcut: 's', context: 'mail' },
   'triage.unread': { title: 'Mark unread', shortcut: 'u', context: 'mail' },
+  'triage.move': { title: 'Move', shortcut: 'v', context: 'mail' },
   'triage.label': { title: 'Label', shortcut: 'l', context: 'mail' },
   'triage.undo': { title: 'Undo', shortcut: 'z', context: 'global' }
 } as const satisfies Record<string, CommandSpec>

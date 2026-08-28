@@ -203,7 +203,9 @@ This is the product. Everything else in M1 hangs off the machinery built here: o
 - **One reducer, two sources (SPEC §6):** a single `applyThreadDelta` mutates local state for *both* optimistic user actions (now) and server history events (T7). Local-first means the optimistic path *is* the local DB write — SQLite is synchronous and local, comfortably inside the 16ms feedback budget.
 - **The queue stores intent, not SQL:** rows are per-thread label/trash operations that map 1:1 onto Gmail endpoints. Label ops are idempotent, so crash-recovery is "re-run anything in flight" — the exactly-once machinery is only needed for send (M2 outbox).
 - **Undo is a session-scoped stack in the main process** (spec: last 50, includes bulk). Undoing performs precise per-thread inverse actions (computed from pre-state at perform time) and does *not* push onto the stack.
-- **Trash uses the dedicated endpoints** (`threads.trash`/`untrash`), not label modify. Spam = modify `+SPAM −INBOX`.
+- **Superseded by M3 T31:** new Trash and Spam actions use `threads.modify`, sharing the same exclusive
+  `TRASH` and `SPAM` deltas as Move. The executor retains the dedicated `threads.trash` and `threads.untrash`
+  branches only to drain rows queued by older app versions.
 - **A minimal `MailProvider` interface starts here** (D1): the executor calls `modifyThread`/`trashThread`/`untrashThread` on the interface; `GmailMailProvider` wraps `GmailClient`. T7 extends the same interface with sync methods.
 - **Verbs are available only in the authenticated inbox.** Signed-out launches stay on onboarding.
 
@@ -262,7 +264,7 @@ Undo stack (module state in main): array of `{ label, undo: TriageAction[] }`, c
 - Per row: `state='inflight'` → provider call → delete row. `GmailApiError` 404 → thread gone, delete row. Other 4xx → `state='failed'` + `last_error` (don't retry forever). Network errors / 5xx / 429 → back to `pending`, `attempts++`, retry with capped backoff (the client's own retry handles short bursts; the executor's timer handles offline: 5s → 30s → 60s cap).
 - Boot recovery: any `inflight` rows (crash artifacts) flip back to `pending` — idempotent ops make re-running safe.
 
-**Gmail client (`src/main/gmail/client.ts`):** refactor `get` into a shared `request(method, path, { params, body })`; add `post<T>(path, body)`. Same 401-refresh + backoff behavior. New `src/main/gmail/provider.ts` implements `MailProvider` (interface in `src/main/sync/provider.ts`): `modifyThread` → `POST /threads/{id}/modify`, `trashThread` → `POST /threads/{id}/trash`, `untrashThread` → `POST /threads/{id}/untrash`.
+**Gmail client (`src/main/gmail/client.ts`):** refactor `get` into a shared `request(method, path, { params, body })`; add `post<T>(path, body)`. Same 401-refresh + backoff behavior. New `src/main/gmail/provider.ts` implements `MailProvider` (interface in `src/main/sync/provider.ts`): `modifyThread` → `POST /threads/{id}/modify`, `trashThread` → `POST /threads/{id}/trash`, `untrashThread` → `POST /threads/{id}/untrash`. M3 T31 routes new Spam and Trash actions through `modifyThread`; the dedicated methods remain for compatible replay of existing queue rows.
 
 **IPC (all three layers):**
 - `mail:triage(action: TriageAction)` → `{ label: string }` — applies, enqueues, broadcasts `mail:changed`, pushes undo.

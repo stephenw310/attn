@@ -113,6 +113,7 @@ describe('command catalog', () => {
       'triage.spam',
       'triage.star',
       'triage.unread',
+      'triage.move',
       'triage.label',
       'triage.undo'
     ])

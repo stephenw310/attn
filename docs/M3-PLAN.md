@@ -2,7 +2,7 @@
 
 **Audience:** the engineers building M3. Same contract as [M1-PLAN.md](M1-PLAN.md) and [M2-PLAN.md](M2-PLAN.md).
 Every task is one PR, nothing is done until `npm run verify` is green, and "spec F2" means a section of
-[SPEC.md](SPEC.md) (v0.15). Read the section before starting the task.
+[SPEC.md](SPEC.md) (v0.16). Read the section before starting the task.
 
 **Basis:** SPEC §8 M3, §9 #10 (system mailboxes are explicit v1 scope), §9 #17 (lifetime headers replace the
 12-month window), §6 (utility-process move), F2 (sync engine), F3 (mailbox navigation), F10 (instant search).
@@ -31,6 +31,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
 | T29 inbox zero (F13) | **planned**, not started | nothing |
 | T30 built-in themes (F14) | **done**, completed 2026-08-23 | nothing |
+| T31 move to a label (F4) | **done**, completed 2026-08-27 | nothing |
 
 S2 settled the store shape needed for F3 mailbox views and S4, S1 moved that store into the utility process,
 and S4 closed the last sync correctness gap. The feature tasks are written up below, under
@@ -382,7 +383,7 @@ Expired-history recovery now converges cached membership and existence without g
 
 ## The feature half: order and open assumptions
 
-Nine tasks, T22 through T30. They keep M2's `T` numbering rather than continuing `S1`–`S4`, because the `S`
+Ten tasks, T22 through T31. They keep M2's `T` numbering rather than continuing `S1`–`S4`, because the `S`
 names describe the sync restructure and no id is ever reused. Two tracks run in parallel and meet at the
 palette:
 
@@ -391,6 +392,7 @@ A  T22 mailboxes ──> T27 splits ──> T28 chord guide ──> T29 inbox ze
 B  T23 FTS index ──> T24 search UI ──> T25 server search
    T26 palette   ── depends on A and B registering their commands, asserts the inventory last
    T30 built-in themes ── independent, schedule it wherever it fits
+   T31 move to a label ── depends on T22's user-label views, then runs independently
 ```
 
 T22 goes first because S2 and S4 exist to serve it, because the store already answers its questions, and
@@ -1112,6 +1114,125 @@ The zero state appears only when the mailbox is genuinely empty, and verify is g
 
 All four themes are legible across list, reader, composer, and HTML mail, the override persists across
 relaunch, System reacts to OS changes without a reload, and verify is green.
+
+---
+
+## T31 — Move to a label (`V`)
+
+**Status: done.**
+
+**Depends on:** T22 · **Parallel with:** T27, T28, and T29 · **Spec:** F4 Move, F5 `V`
+
+### Why
+
+`L` edits label membership. It supports several labels, shows mixed bulk state, and stays open after each
+toggle. Move is a different triage gesture: choose one destination, remove the conversation from Inbox or
+the active user-label view, close the picker, and continue. Reusing `LabelPicker` without changing those
+semantics would leave mail in Inbox and would not advance the queue.
+
+### Design (decided)
+
+- Register `triage.move` with `V` in `COMMAND_SPECS`. The command appears in list and reader contexts for
+  Inbox, Inbox splits, All Mail, Sent, Starred, Spam, Trash, user-label views, and matching search results.
+  Do not register it in Drafts, Snoozed, or Outbox.
+- Build a separate one-shot `MovePicker`. It offers Done, Inbox, Spam, Trash, and every user label. When split
+  Inbox is configured, it also offers Important and Other. The picker supports the same ArrowUp, ArrowDown,
+  Enter, and Escape loop as `LabelPicker`, and it closes after one choice. Put Done first. Exclude the active
+  user label because Done is the explicit removal action. Disable a destination only when every target is
+  already there and no target has a pending or returned reminder. Creating, renaming, and deleting Gmail
+  labels remain outside this task.
+- Capture the target ids and their label snapshots when the picker opens. Do not read the live selection
+  after Move clears it. This avoids the multi-toggle target drift recorded for `LabelPicker` in the M1
+  accepted deviations.
+- Add a semantic `move` member to `TriageAction` with a discriminated `MoveDestination` and
+  `sourceLabelId: string | null`. The utility action handler validates user-label destinations against the
+  local catalog before it writes and rejects an action whose source equals its destination. Keep the label
+  plan in `src/shared/move.ts` so the utility reducer and renderer optimism use the same mapping:
+
+  | Destination | Add | Remove |
+  |---|---|---|
+  | Done | Nothing | `INBOX`, `SPAM`, `TRASH` |
+  | Inbox | `INBOX` | `SPAM`, `TRASH` |
+  | Spam | `SPAM` | `INBOX`, `TRASH` |
+  | Trash | `TRASH` | `INBOX`, `SPAM` |
+  | Important | `INBOX`, `IMPORTANT` | `SPAM`, `TRASH` |
+  | Other | `INBOX` | `IMPORTANT`, `SPAM`, `TRASH` |
+  | User label | The chosen label | `INBOX`, `SPAM`, `TRASH` |
+
+  Every row also removes `sourceLabelId` when the command came from a user-label view. The delta does not
+  touch other user labels, `STARRED`, `UNREAD`, or `SENT`. It preserves `IMPORTANT` except when Other removes
+  it by definition.
+- Read each target's snooze reminder before applying Move. In the same SQLite transaction as the label delta,
+  change a pending reminder to `canceled` and a returned reminder to `done`, matching archive. Store the prior
+  reminder snapshot in the queued payload so permanent-failure recovery restores both labels and reminder
+  state. This rule applies even when the target came from All Mail, Starred, a user-label view, or search.
+- Keep the durable operation as the existing `modifyLabels` queue kind. Add `move` to action validation,
+  action labels, the queue payload's `RevertedActionKind`, permanent-failure copy, and every exhaustive
+  switch. The action executor calls `GmailMailProvider.modifyThread`, which posts the planned add and remove
+  arrays to Gmail `users.threads.modify` under `gmail.modify`. Route new `!` and `#` actions through the same
+  Spam and Trash system-label plans, reminder transaction, inverse-delta undo, and `modifyLabels` operation.
+  Give those shortcuts the same renderer cache update, rollback, and view-exit path as Move. Keep the
+  dedicated trash and untrash executor branches for compatible replay of older queued rows. The executor
+  already restores the optional reminder snapshot on permanent failure. No schema, preload, IPC-channel, or
+  new executor behavior is needed.
+- Skip a thread only when Move changes neither its labels nor its reminder state. Do not enqueue that thread
+  or add it to the undo entry. If no target changes, return `Already there` and do not push an empty undo
+  entry.
+- Compute each undo from that thread's forward label delta and reminder pre-state. Add an internal Move undo
+  entry that carries the inverse label delta plus the prior reminder snapshot; `undoLast` applies both in one
+  SQLite transaction. Do not represent this case as `snoozeAt`, which cannot remove a destination label.
+  Undo re-adds every label that the forward thread mutation removed, removes every label it added, and
+  restores the prior reminder state and due time. Gmail's thread-level operation cannot recreate a label
+  that was present on only some messages before the move; reversing the actual mutation avoids leaving the
+  destination on the whole thread. A bulk move stays one undo-stack entry even when the selected threads
+  began with different labels or only some had reminders.
+- Refactor the renderer's archive-only exit path into a pure view-membership plan used by archive and Move.
+  Inbox, Spam, Trash, normal mailboxes, user-label views, Important, and Other each remove a row only when the
+  chosen delta ends that membership. Advance the list or open reader to the next surviving conversation.
+  Search removes or retains each row according to the active query after the optimistic label update. Bulk
+  Move clears the selection and clamps focus to a surviving row without opening a conversation.
+- Apply the destination and removal delta to every renderer row cache in the same keydown turn, including
+  search results, so the chosen label chip and row exit meet F4's 16 ms feedback budget. Roll back only the
+  rows still owned by the failed Move if IPC rejects. The existing `mail:changed` refresh remains the final
+  source of truth.
+
+### Testing
+
+- **Unit:** the Move planner for every mailbox, split, and user-label destination; the shared `!`, `#`, Spam,
+  and Trash plans; preservation of unrelated labels and status labels; user-label validation; exact inverse
+  deltas for mixed bulk pre-state; the Gmail provider request body; action decoding and permanent-failure
+  copy for `move`; the view-membership and
+  selection plan at the first, middle, and last row. Cover both implicit normal-mail search scope and
+  explicit mailbox or user-label filters after an optimistic Move. With a real in-memory store and injectable scheduler,
+  prove that Move cancels a pending reminder reached through an ordinary search, that the due scheduler does
+  not return it to Inbox, and that undo restores the expected thread-label membership, reminder state, and
+  due time. Also prove
+  that permanent-failure recovery restores the same snapshot.
+- **Component:** system and split destinations, destination filtering, current-destination disabling,
+  keyboard wrap, one-shot Enter, Escape, Done with an empty catalog, exclusion of the active user label, a
+  bulk target snapshot that survives selection clearing, and isolation of typed letters from global
+  shortcuts.
+- **E2e (seeded):** move one Inbox thread into a user label and auto-advance; open that label and move the
+  thread to Done; move three selected Inbox threads and restore all three with one `Z`; move from All Mail
+  without losing `STARRED`, `UNREAD`, or an unrelated label. Reach a pending-snooze thread through an allowed
+  user-label view, move it, and prove that it leaves Snoozed. Undo and prove that its original due time
+  returns. Move one thread through Spam, Trash, and Inbox. Move one Inbox thread from Important to Other and
+  back. Move another thread between Spam and Trash with `!` and `#`, prove immediate optimistic exit, and
+  then prove that undo restores its prior system mailbox. Move a matching normal-mail search result to Trash
+  and prove that it exits before the local refresh.
+  Prove that `V` and the palette command are present in Spam and Trash but absent in Drafts, Snoozed, and
+  Outbox. Assert pending-row counts so the local action cannot pass without entering the durable queue.
+- **T27 integration:** if T31 lands first, T27 adds one split e2e that invokes `V` and proves that Move uses
+  Inbox semantics. If T27 lands first, add that assertion here. The second task to land owns the test.
+- **Screenshot artifact:** `move-picker.png`, added to the visual self-check list in `AGENTS.md` when the task
+  ships.
+
+### Done when
+
+Move and Label remain distinct commands, every allowed context follows F4's destination rules, and Move
+cannot leave a pending reminder that later adds `INBOX`. Bulk undo reverses every applied thread delta and
+restores reminder snapshots, failed actions converge through the existing recovery path, the affected
+screenshots have been reviewed, and `npm run verify` is green.
 
 ---
 

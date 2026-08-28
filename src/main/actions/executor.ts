@@ -274,6 +274,7 @@ export class ActionExecutor {
     try {
       this.db.transaction(() => {
         this.db.prepare('DELETE FROM action_queue WHERE account_id = ? AND id = ?').run(accountId, row.id)
+        this.dropQueuedReverts(accountId, row.id)
         if (reminderBefore !== undefined) {
           restoreSnoozeReminder(this.db, accountId, row.thread_id, reminderBefore)
         }
@@ -341,10 +342,35 @@ export class ActionExecutor {
     actionKind: RevertedActionKind | undefined,
     reverted: RevertedAction[]
   ): void {
-    this.db.prepare('DELETE FROM action_queue WHERE account_id = ? AND id = ?').run(accountId, row.id)
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM action_queue WHERE account_id = ? AND id = ?').run(accountId, row.id)
+      this.dropQueuedReverts(accountId, row.id)
+    })()
     invalidateRevertedUndo(accountId, [queueRowRef(row.id, row.thread_id)])
     reverted.push(unavailableAction(row.kind, row.thread_id, row.subject ?? '', actionKind))
     this.notify()
+  }
+
+  private dropQueuedReverts(accountId: string, queueId: number): void {
+    const candidates = this.db
+      .prepare(
+        `SELECT id, payload FROM action_queue
+         WHERE account_id = ? AND state = 'pending' AND id > ?
+         ORDER BY id`
+      )
+      .all(accountId, queueId) as Array<{ id: number; payload: string }>
+    const remove = this.db.prepare(
+      "DELETE FROM action_queue WHERE account_id = ? AND id = ? AND state = 'pending'"
+    )
+    for (const candidate of candidates) {
+      try {
+        if (decodeLabelDelta(candidate.payload).revertsQueueId === queueId) {
+          remove.run(accountId, candidate.id)
+        }
+      } catch {
+        // A corrupt later row gets its own authoritative recovery turn.
+      }
+    }
   }
 
   private markPending(

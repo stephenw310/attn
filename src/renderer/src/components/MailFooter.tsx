@@ -14,6 +14,7 @@ interface ShortcutHint {
 const TRIAGE_SHORTCUT_HINTS: ShortcutHint[] = [
   { id: 'done', keys: ['E'], label: 'done' },
   { id: 'snooze', keys: ['H'], label: 'snooze' },
+  { id: 'move', keys: ['V'], label: 'move' },
   { id: 'label', keys: ['L'], label: 'label' },
   { id: 'trash', keys: ['#'], label: 'trash' },
   { id: 'star', keys: ['S'], label: 'star' },
@@ -26,7 +27,8 @@ function footerShortcuts(
   readerOpen: boolean,
   outboxOpen: boolean,
   composing: boolean,
-  searchEditing: boolean
+  searchEditing: boolean,
+  moveAllowed: boolean
 ): ShortcutHint[] {
   // An inline composer keeps the list and reader on screen but owns the
   // keyboard, so advertise the composer's keys rather than dead triage verbs.
@@ -62,7 +64,7 @@ function footerShortcuts(
           { id: 'open', keys: ['Enter'], label: 'open' }
         ]),
     { id: 'select', keys: ['X'], label: 'select' },
-    ...TRIAGE_SHORTCUT_HINTS
+    ...TRIAGE_SHORTCUT_HINTS.filter((shortcut) => shortcut.id !== 'move' || moveAllowed)
   ]
 }
 
@@ -90,6 +92,7 @@ interface MailFooterProps {
   outboxOpen: boolean
   composing: boolean
   searchEditing: boolean
+  moveAllowed: boolean
   sync: SyncState
   networkOnline: boolean
   onRetry: () => void
@@ -97,15 +100,24 @@ interface MailFooterProps {
 }
 
 export function MailFooter(props: MailFooterProps): React.JSX.Element {
-  const { readerOpen, outboxOpen, composing, searchEditing, sync, networkOnline, onRetry, onCopyError } =
-    props
+  const {
+    readerOpen,
+    outboxOpen,
+    composing,
+    searchEditing,
+    moveAllowed,
+    sync,
+    networkOnline,
+    onRetry,
+    onCopyError
+  } = props
   return (
     <footer
       data-testid="mail-footer"
       className="relative z-40 flex min-h-11 items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
     >
       <div data-testid="footer-shortcuts" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
-        {footerShortcuts(readerOpen, outboxOpen, composing, searchEditing).map((shortcut) => (
+        {footerShortcuts(readerOpen, outboxOpen, composing, searchEditing, moveAllowed).map((shortcut) => (
           <FooterShortcut key={shortcut.id} {...shortcut} />
         ))}
       </div>

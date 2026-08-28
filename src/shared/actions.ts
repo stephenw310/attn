@@ -1,7 +1,15 @@
+import type { MoveDestination } from './move'
+
 export type TriageAction =
   | { kind: 'archive' | 'trash' | 'spam'; threadIds: string[] }
   | { kind: 'star' | 'markUnread'; threadIds: string[]; on: boolean }
   | { kind: 'label'; threadIds: string[]; add: string[]; remove: string[] }
+  | {
+      kind: 'move'
+      threadIds: string[]
+      destination: MoveDestination
+      sourceLabelId: string | null
+    }
   | { kind: 'restoreInbox' | 'untrash' | 'unsnooze'; threadIds: string[] }
 
 export interface TriageResult {

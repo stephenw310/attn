@@ -34,6 +34,12 @@ describe('failed-action toast batching', () => {
     )
   })
 
+  it('names a rejected Move without calling it an archive', () => {
+    expect(formatActionRevertToast([reverted('move', 'Roadmap')])).toBe(
+      "Couldn't move 'Roadmap' — Gmail's version was restored."
+    )
+  })
+
   it('does not claim restoration when the authoritative refetch is unavailable', () => {
     expect(formatActionRevertToast([{ ...reverted('unsnooze', 'Roadmap'), resolution: 'unavailable' }])).toBe(
       "Couldn't unsnooze 'Roadmap', and Gmail's current version couldn't be loaded. The cached copy was kept."
