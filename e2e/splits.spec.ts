@@ -24,11 +24,31 @@ async function emitFocusThread(app: ElectronApplication, threadId: string): Prom
   })
 }
 
+async function updateMessageBody(
+  app: ElectronApplication,
+  messageId: string,
+  bodyText: string
+): Promise<void> {
+  await app.evaluate(
+    ({ ipcMain }, { channel, id, body }) =>
+      new Promise<void>((resolve, reject) => {
+        ipcMain.emit(channel, {}, id, body, (error?: string) => {
+          if (error) reject(new Error(error))
+          else resolve()
+        })
+      }),
+    { channel: TEST_CHANNELS.updateMessageBody, id: messageId, body: bodyText }
+  )
+}
+
 function spread(values: number[]): number {
   return Math.max(...values) - Math.min(...values)
 }
 
-test('classifies once, navigates locally, and restores each split selection', async ({ page }, testInfo) => {
+test('classifies once, navigates locally, and restores each split selection', async ({
+  app,
+  page
+}, testInfo) => {
   const strip = page.getByTestId('split-strip')
   const tabs = page.getByTestId('split-tab')
   const rows = page.getByTestId('thread-row')
@@ -42,6 +62,20 @@ test('classifies once, navigates locally, and restores each split selection', as
   )
   await expect(rows).toHaveCount(1)
   await expect(rows).toContainText('Board memo needs approval')
+
+  await page.evaluate(() => {
+    const appWindow = window as typeof window & {
+      splitEmptyObserver?: MutationObserver
+      splitEmptyPaints?: number
+    }
+    const threadList = document.querySelector('[data-testid="thread-list"]')
+    if (!threadList) throw new Error('Thread list is unavailable')
+    appWindow.splitEmptyPaints = 0
+    appWindow.splitEmptyObserver = new MutationObserver(() => {
+      if (threadList.textContent?.includes('Inbox empty')) appWindow.splitEmptyPaints = 1
+    })
+    appWindow.splitEmptyObserver.observe(threadList, { childList: true, subtree: true })
+  })
 
   await page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]').click()
   await expect(rows).toHaveCount(2)
@@ -79,12 +113,59 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(rows).toHaveCount(2)
   await expect(rows).toContainText(['The systems issue', 'A special offer for members'])
   await expect(rows.filter({ hasText: 'Review requested on PR #87' })).toHaveCount(0)
+  const splitEmptyPaints = await page.evaluate(() => {
+    const appWindow = window as typeof window & {
+      splitEmptyObserver?: MutationObserver
+      splitEmptyPaints?: number
+    }
+    appWindow.splitEmptyObserver?.disconnect()
+    return appWindow.splitEmptyPaints ?? 0
+  })
+  expect(splitEmptyPaints).toBe(0)
 
   const artifactDirectory = join(__dirname, '.artifacts')
   mkdirSync(artifactDirectory, { recursive: true })
   const inboxPath = join(artifactDirectory, 'split-inbox.png')
   await page.screenshot({ path: inboxPath })
   await testInfo.attach('split-inbox', { path: inboxPath, contentType: 'image/png' })
+
+  await page.evaluate(() => {
+    const appWindow = window as typeof window & {
+      splitTransitionObserver?: MutationObserver
+      splitTransitionStates?: string[]
+    }
+    appWindow.splitTransitionObserver?.disconnect()
+    appWindow.splitTransitionStates = []
+    const threadList = document.querySelector('[data-testid="thread-list"]')
+    if (!threadList) throw new Error('Thread list is unavailable')
+    const recordTransientState = (): void => {
+      for (const copy of ['Inbox empty', 'Loading conversations…']) {
+        if (threadList.textContent?.includes(copy)) appWindow.splitTransitionStates?.push(copy)
+      }
+    }
+    appWindow.splitTransitionObserver = new MutationObserver(recordTransientState)
+    appWindow.splitTransitionObserver.observe(threadList, { childList: true, subtree: true })
+  })
+  const mailChanged = page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const off = window.attn.mail.onChanged(() => {
+          off()
+          resolve()
+        })
+      })
+  )
+  await updateMessageBody(app, 'm-calendar-sender', 'A locally refreshed calendar invitation.')
+  await mailChanged
+  await goToSplit(page, 2)
+  await expect(rows).toContainText('Review requested on PR #87')
+  const transientStates = await page.evaluate(() => {
+    const appWindow = window as typeof window & { splitTransitionStates?: string[] }
+    return appWindow.splitTransitionStates ?? []
+  })
+  expect(transientStates).toEqual([])
+  await goToSplit(page, 3)
+  await expect(rows).toContainText(['The systems issue', 'A special offer for members'])
 
   await rows.first().click()
   await expect(page.getByTestId('conversation-view')).toBeVisible()

@@ -433,7 +433,10 @@ The inbox is divided into **splits** — tabs above the list, each an independen
 - Per-split notification settings (see F12): by default only Important notifies.
 
 **Acceptance criteria**
-- Split switch < 50ms with selection preserved per split.
+- Split switch < 50ms with selection preserved per split. Attn warms inactive first pages after startup. A
+  revision-valid cached page becomes visible in the same state transition as its tab and then revalidates
+  against SQLite. An unresolved cold page shows a loading state; it never reports `Inbox empty` before the
+  query completes.
 - Rule changes re-bucket the inbox in < 1s for 10k threads, with no thread appearing in two splits.
 - Users can edit or delete every starter preset. A changed or deleted preset stays changed or deleted after
   relaunch, sync, and an app update. Deleting all starter presets does not seed them again. Users can restore
