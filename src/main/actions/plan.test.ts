@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import type { TriageAction } from '../../shared/actions'
 import { isTriageAction } from '.'
 import { actionLabel, inverseForThread, planAction } from './plan'
@@ -105,6 +105,30 @@ describe('triage action planning', () => {
     expect(actionLabel({ ...move, threadIds: ['t1', 't2'], verb: 'markNotDone' })).toBe('2 marked not done')
   })
 
+  it('restricts the mark-not-done verb to an Inbox move without a source label', () => {
+    expectTypeOf({
+      kind: 'move' as const,
+      threadIds: ['t1'],
+      destination: { kind: 'inbox' as const },
+      sourceLabelId: null,
+      verb: 'markNotDone' as const
+    }).toMatchTypeOf<TriageAction>()
+    expectTypeOf({
+      kind: 'move' as const,
+      threadIds: ['t1'],
+      destination: { kind: 'trash' as const },
+      sourceLabelId: null,
+      verb: 'markNotDone' as const
+    }).not.toMatchTypeOf<TriageAction>()
+    expectTypeOf({
+      kind: 'move' as const,
+      threadIds: ['t1'],
+      destination: { kind: 'inbox' as const },
+      sourceLabelId: 'Label_Source',
+      verb: 'markNotDone' as const
+    }).not.toMatchTypeOf<TriageAction>()
+  })
+
   it('rejects malformed actions at the IPC boundary', () => {
     expect(isTriageAction({ kind: 'archive', threadIds: ['t1'] })).toBe(true)
     expect(isTriageAction({ kind: 'archive' })).toBe(false)
@@ -133,6 +157,24 @@ describe('triage action planning', () => {
         destination: { kind: 'inbox' },
         sourceLabelId: null,
         verb: 'unexpected'
+      })
+    ).toBe(false)
+    expect(
+      isTriageAction({
+        kind: 'move',
+        threadIds: ['t1'],
+        destination: { kind: 'trash' },
+        sourceLabelId: null,
+        verb: 'markNotDone'
+      })
+    ).toBe(false)
+    expect(
+      isTriageAction({
+        kind: 'move',
+        threadIds: ['t1'],
+        destination: { kind: 'inbox' },
+        sourceLabelId: 'Label_Source',
+        verb: 'markNotDone'
       })
     ).toBe(false)
     expect(

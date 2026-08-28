@@ -463,13 +463,16 @@ export function isTriageAction(value: unknown): value is TriageAction {
       return typeof action.on === 'boolean'
     case 'label':
       return stringArray(action.add) && stringArray(action.remove)
-    case 'move':
+    case 'move': {
+      const destination = action.destination
       return (
-        isMoveDestination(action.destination) &&
+        isMoveDestination(destination) &&
         (typeof action.sourceLabelId === 'string' || action.sourceLabelId === null) &&
-        (action.verb === undefined || action.verb === 'markNotDone') &&
-        (action.destination.kind !== 'label' || action.destination.labelId !== action.sourceLabelId)
+        (action.verb === undefined ||
+          (action.verb === 'markNotDone' && destination.kind === 'inbox' && action.sourceLabelId === null)) &&
+        (destination.kind !== 'label' || destination.labelId !== action.sourceLabelId)
       )
+    }
     default:
       return false
   }
