@@ -6,11 +6,6 @@ import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-splits.json' })
 
-async function goToSplit(page: Page, position: number): Promise<void> {
-  await page.keyboard.press('g')
-  await page.keyboard.press(String(position))
-}
-
 async function openSplitRules(page: Page): Promise<void> {
   await page.getByTestId('account-menu').getByRole('button').first().click()
   await page.getByTestId('account-split-rules').click()
@@ -110,10 +105,11 @@ test('classifies once, navigates locally, and restores each split selection', as
   await page.keyboard.press('Shift+Tab')
   await expect(rows).toContainText(['Dinner Friday?', 'Weekend walk'])
 
-  await goToSplit(page, 2)
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
   await expect(rows).toHaveCount(1)
   await expect(rows).toContainText('Review requested on PR #87')
-  await goToSplit(page, 3)
+  await page.keyboard.press('Tab')
   await expect(rows).toHaveCount(2)
   await expect(rows).toContainText(['The systems issue', 'A special offer for members'])
   await expect(rows.filter({ hasText: 'Review requested on PR #87' })).toHaveCount(0)

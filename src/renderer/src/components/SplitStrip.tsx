@@ -54,7 +54,6 @@ export function SplitStrip({
       <div role="tablist" aria-label="Inbox splits" className="flex min-w-0 flex-1 overflow-x-auto">
         {visibleSplits.map((split) => {
           const active = split.id === activeSplitId
-          const index = splits.findIndex((candidate) => candidate.id === split.id)
           return (
             <button
               key={split.id}
@@ -64,7 +63,7 @@ export function SplitStrip({
               data-split-id={split.id}
               data-active={active || undefined}
               aria-selected={active}
-              title={`${index < 9 ? `G ${index + 1} · ` : ''}${split.total.toLocaleString()} conversations`}
+              title={`${split.total.toLocaleString()} conversations`}
               className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-3 text-xs transition-colors ${
                 active
                   ? 'border-accent font-semibold text-ink'

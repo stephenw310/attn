@@ -1,6 +1,19 @@
 export type CommandContext = 'list' | 'reader' | 'outbox' | 'navigation' | 'mail' | 'composer' | 'global'
 export type ShortcutContext = 'list' | 'reader' | 'outbox'
 export type ActiveCommandContext = ShortcutContext | 'composer'
+export type FooterContext = ActiveCommandContext | 'search'
+
+interface FooterHintSpec {
+  id: string
+  label: string
+  order: number
+  shortcuts?: readonly string[]
+}
+
+interface ChordGuideSpec {
+  label: string
+  order: number
+}
 
 interface CommandSpec {
   title: string
@@ -8,6 +21,8 @@ interface CommandSpec {
   shortcutAliases?: readonly string[]
   context: CommandContext
   allowInComposer?: boolean
+  footer?: Partial<Record<FooterContext, FooterHintSpec>>
+  chordGuide?: ChordGuideSpec
 }
 
 export const COMMAND_SPECS = {
@@ -15,10 +30,29 @@ export const COMMAND_SPECS = {
     title: 'Open command palette',
     shortcut: 'Mod+K',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    footer: { list: { id: 'palette', label: 'command palette', order: 80 } }
   },
-  'navigate.next': { title: 'Next item', shortcut: 'j', context: 'navigation' },
-  'navigate.previous': { title: 'Previous item', shortcut: 'k', context: 'navigation' },
+  'navigate.next': {
+    title: 'Next item',
+    shortcut: 'j',
+    context: 'navigation',
+    footer: {
+      list: { id: 'navigate', label: 'navigate', order: 10 },
+      reader: { id: 'navigate', label: 'next / previous', order: 50 },
+      outbox: { id: 'navigate', label: 'navigate', order: 10 }
+    }
+  },
+  'navigate.previous': {
+    title: 'Previous item',
+    shortcut: 'k',
+    context: 'navigation',
+    footer: {
+      list: { id: 'navigate', label: 'navigate', order: 10 },
+      reader: { id: 'navigate', label: 'next / previous', order: 50 },
+      outbox: { id: 'navigate', label: 'navigate', order: 10 }
+    }
+  },
   'selection.toggle': { title: 'Toggle selection', shortcut: 'x', context: 'mail' },
   'selection.extendNext': {
     title: 'Extend selection to next conversation',
@@ -31,8 +65,18 @@ export const COMMAND_SPECS = {
     context: 'mail'
   },
   'selection.clear': { title: 'Clear selection', shortcut: 'Escape', context: 'list' },
-  'conversation.open': { title: 'Open conversation', shortcut: 'Enter', context: 'list' },
-  'conversation.close': { title: 'Back to conversation list', shortcut: 'Escape', context: 'reader' },
+  'conversation.open': {
+    title: 'Open conversation',
+    shortcut: 'Enter',
+    context: 'list',
+    footer: { list: { id: 'open', label: 'open', order: 20 } }
+  },
+  'conversation.close': {
+    title: 'Back to conversation list',
+    shortcut: 'Escape',
+    context: 'reader',
+    footer: { reader: { id: 'back', label: 'back to list', order: 60 } }
+  },
   'message.next': { title: 'Next message in conversation', shortcut: 'n', context: 'reader' },
   'message.previous': { title: 'Previous message in conversation', shortcut: 'p', context: 'reader' },
   'message.toggle': { title: 'Expand or collapse message', shortcut: 'o', context: 'reader' },
@@ -50,7 +94,20 @@ export const COMMAND_SPECS = {
     context: 'list'
   },
   'search.allGmail': { title: 'Search all of Gmail', context: 'global' },
-  'search.clear': { title: 'Clear search', context: 'global' },
+  'search.submit': {
+    title: 'Browse search results',
+    context: 'list',
+    footer: {
+      search: { id: 'search-browse', label: 'search', order: 10, shortcuts: ['Enter'] }
+    }
+  },
+  'search.clear': {
+    title: 'Clear search',
+    context: 'global',
+    footer: {
+      search: { id: 'search-close', label: 'close search', order: 20, shortcuts: ['Escape'] }
+    }
+  },
   'split.previous': {
     title: 'Previous inbox split',
     shortcut: 'Shift+Tab',
@@ -81,55 +138,64 @@ export const COMMAND_SPECS = {
     title: 'Go to Inbox',
     shortcut: 'g i',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'Inbox', order: 10 }
   },
   'view.allMail': {
     title: 'Go to All Mail',
     shortcut: 'g a',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'All Mail', order: 20 }
   },
   'view.sent': {
     title: 'Go to Sent',
     shortcut: 'g t',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'Sent', order: 30 }
   },
   'view.starred': {
     title: 'Go to Starred',
     shortcut: 'g s',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'Starred', order: 50 }
   },
   'view.snoozed': {
     title: 'Go to Snoozed',
     shortcut: 'g h',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'Snoozed', order: 60 }
   },
   'view.drafts': {
     title: 'Go to Drafts',
     shortcut: 'g d',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'Drafts', order: 40 }
   },
   'view.spam': {
     title: 'Go to Spam',
     shortcut: 'g p',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'Spam', order: 70 }
   },
   'view.trash': {
     title: 'Go to Trash',
     shortcut: 'g r',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'Trash', order: 80 }
   },
   'view.outbox': {
     title: 'Go to Outbox',
     shortcut: 'g o',
     context: 'global',
-    allowInComposer: true
+    allowInComposer: true,
+    chordGuide: { label: 'Outbox', order: 90 }
   },
   'layout.sidebar.toggle': {
     title: 'Toggle sidebar',
@@ -137,21 +203,62 @@ export const COMMAND_SPECS = {
     context: 'global',
     allowInComposer: true
   },
-  'outbox.open': { title: 'Open Outbox message', shortcut: 'Enter', context: 'outbox' },
-  'outbox.close': { title: 'Back from Outbox', shortcut: 'Escape', context: 'outbox' },
-  'draft.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'list' },
-  'composer.new': { title: 'New message', shortcut: 'c', context: 'global' },
-  'composer.reply': { title: 'Reply', shortcut: 'r', context: 'reader' },
+  'outbox.open': {
+    title: 'Open Outbox message',
+    shortcut: 'Enter',
+    context: 'outbox',
+    footer: { outbox: { id: 'open', label: 'open', order: 20 } }
+  },
+  'outbox.close': {
+    title: 'Back from Outbox',
+    shortcut: 'Escape',
+    context: 'outbox',
+    footer: { outbox: { id: 'back', label: 'back', order: 30 } }
+  },
+  'draft.discard': {
+    title: 'Discard draft',
+    shortcut: 'Mod+Shift+D',
+    context: 'list',
+    footer: { list: { id: 'delete-draft', label: 'delete draft', order: 30 } }
+  },
+  'composer.new': {
+    title: 'New message',
+    shortcut: 'c',
+    context: 'global',
+    footer: { list: { id: 'compose', label: 'compose', order: 40 } }
+  },
+  'composer.reply': {
+    title: 'Reply',
+    shortcut: 'r',
+    context: 'reader',
+    footer: { reader: { id: 'reply', label: 'reply', order: 10 } }
+  },
   'composer.replyAll': {
     title: 'Reply all',
     shortcut: 'a',
     shortcutAliases: ['Enter'],
-    context: 'reader'
+    context: 'reader',
+    footer: { reader: { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] } }
   },
-  'composer.forward': { title: 'Forward', shortcut: 'f', context: 'reader' },
-  'composer.close': { title: 'Save and close draft', shortcut: 'Escape', context: 'composer' },
+  'composer.forward': {
+    title: 'Forward',
+    shortcut: 'f',
+    context: 'reader',
+    footer: { reader: { id: 'forward', label: 'forward', order: 12 } }
+  },
+  'composer.close': {
+    title: 'Save and close draft',
+    shortcut: 'Escape',
+    context: 'composer',
+    footer: { composer: { id: 'back', label: 'save and close', order: 20 } }
+  },
   'composer.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'composer' },
-  'composer.send': { title: 'Send message', shortcut: 'Mod+Enter', context: 'composer' },
+  'composer.send': {
+    title: 'Send message',
+    shortcut: 'Mod+Enter',
+    context: 'composer',
+    footer: { composer: { id: 'send', label: 'send', order: 10 } }
+  },
   'composer.attach': { title: 'Attach files', context: 'composer' },
   'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },
   'composer.bold': { title: 'Bold', shortcut: 'Mod+B', context: 'composer' },
@@ -169,15 +276,47 @@ export const COMMAND_SPECS = {
   'composer.numbering': { title: 'Numbered list', context: 'composer' },
   'composer.quote': { title: 'Block quote', context: 'composer' },
   'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
-  'triage.archive': { title: 'Mark done', shortcut: 'e', context: 'mail' },
-  'triage.snooze': { title: 'Snooze / remind me later', shortcut: 'h', context: 'mail' },
+  'triage.archive': {
+    title: 'Mark done',
+    shortcut: 'e',
+    context: 'mail',
+    footer: {
+      list: { id: 'done', label: 'done', order: 30 },
+      reader: { id: 'done', label: 'done', order: 20 }
+    }
+  },
+  'triage.snooze': {
+    title: 'Snooze / remind me later',
+    shortcut: 'h',
+    context: 'mail',
+    footer: {
+      list: { id: 'snooze', label: 'snooze', order: 60 },
+      reader: { id: 'snooze', label: 'snooze', order: 30 }
+    }
+  },
   'triage.trash': { title: 'Move to trash', shortcut: '#', context: 'mail' },
   'triage.spam': { title: 'Mark as spam', shortcut: '!', context: 'mail' },
   'triage.star': { title: 'Star', shortcut: 's', context: 'mail' },
   'triage.unread': { title: 'Mark unread', shortcut: 'u', context: 'mail' },
-  'triage.move': { title: 'Move', shortcut: 'v', context: 'mail' },
+  'triage.move': {
+    title: 'Move',
+    shortcut: 'v',
+    context: 'mail',
+    footer: {
+      list: { id: 'move', label: 'move', order: 70 },
+      reader: { id: 'move', label: 'move', order: 40 }
+    }
+  },
   'triage.label': { title: 'Label', shortcut: 'l', context: 'mail' },
-  'triage.undo': { title: 'Undo', shortcut: 'z', context: 'global' }
+  'triage.undo': {
+    title: 'Undo',
+    shortcut: 'z',
+    context: 'global',
+    footer: {
+      list: { id: 'undo', label: 'undo', order: 50 },
+      outbox: { id: 'undo', label: 'undo', order: 40 }
+    }
+  }
 } as const satisfies Record<string, CommandSpec>
 
 export type StaticCommandId = keyof typeof COMMAND_SPECS
@@ -226,16 +365,10 @@ export function createCommand(
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
 }
 
-export function createDynamicSplitCommand(
-  splitId: string,
-  title: string,
-  run: () => void,
-  shortcut?: string
-): Command {
+export function createDynamicSplitCommand(splitId: string, title: string, run: () => void): Command {
   return {
     id: `split.goto:${splitId}`,
     title,
-    ...(shortcut ? { shortcut } : {}),
     context: 'navigation',
     run
   }
@@ -319,6 +452,65 @@ function commandShortcuts(command: Command): readonly string[] {
   return [...(command.shortcut ? [command.shortcut] : []), ...(command.shortcutAliases ?? [])]
 }
 
+export interface FooterHint {
+  id: string
+  label: string
+  order: number
+  shortcuts: readonly string[]
+}
+
+export function listFooterHints(context: FooterContext): readonly FooterHint[] {
+  const hints = new Map<string, FooterHint>()
+  for (const command of commands) {
+    const spec = command.footer?.[context]
+    if (!spec || (context !== 'search' && !commandMatchesContext(command, context))) continue
+    const shortcuts = spec.shortcuts ?? (command.shortcut ? [command.shortcut] : [])
+    if (shortcuts.length === 0) continue
+    const existing = hints.get(spec.id)
+    if (existing) {
+      hints.set(spec.id, {
+        ...existing,
+        shortcuts: [...existing.shortcuts, ...shortcuts.filter((item) => !existing.shortcuts.includes(item))]
+      })
+    } else {
+      hints.set(spec.id, { id: spec.id, label: spec.label, order: spec.order, shortcuts })
+    }
+  }
+  return [...hints.values()].sort((left, right) => left.order - right.order)
+}
+
+export interface ChordCompletion {
+  commandId: CommandId
+  key: string
+  label: string
+}
+
+export function listChordCompletions(
+  prefixKey: string,
+  context: ShortcutContext
+): readonly ChordCompletion[] {
+  const prefix = `${prefixKey.toLowerCase()} `
+  const completions: Array<ChordCompletion & { order: number }> = []
+  for (const command of commands) {
+    if (!commandMatchesContext(command, context)) continue
+    for (const shortcut of commandShortcuts(command)) {
+      const normalized = shortcut.toLowerCase()
+      if (!normalized.startsWith(prefix)) continue
+      const key = normalized.slice(prefix.length)
+      if (!key || key.includes(' ')) continue
+      completions.push({
+        commandId: command.id,
+        key,
+        label: command.chordGuide?.label ?? command.title,
+        order: command.chordGuide?.order ?? Number.MAX_SAFE_INTEGER
+      })
+    }
+  }
+  return completions
+    .sort((left, right) => left.order - right.order || left.key.localeCompare(right.key))
+    .map(({ order: _order, ...completion }) => completion)
+}
+
 // Chord shortcuts are written with a space ("g i"): the prefix key opens a short
 // window in which the next key completes the command. Prefixes are derived from
 // the registry so registering a new chord needs no change to keyboard dispatch.
@@ -332,7 +524,7 @@ export function isChordPrefix(key: string, context: ShortcutContext): boolean {
 }
 
 export function chordKey(event: KeyboardEvent): string | null {
-  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null
+  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null
   return event.key.toLowerCase()
 }
 

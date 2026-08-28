@@ -230,7 +230,7 @@ test('cancels a snooze reached through a user label and restores its exact due t
   await expect(snoozedReceipt.getByTestId('chip-snooze-due')).toHaveText(originalDue ?? '')
 })
 
-test('offers Move in mailboxes and omits it from non-message destinations', async ({ page }) => {
+test('offers Move in the footer and palette for message destinations', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await expect(page.getByTestId('footer-shortcut-move')).toContainText('Vmove')
   await expectMovePaletteCount(page, 1)

@@ -27,8 +27,8 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
 | T25 on-demand fetch and server search (F10) | **done**, completed 2026-08-25 | nothing |
 | T26 palette and registry completeness (F5) | **done**, completed 2026-08-25 | nothing |
-| T27 splits and per-split notifications (F11, F12) | **done**, completed 2026-08-27 | nothing; T28 and T29 are unblocked |
-| T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
+| T27 splits and per-split notifications (F11, F12) | **done**, completed 2026-08-27 | nothing; T29 is unblocked |
+| T28 contextual chord guide (§9 #14) | **done**, completed 2026-08-28 | nothing |
 | T29 inbox zero (F13) | **planned**, not started | nothing |
 | T30 built-in themes (F14) | **done**, completed 2026-08-23 | nothing |
 | T31 move to a label (F4) | **done**, completed 2026-08-27 | nothing |
@@ -807,8 +807,8 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
 
 **Status: done, completed 2026-08-27.**
 
-**Depends on:** T22 · **Unblocks:** T28's digit completions, T29's remaining-split counts ·
-**Spec:** F11, F12 (the per-split slice), §5 `Tab`, `Shift+Tab`, `←`, `→`, and `G` `1`–`9`
+**Depends on:** T22 · **Unblocks:** T28's footer guide, T29's remaining-split counts ·
+**Spec:** F11, F12 (the per-split slice), §5 `Tab`, `Shift+Tab`, `←`, and `→`
 
 ### Design (decided)
 
@@ -1006,7 +1006,7 @@ one-time setup marker. One parameterized SQLite classifier now owns ordered assi
 exact counts, notification eligibility, badge counts, and notification click-through. Calendar, GitHub, and
 Newsletters start as editable presets; changes and deletions persist, and Restore is explicit.
 
-The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, `→`, configured `G` digits,
+The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, and `→`,
 per-split selection and scroll, revision-aware page caching, quiet zero counts, and an overflow menu past eight
 visible tabs. Outside Inbox, `Tab` returns to Inbox. The rule manager creates, renames, edits, reorders with
 leading drag handles, deletes, restores, and configures notifications.
@@ -1026,7 +1026,7 @@ budget. A cold split switch measured 44 ms, and revision-valid cached switches m
 
 ## T28 — The contextual chord guide
 
-**Status: not started.**
+**Status: done, completed 2026-08-28.**
 
 **Depends on:** T22, T27 · **Spec:** §9 #14, F5
 
@@ -1034,25 +1034,39 @@ budget. A cold split switch measured 44 ms, and revision-valid cached switches m
 
 - The footer's default state is one non-wrapping line of commands relevant to the active view, derived from
   the registry rather than from a hand-kept list in `MailFooter`.
-- A pending chord prefix replaces that line with the valid completions, again from the registry: fixed
-  mailbox letters from T22, and split digits from T27's configured order.
+- A pending chord prefix replaces that line with the visible completions from the registry. The `G` guide
+  shows fixed mailbox letters from T22. Split navigation stays on `Tab` and `Shift+Tab`.
 - **Reconcile the two timeouts before writing UI.** Dispatch holds a pending chord for 500 ms
   (`useKeyboardDispatch.ts:56`) and §9 #14 wants the guide visible for 2 to 3 seconds. A guide that outlives
-  the chord it describes is a lie the user acts on. Pick one number, 2 seconds, and use it in both places.
+  the chord it describes is a lie the user acts on. Use one number in both places. T28 initially shipped at
+  2 seconds; dogfood lengthened it to 3 seconds.
   Raising the dispatch window is a behavior change to a shipped key path, so it needs its own test.
 - The guide clears on completion, `Esc`, a view change, or that timeout. The palette and the cheat sheet stay
   the exhaustive references.
 
 ### Testing
 
-- **Unit:** completions derived from the registry for each context, including a view with no split digits.
-- **E2e (seeded):** the default line per view; `G` showing mailbox letters and split digits; dismissal by
+- **Unit:** completions derived from the registry for each context, with dynamic split commands excluded.
+- **E2e (seeded):** the default line per view; `G` showing fixed mailbox letters; dismissal by
   each of the four routes; the raised chord window still completing `g i` and still expiring.
 - **Screenshot artifact:** `chord-guide.png`, added to the `AGENTS.md` list.
 
 ### Done when
 
 The guide is registry-derived, the two timeouts agree, and verify is green.
+
+### Shipped
+
+Command specs now hold the footer metadata for list, reader, Outbox, search, and composer contexts.
+`MailFooter` subscribes to the active registry, groups paired commands such as `J` and `K`, and renders one
+non-wrapping line across the full window. A pending `G` replaces that line with the active mailbox and split
+completions from the same registry.
+
+`useKeyboardDispatch` owns the guide state and one 3-second timer. Completion, `Esc`, a view change, and the
+timer all clear the same state. Registered prefixes work while a sidebar control has focus. Held-key repeats
+cannot create a phantom prefix, and pressing `G` again restarts the chord instead of swallowing the key.
+Seeded Electron coverage pins all dismissal routes, a 700 ms `G R`, an immediate second mailbox chord, and
+the `chord-guide.png` artifact.
 
 ---
 
