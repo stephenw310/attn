@@ -59,4 +59,27 @@ describe('search result interpretation', () => {
     expect(searchRetainsMovedThread('in:"Project Alpha" is:unread', moved, labels)).toBe(true)
     expect(searchRetainsMovedThread('is:snoozed', moved, labels)).toBe(false)
   })
+
+  it('removes junk moves from every search scope that requires normal mail', () => {
+    const movedToTrash = {
+      hasAttachment: false,
+      labelIds: ['TRASH', 'STARRED', 'SENT', 'project-alpha'],
+      snoozed: false,
+      starred: true,
+      unread: false
+    }
+    const labels = [{ id: 'project-alpha', name: 'Project Alpha', type: 'user' }]
+
+    for (const query of [
+      'subject:roadmap',
+      'in:all',
+      'in:all-mail',
+      'in:sent',
+      'in:starred',
+      'in:"Project Alpha"'
+    ]) {
+      expect(searchRetainsMovedThread(query, movedToTrash, labels), query).toBe(false)
+    }
+    expect(searchRetainsMovedThread('in:trash', movedToTrash, labels)).toBe(true)
+  })
 })

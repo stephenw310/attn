@@ -112,6 +112,37 @@ test('applies and exactly rolls back move labels and snooze state', () => {
   expect(rollbackThreadMove(optimistic, snapshot)).toEqual(rows)
 })
 
+test('uses the Move label transition for direct Spam and Trash actions', () => {
+  const rows = [
+    {
+      ...row('one', false, false),
+      labelIds: ['INBOX', 'SPAM', 'keep'],
+      snoozed: true
+    }
+  ]
+
+  const directTrash = threadMoveSnapshot({ kind: 'trash', threadIds: ['one'] }, rows)
+  const pickerTrash = threadMoveSnapshot(
+    {
+      kind: 'move',
+      threadIds: ['one'],
+      destination: { kind: 'trash' },
+      sourceLabelId: null
+    },
+    rows
+  )
+  expect(directTrash).toEqual(pickerTrash)
+  expect(applyThreadMove(rows, directTrash ?? { before: new Map(), add: [], remove: [] })?.[0]).toMatchObject(
+    {
+      labelIds: ['keep', 'TRASH'],
+      snoozed: false
+    }
+  )
+
+  expect(moveExitsView({ kind: 'spam', threadIds: ['one'] }, 'trash')).toBe(true)
+  expect(moveExitsView({ kind: 'trash', threadIds: ['one'] }, 'snoozed')).toBe(true)
+})
+
 test('does not let an older move rollback overwrite newer move state', () => {
   const rows = [{ ...row('one', false, false), labelIds: ['INBOX'] }]
   const first = threadMoveSnapshot(

@@ -92,7 +92,7 @@ export function MovePicker({
         destination: { kind: 'label' as const, labelId: label.id },
         labelId: label.id,
         icon: '→',
-        disabled: false
+        disabled: destinationIsDisabled({ kind: 'label', labelId: label.id }, targets, sourceLabelId)
       }))
     ]
   }, [filteredLabels, normalizedQuery, showSplitDestinations, sourceLabelId, targets])

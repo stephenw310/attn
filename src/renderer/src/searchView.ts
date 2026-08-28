@@ -58,6 +58,9 @@ export function searchRetainsMovedThread(
   labels: readonly MailLabel[]
 ): boolean {
   const parsed = parseSearchQuery(query)
+  const normal = !row.labelIds.includes('SPAM') && !row.labelIds.includes('TRASH')
+  const hasLocationFilter = parsed.filters.some((filter) => filter.kind === 'in')
+  if (!hasLocationFilter && !normal) return false
   for (const filter of parsed.filters) {
     if (filter.kind === 'is') {
       if (filter.value === 'snoozed' && !row.snoozed) return false
@@ -73,10 +76,11 @@ export function searchRetainsMovedThread(
     const mailbox = normalizedMailbox(filter.value)
     if (mailbox === 'inbox' && (!row.labelIds.includes('INBOX') || row.snoozed)) return false
     if (mailbox === 'snoozed' && !row.snoozed) return false
-    if (mailbox === 'sent' && !row.labelIds.includes('SENT')) return false
-    if (mailbox === 'starred' && !row.labelIds.includes('STARRED')) return false
+    if (mailbox === 'sent' && (!normal || !row.labelIds.includes('SENT'))) return false
+    if (mailbox === 'starred' && (!normal || !row.labelIds.includes('STARRED'))) return false
     if (mailbox === 'spam' && !row.labelIds.includes('SPAM')) return false
     if (mailbox === 'trash' && !row.labelIds.includes('TRASH')) return false
+    if ((mailbox === 'all' || mailbox === 'allmail') && !normal) return false
     if (
       ['inbox', 'snoozed', 'sent', 'starred', 'spam', 'trash', 'all', 'allmail', 'draft', 'drafts'].includes(
         mailbox
@@ -90,7 +94,7 @@ export function searchRetainsMovedThread(
         (label.id.toLowerCase() === filter.value.toLowerCase() ||
           label.name.toLowerCase() === filter.value.toLowerCase())
     )
-    if (userLabel && !row.labelIds.includes(userLabel.id)) return false
+    if (userLabel && (!normal || !row.labelIds.includes(userLabel.id))) return false
   }
   return true
 }

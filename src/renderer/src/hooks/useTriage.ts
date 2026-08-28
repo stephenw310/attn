@@ -267,7 +267,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       const exitingThreadIds =
         targetedAction.kind === 'archive' && view === 'inbox'
           ? targetedAction.threadIds
-          : moveSnapshot && targetedAction.kind === 'move'
+          : moveSnapshot
             ? searchOpen && searchMoveRetains
               ? movedThreadIdsOutsideView(threads, moveSnapshot, searchMoveRetains)
               : moveExitsView(targetedAction, view, activeSplitId)

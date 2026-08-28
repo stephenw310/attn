@@ -160,6 +160,7 @@ test('uses the same exclusive Spam and Trash transitions for direct shortcuts', 
 
   await page.getByTestId('thread-list').focus()
   await page.keyboard.press('#')
+  await expect(roadmap).toHaveAttribute('data-exiting', 'true')
   await expect(roadmap).toHaveCount(0)
 
   await goTo(page, 'r')
@@ -196,6 +197,21 @@ test('re-evaluates an active Inbox search after the optimistic Move', async ({ p
   await expect(roadmap).toHaveAttribute('data-exiting', 'true')
   await expect(rows).toHaveCount(7)
   await expect(page.getByTestId('search-input')).toHaveValue('in:inbox')
+})
+
+test('removes a Trash move from an ordinary normal-mail search immediately', async ({ page }) => {
+  await page.getByTestId('thread-list').focus()
+  await page.keyboard.press('/')
+  await page.getByTestId('search-input').fill('subject:"Q3 roadmap review"')
+  await page.getByTestId('search-input').press('Enter')
+  const roadmap = page.locator('[data-testid="thread-row"][data-thread-id="t-roadmap"]')
+  await expect(roadmap).toBeVisible()
+
+  await page.getByTestId('thread-list').focus()
+  await openMove(page)
+  await page.getByTestId('move-trash').click()
+  await expect(roadmap).toHaveAttribute('data-exiting', 'true')
+  await expect(roadmap).toHaveCount(0)
 })
 
 test('cancels a snooze reached through a user label and restores its exact due time', async ({ page }) => {

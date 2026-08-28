@@ -130,9 +130,14 @@ export function threadMoveSnapshot(
   action: TriageAction,
   threads: readonly ThreadMoveFields[]
 ): ThreadMoveSnapshot | null {
-  if (action.kind !== 'move') return null
+  const delta =
+    action.kind === 'move'
+      ? moveLabelDelta(action.destination, action.sourceLabelId)
+      : action.kind === 'spam' || action.kind === 'trash'
+        ? moveLabelDelta({ kind: action.kind }, null)
+        : null
+  if (!delta) return null
   const targetedIds = new Set(action.threadIds)
-  const delta = moveLabelDelta(action.destination, action.sourceLabelId)
   return {
     before: new Map(
       threads
@@ -241,15 +246,22 @@ export function moveExitsView(
   view: MailView,
   activeSplitId: string | null = null
 ): boolean {
-  if (action.kind !== 'move') return false
-  const delta = moveLabelDelta(action.destination, action.sourceLabelId)
+  const destination =
+    action.kind === 'move'
+      ? action.destination
+      : action.kind === 'spam' || action.kind === 'trash'
+        ? { kind: action.kind as 'spam' | 'trash' }
+        : null
+  if (!destination) return false
+  const delta = moveLabelDelta(destination, action.kind === 'move' ? action.sourceLabelId : null)
   const add = new Set(delta.add)
   const remove = new Set(delta.remove)
   if (view === 'inbox') {
-    if (activeSplitId === IMPORTANT_SPLIT_ID && action.destination.kind === 'other') return true
-    if (activeSplitId === OTHER_SPLIT_ID && action.destination.kind === 'important') return true
+    if (activeSplitId === IMPORTANT_SPLIT_ID && destination.kind === 'other') return true
+    if (activeSplitId === OTHER_SPLIT_ID && destination.kind === 'important') return true
     return remove.has('INBOX') && !add.has('INBOX')
   }
+  if (view === 'snoozed') return true
   if (view === 'spam') return remove.has('SPAM') && !add.has('SPAM')
   if (view === 'trash') return remove.has('TRASH') && !add.has('TRASH')
   if (
@@ -259,7 +271,7 @@ export function moveExitsView(
     return true
   }
   const labelId = userLabelId(view)
-  return labelId !== null && labelId === action.sourceLabelId
+  return labelId !== null && action.kind === 'move' && labelId === action.sourceLabelId
 }
 
 export function selectionAfterExit(

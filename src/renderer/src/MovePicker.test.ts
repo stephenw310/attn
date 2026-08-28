@@ -118,6 +118,20 @@ describe('MovePicker', () => {
     expect(container.textContent).toContain('Create labels in Gmail')
   })
 
+  test('disables a user-label destination when every target is already there', async () => {
+    await renderPicker({
+      sourceLabelId: null,
+      targets: [{ id: 'one', labelIds: ['label-project'], snoozed: false, returned: false }]
+    })
+
+    expect((container.querySelector('[data-label-id="label-project"]') as HTMLButtonElement).disabled).toBe(
+      true
+    )
+    expect((container.querySelector('[data-label-id="label-travel"]') as HTMLButtonElement).disabled).toBe(
+      false
+    )
+  })
+
   test('disables the current split destination and can hide split choices', async () => {
     const { onMove } = await renderPicker({
       targets: [

@@ -1170,7 +1170,8 @@ semantics would leave mail in Inbox and would not advance the queue.
   action labels, the queue payload's `RevertedActionKind`, permanent-failure copy, and every exhaustive
   switch. The action executor calls `GmailMailProvider.modifyThread`, which posts the planned add and remove
   arrays to Gmail `users.threads.modify` under `gmail.modify`. Route new `!` and `#` actions through the same
-  Spam and Trash label plans, reminder transaction, exact undo, and `modifyLabels` operation. Keep the
+  Spam and Trash system-label plans, reminder transaction, inverse-delta undo, and `modifyLabels` operation.
+  Give those shortcuts the same renderer cache update, rollback, and view-exit path as Move. Keep the
   dedicated trash and untrash executor branches for compatible replay of older queued rows. The executor
   already restores the optional reminder snapshot on permanent failure. No schema, preload, IPC-channel, or
   new executor behavior is needed.
@@ -1201,9 +1202,11 @@ semantics would leave mail in Inbox and would not advance the queue.
   and Trash plans; preservation of unrelated labels and status labels; user-label validation; exact inverse
   deltas for mixed bulk pre-state; the Gmail provider request body; action decoding and permanent-failure
   copy for `move`; the view-membership and
-  selection plan at the first, middle, and last row. With a real in-memory store and injectable scheduler,
+  selection plan at the first, middle, and last row. Cover both implicit normal-mail search scope and
+  explicit mailbox or user-label filters after an optimistic Move. With a real in-memory store and injectable scheduler,
   prove that Move cancels a pending reminder reached through an ordinary search, that the due scheduler does
-  not return it to Inbox, and that undo restores its exact labels, reminder state, and due time. Also prove
+  not return it to Inbox, and that undo restores the expected thread-label membership, reminder state, and
+  due time. Also prove
   that permanent-failure recovery restores the same snapshot.
 - **Component:** system and split destinations, destination filtering, current-destination disabling,
   keyboard wrap, one-shot Enter, Escape, Done with an empty catalog, exclusion of the active user label, a
@@ -1214,8 +1217,9 @@ semantics would leave mail in Inbox and would not advance the queue.
   without losing `STARRED`, `UNREAD`, or an unrelated label. Reach a pending-snooze thread through an allowed
   user-label view, move it, and prove that it leaves Snoozed. Undo and prove that its original due time
   returns. Move one thread through Spam, Trash, and Inbox. Move one Inbox thread from Important to Other and
-  back. Move another thread between Spam and Trash with `!` and `#`, then prove that undo restores its prior
-  system mailbox.
+  back. Move another thread between Spam and Trash with `!` and `#`, prove immediate optimistic exit, and
+  then prove that undo restores its prior system mailbox. Move a matching normal-mail search result to Trash
+  and prove that it exits before the local refresh.
   Prove that `V` and the palette command are present in Spam and Trash but absent in Drafts, Snoozed, and
   Outbox. Assert pending-row counts so the local action cannot pass without entering the durable queue.
 - **T27 integration:** if T31 lands first, T27 adds one split e2e that invokes `V` and proves that Move uses
@@ -1226,8 +1230,9 @@ semantics would leave mail in Inbox and would not advance the queue.
 ### Done when
 
 Move and Label remain distinct commands, every allowed context follows F4's destination rules, and Move
-cannot leave a pending reminder that later adds `INBOX`. Bulk undo is exact, failed actions converge through
-the existing recovery path, the affected screenshots have been reviewed, and `npm run verify` is green.
+cannot leave a pending reminder that later adds `INBOX`. Bulk undo reverses every applied thread delta and
+restores reminder snapshots, failed actions converge through the existing recovery path, the affected
+screenshots have been reviewed, and `npm run verify` is green.
 
 ---
 
