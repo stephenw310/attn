@@ -1681,8 +1681,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           labels={labels}
           targets={moveRequest.targets}
           sourceLabelId={moveRequest.sourceLabelId}
-          showSplitDestinations={Boolean(
-            splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
+          showImportanceActions={Boolean(
+            !searchOpen &&
+              view === 'inbox' &&
+              splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
               splits.state.splits.some((split) => split.id === OTHER_SPLIT_ID)
           )}
           onClose={closeMove}

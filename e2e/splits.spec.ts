@@ -221,7 +221,9 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(page.locator('[data-command-id^="split.goto:"]')).toHaveCount(9)
 })
 
-test('moves between Important and Other by changing Gmail importance', async ({ page }) => {
+test('changes Gmail importance without presenting splits as move destinations', async ({
+  page
+}, testInfo) => {
   const rows = page.getByTestId('thread-row')
   const boardMemo = rows.filter({ hasText: 'Board memo needs approval' })
   await expect(boardMemo).toBeVisible()
@@ -229,8 +231,15 @@ test('moves between Important and Other by changing Gmail importance', async ({ 
   await page.getByTestId('thread-list').focus()
   await page.keyboard.press('v')
   await expect(page.getByTestId('move-picker')).toBeVisible()
-  await expect(page.getByTestId('move-important')).toBeDisabled()
-  await page.getByTestId('move-other').click()
+  await expect(page.getByTestId('move-section-importance')).toHaveText('Importance')
+  await expect(page.getByTestId('move-mark-important')).toHaveCount(0)
+  await expect(page.getByTestId('move-mark-not-important')).toHaveText(/Mark as not important/)
+  const artifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(artifactDirectory, { recursive: true })
+  const pickerPath = join(artifactDirectory, 'move-picker.png')
+  await page.screenshot({ path: pickerPath })
+  await testInfo.attach('move-picker', { path: pickerPath, contentType: 'image/png' })
+  await page.getByTestId('move-mark-not-important').click()
   await expect(boardMemo).toHaveCount(0)
   await expect(page.getByTestId('pending-count')).toContainText('1 pending')
 
@@ -240,8 +249,9 @@ test('moves between Important and Other by changing Gmail importance', async ({ 
   await expect(boardMemo).toHaveAttribute('data-selected', 'true')
   await page.getByTestId('thread-list').focus()
   await page.keyboard.press('v')
-  await expect(page.getByTestId('move-other')).toBeDisabled()
-  await page.getByTestId('move-important').click()
+  await expect(page.getByTestId('move-mark-not-important')).toHaveCount(0)
+  await expect(page.getByTestId('move-mark-important')).toHaveText(/Mark as important/)
+  await page.getByTestId('move-mark-important').click()
   await expect(boardMemo).toHaveCount(0)
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
 
