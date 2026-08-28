@@ -3,6 +3,7 @@ import {
   COMMAND_SPECS,
   chordKey,
   createCommand,
+  createDynamicSplitCommand,
   findCommandByShortcut,
   isChordPrefix,
   listCommands,
@@ -40,7 +41,7 @@ afterEach(() => {
 })
 
 describe('command catalog', () => {
-  test('contains the complete audited M1 semantic command inventory', () => {
+  test('contains the complete audited semantic command inventory', () => {
     expect(Object.keys(COMMAND_SPECS)).toEqual([
       'palette.open',
       'navigate.next',
@@ -61,6 +62,9 @@ describe('command catalog', () => {
       'search.focusQuery',
       'search.allGmail',
       'search.clear',
+      'split.previous',
+      'split.next',
+      'split.manage',
       'theme.system',
       'theme.dispatch-dark',
       'theme.dispatch-light',
@@ -170,6 +174,21 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('ArrowUp'), 'outbox')?.id).toBe('navigate.previous')
     expect(readingScrollDelta(key('ArrowDown'), 800)).toBe(120)
     expect(readingScrollDelta(key('ArrowUp'), 800)).toBe(-120)
+  })
+
+  test('moves between inbox splits with Tab while preserving direction and context', () => {
+    useCommands([createCommand('split.next', () => {}), createCommand('split.previous', () => {})])
+    expect(matchKey(key('Tab'), 'list')?.id).toBe('split.next')
+    expect(matchKey(key('Tab', { shiftKey: true }), 'list')?.id).toBe('split.previous')
+    expect(matchKey(key('Tab'), 'reader')).toBeNull()
+    expect(matchComposerKey(key('Tab'))).toBeNull()
+  })
+
+  test('accepts Tab as a contextual Inbox alias without replacing the G I chord', () => {
+    useCommands([createCommand('view.inbox', () => {}, { shortcutAliases: ['Tab'] })])
+    expect(matchKey(key('Tab'), 'list')?.id).toBe('view.inbox')
+    expect(matchKey(key('Tab', { shiftKey: true }), 'list')).toBeNull()
+    expect(findCommandByShortcut('g i', 'list')?.id).toBe('view.inbox')
   })
 
   test('extends the selection with Shift+Arrow in both contexts', () => {
@@ -288,6 +307,16 @@ describe('keyboard dispatch', () => {
     expect(findCommandByShortcut('m t', 'list')?.id).toBe('view.snoozed')
     // A chord prefix is not itself a single-key shortcut.
     expect(matchKey(key('m'), 'list')).toBeNull()
+  })
+
+  test('dispatches configured split chords through dynamic command ids', () => {
+    useCommands([
+      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}, 'g 2'),
+      createDynamicSplitCommand('custom:news', 'Go to: News', () => {}, 'g 6')
+    ])
+    expect(isChordPrefix('g', 'list')).toBe(true)
+    expect(findCommandByShortcut('g 2', 'list')?.id).toBe('split.goto:preset:github')
+    expect(findCommandByShortcut('g 6', 'reader')?.id).toBe('split.goto:custom:news')
   })
 
   test('requires unmodified keys for chord prefixes and completions', () => {

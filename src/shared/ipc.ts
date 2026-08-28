@@ -27,6 +27,13 @@ import type {
 } from './mail'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
 import type { SearchResponse, ServerSearchResponse } from './searchQuery'
+import type {
+  ReorderSplitsInput,
+  SaveSplitInput,
+  SplitPresetId,
+  SplitState,
+  SplitThreadLocation
+} from './splits'
 import type { ThemePreference } from './theme'
 
 export const IPC_CHANNELS = {
@@ -68,6 +75,13 @@ export const IPC_CHANNELS = {
   mailListLabels: 'mail:listLabels',
   mailGetMailboxCounts: 'mail:getMailboxCounts',
   mailGetUnreadCount: 'mail:getUnreadCount',
+  splitsGetState: 'splits:getState',
+  splitsGetThreadLocation: 'splits:getThreadLocation',
+  splitsSave: 'splits:save',
+  splitsSetNotify: 'splits:setNotify',
+  splitsDelete: 'splits:delete',
+  splitsReorder: 'splits:reorder',
+  splitsRestorePreset: 'splits:restorePreset',
   mailPeekActionsReverted: 'mail:peekActionsReverted',
   mailAcknowledgeActionsReverted: 'mail:acknowledgeActionsReverted',
   mailGetConversation: 'mail:getConversation',
@@ -86,6 +100,8 @@ export const IPC_CHANNELS = {
   mailFocusThreadAvailable: 'mail:focusThreadAvailable',
   syncState: 'sync:state'
 } as const
+
+export type MailChangeReason = 'split-metadata'
 
 /**
  * E2E-only channels, registered by the main process solely under
@@ -188,6 +204,19 @@ export interface InvokeChannels {
   [IPC_CHANNELS.mailListLabels]: { args: []; result: MailLabel[] }
   [IPC_CHANNELS.mailGetMailboxCounts]: { args: []; result: SystemMailboxCounts }
   [IPC_CHANNELS.mailGetUnreadCount]: { args: []; result: number }
+  [IPC_CHANNELS.splitsGetState]: { args: []; result: SplitState }
+  [IPC_CHANNELS.splitsGetThreadLocation]: {
+    args: [threadId: string]
+    result: SplitThreadLocation | null
+  }
+  [IPC_CHANNELS.splitsSave]: { args: [input: SaveSplitInput]; result: SplitState }
+  [IPC_CHANNELS.splitsSetNotify]: {
+    args: [id: string, notify: boolean]
+    result: SplitState
+  }
+  [IPC_CHANNELS.splitsDelete]: { args: [id: string]; result: SplitState }
+  [IPC_CHANNELS.splitsReorder]: { args: [input: ReorderSplitsInput]; result: SplitState }
+  [IPC_CHANNELS.splitsRestorePreset]: { args: [id: SplitPresetId]; result: SplitState }
   [IPC_CHANNELS.mailPeekActionsReverted]: {
     args: [accountId: string]
     result: ActionRevertNotice | null
@@ -223,7 +252,7 @@ export interface InvokeChannels {
 export interface BroadcastChannels {
   [IPC_CHANNELS.outboxChanged]: OutboxChanged
   [IPC_CHANNELS.outboxProgress]: import('./outbox').OutboxProgress | null
-  [IPC_CHANNELS.mailChanged]: { serverSearchRequestId?: string }
+  [IPC_CHANNELS.mailChanged]: { serverSearchRequestId?: string; reason?: MailChangeReason }
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined

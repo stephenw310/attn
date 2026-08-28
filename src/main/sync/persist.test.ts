@@ -117,25 +117,40 @@ describe('thread snapshot persistence', () => {
         payload: {
           headers: [
             { name: 'From', value: 'Maya <maya@example.com>' },
-            { name: 'Subject', value: 'Roadmap' }
+            { name: 'Subject', value: 'Roadmap' },
+            { name: 'List-Id', value: 'Roadmap updates <Roadmap.Example.COM>' }
           ],
           parts: [
             {
               mimeType: 'application/pdf',
               filename: 'notes.pdf',
               body: { attachmentId: 'attachment', size: 42 }
+            },
+            {
+              mimeType: 'text/calendar',
+              body: { attachmentId: 'calendar-body', size: 120 }
             }
           ]
         }
       }
       persistThread(db, 'account', { id: 'thread', messages: [message] })
       const full = db
-        .prepare('SELECT labels_json, attachments_json FROM messages WHERE account_id = ? AND id = ?')
-        .get('account', 'message') as { labels_json: string; attachments_json: string }
+        .prepare(
+          `SELECT labels_json, attachments_json, list_id, has_calendar_part
+           FROM messages WHERE account_id = ? AND id = ?`
+        )
+        .get('account', 'message') as {
+        labels_json: string
+        attachments_json: string
+        list_id: string | null
+        has_calendar_part: number
+      }
       expect(JSON.parse(full.labels_json)).toEqual(['INBOX', 'TRASH'])
       expect(JSON.parse(full.attachments_json)).toEqual([
         expect.objectContaining({ attachmentId: 'attachment', filename: 'notes.pdf', sizeBytes: 42 })
       ])
+      expect(full.list_id).toBe('<roadmap.example.com>')
+      expect(full.has_calendar_part).toBe(1)
 
       persistThread(
         db,
@@ -147,17 +162,33 @@ describe('thread snapshot persistence', () => {
               ...message,
               labelIds: ['INBOX', 'STARRED'],
               snippet: 'Metadata snapshot',
-              payload: { headers: message.payload.headers }
+              payload: {
+                headers: message.payload.headers.map((header) =>
+                  header.name === 'List-Id'
+                    ? { name: 'List-Id', value: 'Renamed <renamed.example.com>' }
+                    : header
+                )
+              }
             }
           ]
         },
         { metadataOnly: true }
       )
       const metadata = db
-        .prepare('SELECT labels_json, attachments_json FROM messages WHERE account_id = ? AND id = ?')
-        .get('account', 'message') as { labels_json: string; attachments_json: string }
+        .prepare(
+          `SELECT labels_json, attachments_json, list_id, has_calendar_part
+           FROM messages WHERE account_id = ? AND id = ?`
+        )
+        .get('account', 'message') as {
+        labels_json: string
+        attachments_json: string
+        list_id: string | null
+        has_calendar_part: number
+      }
       expect(JSON.parse(metadata.labels_json)).toEqual(['INBOX', 'STARRED'])
       expect(metadata.attachments_json).toBe(full.attachments_json)
+      expect(metadata.list_id).toBe('<renamed.example.com>')
+      expect(metadata.has_calendar_part).toBe(1)
     } finally {
       db.close()
     }

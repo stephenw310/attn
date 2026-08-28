@@ -27,7 +27,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
 | T25 on-demand fetch and server search (F10) | **done**, completed 2026-08-25 | nothing |
 | T26 palette and registry completeness (F5) | **done**, completed 2026-08-25 | nothing |
-| T27 splits and per-split notifications (F11, F12) | **planned**, not started | T28, T29 |
+| T27 splits and per-split notifications (F11, F12) | **done**, completed 2026-08-27 | nothing; T28 and T29 are unblocked |
 | T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
 | T29 inbox zero (F13) | **planned**, not started | nothing |
 | T30 built-in themes (F14) | **done**, completed 2026-08-23 | nothing |
@@ -111,7 +111,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 ## Global rules (carried from M2, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative
-   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 19. Throwaway profiles may be
+   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 21. Throwaway profiles may be
    deleted and re-synced. A real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and every
    schema-changing task publishes its exact DDL.
 2. **IPC has three parts**: main handler, preload bridge, and the typed channel map in `src/shared/`. All in
@@ -803,65 +803,219 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
 
 ## T27 — Split inbox, rules, and per-split notifications
 
-**Status: not started.**
+**Status: done, completed 2026-08-27.**
 
 **Depends on:** T22 · **Unblocks:** T28's digit completions, T29's remaining-split counts ·
-**Spec:** F11, F12 (the per-split slice), §5 `←`/`→` and `G` `1`–`9`
+**Spec:** F11, F12 (the per-split slice), §5 `Tab`, `Shift+Tab`, `←`, `→`, and `G` `1`–`9`
 
 ### Design (decided)
 
-- **Splits are read-time views over the Inbox list.** First matching rule wins, every inbox thread lands in
-  exactly one split, and mail is never moved. Evaluating at read time means a rule change re-buckets by
-  re-rendering, which satisfies F11's "under 1s for 10k threads" by construction and avoids a denormalized
-  column that can disagree with its rules.
-- **Defaults are Important and Other.** Important reads Gmail's `IMPORTANT` label, which `thread_labels` and
+- **Splits are read-time SQLite views over the full Inbox.** T22 pages every mailbox in 100-row keyset
+  reads, so the renderer cannot classify only its loaded rows: that would produce incomplete pages and
+  incorrect counts. Compile validated rule expressions into fixed, parameterized SQL fragments and use the
+  same ordered `CASE` assignment for the split list, exact total and unread counts, and the notification
+  lookup by thread id. Values are always bound parameters; a stored rule can never contribute raw SQL.
+  Evaluate matching splits in configured order, then use Other as the final fallback. Other cannot move into
+  the matching order. Every Inbox thread therefore lands in exactly one split, and mail is never moved or
+  stamped with a denormalized split id.
+- **Defaults are Important and Other, with three starter presets.** The first split setup seeds Calendar,
+  GitHub, and Newsletters. Calendar is an ordinary `any` rule over known calendar-notification senders,
+  a cached `text/calendar` MIME-part flag, and `.ics` filenames. GitHub matches the `github.com` sender domain.
+  Newsletters matches `List-Id` presence or Gmail's Promotions label. Seed these presets before Important;
+  Other remains the final fallback. Important reads Gmail's `IMPORTANT` label, which `thread_labels` and
   `labels_json` already carry, so no new fetch is needed.
-- **User rules match sender address, sender domain, `List-Id`, or label.** `List-Id` is not stored. Add
-  `messages.list_id` and add `List-Id` to `METADATA_HEADERS` (`gmail/provider.ts:19`). Existing rows stay
-  `NULL` until an ordinary refetch fills them, exactly as S2's legacy labels do, so address, domain, and label
-  rules work on day one while list rules ramp. Say that in the rule editor rather than letting it look broken.
+- **Starter presets remain user-owned.** Store them as editable `split_rules` rows. Stable ids such as
+  `preset:github` let the preset library hide Restore while an edited copy still exists. The ids confer no
+  matching or deletion protection. Users can rename the rows, edit their conditions, reorder them, or delete
+  them. A user who does not use GitHub can therefore remove that split permanently.
+- **Preset setup has separate durable state.** In one SQLite transaction, insert the initial rows and set the
+  account's `split_config.initialized` marker. Test that marker instead of testing whether preset rows exist.
+  Startup, sync, and app updates must do nothing when the marker is set, even when the user deleted every
+  preset row. Restore is a separate explicit command that inserts only the selected missing id.
+- **Rule reads are revisioned.** Seed, restore, create, edit, reorder, notify, and delete each increment
+  `split_config.revision` in the same transaction as the rule mutation. Inbox split pages and count results
+  carry the revision used by their SQLite snapshot. The renderer appends a page or applies counts only when
+  that revision matches its active split data; otherwise it discards the accumulated pages and starts again.
+  This prevents an in-flight page from mixing the old order with a newly edited rule set.
+- **`match_json` is a versioned flat expression.** Version 1 stores an `any` or `all` operator plus typed
+  conditions for sender address, sender domain, exact `List-Id`, `List-Id` presence, label, attachment MIME
+  type, or attachment filename suffix. A thread matches when one message satisfies the whole expression.
+  Under `all`, conditions cannot be satisfied by different messages in the thread. Skip malformed rows and
+  unknown expression versions instead of failing the Inbox read. Compile rows in `position, id` order so a
+  damaged profile with duplicate positions still has deterministic first-match behavior; normal reorder
+  mutations compact positions in one transaction.
+- **User rules match sender address, sender domain, `List-Id`, `List-Id` presence, label, or calendar-invite
+  attachment metadata.** `List-Id` is not stored. Add
+  `messages.list_id` and add `List-Id` to `METADATA_HEADERS` in `gmail/provider.ts`. Existing rows stay
+  `NULL` until a full payload persist fills them. A resumable upgrade rebuild refreshes stored Inbox threads,
+  so address, domain, and label rules work immediately while List-Id rules fill in page by page. Canonicalize
+  a non-empty header to the lowercased identifier
+  inside angle brackets, or to its unfolded, lowercased value when no brackets exist; absence stays `NULL`.
+  Normalize sender addresses, domains, MIME types, and filename suffixes by trimming and lowercasing them on
+  write; labels retain their exact Gmail id. Reject empty condition values. Say that in the rule editor rather
+  than letting incomplete cached data look broken.
+- **Attachment conditions use cached data only.** Gmail's metadata format returns headers but no MIME part
+  tree. The existing attachment parser intentionally excludes a filename-less, non-image MIME part from
+  `attachments_json`, so add `messages.has_calendar_part` and set it while walking a full payload whenever a
+  `text/calendar` part exists; a metadata-only persist must preserve the last known value. During first sync,
+  known Calendar senders match in the metadata stage; `.ics` and `text/calendar` conditions become complete
+  as the Inbox bodies stage stores full-payload metadata. History polling already fetches changed threads in
+  full, so new calendar invitations classify before T27 plans their notification. A split read never starts a
+  network request.
+- **Upgraded profiles rebuild split metadata once.** A stopped pre-T27 profile gets
+  `sync_state.split_metadata_cursor = 'split-metadata'` in the task-specific manual DDL. After the lifetime and
+  attachment passes, a low-priority worker pages remote Inbox ids, re-fetches stored Inbox threads in full,
+  and persists them through the ordinary authoritative write path. It checkpoints each complete Gmail page,
+  restarts once when a saved page token expires, yields to foreground work, and broadcasts after each changed
+  page. Fresh profiles default this cursor to `done` because the Inbox bodies stage already recorded the same
+  fields. This path covers filename-less `text/calendar` parts that neither `attachments_json` nor Gmail's
+  filename search can reconstruct locally.
 - **The strip follows D6:** a horizontal top-bar strip, unread counts on hot splits, overflow behind `···`
-  past about eight. `←`/`→` moves between splits, `G` then `1`–`9` jumps by configured order, and each split
-  keeps its own selection.
+  past about eight. `Tab` and `Shift+Tab` move between splits and wrap at both ends. Outside Inbox, `Tab`
+  returns to Inbox. `←` and `→` remain split-navigation aliases. `G` then `1`–`9` jumps by configured order,
+  and each split
+  keeps its own selection. `mail:listThreads({ view: 'inbox', splitId, cursor })` filters and applies the
+  existing keyset cursor inside SQLite; a separate typed read returns exact total and unread counts for every
+  configured split. A rule mutation invalidates those reads and reloads the active split from page one.
 - **F12's slice lands here.** A per-split notify flag, default Important only, feeding `planNotifications`
   and `applyUnreadBadge` in `notify.ts`. The badge counts notification-enabled splits, which is what F12 has
-  said since M1 staging.
-- **The rule manager is minimal.** F15's settings surface is M4. T27 ships rule creation, ordering, and
-  deletion, reachable by palette command, and no more.
+  said since M1 staging. `candidatesFor` must resolve each new Inbox thread's assigned split and discard
+  muted splits before it applies the summary threshold or hydrates notification details. Otherwise several
+  muted arrivals could turn one eligible message into an incorrect summary. The badge sums the exact unread
+  counts for enabled splits from the same rule revision.
+- **The rule manager is minimal.** F15's settings surface is M4. T27 ships preset restore plus rule creation,
+  renaming, condition editing, ordering, and deletion, reachable by palette command, and no more.
 
-**Schema revision 19.** For a stopped revision-18 profile:
+**Schema revision 21.** For a stopped revision-18 profile:
 
 ```sql
 BEGIN IMMEDIATE;
 ALTER TABLE messages ADD COLUMN list_id TEXT;
+ALTER TABLE messages ADD COLUMN has_calendar_part INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE split_rules (
   account_id TEXT NOT NULL,
   id         TEXT NOT NULL,
   position   INTEGER NOT NULL,
   name       TEXT NOT NULL,
   kind       TEXT NOT NULL,
-  match_json TEXT NOT NULL DEFAULT '[]',
+  match_json TEXT NOT NULL DEFAULT '{"version":1,"operator":"any","conditions":[]}',
   notify     INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (account_id, id)
 );
 CREATE INDEX idx_split_rules_order ON split_rules (account_id, position);
-PRAGMA user_version = 19;
+CREATE TABLE split_config (
+  account_id  TEXT PRIMARY KEY,
+  initialized INTEGER NOT NULL DEFAULT 0,
+  revision    INTEGER NOT NULL DEFAULT 0
+);
+ALTER TABLE sync_state
+  ADD COLUMN split_metadata_cursor TEXT NOT NULL DEFAULT 'done';
+UPDATE sync_state SET split_metadata_cursor = 'split-metadata';
+ALTER TABLE outbox ADD COLUMN default_signature_fingerprint TEXT;
+PRAGMA user_version = 21;
+COMMIT;
+```
+
+For a stopped revision-19 profile from `main`, which already has
+`outbox.default_signature_fingerprint`:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE messages ADD COLUMN list_id TEXT;
+ALTER TABLE messages ADD COLUMN has_calendar_part INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE split_rules (
+  account_id TEXT NOT NULL,
+  id         TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  match_json TEXT NOT NULL DEFAULT '{"version":1,"operator":"any","conditions":[]}',
+  notify     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, id)
+);
+CREATE INDEX idx_split_rules_order ON split_rules (account_id, position);
+CREATE TABLE split_config (
+  account_id  TEXT PRIMARY KEY,
+  initialized INTEGER NOT NULL DEFAULT 0,
+  revision    INTEGER NOT NULL DEFAULT 0
+);
+ALTER TABLE sync_state
+  ADD COLUMN split_metadata_cursor TEXT NOT NULL DEFAULT 'done';
+UPDATE sync_state SET split_metadata_cursor = 'split-metadata';
+PRAGMA user_version = 21;
+COMMIT;
+```
+
+For a stopped revision-19 profile created from the split branch before merge, which already has the split
+tables and message columns:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE sync_state
+  ADD COLUMN split_metadata_cursor TEXT NOT NULL DEFAULT 'done';
+UPDATE sync_state SET split_metadata_cursor = 'split-metadata';
+ALTER TABLE outbox ADD COLUMN default_signature_fingerprint TEXT;
+PRAGMA user_version = 21;
+COMMIT;
+```
+
+For a stopped revision-20 profile created from the split branch:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE outbox ADD COLUMN default_signature_fingerprint TEXT;
+PRAGMA user_version = 21;
 COMMIT;
 ```
 
 ### Testing
 
-- **Unit:** the matcher, covering rule order, first match wins, a thread matching two rules landing in one
-  split, a malformed rule being skipped rather than throwing, and `NULL` `list_id` falling through; the
-  notification planner honoring per-split flags and the badge counting only enabled splits.
-- **E2e (seeded):** `←`/`→` and `G` digits switch splits; each split keeps its selection; unread counts are
-  per split; adding a rule re-buckets without a reload; splits never appear outside Inbox.
-- **Perf (@perf):** a rule change re-buckets the 10,000-thread profile under 1s.
+- **Unit:** cover `any` and `all`, same-message `all` semantics, rule order, Other as the final fallback, the
+  three preset definitions, a thread matching GitHub and Newsletters landing in GitHub, calendar MIME and
+  `.ics` matching, a malformed or unknown-version rule being skipped, and `NULL` `list_id` falling through.
+  Prove that full-payload parsing records a filename-less `text/calendar` part without exposing it as a
+  downloadable attachment, and that a later metadata-only persist preserves the flag.
+  Cover the revision-18 upgrade shape with a completed normal backfill, cached bodies, defaulted split fields,
+  and a resumable full-payload rebuild that fills both `List-Id` and filename-less calendar MIME metadata.
+  Exercise the SQL classifier against real in-memory SQLite and prove that a split's paged rows, exact total
+  and unread counts, and notification lookup agree. Cover keyset continuation within a split and revision
+  changes between pages. Cover the notification planner honoring per-split flags and the badge counting only
+  enabled splits. Include a poll cycle where muted arrivals push the unfiltered total over the batching
+  threshold but only one eligible conversation remains, plus a cycle where the eligible total itself requires
+  a summary. Cover preset initialization as an atomic one-time action, including an initialized account with
+  zero remaining preset rows and an explicit restore that cannot duplicate an existing preset id.
+- **E2e (seeded):** `Tab`, `Shift+Tab`, `←`, `→`, and `G` digits switch splits and wrap at both ends; `Tab`
+  returns from another mailbox to Inbox; each split keeps its selection; unread counts are
+  per split; adding or editing a rule re-buckets without a reload; deleting the GitHub preset persists across
+  relaunch and sync; deleting all starter presets does not recreate them; an explicit restore recreates only
+  the selected preset; splits never appear outside Inbox.
+- **Perf (@perf):** on the 10,000-thread profile, a rule change plus the replacement first 100-row page and
+  exact split counts completes under 1s; switching between already configured splits stays under 50ms.
 
 ### Done when
 
-F11's two acceptance criteria are measured, per-split notification and badge behavior is covered, and verify
-is green.
+F11's acceptance criteria are measured, starter presets remain user-owned after setup, per-split notification
+and badge behavior is covered, and verify is green.
+
+### Shipped
+
+Revision 19 stores canonical `List-Id` values, cached calendar-part flags, durable rule rows, and a separate
+one-time setup marker. One parameterized SQLite classifier now owns ordered assignment for keyset pages,
+exact counts, notification eligibility, badge counts, and notification click-through. Calendar, GitHub, and
+Newsletters start as editable presets; changes and deletions persist, and Restore is explicit.
+
+The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, `→`, configured `G` digits,
+per-split selection and scroll, revision-aware page caching, quiet zero counts, and an overflow menu past eight
+visible tabs. Outside Inbox, `Tab` returns to Inbox. The rule manager creates, renames, edits, reorders with
+leading drag handles, deletes, restores, and configures notifications.
+The dragged row follows the pointer while nearby rows move to reveal the nearest drop position. A focused handle
+accepts Up and Down as its keyboard path. It is available from the account menu and command palette. Seeded
+Electron coverage exercises the full path and captures `split-inbox.png`, `split-rules.png`, and
+`split-rules-drag.png`.
+
+On the built 10,000-thread profile, a rule mutation plus exact re-bucketing measured 59 ms against the 1 s
+budget. A cold split switch measured 44 ms, and revision-valid cached switches measured 3 ms p95 against the
+50 ms budget.
 
 ---
 

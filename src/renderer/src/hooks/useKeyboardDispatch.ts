@@ -39,6 +39,15 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
         target instanceof HTMLElement &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
       if (isTextEntry) return
+      const tabCommand = event.key === 'Tab' ? matchKey(event, context) : null
+      const keepsNativeTab = target?.closest(
+        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [data-testid="account-menu"]'
+      )
+      if (tabCommand && !keepsNativeTab) {
+        event.preventDefault()
+        tabCommand.run()
+        return
+      }
       const isInteractive = target?.closest('a, button, input, textarea, select, [contenteditable="true"]')
       if (isInteractive && event.key !== 'Escape') return
       const scroll = conversationScrollRef.current

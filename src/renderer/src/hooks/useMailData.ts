@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
+import type { MailChangeReason } from '../../../shared/ipc'
 import {
   type MailLabel,
   type SnoozedThreadRow,
@@ -32,10 +33,23 @@ export interface ThreadPaginationState {
 
 export type ThreadPagination = Record<string, ThreadPaginationState | undefined>
 
-function listThreadPage(view: PagedThreadView, cursor?: ThreadPageCursor): Promise<ThreadPage> {
+interface InboxSplitCacheEntry {
+  rows: ThreadRow[]
+  pagination: ThreadPaginationState
+}
+
+export function shouldClearInactiveSplitCache(reason: MailChangeReason | null): boolean {
+  return reason !== 'split-metadata'
+}
+
+function listThreadPage(
+  view: PagedThreadView,
+  cursor?: ThreadPageCursor,
+  splitId?: string
+): Promise<ThreadPage> {
   const bridge = window.attn
   if (!bridge) return Promise.resolve({ rows: [], nextCursor: null })
-  if (view === 'inbox') return bridge.mail.listThreadPage('inbox', cursor)
+  if (view === 'inbox') return bridge.mail.listThreadPage('inbox', cursor, splitId)
   if (view === 'snoozed') return bridge.mail.listSnoozedPage(cursor)
   const mailbox = labelMailboxView(view)
   return mailbox
@@ -43,23 +57,40 @@ function listThreadPage(view: PagedThreadView, cursor?: ThreadPageCursor): Promi
     : bridge.mail.listLabelThreadPage(userLabelId(view) ?? '', cursor)
 }
 
+interface ThreadSnapshotOptions {
+  targetThreadId?: string
+  splitId?: string
+  expectedSplitRevision?: number
+}
+
 async function listThreadSnapshot(
   view: PagedThreadView,
   minimumRows: number,
-  targetThreadId?: string
+  options: ThreadSnapshotOptions = {}
 ): Promise<ThreadPage> {
   const rows: ThreadRow[] = []
   let cursor: ThreadPageCursor | undefined
   let nextCursor: ThreadPageCursor | null = null
-  let foundTarget = targetThreadId === undefined
+  let foundTarget = options.targetThreadId === undefined
+  let splitRevision: number | undefined
   do {
-    const page = await listThreadPage(view, cursor)
+    const page = await listThreadPage(view, cursor, options.splitId)
+    if (options.splitId) {
+      splitRevision ??= page.splitRevision
+      if (
+        page.splitRevision === undefined ||
+        page.splitRevision !== splitRevision ||
+        (options.expectedSplitRevision !== undefined && page.splitRevision !== options.expectedSplitRevision)
+      ) {
+        throw new Error('Split rules changed while loading the Inbox')
+      }
+    }
     rows.push(...page.rows)
-    if (!foundTarget) foundTarget = page.rows.some((row) => row.id === targetThreadId)
+    if (!foundTarget) foundTarget = page.rows.some((row) => row.id === options.targetThreadId)
     nextCursor = page.nextCursor
     cursor = page.nextCursor ?? undefined
   } while (nextCursor && (rows.length < Math.max(THREAD_PAGE_SIZE, minimumRows) || !foundTarget))
-  return { rows, nextCursor }
+  return { rows, nextCursor, ...(splitRevision === undefined ? {} : { splitRevision }) }
 }
 
 function appendUniqueRows<Row extends ThreadRow>(current: Row[], next: Row[]): Row[] {
@@ -74,6 +105,7 @@ interface MailDataState {
   networkOnline: boolean
   realThreads: ThreadRow[] | null
   setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
+  loadedInboxSplitId: string | null
   realSnoozedThreads: SnoozedThreadRow[] | null
   setRealSnoozedThreads: React.Dispatch<React.SetStateAction<SnoozedThreadRow[] | null>>
   mailboxRows: MailboxRowCache
@@ -81,7 +113,11 @@ interface MailDataState {
   refreshCachedThreadView: (view: CachedThreadView) => Promise<void>
   threadPagination: ThreadPagination
   loadMoreThreads: (view: PagedThreadView) => Promise<void>
-  focusInboxThread: (threadId: string) => Promise<number | null>
+  focusInboxThread: (
+    threadId: string,
+    splitId?: string | null,
+    splitRevision?: number
+  ) => Promise<number | null>
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
   outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
@@ -103,6 +139,8 @@ interface MailDataState {
 
 export function useMailData(
   activeAccount: string | null,
+  activeSplitId: string | null,
+  splitRevisionValue: number | null,
   activeViewRef: React.RefObject<MailView>,
   selectedThreadIdRef: React.RefObject<string | null>,
   selectedDraftIdRef: React.RefObject<string | null>,
@@ -111,6 +149,7 @@ export function useMailData(
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine)
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
+  const [loadedInboxSplitId, setLoadedInboxSplitId] = useState<string | null>(null)
   const [realSnoozedThreads, setRealSnoozedThreads] = useState<SnoozedThreadRow[] | null>(null)
   const [mailboxRows, setMailboxRows] = useState<MailboxRowCache>({})
   const [threadPagination, setThreadPagination] = useState<ThreadPagination>({})
@@ -134,6 +173,9 @@ export function useMailData(
   const deferGateRef = useRef<Promise<void> | null>(null)
   const mailboxRefreshVersionRef = useRef<Record<string, number | undefined>>({})
   const loadMoreInFlightRef = useRef(new Set<PagedThreadView>())
+  const inboxSplitCacheRef = useRef(new Map<string, InboxSplitCacheEntry>())
+  const effectAccountRef = useRef<string | null | undefined>(undefined)
+  const effectSplitRevisionRef = useRef<number | null | undefined>(undefined)
   const threadPaginationRef = useRef(threadPagination)
   threadPaginationRef.current = threadPagination
   const loadedRowCountsRef = useRef<Record<string, number | undefined>>({})
@@ -144,7 +186,19 @@ export function useMailData(
   }
   const activeAccountRef = useRef(activeAccount)
   activeAccountRef.current = activeAccount
+  const activeSplitIdRef = useRef(activeSplitId)
+  activeSplitIdRef.current = activeSplitId
+  const splitRevisionRef = useRef(splitRevisionValue)
+  splitRevisionRef.current = splitRevisionValue
   const clearOutboxFailure = useCallback(() => setOutboxFailure(null), [])
+
+  useEffect(() => {
+    if (!loadedInboxSplitId || realThreads === null) return
+    inboxSplitCacheRef.current.set(loadedInboxSplitId, {
+      rows: realThreads,
+      pagination: threadPagination.inbox ?? { nextCursor: null, loadingMore: false }
+    })
+  }, [loadedInboxSplitId, realThreads, threadPagination.inbox])
 
   useEffect(() => {
     if (!window.attn) return
@@ -170,25 +224,47 @@ export function useMailData(
   }, [])
 
   useEffect(() => {
-    setRealThreads(null)
-    setRealSnoozedThreads(null)
-    setMailboxRows({})
-    setThreadPagination({})
-    setRealDrafts([])
-    setRealOutbox([])
-    setOutboxFailure(null)
-    setOutboxProgress(null)
-    setRealMailboxCounts(null)
-    setRealUnreadTotal(null)
-    setLabels([])
-    setPendingActionCount(0)
-    setPausedActionCount(0)
-    setMailRevision(0)
-    setMailChangeSource(null)
-    mailboxRefreshVersionRef.current = {}
-    loadMoreInFlightRef.current.clear()
-    loadedRowCountsRef.current = {}
-    preserveSelectionOnRefreshRef.current = true
+    const accountChanged = effectAccountRef.current !== activeAccount
+    const revisionChanged = effectSplitRevisionRef.current !== splitRevisionValue
+    effectAccountRef.current = activeAccount
+    effectSplitRevisionRef.current = splitRevisionValue
+    if (accountChanged) {
+      inboxSplitCacheRef.current.clear()
+      setRealThreads(null)
+      setLoadedInboxSplitId(null)
+      setRealSnoozedThreads(null)
+      setMailboxRows({})
+      setThreadPagination({})
+      setRealDrafts([])
+      setRealOutbox([])
+      setOutboxFailure(null)
+      setOutboxProgress(null)
+      setRealMailboxCounts(null)
+      setRealUnreadTotal(null)
+      setLabels([])
+      setPendingActionCount(0)
+      setPausedActionCount(0)
+      setMailRevision(0)
+      setMailChangeSource(null)
+      mailboxRefreshVersionRef.current = {}
+      loadMoreInFlightRef.current.clear()
+      loadedRowCountsRef.current = {}
+      preserveSelectionOnRefreshRef.current = true
+    } else {
+      if (revisionChanged) inboxSplitCacheRef.current.clear()
+      const cached = activeSplitId ? inboxSplitCacheRef.current.get(activeSplitId) : undefined
+      setRealThreads(cached?.rows ?? null)
+      setLoadedInboxSplitId(cached && activeSplitId ? activeSplitId : null)
+      setThreadPagination((current) => {
+        const next = { ...current }
+        if (cached) next.inbox = cached.pagination
+        else delete next.inbox
+        return next
+      })
+      mailboxRefreshVersionRef.current.inbox = (mailboxRefreshVersionRef.current.inbox ?? 0) + 1
+      loadMoreInFlightRef.current.delete('inbox')
+      preserveSelectionOnRefreshRef.current = true
+    }
     const bridge = window.attn
     if (!bridge || !activeAccount) return
     let cancelled = false
@@ -223,6 +299,7 @@ export function useMailData(
       preserveSelectionOnRefreshRef.current = true
       const viewAtStart = activeViewRef.current
       const extraView = cachedThreadView(viewAtStart)
+      const inboxSplitId = activeSplitId ?? null
       const inboxVersion = (mailboxRefreshVersionRef.current.inbox ?? 0) + 1
       const snoozedVersion = (mailboxRefreshVersionRef.current.snoozed ?? 0) + 1
       const extraViewVersion = extraView ? (mailboxRefreshVersionRef.current[extraView] ?? 0) + 1 : null
@@ -232,7 +309,10 @@ export function useMailData(
         mailboxRefreshVersionRef.current[extraView] = extraViewVersion
       }
       void Promise.all([
-        listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0),
+        listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, {
+          splitId: activeSplitId ?? undefined,
+          expectedSplitRevision: splitRevisionValue ?? undefined
+        }),
         listThreadSnapshot('snoozed', loadedRowCountsRef.current.snoozed ?? 0),
         bridge.draft.list(),
         bridge.outbox.listPending(),
@@ -285,6 +365,7 @@ export function useMailData(
             }
             if (inboxStillCurrent) {
               setRealThreads((current) => reuseThreadRows(current, inboxPage.rows))
+              setLoadedInboxSplitId(inboxSplitId)
             }
             if (snoozedStillCurrent) {
               setRealSnoozedThreads((current) =>
@@ -338,7 +419,15 @@ export function useMailData(
         })
     }
     refresh()
-    const offMail = bridge.mail.onChanged((serverSearchRequestId) => {
+    const offMail = bridge.mail.onChanged((serverSearchRequestId, reason) => {
+      // Rows in inactive splits can change without a rule revision. Keep the
+      // active page visible while it refreshes, but never paint an inactive
+      // split's pre-change cache after ordinary mail writes. The one-time
+      // split-metadata rebuild is different: it can run for hours and emits a
+      // checkpoint after each Gmail page. Keep those cached pages visible and
+      // revalidate the selected split behind them instead of turning every tab
+      // switch into a cold SQLite read.
+      if (shouldClearInactiveSplitCache(reason)) inboxSplitCacheRef.current.clear()
       pendingMailChangeSource = mailChangedPending
         ? pendingMailChangeSource === serverSearchRequestId
           ? pendingMailChangeSource
@@ -348,6 +437,7 @@ export function useMailData(
       refresh()
     })
     const offOutbox = bridge.outbox.onChanged((change) => {
+      inboxSplitCacheRef.current.clear()
       if (change.kind === 'failed') setOutboxFailure(change)
       // Reply/forward rows are projected into the open conversation while
       // queued, so outbox transitions invalidate that cache as well as lists.
@@ -363,7 +453,15 @@ export function useMailData(
       offOutbox()
       offProgress()
     }
-  }, [activeAccount, activeViewRef, selectedDraftIdRef, selectedThreadIdRef, setSelectedIndex])
+  }, [
+    activeAccount,
+    activeSplitId,
+    splitRevisionValue,
+    activeViewRef,
+    selectedDraftIdRef,
+    selectedThreadIdRef,
+    setSelectedIndex
+  ])
 
   // One shared wait behind the defer gate, mirroring the coalescing timer the
   // event-driven refresh above uses: N closes during one triage animation
@@ -407,6 +505,7 @@ export function useMailData(
     if (!window.attn || activeAccountRef.current !== account) return
     const viewAtStart = activeViewRef.current
     const extraView = cachedThreadView(viewAtStart)
+    const inboxSplitId = activeSplitIdRef.current ?? null
     const inboxVersion = (mailboxRefreshVersionRef.current.inbox ?? 0) + 1
     const snoozedVersion = (mailboxRefreshVersionRef.current.snoozed ?? 0) + 1
     const extraViewVersion = extraView ? (mailboxRefreshVersionRef.current[extraView] ?? 0) + 1 : null
@@ -416,7 +515,10 @@ export function useMailData(
       mailboxRefreshVersionRef.current[extraView] = extraViewVersion
     }
     const [inboxPage, snoozedPage, drafts, mailboxCounts, extraPage] = await Promise.all([
-      listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0),
+      listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, {
+        splitId: activeSplitIdRef.current ?? undefined,
+        expectedSplitRevision: splitRevisionRef.current ?? undefined
+      }),
       listThreadSnapshot('snoozed', loadedRowCountsRef.current.snoozed ?? 0),
       window.attn.draft.list(),
       window.attn.mail.getMailboxCounts(),
@@ -451,6 +553,7 @@ export function useMailData(
     }
     if (inboxStillCurrent) {
       setRealThreads((current) => reuseThreadRows(current, inboxPage.rows))
+      setLoadedInboxSplitId(inboxSplitId)
     }
     if (snoozedStillCurrent) {
       setRealSnoozedThreads((current) => reuseSnoozedRows(current, snoozedPage.rows as SnoozedThreadRow[]))
@@ -519,12 +622,17 @@ export function useMailData(
       [view]: { ...current[view], nextCursor: pageState.nextCursor, loadingMore: true }
     }))
     try {
-      const page = await listThreadPage(view, pageState.nextCursor)
+      const splitId = view === 'inbox' ? (activeSplitIdRef.current ?? undefined) : undefined
+      const page = await listThreadPage(view, pageState.nextCursor, splitId)
+      if (splitId && (page.splitRevision === undefined || page.splitRevision !== splitRevisionRef.current)) {
+        return
+      }
       if (activeAccountRef.current !== account || mailboxRefreshVersionRef.current[view] !== version) {
         return
       }
       if (view === 'inbox') {
         setRealThreads((current) => appendUniqueRows(current ?? [], page.rows))
+        setLoadedInboxSplitId(splitId ?? null)
       } else if (view === 'snoozed') {
         setRealSnoozedThreads((current) => appendUniqueRows(current ?? [], page.rows as SnoozedThreadRow[]))
       } else {
@@ -549,33 +657,51 @@ export function useMailData(
     }
   }, [])
 
-  const focusInboxThread = useCallback(async (threadId: string): Promise<number | null> => {
-    const account = activeAccountRef.current
-    if (!window.attn || !account) return null
-    const version = (mailboxRefreshVersionRef.current.inbox ?? 0) + 1
-    mailboxRefreshVersionRef.current.inbox = version
-    const page = await listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, threadId)
-    if (
-      !window.attn ||
-      activeAccountRef.current !== account ||
-      mailboxRefreshVersionRef.current.inbox !== version
-    ) {
-      return null
-    }
-    const targetIndex = page.rows.findIndex((row) => row.id === threadId)
-    setRealThreads((current) => reuseThreadRows(current, page.rows))
-    setThreadPagination((current) => ({
-      ...current,
-      inbox: { nextCursor: page.nextCursor, loadingMore: false }
-    }))
-    return targetIndex >= 0 ? targetIndex : null
-  }, [])
+  const focusInboxThread = useCallback(
+    async (
+      threadId: string,
+      splitId: string | null | undefined = undefined,
+      expectedSplitRevision = splitRevisionRef.current ?? undefined
+    ): Promise<number | null> => {
+      const account = activeAccountRef.current
+      if (!window.attn || !account) return null
+      const targetSplitId =
+        splitId === undefined ? (activeSplitIdRef.current ?? undefined) : (splitId ?? undefined)
+      const version = (mailboxRefreshVersionRef.current.inbox ?? 0) + 1
+      mailboxRefreshVersionRef.current.inbox = version
+      const page = await listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, {
+        targetThreadId: threadId,
+        splitId: targetSplitId,
+        expectedSplitRevision
+      })
+      if (
+        !window.attn ||
+        activeAccountRef.current !== account ||
+        (targetSplitId !== undefined && activeSplitIdRef.current !== targetSplitId)
+      ) {
+        return null
+      }
+      const targetIndex = page.rows.findIndex((row) => row.id === threadId)
+      // Direct focus requests should survive background refresh churn, including
+      // split bootstrap and notification-driven view switches that legitimately
+      // advance the Inbox refresh version while this targeted read is in flight.
+      setRealThreads((current) => reuseThreadRows(current, page.rows))
+      setLoadedInboxSplitId(targetSplitId ?? null)
+      setThreadPagination((current) => ({
+        ...current,
+        inbox: { nextCursor: page.nextCursor, loadingMore: false }
+      }))
+      return targetIndex >= 0 ? targetIndex : null
+    },
+    []
+  )
 
   return {
     sync,
     networkOnline,
     realThreads,
     setRealThreads,
+    loadedInboxSplitId,
     realSnoozedThreads,
     setRealSnoozedThreads,
     mailboxRows,

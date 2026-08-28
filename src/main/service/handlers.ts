@@ -27,6 +27,8 @@ import {
   type ThreadPageCursor,
   type ThreadRow
 } from '../../shared/mail'
+import type { ReorderSplitsInput, SaveSplitInput, SplitCondition, SplitPresetId } from '../../shared/splits'
+import { SPLIT_PRESET_IDS } from '../../shared/splits'
 import { isThemePreference } from '../../shared/theme'
 import {
   actionQueueStatus,
@@ -82,6 +84,17 @@ import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '
 import { isPathInside } from '../pathSafety'
 import type { SnoozeScheduler } from '../scheduler'
 import { readAccountSetting, readSetting, writeAccountSetting, writeSetting } from '../settings'
+import {
+  deleteSplit,
+  getSplitState,
+  hasSplitSetup,
+  reorderSplits,
+  restoreSplitPreset,
+  saveSplit,
+  setSplitNotify,
+  splitLocationForThread,
+  splitRevision
+} from '../splits'
 import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
 import { fetchAndCacheThread } from '../sync/fetchThread'
@@ -172,9 +185,12 @@ const THREAD_LIST_VIEWS: readonly ThreadListView[] = [
 
 function isThreadListRequest(value: unknown): value is ThreadListRequest {
   if (!value || typeof value !== 'object') return false
-  const request = value as { view?: unknown; labelId?: unknown; cursor?: unknown }
+  const request = value as { view?: unknown; labelId?: unknown; splitId?: unknown; cursor?: unknown }
   if (request.cursor !== undefined && !isThreadPageCursor(request.cursor)) return false
   if (request.view === 'label') return nonEmptyString(request.labelId)
+  if (request.splitId !== undefined && (request.view !== 'inbox' || !nonEmptyString(request.splitId))) {
+    return false
+  }
   return typeof request.view === 'string' && (THREAD_LIST_VIEWS as readonly string[]).includes(request.view)
 }
 
@@ -184,7 +200,11 @@ function isThreadPageCursor(value: unknown): value is ThreadPageCursor {
   return typeof cursor.at === 'number' && Number.isFinite(cursor.at) && nonEmptyString(cursor.id)
 }
 
-function threadPage<Row extends ThreadRow>(rows: Row[], snoozed = false): ThreadPage<Row> {
+function threadPage<Row extends ThreadRow>(
+  rows: Row[],
+  snoozed = false,
+  splitRevisionValue?: number
+): ThreadPage<Row> {
   const hasMore = rows.length > THREAD_PAGE_SIZE
   const pageRows = hasMore ? rows.slice(0, THREAD_PAGE_SIZE) : rows
   const last = pageRows.at(-1)
@@ -192,8 +212,43 @@ function threadPage<Row extends ThreadRow>(rows: Row[], snoozed = false): Thread
     snoozed && last && 'dueAt' in last && typeof last.dueAt === 'number' ? last.dueAt : last?.lastMsgAt
   return {
     rows: pageRows,
-    nextCursor: hasMore && last && cursorAt !== undefined ? { at: cursorAt, id: last.id } : null
+    nextCursor: hasMore && last && cursorAt !== undefined ? { at: cursorAt, id: last.id } : null,
+    ...(splitRevisionValue === undefined ? {} : { splitRevision: splitRevisionValue })
   }
+}
+
+function isSplitCondition(value: unknown): value is SplitCondition {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as { type?: unknown; value?: unknown }
+  if (candidate.type === 'listIdPresent') return candidate.value === undefined
+  return (
+    (candidate.type === 'senderAddress' ||
+      candidate.type === 'senderDomain' ||
+      candidate.type === 'listId' ||
+      candidate.type === 'label' ||
+      candidate.type === 'attachmentMimeType' ||
+      candidate.type === 'attachmentFilenameSuffix') &&
+    typeof candidate.value === 'string'
+  )
+}
+
+function isSaveSplitInput(value: unknown): value is SaveSplitInput {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<SaveSplitInput>
+  return (
+    (candidate.id === undefined || nonEmptyString(candidate.id)) &&
+    typeof candidate.name === 'string' &&
+    (candidate.operator === 'any' || candidate.operator === 'all') &&
+    Array.isArray(candidate.conditions) &&
+    candidate.conditions.every(isSplitCondition) &&
+    typeof candidate.notify === 'boolean'
+  )
+}
+
+function isReorderSplitsInput(value: unknown): value is ReorderSplitsInput {
+  if (!value || typeof value !== 'object') return false
+  const ids = (value as Partial<ReorderSplitsInput>).ids
+  return Array.isArray(ids) && ids.every((id) => nonEmptyString(id))
 }
 
 const CONVERSATION_MAILBOXES: readonly ConversationMailbox[] = ['normal', 'all-mail', 'spam', 'trash']
@@ -712,7 +767,15 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       return threadPage(listLabelThreads(context.db, account, input.labelId, limit, cursor))
     }
     if (input.view === 'inbox') {
-      return threadPage(listInboxThreads(context.db, account, limit, cursor))
+      if (!input.splitId) return threadPage(listInboxThreads(context.db, account, limit, cursor))
+      return context.db.transaction(() => {
+        const revision = splitRevision(context.db, account)
+        return threadPage(
+          listInboxThreads(context.db, account, limit, cursor, input.splitId),
+          false,
+          revision
+        )
+      })()
     }
     if (input.view === 'snoozed') {
       return threadPage(listSnoozedThreads(context.db, account, limit, cursor), true)
@@ -732,6 +795,56 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.mailGetUnreadCount, () => {
     const account = context.currentAccountId()
     return account ? countInboxUnread(context.db, account) : 0
+  })
+  handle(IPC_CHANNELS.splitsGetState, () => {
+    const account = context.currentAccountId()
+    if (!account || (context.testUserData && !hasSplitSetup(context.db, account))) {
+      return { revision: 0, splits: [], restorablePresetIds: [] }
+    }
+    return getSplitState(context.db, account)
+  })
+  handle(IPC_CHANNELS.splitsGetThreadLocation, (_event, threadId) => {
+    const account = context.currentAccountId()
+    if (
+      !account ||
+      !nonEmptyString(threadId) ||
+      (context.testUserData && !hasSplitSetup(context.db, account))
+    ) {
+      return null
+    }
+    return splitLocationForThread(context.db, account, threadId)
+  })
+  handle(IPC_CHANNELS.splitsSave, (_event, input) => {
+    if (!isSaveSplitInput(input)) throw new Error('invalid split')
+    const state = saveSplit(context.db, requireAccount(context), input)
+    context.broadcastMailChanged()
+    return state
+  })
+  handle(IPC_CHANNELS.splitsSetNotify, (_event, id, notify) => {
+    if (!nonEmptyString(id) || typeof notify !== 'boolean') throw new Error('invalid split notification')
+    const state = setSplitNotify(context.db, requireAccount(context), id, notify)
+    context.broadcastMailChanged()
+    return state
+  })
+  handle(IPC_CHANNELS.splitsDelete, (_event, id) => {
+    if (!nonEmptyString(id)) throw new Error('invalid split')
+    const state = deleteSplit(context.db, requireAccount(context), id)
+    context.broadcastMailChanged()
+    return state
+  })
+  handle(IPC_CHANNELS.splitsReorder, (_event, input) => {
+    if (!isReorderSplitsInput(input)) throw new Error('invalid split order')
+    const state = reorderSplits(context.db, requireAccount(context), input)
+    context.broadcastMailChanged()
+    return state
+  })
+  handle(IPC_CHANNELS.splitsRestorePreset, (_event, id) => {
+    if (typeof id !== 'string' || !(SPLIT_PRESET_IDS as readonly string[]).includes(id)) {
+      throw new Error('invalid split preset')
+    }
+    const state = restoreSplitPreset(context.db, requireAccount(context), id as SplitPresetId)
+    context.broadcastMailChanged()
+    return state
   })
   handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration, mailbox) => {
     if (typeof threadId !== 'string') return null

@@ -196,7 +196,8 @@ function publishFocus(): void {
 function handleServiceEvent(event: ServiceEvent): void {
   if (event.kind === 'mail-changed') {
     broadcast(IPC_CHANNELS.mailChanged, {
-      ...(event.serverSearchRequestId ? { serverSearchRequestId: event.serverSearchRequestId } : {})
+      ...(event.serverSearchRequestId ? { serverSearchRequestId: event.serverSearchRequestId } : {}),
+      ...(event.reason ? { reason: event.reason } : {})
     })
   } else if (event.kind === 'outbox-changed') broadcast(IPC_CHANNELS.outboxChanged, event.payload)
   else if (event.kind === 'outbox-progress') broadcast(IPC_CHANNELS.outboxProgress, event.payload)

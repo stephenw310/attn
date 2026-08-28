@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
-import { type InvokeChannel, TEST_CHANNELS } from '../../shared/ipc'
+import { type InvokeChannel, type MailChangeReason, TEST_CHANNELS } from '../../shared/ipc'
 import type { MessageMailbox, SyncState } from '../../shared/mail'
 import { clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
@@ -20,6 +20,7 @@ import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
 import { readSetting, settingEnabled, writeSetting } from '../settings'
+import { countNotificationEnabledUnread, hasSplitSetup } from '../splits'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
 import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
 import { runFtsBackfill } from '../sync/ftsBackfill'
@@ -57,6 +58,7 @@ export class ServiceRuntime {
   private seedAccountId: string | null = null
   private focused: boolean
   private stopped = false
+  private mailRevision = 0
   private draftSaveFailures = 0
   private conversationDelay: { threadId: string; delayMs: number } | null = null
   private draftReopenDelayMs = 0
@@ -140,8 +142,9 @@ export class ServiceRuntime {
       makeProvider: (generation) => this.makeProvider(generation),
       isForeground: () => this.focused,
       hasForegroundProviderWork: (accountId) => (this.foregroundProviderWork.get(accountId) ?? 0) > 0,
+      mailRevision: () => this.mailRevision,
       broadcastState: (payload) => this.emit({ kind: 'sync-state', payload }),
-      broadcastMailChanged: () => this.broadcastMailChanged(),
+      broadcastMailChanged: (reason) => this.broadcastMailChanged(undefined, reason),
       getActionExecutor: () => this.actionExecutor,
       getDraftMirrorExecutor: () => this.draftMirrorExecutor,
       getOutboxSender: () => this.outboxSender,
@@ -368,17 +371,27 @@ export class ServiceRuntime {
     }
   }
 
-  private broadcastMailChanged(serverSearchRequestId?: string): void {
+  private broadcastMailChanged(serverSearchRequestId?: string, reason?: MailChangeReason): void {
+    this.mailRevision += 1
     this.emit({
       kind: 'mail-changed',
-      ...(serverSearchRequestId ? { serverSearchRequestId } : {})
+      ...(serverSearchRequestId ? { serverSearchRequestId } : {}),
+      ...(reason ? { reason } : {})
     })
     this.broadcastBadge()
   }
 
   private broadcastBadge(): void {
     const accountId = this.currentAccountId()
-    this.emit({ kind: 'badge', unreadCount: accountId ? countInboxUnread(this.db, accountId) : 0 })
+    const legacySeed = accountId && this.input.testMode && !hasSplitSetup(this.db, accountId)
+    this.emit({
+      kind: 'badge',
+      unreadCount: accountId
+        ? legacySeed
+          ? countInboxUnread(this.db, accountId)
+          : countNotificationEnabledUnread(this.db, accountId)
+        : 0
+    })
   }
 
   private broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {
@@ -543,7 +556,7 @@ export class ServiceRuntime {
         : 0
       const cursors = this.db
         .prepare(
-          `SELECT backfill_cursor, sweep_cursor, attachment_cursor, fts_cursor
+          `SELECT backfill_cursor, sweep_cursor, attachment_cursor, split_metadata_cursor, fts_cursor
            FROM sync_state WHERE account_id = ?`
         )
         .get(accountId)

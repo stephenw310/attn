@@ -1,5 +1,5 @@
 import type { RevertedAction } from '../../shared/actionRevert'
-import type { InvokeChannel } from '../../shared/ipc'
+import type { InvokeChannel, MailChangeReason } from '../../shared/ipc'
 import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
 import type { NotificationCandidate } from './notificationQueries'
 
@@ -52,7 +52,7 @@ export interface ServiceReady {
 }
 
 export type ServiceEvent =
-  | { kind: 'mail-changed'; serverSearchRequestId?: string }
+  | { kind: 'mail-changed'; serverSearchRequestId?: string; reason?: MailChangeReason }
   | { kind: 'outbox-changed'; payload: import('../../shared/outbox').OutboxChanged }
   | { kind: 'outbox-progress'; payload: import('../../shared/outbox').OutboxProgress | null }
   | { kind: 'sync-state'; payload: import('../../shared/mail').SyncState }

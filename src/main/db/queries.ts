@@ -25,6 +25,7 @@ import type {
   ThreadRow
 } from '../../shared/mail'
 import { messageLabelsMatchMailbox } from '../../shared/mail'
+import { splitAssignmentForAccount } from '../splits'
 import { needsBodyHydration } from '../sync/bodyHydration'
 import type { Db } from './index'
 
@@ -342,9 +343,12 @@ export function listInboxThreads(
   db: Db,
   accountId: string,
   limit = THREAD_LIST_LIMIT,
-  cursor: ThreadPageCursor | null = null
+  cursor: ThreadPageCursor | null = null,
+  splitId?: string
 ): ThreadRow[] {
   const sortExpression = 'COALESCE(t.last_msg_at, 0)'
+  const assignment = splitId ? splitAssignmentForAccount(db, accountId) : null
+  const splitFilter = assignment ? `AND (${assignment.sql}) = ?` : ''
   const rows = db
     .prepare(
       `WITH visible AS (
@@ -360,6 +364,7 @@ export function listInboxThreads(
          JOIN thread_labels inbox
            ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
          WHERE t.account_id = ? AND t.is_inbox_visible = 1
+           ${splitFilter}
            ${descendingCursorSql(sortExpression, cursor)}
          ORDER BY ${sortExpression} DESC, t.id
          LIMIT ?
@@ -371,7 +376,12 @@ export function listInboxThreads(
        FROM visible v
        ORDER BY COALESCE(v.last_msg_at, 0) DESC, v.id`
     )
-    .all(accountId, ...cursorValues(cursor), limit) as {
+    .all(
+      accountId,
+      ...(assignment ? [...assignment.params, splitId] : []),
+      ...cursorValues(cursor),
+      limit
+    ) as {
     account_id: string
     id: string
     from_display: string | null

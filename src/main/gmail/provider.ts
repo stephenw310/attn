@@ -24,6 +24,7 @@ const METADATA_HEADERS = [
   'Bcc',
   'Reply-To',
   'Subject',
+  'List-Id',
   'Message-ID',
   'References',
   'In-Reply-To'

@@ -102,12 +102,15 @@ export interface ThreadPageCursor {
 export interface ThreadPage<Row extends ThreadRow = ThreadRow> {
   rows: Row[]
   nextCursor: ThreadPageCursor | null
+  /** Present for split-filtered Inbox reads. Pages from another rule revision must not be mixed. */
+  splitRevision?: number
 }
 
 /** A local list read targets one 100-row page of a system mailbox or Gmail user label. */
-export type ThreadListRequest = ({ view: ThreadListView } | { view: 'label'; labelId: string }) & {
-  cursor?: ThreadPageCursor
-}
+export type ThreadListRequest =
+  | { view: 'inbox'; splitId?: string; cursor?: ThreadPageCursor }
+  | { view: Exclude<ThreadListView, 'inbox'>; cursor?: ThreadPageCursor }
+  | { view: 'label'; labelId: string; cursor?: ThreadPageCursor }
 
 /** Mailboxes whose membership and reader contents depend on per-message labels. */
 export type MessageMailbox = 'all-mail' | 'spam' | 'trash'
@@ -172,9 +175,9 @@ export type SyncState =
     }
   | {
       phase: 'indexing'
-      // 'lifetime' walks account headers; 'attachments' is the short ids-only
-      // tail that flags which stored threads carry an attachment (SPEC §9 #18c).
-      stage: 'lifetime' | 'attachments'
+      // The account-wide header walk is followed by two derived-metadata
+      // passes before the local FTS backfill starts.
+      stage: 'lifetime' | 'attachments' | 'split-metadata'
       threadsDone: number
       threadsTotal?: number
       messagesTotal?: number
