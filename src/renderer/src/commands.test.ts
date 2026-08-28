@@ -184,6 +184,13 @@ describe('keyboard dispatch', () => {
     expect(matchComposerKey(key('Tab'))).toBeNull()
   })
 
+  test('accepts Tab as a contextual Inbox alias without replacing the G I chord', () => {
+    useCommands([createCommand('view.inbox', () => {}, { shortcutAliases: ['Tab'] })])
+    expect(matchKey(key('Tab'), 'list')?.id).toBe('view.inbox')
+    expect(matchKey(key('Tab', { shiftKey: true }), 'list')).toBeNull()
+    expect(findCommandByShortcut('g i', 'list')?.id).toBe('view.inbox')
+  })
+
   test('extends the selection with Shift+Arrow in both contexts', () => {
     useCommands([
       createCommand('selection.extendNext', () => {}),

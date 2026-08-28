@@ -76,7 +76,7 @@ export function useSplits(account: string | null): SplitData {
       if (!state || !activeSplitId) return
       const current = state.splits.findIndex((split) => split.id === activeSplitId)
       if (current < 0) return
-      const next = Math.max(0, Math.min(state.splits.length - 1, current + direction))
+      const next = (current + direction + state.splits.length) % state.splits.length
       setActiveSplitIdState(state.splits[next].id)
     },
     [activeSplitId, state]

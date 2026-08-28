@@ -147,7 +147,9 @@ export function useInboxCommands(options: Options): void {
               : [createCommand('conversation.open', openSelected)]
           : []),
         ...(searchOpen && readerOpen ? [createCommand('search.clear', clearSearch)] : []),
-        createCommand('view.inbox', () => switchView('inbox')),
+        createCommand('view.inbox', () => switchView('inbox'), {
+          ...(!readerOpen && !searchOpen && view !== 'inbox' ? { shortcutAliases: ['Tab'] } : {})
+        }),
         createCommand('view.allMail', () => switchView('allMail')),
         createCommand('view.sent', () => switchView('sent')),
         createCommand('view.starred', () => switchView('starred')),

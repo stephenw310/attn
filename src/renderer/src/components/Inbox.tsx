@@ -697,8 +697,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       if (!splitState || !currentId) return
       const current = splitState.splits.findIndex((split) => split.id === currentId)
       if (current < 0) return
-      const next = Math.max(0, Math.min(splitState.splits.length - 1, current + direction))
-      if (next !== current) switchSplit(splitState.splits[next].id)
+      const next = (current + direction + splitState.splits.length) % splitState.splits.length
+      switchSplit(splitState.splits[next].id)
     },
     [splits.activeSplitId, splits.state, switchSplit]
   )

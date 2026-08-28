@@ -871,8 +871,9 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
   fields. This path covers filename-less `text/calendar` parts that neither `attachments_json` nor Gmail's
   filename search can reconstruct locally.
 - **The strip follows D6:** a horizontal top-bar strip, unread counts on hot splits, overflow behind `···`
-  past about eight. `Tab` and `Shift+Tab` move between splits. `←` and `→` remain aliases. `G` then `1`–`9`
-  jumps by configured order, and each split
+  past about eight. `Tab` and `Shift+Tab` move between splits and wrap at both ends. Outside Inbox, `Tab`
+  returns to Inbox. `←` and `→` remain split-navigation aliases. `G` then `1`–`9` jumps by configured order,
+  and each split
   keeps its own selection. `mail:listThreads({ view: 'inbox', splitId, cursor })` filters and applies the
   existing keyset cursor inside SQLite; a separate typed read returns exact total and unread counts for every
   configured split. A rule mutation invalidates those reads and reloads the active split from page one.
@@ -983,8 +984,8 @@ COMMIT;
   threshold but only one eligible conversation remains, plus a cycle where the eligible total itself requires
   a summary. Cover preset initialization as an atomic one-time action, including an initialized account with
   zero remaining preset rows and an explicit restore that cannot duplicate an existing preset id.
-- **E2e (seeded):** `Tab`, `Shift+Tab`, `←`, `→`, and `G` digits switch splits; each split keeps its
-  selection; unread counts are
+- **E2e (seeded):** `Tab`, `Shift+Tab`, `←`, `→`, and `G` digits switch splits and wrap at both ends; `Tab`
+  returns from another mailbox to Inbox; each split keeps its selection; unread counts are
   per split; adding or editing a rule re-buckets without a reload; deleting the GitHub preset persists across
   relaunch and sync; deleting all starter presets does not recreate them; an explicit restore recreates only
   the selected preset; splits never appear outside Inbox.
@@ -1003,10 +1004,10 @@ one-time setup marker. One parameterized SQLite classifier now owns ordered assi
 exact counts, notification eligibility, badge counts, and notification click-through. Calendar, GitHub, and
 Newsletters start as editable presets; changes and deletions persist, and Restore is explicit.
 
-The Inbox strip supports pointer selection, `Tab`, `Shift+Tab`, `←`, `→`, configured `G` digits, per-split
-selection and scroll, revision-aware page caching, quiet zero counts, and an overflow menu past eight visible
-tabs. The rule manager creates, renames, edits, reorders with leading drag handles, deletes, restores, and
-configures notifications.
+The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, `→`, configured `G` digits,
+per-split selection and scroll, revision-aware page caching, quiet zero counts, and an overflow menu past eight
+visible tabs. Outside Inbox, `Tab` returns to Inbox. The rule manager creates, renames, edits, reorders with
+leading drag handles, deletes, restores, and configures notifications.
 The dragged row follows the pointer while nearby rows move to reveal the nearest drop position. A focused handle
 accepts Up and Down as its keyboard path. It is available from the account menu and command palette. Seeded
 Electron coverage exercises the full path and captures `split-inbox.png`, `split-rules.png`, and
