@@ -321,7 +321,8 @@ temporarily replaces that line with the valid next keys derived from the same co
 shows only the completion keys and labels, without repeating the prefix. Fixed mailboxes use
 `I/A/T/D/S/H/P/R/O`, while `1`–`9` maps to Inbox splits in configured order. The guide remains visible until
 completion, `Esc`, a view change, or a 3-second timeout. The command palette (`Mod+K`) and cheat sheet
-(`Mod+/`) remain the exhaustive discovery surfaces.
+(`Mod+/`) remain the exhaustive discovery surfaces. Narrow windows can pan the line horizontally without a
+native scrollbar changing the footer height.
 
 **Acceptance criteria**
 - Opens in < 50ms; results re-rank per keystroke in < 30ms.

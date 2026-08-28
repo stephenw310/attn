@@ -173,3 +173,55 @@ test('cancels pending chords before overlays stop keyboard propagation', async (
   await page.keyboard.press('o')
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')
 })
+
+test('keeps the footer height fixed when shortcut content overflows', async ({ app, page }) => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setContentSize(700, 420)
+  })
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  const footer = page.getByTestId('mail-footer')
+  const shortcuts = page.getByTestId('footer-shortcuts')
+  const initialHeight = await footer.evaluate((element) => element.getBoundingClientRect().height)
+
+  await page.keyboard.press('g')
+  await expect(page.getByTestId('footer-chord-guide')).toBeVisible()
+  await expect
+    .poll(() => footer.evaluate((element) => element.getBoundingClientRect().height))
+    .toBe(initialHeight)
+  await expect
+    .poll(() =>
+      shortcuts.evaluate((element) => ({
+        overflows: element.scrollWidth > element.clientWidth,
+        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
+      }))
+    )
+    .toEqual({ overflows: true, scrollbarHeight: 0 })
+
+  await shortcuts.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth
+  })
+  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  await page.keyboard.press('Escape')
+  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)
+
+  await page.keyboard.press('g')
+  await expect(page.getByTestId('footer-chord-guide')).toBeVisible()
+  await shortcuts.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth
+  })
+  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  await page.getByTestId('thread-row').first().click()
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)
+  await expect
+    .poll(() => footer.evaluate((element) => element.getBoundingClientRect().height))
+    .toBe(initialHeight)
+  await expect
+    .poll(() =>
+      shortcuts.evaluate((element) => ({
+        overflows: element.scrollWidth > element.clientWidth,
+        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
+      }))
+    )
+    .toEqual({ overflows: true, scrollbarHeight: 0 })
+})

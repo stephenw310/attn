@@ -102,8 +102,9 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
       className="relative z-40 flex min-h-11 items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
     >
       <div
+        key={`${context}:${pendingChord ?? 'default'}`}
         data-testid="footer-shortcuts"
-        className="flex min-w-0 flex-1 items-center gap-x-4 overflow-x-auto"
+        className="flex min-w-0 flex-1 items-center gap-x-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {pendingChord ? (
           <ChordGuide prefix={pendingChord} context={context} />
