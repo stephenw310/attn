@@ -74,9 +74,86 @@ function inlineImageSourcesToCid(html: string): string {
   return template.innerHTML
 }
 
+/** Gmail composes logical rows as divs; paragraphs acquire large margins when it opens a draft. */
+function paragraphsToGmailRows(html: string): string {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  for (const paragraph of template.content.querySelectorAll<HTMLParagraphElement>('p')) {
+    const row = document.createElement('div')
+    for (const attribute of paragraph.attributes) {
+      row.setAttribute(attribute.name, attribute.value)
+    }
+    while (paragraph.firstChild) row.append(paragraph.firstChild)
+    paragraph.replaceWith(row)
+  }
+  return template.innerHTML
+}
+
+function previousMeaningfulSibling(node: Node): ChildNode | null {
+  let previous = node.previousSibling
+  while (previous?.nodeType === Node.TEXT_NODE && !previous.textContent?.trim()) {
+    previous = previous.previousSibling
+  }
+  return previous
+}
+
+function isBlankGmailRow(node: ChildNode | null): boolean {
+  if (!(node instanceof HTMLElement) || node.tagName !== 'DIV' || node.textContent?.trim()) return false
+  return [...node.childNodes].every(
+    (child) =>
+      (child.nodeType === Node.TEXT_NODE && !child.textContent?.trim()) || child instanceof HTMLBRElement
+  )
+}
+
+/** Match the wrapper Gmail emits around a signature so recipient clients can classify it. */
+function wrapGmailSignatures(html: string): string {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  for (const signature of template.content.querySelectorAll<HTMLElement>(
+    '.gmail_signature, [data-smartmail="gmail_signature"]'
+  )) {
+    if (!signature.hasAttribute('dir')) {
+      const direction = signature.querySelector<HTMLElement>('[dir]')?.getAttribute('dir')
+      signature.setAttribute('dir', direction === 'rtl' ? 'rtl' : 'ltr')
+    }
+    const parent = signature.parentElement
+    const dedicatedWrapper =
+      parent?.tagName === 'DIV' &&
+      [...parent.childNodes].every(
+        (child) => child === signature || (child.nodeType === Node.TEXT_NODE && !child.textContent?.trim())
+      )
+    const wrapper = dedicatedWrapper ? parent : document.createElement('div')
+    if (!dedicatedWrapper) {
+      signature.replaceWith(wrapper)
+      wrapper.append(signature)
+    }
+    if (!isBlankGmailRow(previousMeaningfulSibling(wrapper))) {
+      const spacer = document.createElement('div')
+      spacer.append(document.createElement('br'))
+      wrapper.before(spacer)
+    }
+  }
+  return template.innerHTML
+}
+
+function wrapGmailBody(html: string): string {
+  const root = document.createElement('div')
+  root.setAttribute('dir', 'ltr')
+  root.innerHTML = html
+  return root.outerHTML
+}
+
 export function editorStateToPlainText(state: SerializedEditorState): string {
+  let hasAuthoredText = false
   return childrenOf(state.root)
-    .map(blockText)
+    .map((node, index) => {
+      const text = blockText(node)
+      if (node.type === 'gmail-signature') {
+        return hasAuthoredText || index === 0 ? `\n${text}` : text
+      }
+      if (text.trim()) hasAuthoredText = true
+      return text
+    })
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trimEnd()
@@ -86,14 +163,20 @@ export function serializeEditorState(
   editorState: EditorState,
   editor: LexicalEditor
 ): { bodyHtml: string; bodyText: string } {
+  const serializedState = editorState.toJSON()
+  const rootChildren = childrenOf(serializedState.root)
+  const preserveExactOpaqueBody = rootChildren.length === 1 && rootChildren[0]?.type === 'opaque-html'
   let bodyHtml = ''
   editorState.read(
     () => {
+      const normalizedHtml = wrapGmailSignatures(
+        paragraphsToGmailRows(sanitizeOutgoingHtml($generateHtmlFromNodes(editor)))
+      )
       bodyHtml = restoreOpaqueHtml(
-        inlineImageSourcesToCid(sanitizeOutgoingHtml($generateHtmlFromNodes(editor)))
+        inlineImageSourcesToCid(preserveExactOpaqueBody ? normalizedHtml : wrapGmailBody(normalizedHtml))
       )
     },
     { editor }
   )
-  return { bodyHtml, bodyText: editorStateToPlainText(editorState.toJSON()) }
+  return { bodyHtml, bodyText: editorStateToPlainText(serializedState) }
 }

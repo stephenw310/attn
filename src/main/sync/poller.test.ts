@@ -337,6 +337,32 @@ describe('history poller lifecycle', () => {
     poller.stop()
   })
 
+  it('refreshes send-as settings once between labels and drafts', async () => {
+    const calls: string[] = []
+    const options = pollerOptions({
+      syncLabels: vi.fn(async () => {
+        calls.push('labels')
+        return false
+      }),
+      syncSendAs: vi.fn(async () => {
+        calls.push('send-as')
+      }),
+      syncDrafts: vi.fn(async () => {
+        calls.push('drafts')
+        return false
+      })
+    })
+    const poller = new HistoryPoller(options)
+    poller.start()
+
+    await poller.runNow()
+
+    expect(options.syncSendAs).toHaveBeenCalledOnce()
+    expect(calls).toEqual(['labels', 'send-as', 'drafts'])
+    expect(options.onCycleComplete).toHaveBeenCalledWith(false)
+    poller.stop()
+  })
+
   it('keeps a label-list failure out of the mail-poll error path', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const syncDrafts = vi.fn(async () => false)
@@ -368,6 +394,26 @@ describe('history poller lifecycle', () => {
     expect(options.onError).not.toHaveBeenCalled()
     expect(options.onCycleComplete).toHaveBeenCalledWith(false)
     expect(warning).toHaveBeenCalledWith('[draft] inbound sync failed: drafts down')
+    warning.mockRestore()
+    poller.stop()
+  })
+
+  it('keeps a send-as failure out of the mail-poll error path', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const syncDrafts = vi.fn(async () => false)
+    const options = pollerOptions({
+      syncSendAs: vi.fn(async () => Promise.reject(new Error('settings down'))),
+      syncDrafts
+    })
+    const poller = new HistoryPoller(options)
+    poller.start()
+
+    await poller.runNow()
+
+    expect(options.onError).not.toHaveBeenCalled()
+    expect(syncDrafts).toHaveBeenCalledOnce()
+    expect(options.onCycleComplete).toHaveBeenCalledWith(false)
+    expect(warning).toHaveBeenCalledWith('[sync] send-as refresh failed: settings down')
     warning.mockRestore()
     poller.stop()
   })

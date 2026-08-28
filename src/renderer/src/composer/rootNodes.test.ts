@@ -13,7 +13,8 @@ import { ImageNode } from './nodes/ImageNode'
 import { OpaqueHtmlNode } from './nodes/OpaqueHtmlNode'
 import { StyledTextNode } from './nodes/StyledTextNode'
 import { prepareHtmlForEditor } from './preserve'
-import { rootLevelNodes } from './rootNodes'
+import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
+import { editorStateToPlainText } from './serialize'
 
 // The composer's own registry: node types decide what `$generateNodesFromDOM`
 // returns, so a narrower list would not exercise the real import.
@@ -51,6 +52,7 @@ function loadDraftHtml(html: string): string[] {
   target.update(
     () => {
       const document = new DOMParser().parseFromString(prepareHtmlForEditor(html).html, 'text/html')
+      preserveBlankLineBlocks(document)
       const root = $getRoot()
       root.clear()
       root.append(...rootLevelNodes($generateNodesFromDOM(target, document)))
@@ -59,6 +61,19 @@ function loadDraftHtml(html: string): string[] {
     { discrete: true }
   )
   return types
+}
+
+function loadDraftText(html: string): string {
+  const target = editor()
+  target.update(
+    () => {
+      const document = new DOMParser().parseFromString(prepareHtmlForEditor(html).html, 'text/html')
+      preserveBlankLineBlocks(document)
+      $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
+    },
+    { discrete: true }
+  )
+  return editorStateToPlainText(target.getEditorState().toJSON())
 }
 
 describe('root-level node normalization', () => {
@@ -85,5 +100,18 @@ describe('root-level node normalization', () => {
 
   it('leaves output that is already element-only untouched', () => {
     expect(loadDraftHtml('<p>One</p><blockquote>Two</blockquote>')).toEqual(['paragraph', 'quote'])
+  })
+
+  it("keeps Gmail's blank row between authored text and its signature", () => {
+    const html =
+      '<div dir="ltr"><div>Hi there,</div><div>This is a test of email format.</div>' +
+      '<div>Hopefully it looks good</div><div><br></div><div>' +
+      '<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">' +
+      '<div dir="ltr"><div>Bests,</div>Chao Wu<div><a href="https://chaowu.xyz">' +
+      'https://chaowu.xyz</a><br></div></div></div></div></div>'
+
+    expect(loadDraftText(html)).toBe(
+      'Hi there,\nThis is a test of email format.\nHopefully it looks good\n\nBests,\nChao Wu\nhttps://chaowu.xyz'
+    )
   })
 })

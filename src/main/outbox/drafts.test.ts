@@ -12,6 +12,7 @@ import {
   requestDraftMirror,
   saveDraft
 } from './drafts'
+import { cachePrimarySendAs, prepareDraftWithCachedPrimarySignature } from './sendAs'
 
 const stored: StoredDraftAttachment = {
   id: 'owned-attachment',
@@ -97,6 +98,13 @@ describe('draft lifecycle guards', () => {
             subject: '',
             body_text: '',
             attachments_json: '[]',
+            thread_id: null,
+            source_message_id: null,
+            in_reply_to: null,
+            references_json: '[]',
+            kind: 'new',
+            local_revision: 1,
+            default_signature_fingerprint: null,
             ...content
           }))
         }))
@@ -157,6 +165,31 @@ describe('untouched reply and forward drafts', () => {
     expect(isUntouchedThreadDraft({ ...plannedReply, bodyHtml: '<img src="cid:x">' })).toBe(false)
     // Whitespace-only markup is still nothing the user meant to keep.
     expect(isUntouchedThreadDraft({ ...plannedReply, bodyHtml: '<p>&nbsp;</p>' })).toBe(true)
+  })
+
+  it('does not count the default signature as authored body content', () => {
+    const db = openDatabase(':memory:')
+    try {
+      cachePrimarySendAs(db, 'account', {
+        sendAsEmail: 'account',
+        signature: '<div>Best,</div>'
+      })
+      const prepared = prepareDraftWithCachedPrimarySignature(db, 'account', plannedReply)
+      expect(isUntouchedThreadDraft(prepared.draft, false, prepared.defaultSignatureFingerprint)).toBe(true)
+      expect(
+        isUntouchedThreadDraft(
+          {
+            ...prepared.draft,
+            bodyHtml: `<p>Thanks</p>${prepared.draft.bodyHtml}`,
+            bodyText: `Thanks\n${prepared.draft.bodyText}`
+          },
+          false,
+          prepared.defaultSignatureFingerprint
+        )
+      ).toBe(false)
+    } finally {
+      db.close()
+    }
   })
 
   it('counts recipients the plan never fills', () => {

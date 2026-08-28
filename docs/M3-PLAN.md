@@ -111,7 +111,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 ## Global rules (carried from M2, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative
-   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 18. Throwaway profiles may be
+   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 19. Throwaway profiles may be
    deleted and re-synced. A real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and every
    schema-changing task publishes its exact DDL.
 2. **IPC has three parts**: main handler, preload bridge, and the typed channel map in `src/shared/`. All in

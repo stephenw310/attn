@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
-// gmail.modify covers read, label changes, and send (SPEC F1).
+// gmail.modify covers read, label changes, send, and users.settings.sendAs.get (SPEC F1/F6).
 const SCOPES = 'https://www.googleapis.com/auth/gmail.modify openid email'
 const FLOW_TIMEOUT_MS = 5 * 60 * 1000
 
