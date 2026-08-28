@@ -9,6 +9,28 @@ import {
 
 export type SerializedGmailSignatureNode = SerializedElementNode
 
+export const COLLAPSED_GMAIL_SIGNATURE_SELECTOR = '.gmail_signature[data-attn-signature-collapsed="true"]'
+
+export function collapseGmailSignature(element: HTMLElement): void {
+  element.setAttribute('data-attn-signature-collapsed', 'true')
+  element.setAttribute('contenteditable', 'false')
+  element.setAttribute('role', 'button')
+  element.setAttribute('tabindex', '0')
+  element.setAttribute('aria-expanded', 'false')
+  element.setAttribute('aria-label', 'Show signature')
+  element.setAttribute('title', 'Show signature')
+}
+
+export function revealGmailSignature(element: HTMLElement): void {
+  element.removeAttribute('data-attn-signature-collapsed')
+  element.removeAttribute('contenteditable')
+  element.removeAttribute('role')
+  element.removeAttribute('tabindex')
+  element.removeAttribute('aria-expanded')
+  element.removeAttribute('aria-label')
+  element.removeAttribute('title')
+}
+
 function isGmailSignature(element: HTMLElement): boolean {
   return (
     element.classList.contains('gmail_signature') ||
@@ -51,6 +73,7 @@ export class GmailSignatureNode extends ElementNode {
     element.className = 'gmail_signature'
     element.setAttribute('data-smartmail', 'gmail_signature')
     element.setAttribute('data-testid', 'composer-gmail-signature')
+    collapseGmailSignature(element)
     const direction = this.getDirection()
     if (direction) element.setAttribute('dir', direction)
     return element

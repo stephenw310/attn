@@ -48,10 +48,11 @@ import { useTheme } from '../theme'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
+import { COLLAPSED_GMAIL_SIGNATURE_SELECTOR, revealGmailSignature } from './nodes/GmailSignatureNode'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
-import { rootLevelNodes } from './rootNodes'
+import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
 import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
@@ -147,6 +148,12 @@ function plainTextForEditor(value: string): string {
   return `<p>${escapeHtml(value).replace(/\r\n?|\n/g, '<br>')}</p>`
 }
 
+function hasGmailSignature(html: string): boolean {
+  if (!html) return false
+  const document = new DOMParser().parseFromString(html, 'text/html')
+  return document.querySelector('.gmail_signature, [data-smartmail="gmail_signature"]') !== null
+}
+
 function quoteSrcDoc(body: string, surface: MailSurface, appearance: ThemeAppearance): string {
   const senderCanvas = surface === 'light'
   const light = senderCanvas || appearance === 'light'
@@ -156,8 +163,19 @@ function quoteSrcDoc(body: string, surface: MailSurface, appearance: ThemeAppear
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${senderCanvas ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${senderCanvas ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
 }
 
-function InlineQuote({ draftId, html }: { draftId: string; html: string }): React.JSX.Element | null {
-  const [expanded, setExpanded] = useState(false)
+function InlineQuote({
+  draftId,
+  html,
+  expanded: controlledExpanded,
+  showToggle = true
+}: {
+  draftId: string
+  html: string
+  expanded?: boolean
+  showToggle?: boolean
+}): React.JSX.Element | null {
+  const [localExpanded, setLocalExpanded] = useState(false)
+  const expanded = controlledExpanded ?? localExpanded
   const { appearance } = useTheme()
   const surface = useMemo(() => mailSurfaceForHtml(html), [html])
   const [srcDoc, setSrcDoc] = useState(() => quoteSrcDoc('', surface, appearance))
@@ -274,7 +292,7 @@ function InlineQuote({ draftId, html }: { draftId: string; html: string }): Reac
     }
   }, [disconnect, observe, renderedQuote])
 
-  if (!html) return null
+  if (!html || (!expanded && !showToggle)) return null
   return (
     <div className="mx-5 mb-5 text-sm text-ink-dim" data-testid="composer-quote-container">
       {/* `allow-same-origin` is needed only to measure this scriptless srcdoc,
@@ -293,17 +311,19 @@ function InlineQuote({ draftId, html }: { draftId: string; html: string }): Reac
           style={{ colorScheme: surface === 'light' ? 'light' : appearance, height }}
         />
       )}
-      <button
-        type="button"
-        className={`${expanded ? 'mt-1' : ''} block cursor-pointer border-0 bg-transparent px-0.5 text-sm font-normal tracking-normal text-ink-faint hover:text-ink`}
-        data-testid="composer-quote-toggle"
-        aria-expanded={expanded}
-        aria-label={expanded ? 'Hide quoted history' : 'Show quoted history'}
-        title={expanded ? 'Hide quoted history' : 'Show quoted history'}
-        onClick={() => setExpanded((current) => !current)}
-      >
-        ...
-      </button>
+      {showToggle && (
+        <button
+          type="button"
+          className={`${expanded ? 'mt-1' : ''} block cursor-pointer border-0 bg-transparent px-0.5 text-sm font-normal tracking-normal text-ink-faint hover:text-ink`}
+          data-testid="composer-quote-toggle"
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Hide quoted history' : 'Show quoted history'}
+          title={expanded ? 'Hide quoted history' : 'Show quoted history'}
+          onClick={() => setLocalExpanded((current) => !current)}
+        >
+          ...
+        </button>
+      )}
     </div>
   )
 }
@@ -314,6 +334,7 @@ function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string })
     if (!html) return
     let cancelled = false
     const document = new DOMParser().parseFromString(html, 'text/html')
+    preserveBlankLineBlocks(document)
     const contentIds = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
       const source = image.getAttribute('src') ?? ''
       if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
@@ -353,6 +374,61 @@ function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string })
       cancelled = true
     }
   }, [draftId, editor, html])
+  return null
+}
+
+function CollapsedSignaturePlugin({
+  includesQuote,
+  onReveal
+}: {
+  includesQuote: boolean
+  onReveal: () => void
+}): null {
+  const [editor] = useLexicalComposerContext()
+  useEffect(() => {
+    const label = includesQuote ? 'Show signature and quoted history' : 'Show signature'
+    const updateLabels = (): void => {
+      for (const signature of editor
+        .getRootElement()
+        ?.querySelectorAll<HTMLElement>(COLLAPSED_GMAIL_SIGNATURE_SELECTOR) ?? []) {
+        signature.setAttribute('aria-label', label)
+        signature.setAttribute('title', label)
+      }
+    }
+    const collapsedSignature = (target: EventTarget | null): HTMLElement | null =>
+      target instanceof Element ? target.closest<HTMLElement>(COLLAPSED_GMAIL_SIGNATURE_SELECTOR) : null
+    const revealFromClick = (event: MouseEvent): void => {
+      const signature = collapsedSignature(event.target)
+      if (!signature) return
+      event.preventDefault()
+      event.stopPropagation()
+      revealGmailSignature(signature)
+      onReveal()
+    }
+    const revealFromKeyboard = (event: KeyboardEvent): void => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      const signature = collapsedSignature(event.target)
+      if (!signature) return
+      event.preventDefault()
+      event.stopPropagation()
+      revealGmailSignature(signature)
+      onReveal()
+    }
+
+    const unregisterRoot = editor.registerRootListener((root, previous) => {
+      previous?.removeEventListener('click', revealFromClick, true)
+      previous?.removeEventListener('keydown', revealFromKeyboard, true)
+      root?.addEventListener('click', revealFromClick, true)
+      root?.addEventListener('keydown', revealFromKeyboard, true)
+      updateLabels()
+    })
+    const unregisterUpdate = editor.registerUpdateListener(updateLabels)
+    updateLabels()
+    return () => {
+      unregisterUpdate()
+      unregisterRoot()
+    }
+  }, [editor, includesQuote, onReveal])
   return null
 }
 
@@ -415,6 +491,7 @@ function PasteContentPlugin({
         const prepared = prepareHtmlForEditor(html)
         if (prepared.issues.length > 0) onPreservedContent()
         const document = new DOMParser().parseFromString(prepared.html, 'text/html')
+        preserveBlankLineBlocks(document)
         for (const image of document.querySelectorAll<HTMLImageElement>('img[src]')) {
           const source = image.getAttribute('src') ?? ''
           if (!source.toLowerCase().startsWith('data:')) continue
@@ -510,6 +587,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [sendError, setSendError] = useState<string | null>(initialError)
   const initialHtml = draft.bodyHtml || plainTextForEditor(draft.bodyText)
   const preparedHtml = useMemo(() => prepareHtmlForEditor(initialHtml), [initialHtml])
+  const unifiedSignatureAndQuote = useMemo(
+    () => Boolean(draft.quoteHtml) && hasGmailSignature(preparedHtml.html),
+    [draft.quoteHtml, preparedHtml.html]
+  )
+  const [unifiedContentExpanded, setUnifiedContentExpanded] = useState(false)
+  const revealUnifiedContent = useCallback(() => setUnifiedContentExpanded(true), [])
   const [hasPreservedContent, setHasPreservedContent] = useState(preparedHtml.issues.length > 0)
   const notePreservedContent = useCallback(() => setHasPreservedContent(true), [])
   const attachmentMutationRef = useRef(false)
@@ -967,13 +1050,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <RichTextPlugin
                 contentEditable={
                   <ContentEditable
-                    className="min-h-full px-5 py-5 text-[15px] leading-7 text-ink outline-none"
+                    className="min-h-full px-5 py-5 text-[13px] leading-5 text-ink outline-none"
                     data-testid="composer-editor"
                     aria-label="Message body"
                   />
                 }
                 placeholder={
-                  <div className="pointer-events-none absolute left-5 top-5 text-[15px] leading-7 text-ink-faint">
+                  <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
                     Write a message…
                   </div>
                 }
@@ -984,6 +1067,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <TablePlugin />
               <LinkPlugin validateUrl={validateComposerUrl} />
               <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
+              <CollapsedSignaturePlugin
+                includesQuote={unifiedSignatureAndQuote}
+                onReveal={revealUnifiedContent}
+              />
               {mode === 'inline' && draft.kind !== 'forward' && <AutoFocusPlugin />}
               <OnChangePlugin ignoreSelectionChange onChange={captureEditor} />
               <ComposerCommandPlugin
@@ -999,7 +1086,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 onError={onToast}
                 onPreservedContent={notePreservedContent}
               />
-              <InlineQuote draftId={draft.id} html={draft.quoteHtml} />
+              <InlineQuote
+                draftId={draft.id}
+                html={draft.quoteHtml}
+                expanded={unifiedSignatureAndQuote ? unifiedContentExpanded : undefined}
+                showToggle={!unifiedSignatureAndQuote}
+              />
             </div>
             {visibleAttachments.length > 0 && (
               <div

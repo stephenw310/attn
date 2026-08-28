@@ -504,6 +504,11 @@ describe('OutboxSender effect layer', () => {
         'me@example.com',
         NOW
       )
+      db.prepare(
+        `INSERT INTO messages
+           (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
+         VALUES (?, 'gmail-sent', 'identity-thread', 'Chao Zhou', ?, ?, '["SENT"]')`
+      ).run('me@example.com', 'me@example.com', NOW - 1)
       const id = saveDraft(
         db,
         'me@example.com',
@@ -525,7 +530,8 @@ describe('OutboxSender effect layer', () => {
       )
       const getSendAs = vi.fn(async () => ({
         sendAsEmail: 'me@example.com',
-        displayName: 'Chao Zhou',
+        displayName: '',
+        signature: '<div>Best, Chao</div>',
         isPrimary: true
       }))
       const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
@@ -585,6 +591,11 @@ describe('OutboxSender effect layer', () => {
           .prepare("SELECT value FROM settings WHERE account_id = ? AND key = 'sendAsDisplayName'")
           .get('me@example.com')
       ).toEqual({ value: 'Chao Zhou' })
+      expect(
+        db
+          .prepare("SELECT value FROM settings WHERE account_id = ? AND key = 'sendAsSignatureHtml'")
+          .get('me@example.com')
+      ).toEqual({ value: expect.stringContaining('Best, Chao') })
       expect(db.prepare('SELECT body_text FROM messages WHERE id = ?').get('sent-message')).toEqual({
         body_text: 'Fresh reply'
       })

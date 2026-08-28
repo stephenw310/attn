@@ -111,7 +111,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 ## Global rules (carried from M2, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative
-   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 20. Throwaway profiles may be
+   snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 21. Throwaway profiles may be
    deleted and re-synced. A real dogfood profile gets the additive manual upgrade in `AGENTS.md`, and every
    schema-changing task publishes its exact DDL.
 2. **IPC has three parts**: main handler, preload bridge, and the typed channel map in `src/shared/`. All in
@@ -884,7 +884,7 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
 - **The rule manager is minimal.** F15's settings surface is M4. T27 ships preset restore plus rule creation,
   renaming, condition editing, ordering, and deletion, reachable by palette command, and no more.
 
-**Schema revision 20.** For a stopped revision-18 profile:
+**Schema revision 21.** For a stopped revision-18 profile:
 
 ```sql
 BEGIN IMMEDIATE;
@@ -909,18 +909,60 @@ CREATE TABLE split_config (
 ALTER TABLE sync_state
   ADD COLUMN split_metadata_cursor TEXT NOT NULL DEFAULT 'done';
 UPDATE sync_state SET split_metadata_cursor = 'split-metadata';
-PRAGMA user_version = 20;
+ALTER TABLE outbox ADD COLUMN default_signature_fingerprint TEXT;
+PRAGMA user_version = 21;
 COMMIT;
 ```
 
-For a stopped revision-19 profile created while this PR was under review:
+For a stopped revision-19 profile from `main`, which already has
+`outbox.default_signature_fingerprint`:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE messages ADD COLUMN list_id TEXT;
+ALTER TABLE messages ADD COLUMN has_calendar_part INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE split_rules (
+  account_id TEXT NOT NULL,
+  id         TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  match_json TEXT NOT NULL DEFAULT '{"version":1,"operator":"any","conditions":[]}',
+  notify     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, id)
+);
+CREATE INDEX idx_split_rules_order ON split_rules (account_id, position);
+CREATE TABLE split_config (
+  account_id  TEXT PRIMARY KEY,
+  initialized INTEGER NOT NULL DEFAULT 0,
+  revision    INTEGER NOT NULL DEFAULT 0
+);
+ALTER TABLE sync_state
+  ADD COLUMN split_metadata_cursor TEXT NOT NULL DEFAULT 'done';
+UPDATE sync_state SET split_metadata_cursor = 'split-metadata';
+PRAGMA user_version = 21;
+COMMIT;
+```
+
+For a stopped revision-19 profile created from the split branch before merge, which already has the split
+tables and message columns:
 
 ```sql
 BEGIN IMMEDIATE;
 ALTER TABLE sync_state
   ADD COLUMN split_metadata_cursor TEXT NOT NULL DEFAULT 'done';
 UPDATE sync_state SET split_metadata_cursor = 'split-metadata';
-PRAGMA user_version = 20;
+ALTER TABLE outbox ADD COLUMN default_signature_fingerprint TEXT;
+PRAGMA user_version = 21;
+COMMIT;
+```
+
+For a stopped revision-20 profile created from the split branch:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE outbox ADD COLUMN default_signature_fingerprint TEXT;
+PRAGMA user_version = 21;
 COMMIT;
 ```
 

@@ -7,12 +7,14 @@ describe('GmailMailProvider.getSendAs', () => {
     const get = vi.fn(async () => ({
       sendAsEmail: 'me+alias@example.com',
       displayName: 'Chao Zhou',
+      signature: '<div>Best, Chao</div>',
       isPrimary: true
     }))
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
 
     await expect(provider.getSendAs('me+alias@example.com', { priority: 'send' })).resolves.toMatchObject({
-      displayName: 'Chao Zhou'
+      displayName: 'Chao Zhou',
+      signature: '<div>Best, Chao</div>'
     })
     expect(get).toHaveBeenCalledWith('/settings/sendAs/me%2Balias%40example.com', undefined, {
       priority: 'send'

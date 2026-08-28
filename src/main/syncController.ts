@@ -6,6 +6,7 @@ import { GmailApiError } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import { syncRemoteDrafts } from './outbox/draftSync'
 import type { DraftMirrorExecutor } from './outbox/mirrorExecutor'
+import { syncPrimarySendAs } from './outbox/sendAs'
 import type { OutboxSender } from './outbox/sender'
 import type { SnoozeScheduler } from './scheduler'
 import { type AttachmentFlagProgress, runAttachmentFlagWalk } from './sync/attachmentFlags'
@@ -263,6 +264,9 @@ export class SyncController {
       return
     }
     this.foregroundFailure = null
+    void syncPrimarySendAs(this.context.db, accountId, provider, { priority: 'background' }).catch((error) =>
+      console.warn(`[sync] send-as refresh failed: ${errorMessage(error)}`)
+    )
     const state = this.context.db
       .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null } | undefined
@@ -392,6 +396,10 @@ export class SyncController {
       },
       wakeThread: (threadId) => this.context.getSnoozeScheduler()?.wakeThread(threadId),
       syncLabels: () => syncLabelCatalog(this.context.db, accountId, provider),
+      syncSendAs: () =>
+        syncPrimarySendAs(this.context.db, accountId, provider, { priority: 'polling' }).then(
+          () => undefined
+        ),
       syncDrafts: () => syncRemoteDrafts(this.context.db, accountId, provider),
       kickExecutor: () => {
         void this.context.getActionExecutor()?.trigger()
