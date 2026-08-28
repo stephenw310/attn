@@ -63,6 +63,10 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(rows).toContainText('Board memo needs approval')
   await page.keyboard.press('ArrowRight')
   await expect(rows).toContainText(['Dinner Friday?', 'Weekend walk'])
+  await page.keyboard.press('Shift+Tab')
+  await expect(rows).toContainText('Board memo needs approval')
+  await page.keyboard.press('Tab')
+  await expect(rows).toContainText(['Dinner Friday?', 'Weekend walk'])
 
   await goToSplit(page, 2)
   await expect(rows).toHaveCount(1)

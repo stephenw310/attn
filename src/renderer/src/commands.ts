@@ -51,8 +51,18 @@ export const COMMAND_SPECS = {
   },
   'search.allGmail': { title: 'Search all of Gmail', context: 'global' },
   'search.clear': { title: 'Clear search', context: 'global' },
-  'split.previous': { title: 'Previous inbox split', shortcut: 'ArrowLeft', context: 'list' },
-  'split.next': { title: 'Next inbox split', shortcut: 'ArrowRight', context: 'list' },
+  'split.previous': {
+    title: 'Previous inbox split',
+    shortcut: 'Shift+Tab',
+    shortcutAliases: ['ArrowLeft'],
+    context: 'list'
+  },
+  'split.next': {
+    title: 'Next inbox split',
+    shortcut: 'Tab',
+    shortcutAliases: ['ArrowRight'],
+    context: 'list'
+  },
   'split.manage': { title: 'Manage inbox splits', context: 'global' },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
@@ -277,6 +287,7 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string, context: Shortc
   if (!expectedKey || expectsMod !== (event.metaKey || event.ctrlKey) || event.altKey) return false
   if (expectedKey !== normalizedKey(event, context)) return false
   if (expectsShift) return event.shiftKey
+  if (expectedKey === 'tab' && event.shiftKey) return false
 
   // Shift is part of the keystroke for printable symbols such as # and !, but it
   // distinguishes J/K navigation from Shift+J/K range selection. Bare-letter
@@ -336,9 +347,9 @@ export function findCommandByShortcut(shortcut: string, context: ShortcutContext
 }
 
 export function matchKey(event: KeyboardEvent, context: ShortcutContext): Command | null {
-  // Tab always belongs to native focus traversal. Shortcut-less commands remain
-  // available to the future command palette without entering keyboard dispatch.
-  if (event.altKey || event.key === 'Tab') return null
+  // The dispatcher preserves native Tab inside interactive controls and text
+  // entry. A registered list command can therefore use it from the mail canvas.
+  if (event.altKey) return null
   return (
     commands.find(
       (command) =>

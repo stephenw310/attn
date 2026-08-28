@@ -103,7 +103,7 @@ export function useInboxCommands(options: Options): void {
         ...(splitCommands
           ? [
               createCommand('split.manage', splitCommands.manage),
-              ...(!readerOpen && !searchOpen && view === 'inbox'
+              ...(!readerOpen && !searchOpen && view === 'inbox' && splitCommands.goTo.length > 1
                 ? [
                     createCommand('split.previous', splitCommands.previous),
                     createCommand('split.next', splitCommands.next)

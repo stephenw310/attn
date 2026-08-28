@@ -176,6 +176,14 @@ describe('keyboard dispatch', () => {
     expect(readingScrollDelta(key('ArrowUp'), 800)).toBe(-120)
   })
 
+  test('moves between inbox splits with Tab while preserving direction and context', () => {
+    useCommands([createCommand('split.next', () => {}), createCommand('split.previous', () => {})])
+    expect(matchKey(key('Tab'), 'list')?.id).toBe('split.next')
+    expect(matchKey(key('Tab', { shiftKey: true }), 'list')?.id).toBe('split.previous')
+    expect(matchKey(key('Tab'), 'reader')).toBeNull()
+    expect(matchComposerKey(key('Tab'))).toBeNull()
+  })
+
   test('extends the selection with Shift+Arrow in both contexts', () => {
     useCommands([
       createCommand('selection.extendNext', () => {}),

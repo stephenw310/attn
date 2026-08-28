@@ -380,7 +380,8 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   message must satisfy every condition. First matching split wins in the user's configured order. **Other**
   is the final fallback and cannot move ahead of a matching split, so every Inbox thread appears exactly
   once. Splits are views, so splitting never moves mail.
-- Navigate: `←`/`→` between splits; `G` then `1`–`9` jumps by configured split order. Each split
+- Navigate: `Tab` moves to the next split, and `Shift+Tab` moves to the previous split. `←` and `→`
+  remain aliases. `G` then `1`–`9` jumps by configured split order. Each split
   keeps its own selection and exact local unread count, and the context-aware shortcut footer shows the valid
   digit completions while the `G` chord is active.
 - **Strip scaling (D6):** when splits exist, they render as a horizontal strip above the Inbox list. Hot splits show unread counts, cold ones stay quiet, and past ~8 the strip scrolls with overflow behind `···`. The full jump-list lives in the palette ("Go to: <split>"). No strip renders for an unsplit Inbox.
@@ -486,7 +487,8 @@ Guardrails:
 | `J` / `K` | Next / previous conversation in the list or reader |
 | `↓` / `↑` | Next / previous conversation in the list; scroll while reading |
 | `Enter` | Open conversation |
-| `←` / `→` | Previous / next Inbox split (M3) |
+| `Tab` / `Shift+Tab` | Next / previous Inbox split (M3) |
+| `←` / `→` | Previous / next Inbox split aliases (M3) |
 | `X` | Select conversation (`Shift+J/K` or `Shift+↑/↓` extends) |
 | `G` then `I` | Go to Inbox |
 | `G` then `A` | Go to All Mail |
