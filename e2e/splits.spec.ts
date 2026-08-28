@@ -74,7 +74,11 @@ test('classifies once, navigates locally, and restores each split selection', as
     appWindow.splitEmptyObserver = new MutationObserver(() => {
       if (threadList.textContent?.includes('Inbox empty')) appWindow.splitEmptyPaints = 1
     })
-    appWindow.splitEmptyObserver.observe(threadList, { childList: true, subtree: true })
+    appWindow.splitEmptyObserver.observe(threadList, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    })
   })
 
   await page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]').click()
@@ -144,7 +148,11 @@ test('classifies once, navigates locally, and restores each split selection', as
       }
     }
     appWindow.splitTransitionObserver = new MutationObserver(recordTransientState)
-    appWindow.splitTransitionObserver.observe(threadList, { childList: true, subtree: true })
+    appWindow.splitTransitionObserver.observe(threadList, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    })
   })
   const mailChanged = page.evaluate(
     () =>
@@ -160,7 +168,11 @@ test('classifies once, navigates locally, and restores each split selection', as
   await goToSplit(page, 2)
   await expect(rows).toContainText('Review requested on PR #87')
   const transientStates = await page.evaluate(() => {
-    const appWindow = window as typeof window & { splitTransitionStates?: string[] }
+    const appWindow = window as typeof window & {
+      splitTransitionObserver?: MutationObserver
+      splitTransitionStates?: string[]
+    }
+    appWindow.splitTransitionObserver?.disconnect()
     return appWindow.splitTransitionStates ?? []
   })
   expect(transientStates).toEqual([])

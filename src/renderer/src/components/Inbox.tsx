@@ -228,6 +228,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realThreads !== null && (!splits.state || loadedInboxSplitId === splits.activeSplitId)
   const activeInboxRowsResolved =
     activeInboxRowsReady && !(loadedInboxSplitStale && (realThreads?.length ?? 0) === 0)
+  const activeInboxSelectionReady = activeInboxRowsReady && !loadedInboxSplitStale
   const mailboxThreads: DisplayThread[] = useMemo(
     () =>
       backingMailView === 'inbox'
@@ -746,11 +747,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [splits.activeSplitId, splits.state, switchSplit]
   )
 
+  // Stale split rows can paint immediately, but selection restoration depends
+  // on their final order and waits for the SQLite revalidation.
   const viewRowsLoaded =
     view === 'outbox'
       ? true
       : backingMailView === 'inbox'
-        ? activeInboxRowsResolved
+        ? activeInboxSelectionReady
         : backingMailView === 'snoozed'
           ? realSnoozedThreads !== null
           : backingCachedView
