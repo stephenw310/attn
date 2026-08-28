@@ -25,9 +25,9 @@ task. Do not silently deviate from the default — a reversal goes through SPEC 
 | # | Decision | Default in spec | Alternative | Flip cost lands in |
 |---|---|---|---|---|
 | D1 | Unified inbox | Out of v1: switched accounts only (F18, §2) | A merged cross-account inbox view | New milestone — not an M5 edit; reopens splits, counts, search, From identity |
-| D2 | Inactive-account liveness | Fully live: poll 60s, drain queues, notify, snooze returns (F18) | Frozen until switched to (cheaper, but queued sends/snoozes silently wait) | A2, A4 |
-| D3 | Remove-account semantics | Purge every local trace; re-add re-syncs (F18) | Keep cached rows for fast re-add ("disconnect" vs "remove") | A6 |
-| D4 | Composer From picker | None in v1 — a draft's account is fixed at creation (F6) | From dropdown on new mail that reassigns the draft's account/outbox/spool | A5 |
+| D2 | Inactive-account liveness | **Resolved 2026-08-28 (owner): confirmed** — fully live: poll 60s, drain queues, notify, snooze returns (F18) | ~~Frozen until switched to~~ | A2, A4 |
+| D3 | Remove-account semantics | **Resolved 2026-08-28 (owner): remove always drops tokens; the confirmation asks Delete local data (default) or Keep** — kept rows stay dormant and re-adding the same address resumes from stored cursors (F18) | ~~Silent purge with no choice~~ | A6 |
+| D4 | Composer From picker | **Resolved 2026-08-28 (owner): none** — the composer uses the active account: new mail binds to the account active at open, replies/forwards to the source thread's owner, which is the active account in every reachable flow (F6) | ~~From dropdown on new mail~~ | A5 |
 | D5 | Badge & notification aggregation | All accounts notify; badge sums across accounts (F12) | Active-account-only badge/notifications | A4 |
 | D6 | Milestone order | M5 after M4 in sequence, may interleave (§8) | Land M5 before M4's feature work | scheduling only |
 | D7 | Snippets (F8) / AI key (F17) scope | Global, stored under `__app__` when those M4 features ship | Per-account | the M4 tasks that build them |
@@ -273,11 +273,15 @@ on A shows the banner only when A is active while B keeps triaging, and reconnec
 
 **Status: planned.** Spec F18, F15, §9 #21(d).
 
-- `accounts:remove` (explicit confirmation in the UI; palette command *Remove account…*): stop the
-  account's session and executors, then in one transaction delete its rows from **every** account-keyed
-  table (enumerate from the schema, not a hand-list that rots — walk `CURRENT_SCHEMA` tables for
-  `account_id` columns in a unit-tested helper), remove its FTS rows (`removeAccountFromIndex` exists),
-  then delete its outbox/attachment spool files and its token-map entry. `__app__` settings survive.
+- `accounts:remove` (explicit confirmation in the UI; palette command *Remove account…*): the confirmation
+  always removes the token-map entry and stops the account's session and executors, and asks what to do
+  with local data — **Delete local data** (default) or **Keep local data** (D3). Delete runs in one
+  transaction: the account's rows from **every** account-keyed table (enumerate from the schema, not a
+  hand-list that rots — walk `CURRENT_SCHEMA` tables for `account_id` columns in a unit-tested helper),
+  its FTS rows (`removeAccountFromIndex` exists), then its outbox/attachment spool files. Keep leaves the
+  rows dormant — no roster entry, so nothing lists or reads them — and re-adding the same normalized
+  address resumes from the stored cursors instead of re-backfilling (the F1 add-or-refresh path plus the
+  existing cursor plan already produce this; the e2e proves it). `__app__` settings survive either way.
 - Active fallback: removing the active account activates the next by position; removing the last account
   lands on F1's signed-out screen (and clears `activeAccountId`).
 - The legacy single-account "Sign out" menu item becomes *Remove account* for the active account —
@@ -285,9 +289,10 @@ on A shows the banner only when A is active while B keeps triaging, and reconnec
   next sign-in overwriting them; purge-on-remove is the deliberate replacement.)
 
 **Done when:** unit test walks the schema and asserts the purge helper covers every `account_id` table
-(this is the guard that keeps future tables from leaking); e2e removes a seeded account and proves zero
-rows/FTS/spool via a test seam, survivor account intact, relaunch durability, and last-account fallback to
-the signed-out screen.
+(this is the guard that keeps future tables from leaking); e2e removes a seeded account with Delete and
+proves zero rows/FTS/spool via a test seam, survivor account intact, relaunch durability, and last-account
+fallback to the signed-out screen; a second e2e removes with Keep, proves the rows survive but nothing
+lists them, and re-adds the account to prove sync resumes from cursors without a fresh backfill.
 
 ### A7 — Multi-account performance and isolation audit
 
