@@ -40,6 +40,7 @@ interface Options {
   snoozeAt: (dueAt: number) => void
   openLabel: () => void
   openMove: () => void
+  markNotDone: () => void
   openComposer: () => void
   openReply: (kind: Exclude<DraftKind, 'new'>) => void
   showToast: (message: string) => void
@@ -88,6 +89,7 @@ export function useInboxCommands(options: Options): void {
     snoozeAt,
     openLabel,
     openMove,
+    markNotDone,
     openComposer,
     openReply,
     showToast,
@@ -178,6 +180,7 @@ export function useInboxCommands(options: Options): void {
         ...(mailCommandsEnabled && (searchOpen || view !== 'drafts') && selected
           ? [
               createCommand('triage.archive', () => triage({ kind: 'archive', threadIds: [selected.id] })),
+              createCommand('triage.notDone', markNotDone),
               createCommand('triage.snooze', openSnooze, {
                 title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later',
                 argument: {
@@ -238,6 +241,7 @@ export function useInboxCommands(options: Options): void {
       discardSelectedDraft,
       extendSelection,
       focusSearchQuery,
+      markNotDone,
       markUnreadOn,
       moveAllowed,
       mailCommandsEnabled,

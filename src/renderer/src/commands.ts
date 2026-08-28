@@ -285,6 +285,7 @@ export const COMMAND_SPECS = {
       reader: { id: 'done', label: 'done', order: 20 }
     }
   },
+  'triage.notDone': { title: 'Mark not done', shortcut: 'Shift+E', context: 'mail' },
   'triage.snooze': {
     title: 'Snooze / remind me later',
     shortcut: 'h',

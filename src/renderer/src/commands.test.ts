@@ -114,6 +114,7 @@ describe('command catalog', () => {
       'composer.quote',
       'composer.link',
       'triage.archive',
+      'triage.notDone',
       'triage.snooze',
       'triage.trash',
       'triage.spam',
@@ -254,6 +255,7 @@ describe('keyboard dispatch', () => {
       createCommand('conversation.open', () => {}),
       createCommand('conversation.close', () => {}),
       createCommand('triage.archive', () => {}),
+      createCommand('triage.notDone', () => {}),
       createCommand('triage.undo', () => {})
     ])
     expect(matchKey(key('Enter'), 'list')?.id).toBe('conversation.open')
@@ -261,6 +263,8 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('Escape'), 'reader')?.id).toBe('conversation.close')
     expect(matchKey(key('e'), 'list')?.id).toBe('triage.archive')
     expect(matchKey(key('e'), 'reader')?.id).toBe('triage.archive')
+    expect(matchKey(key('E', { shiftKey: true }), 'list')?.id).toBe('triage.notDone')
+    expect(matchKey(key('E', { shiftKey: true }), 'reader')?.id).toBe('triage.notDone')
     expect(matchKey(key('z'), 'list')?.id).toBe('triage.undo')
     expect(matchKey(key('z'), 'reader')?.id).toBe('triage.undo')
   })

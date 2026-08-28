@@ -161,7 +161,7 @@ test('classifies once, navigates locally, and restores each split selection', as
   )
   await updateMessageBody(app, 'm-calendar-sender', 'A locally refreshed calendar invitation.')
   await mailChanged
-  await goToSplit(page, 2)
+  await page.keyboard.press('Shift+Tab')
   await expect(rows).toContainText('Review requested on PR #87')
   const transientStates = await page.evaluate(() => {
     const appWindow = window as typeof window & {
@@ -172,7 +172,7 @@ test('classifies once, navigates locally, and restores each split selection', as
     return appWindow.splitTransitionStates ?? []
   })
   expect(transientStates).toEqual([])
-  await goToSplit(page, 3)
+  await page.keyboard.press('Tab')
   await expect(rows).toContainText(['The systems issue', 'A special offer for members'])
 
   await rows.first().click()
