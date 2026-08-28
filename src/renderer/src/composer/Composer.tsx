@@ -48,6 +48,7 @@ import { useTheme } from '../theme'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
+import { COLLAPSED_GMAIL_SIGNATURE_SELECTOR, revealGmailSignature } from './nodes/GmailSignatureNode'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
@@ -354,6 +355,37 @@ function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string })
       cancelled = true
     }
   }, [draftId, editor, html])
+  return null
+}
+
+function CollapsedSignaturePlugin(): null {
+  const [editor] = useLexicalComposerContext()
+  useEffect(() => {
+    const collapsedSignature = (target: EventTarget | null): HTMLElement | null =>
+      target instanceof Element ? target.closest<HTMLElement>(COLLAPSED_GMAIL_SIGNATURE_SELECTOR) : null
+    const revealFromClick = (event: MouseEvent): void => {
+      const signature = collapsedSignature(event.target)
+      if (!signature) return
+      event.preventDefault()
+      event.stopPropagation()
+      revealGmailSignature(signature)
+    }
+    const revealFromKeyboard = (event: KeyboardEvent): void => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      const signature = collapsedSignature(event.target)
+      if (!signature) return
+      event.preventDefault()
+      event.stopPropagation()
+      revealGmailSignature(signature)
+    }
+
+    return editor.registerRootListener((root, previous) => {
+      previous?.removeEventListener('click', revealFromClick, true)
+      previous?.removeEventListener('keydown', revealFromKeyboard, true)
+      root?.addEventListener('click', revealFromClick, true)
+      root?.addEventListener('keydown', revealFromKeyboard, true)
+    })
+  }, [editor])
   return null
 }
 
@@ -986,6 +1018,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <TablePlugin />
               <LinkPlugin validateUrl={validateComposerUrl} />
               <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
+              <CollapsedSignaturePlugin />
               {mode === 'inline' && draft.kind !== 'forward' && <AutoFocusPlugin />}
               <OnChangePlugin ignoreSelectionChange onChange={captureEditor} />
               <ComposerCommandPlugin

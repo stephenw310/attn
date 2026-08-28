@@ -226,7 +226,10 @@ test('opens the first-class Drafts view with g d', async ({ page }) => {
   await expect(page.getByTestId('view-title')).toHaveText('Drafts')
 })
 
-test('inserts the saved Gmail signature into new mail as editable content', async ({ app, page }) => {
+test('inserts the saved Gmail signature collapsed and reveals it for editing', async ({
+  app,
+  page
+}, testInfo) => {
   await setSendAsSignature(
     app,
     '<div style="color:#2457a6">Best,</div><div>Chao Wu</div><div><a href="https://chaowu.xyz">chaowu.xyz</a></div>'
@@ -234,13 +237,22 @@ test('inserts the saved Gmail signature into new mail as editable content', asyn
   const composer = new ComposerPage(page)
   await composer.openNew()
 
-  const signature = composer.editor.getByTestId('composer-gmail-signature')
+  const signature = composer.signature
   await expect(signature).toHaveCount(1)
+  await composer.expectSignatureCollapsed()
+  await expect(signature.getByText('Best,')).toBeHidden()
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'composer-signature-collapsed.png')
+  await page.screenshot({ path })
+  await testInfo.attach('composer-signature-collapsed', { path, contentType: 'image/png' })
+
   await expect
     .poll(() => composer.editor.evaluate((element) => getComputedStyle(element).fontFamily))
     .toContain('Inter Variable')
   await expect(composer.editor).toHaveCSS('font-size', '13px')
   await expect(composer.editor).toHaveCSS('line-height', '20px')
+  await composer.revealSignature()
   await expect(signature.locator('p').first()).toHaveCSS('margin-bottom', '0px')
   await expect(signature.locator('p').first()).toHaveCSS('min-height', '20px')
   await expect(signature.getByText('Best,')).toBeVisible()
@@ -267,6 +279,8 @@ test('inserts the saved Gmail signature into new mail as editable content', asyn
   expect(saved?.html).toContain('Hello from Attn')
   expect(saved?.html).not.toContain('<p')
   expect(saved?.html).toContain('class="gmail_signature"')
+  expect(saved?.html).not.toContain('data-attn-signature-collapsed')
+  expect(saved?.html).not.toContain('Show signature')
   expect(saved?.html.indexOf('Hello from Attn')).toBeLessThan(saved?.html.indexOf('Best,') ?? -1)
   expect(
     await page.evaluate((html) => {
@@ -291,7 +305,7 @@ test('discards signature-only new mail after the saved Gmail signature changes',
   await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
   await composer.openNew()
-  await expect(composer.editor.getByTestId('composer-gmail-signature')).toBeVisible()
+  await composer.expectSignatureCollapsed()
   await expect.poll(() => page.evaluate(async () => (await window.attn.draft.list()).length)).toBe(0)
 
   await setSendAsSignature(app, '<div>Regards,</div><div>Chao Wu</div>')
@@ -307,6 +321,7 @@ test('keeps formatting edits made inside the saved Gmail signature', async ({ ap
   const composer = new ComposerPage(page)
   await composer.openNew()
 
+  await composer.revealSignatureWithKeyboard()
   await composer.editor.getByText('Best,').selectText()
   await page.getByRole('button', { name: 'Bold' }).click()
   await composer.expectSaved()
@@ -371,10 +386,11 @@ test('carries source attachments into a forward draft and preserves them on reop
 
 test('adds a signature and discards an untouched forward with a source attachment', async ({ app, page }) => {
   await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
+  const composer = new ComposerPage(page)
   const receipt = page.getByTestId('thread-row').filter({ hasText: 'Your receipt' })
   await receipt.click()
   await page.keyboard.press('f')
-  await expect(page.getByTestId('composer-gmail-signature')).toContainText('Chao Wu')
+  await composer.expectSignatureCollapsed()
   await expect(page.getByTestId('composer-attachment-chip')).toContainText('receipt.pdf')
 
   await page.keyboard.press('Escape')
@@ -1064,7 +1080,7 @@ test('adds a signature, discards an untouched reply, and keeps authored text', a
   await design.click()
   await composer.openReply()
   await expect(composer.root).toBeVisible()
-  await expect(composer.editor.getByTestId('composer-gmail-signature')).toContainText('Chao Wu')
+  await composer.expectSignatureCollapsed()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
 
@@ -1100,7 +1116,7 @@ test('keeps the signature discardable when a reply becomes reply-all', async ({ 
   // contributing content, so the draft stays discardable.
   await page.keyboard.press('a')
   await expect(composer.root).toHaveAttribute('data-draft-kind', 'replyAll')
-  await expect(composer.editor.getByTestId('composer-gmail-signature')).toContainText('Chao Wu')
+  await composer.expectSignatureCollapsed()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(design.getByTestId('chip-draft')).toHaveCount(0)
@@ -1491,7 +1507,7 @@ test('hydrates Gmail CID images and imports its signature as editable composer c
     'src',
     /^data:image\/png;base64,/
   )
-  const signature = composer.editor.getByTestId('composer-gmail-signature')
+  const signature = composer.signature
   await expect(signature).toHaveCount(1)
   expect(
     await signature.evaluate((element) => {
@@ -1499,6 +1515,9 @@ test('hydrates Gmail CID images and imports its signature as editable composer c
       return previous?.tagName === 'P' && !previous.textContent?.trim()
     })
   ).toBe(true)
+  await composer.expectSignatureCollapsed()
+  await expect(signature.getByText('Best,')).toBeHidden()
+  await composer.revealSignature()
   await expect(signature.getByText('Best,')).toBeVisible()
   await expect(signature.getByText('Chao Wu')).toBeVisible()
   await expect(signature).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
