@@ -467,6 +467,7 @@ export function isTriageAction(value: unknown): value is TriageAction {
       return (
         isMoveDestination(action.destination) &&
         (typeof action.sourceLabelId === 'string' || action.sourceLabelId === null) &&
+        (action.verb === undefined || action.verb === 'markNotDone') &&
         (action.destination.kind !== 'label' || action.destination.labelId !== action.sourceLabelId)
       )
     default:

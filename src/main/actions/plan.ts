@@ -71,7 +71,9 @@ export function actionLabel(action: TriageAction, count = action.threadIds.lengt
     case 'label':
       return plural('Labels updated', 'labels updated')
     case 'move':
-      return plural('Moved', 'moved')
+      return action.verb === 'markNotDone'
+        ? plural('Marked not done', 'marked not done')
+        : plural('Moved', 'moved')
   }
 }
 

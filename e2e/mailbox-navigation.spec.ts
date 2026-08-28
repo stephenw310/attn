@@ -344,6 +344,15 @@ test('a triage verb removes a row only from views it no longer matches', async (
   await expect(rows.first()).toHaveAttribute('data-unread', 'true')
   await expect(rows.first().getByTestId('thread-done-indicator')).toBeVisible()
 
+  // Marking not done restores Inbox membership without leaving All Mail.
+  await page.keyboard.press('Shift+E')
+  await expect(page.getByTestId('toast')).toContainText('Marked not done')
+  await expect(rows).toHaveCount(10)
+  await expect(rows.first().getByTestId('thread-done-indicator')).toHaveCount(0)
+
+  await page.keyboard.press('e')
+  await expect(rows.first().getByTestId('thread-done-indicator')).toBeVisible()
+
   // Trashing moves every message to Trash, so the thread leaves All Mail.
   await page.keyboard.press('#')
   await expect(page.getByTestId('toast')).toContainText('Trashed')

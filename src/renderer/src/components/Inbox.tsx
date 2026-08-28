@@ -1172,6 +1172,16 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     },
     [moveRequest, triage]
   )
+  const markNotDone = useCallback(() => {
+    if (!selected) return
+    triage({
+      kind: 'move',
+      threadIds: selectedIds.size > 0 ? [...selectedIds] : [selected.id],
+      destination: { kind: 'inbox' },
+      sourceLabelId: null,
+      verb: 'markNotDone'
+    })
+  }, [selected, selectedIds, triage])
   const openThread = useCallback(
     (index: number) => {
       const thread = threads[index]
@@ -1402,6 +1412,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     snoozeAt: snoozeSelected,
     openLabel,
     openMove,
+    markNotDone,
     openComposer,
     openReply,
     showToast,

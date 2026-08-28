@@ -241,6 +241,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 | Action | Behavior |
 |---|---|
 | **Mark done** (`E`) | Removes from inbox (Gmail archive). The signature triage verb. |
+| **Mark not done** (`Shift+E`) | Restores the conversation to Inbox while preserving unrelated labels and status flags. |
 | **Snooze / Remind later** (`H`) | Leaves the inbox now, returns at a chosen time. Picker offers presets (Later today, Tonight, Tomorrow, This weekend, Next week) + natural-language input ("thu 2pm", "in 3 days"). v1 implementation: remove `INBOX` and store the due-time in the local reminders table; at due time (or next launch) restore to inbox with a "returned" chip. Gmail web therefore sees a normal archive until return. **A new reply wakes the thread immediately** (configurable). Cross-device labeling and exact-time restoration move to the v1.5 companion script (F7). |
 | **Trash** (`#`) | Moves to Gmail trash. No permanent delete anywhere in v1. |
 | **Star** (`S`) | Toggles star. |
@@ -566,6 +567,7 @@ Guardrails:
 | Keys | Action |
 |---|---|
 | `E` | Mark done (archive) |
+| `Shift+E` | Mark not done (restore to Inbox) |
 | `H` | Snooze / remind me later |
 | `#` | Trash |
 | `S` | Star |

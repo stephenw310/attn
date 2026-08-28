@@ -9,6 +9,7 @@ export type TriageAction =
       threadIds: string[]
       destination: MoveDestination
       sourceLabelId: string | null
+      verb?: 'markNotDone'
     }
   | { kind: 'restoreInbox' | 'untrash' | 'unsnooze'; threadIds: string[] }
 
