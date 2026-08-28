@@ -1,4 +1,5 @@
 import type { TriageAction } from '../../shared/actions'
+import { moveLabelDelta } from '../../shared/move'
 
 export interface ThreadActionPlan {
   add: string[]
@@ -33,12 +34,10 @@ export function planAction(action: TriageAction): ThreadActionPlan {
       }
     case 'label':
       return { add: action.add, remove: action.remove, queueKind: 'modifyLabels' }
-    case 'move':
-      return {
-        add: action.destinationLabelId ? [action.destinationLabelId] : [],
-        remove: [...new Set(['INBOX', ...(action.sourceLabelId ? [action.sourceLabelId] : [])])],
-        queueKind: 'modifyLabels'
-      }
+    case 'move': {
+      const delta = moveLabelDelta(action.destination, action.sourceLabelId)
+      return { ...delta, queueKind: 'modifyLabels' }
+    }
   }
 }
 

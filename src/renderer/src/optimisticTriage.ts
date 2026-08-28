@@ -1,4 +1,6 @@
 import type { TriageAction } from '../../shared/actions'
+import { moveLabelDelta } from '../../shared/move'
+import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../shared/splits'
 import { type MailView, userLabelId } from './mailDisplay'
 
 type ThreadFlag = 'starred' | 'unread'
@@ -130,6 +132,7 @@ export function threadMoveSnapshot(
 ): ThreadMoveSnapshot | null {
   if (action.kind !== 'move') return null
   const targetedIds = new Set(action.threadIds)
+  const delta = moveLabelDelta(action.destination, action.sourceLabelId)
   return {
     before: new Map(
       threads
@@ -146,8 +149,8 @@ export function threadMoveSnapshot(
             ] as const
         )
     ),
-    add: action.destinationLabelId ? [action.destinationLabelId] : [],
-    remove: ['INBOX', ...(action.sourceLabelId ? [action.sourceLabelId] : [])]
+    add: delta.add,
+    remove: delta.remove
   }
 }
 
@@ -233,9 +236,28 @@ export function rollbackThreadMoveMembership<T extends ThreadMoveFields>(
   return rollbackThreadMove(restored, snapshot)
 }
 
-export function moveExitsView(action: TriageAction, view: MailView): boolean {
+export function moveExitsView(
+  action: TriageAction,
+  view: MailView,
+  activeSplitId: string | null = null
+): boolean {
   if (action.kind !== 'move') return false
-  if (view === 'inbox') return true
+  const delta = moveLabelDelta(action.destination, action.sourceLabelId)
+  const add = new Set(delta.add)
+  const remove = new Set(delta.remove)
+  if (view === 'inbox') {
+    if (activeSplitId === IMPORTANT_SPLIT_ID && action.destination.kind === 'other') return true
+    if (activeSplitId === OTHER_SPLIT_ID && action.destination.kind === 'important') return true
+    return remove.has('INBOX') && !add.has('INBOX')
+  }
+  if (view === 'spam') return remove.has('SPAM') && !add.has('SPAM')
+  if (view === 'trash') return remove.has('TRASH') && !add.has('TRASH')
+  if (
+    (view === 'allMail' || view === 'sent' || view === 'starred') &&
+    (add.has('SPAM') || add.has('TRASH'))
+  ) {
+    return true
+  }
   const labelId = userLabelId(view)
   return labelId !== null && labelId === action.sourceLabelId
 }

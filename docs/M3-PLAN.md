@@ -1133,33 +1133,48 @@ semantics would leave mail in Inbox and would not advance the queue.
 ### Design (decided)
 
 - Register `triage.move` with `V` in `COMMAND_SPECS`. The command appears in list and reader contexts for
-  Inbox, Inbox splits, All Mail, Sent, Starred, user-label views, and ordinary search. Do not register it in
-  Drafts, Snoozed, Spam, Trash, Outbox, or searches scoped to one of those views.
-- Build a separate one-shot `MovePicker`. It searches the existing user-label catalog, supports the same
-  ArrowUp, ArrowDown, Enter, and Escape loop as `LabelPicker`, and closes after one choice. Put Done first.
-  Exclude the active user label from the destinations because Done is the explicit removal action. When no
-  user labels exist, Done remains available and the empty state directs label creation to Gmail. Creating,
-  renaming, and deleting Gmail labels are outside this task.
+  Inbox, Inbox splits, All Mail, Sent, Starred, Spam, Trash, user-label views, and matching search results.
+  Do not register it in Drafts, Snoozed, or Outbox.
+- Build a separate one-shot `MovePicker`. It offers Done, Inbox, Spam, Trash, and every user label. When split
+  Inbox is configured, it also offers Important and Other. The picker supports the same ArrowUp, ArrowDown,
+  Enter, and Escape loop as `LabelPicker`, and it closes after one choice. Put Done first. Exclude the active
+  user label because Done is the explicit removal action. Disable a destination only when every target is
+  already there and no target has a pending or returned reminder. Creating, renaming, and deleting Gmail
+  labels remain outside this task.
 - Capture the target ids and their label snapshots when the picker opens. Do not read the live selection
   after Move clears it. This avoids the multi-toggle target drift recorded for `LabelPicker` in the M1
   accepted deviations.
-- Add a semantic `move` member to `TriageAction` with `destinationLabelId: string | null` and
-  `sourceLabelId: string | null`. The utility action handler validates non-null ids against the local
-  user-label catalog before it writes and rejects an action whose source equals its destination. The planned
-  delta always removes `INBOX`. It also removes `sourceLabelId` when the command came from a user-label view.
-  A non-null destination is added. The delta does not touch other user labels, `STARRED`, `UNREAD`, or `SENT`.
+- Add a semantic `move` member to `TriageAction` with a discriminated `MoveDestination` and
+  `sourceLabelId: string | null`. The utility action handler validates user-label destinations against the
+  local catalog before it writes and rejects an action whose source equals its destination. Keep the label
+  plan in `src/shared/move.ts` so the utility reducer and renderer optimism use the same mapping:
+
+  | Destination | Add | Remove |
+  |---|---|---|
+  | Done | Nothing | `INBOX`, `SPAM`, `TRASH` |
+  | Inbox | `INBOX` | `SPAM`, `TRASH` |
+  | Spam | `SPAM` | `INBOX`, `TRASH` |
+  | Trash | `TRASH` | `INBOX`, `SPAM` |
+  | Important | `INBOX`, `IMPORTANT` | `SPAM`, `TRASH` |
+  | Other | `INBOX` | `IMPORTANT`, `SPAM`, `TRASH` |
+  | User label | The chosen label | `INBOX`, `SPAM`, `TRASH` |
+
+  Every row also removes `sourceLabelId` when the command came from a user-label view. The delta does not
+  touch other user labels, `STARRED`, `UNREAD`, or `SENT`. It preserves `IMPORTANT` except when Other removes
+  it by definition.
 - Read each target's snooze reminder before applying Move. In the same SQLite transaction as the label delta,
   change a pending reminder to `canceled` and a returned reminder to `done`, matching archive. Store the prior
   reminder snapshot in the queued payload so permanent-failure recovery restores both labels and reminder
   state. This rule applies even when the target came from All Mail, Starred, a user-label view, or search.
 - Keep the durable operation as the existing `modifyLabels` queue kind. Add `move` to action validation,
   action labels, the queue payload's `RevertedActionKind`, permanent-failure copy, and every exhaustive
-  switch. The executor already restores the optional reminder snapshot on permanent failure. No schema,
-  provider, preload, IPC-channel, or new executor behavior is needed.
+  switch. The action executor calls `GmailMailProvider.modifyThread`, which posts the planned add and remove
+  arrays to Gmail `users.threads.modify` under `gmail.modify`. The executor already restores the optional
+  reminder snapshot on permanent failure. No schema, preload, IPC-channel, or new executor behavior is
+  needed.
 - Skip a thread only when Move changes neither its labels nor its reminder state. Do not enqueue that thread
   or add it to the undo entry. If no target changes, return `Already there` and do not push an empty undo
-  entry. Disable Done only when every target already lacks both `INBOX` and a source user label and no target
-  has a pending or returned reminder.
+  entry.
 - Compute each undo from that thread's label and reminder pre-state. Add an internal Move undo entry that
   carries the inverse label delta plus the prior reminder snapshot; `undoLast` applies both in one SQLite
   transaction. Do not represent this case as `snoozeAt`, which cannot remove a destination label. Undo
@@ -1167,11 +1182,10 @@ semantics would leave mail in Inbox and would not advance the queue.
   it, and restores the prior reminder state and due time. A bulk move stays one undo-stack entry even when
   the selected threads began with different labels or only some had reminders.
 - Refactor the renderer's archive-only exit path into a pure view-membership plan used by archive and Move.
-  Inbox, Inbox-split, and active-user-label rows leave immediately. Advance the list or open reader to the
-  next surviving conversation. All Mail, Sent, and Starred rows remain because Move preserves the labels
-  that define those views. Search removes or retains each row according to the active query after the
-  optimistic label update. Bulk Move clears the selection and clamps focus to a surviving row without
-  opening a conversation.
+  Inbox, Spam, Trash, normal mailboxes, user-label views, Important, and Other each remove a row only when the
+  chosen delta ends that membership. Advance the list or open reader to the next surviving conversation.
+  Search removes or retains each row according to the active query after the optimistic label update. Bulk
+  Move clears the selection and clamps focus to a surviving row without opening a conversation.
 - Apply the destination and removal delta to every renderer row cache in the same keydown turn, including
   search results, so the chosen label chip and row exit meet F4's 16 ms feedback budget. Roll back only the
   rows still owned by the failed Move if IPC rejects. The existing `mail:changed` refresh remains the final
@@ -1179,22 +1193,25 @@ semantics would leave mail in Inbox and would not advance the queue.
 
 ### Testing
 
-- **Unit:** the Move planner for Inbox, a user-label source, Done, All Mail, and search; preservation of
-  unrelated labels and status labels; rejection of system or missing label ids; precise inverse deltas for
-  mixed bulk pre-state; action decoding and permanent-failure copy for `move`; the view-membership and
+- **Unit:** the Move planner for every mailbox, split, and user-label destination; preservation of unrelated
+  labels and status labels; user-label validation; exact inverse deltas for mixed bulk pre-state; the Gmail
+  provider request body; action decoding and permanent-failure copy for `move`; the view-membership and
   selection plan at the first, middle, and last row. With a real in-memory store and injectable scheduler,
   prove that Move cancels a pending reminder reached through an ordinary search, that the due scheduler does
   not return it to Inbox, and that undo restores its exact labels, reminder state, and due time. Also prove
   that permanent-failure recovery restores the same snapshot.
-- **Component:** destination filtering, keyboard wrap, one-shot Enter, Escape, Done with an empty catalog,
-  exclusion of the active user label, a bulk target snapshot that survives selection clearing, and isolation
-  of typed letters from global shortcuts.
+- **Component:** system and split destinations, destination filtering, current-destination disabling,
+  keyboard wrap, one-shot Enter, Escape, Done with an empty catalog, exclusion of the active user label, a
+  bulk target snapshot that survives selection clearing, and isolation of typed letters from global
+  shortcuts.
 - **E2e (seeded):** move one Inbox thread into a user label and auto-advance; open that label and move the
   thread to Done; move three selected Inbox threads and restore all three with one `Z`; move from All Mail
   without losing `STARRED`, `UNREAD`, or an unrelated label. Reach a pending-snooze thread through an allowed
-  user-label view, move it, and prove that it leaves Snoozed. Undo and prove that its original due time returns.
-  Prove that `V` and the palette command are absent in Drafts, Snoozed, Spam, Trash, and Outbox. Assert
-  pending-row counts so the local action cannot pass without entering the durable queue.
+  user-label view, move it, and prove that it leaves Snoozed. Undo and prove that its original due time
+  returns. Move one thread through Spam, Trash, and Inbox. Move one Inbox thread from Important to Other and
+  back.
+  Prove that `V` and the palette command are present in Spam and Trash but absent in Drafts, Snoozed, and
+  Outbox. Assert pending-row counts so the local action cannot pass without entering the durable queue.
 - **T27 integration:** if T31 lands first, T27 adds one split e2e that invokes `V` and proves that Move uses
   Inbox semantics. If T27 lands first, add that assertion here. The second task to land owns the test.
 - **Screenshot artifact:** `move-picker.png`, added to the visual self-check list in `AGENTS.md` when the task

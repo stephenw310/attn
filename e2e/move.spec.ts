@@ -114,6 +114,46 @@ test('keeps All Mail membership, status, and unrelated labels after Move', async
   await expect(page.getByTestId('pending-count')).toContainText('1 pending')
 })
 
+test('moves through Spam, Trash, and Inbox with one Gmail label delta per move', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  const roadmap = page.locator('[data-testid="thread-row"][data-thread-id="t-roadmap"]')
+  await expect(roadmap).toBeVisible()
+
+  await page.getByTestId('thread-list').focus()
+  await openMove(page)
+  await page.getByTestId('move-spam').click()
+  await expect(roadmap).toHaveCount(0)
+  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+
+  await goTo(page, 'p')
+  await expect(page.getByTestId('view-title')).toHaveText('Spam')
+  await expect(roadmap).toBeVisible()
+  await expect(rows).toHaveCount(1)
+  await page.getByTestId('thread-list').focus()
+  await openMove(page)
+  await expect(page.getByTestId('move-spam')).toBeDisabled()
+  await page.getByTestId('move-trash').click()
+  await expect(roadmap).toHaveCount(0)
+
+  await goTo(page, 'r')
+  await expect(page.getByTestId('view-title')).toHaveText('Trash')
+  await expect(roadmap).toBeVisible()
+  await page.getByTestId('thread-list').focus()
+  await openMove(page)
+  await expect(page.getByTestId('move-trash')).toBeDisabled()
+  await page.getByTestId('move-inbox').click()
+  await expect(roadmap).toHaveCount(0)
+
+  await goTo(page, 'i')
+  await expect(roadmap).toBeVisible()
+  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
+
+  await page.keyboard.press('z')
+  await expect(roadmap).toHaveCount(0)
+  await goTo(page, 'r')
+  await expect(roadmap).toBeVisible()
+})
+
 test('re-evaluates an active Inbox search after the optimistic Move', async ({ page }) => {
   await page.getByTestId('thread-list').focus()
   await page.keyboard.press('/')
@@ -156,21 +196,25 @@ test('cancels a snooze reached through a user label and restores its exact due t
   await expect(snoozedReceipt.getByTestId('chip-snooze-due')).toHaveText(originalDue ?? '')
 })
 
-test('offers Move in allowed contexts and omits it from dedicated-action contexts', async ({ page }) => {
+test('offers Move in mailboxes and omits it from non-message destinations', async ({ page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await expect(page.getByTestId('footer-shortcut-move')).toContainText('Vmove')
   await expectMovePaletteCount(page, 1)
 
-  for (const shortcut of ['d', 'h', 'p', 'r', 'o']) {
+  for (const shortcut of ['d', 'h', 'o']) {
     await goTo(page, shortcut)
     await expect(page.getByTestId('footer-shortcut-move')).toHaveCount(0)
     await expectMovePaletteCount(page, 0)
   }
 
+  await goTo(page, 'r')
+  await expect(page.getByTestId('footer-shortcut-move')).toContainText('Vmove')
+  await expectMovePaletteCount(page, 1)
+
   await goTo(page, 'i')
   await page.keyboard.press('/')
   await page.getByTestId('search-input').fill('in:trash')
   await page.getByTestId('search-input').press('Enter')
-  await expect(page.getByTestId('footer-shortcut-move')).toHaveCount(0)
-  await expectMovePaletteCount(page, 0)
+  await expect(page.getByTestId('footer-shortcut-move')).toContainText('Vmove')
+  await expectMovePaletteCount(page, 1)
 })

@@ -118,7 +118,7 @@ describe('mailbox triage projection', () => {
       const result = performTriage(db, ACCOUNT, {
         kind: 'move',
         threadIds: ['inbox', 'snoozed'],
-        destinationLabelId: 'Label_Destination',
+        destination: { kind: 'label', labelId: 'Label_Destination' },
         sourceLabelId: 'Label_Source'
       })
 
@@ -168,6 +168,84 @@ describe('mailbox triage projection', () => {
     }
   })
 
+  it('queues Gmail deltas for Trash, Important, and Other and undoes the system labels exactly', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      const insertThread = db.prepare(
+        'INSERT INTO threads (account_id, id, subject, last_msg_at) VALUES (?, ?, ?, 1)'
+      )
+      const insertMessage = db.prepare(
+        'INSERT INTO messages (account_id, id, thread_id, labels_json) VALUES (?, ?, ?, ?)'
+      )
+      const insertThreadLabel = db.prepare(
+        'INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)'
+      )
+      insertThread.run(ACCOUNT, 'trashed', 'Trashed thread')
+      insertMessage.run(ACCOUNT, 'trashed-message', 'trashed', JSON.stringify(['TRASH', 'STARRED']))
+      insertThreadLabel.run(ACCOUNT, 'trashed', 'TRASH')
+      insertThreadLabel.run(ACCOUNT, 'trashed', 'STARRED')
+      insertThread.run(ACCOUNT, 'important', 'Important thread')
+      insertMessage.run(
+        ACCOUNT,
+        'important-message',
+        'important',
+        JSON.stringify(['INBOX', 'IMPORTANT', 'UNREAD'])
+      )
+      for (const label of ['INBOX', 'IMPORTANT', 'UNREAD']) {
+        insertThreadLabel.run(ACCOUNT, 'important', label)
+      }
+
+      performTriage(db, ACCOUNT, {
+        kind: 'move',
+        threadIds: ['trashed'],
+        destination: { kind: 'important' },
+        sourceLabelId: null
+      })
+      const labelsFor = (threadId: string): string[] =>
+        (
+          db
+            .prepare(
+              'SELECT label_id FROM thread_labels WHERE account_id = ? AND thread_id = ? ORDER BY label_id'
+            )
+            .all(ACCOUNT, threadId) as Array<{ label_id: string }>
+        ).map((row) => row.label_id)
+      expect(labelsFor('trashed')).toEqual(['IMPORTANT', 'INBOX', 'STARRED'])
+      expect(
+        JSON.parse(
+          (db.prepare('SELECT payload FROM action_queue WHERE id = 1').get() as { payload: string }).payload
+        )
+      ).toMatchObject({ add: ['INBOX', 'IMPORTANT'], remove: ['TRASH'], actionKind: 'move' })
+
+      expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid moved' })
+      expect(labelsFor('trashed')).toEqual(['STARRED', 'TRASH'])
+
+      performTriage(
+        db,
+        ACCOUNT,
+        {
+          kind: 'move',
+          threadIds: ['important'],
+          destination: { kind: 'other' },
+          sourceLabelId: null
+        },
+        false
+      )
+      expect(labelsFor('important')).toEqual(['INBOX', 'UNREAD'])
+      expect(
+        JSON.parse(
+          (
+            db.prepare('SELECT payload FROM action_queue ORDER BY id DESC LIMIT 1').get() as {
+              payload: string
+            }
+          ).payload
+        )
+      ).toMatchObject({ add: [], remove: ['IMPORTANT'], actionKind: 'move' })
+    } finally {
+      db.close()
+    }
+  })
+
   it('does not queue or record a Move that changes no label or reminder', () => {
     const db = openDatabase(':memory:')
     try {
@@ -191,7 +269,7 @@ describe('mailbox triage projection', () => {
         performTriage(db, ACCOUNT, {
           kind: 'move',
           threadIds: ['thread'],
-          destinationLabelId: 'Label_Destination',
+          destination: { kind: 'label', labelId: 'Label_Destination' },
           sourceLabelId: null
         })
       ).toEqual({ label: 'Already there' })
@@ -227,7 +305,7 @@ describe('mailbox triage projection', () => {
         performTriage(db, ACCOUNT, {
           kind: 'move',
           threadIds: ['thread'],
-          destinationLabelId: 'Label_Destination',
+          destination: { kind: 'label', labelId: 'Label_Destination' },
           sourceLabelId: null
         })
       ).toEqual({ label: 'Moved' })
@@ -287,7 +365,7 @@ describe('mailbox triage projection', () => {
         performTriage(db, ACCOUNT, {
           kind: 'move',
           threadIds: ['changed', 'unchanged'],
-          destinationLabelId: 'Label_Destination',
+          destination: { kind: 'label', labelId: 'Label_Destination' },
           sourceLabelId: null
         })
       ).toEqual({ label: 'Moved' })
@@ -311,17 +389,20 @@ describe('mailbox triage projection', () => {
       const action = {
         kind: 'move' as const,
         threadIds: ['thread'],
-        destinationLabelId: 'missing',
+        destination: { kind: 'label' as const, labelId: 'missing' },
         sourceLabelId: null
       }
       expect(() => performTriage(db, ACCOUNT, action)).toThrow('Move label is unavailable')
-      expect(() => performTriage(db, ACCOUNT, { ...action, destinationLabelId: 'STARRED' })).toThrow(
-        'Move label is unavailable'
-      )
       expect(() =>
         performTriage(db, ACCOUNT, {
           ...action,
-          destinationLabelId: 'Label_User',
+          destination: { kind: 'label', labelId: 'STARRED' }
+        })
+      ).toThrow('Move label is unavailable')
+      expect(() =>
+        performTriage(db, ACCOUNT, {
+          ...action,
+          destination: { kind: 'label', labelId: 'Label_User' },
           sourceLabelId: 'Label_User'
         })
       ).toThrow('Move source and destination must differ')

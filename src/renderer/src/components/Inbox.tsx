@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { type AuthSignInResult, type AuthStatus, isSignInCanceled } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { ConversationMailbox, MailLabel, ThreadListView, ThreadRow } from '../../../shared/mail'
+import type { MoveDestination } from '../../../shared/move'
+import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
 import { actionReconnectMessage } from '../actionReconnect'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
@@ -270,11 +272,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const searchSnoozeMode = searchOpen && searchesLocalSnoozes(searchResultQuery)
   const moveAllowed = searchOpen
     ? searchAllowsMove(searchResultQuery)
-    : view === 'inbox' ||
-      view === 'allMail' ||
-      view === 'sent' ||
-      view === 'starred' ||
-      userLabelId(view) !== null
+    : view !== 'drafts' && view !== 'snoozed' && view !== 'outbox'
   const searchRowIds = useMemo(
     () =>
       searchDraftMode ? searchDrafts.map((draft) => draft.id) : searchThreads.map((thread) => thread.id),
@@ -918,6 +916,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     moveCacheRows,
     readerOpen,
     view: searchOpen ? triageViewForSearch(searchResultQuery) : view,
+    activeSplitId: searchOpen ? null : splits.activeSplitId,
     searchOpen,
     searchMoveRetains: searchOpen ? searchMoveRetains : undefined,
     preserveSelectionOnRefreshRef,
@@ -1152,13 +1151,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     })
   }, [moveAllowed, searchOpen, selected, targetedThreads, view])
   const moveSelected = useCallback(
-    (destinationLabelId: string | null) => {
+    (destination: MoveDestination) => {
       if (!moveRequest) return
       setMoveRequest(null)
       triage({
         kind: 'move',
         threadIds: moveRequest.targets.map((target) => target.id),
-        destinationLabelId,
+        destination,
         sourceLabelId: moveRequest.sourceLabelId
       })
     },
@@ -1673,6 +1672,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           labels={labels}
           targets={moveRequest.targets}
           sourceLabelId={moveRequest.sourceLabelId}
+          showSplitDestinations={Boolean(
+            splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
+              splits.state.splits.some((split) => split.id === OTHER_SPLIT_ID)
+          )}
           onClose={closeMove}
           onMove={moveSelected}
         />

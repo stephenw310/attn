@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { TriageAction } from '../../shared/actions'
 import { isTriageAction } from '.'
 import { inverseForThread, planAction } from './plan'
 
@@ -49,12 +50,12 @@ describe('triage action planning', () => {
     const action = {
       kind: 'move' as const,
       threadIds: ['t1'],
-      destinationLabelId: 'Label_Destination',
+      destination: { kind: 'label' as const, labelId: 'Label_Destination' },
       sourceLabelId: 'Label_Source'
     }
     expect(planAction(action)).toEqual({
       add: ['Label_Destination'],
-      remove: ['INBOX', 'Label_Source'],
+      remove: ['INBOX', 'SPAM', 'TRASH', 'Label_Source'],
       queueKind: 'modifyLabels'
     })
     expect(inverseForThread(action, new Set(['INBOX', 'Label_Source', 'Label_Destination']), 't1')).toEqual({
@@ -62,6 +63,24 @@ describe('triage action planning', () => {
       threadIds: ['t1'],
       add: ['INBOX', 'Label_Source'],
       remove: []
+    })
+  })
+
+  it('maps mailbox and split destinations to Gmail system-label deltas', () => {
+    const move = (destination: Extract<TriageAction, { kind: 'move' }>['destination']) =>
+      planAction({ kind: 'move', threadIds: ['t1'], destination, sourceLabelId: null })
+
+    expect(move({ kind: 'done' })).toMatchObject({ add: [], remove: ['INBOX', 'SPAM', 'TRASH'] })
+    expect(move({ kind: 'inbox' })).toMatchObject({ add: ['INBOX'], remove: ['SPAM', 'TRASH'] })
+    expect(move({ kind: 'spam' })).toMatchObject({ add: ['SPAM'], remove: ['INBOX', 'TRASH'] })
+    expect(move({ kind: 'trash' })).toMatchObject({ add: ['TRASH'], remove: ['INBOX', 'SPAM'] })
+    expect(move({ kind: 'important' })).toMatchObject({
+      add: ['INBOX', 'IMPORTANT'],
+      remove: ['SPAM', 'TRASH']
+    })
+    expect(move({ kind: 'other' })).toMatchObject({
+      add: ['INBOX'],
+      remove: ['IMPORTANT', 'SPAM', 'TRASH']
     })
   })
 
@@ -73,7 +92,7 @@ describe('triage action planning', () => {
       isTriageAction({
         kind: 'move',
         threadIds: ['t1'],
-        destinationLabelId: 'Label_Destination',
+        destination: { kind: 'label', labelId: 'Label_Destination' },
         sourceLabelId: null
       })
     ).toBe(true)
@@ -81,7 +100,7 @@ describe('triage action planning', () => {
       isTriageAction({
         kind: 'move',
         threadIds: ['t1'],
-        destinationLabelId: 'Label_Source',
+        destination: { kind: 'label', labelId: 'Label_Source' },
         sourceLabelId: 'Label_Source'
       })
     ).toBe(false)

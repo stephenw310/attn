@@ -37,7 +37,7 @@ export function searchesLocalSnoozes(query: string): boolean {
 export function searchAllowsMove(query: string): boolean {
   const parsed = parseSearchQuery(query)
   if (parsed.filters.some((filter) => filter.kind === 'is' && filter.value === 'snoozed')) return false
-  const blocked = new Set(['draft', 'drafts', 'snoozed', 'spam', 'trash', 'outbox'])
+  const blocked = new Set(['draft', 'drafts', 'snoozed', 'outbox'])
   return !searchMailboxes(query).some((mailbox) => blocked.has(mailbox))
 }
 

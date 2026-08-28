@@ -94,7 +94,7 @@ test('applies and exactly rolls back move labels and snooze state', () => {
     {
       kind: 'move',
       threadIds: ['one'],
-      destinationLabelId: 'destination',
+      destination: { kind: 'label', labelId: 'destination' },
       sourceLabelId: 'source'
     },
     rows
@@ -115,14 +115,24 @@ test('applies and exactly rolls back move labels and snooze state', () => {
 test('does not let an older move rollback overwrite newer move state', () => {
   const rows = [{ ...row('one', false, false), labelIds: ['INBOX'] }]
   const first = threadMoveSnapshot(
-    { kind: 'move', threadIds: ['one'], destinationLabelId: 'first', sourceLabelId: null },
+    {
+      kind: 'move',
+      threadIds: ['one'],
+      destination: { kind: 'label', labelId: 'first' },
+      sourceLabelId: null
+    },
     rows
   )
   expect(first).not.toBeNull()
   if (!first) return
   const afterFirst = applyThreadMove(rows, first)
   const second = threadMoveSnapshot(
-    { kind: 'move', threadIds: ['one'], destinationLabelId: 'second', sourceLabelId: null },
+    {
+      kind: 'move',
+      threadIds: ['one'],
+      destination: { kind: 'label', labelId: 'second' },
+      sourceLabelId: null
+    },
     afterFirst ?? []
   )
   expect(second).not.toBeNull()
@@ -139,7 +149,12 @@ test('removes moved rows from an inactive cache and restores their exact positio
     { ...row('two', true, true), labelIds: ['INBOX'] }
   ]
   const snapshot = threadMoveSnapshot(
-    { kind: 'move', threadIds: ['one'], destinationLabelId: 'destination', sourceLabelId: null },
+    {
+      kind: 'move',
+      threadIds: ['one'],
+      destination: { kind: 'label', labelId: 'destination' },
+      sourceLabelId: null
+    },
     rows
   )
   expect(snapshot).not.toBeNull()
@@ -158,7 +173,12 @@ test('computes search exits from each row after the Move delta', () => {
     { ...row('two', false, false), labelIds: ['INBOX', 'keep'] }
   ]
   const snapshot = threadMoveSnapshot(
-    { kind: 'move', threadIds: ['one', 'two'], destinationLabelId: 'destination', sourceLabelId: null },
+    {
+      kind: 'move',
+      threadIds: ['one', 'two'],
+      destination: { kind: 'label', labelId: 'destination' },
+      sourceLabelId: null
+    },
     rows
   )
   expect(snapshot).not.toBeNull()
@@ -169,16 +189,48 @@ test('computes search exits from each row after the Move delta', () => {
   ).toEqual(['one'])
 })
 
-test('moves exit Inbox and their source label, but stay in All Mail', () => {
+test('moves exit each changed mailbox and built-in split', () => {
   const move: TriageAction = {
     kind: 'move',
     threadIds: ['one'],
-    destinationLabelId: 'destination',
+    destination: { kind: 'label', labelId: 'destination' },
     sourceLabelId: 'source'
   }
   expect(moveExitsView(move, 'inbox')).toBe(true)
   expect(moveExitsView(move, 'label:source')).toBe(true)
   expect(moveExitsView(move, 'allMail')).toBe(false)
+  expect(
+    moveExitsView(
+      { kind: 'move', threadIds: ['one'], destination: { kind: 'inbox' }, sourceLabelId: null },
+      'spam'
+    )
+  ).toBe(true)
+  expect(
+    moveExitsView(
+      { kind: 'move', threadIds: ['one'], destination: { kind: 'spam' }, sourceLabelId: null },
+      'spam'
+    )
+  ).toBe(false)
+  expect(
+    moveExitsView(
+      { kind: 'move', threadIds: ['one'], destination: { kind: 'trash' }, sourceLabelId: null },
+      'allMail'
+    )
+  ).toBe(true)
+  expect(
+    moveExitsView(
+      { kind: 'move', threadIds: ['one'], destination: { kind: 'other' }, sourceLabelId: null },
+      'inbox',
+      'base:important'
+    )
+  ).toBe(true)
+  expect(
+    moveExitsView(
+      { kind: 'move', threadIds: ['one'], destination: { kind: 'important' }, sourceLabelId: null },
+      'inbox',
+      'fallback:other'
+    )
+  ).toBe(true)
   expect(moveExitsView({ kind: 'archive', threadIds: ['one'] }, 'inbox')).toBe(false)
 })
 

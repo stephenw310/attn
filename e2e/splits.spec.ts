@@ -128,6 +128,34 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(page.locator('[data-command-id^="split.goto:"]')).toHaveCount(9)
 })
 
+test('moves between Important and Other by changing Gmail importance', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  const boardMemo = rows.filter({ hasText: 'Board memo needs approval' })
+  await expect(boardMemo).toBeVisible()
+
+  await page.getByTestId('thread-list').focus()
+  await page.keyboard.press('v')
+  await expect(page.getByTestId('move-picker')).toBeVisible()
+  await expect(page.getByTestId('move-important')).toBeDisabled()
+  await page.getByTestId('move-other').click()
+  await expect(boardMemo).toHaveCount(0)
+  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+
+  await page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]').click()
+  await expect(boardMemo).toBeVisible()
+  await expect(rows).toHaveCount(3)
+  await expect(boardMemo).toHaveAttribute('data-selected', 'true')
+  await page.getByTestId('thread-list').focus()
+  await page.keyboard.press('v')
+  await expect(page.getByTestId('move-other')).toBeDisabled()
+  await page.getByTestId('move-important').click()
+  await expect(boardMemo).toHaveCount(0)
+  await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+
+  await page.locator('[data-testid="split-tab"][data-split-id="base:important"]').click()
+  await expect(boardMemo).toBeVisible()
+})
+
 test('edits, reorders, deletes, persists, and explicitly restores a starter preset', async ({
   boot,
   page

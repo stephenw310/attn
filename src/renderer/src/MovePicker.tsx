@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MailLabel } from '../../shared/mail'
+import { type MoveDestination, moveLabelDelta } from '../../shared/move'
 
 export interface MoveTarget {
   id: string
@@ -12,31 +13,39 @@ interface MovePickerProps {
   labels: readonly MailLabel[]
   targets: readonly MoveTarget[]
   sourceLabelId: string | null
+  showSplitDestinations: boolean
   onClose: () => void
-  onMove: (destinationLabelId: string | null) => void
+  onMove: (destination: MoveDestination) => void
 }
 
 interface MoveOption {
   id: string
   label: string
-  destinationLabelId: string | null
+  destination: MoveDestination
+  labelId?: string
+  icon: string
   disabled: boolean
 }
 
-function doneIsDisabled(targets: readonly MoveTarget[], sourceLabelId: string | null): boolean {
-  return targets.every(
-    (target) =>
-      !target.labelIds.includes('INBOX') &&
-      (!sourceLabelId || !target.labelIds.includes(sourceLabelId)) &&
-      !target.snoozed &&
-      !target.returned
-  )
+function destinationIsDisabled(
+  destination: MoveDestination,
+  targets: readonly MoveTarget[],
+  sourceLabelId: string | null
+): boolean {
+  const delta = moveLabelDelta(destination, sourceLabelId)
+  return targets.every((target) => {
+    const changesLabels =
+      delta.add.some((labelId) => !target.labelIds.includes(labelId)) ||
+      delta.remove.some((labelId) => target.labelIds.includes(labelId))
+    return !changesLabels && !target.snoozed && !target.returned
+  })
 }
 
 export function MovePicker({
   labels,
   targets,
   sourceLabelId,
+  showSplitDestinations,
   onClose,
   onMove
 }: MovePickerProps): React.JSX.Element {
@@ -53,26 +62,40 @@ export function MovePicker({
     )
   }, [labels, normalizedQuery, sourceLabelId])
   const options = useMemo<readonly MoveOption[]>(() => {
-    const showDone = labels.length === 0 || !normalizedQuery || 'done'.includes(normalizedQuery)
-    return [
-      ...(showDone
+    const systemOptions: Array<Omit<MoveOption, 'disabled'>> = [
+      { id: 'done', label: 'Done', destination: { kind: 'done' }, icon: '✓' },
+      { id: 'inbox', label: 'Inbox', destination: { kind: 'inbox' }, icon: '→' },
+      ...(showSplitDestinations
         ? [
             {
-              id: 'done',
-              label: 'Done',
-              destinationLabelId: null,
-              disabled: doneIsDisabled(targets, sourceLabelId)
-            }
+              id: 'important',
+              label: 'Important',
+              destination: { kind: 'important' } as const,
+              icon: '→'
+            },
+            { id: 'other', label: 'Other', destination: { kind: 'other' } as const, icon: '→' }
           ]
         : []),
+      { id: 'spam', label: 'Spam', destination: { kind: 'spam' }, icon: '→' },
+      { id: 'trash', label: 'Trash', destination: { kind: 'trash' }, icon: '→' }
+    ]
+    return [
+      ...systemOptions
+        .filter((option) => !normalizedQuery || option.label.toLocaleLowerCase().includes(normalizedQuery))
+        .map((option) => ({
+          ...option,
+          disabled: destinationIsDisabled(option.destination, targets, sourceLabelId)
+        })),
       ...filteredLabels.map((label) => ({
         id: label.id,
         label: label.name,
-        destinationLabelId: label.id,
+        destination: { kind: 'label' as const, labelId: label.id },
+        labelId: label.id,
+        icon: '→',
         disabled: false
       }))
     ]
-  }, [filteredLabels, labels.length, normalizedQuery, sourceLabelId, targets])
+  }, [filteredLabels, normalizedQuery, showSplitDestinations, sourceLabelId, targets])
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -89,7 +112,7 @@ export function MovePicker({
 
   const moveHighlighted = (): void => {
     const option = options[highlightedIndex]
-    if (option && !option.disabled) onMove(option.destinationLabelId)
+    if (option && !option.disabled) onMove(option.destination)
   }
 
   return (
@@ -147,12 +170,13 @@ export function MovePicker({
                 else optionRefs.current.delete(option.id)
               }}
               type="button"
-              data-testid={option.id === 'done' ? 'move-done' : 'move-option'}
-              data-label-id={option.destinationLabelId ?? undefined}
+              data-testid={option.labelId ? 'move-option' : `move-${option.id}`}
+              data-label-id={option.labelId}
+              data-destination-kind={option.destination.kind}
               data-highlighted={index === highlightedIndex || undefined}
               disabled={option.disabled}
               onMouseEnter={() => setHighlightedIndex(index)}
-              onClick={() => onMove(option.destinationLabelId)}
+              onClick={() => onMove(option.destination)}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
                 index === highlightedIndex ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
               }`}
@@ -163,7 +187,7 @@ export function MovePicker({
                 }`}
                 aria-hidden
               >
-                {option.id === 'done' ? '✓' : '→'}
+                {option.icon}
               </span>
               <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{option.label}</span>
             </button>
@@ -173,8 +197,8 @@ export function MovePicker({
               Create labels in Gmail to add more destinations.
             </div>
           )}
-          {filteredLabels.length === 0 && labels.length > 0 && query.trim() && (
-            <div className="px-3 py-4 text-center text-xs text-ink-faint">No matching labels</div>
+          {options.length === 0 && query.trim() && (
+            <div className="px-3 py-4 text-center text-xs text-ink-faint">No matching destinations</div>
           )}
         </div>
         <div className="border-t border-edge px-4 py-2 text-xs text-ink-faint">

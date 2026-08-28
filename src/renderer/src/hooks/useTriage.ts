@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
+import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
 import { type MailView, userLabelId } from '../mailDisplay'
 import {
   applyThreadFlag,
@@ -35,6 +36,7 @@ interface Options {
   moveCacheRows: readonly ThreadRow[]
   readerOpen: boolean
   view: MailView
+  activeSplitId: string | null
   searchOpen: boolean
   searchMoveRetains?: (thread: Options['threads'][number]) => boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
@@ -59,10 +61,25 @@ function flagOwnerKey(threadId: string, field: ThreadFlagSnapshot['field']): str
 }
 
 function moveRetainsCachedView(row: ThreadRow, view: MailView): boolean {
-  if (view === 'inbox') return row.labelIds.includes('INBOX')
+  if (view === 'inbox') {
+    return row.labelIds.includes('INBOX') && !row.labelIds.includes('SPAM') && !row.labelIds.includes('TRASH')
+  }
   if (view === 'snoozed') return row.snoozed
+  if (view === 'spam') return row.labelIds.includes('SPAM')
+  if (view === 'trash') return row.labelIds.includes('TRASH')
+  if (row.labelIds.includes('SPAM') || row.labelIds.includes('TRASH')) return false
+  if (view === 'allMail') return true
+  if (view === 'sent') return row.labelIds.includes('SENT')
+  if (view === 'starred') return row.labelIds.includes('STARRED')
   const labelId = userLabelId(view)
-  return labelId === null || row.labelIds.includes(labelId)
+  return labelId !== null && row.labelIds.includes(labelId)
+}
+
+function moveRetainsActiveInboxSplit(row: ThreadRow, activeSplitId: string | null): boolean {
+  if (!moveRetainsCachedView(row, 'inbox')) return false
+  if (activeSplitId === IMPORTANT_SPLIT_ID) return row.labelIds.includes('IMPORTANT')
+  if (activeSplitId === OTHER_SPLIT_ID) return !row.labelIds.includes('IMPORTANT')
+  return true
 }
 
 export function useTriage(options: Options): (action: TriageAction) => void {
@@ -73,6 +90,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
     moveCacheRows,
     readerOpen,
     view,
+    activeSplitId,
     searchOpen,
     searchMoveRetains,
     preserveSelectionOnRefreshRef,
@@ -122,18 +140,18 @@ export function useTriage(options: Options): (action: TriageAction) => void {
             (row) => moveRetainsCachedView(row, cachedView as MailView),
             preservedIds
           )
-          const destinationLabelId = snapshot.add[0]
-          if (destinationLabelId && userLabelId(cachedView as MailView) === destinationLabelId) {
-            const existingIds = new Set((updated ?? []).map((row) => row.id))
-            const movedCandidates = applyThreadMove([...candidates], snapshot) ?? []
-            const additions = movedCandidates.filter(
-              (row) => snapshot.before.has(row.id) && !existingIds.has(row.id)
+          const existingIds = new Set((updated ?? []).map((row) => row.id))
+          const movedCandidates = applyThreadMove([...candidates], snapshot) ?? []
+          const additions = movedCandidates.filter(
+            (row) =>
+              snapshot.before.has(row.id) &&
+              !existingIds.has(row.id) &&
+              moveRetainsCachedView(row, cachedView as MailView)
+          )
+          if (additions.length > 0) {
+            updated = [...(updated ?? []), ...additions].sort(
+              (left, right) => right.lastMsgAt - left.lastMsgAt || left.id.localeCompare(right.id)
             )
-            if (additions.length > 0) {
-              updated = [...(updated ?? []), ...additions].sort(
-                (left, right) => right.lastMsgAt - left.lastMsgAt || left.id.localeCompare(right.id)
-              )
-            }
           }
           if (updated !== rows) changed = true
           next[cachedView as keyof MailboxRowCache] = updated ?? rows
@@ -192,7 +210,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
           applyThreadMoveMembership(
             current,
             moveSnapshot,
-            (row) => moveRetainsCachedView(row, 'inbox'),
+            (row) => moveRetainsActiveInboxSplit(row, activeSplitId),
             preservedView === 'inbox' ? preservedIds : undefined
           )
         )
@@ -252,7 +270,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
           : moveSnapshot && targetedAction.kind === 'move'
             ? searchOpen && searchMoveRetains
               ? movedThreadIdsOutsideView(threads, moveSnapshot, searchMoveRetains)
-              : moveExitsView(targetedAction, view)
+              : moveExitsView(targetedAction, view, activeSplitId)
                 ? targetedAction.threadIds
                 : []
             : []
@@ -305,6 +323,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
     [
       applyFlagToMailboxRows,
       applyMoveToMailboxRows,
+      activeSplitId,
       clearSelection,
       deferRefreshUntilRef,
       preserveSelectionOnRefreshRef,

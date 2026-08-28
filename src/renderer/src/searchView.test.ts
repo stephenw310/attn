@@ -33,11 +33,13 @@ describe('search result interpretation', () => {
     expect(searchesLocalSnoozes(query)).toBe(true)
   })
 
-  it('allows Move only for ordinary search contexts', () => {
+  it('allows Move for Spam and Trash searches but not non-mail destinations', () => {
     expect(searchAllowsMove('from:maya in:inbox')).toBe(true)
     expect(searchAllowsMove('in:starred subject:roadmap')).toBe(true)
     expect(searchAllowsMove('in:"Project Alpha"')).toBe(true)
-    for (const query of ['in:drafts', 'is:snoozed', 'in:snoozed', 'in:spam', 'in:trash', 'in:outbox']) {
+    expect(searchAllowsMove('in:spam')).toBe(true)
+    expect(searchAllowsMove('in:trash')).toBe(true)
+    for (const query of ['in:drafts', 'is:snoozed', 'in:snoozed', 'in:outbox']) {
       expect(searchAllowsMove(query)).toBe(false)
     }
   })

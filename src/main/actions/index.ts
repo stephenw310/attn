@@ -1,6 +1,7 @@
 import type { RevertedActionKind } from '../../shared/actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from '../../shared/actions'
 import { stringArray } from '../../shared/guards'
+import { isMoveDestination } from '../../shared/move'
 import type { Db } from '../db'
 import { applyThreadDelta } from '../store/mutate'
 import {
@@ -116,13 +117,14 @@ function validateMoveLabels(
   accountId: string,
   action: Extract<TriageAction, { kind: 'move' }>
 ): void {
-  if (action.sourceLabelId !== null && action.sourceLabelId === action.destinationLabelId) {
+  const destinationLabelId = action.destination.kind === 'label' ? action.destination.labelId : null
+  if (action.sourceLabelId !== null && action.sourceLabelId === destinationLabelId) {
     throw new Error('Move source and destination must differ')
   }
   const findUserLabel = db.prepare(
     "SELECT 1 FROM labels WHERE account_id = ? AND id = ? AND lower(type) = 'user'"
   )
-  for (const labelId of [action.sourceLabelId, action.destinationLabelId]) {
+  for (const labelId of [action.sourceLabelId, destinationLabelId]) {
     if (labelId !== null && !findUserLabel.get(accountId, labelId)) {
       throw new Error('Move label is unavailable')
     }
@@ -457,9 +459,9 @@ export function isTriageAction(value: unknown): value is TriageAction {
       return stringArray(action.add) && stringArray(action.remove)
     case 'move':
       return (
-        (typeof action.destinationLabelId === 'string' || action.destinationLabelId === null) &&
+        isMoveDestination(action.destination) &&
         (typeof action.sourceLabelId === 'string' || action.sourceLabelId === null) &&
-        (action.destinationLabelId === null || action.destinationLabelId !== action.sourceLabelId)
+        (action.destination.kind !== 'label' || action.destination.labelId !== action.sourceLabelId)
       )
     default:
       return false

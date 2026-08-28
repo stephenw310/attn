@@ -2,6 +2,24 @@ import { describe, expect, it, vi } from 'vitest'
 import type { GmailClient } from './client'
 import { GmailMailProvider } from './provider'
 
+describe('GmailMailProvider.modifyThread', () => {
+  it('posts mailbox and importance labels through the Gmail thread API', async () => {
+    const post = vi.fn(async () => ({}))
+    const provider = new GmailMailProvider({ post } as unknown as GmailClient)
+
+    await provider.modifyThread('thread/one', ['INBOX', 'IMPORTANT'], ['SPAM', 'TRASH'])
+
+    expect(post).toHaveBeenCalledWith(
+      '/threads/thread%2Fone/modify',
+      {
+        addLabelIds: ['INBOX', 'IMPORTANT'],
+        removeLabelIds: ['SPAM', 'TRASH']
+      },
+      { priority: 'action' }
+    )
+  })
+})
+
 describe('GmailMailProvider.getSendAs', () => {
   it('reads the sender identity for the exact account address', async () => {
     const get = vi.fn(async () => ({

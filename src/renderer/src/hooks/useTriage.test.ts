@@ -59,6 +59,7 @@ test('rolls back overlapping failed star and unread actions independently', asyn
       moveCacheRows: rows ?? [],
       readerOpen: false,
       view: 'inbox',
+      activeSplitId: null,
       searchOpen: false,
       preserveSelectionOnRefreshRef: { current: true },
       deferRefreshUntilRef: { current: 0 },
@@ -155,6 +156,7 @@ test('updates inactive Move cache membership immediately and restores it on reje
       moveCacheRows: mailboxRows.allMail ?? [],
       readerOpen: false,
       view: 'allMail',
+      activeSplitId: null,
       searchOpen: false,
       preserveSelectionOnRefreshRef: { current: true },
       deferRefreshUntilRef: { current: 0 },
@@ -180,7 +182,7 @@ test('updates inactive Move cache membership immediately and restores it on reje
       runTriage?.({
         kind: 'move',
         threadIds: [movedThread.id],
-        destinationLabelId: 'destination',
+        destination: { kind: 'label', labelId: 'destination' },
         sourceLabelId: null
       })
     )

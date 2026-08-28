@@ -247,24 +247,39 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 | **Unread** (`U`) | Toggles read state. |
 | **Spam** (`!`) | Reports spam. |
 | **Label** (`L`) | Opens label picker (search-as-you-type, add/remove). |
-| **Move** (`V`) | Opens a one-shot destination picker for Done or an existing user label. Move removes `INBOX`, adds the chosen label, and closes the picker. From a user-label view, it also removes that view's label. If the thread has a pending snooze reminder, Move cancels it. |
+| **Move** (`V`) | Opens a one-shot picker for Done, Inbox, Spam, Trash, an Inbox split, or an existing user label. Move closes the picker after one choice. If the thread has a pending snooze reminder, Move cancels it. |
 | **Select** (`X`) | Toggles selection; `Shift+click`/`Shift+J/K`/`Shift+↑/↓` extends. All triage verbs operate on the selection when one exists. |
 | **Undo** (`Z`) | Reverses the last action — including bulk actions — from a session-scoped stack (last 50 actions). Every destructive-feeling verb is instantly reversible; this is what makes fearless triage possible. |
 
 `L` and `V` have different jobs. `L` toggles any number of user labels and leaves the picker open. `V`
-chooses one destination, applies it once, and closes the picker. Move preserves unrelated user labels plus
-`STARRED`, `UNREAD`, and `SENT`. Choosing Done adds no label. It removes `INBOX` and, from a user-label
-view, removes that view's label. The active user label is not offered as a destination because Done is the
-explicit removal path.
+chooses one destination, applies it once, and closes the picker. The picker offers Done, Inbox, Spam, Trash,
+and every user label. When split Inbox is configured, it also offers Important and Other. Gmail does not let
+clients apply `SENT`, so Sent is a source view but not a destination. Done represents All Mail without a
+placement label.
 
-Move works in Inbox, Inbox splits, All Mail, Sent, Starred, user-label views, and ordinary search results,
-including a reader opened from those views. From Inbox or a user-label view, the moved row leaves the view
-and the selection or reader advances. In All Mail, Sent, Starred, or a search whose query still matches, the
-row remains selected. Move is unavailable in Drafts, Snoozed, Spam, Trash, Outbox, and searches scoped to
-those views. A pending-snooze thread can still appear in an allowed view. Moving that thread cancels its
-reminder in the same local transaction as the label change, so its due time cannot add `INBOX` again. Undo
-restores both the reminder and the exact prior labels. The Snoozed view keeps its dedicated reschedule and
-unsnooze actions; Spam and Trash keep their restore actions.
+Each destination maps to one Gmail thread-label delta:
+
+| Destination | Add | Remove |
+|---|---|---|
+| Done | Nothing | `INBOX`, `SPAM`, `TRASH` |
+| Inbox | `INBOX` | `SPAM`, `TRASH` |
+| Spam | `SPAM` | `INBOX`, `TRASH` |
+| Trash | `TRASH` | `INBOX`, `SPAM` |
+| Important | `INBOX`, `IMPORTANT` | `SPAM`, `TRASH` |
+| Other | `INBOX` | `IMPORTANT`, `SPAM`, `TRASH` |
+| User label | The chosen label | `INBOX`, `SPAM`, `TRASH` |
+
+From a user-label view, every destination also removes that view's label. The picker omits that label as a
+destination. Move preserves unrelated user labels plus `STARRED`, `UNREAD`, `SENT`, and `IMPORTANT`, except
+that Other removes `IMPORTANT` by definition. Attn applies the local delta first, queues it durably, and then
+calls Gmail `users.threads.modify` under the existing `gmail.modify` grant.
+
+Move works in Inbox and its splits, All Mail, Sent, Starred, Spam, Trash, user-label views, and matching
+search results. It also works in a reader opened from those views. A move that changes the current view's
+membership removes the row and advances the selection or reader. A move that keeps the membership leaves
+the row selected. Drafts, Snoozed, and Outbox keep their dedicated actions. A pending-snooze thread can still
+appear in another view. Moving that thread cancels its reminder in the same local transaction as the label
+change, so its due time cannot add `INBOX` again. Undo restores both the reminder and the exact prior labels.
 
 Bare-letter shortcuts do not also accept their shifted variants: `Shift+letter` is reserved for explicit
 combinations such as `Shift+J/K`. Printable symbols that require Shift, including `#` and `!`, are unaffected.
@@ -275,6 +290,8 @@ combinations such as `Shift+J/K`. Printable symbols that require Shift, includin
 - `V` moves a bulk selection with one destination choice, and one `Z` restores each thread's exact prior
   `INBOX` and user-label membership. If a target had a pending snooze reminder, Move cancels it and the same
   `Z` restores its prior state and due time.
+- Moving between Important and Other updates `IMPORTANT` through Gmail. Moving into or out of Spam and Trash
+  updates `SPAM` or `TRASH` through Gmail. The optimistic row membership matches the chosen destination.
 - A snoozed thread returns within 60s of its due time while the app runs, or immediately on next launch if it was closed; a reply during snooze surfaces it immediately.
 - Snoozed threads are findable in the local "Snoozed" view (`G` then `H`) while the Attn profile exists. Reinstall durability and cross-device visibility are not v1 promises (decision #6).
 
@@ -532,7 +549,7 @@ Guardrails:
 | `U` | Toggle unread |
 | `!` | Spam |
 | `L` | Label picker |
-| `V` | Move to Done or a user label |
+| `V` | Move to a mailbox, Inbox split, or user label |
 
 **Conversation**
 
@@ -632,7 +649,7 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading view, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
 - **M1 — Triage core.** First items: **apply the Dispatch direction** (D6 — graphite/amber tokens, `attn:` wordmark, layout per D6, split strip, account menu) and **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). The reading work adds recipients, attachments, quote/signature collapse, and—after M1 dogfood—the full-window conversation that supersedes the interim split. Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
 - **M2 — Mail out.** Composer (rich text, attachments, autocomplete), reply/all/forward, crash-safe drafts, send + undo send, exactly-once outbox. **← daily-drivable.**
-- **M3 — Find & focus.** Opens with the sync restructure planned as S1–S4 in docs/M3-PLAN.md. The all-mail and spam-trash backfill stages and per-label membership reconciliation (S3 and half of S4) shipped early, in M2's #51. Per-message label storage followed in S2, the utility-process move landed in S1, and S4 completed expired-history tombstoning. The sync restructure is done. T22 shipped local system mailbox navigation, unconditional list windowing, per-view selection/scroll restore, and trashed-message reader markers. Its 2026-08-24 navigation follow-up replaced the shifting header menu with a persistent mailbox/label sidebar and added local user-label list views. T23 shipped the FTS5 message index with its transactional write paths and resumable backfill cursor, T24 shipped local search UI and operators over that index, T25 shipped Enter-submitted Gmail search with durable on-demand thread caching, T26 shipped the context-filtered command palette and `N`/`P`/`O` reader keys, T27 shipped configurable split Inbox views and per-split notifications, T30 shipped the built-in themes, and T31 shipped one-shot Move with exact bulk and snooze-aware undo. Next: inbox-zero states and the contextual chord guide (§9 #14).
+- **M3 — Find & focus.** Opens with the sync restructure planned as S1–S4 in docs/M3-PLAN.md. The all-mail and spam-trash backfill stages and per-label membership reconciliation (S3 and half of S4) shipped early, in M2's #51. Per-message label storage followed in S2, the utility-process move landed in S1, and S4 completed expired-history tombstoning. The sync restructure is done. T22 shipped local system mailbox navigation, unconditional list windowing, per-view selection/scroll restore, and trashed-message reader markers. Its 2026-08-24 navigation follow-up replaced the shifting header menu with a persistent mailbox/label sidebar and added local user-label list views. T23 shipped the FTS5 message index with its transactional write paths and resumable backfill cursor, T24 shipped local search UI and operators over that index, T25 shipped Enter-submitted Gmail search with durable on-demand thread caching, T26 shipped the context-filtered command palette and `N`/`P`/`O` reader keys, T27 shipped configurable split Inbox views and per-split notifications, T30 shipped the built-in themes, and T31 shipped one-shot Move with mailbox, split, bulk, and snooze-aware undo behavior. Next: inbox-zero states and the contextual chord guide (§9 #14).
 - **M4 — Power finish.** Snippets, follow-up reminders, AI reply drafting (F17), settings surface, badge polish, auto-update + signing/notarization (personal-build packaging shipped early, at M1 exit — §6 Packaging).
 
 **Post-v1 sequence:** v1.1 — global-hotkey quick panel (quick compose + quick search), multi-account (switcher `Mod+1..9`; unified inbox stays out), and custom themes (user token sets over D6's semantic names). v1.5 — companion Apps Script: send later + exact-time snooze return (F7). v2 — hosted backend: read statuses, true multi-device state.
@@ -662,4 +679,4 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 17. **Lifetime headers replace the 12-month metadata window (2026-08-15; quota corrected 2026-08-19; M3 sync completed 2026-08-22):** v0.13's 12-month window was a scoping decision, not an architectural constraint, and it quietly broke three product promises — search recall (mail archived before install was invisible even when weeks old, because backfill was Inbox-scoped), contact autocomplete beyond a year, and complete system mailboxes. Headers are cheap in storage (~1–2 KB) but, under Google's post-May-2026 table, cost 40 quota units per `threads.get` plus amortized listing cost; a 60k uncached sweep has a theoretical quota floor around 6.7 hours at the default 6,000 units/user/minute, before the accepted interactive reserves and background pauses. Bodies and attachments remain orders of magnitude heavier, so v0.15 retargets the store at **lifetime headers, windowed + on-demand bodies** (D5, F2). The backfill becomes priority-ordered stages over one idempotent walk — inbox → bodies → drafts → all-mail 12m → spam-trash → reconcile → lifetime sweep — where every stage skips already-stored threads, consecutive slices overlap rather than carving Gmail's fuzzy date-operator complements (a seam gap loses mail silently; overlap costs ~1% in listing), and a stage boundary exists only where behavior changes (priority, throttle, or what runs next). Recorded consequences: `threads.list` excludes SPAM/TRASH unless asked and Gmail purges both at ~30 days, so those stages are explicit and inherently small; SPAM/TRASH messages are excluded from contact statistics; per-message label storage is required once Trash is local, because a thread-level label union cannot express a partially-trashed thread; the poller refreshes `labels.list` each cycle because history never reports label create/rename/delete; and `historyId`-expiry recovery reconciles every cached system label and removes server-purged threads only after a complete account existence listing identifies candidates and direct per-thread fetches return 404. T13A shipped the lifetime sweep and contact derivation in M2, superseding #15's Sent-only pass. The all-mail/spam-trash stages shipped in #51; S2 added per-message labels, S1 moved SQLite and sync into the utility process, and S4 completed recovery reconciliation and tombstoning. Deliberately still not fetched: People-API contacts (#15), custom send-as aliases, Gmail's separate reply and forward signature-default choices, Gmail-native snooze (not exposed by the API), filters/vacation/forwarding settings, confidential-mode bodies (the API returns placeholders), and legacy Hangouts `CHAT` rows (skipped defensively). The sender reads the primary send-as display name and signature through the existing `gmail.modify` scope. Outgoing mail therefore carries the configured `From` identity, and every local Attn composer starts with the last fetched primary signature.
 18. **Post-M2-review product calls (2026-08-17):** (a) **Legacy table presentational attributes join the zero-loss scope** — *shipped in #55* — `align`/`valign`/`bgcolor`/`width`/`height`/`border`/`cellpadding`/`cellspacing` on `table`/`tr`/`td`/`th` must round-trip instead of being silently dropped by the import sanitizer; until the editor can represent them, a table carrying them is preserved whole as an opaque region (byte-exact, not editable inline) rather than editable-but-stripped. (b) **Forward threading is verified on real Gmail:** a forward carries only `threadId` plus the `Fwd:`-prefixed subject (no reply headers, `replyPlan.ts`), and an owner test shows it lands in the source conversation — T14B/T16's open observation is closed. (c) **The lifetime `has:attachment` walk is approved** — *shipped in #56, `sync/attachmentFlags.ts`, schema revision 15*: an ids-only `q=has:attachment` listing pass (~1% of sweep cost) sets thread-level attachment flags lifetime-wide, so attachment chips and local `has:attachment` search are trustworthy before hydration. (d) **`N`/`P`/`O` reader keys stay in §5** — *shipped in T26*: `N` and `P` move the active message without changing its expansion state, and `O` expands or collapses that message. The M3 palette-completeness assertion covers all three commands.
 19. **The utility process owns SQLite (2026-08-22):** §6 commits M3 to running Gmail fetch, backfill, derived-data rebuilds, and FTS indexing in a utility process. S1 moved the sole SQLite connection, every local read, sync, action replay, draft mirroring, outbox sending, and schedulers into that process. Main has no fallback database handle. The action and send state machines live beside their durable rows, so an IPC reply cannot split an executor from its committed state. Every renderer read is a two-hop round trip; the post-move 10,000-thread profile measured cached conversation open at 5 ms p95, local mail refresh at 37 ms p95, and application-owned steady-state memory at 130 MB. The supervisor restarts a crashed utility without restarting the app, and each indexing cursor resumes from SQLite. See docs/S1-DESIGN.md and M3's S1 in docs/M3-PLAN.md.
-20. **Move is separate from Label (2026-08-27):** `V` chooses one existing user label or Done, removes `INBOX`, and removes the active user label when invoked from a user-label view. `L` remains the multi-label membership editor. Move preserves unrelated labels and status flags. A pending-snooze thread reached through an allowed view is movable; Move cancels its reminder, and undo restores the reminder with its prior due time. Drafts, the Snoozed view, Spam, Trash, and Outbox retain their dedicated actions.
+20. **Move is separate from Label (2026-08-27):** `V` chooses one mailbox, Inbox split, or user-label destination. Done represents All Mail without `INBOX`, `SPAM`, or `TRASH`. Important adds `INBOX` and `IMPORTANT`; Other adds `INBOX` and removes `IMPORTANT`. `L` remains the multi-label membership editor. Move preserves unrelated labels and status flags, removes the active user label when invoked from that label's view, and calls Gmail `users.threads.modify` with the planned system-label delta. A pending-snooze thread reached through another view is movable. Move cancels its reminder, and undo restores the reminder with its prior due time. Drafts, Snoozed, and Outbox retain their dedicated actions.

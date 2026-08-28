@@ -1,3 +1,5 @@
+import type { MoveDestination } from './move'
+
 export type TriageAction =
   | { kind: 'archive' | 'trash' | 'spam'; threadIds: string[] }
   | { kind: 'star' | 'markUnread'; threadIds: string[]; on: boolean }
@@ -5,7 +7,7 @@ export type TriageAction =
   | {
       kind: 'move'
       threadIds: string[]
-      destinationLabelId: string | null
+      destination: MoveDestination
       sourceLabelId: string | null
     }
   | { kind: 'restoreInbox' | 'untrash' | 'unsnooze'; threadIds: string[] }

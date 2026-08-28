@@ -41,6 +41,7 @@ async function renderPicker(
         labels,
         targets,
         sourceLabelId: 'label-project',
+        showSplitDestinations: true,
         onClose,
         onMove,
         ...overrides
@@ -60,6 +61,11 @@ describe('MovePicker', () => {
     const input = container.querySelector('[data-testid="move-search"]') as HTMLInputElement
     expect(document.activeElement).toBe(input)
     expect(container.querySelector('[data-testid="move-done"]')?.textContent).toContain('Done')
+    expect(container.querySelector('[data-testid="move-inbox"]')?.textContent).toContain('Inbox')
+    expect(container.querySelector('[data-testid="move-important"]')?.textContent).toContain('Important')
+    expect(container.querySelector('[data-testid="move-other"]')?.textContent).toContain('Other')
+    expect(container.querySelector('[data-testid="move-spam"]')?.textContent).toContain('Spam')
+    expect(container.querySelector('[data-testid="move-trash"]')?.textContent).toContain('Trash')
     expect(container.querySelector('[data-label-id="label-project"]')).toBeNull()
     expect(container.querySelector('[data-label-id="label-travel"]')).not.toBeNull()
 
@@ -69,7 +75,7 @@ describe('MovePicker', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     expect(container.querySelectorAll('[data-testid="move-option"]')).toHaveLength(0)
-    expect(container.textContent).toContain('No matching labels')
+    expect(container.textContent).toContain('No matching destinations')
   })
 
   test('wraps keyboard navigation, moves once, and closes on Escape', async () => {
@@ -82,7 +88,7 @@ describe('MovePicker', () => {
     )
     await act(async () => key(input, 'Enter'))
     expect(onMove).toHaveBeenCalledOnce()
-    expect(onMove).toHaveBeenCalledWith('label-travel')
+    expect(onMove).toHaveBeenCalledWith({ kind: 'label', labelId: 'label-travel' })
 
     await act(async () => key(input, 'Escape'))
     expect(onClose).toHaveBeenCalledOnce()
@@ -102,6 +108,7 @@ describe('MovePicker', () => {
           labels: [],
           targets: [{ id: 'one', labelIds: ['STARRED'], snoozed: true, returned: false }],
           sourceLabelId: null,
+          showSplitDestinations: false,
           onClose: vi.fn(),
           onMove: vi.fn()
         })
@@ -109,5 +116,43 @@ describe('MovePicker', () => {
     })
     expect((container.querySelector('[data-testid="move-done"]') as HTMLButtonElement).disabled).toBe(false)
     expect(container.textContent).toContain('Create labels in Gmail')
+  })
+
+  test('disables the current split destination and can hide split choices', async () => {
+    const { onMove } = await renderPicker({
+      targets: [
+        {
+          id: 'one',
+          labelIds: ['INBOX', 'IMPORTANT'],
+          snoozed: false,
+          returned: false
+        }
+      ],
+      sourceLabelId: null
+    })
+    expect((container.querySelector('[data-testid="move-important"]') as HTMLButtonElement).disabled).toBe(
+      true
+    )
+    expect((container.querySelector('[data-testid="move-other"]') as HTMLButtonElement).disabled).toBe(false)
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="move-other"]') as HTMLButtonElement).click()
+    })
+    expect(onMove).toHaveBeenCalledWith({ kind: 'other' })
+
+    await act(async () => {
+      root.render(
+        createElement(MovePicker, {
+          labels,
+          targets,
+          sourceLabelId: null,
+          showSplitDestinations: false,
+          onClose: vi.fn(),
+          onMove: vi.fn()
+        })
+      )
+    })
+    expect(container.querySelector('[data-testid="move-important"]')).toBeNull()
+    expect(container.querySelector('[data-testid="move-other"]')).toBeNull()
   })
 })
