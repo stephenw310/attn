@@ -1169,18 +1169,22 @@ semantics would leave mail in Inbox and would not advance the queue.
 - Keep the durable operation as the existing `modifyLabels` queue kind. Add `move` to action validation,
   action labels, the queue payload's `RevertedActionKind`, permanent-failure copy, and every exhaustive
   switch. The action executor calls `GmailMailProvider.modifyThread`, which posts the planned add and remove
-  arrays to Gmail `users.threads.modify` under `gmail.modify`. The executor already restores the optional
-  reminder snapshot on permanent failure. No schema, preload, IPC-channel, or new executor behavior is
-  needed.
+  arrays to Gmail `users.threads.modify` under `gmail.modify`. Route new `!` and `#` actions through the same
+  Spam and Trash label plans, reminder transaction, exact undo, and `modifyLabels` operation. Keep the
+  dedicated trash and untrash executor branches for compatible replay of older queued rows. The executor
+  already restores the optional reminder snapshot on permanent failure. No schema, preload, IPC-channel, or
+  new executor behavior is needed.
 - Skip a thread only when Move changes neither its labels nor its reminder state. Do not enqueue that thread
   or add it to the undo entry. If no target changes, return `Already there` and do not push an empty undo
   entry.
-- Compute each undo from that thread's label and reminder pre-state. Add an internal Move undo entry that
-  carries the inverse label delta plus the prior reminder snapshot; `undoLast` applies both in one SQLite
-  transaction. Do not represent this case as `snoozeAt`, which cannot remove a destination label. Undo
-  re-adds only labels that Move removed, removes the destination only when the thread did not already have
-  it, and restores the prior reminder state and due time. A bulk move stays one undo-stack entry even when
-  the selected threads began with different labels or only some had reminders.
+- Compute each undo from that thread's forward label delta and reminder pre-state. Add an internal Move undo
+  entry that carries the inverse label delta plus the prior reminder snapshot; `undoLast` applies both in one
+  SQLite transaction. Do not represent this case as `snoozeAt`, which cannot remove a destination label.
+  Undo re-adds every label that the forward thread mutation removed, removes every label it added, and
+  restores the prior reminder state and due time. Gmail's thread-level operation cannot recreate a label
+  that was present on only some messages before the move; reversing the actual mutation avoids leaving the
+  destination on the whole thread. A bulk move stays one undo-stack entry even when the selected threads
+  began with different labels or only some had reminders.
 - Refactor the renderer's archive-only exit path into a pure view-membership plan used by archive and Move.
   Inbox, Spam, Trash, normal mailboxes, user-label views, Important, and Other each remove a row only when the
   chosen delta ends that membership. Advance the list or open reader to the next surviving conversation.
@@ -1193,9 +1197,10 @@ semantics would leave mail in Inbox and would not advance the queue.
 
 ### Testing
 
-- **Unit:** the Move planner for every mailbox, split, and user-label destination; preservation of unrelated
-  labels and status labels; user-label validation; exact inverse deltas for mixed bulk pre-state; the Gmail
-  provider request body; action decoding and permanent-failure copy for `move`; the view-membership and
+- **Unit:** the Move planner for every mailbox, split, and user-label destination; the shared `!`, `#`, Spam,
+  and Trash plans; preservation of unrelated labels and status labels; user-label validation; exact inverse
+  deltas for mixed bulk pre-state; the Gmail provider request body; action decoding and permanent-failure
+  copy for `move`; the view-membership and
   selection plan at the first, middle, and last row. With a real in-memory store and injectable scheduler,
   prove that Move cancels a pending reminder reached through an ordinary search, that the due scheduler does
   not return it to Inbox, and that undo restores its exact labels, reminder state, and due time. Also prove
@@ -1209,7 +1214,8 @@ semantics would leave mail in Inbox and would not advance the queue.
   without losing `STARRED`, `UNREAD`, or an unrelated label. Reach a pending-snooze thread through an allowed
   user-label view, move it, and prove that it leaves Snoozed. Undo and prove that its original due time
   returns. Move one thread through Spam, Trash, and Inbox. Move one Inbox thread from Important to Other and
-  back.
+  back. Move another thread between Spam and Trash with `!` and `#`, then prove that undo restores its prior
+  system mailbox.
   Prove that `V` and the palette command are present in Spam and Trash but absent in Drafts, Snoozed, and
   Outbox. Assert pending-row counts so the local action cannot pass without entering the durable queue.
 - **T27 integration:** if T31 lands first, T27 adds one split e2e that invokes `V` and proves that Move uses

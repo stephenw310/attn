@@ -112,6 +112,10 @@ function moveChangesReminder(reminder: SnoozeReminderSnapshot | null): boolean {
   return reminder?.state === 'pending' || reminder?.state === 'returned'
 }
 
+function movesToMailbox(action: TriageAction): boolean {
+  return action.kind === 'move' || action.kind === 'spam' || action.kind === 'trash'
+}
+
 function validateMoveLabels(
   db: Db,
   accountId: string,
@@ -141,28 +145,26 @@ function apply(
   const labelsBefore = new Map(
     action.threadIds.map((threadId) => [threadId, labelsFor(db, accountId, threadId)] as const)
   )
-  const labelsOnEveryMessageBefore =
-    action.kind === 'move'
-      ? new Map(
-          action.threadIds.map((threadId) => [
-            threadId,
-            labelsOnEveryMessageFor(db, accountId, threadId, labelsBefore.get(threadId) ?? new Set())
-          ])
-        )
-      : null
+  const labelsOnEveryMessageBefore = movesToMailbox(action)
+    ? new Map(
+        action.threadIds.map((threadId) => [
+          threadId,
+          labelsOnEveryMessageFor(db, accountId, threadId, labelsBefore.get(threadId) ?? new Set())
+        ])
+      )
+    : null
   const remindersBefore = new Map(
     action.threadIds.map((threadId) => [threadId, snoozeReminderSnapshot(db, accountId, threadId)] as const)
   )
-  const undo: UndoAction[] =
-    action.kind === 'move'
-      ? []
-      : action.threadIds.map((id): UndoAction => {
-          if (action.kind === 'unsnooze' || action.kind === 'archive') {
-            const reminder = pendingSnoozeFor(db, accountId, id)
-            if (reminder) return { kind: 'snoozeAt', threadIds: [id], dueAt: reminder.dueAt }
-          }
-          return inverseForThread(action, labelsBefore.get(id) ?? new Set(), id)
-        })
+  const undo: UndoAction[] = movesToMailbox(action)
+    ? []
+    : action.threadIds.map((id): UndoAction => {
+        if (action.kind === 'unsnooze' || action.kind === 'archive') {
+          const reminder = pendingSnoozeFor(db, accountId, id)
+          if (reminder) return { kind: 'snoozeAt', threadIds: [id], dueAt: reminder.dueAt }
+        }
+        return inverseForThread(action, labelsBefore.get(id) ?? new Set(), id)
+      })
   const enqueue = db.prepare(
     `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
      VALUES (?, ?, ?, ?, 'pending')`
@@ -170,7 +172,7 @@ function apply(
   const refs: QueuedActionRef[] = []
   db.transaction(() => {
     for (const threadId of action.threadIds) {
-      if (action.kind === 'move') {
+      if (movesToMailbox(action)) {
         const labels = labelsBefore.get(threadId) ?? new Set<string>()
         const reminderBefore = remindersBefore.get(threadId) ?? null
         const delta = effectiveLabelDelta(plan, labels, labelsOnEveryMessageBefore?.get(threadId) ?? labels)
@@ -181,7 +183,11 @@ function apply(
           kind: 'moveUndo',
           threadIds: [threadId],
           add: [...delta.remove],
-          remove: plan.add.filter((label) => !labels.has(label)),
+          // Reverse the labels that the forward thread mutation actually
+          // added. Thread-level Gmail operations cannot recreate partial
+          // per-message membership, so checking the thread-label union here
+          // would leave the destination applied to the whole thread.
+          remove: [...delta.add],
           reminderBefore
         }
         db.prepare(
@@ -361,7 +367,7 @@ export function performTriage(
 ): TriageResult {
   if (action.kind === 'move') validateMoveLabels(db, accountId, action)
   const { undo, refs } = apply(db, accountId, action)
-  const label = actionLabel(action, action.kind === 'move' ? undo.length : action.threadIds.length)
+  const label = actionLabel(action, movesToMailbox(action) ? undo.length : action.threadIds.length)
   if (recordUndo && undo.length > 0) {
     const undoStack = undoStackFor(accountId)
     undoStack.push({

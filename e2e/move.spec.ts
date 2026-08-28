@@ -154,6 +154,33 @@ test('moves through Spam, Trash, and Inbox with one Gmail label delta per move',
   await expect(roadmap).toBeVisible()
 })
 
+test('uses the same exclusive Spam and Trash transitions for direct shortcuts', async ({ page }) => {
+  const roadmap = page.locator('[data-testid="thread-row"][data-thread-id="t-roadmap"]')
+  await expect(roadmap).toBeVisible()
+
+  await page.getByTestId('thread-list').focus()
+  await page.keyboard.press('#')
+  await expect(roadmap).toHaveCount(0)
+
+  await goTo(page, 'r')
+  await expect(roadmap).toBeVisible()
+  await page.getByTestId('thread-list').focus()
+  await page.keyboard.press('!')
+  await expect(roadmap).toHaveCount(0)
+
+  await goTo(page, 'p')
+  await expect(roadmap).toBeVisible()
+  await page.getByTestId('thread-list').focus()
+  await page.keyboard.press('#')
+  await expect(roadmap).toHaveCount(0)
+  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
+
+  await page.keyboard.press('z')
+  await expect(roadmap).toHaveCount(0)
+  await goTo(page, 'p')
+  await expect(roadmap).toBeVisible()
+})
+
 test('re-evaluates an active Inbox search after the optimistic Move', async ({ page }) => {
   await page.getByTestId('thread-list').focus()
   await page.keyboard.press('/')

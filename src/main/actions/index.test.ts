@@ -72,10 +72,115 @@ describe('mailbox triage projection', () => {
       performTriage(db, ACCOUNT, { kind: 'trash', threadIds: ['thread'] }, false)
       expect(mailboxIds('allMail')).toEqual([])
       expect(mailboxIds('trash')).toEqual(['thread'])
+      expect(
+        db.prepare('SELECT kind FROM action_queue ORDER BY id LIMIT 1').get() as { kind: string }
+      ).toEqual({ kind: 'modifyLabels' })
 
       performTriage(db, ACCOUNT, { kind: 'untrash', threadIds: ['thread'] }, false)
       expect(mailboxIds('allMail')).toEqual(['thread'])
       expect(mailboxIds('trash')).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('shares Spam and Trash queue operations with Move and restores direct-action pre-state exactly', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      const insertThread = db.prepare(
+        'INSERT INTO threads (account_id, id, subject, last_msg_at) VALUES (?, ?, ?, 1)'
+      )
+      const insertMessage = db.prepare(
+        'INSERT INTO messages (account_id, id, thread_id, labels_json) VALUES (?, ?, ?, ?)'
+      )
+      const insertThreadLabel = db.prepare(
+        'INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)'
+      )
+      for (const threadId of ['direct-trash', 'move-trash']) {
+        insertThread.run(ACCOUNT, threadId, threadId)
+        insertMessage.run(ACCOUNT, `${threadId}-message`, threadId, JSON.stringify(['SPAM', 'STARRED']))
+        insertThreadLabel.run(ACCOUNT, threadId, 'SPAM')
+        insertThreadLabel.run(ACCOUNT, threadId, 'STARRED')
+      }
+      for (const threadId of ['direct-spam', 'move-spam']) {
+        insertThread.run(ACCOUNT, threadId, threadId)
+        insertMessage.run(ACCOUNT, `${threadId}-message`, threadId, JSON.stringify(['TRASH', 'STARRED']))
+        insertThreadLabel.run(ACCOUNT, threadId, 'TRASH')
+        insertThreadLabel.run(ACCOUNT, threadId, 'STARRED')
+      }
+      db.prepare(
+        `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+         VALUES (?, 'direct-trash', 'snooze', 1234, 'pending')`
+      ).run(ACCOUNT)
+
+      expect(performTriage(db, ACCOUNT, { kind: 'trash', threadIds: ['direct-trash'] })).toEqual({
+        label: 'Trashed'
+      })
+      performTriage(
+        db,
+        ACCOUNT,
+        {
+          kind: 'move',
+          threadIds: ['move-trash'],
+          destination: { kind: 'trash' },
+          sourceLabelId: null
+        },
+        false
+      )
+      performTriage(db, ACCOUNT, { kind: 'spam', threadIds: ['direct-spam'] }, false)
+      performTriage(
+        db,
+        ACCOUNT,
+        {
+          kind: 'move',
+          threadIds: ['move-spam'],
+          destination: { kind: 'spam' },
+          sourceLabelId: null
+        },
+        false
+      )
+
+      const queued = db.prepare('SELECT kind, payload FROM action_queue ORDER BY id').all() as Array<{
+        kind: string
+        payload: string
+      }>
+      expect(queued.map((row) => row.kind)).toEqual([
+        'modifyLabels',
+        'modifyLabels',
+        'modifyLabels',
+        'modifyLabels'
+      ])
+      expect(queued.map((row) => JSON.parse(row.payload))).toEqual([
+        expect.objectContaining({ add: ['TRASH'], remove: ['SPAM'], actionKind: 'trash' }),
+        expect.objectContaining({ add: ['TRASH'], remove: ['SPAM'], actionKind: 'move' }),
+        expect.objectContaining({ add: ['SPAM'], remove: ['TRASH'], actionKind: 'spam' }),
+        expect.objectContaining({ add: ['SPAM'], remove: ['TRASH'], actionKind: 'move' })
+      ])
+      expect(
+        db
+          .prepare("SELECT state FROM reminders WHERE account_id = ? AND thread_id = 'direct-trash'")
+          .get(ACCOUNT)
+      ).toEqual({ state: 'canceled' })
+
+      const labelsFor = (threadId: string): string[] =>
+        (
+          db
+            .prepare(
+              'SELECT label_id FROM thread_labels WHERE account_id = ? AND thread_id = ? ORDER BY label_id'
+            )
+            .all(ACCOUNT, threadId) as Array<{ label_id: string }>
+        ).map((row) => row.label_id)
+      expect(labelsFor('direct-trash')).toEqual(['STARRED', 'TRASH'])
+      expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid trashed' })
+      expect(labelsFor('direct-trash')).toEqual(['SPAM', 'STARRED'])
+      expect(
+        db
+          .prepare(
+            "SELECT due_at AS dueAt, state FROM reminders WHERE account_id = ? AND thread_id = 'direct-trash'"
+          )
+          .get(ACCOUNT)
+      ).toEqual({ dueAt: 1234, state: 'pending' })
     } finally {
       db.close()
     }
@@ -280,7 +385,7 @@ describe('mailbox triage projection', () => {
     }
   })
 
-  it('applies a destination to every message when it was only partially present', () => {
+  it('applies a partial destination to every message and reverses the thread mutation on undo', () => {
     const db = openDatabase(':memory:')
     try {
       db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
@@ -322,10 +427,7 @@ describe('mailbox triage projection', () => {
       ).toMatchObject({ add: ['Label_Destination'], remove: ['INBOX'] })
 
       expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid moved' })
-      expect(messageLabels()).toEqual([
-        ['Label_Destination', 'INBOX'],
-        ['Label_Destination', 'INBOX']
-      ])
+      expect(messageLabels()).toEqual([['INBOX'], ['INBOX']])
       expect(
         JSON.parse(
           (
@@ -334,7 +436,7 @@ describe('mailbox triage projection', () => {
             }
           ).payload
         )
-      ).toMatchObject({ add: ['INBOX'], remove: [], revertsQueueId: 1 })
+      ).toMatchObject({ add: ['INBOX'], remove: ['Label_Destination'], revertsQueueId: 1 })
     } finally {
       db.close()
     }

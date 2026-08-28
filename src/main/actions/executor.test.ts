@@ -508,22 +508,26 @@ describe('action executor', () => {
     ])
   })
 
-  it('restores the pending reminder when Gmail rejects Move', async () => {
-    const move = row(1, 'a@example.com', 'move')
-    move.payload = JSON.stringify({
-      add: ['Label_2'],
-      remove: ['INBOX'],
-      actionKind: 'move',
+  it.each([
+    { actionKind: 'move' as const, add: ['Label_2'], remove: ['INBOX'] },
+    { actionKind: 'trash' as const, add: ['TRASH'], remove: ['INBOX'] },
+    { actionKind: 'spam' as const, add: ['SPAM'], remove: ['INBOX'] }
+  ])('restores the pending reminder when Gmail rejects $actionKind', async ({ actionKind, add, remove }) => {
+    const queued = row(1, 'a@example.com', actionKind)
+    queued.payload = JSON.stringify({
+      add,
+      remove,
+      actionKind,
       reminderBefore: { dueAt: 20_000, state: 'pending' }
     })
     const reminders = new Map<string, SnoozeReminderSnapshot>([
-      ['move', { dueAt: 20_000, state: 'canceled' }]
+      [actionKind, { dueAt: 20_000, state: 'canceled' }]
     ])
-    const actionProvider = provider(vi.fn().mockRejectedValue(new GmailApiError(400, 'bad move')))
-    vi.mocked(actionProvider.getThread).mockResolvedValue(snapshot('move', []))
+    const actionProvider = provider(vi.fn().mockRejectedValue(new GmailApiError(400, `bad ${actionKind}`)))
+    vi.mocked(actionProvider.getThread).mockResolvedValue(snapshot(actionKind, []))
     const onReverted = vi.fn()
     const executor = new ActionExecutor(
-      fakeDb([move], { reminders }),
+      fakeDb([queued], { reminders }),
       () => 'a@example.com',
       () => actionProvider,
       { notifyReverted: onReverted }
@@ -531,9 +535,9 @@ describe('action executor', () => {
 
     await executor.trigger()
 
-    expect(reminders.get('move')).toEqual({ dueAt: 20_000, state: 'pending' })
+    expect(reminders.get(actionKind)).toEqual({ dueAt: 20_000, state: 'pending' })
     expect(onReverted).toHaveBeenCalledWith('a@example.com', [
-      expect.objectContaining({ kind: 'move', returnedToInbox: false, resolution: 'restored' })
+      expect.objectContaining({ kind: actionKind, returnedToInbox: false, resolution: 'restored' })
     ])
   })
 

@@ -15,11 +15,14 @@ export function planAction(action: TriageAction): ThreadActionPlan {
     case 'unsnooze':
       return { add: ['INBOX'], remove: [], queueKind: 'modifyLabels' }
     case 'trash':
-      return { add: ['TRASH'], remove: ['INBOX'], queueKind: 'trash' }
-    case 'untrash':
-      return { add: ['INBOX'], remove: ['TRASH'], queueKind: 'untrash' }
-    case 'spam':
-      return { add: ['SPAM'], remove: ['INBOX'], queueKind: 'modifyLabels' }
+    case 'spam': {
+      const delta = moveLabelDelta({ kind: action.kind }, null)
+      return { ...delta, queueKind: 'modifyLabels' }
+    }
+    case 'untrash': {
+      const delta = moveLabelDelta({ kind: 'inbox' }, null)
+      return { ...delta, queueKind: 'modifyLabels' }
+    }
     case 'star':
       return {
         add: action.on ? ['STARRED'] : [],
@@ -85,16 +88,16 @@ export function inverseForThread(
     case 'unsnooze':
       return { kind: 'archive', threadIds: [threadId] }
     case 'trash':
-      return { kind: 'untrash', threadIds: [threadId] }
     case 'untrash':
-      return { kind: 'trash', threadIds: [threadId] }
-    case 'spam':
+    case 'spam': {
+      const plan = planAction(action)
       return {
         kind: 'label',
         threadIds: [threadId],
-        add: labels.has('INBOX') ? ['INBOX'] : [],
-        remove: ['SPAM']
+        add: plan.remove.filter((label) => labels.has(label)),
+        remove: plan.add.filter((label) => !labels.has(label))
       }
+    }
     case 'star':
       return { kind: 'star', threadIds: [threadId], on: labels.has('STARRED') }
     case 'markUnread':

@@ -4,7 +4,7 @@ import { isTriageAction } from '.'
 import { inverseForThread, planAction } from './plan'
 
 describe('triage action planning', () => {
-  it('maps archive and spam to idempotent label deltas', () => {
+  it('maps archive, spam, and trash to idempotent label deltas', () => {
     expect(planAction({ kind: 'archive', threadIds: ['t1'] })).toEqual({
       add: [],
       remove: ['INBOX'],
@@ -12,21 +12,18 @@ describe('triage action planning', () => {
     })
     expect(planAction({ kind: 'spam', threadIds: ['t1'] })).toEqual({
       add: ['SPAM'],
-      remove: ['INBOX'],
+      remove: ['INBOX', 'TRASH'],
       queueKind: 'modifyLabels'
     })
-  })
-
-  it('projects dedicated trash endpoints into local mailbox labels', () => {
     expect(planAction({ kind: 'trash', threadIds: ['t1'] })).toEqual({
       add: ['TRASH'],
-      remove: ['INBOX'],
-      queueKind: 'trash'
+      remove: ['INBOX', 'SPAM'],
+      queueKind: 'modifyLabels'
     })
     expect(planAction({ kind: 'untrash', threadIds: ['t1'] })).toEqual({
       add: ['INBOX'],
-      remove: ['TRASH'],
-      queueKind: 'untrash'
+      remove: ['SPAM', 'TRASH'],
+      queueKind: 'modifyLabels'
     })
   })
 
@@ -44,6 +41,18 @@ describe('triage action planning', () => {
         't1'
       )
     ).toEqual({ kind: 'label', threadIds: ['t1'], add: ['keep'], remove: ['new'] })
+    expect(inverseForThread({ kind: 'trash', threadIds: ['t1'] }, new Set(['SPAM']), 't1')).toEqual({
+      kind: 'label',
+      threadIds: ['t1'],
+      add: ['SPAM'],
+      remove: ['TRASH']
+    })
+    expect(inverseForThread({ kind: 'spam', threadIds: ['t1'] }, new Set(['TRASH']), 't1')).toEqual({
+      kind: 'label',
+      threadIds: ['t1'],
+      add: ['TRASH'],
+      remove: ['SPAM']
+    })
   })
 
   it('plans Move separately from label editing and preserves pre-existing destinations on undo', () => {
