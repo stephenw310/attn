@@ -217,6 +217,42 @@
   background: var(--attn-login-glow);
 }
 
+/* Fixed photo-overlay colors keep contrast stable across both app themes. */
+.app-inbox-zero-scrim {
+  background:
+    linear-gradient(rgb(6 10 16 / 18%), rgb(6 10 16 / 48%)),
+    radial-gradient(circle at center, transparent 5%, rgb(4 7 12 / 28%) 100%);
+}
+
+.app-inbox-zero-copy {
+  color: #ffffff;
+  text-shadow: 0 1px 18px rgb(0 0 0 / 32%);
+}
+
+.app-inbox-zero-card {
+  border: 1px solid rgb(255 255 255 / 18%);
+  background: rgb(9 13 19 / 34%);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 22%);
+  backdrop-filter: blur(18px);
+}
+
+.app-inbox-zero-muted {
+  color: rgb(255 255 255 / 76%);
+}
+
+.app-inbox-zero-chip {
+  border: 1px solid rgb(255 255 255 / 22%);
+  background: rgb(255 255 255 / 9%);
+  color: rgb(255 255 255 / 88%);
+  text-shadow: none;
+}
+
+.app-inbox-zero-chip:hover {
+  border-color: rgb(255 255 255 / 42%);
+  background: rgb(255 255 255 / 16%);
+  color: #ffffff;
+}
+
 /* Electron window-drag regions — not expressible as standard utilities. */
 .app-drag {
   -webkit-app-region: drag;

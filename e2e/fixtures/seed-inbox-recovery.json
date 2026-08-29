@@ -1,0 +1,6 @@
+{
+  "account": "recovery@attn.test",
+  "splitSetup": true,
+  "backfillCursor": "done",
+  "threads": []
+}

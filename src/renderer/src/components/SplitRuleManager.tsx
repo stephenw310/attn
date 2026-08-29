@@ -263,6 +263,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const editorOpen = draft !== null
   const matchingSplits = useMemo(
     () => state.splits.filter((split) => split.id !== OTHER_SPLIT_ID),
     [state.splits]
@@ -311,8 +312,8 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
   }, [draft, draggingId, onClose])
 
   useEffect(() => {
-    if (draft) nameInputRef.current?.focus()
-  }, [draft])
+    if (editorOpen) nameInputRef.current?.focus()
+  }, [editorOpen])
 
   const run = async (operation: () => Promise<void>): Promise<boolean> => {
     setBusy(true)

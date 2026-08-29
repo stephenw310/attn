@@ -66,6 +66,7 @@ export const IPC_CHANNELS = {
   outboxChanged: 'outbox:changed',
   outboxProgress: 'outbox:progress',
   syncGetState: 'sync:getState',
+  syncGetInboxReady: 'sync:getInboxReady',
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
   mailSearch: 'mail:search',
@@ -190,6 +191,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.outboxReopen]: { args: [outboxId: string]; result: ReopenOutboxResult }
   [IPC_CHANNELS.outboxListPending]: { args: []; result: OutboxItem[] }
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
+  [IPC_CHANNELS.syncGetInboxReady]: { args: []; result: boolean }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: string | null }
   [IPC_CHANNELS.mailSearch]: { args: [query: string]; result: SearchResponse }
