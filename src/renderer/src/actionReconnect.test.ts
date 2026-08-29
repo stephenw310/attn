@@ -32,10 +32,13 @@ describe('action reconnect result copy', () => {
   })
 
   it('does not claim another account resumed the active account queue', () => {
+    // Sign-in no longer switches the active account, so the status still names
+    // the paused account as active while accountId names who reconnected.
     expect(
       actionReconnectMessage('a@example.com', {
-        status: status(true, 'b@example.com'),
-        resumedActions: 0
+        status: status(true, 'a@example.com'),
+        resumedActions: 0,
+        accountId: 'b@example.com'
       })
     ).toBe('Connected as b@example.com — pending changes for a@example.com remain paused.')
   })

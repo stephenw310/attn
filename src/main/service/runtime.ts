@@ -66,10 +66,13 @@ interface AccountSession {
 /**
  * Serializes the Gmail-heavy historical chain across accounts: one holder at a
  * time, and a waiting active account is granted before waiting inactive ones.
- * The chain's durable cursors are what make this safe — a queued account
- * simply resumes where its cursor points once granted.
+ * Priority is evaluated when the slot is handed over, not when a waiter
+ * queued, so a switch that happens mid-wait still puts the newly active
+ * account ahead of everyone queued before it. The chain's durable cursors are
+ * what make this safe — a queued account simply resumes where its cursor
+ * points once granted. Exported for its focused unit tests.
  */
-class IndexingSlot {
+export class IndexingSlot {
   private holder: string | null = null
   private queue: Array<{ accountId: string; grant: (release: () => void) => void }> = []
 
@@ -82,14 +85,7 @@ class IndexingSlot {
         grant(this.makeRelease(accountId))
         return
       }
-      const entry = { accountId, grant }
-      if (this.isPriority(accountId)) {
-        const index = this.queue.findIndex((queued) => !this.isPriority(queued.accountId))
-        if (index >= 0) this.queue.splice(index, 0, entry)
-        else this.queue.push(entry)
-      } else {
-        this.queue.push(entry)
-      }
+      this.queue.push({ accountId, grant })
     })
   }
 
@@ -98,7 +94,8 @@ class IndexingSlot {
     return () => {
       if (released || this.holder !== accountId) return
       released = true
-      const next = this.queue.shift()
+      const priorityIndex = this.queue.findIndex((queued) => this.isPriority(queued.accountId))
+      const next = priorityIndex >= 0 ? this.queue.splice(priorityIndex, 1)[0] : this.queue.shift()
       if (!next) {
         this.holder = null
         return
@@ -125,6 +122,8 @@ export class ServiceRuntime {
    * non-idempotent remote draft create.
    */
   private readonly retirements = new Map<string, Promise<void>>()
+  /** Deferred session creations, awaitable by roster and switch operations. */
+  private readonly pendingSessionCreations = new Map<string, Promise<void>>()
   /** The latest roster intent, consulted when a deferred re-create lands. */
   private desiredAccounts = new Map<string, ServiceAccountAuth | null>()
   private desiredActiveAccountId: string | null = null
@@ -240,11 +239,22 @@ export class ServiceRuntime {
       if (resumed > 0) void session.syncController.resumeOnlineWork()
       return resumed
     }
+    if (operation === 'apply-accounts') {
+      const state = args[0]
+      if (!isServiceAccountsState(state)) throw new Error('invalid accounts state')
+      // Await deferred re-creates so the caller's answer names sessions that
+      // actually exist — main publishes AuthStatus from this response.
+      await Promise.all(this.applyAccounts(state))
+      return this.activeAccountId
+    }
     if (operation === 'set-active-account') {
       const accountId = args[0]
-      if (typeof accountId !== 'string' || !this.sessions.has(accountId)) {
-        throw new Error('unknown account')
-      }
+      if (typeof accountId !== 'string') throw new Error('unknown account')
+      // A just-re-added account can still be waiting out its predecessor's
+      // worker retirement; the switch waits for the session instead of failing.
+      const pending = this.pendingSessionCreations.get(accountId)
+      if (pending && !this.sessions.has(accountId)) await pending
+      if (!this.sessions.has(accountId)) throw new Error('unknown account')
       this.setActiveAccount(accountId)
       return this.activeAccountId
     }
@@ -266,7 +276,7 @@ export class ServiceRuntime {
 
   control(control: ServiceControl): void {
     if (control.kind === 'accounts') {
-      this.applyAccounts(control.accounts)
+      void this.applyAccounts(control.accounts)
       return
     }
     if (control.kind === 'focus') {
@@ -428,29 +438,38 @@ export class ServiceRuntime {
   }
 
   /** Create the account's session now, or once its predecessor's workers retire. */
-  private createSessionWhenRetired(id: string): void {
+  private createSessionWhenRetired(id: string): Promise<void> {
     const retirement = this.retirements.get(id)
     if (!retirement) {
       const auth = this.desiredAccounts.get(id)
       if (auth !== undefined) this.createSession(id, auth, auth === null)
-      return
+      return Promise.resolve()
     }
-    void retirement.then(() => {
-      if (this.stopped || this.sessions.has(id)) return
-      // Re-check the latest intent: the roster may have changed again while
-      // the predecessor quiesced, and only the newest wanted state counts.
-      const auth = this.desiredAccounts.get(id)
-      if (auth === undefined) return
-      this.createSession(id, auth, auth === null)
-      if (this.desiredActiveAccountId === id || this.activeAccountId === null) {
-        this.setActiveAccount(this.resolveActiveAccount(this.desiredActiveAccountId, 'control'))
-      }
-      this.broadcastBadge()
-    })
+    let pending: Promise<void>
+    pending = retirement
+      .then(() => {
+        if (this.stopped || this.sessions.has(id)) return
+        // Re-check the latest intent: the roster may have changed again while
+        // the predecessor quiesced, and only the newest wanted state counts.
+        const auth = this.desiredAccounts.get(id)
+        if (auth === undefined) return
+        this.createSession(id, auth, auth === null)
+        if (this.desiredActiveAccountId === id || this.activeAccountId === null) {
+          this.setActiveAccount(this.resolveActiveAccount(this.desiredActiveAccountId, 'control'))
+        }
+        this.broadcastBadge()
+      })
+      .finally(() => {
+        if (this.pendingSessionCreations.get(id) === pending) this.pendingSessionCreations.delete(id)
+      })
+    this.pendingSessionCreations.set(id, pending)
+    return pending
   }
 
-  private applyAccounts(state: ServiceAccountsState): void {
-    if (this.stopped) return
+  /** Returns the deferred session creations so callers can await settlement. */
+  private applyAccounts(state: ServiceAccountsState): Promise<void>[] {
+    if (this.stopped) return []
+    const pendingCreations: Promise<void>[] = []
     this.config = state.config
     const currentSeedIds = [
       ...new Set([
@@ -470,7 +489,7 @@ export class ServiceRuntime {
     for (const auth of state.accounts) {
       const existing = this.sessions.get(auth.id)
       if (!existing) {
-        this.createSessionWhenRetired(auth.id)
+        pendingCreations.push(this.createSessionWhenRetired(auth.id))
         continue
       }
       const reauthenticated = existing.auth?.generation !== auth.generation
@@ -487,12 +506,13 @@ export class ServiceRuntime {
       }
     }
     for (const seedId of wantedSeedIds) {
-      if (!this.sessions.has(seedId)) this.createSessionWhenRetired(seedId)
+      if (!this.sessions.has(seedId)) pendingCreations.push(this.createSessionWhenRetired(seedId))
     }
     const nextActive = this.resolveActiveAccount(state.activeAccountId, 'control')
     if (nextActive !== this.activeAccountId) this.setActiveAccount(nextActive, { force: true })
     else this.persistActiveAccount()
     this.broadcastBadge()
+    return pendingCreations
   }
 
   /**
@@ -1089,6 +1109,16 @@ function isSearchIndexStatsRequest(value: unknown): value is SearchIndexStatsReq
 
 function isMessageMailbox(value: unknown): value is MessageMailbox {
   return value === 'all-mail' || value === 'spam' || value === 'trash'
+}
+
+function isServiceAccountsState(value: unknown): value is ServiceAccountsState {
+  if (!value || typeof value !== 'object') return false
+  const state = value as Partial<ServiceAccountsState>
+  return (
+    Array.isArray(state.accounts) &&
+    (state.activeAccountId === null || typeof state.activeAccountId === 'string') &&
+    (state.seedAccountIds === undefined || Array.isArray(state.seedAccountIds))
+  )
 }
 
 function validDelay(value: unknown): number {

@@ -644,20 +644,15 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   // the menu's disabled rows make the pointer path match. `Esc` saves and
   // closes the draft first (F6), so nothing is ever lost to a switch.
   const accountActionsBlocked = composerDraft !== null
-  // Adding an account is the same OAuth flow as reconnecting: an existing
-  // address refreshes its tokens, a new one joins the roster and becomes
-  // active (F18). The account-keyed remount in App handles the swap.
-  const addAccount = useCallback(() => {
-    if (accountActionsBlocked) {
-      showToast('Save and close the draft before adding an account')
-      return
-    }
-    void reconnectGoogle()
-  }, [accountActionsBlocked, reconnectGoogle, showToast])
+  // The guards below read this ref, not the captured boolean: an OAuth
+  // completion (or any queued callback) can arrive minutes after the closure
+  // was created, and only the ref knows whether a composer is open *now*.
+  const composerOpenRef = useRef(false)
+  composerOpenRef.current = accountActionsBlocked
   const switchAccount = useCallback(
     (accountId: string) => {
       if (!window.attn || accountId === status.activeAccountId) return
-      if (accountActionsBlocked) {
+      if (composerOpenRef.current) {
         showToast('Save and close the draft before switching accounts')
         return
       }
@@ -666,8 +661,28 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         .then(onStatus)
         .catch(() => void showToast('Could not switch accounts'))
     },
-    [accountActionsBlocked, onStatus, showToast, status.activeAccountId]
+    [onStatus, showToast, status.activeAccountId]
   )
+  // Adding an account is the same OAuth flow as reconnecting: an existing
+  // address refreshes its tokens, a new one joins the roster (F18). Sign-in
+  // no longer activates the addition — the browser flow can complete minutes
+  // later, when a composer may be open — so activation goes through the
+  // guarded switch here, and a blocked switch leaves the account added but
+  // not active rather than dropping unsaved keystrokes.
+  const addAccount = useCallback(() => {
+    if (composerOpenRef.current) {
+      showToast('Save and close the draft before adding an account')
+      return
+    }
+    void reconnectGoogle().then((result) => {
+      if (!result?.accountId || result.accountId === result.status.activeAccountId) return
+      if (composerOpenRef.current) {
+        void showToast(`Added ${result.accountId} — save the draft, then switch from the account menu`)
+        return
+      }
+      switchAccount(result.accountId)
+    })
+  }, [reconnectGoogle, showToast, switchAccount])
   const accountCommands = useMemo(
     () => ({
       accounts: status.accounts,

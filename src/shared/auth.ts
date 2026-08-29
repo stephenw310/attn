@@ -21,6 +21,13 @@ export interface AuthStatus {
 export interface AuthSignInResult {
   status: AuthStatus
   resumedActions: number
+  /**
+   * The account the completed OAuth flow identified (normalized). Sign-in no
+   * longer activates a newly added account by itself — activation goes through
+   * the guarded switch — so this tells the renderer what to offer switching to.
+   * Absent when the flow ended without tokens (e.g. unconfigured OAuth).
+   */
+  accountId?: string
 }
 
 /**

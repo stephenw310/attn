@@ -157,6 +157,16 @@ rows could double a non-idempotent Gmail draft create); re-authentication resets
 credentials; and account switching/adding/sign-out are blocked while any composer is open — `Esc` saves and
 closes first — with an e2e proving a typed reply survives a switch attempt.
 
+Second review round (2026-08-29): roster updates from sign-in/sign-out go through an awaited
+`apply-accounts` operation — the utility answers with the active account whose sessions actually exist,
+deferred re-creates included, so main can never publish an `AuthStatus` naming a still-retiring account
+while reads route elsewhere; `set-active-account` likewise waits for a pending session instead of failing.
+Sign-in no longer activates a newly added account at all: activation runs through the renderer's guarded
+switch (reading a live composer-open ref, since the browser OAuth flow can complete minutes after the
+click), which is what closes the completion-mid-compose remount hole. The indexing slot picks its next
+holder at hand-over time, so an account switch made while queued still runs the newly active account's
+historical chain first (focused `IndexingSlot` unit tests).
+
 ---
 
 ### A1 — Token roster and auth sessions (main process)

@@ -549,7 +549,10 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   collapsed/expanded state is global; its contents are per account. While any composer is open, switching,
   adding, and signing out are unavailable (menu rows disabled, `Mod+1..9` and palette inert): a switch
   swaps the whole surface and would drop keystrokes the autosave has not yet captured, so `Esc` — which
-  saves and closes the draft (F6) — always comes first.
+  saves and closes the draft (F6) — always comes first. An OAuth completion never switches by itself
+  either: adding an account only joins the roster, and activation goes through the same guarded switch —
+  a sign-in whose browser flow completes minutes later, mid-compose, leaves the account added but not
+  active rather than swapping the surface.
 - **Scoping:** threads, labels, splits and their notification settings, contacts and autocomplete ranking,
   local and server search, snooze and follow-up reminders, drafts, outbox rows, the session undo stack, and
   command usage all key off the owning account. App-level preferences stay global: theme, launch at

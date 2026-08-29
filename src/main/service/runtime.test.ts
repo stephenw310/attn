@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import type { ThreadPage } from '../../shared/mail'
 import type { ServiceEvent, ServiceInitialize } from './protocol'
-import { ServiceRuntime } from './runtime'
+import { IndexingSlot, ServiceRuntime } from './runtime'
 
 // Two seeded accounts prove the session-per-account runtime (F18): reads are
 // answered for the active account only, the switch is durable, and the badge
@@ -144,6 +144,48 @@ describe('ServiceRuntime with several accounts', () => {
     expect(await listInboxSubjects(second.runtime)).toEqual(['Beta launch', 'Beta digest'])
   })
 
+  it('acknowledges a roster update only once deferred sessions exist, and switches wait for them', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+
+    // Remove the active account, then re-add it through the awaited operation
+    // main uses: the answer must name a session that actually exists, so the
+    // published AuthStatus can never point at a still-retiring account.
+    runtime.control({
+      kind: 'accounts',
+      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    })
+    const active = await runtime.internal('apply-accounts', [
+      {
+        config: null,
+        accounts: [],
+        activeAccountId: 'primary@attn.test',
+        seedAccountIds: ['primary@attn.test', 'second@attn.test']
+      }
+    ])
+    expect(active).toBe('primary@attn.test')
+    expect(runtime.ready().accountIds).toContain('primary@attn.test')
+    expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
+
+    // And a switch aimed at a still-pending session waits instead of failing.
+    runtime.control({
+      kind: 'accounts',
+      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    })
+    runtime.control({
+      kind: 'accounts',
+      accounts: {
+        config: null,
+        accounts: [],
+        activeAccountId: null,
+        seedAccountIds: ['primary@attn.test', 'second@attn.test']
+      }
+    })
+    expect(runtime.ready().accountIds).toEqual(['second@attn.test'])
+    expect(await runtime.internal('set-active-account', ['primary@attn.test'])).toBe('primary@attn.test')
+    expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
+  })
+
   it('defers re-creating a re-added account until its predecessor workers retire', async () => {
     const input = makeInput()
     const { runtime } = await createRuntime(input)
@@ -193,5 +235,43 @@ describe('ServiceRuntime with several accounts', () => {
     expect(runtime.ready().accountIds).toEqual(['primary@attn.test'])
     expect(runtime.ready().activeAccountId).toBe('primary@attn.test')
     expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
+  })
+})
+
+describe('IndexingSlot', () => {
+  it('grants the slot to the account that is active at release time', async () => {
+    let active = 'a'
+    const slot = new IndexingSlot((accountId) => accountId === active)
+    const releaseA = await slot.acquire('a')
+
+    const grants: string[] = []
+    const waiters = ['b', 'c'].map((accountId) =>
+      slot.acquire(accountId).then((release) => {
+        grants.push(accountId)
+        release()
+      })
+    )
+
+    // The user switches to c while it is already queued behind b. Priority is
+    // decided at hand-over, so c must run its chain before b.
+    active = 'c'
+    releaseA()
+    await Promise.all(waiters)
+    expect(grants).toEqual(['c', 'b'])
+  })
+
+  it('falls back to arrival order when no waiter is active', async () => {
+    const slot = new IndexingSlot(() => false)
+    const releaseA = await slot.acquire('a')
+    const grants: string[] = []
+    const waiters = ['b', 'c'].map((accountId) =>
+      slot.acquire(accountId).then((release) => {
+        grants.push(accountId)
+        release()
+      })
+    )
+    releaseA()
+    await Promise.all(waiters)
+    expect(grants).toEqual(['b', 'c'])
   })
 })

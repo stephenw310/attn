@@ -158,6 +158,17 @@ export class ServiceSupervisor {
     this.control({ kind: 'accounts', accounts })
   }
 
+  /**
+   * Roster update that resolves only after the utility applied it — deferred
+   * session re-creates included — answering with the utility's actual active
+   * account id, so main never publishes an AuthStatus ahead of the sessions
+   * that back it.
+   */
+  applyAccounts(accounts: ServiceAccountsState): Promise<unknown> {
+    this.initialize.accounts = accounts
+    return this.internal('apply-accounts', accounts)
+  }
+
   cacheTokens(accountId: string, tokens: TokenSet): void {
     this.initialize.accounts = {
       ...this.initialize.accounts,

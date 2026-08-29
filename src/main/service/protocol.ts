@@ -47,6 +47,7 @@ export type ServiceControl =
 
 export type ServiceOperation =
   | 'resume-auth-failures'
+  | 'apply-accounts'
   | 'set-active-account'
   | 'mark-login-item-registered'
   | 'set-notification-pause'

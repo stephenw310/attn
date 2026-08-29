@@ -116,6 +116,7 @@ async function signIn(): Promise<AuthSignInResult> {
   if (signInInFlight) cancelActiveSignIn()
   signInInFlight = true
   let resumedActions = 0
+  let signedInAccountId: string | undefined
   try {
     const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
     const accountId = accountIdForTokens(tokens)
@@ -123,10 +124,14 @@ async function signIn(): Promise<AuthSignInResult> {
     const refreshed = storedAccounts.some((account) => account.id === accountId)
     storedAccounts = saveAccountTokens(app.getPath('userData'), tokens)
     authGenerations.set(accountId, (authGenerations.get(accountId) ?? 0) + 1)
-    activeAccountId = accountId
-    pendingFocus = null
-    mailNotifier?.setAccountId(accountId)
-    service?.setAccounts(serviceAccountsState())
+    signedInAccountId = accountId
+    // Adding an account does not activate it: activation goes through the
+    // guarded renderer switch, so an OAuth completion that lands while a
+    // composer is open can never swap the surface (PR #94 review). The roster
+    // update is awaited — the utility's answer names the sessions that
+    // actually exist, deferred re-creates included — and its resolved active
+    // account (the first sign-in, or the persisted survivor) is adopted.
+    await adoptServiceAccounts()
     resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
     console.log(`[auth] ${refreshed ? 'reconnected' : 'added account'} ${tokens.email ?? accountId}`)
   } catch (error) {
@@ -135,11 +140,29 @@ async function signIn(): Promise<AuthSignInResult> {
   } finally {
     signInInFlight = false
   }
-  return { status: authStatus(), resumedActions }
+  return {
+    status: authStatus(),
+    resumedActions,
+    ...(signedInAccountId ? { accountId: signedInAccountId } : {})
+  }
+}
+
+/**
+ * Push the roster to the utility and mirror back the active account it
+ * resolved. Waiting on the response is what keeps AuthStatus truthful: the
+ * named active account's session exists before anyone reads it.
+ */
+async function adoptServiceAccounts(): Promise<void> {
+  const previousActive = activeAccountId
+  const result = await service?.applyAccounts(serviceAccountsState())
+  if (result === null || typeof result === 'string') activeAccountId = result
+  service?.noteActiveAccount(activeAccountId)
+  if (activeAccountId !== previousActive) pendingFocus = null
+  mailNotifier?.setAccountId(activeAccountId)
 }
 
 /** Remove the active account's tokens; local rows stay cached (F18, D3 Keep). */
-function signOut(): AuthStatus {
+async function signOut(): Promise<AuthStatus> {
   cancelActiveSignIn()
   const removed = activeAccountId
   if (removed) {
@@ -149,8 +172,7 @@ function signOut(): AuthStatus {
   }
   activeAccountId = rosterAccountIds()[0] ?? null
   pendingFocus = null
-  mailNotifier?.setAccountId(activeAccountId)
-  service?.setAccounts(serviceAccountsState())
+  await adoptServiceAccounts()
   console.log(`[auth] signed out ${removed ?? '(no account)'}`)
   return authStatus()
 }

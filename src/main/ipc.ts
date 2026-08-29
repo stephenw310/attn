@@ -26,7 +26,7 @@ export interface IpcContext {
   service: ServiceSupervisor
   authStatus: () => AuthStatus
   signIn: () => Promise<AuthSignInResult>
-  signOut: () => AuthStatus
+  signOut: () => Promise<AuthStatus>
   setActiveAccount: (accountId: string) => Promise<AuthStatus>
   pendingFocus: () => PendingFocus | null
   clearPendingFocus: () => void
