@@ -38,13 +38,14 @@ interface Options {
   openSearch: () => void
   focusSearchQuery: () => void
   searchAllEnabled: boolean
-  searchAll: () => void
+  submitSearch: () => void
   clearSearch: () => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
   snoozeAt: (dueAt: number) => void
   openLabel: () => void
   openMove: () => void
+  markNotDone: () => void
   openComposer: () => void
   openReply: (kind: Exclude<DraftKind, 'new'>) => void
   showToast: (message: string) => void
@@ -93,13 +94,14 @@ export function useInboxCommands(options: Options): void {
     openSearch,
     focusSearchQuery,
     searchAllEnabled,
-    searchAll,
+    submitSearch,
     clearSearch,
     triage,
     openSnooze,
     snoozeAt,
     openLabel,
     openMove,
+    markNotDone,
     openComposer,
     openReply,
     showToast,
@@ -112,9 +114,12 @@ export function useInboxCommands(options: Options): void {
     () =>
       registerCommands([
         createCommand('search.open', openSearch),
+        ...(searchOpen && !readerOpen && !searchBrowsing
+          ? [createCommand('search.submit', submitSearch)]
+          : []),
         ...(searchBrowsing ? [createCommand('search.focusQuery', focusSearchQuery)] : []),
         ...(searchOpen && !readerOpen && searchAllEnabled
-          ? [createCommand('search.allGmail', searchAll)]
+          ? [createCommand('search.allGmail', submitSearch)]
           : []),
         ...(searchOpen && !readerOpen ? [createCommand('search.clear', clearSearch)] : []),
         ...(splitCommands
@@ -126,13 +131,8 @@ export function useInboxCommands(options: Options): void {
                     createCommand('split.next', splitCommands.next)
                   ]
                 : []),
-              ...splitCommands.goTo.map((split, index) =>
-                createDynamicSplitCommand(
-                  split.id,
-                  `Go to: ${split.name}`,
-                  split.run,
-                  index < 9 ? `g ${index + 1}` : undefined
-                )
+              ...splitCommands.goTo.map((split) =>
+                createDynamicSplitCommand(split.id, `Go to: ${split.name}`, split.run)
               )
             ]
           : []),
@@ -208,6 +208,7 @@ export function useInboxCommands(options: Options): void {
         ...(mailCommandsEnabled && (searchOpen || view !== 'drafts') && selected
           ? [
               createCommand('triage.archive', () => triage({ kind: 'archive', threadIds: [selected.id] })),
+              createCommand('triage.notDone', markNotDone),
               createCommand('triage.snooze', openSnooze, {
                 title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later',
                 argument: {
@@ -269,6 +270,7 @@ export function useInboxCommands(options: Options): void {
       discardSelectedDraft,
       extendSelection,
       focusSearchQuery,
+      markNotDone,
       markUnreadOn,
       moveAllowed,
       mailCommandsEnabled,
@@ -290,7 +292,7 @@ export function useInboxCommands(options: Options): void {
       selectedIndex,
       snoozeAt,
       searchOpen,
-      searchAll,
+      submitSearch,
       searchAllEnabled,
       searchBrowsing,
       showToast,

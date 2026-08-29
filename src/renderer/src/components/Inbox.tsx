@@ -110,6 +110,7 @@ function sidebarStorage(): Storage | null {
 
 export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [view, setView] = useState<MailView>('inbox')
+  const [pendingChord, setPendingChord] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchKeyboardTarget, setSearchKeyboardTarget] = useState<'query' | 'results'>('query')
@@ -170,6 +171,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   // command usage, and every account-scoped row. `status.email` is display-only.
   const activeAccount = status.activeAccountId ?? status.email ?? null
   const splits = useSplits(activeAccount)
+  const inboxSplitIdsKey = splits.state?.splits.map((split) => split.id).join('\u0000') ?? ''
+  const inboxSplitRevision = splits.state?.revision
   const setActiveSplitForFocusRef = useRef(splits.setActiveSplitId)
   setActiveSplitForFocusRef.current = splits.setActiveSplitId
   const {
@@ -178,6 +181,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realThreads,
     setRealThreads,
     loadedInboxSplitId,
+    loadedInboxSplitStale,
+    activateInboxSplitCache,
+    preloadInboxSplits,
     realSnoozedThreads,
     setRealSnoozedThreads,
     mailboxRows,
@@ -212,31 +218,30 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedDraftIdRef,
     setMailboxSelectedIndex
   )
+  useEffect(() => {
+    if (activeAccount && inboxSplitIdsKey && inboxSplitRevision !== undefined) {
+      preloadInboxSplits(inboxSplitIdsKey.split('\u0000'))
+    }
+  }, [activeAccount, inboxSplitIdsKey, inboxSplitRevision, preloadInboxSplits])
   const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
   const online = networkOnline && sync.phase !== 'offline'
   const backingMailView = view === 'outbox' ? outboxReturnRef.current.view : view
   const backingCachedView = cachedThreadView(backingMailView)
+  const activeInboxRowsReady =
+    realThreads !== null && (!splits.state || loadedInboxSplitId === splits.activeSplitId)
+  const activeInboxRowsResolved =
+    activeInboxRowsReady && !(loadedInboxSplitStale && (realThreads?.length ?? 0) === 0)
+  const activeInboxSelectionReady = activeInboxRowsReady && !loadedInboxSplitStale
   const mailboxThreads: DisplayThread[] = useMemo(
     () =>
       backingMailView === 'inbox'
-        ? displayThreads(
-            splits.state && loadedInboxSplitId === splits.activeSplitId ? (realThreads ?? []) : []
-          )
+        ? displayThreads(activeInboxRowsReady ? (realThreads ?? []) : [])
         : backingMailView === 'snoozed'
           ? displaySnoozedThreads(realSnoozedThreads ?? [])
           : backingCachedView
             ? displayThreads(mailboxRows[backingCachedView] ?? [])
             : [],
-    [
-      backingCachedView,
-      backingMailView,
-      loadedInboxSplitId,
-      mailboxRows,
-      realSnoozedThreads,
-      realThreads,
-      splits.activeSplitId,
-      splits.state
-    ]
+    [backingCachedView, backingMailView, activeInboxRowsReady, mailboxRows, realSnoozedThreads, realThreads]
   )
   const search = useLocalSearch(searchOpen, searchQuery, activeAccount, mailRevision)
   const serverSearch = useServerSearch(
@@ -752,9 +757,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       setSnoozeOpen(false)
       setLabelTargetIds(null)
       setSelectedIndex(Math.max(0, record.index))
+      activateInboxSplitCache(id)
       splits.setActiveSplitId(id)
     },
-    [clearSelection, mailboxThreads, splits, switchViewNow]
+    [activateInboxSplitCache, clearSelection, mailboxThreads, splits, switchViewNow]
   )
 
   const moveSplit = useCallback(
@@ -770,11 +776,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [splits.activeSplitId, splits.state, switchSplit]
   )
 
+  // Stale split rows can paint immediately, but selection restoration depends
+  // on their final order and waits for the SQLite revalidation.
   const viewRowsLoaded =
     view === 'outbox'
       ? true
       : backingMailView === 'inbox'
-        ? realThreads !== null
+        ? activeInboxSelectionReady
         : backingMailView === 'snoozed'
           ? realSnoozedThreads !== null
           : backingCachedView
@@ -815,6 +823,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       view !== 'inbox' ||
       splits.activeSplitId !== pending.id ||
       loadedInboxSplitId !== pending.id ||
+      loadedInboxSplitStale ||
       realThreads === null
     ) {
       return
@@ -830,7 +839,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedThreadIdRef.current = realThreads[nextIndex]?.id ?? null
     setSelectedIndex(nextIndex)
     if (listElRef.current) listElRef.current.scrollTop = pending.record.scrollTop
-  }, [loadedInboxSplitId, realThreads, splits.activeSplitId, view])
+  }, [loadedInboxSplitId, loadedInboxSplitStale, realThreads, splits.activeSplitId, view])
 
   const openOutboxNow = useCallback(() => {
     if (view === 'outbox') {
@@ -1191,6 +1200,16 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     },
     [moveRequest, triage]
   )
+  const markNotDone = useCallback(() => {
+    if (!selected) return
+    triage({
+      kind: 'move',
+      threadIds: selectedIds.size > 0 ? [...selectedIds] : [selected.id],
+      destination: { kind: 'inbox' },
+      sourceLabelId: null,
+      verb: 'markNotDone'
+    })
+  }, [selected, selectedIds, triage])
   const openThread = useCallback(
     (index: number) => {
       const thread = threads[index]
@@ -1414,13 +1433,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       online &&
       serverSearch.phase !== 'waiting' &&
       serverSearch.phase !== 'complete',
-    searchAll: submitSearch,
+    submitSearch,
     clearSearch,
     triage,
     openSnooze,
     snoozeAt: snoozeSelected,
     openLabel,
     openMove,
+    markNotDone,
     openComposer,
     openReply,
     showToast,
@@ -1435,6 +1455,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     outboxOpen: !searchOpen && view === 'outbox',
     snoozeOpen,
     onCloseSnooze: closeSnooze,
+    viewKey: `${view}:${readerOpen ? 'reader' : 'list'}:${
+      searchOpen ? searchKeyboardTarget : 'mail'
+    }:${splits.activeSplitId ?? ''}`,
+    onPendingChordChange: setPendingChord,
     conversationScrollRef
   })
 
@@ -1586,6 +1610,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 view={searchOpen ? 'search' : threadListKind(view)}
                 hasMore={!searchOpen && activePageState?.nextCursor !== null && activePageState !== undefined}
                 loadingMore={!searchOpen && (activePageState?.loadingMore ?? false)}
+                loadingInitial={!searchOpen && view === 'inbox' && !activeInboxRowsResolved}
                 syncing={!searchOpen && sync.phase === 'syncing'}
                 readerOpen={readerOpen}
                 selectedIndex={selectedIndex}
@@ -1663,22 +1688,29 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               />
             )}
           </div>
-
-          {!fullWindowComposerDraft && (
-            <MailFooter
-              readerOpen={readerOpen}
-              outboxOpen={!searchOpen && view === 'outbox'}
-              composing={inlineComposerDraft !== null}
-              searchEditing={searchOpen && searchKeyboardTarget === 'query' && !readerOpen}
-              moveAllowed={moveAllowed}
-              sync={sync}
-              networkOnline={networkOnline}
-              onRetry={retrySync}
-              onCopyError={copySyncError}
-            />
-          )}
         </div>
       </div>
+
+      {!fullWindowComposerDraft && (
+        <MailFooter
+          context={
+            inlineComposerDraft
+              ? 'composer'
+              : searchOpen && searchKeyboardTarget === 'query' && !readerOpen
+                ? 'search'
+                : readerOpen
+                  ? 'reader'
+                  : !searchOpen && view === 'outbox'
+                    ? 'outbox'
+                    : 'list'
+          }
+          pendingChord={pendingChord}
+          sync={sync}
+          networkOnline={networkOnline}
+          onRetry={retrySync}
+          onCopyError={copySyncError}
+        />
+      )}
 
       {!composerDraft && snoozeOpen && selected && (
         <SnoozePicker
@@ -1703,8 +1735,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           labels={labels}
           targets={moveRequest.targets}
           sourceLabelId={moveRequest.sourceLabelId}
-          showSplitDestinations={Boolean(
-            splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
+          showImportanceActions={Boolean(
+            !searchOpen &&
+              view === 'inbox' &&
+              splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
               splits.state.splits.some((split) => split.id === OTHER_SPLIT_ID)
           )}
           onClose={closeMove}

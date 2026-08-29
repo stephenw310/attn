@@ -41,7 +41,7 @@ async function renderPicker(
         labels,
         targets,
         sourceLabelId: 'label-project',
-        showSplitDestinations: true,
+        showImportanceActions: true,
         onClose,
         onMove,
         ...overrides
@@ -56,14 +56,19 @@ function key(input: HTMLInputElement, value: string): void {
 }
 
 describe('MovePicker', () => {
-  test('puts Done first, excludes the source label, and filters destinations', async () => {
+  test('separates importance actions from destinations and filters both', async () => {
     await renderPicker()
     const input = container.querySelector('[data-testid="move-search"]') as HTMLInputElement
     expect(document.activeElement).toBe(input)
     expect(container.querySelector('[data-testid="move-done"]')?.textContent).toContain('Done')
     expect(container.querySelector('[data-testid="move-inbox"]')?.textContent).toContain('Inbox')
-    expect(container.querySelector('[data-testid="move-important"]')?.textContent).toContain('Important')
-    expect(container.querySelector('[data-testid="move-other"]')?.textContent).toContain('Other')
+    expect(container.querySelector('[data-testid="move-section-destinations"]')?.textContent).toBe('Move to')
+    expect(container.querySelector('[data-testid="move-section-importance"]')?.textContent).toBe('Importance')
+    expect(container.querySelector('[data-testid="move-section-labels"]')?.textContent).toBe('Labels')
+    expect(container.querySelector('[data-testid="move-mark-important"]')?.textContent).toContain(
+      'Mark as important'
+    )
+    expect(container.querySelector('[data-testid="move-mark-not-important"]')).toBeNull()
     expect(container.querySelector('[data-testid="move-spam"]')?.textContent).toContain('Spam')
     expect(container.querySelector('[data-testid="move-trash"]')?.textContent).toContain('Trash')
     expect(container.querySelector('[data-label-id="label-project"]')).toBeNull()
@@ -75,7 +80,7 @@ describe('MovePicker', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     expect(container.querySelectorAll('[data-testid="move-option"]')).toHaveLength(0)
-    expect(container.textContent).toContain('No matching destinations')
+    expect(container.textContent).toContain('No matching options')
   })
 
   test('wraps keyboard navigation, moves once, and closes on Escape', async () => {
@@ -108,7 +113,7 @@ describe('MovePicker', () => {
           labels: [],
           targets: [{ id: 'one', labelIds: ['STARRED'], snoozed: true, returned: false }],
           sourceLabelId: null,
-          showSplitDestinations: false,
+          showImportanceActions: false,
           onClose: vi.fn(),
           onMove: vi.fn()
         })
@@ -132,7 +137,7 @@ describe('MovePicker', () => {
     )
   })
 
-  test('disables the current split destination and can hide split choices', async () => {
+  test('offers only importance actions that change at least one target', async () => {
     const { onMove } = await renderPicker({
       targets: [
         {
@@ -144,13 +149,13 @@ describe('MovePicker', () => {
       ],
       sourceLabelId: null
     })
-    expect((container.querySelector('[data-testid="move-important"]') as HTMLButtonElement).disabled).toBe(
-      true
+    expect(container.querySelector('[data-testid="move-mark-important"]')).toBeNull()
+    expect(container.querySelector('[data-testid="move-mark-not-important"]')?.textContent).toContain(
+      'Mark as not important'
     )
-    expect((container.querySelector('[data-testid="move-other"]') as HTMLButtonElement).disabled).toBe(false)
 
     await act(async () => {
-      ;(container.querySelector('[data-testid="move-other"]') as HTMLButtonElement).click()
+      ;(container.querySelector('[data-testid="move-mark-not-important"]') as HTMLButtonElement).click()
     })
     expect(onMove).toHaveBeenCalledWith({ kind: 'other' })
 
@@ -160,13 +165,26 @@ describe('MovePicker', () => {
           labels,
           targets,
           sourceLabelId: null,
-          showSplitDestinations: false,
+          showImportanceActions: false,
           onClose: vi.fn(),
           onMove: vi.fn()
         })
       )
     })
-    expect(container.querySelector('[data-testid="move-important"]')).toBeNull()
-    expect(container.querySelector('[data-testid="move-other"]')).toBeNull()
+    expect(container.querySelector('[data-testid="move-mark-important"]')).toBeNull()
+    expect(container.querySelector('[data-testid="move-mark-not-important"]')).toBeNull()
+    expect(container.querySelector('[data-testid="move-section-importance"]')).toBeNull()
+  })
+
+  test('offers both importance actions for a mixed bulk selection', async () => {
+    await renderPicker({
+      targets: [
+        { id: 'important', labelIds: ['INBOX', 'IMPORTANT'], snoozed: false, returned: false },
+        { id: 'not-important', labelIds: ['INBOX'], snoozed: false, returned: false }
+      ]
+    })
+
+    expect(container.querySelector('[data-testid="move-mark-important"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="move-mark-not-important"]')).not.toBeNull()
   })
 })
