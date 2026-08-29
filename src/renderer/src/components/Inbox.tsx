@@ -431,7 +431,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [activeAccount, resetSelection])
 
   useEffect(() => {
-    if (!window.attn || !activeAccount) return
+    // Taking consumes the recovered pointer; skip while a switch is settling
+    // so an unclaimed crash recovery stays claimable instead of vanishing.
+    if (!window.attn || !activeAccount || accountSwitchPendingRef.current) return
     let active = true
     void window.attn.draft
       .takeRecovered()
@@ -523,6 +525,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         (candidate) => candidate.kind !== 'new' && candidate.threadId === threadId
       )
       if (!draft || !window.attn) return
+      // Reopening mutates the draft pointer; while a switch is settling
+      // nothing may touch the outgoing account's queue (F18), so the gate
+      // sits before the request, not on its completion.
+      if (accountSwitchPendingRef.current) return
       const request = ++draftOpenRequestRef.current
       draftOpenTargetRef.current = { request, draftId: draft.id }
       void window.attn.draft
@@ -1036,6 +1042,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     (index: number) => {
       const item = realOutbox[index]
       if (!item || !window.attn) return
+      // undoSend cancels the scheduled send and reopen mutates the row, so the
+      // switch-settling gate must run before either request goes out — a
+      // gated completion alone would cancel a send and then hide its composer.
+      if (accountSwitchPendingRef.current) return
       if (item.state === 'sending') {
         showToast('Sending in progress')
         return
@@ -1058,7 +1068,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   )
 
   const reopenUndoDraft = useCallback((id: string) => {
-    if (!window.attn) return
+    if (!window.attn || accountSwitchPendingRef.current) return
     void window.attn.draft
       .get(id)
       .then((draft) => {
@@ -1069,16 +1079,26 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       .catch(() => {})
   }, [])
 
-  const openSelected = useCallback(() => {
-    if (searchDraftMode) {
-      const draft = searchDrafts[selectedIndex]
-      if (!draft || !window.attn) return
+  /** Shared by the Drafts list and draft search results: reopen mutates the
+      draft pointer, so it carries the same before-request gate. */
+  const reopenListDraft = useCallback(
+    (draftId: string) => {
+      if (!window.attn || accountSwitchPendingRef.current) return
       void window.attn.draft
-        .reopen(draft.id)
+        .reopen(draftId)
         .then((reopened) => {
           if (reopened) showDraft(reopened)
         })
         .catch(() => {})
+    },
+    [showDraft]
+  )
+
+  const openSelected = useCallback(() => {
+    if (searchDraftMode) {
+      const draft = searchDrafts[selectedIndex]
+      if (!draft) return
+      reopenListDraft(draft.id)
       return
     }
     if (!searchOpen && view === 'outbox') {
@@ -1087,13 +1107,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     }
     if (!searchOpen && view === 'drafts') {
       const draft = realDrafts[selectedIndex]
-      if (!draft || !window.attn) return
-      void window.attn.draft
-        .reopen(draft.id)
-        .then((reopened) => {
-          if (reopened) showDraft(reopened)
-        })
-        .catch(() => {})
+      if (!draft) return
+      reopenListDraft(draft.id)
       return
     }
     const thread = threads[selectedIndex]
@@ -1112,11 +1127,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     openOutboxItem,
     realDrafts,
     reopenDraftForThread,
+    reopenListDraft,
     searchDraftMode,
     searchDrafts,
     searchOpen,
     selectedIndex,
-    showDraft,
     threads,
     view
   ])
@@ -1622,13 +1637,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                   setSearchKeyboardTarget('results')
                   setSelectedIndex(index)
                   const draft = searchDrafts[index]
-                  if (!draft || !window.attn) return
-                  void window.attn.draft
-                    .reopen(draft.id)
-                    .then((reopened) => {
-                      if (reopened) showDraft(reopened)
-                    })
-                    .catch(() => {})
+                  if (draft) reopenListDraft(draft.id)
                 }}
               />
             ) : !searchOpen && view === 'drafts' ? (
@@ -1641,14 +1650,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 onOpen={(index) => {
                   setSelectedIndex(index)
                   const draft = realDrafts[index]
-                  if (!draft || !window.attn) return
+                  if (!draft) return
                   selectedDraftIdRef.current = draft.id
-                  void window.attn.draft
-                    .reopen(draft.id)
-                    .then((reopened) => {
-                      if (reopened) showDraft(reopened)
-                    })
-                    .catch(() => {})
+                  reopenListDraft(draft.id)
                 }}
               />
             ) : !searchOpen && view === 'outbox' ? (

@@ -140,6 +140,52 @@ test('composer opens stay inert while an account switch is settling', async ({ a
   await expect(page.getByTestId('composer')).toBeVisible()
 })
 
+test('a queued send survives an Outbox click made while a switch is settling', async ({ app, page }) => {
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
+
+  // Queue a send with a long undo window, then browse to Outbox.
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.seconds), {
+    channel: TEST_CHANNELS.setUndoSendDelay,
+    seconds: 30
+  })
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.addRecipient('someone@example.com')
+  await composer.subject.fill('Queued while switching accounts')
+  await composer.typeBody('Body')
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect(composer.root).toHaveCount(0)
+  await page.keyboard.press('g')
+  await page.keyboard.press('o')
+  const outboxRow = page.getByTestId('outbox-row').first()
+  await expect(outboxRow).toHaveAttribute('data-outbox-state', 'queued')
+
+  // Clicking the queued row mid-switch must be a no-op: undoSend would cancel
+  // the scheduled send, and the gated composer could never show it again.
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.delayMs), {
+    channel: TEST_CHANNELS.delaySetActiveAccount,
+    delayMs: 1500
+  })
+  await page.keyboard.press('ControlOrMeta+2')
+  // The queued row repaints its live countdown every frame, so Playwright's
+  // stability gate cannot pass inside the switch window; force the click —
+  // the app-side gate, not hit-testing, is what this regression exercises.
+  await outboxRow.click({ force: true })
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+
+  // Back on the first account, the send is still queued, untouched.
+  await page.keyboard.press('ControlOrMeta+1')
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('outbox-count')).toContainText('1 in Outbox')
+  await page.keyboard.press('g')
+  await page.keyboard.press('o')
+  const survivingRow = page.getByTestId('outbox-row').first()
+  await expect(survivingRow).toContainText('Queued while switching accounts')
+  await expect(survivingRow).toHaveAttribute('data-outbox-state', 'queued')
+})
+
 test('signing out the active account falls back to the survivor, then to onboarding', async ({ page }) => {
   await page.getByTestId('account-menu').getByRole('button').first().click()
   await page.getByRole('button', { name: /^Sign out/ }).click()
