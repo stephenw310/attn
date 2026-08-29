@@ -686,14 +686,20 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.syncGetState, () => context.syncController()?.getState() ?? { phase: 'idle' })
   handle(IPC_CHANNELS.syncGetInboxReady, () => {
-    const sync = context.syncController()?.getState()
-    if (sync?.phase === 'syncing' && sync.stage === 'metadata') return false
+    const syncController = context.syncController()
+    const sync = syncController?.getState()
+    if (syncController?.isInboxRecoveryPending()) return false
+    if (sync?.phase === 'syncing' && (sync.stage === 'metadata' || sync.stage === 'bodies')) return false
     const account = context.currentAccountId()
     if (!account) return false
     const state = context.db
-      .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
-      .get(account) as { backfill_cursor: string | null } | undefined
-    return inboxBackfillReady(state?.backfill_cursor)
+      .prepare(
+        `SELECT backfill_cursor, split_metadata_cursor
+         FROM sync_state
+         WHERE account_id = ?`
+      )
+      .get(account) as { backfill_cursor: string | null; split_metadata_cursor: string | null } | undefined
+    return inboxBackfillReady(state?.backfill_cursor, state?.split_metadata_cursor)
   })
   handle(IPC_CHANNELS.syncRetry, () => {
     context.syncController()?.retry()

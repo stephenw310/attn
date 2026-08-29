@@ -1103,10 +1103,11 @@ landscape images by local calendar day and shows the current time, a short affir
 non-empty split with its exact conversation total. Selecting a button opens that split.
 
 `sync:getInboxReady` reads `sync_state.backfill_cursor` through the typed preload bridge. A missing cursor or
-an active `metadata` stage keeps the ordinary loading state visible. The reward becomes eligible after the
-metadata walk checkpoints `bodies` or a later known stage. Seeded Electron coverage archives the only
-Important conversation, checks the remaining split totals, writes `inbox-zero.png`, and proves that both a
-partial first backfill and expired-history recovery hide the reward.
+an active Inbox metadata or body stage keeps the ordinary loading state visible. The reward becomes eligible
+after the full-body walk checkpoints `drafts` and any one-time split metadata rebuild finishes. Seeded
+Electron coverage archives the only Important conversation, checks the remaining split totals, writes
+`inbox-zero.png`, and proves that partial backfills and expired-history recovery hide the reward. A recovery
+failure keeps that gate closed until its retry completes.
 
 ---
 

@@ -60,6 +60,16 @@ test.describe('partial Inbox metadata', () => {
   })
 })
 
+test.describe('partial Inbox bodies', () => {
+  test.use({ seed: 'fixtures/seed-inbox-bodies.json' })
+
+  test('waits for body-derived split classification', async ({ page }) => {
+    await expect(page.getByTestId('inbox-zero')).toHaveCount(0)
+    await expect(page.getByTestId('thread-list-loading-initial')).toHaveText('Loading conversations…')
+    await expect(page.getByTestId('thread-list')).not.toContainText('Inbox empty')
+  })
+})
+
 test.describe('Inbox metadata recovery', () => {
   test.use({ seed: 'fixtures/seed-inbox-recovery.json' })
 

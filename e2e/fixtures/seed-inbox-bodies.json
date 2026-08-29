@@ -1,0 +1,6 @@
+{
+  "account": "bodies@attn.test",
+  "splitSetup": true,
+  "backfillCursor": "bodies",
+  "threads": []
+}

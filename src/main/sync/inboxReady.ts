@@ -1,12 +1,15 @@
 /**
- * Inbox metadata is authoritative once the metadata walk checkpoints the next
- * stage. A missing or paged metadata cursor still describes a partial Inbox.
+ * Inbox split membership is authoritative after the full-body Inbox walk and
+ * any one-time split metadata rebuild have both finished.
  */
-export function inboxBackfillReady(cursor: string | null | undefined): boolean {
-  if (!cursor) return false
+export function inboxBackfillReady(
+  backfillCursor: string | null | undefined,
+  splitMetadataCursor: string | null | undefined
+): boolean {
+  if (!backfillCursor || splitMetadataCursor !== 'done') return false
   return (
-    /^(?:bodies|drafts|all-mail|spam|trash|sent)(?::.+)?$/.test(cursor) ||
-    cursor === 'reconcile' ||
-    cursor === 'done'
+    /^(?:drafts|all-mail|spam|trash|sent)(?::.+)?$/.test(backfillCursor) ||
+    backfillCursor === 'reconcile' ||
+    backfillCursor === 'done'
   )
 }

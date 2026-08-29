@@ -748,6 +748,28 @@ describe('backfill to poller handoff', () => {
     expect(mocks.runLifetimeSweep).toHaveBeenCalledOnce()
   })
 
+  it('keeps Inbox readiness blocked after recovery fails and clears it after retry', async () => {
+    const { controller, backfills } = harness({ backfillCursor: 'done' })
+    mocks.reconcileThreadExistence.mockRejectedValueOnce(new Error('offline'))
+    controller.retry()
+    const poller = mocks.FakePoller.instances[0]
+
+    await expect(poller.options.recoverExpiredHistory()).rejects.toThrow('offline')
+    expect(controller.isInboxRecoveryPending()).toBe(true)
+
+    const retry = poller.options.recoverExpiredHistory()
+    await flush()
+    backfills[0].result.resolve({
+      threadCount: 0,
+      inboxThreadIds: [],
+      spamThreadIds: [],
+      trashThreadIds: []
+    })
+    await retry
+
+    expect(controller.isInboxRecoveryPending()).toBe(false)
+  })
+
   it('does not let background progress overwrite a history failure', () => {
     const { controller, lifetimeSweeps, states } = harness({ backfillCursor: 'done' })
     controller.retry()

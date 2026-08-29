@@ -2,19 +2,26 @@ import { describe, expect, it } from 'vitest'
 import { inboxBackfillReady } from './inboxReady'
 
 describe('inboxBackfillReady', () => {
-  it('waits for the Inbox metadata walk to checkpoint its next stage', () => {
-    expect(inboxBackfillReady(undefined)).toBe(false)
-    expect(inboxBackfillReady(null)).toBe(false)
-    expect(inboxBackfillReady('')).toBe(false)
-    expect(inboxBackfillReady('metadata')).toBe(false)
-    expect(inboxBackfillReady('metadata:page-2')).toBe(false)
-    expect(inboxBackfillReady('unknown')).toBe(false)
+  it('waits for the Inbox full-body walk to finish', () => {
+    expect(inboxBackfillReady(undefined, 'done')).toBe(false)
+    expect(inboxBackfillReady(null, 'done')).toBe(false)
+    expect(inboxBackfillReady('', 'done')).toBe(false)
+    expect(inboxBackfillReady('metadata', 'done')).toBe(false)
+    expect(inboxBackfillReady('metadata:page-2', 'done')).toBe(false)
+    expect(inboxBackfillReady('bodies', 'done')).toBe(false)
+    expect(inboxBackfillReady('bodies:page-2', 'done')).toBe(false)
+    expect(inboxBackfillReady('unknown', 'done')).toBe(false)
   })
 
-  it('accepts every checkpoint after Inbox metadata', () => {
+  it('waits for an upgraded profile to rebuild split metadata', () => {
+    expect(inboxBackfillReady('done', undefined)).toBe(false)
+    expect(inboxBackfillReady('done', null)).toBe(false)
+    expect(inboxBackfillReady('done', 'split-metadata')).toBe(false)
+    expect(inboxBackfillReady('done', 'split-metadata:page-2')).toBe(false)
+  })
+
+  it('accepts every checkpoint after Inbox bodies when split metadata is complete', () => {
     for (const cursor of [
-      'bodies',
-      'bodies:page-2',
       'drafts',
       'drafts:page-2',
       'all-mail',
@@ -28,7 +35,7 @@ describe('inboxBackfillReady', () => {
       'reconcile',
       'done'
     ]) {
-      expect(inboxBackfillReady(cursor)).toBe(true)
+      expect(inboxBackfillReady(cursor, 'done')).toBe(true)
     }
   })
 })
