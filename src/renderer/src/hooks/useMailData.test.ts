@@ -68,7 +68,7 @@ describe('useMailData mailbox refreshes', () => {
       })
     )
     const stop = (): void => {}
-    let inboxReady = false
+    let inboxReady: boolean | Error = false
     const mailChangedListeners: Array<(requestId: string | null, reason: null) => void> = []
     const emitMailChanged = (): void => {
       for (const listener of mailChangedListeners) listener(null, null)
@@ -76,7 +76,8 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
-        getInboxReady: () => Promise.resolve(inboxReady),
+        getInboxReady: () =>
+          inboxReady instanceof Error ? Promise.reject(inboxReady) : Promise.resolve(inboxReady),
         retry: () => Promise.resolve(),
         onState: () => stop
       },
@@ -162,6 +163,14 @@ describe('useMailData mailbox refreshes', () => {
     expect(currentState().loadedInboxSplitId).toBe('preset:github')
     expect(currentState().realThreads).toEqual([thread('preset:github')])
     expect(currentState().inboxBackfillReady).toBe(true)
+
+    inboxReady = new Error('Invalid backfill cursor: unknown')
+    await act(async () => {
+      emitMailChanged()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(currentState().inboxBackfillReady).toBe(false)
   })
 
   it('does not let an older Inbox snapshot erase rows loaded after switching mailboxes', async () => {

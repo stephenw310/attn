@@ -294,7 +294,9 @@ export function useMailData(
         .then((ready) => {
           if (request === inboxReadyRequestRef.current) setInboxBackfillReady(ready)
         })
-        .catch(() => {})
+        .catch(() => {
+          if (request === inboxReadyRequestRef.current) setInboxBackfillReady(false)
+        })
     }
     refresh()
     const offState = bridge.sync.onState((next) => {

@@ -113,14 +113,16 @@ describe('Inbox readiness service handler', () => {
       `INSERT INTO sync_state (account_id, backfill_cursor, split_metadata_cursor)
        VALUES (?, 'done', 'done')`
     ).run(ACCOUNT)
+    const getState = vi.fn(() => ({ phase: 'offline', message: 'offline' }) as const)
     const controller = {
-      getState: () => ({ phase: 'offline', message: 'offline' }),
+      getState,
       isInboxRecoveryPending: () => true
     } as unknown as SyncController
     const handlers = createServiceHandlers(handlerContext(db, emptyProvider, vi.fn(), controller))
 
     try {
       await expect(handlers.invoke(IPC_CHANNELS.syncGetInboxReady, [])).resolves.toBe(false)
+      expect(getState).not.toHaveBeenCalled()
     } finally {
       handlers.stop()
       db.close()

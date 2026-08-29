@@ -687,8 +687,8 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.syncGetState, () => context.syncController()?.getState() ?? { phase: 'idle' })
   handle(IPC_CHANNELS.syncGetInboxReady, () => {
     const syncController = context.syncController()
-    const sync = syncController?.getState()
     if (syncController?.isInboxRecoveryPending()) return false
+    const sync = syncController?.getState()
     if (sync?.phase === 'syncing' && (sync.stage === 'metadata' || sync.stage === 'bodies')) return false
     const account = context.currentAccountId()
     if (!account) return false
