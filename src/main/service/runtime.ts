@@ -138,6 +138,7 @@ export class ServiceRuntime {
   private conversationDelay: { threadId: string; delayMs: number } | null = null
   private draftReopenDelayMs = 0
   private draftInlineImageDelayMs = 0
+  private setActiveAccountDelayMs = 0
   private actionProvider: ActionRecoveryProvider | null = null
 
   private readonly onNewMail = (accountId: string, newMail: NewMail[]): void => {
@@ -233,7 +234,11 @@ export class ServiceRuntime {
 
   async internal(operation: ServiceOperation, args: unknown[]): Promise<unknown> {
     if (operation === 'resume-auth-failures') {
-      const session = this.activeSession()
+      // Sign-in names the account it reauthenticated — which need not be the
+      // active one, since adding an account no longer activates it (F18).
+      const requested = args[0]
+      const accountId = typeof requested === 'string' ? requested : this.activeAccountId
+      const session = accountId ? (this.sessions.get(accountId) ?? null) : null
       if (!session) return 0
       const resumed = session.actionExecutor.resumeAuthFailures(session.id)
       if (resumed > 0) void session.syncController.resumeOnlineWork()
@@ -250,6 +255,13 @@ export class ServiceRuntime {
     if (operation === 'set-active-account') {
       const accountId = args[0]
       if (typeof accountId !== 'string') throw new Error('unknown account')
+      if (this.input.testMode && this.setActiveAccountDelayMs > 0) {
+        // One-shot e2e seam modeling the retirement wait below without
+        // needing a real mid-quiesce account.
+        const delayMs = this.setActiveAccountDelayMs
+        this.setActiveAccountDelayMs = 0
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+      }
       // A just-re-added account can still be waiting out its predecessor's
       // worker retirement; the switch waits for the session instead of failing.
       const pending = this.pendingSessionCreations.get(accountId)
@@ -720,6 +732,10 @@ export class ServiceRuntime {
     }
     if (channel === TEST_CHANNELS.delayDraftInlineImage) {
       this.draftInlineImageDelayMs = validDelay(args[0])
+      return undefined
+    }
+    if (channel === TEST_CHANNELS.delaySetActiveAccount) {
+      this.setActiveAccountDelayMs = validDelay(args[0])
       return undefined
     }
     if (channel === TEST_CHANNELS.updateMessageBody) {

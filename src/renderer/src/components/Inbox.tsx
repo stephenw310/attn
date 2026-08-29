@@ -122,6 +122,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [labelTargetIds, setLabelTargetIds] = useState<readonly string[] | null>(null)
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
+  // A switch can wait on the utility (a retiring session holds it for up to
+  // five seconds). Its settle remounts the tree, so while it is in flight
+  // every composer open is inert — a composer that opened mid-wait would be
+  // torn down with whatever was typed into it (F18). State blocks keyboard
+  // dispatch; the ref answers async completions that outlive their closure.
+  const [accountSwitchPending, setAccountSwitchPending] = useState(false)
   const [detachedDraftThread, setDetachedDraftThread] = useState<DisplayThread | null>(null)
   const [composerError, setComposerError] = useState<string | null>(null)
   const [toast, showToast] = useToast()
@@ -161,6 +167,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   })
   const resetAccountRef = useRef<string | null | undefined>(undefined)
   const composerOpeningRef = useRef(false)
+  const accountSwitchPendingRef = useRef(false)
   const draftOpenRequestRef = useRef(0)
   const draftOpenTargetRef = useRef<{ request: number; draftId: string } | null>(null)
   const discardingDraftIdRef = useRef<string | null>(null)
@@ -332,6 +339,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const showDraft = useCallback(
     (draft: Draft) => {
+      if (accountSwitchPendingRef.current) return
       activeComposerDraftIdRef.current = draft.id
       if (draft.kind !== 'new' && draft.threadId) {
         const inboxIndex = (realThreads ?? []).findIndex((thread) => thread.id === draft.threadId)
@@ -428,7 +436,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     void window.attn.draft
       .takeRecovered()
       .then((draft) => {
-        if (active && draft) setComposerDraft(draft)
+        if (active && draft && !accountSwitchPendingRef.current) setComposerDraft(draft)
       })
       .catch(() => {})
     return () => {
@@ -525,7 +533,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             return
           }
           const ownsResult =
-            request === draftOpenRequestRef.current && selectedThreadIdRef.current === threadId
+            request === draftOpenRequestRef.current &&
+            selectedThreadIdRef.current === threadId &&
+            !accountSwitchPendingRef.current
           if (ownsResult) {
             draftOpenTargetRef.current = null
             activeComposerDraftIdRef.current = reopened.id
@@ -656,10 +666,17 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         showToast('Save and close the draft before switching accounts')
         return
       }
+      if (accountSwitchPendingRef.current) return
+      accountSwitchPendingRef.current = true
+      setAccountSwitchPending(true)
       void window.attn.auth
         .setActiveAccount(accountId)
         .then(onStatus)
         .catch(() => void showToast('Could not switch accounts'))
+        .finally(() => {
+          accountSwitchPendingRef.current = false
+          setAccountSwitchPending(false)
+        })
     },
     [onStatus, showToast, status.activeAccountId]
   )
@@ -1031,6 +1048,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             if (result.error) showToast(result.error)
             return
           }
+          if (accountSwitchPendingRef.current) return
           setComposerError(result.error)
           setComposerDraft(result.draft)
         })
@@ -1044,7 +1062,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     void window.attn.draft
       .get(id)
       .then((draft) => {
-        if (!draft) return
+        if (!draft || accountSwitchPendingRef.current) return
         setComposerError(null)
         setComposerDraft(draft)
       })
@@ -1262,12 +1280,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [reopenDraftForThread, searchOpen, threads, view]
   )
   const openComposer = useCallback(() => {
-    if (!window.attn || composerOpeningRef.current) return
+    if (!window.attn || composerOpeningRef.current || accountSwitchPendingRef.current) return
     composerOpeningRef.current = true
     void window.attn.draft
       .save(emptyDraftInput())
       .then(({ draft }) => {
-        if (draft) {
+        if (draft && !accountSwitchPendingRef.current) {
           setComposerError(null)
           setComposerDraft(draft)
         }
@@ -1280,7 +1298,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   const openReply = useCallback(
     (kind: Exclude<DraftKind, 'new'>) => {
-      if (!window.attn || !selected || (!searchOpen && view === 'drafts') || composerOpeningRef.current)
+      if (
+        !window.attn ||
+        !selected ||
+        (!searchOpen && view === 'drafts') ||
+        composerOpeningRef.current ||
+        accountSwitchPendingRef.current
+      )
         return
       if (!readerOpen) {
         selectedThreadIdRef.current = selected.id
@@ -1479,7 +1503,12 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   })
 
   useKeyboardDispatch({
-    blocked: labelTargets !== undefined || moveRequest !== null || composerDraft !== null || splitRulesOpen,
+    blocked:
+      labelTargets !== undefined ||
+      moveRequest !== null ||
+      composerDraft !== null ||
+      splitRulesOpen ||
+      accountSwitchPending,
     readerOpen,
     outboxOpen: !searchOpen && view === 'outbox',
     snoozeOpen,

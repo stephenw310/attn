@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import type { ThreadPage } from '../../shared/mail'
+import { storeActionError } from '../actions/execute'
+import { openDatabase } from '../db'
 import type { ServiceEvent, ServiceInitialize } from './protocol'
 import { IndexingSlot, ServiceRuntime } from './runtime'
 
@@ -184,6 +186,39 @@ describe('ServiceRuntime with several accounts', () => {
     expect(runtime.ready().accountIds).toEqual(['second@attn.test'])
     expect(await runtime.internal('set-active-account', ['primary@attn.test'])).toBe('primary@attn.test')
     expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
+  })
+
+  it('resumes auth-paused actions for the account that reauthenticated, not the active one', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+    expect(runtime.ready().activeAccountId).toBe('primary@attn.test')
+
+    // Auth-paused rows on both accounts, written the way the executor stores
+    // them. Sign-in no longer activates the reconnected account, so the resume
+    // must follow the flow's account id rather than the active pointer.
+    const db = openDatabase(input.dbPath)
+    const insert = db.prepare(
+      `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, attempts, last_error)
+       VALUES (?, 'archive', ?, '{}', 'failed', 3, ?)`
+    )
+    const authError = storeActionError(new Error('invalid_grant'), 'auth')
+    insert.run('primary@attn.test', 't-alpha', authError)
+    insert.run('second@attn.test', 't-beta', authError)
+    db.close()
+
+    expect(await runtime.internal('resume-auth-failures', ['second@attn.test'])).toBe(1)
+    const states = openDatabase(input.dbPath)
+    const rows = states
+      .prepare('SELECT account_id, state FROM action_queue ORDER BY account_id')
+      .all() as Array<{ account_id: string; state: string }>
+    states.close()
+    expect(rows).toEqual([
+      { account_id: 'primary@attn.test', state: 'failed' },
+      { account_id: 'second@attn.test', state: 'pending' }
+    ])
+
+    // Without an explicit account the operation still serves the active one.
+    expect(await runtime.internal('resume-auth-failures', [])).toBe(1)
   })
 
   it('defers re-creating a re-added account until its predecessor workers retire', async () => {

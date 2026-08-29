@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 
@@ -110,6 +111,33 @@ test('an open composer blocks account switching until the draft is saved closed'
   await page.keyboard.press('Enter')
   await composer.root.waitFor()
   await expect(composer.editor).toContainText('Draft that must survive an account switch')
+})
+
+test('composer opens stay inert while an account switch is settling', async ({ app, page }) => {
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
+
+  // Model the slow path: a switch can wait on a retiring session for seconds.
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.delayMs), {
+    channel: TEST_CHANNELS.delaySetActiveAccount,
+    delayMs: 1500
+  })
+  await page.keyboard.press('ControlOrMeta+2')
+
+  // While the switch is in flight, every composer entry point is inert — a
+  // composer opened now would be remounted away with its keystrokes (F18).
+  await page.keyboard.press('c')
+  await page.keyboard.press('r')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+
+  // The switch settles normally, still with no composer, and composing then
+  // works on the switched-to account.
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Beta launch checklist' })).toBeVisible()
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await page.keyboard.press('c')
+  await expect(page.getByTestId('composer')).toBeVisible()
 })
 
 test('signing out the active account falls back to the survivor, then to onboarding', async ({ page }) => {

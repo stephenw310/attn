@@ -123,6 +123,7 @@ export const TEST_CHANNELS = {
   markDraftMirrored: 'attn:test:markDraftMirrored',
   failNextAction: 'attn:test:failNextAction',
   failNextActionAuth: 'attn:test:failNextActionAuth',
+  delaySetActiveAccount: 'attn:test:delaySetActiveAccount',
   setAttachmentPickerFiles: 'attn:test:setAttachmentPickerFiles',
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',

@@ -167,6 +167,13 @@ click), which is what closes the completion-mid-compose remount hole. The indexi
 holder at hand-over time, so an account switch made while queued still runs the newly active account's
 historical chain first (focused `IndexingSlot` unit tests).
 
+Third round (2026-08-29): the composer guard became symmetric — while a switch is settling (the request can
+wait out a retiring session), every composer entry point is inert (`accountSwitchPending` state blocks
+keyboard dispatch; a ref gates the async open completions), proven by a delayed-switch e2e driven through
+the test-only `attn:test:delaySetActiveAccount` seam; and `resume-auth-failures` takes the account the
+OAuth flow actually reauthenticated, since sign-in no longer changes the active pointer — reconnecting a
+background account now resumes that account's paused queue (runtime unit test).
+
 ---
 
 ### A1 — Token roster and auth sessions (main process)

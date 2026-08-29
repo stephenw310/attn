@@ -132,7 +132,9 @@ async function signIn(): Promise<AuthSignInResult> {
     // actually exist, deferred re-creates included — and its resolved active
     // account (the first sign-in, or the persisted survivor) is adopted.
     await adoptServiceAccounts()
-    resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
+    // Resume the account the flow actually reauthenticated — not the active
+    // one, which sign-in no longer changes.
+    resumedActions = Number((await service?.internal('resume-auth-failures', accountId)) ?? 0)
     console.log(`[auth] ${refreshed ? 'reconnected' : 'added account'} ${tokens.email ?? accountId}`)
   } catch (error) {
     console.error(`[auth] sign-in failed: ${errorMessage(error)}`)
