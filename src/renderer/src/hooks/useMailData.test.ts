@@ -72,6 +72,7 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
         retry: () => Promise.resolve(),
         onState: () => stop
       },
@@ -166,6 +167,7 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
         retry: () => Promise.resolve(),
         onState: () => stop
       },
@@ -251,6 +253,7 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
         retry: () => Promise.resolve(),
         onState: () => stop
       },
@@ -343,6 +346,7 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
         retry: () => Promise.resolve(),
         onState: () => stop
       },

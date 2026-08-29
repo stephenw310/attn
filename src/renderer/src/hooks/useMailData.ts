@@ -99,6 +99,7 @@ function appendUniqueRows<Row extends ThreadRow>(current: Row[], next: Row[]): R
 
 interface MailDataState {
   sync: SyncState
+  inboxBackfillReady: boolean | null
   networkOnline: boolean
   realThreads: ThreadRow[] | null
   setRealThreads: React.Dispatch<React.SetStateAction<ThreadRow[] | null>>
@@ -147,6 +148,7 @@ export function useMailData(
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
 ): MailDataState {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
+  const [inboxBackfillReady, setInboxBackfillReady] = useState<boolean | null>(null)
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine)
   const [realThreads, setRealThreads] = useState<ThreadRow[] | null>(null)
   const [loadedInboxSplitId, setLoadedInboxSplitId] = useState<string | null>(null)
@@ -177,6 +179,7 @@ export function useMailData(
   const inboxSplitCacheRef = useRef(new Map<string, InboxSplitCacheEntry>())
   const inboxSplitPreloadRef = useRef(0)
   const inboxSplitChangeRef = useRef(0)
+  const inboxReadyRequestRef = useRef(0)
   const effectAccountRef = useRef<string | null | undefined>(undefined)
   const effectSplitRevisionRef = useRef<number | null | undefined>(undefined)
   const threadPaginationRef = useRef(threadPagination)
@@ -277,6 +280,32 @@ export function useMailData(
   }, [])
 
   useEffect(() => {
+    const bridge = window.attn
+    if (!bridge || !activeAccount) {
+      inboxReadyRequestRef.current += 1
+      setInboxBackfillReady(null)
+      return
+    }
+    let stateKey = ''
+    const refresh = (): void => {
+      const request = ++inboxReadyRequestRef.current
+      void bridge.sync
+        .getInboxReady()
+        .then((ready) => {
+          if (request === inboxReadyRequestRef.current) setInboxBackfillReady(ready)
+        })
+        .catch(() => {})
+    }
+    refresh()
+    return bridge.sync.onState((next) => {
+      const nextKey = next.phase === 'syncing' ? `${next.phase}:${next.stage}` : next.phase
+      if (nextKey === stateKey) return
+      stateKey = nextKey
+      refresh()
+    })
+  }, [activeAccount])
+
+  useEffect(() => {
     const onOffline = (): void => setNetworkOnline(false)
     const onOnline = (): void => {
       setNetworkOnline(true)
@@ -313,6 +342,7 @@ export function useMailData(
       setOutboxProgress(null)
       setRealMailboxCounts(null)
       setRealUnreadTotal(null)
+      setInboxBackfillReady(null)
       setLabels([])
       setPendingActionCount(0)
       setPausedActionCount(0)
@@ -778,6 +808,7 @@ export function useMailData(
 
   return {
     sync,
+    inboxBackfillReady,
     networkOnline,
     realThreads,
     setRealThreads,

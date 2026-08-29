@@ -98,6 +98,7 @@ import {
 import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
 import { fetchAndCacheThread } from '../sync/fetchThread'
+import { inboxBackfillReady } from '../sync/inboxReady'
 import { OnDemandBodyHydrator } from '../sync/onDemandBodies'
 import { type ServerSearchProvider, searchAllGmail, serverSearchFailure } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
@@ -684,6 +685,16 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     return account ? listPendingOutbox(context.db, account) : []
   })
   handle(IPC_CHANNELS.syncGetState, () => context.syncController()?.getState() ?? { phase: 'idle' })
+  handle(IPC_CHANNELS.syncGetInboxReady, () => {
+    const sync = context.syncController()?.getState()
+    if (sync?.phase === 'syncing' && sync.stage === 'metadata') return false
+    const account = context.currentAccountId()
+    if (!account) return false
+    const state = context.db
+      .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
+      .get(account) as { backfill_cursor: string | null } | undefined
+    return inboxBackfillReady(state?.backfill_cursor)
+  })
   handle(IPC_CHANNELS.syncRetry, () => {
     context.syncController()?.retry()
     return undefined

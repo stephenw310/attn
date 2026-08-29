@@ -29,7 +29,7 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T26 palette and registry completeness (F5) | **done**, completed 2026-08-25 | nothing |
 | T27 splits and per-split notifications (F11, F12) | **done**, completed 2026-08-27 | nothing; T29 is unblocked |
 | T28 contextual chord guide (§9 #14) | **done**, completed 2026-08-28 | nothing |
-| T29 inbox zero (F13) | **planned**, not started | nothing |
+| T29 inbox zero (F13) | **done**, completed 2026-08-29 | nothing |
 | T30 built-in themes (F14) | **done**, completed 2026-08-23 | nothing |
 | T31 move to a label (F4) | **done**, completed 2026-08-27 | nothing |
 
@@ -1072,7 +1072,7 @@ the `chord-guide.png` artifact.
 
 ## T29 — Inbox zero
 
-**Status: not started.**
+**Status: done.**
 
 **Depends on:** T27 · **Spec:** F13
 
@@ -1095,6 +1095,18 @@ the `chord-guide.png` artifact.
 ### Done when
 
 The zero state appears only when the mailbox is genuinely empty, and verify is green.
+
+### Shipped
+
+The active split now replaces its empty list with a full-pane reward. The pane rotates among three bundled
+landscape images by local calendar day and shows the current time, a short affirmation, and buttons for each
+non-empty split with its exact conversation total. Selecting a button opens that split.
+
+`sync:getInboxReady` reads `sync_state.backfill_cursor` through the typed preload bridge. A missing cursor or
+an active `metadata` stage keeps the ordinary loading state visible. The reward becomes eligible after the
+metadata walk checkpoints `bodies` or a later known stage. Seeded Electron coverage archives the only
+Important conversation, checks the remaining split totals, writes `inbox-zero.png`, and proves that both a
+partial first backfill and expired-history recovery hide the reward.
 
 ---
 

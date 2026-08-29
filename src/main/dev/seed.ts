@@ -53,6 +53,8 @@ interface SeedFixture {
   account: string
   labels?: LabelRow[]
   threads: SeedThread[]
+  /** Override the complete checkpoint for sync-gating e2e coverage. */
+  backfillCursor?: string
   /** E2E-only Gmail snapshots that are not imported until an explicit server search fetches them. */
   remoteThreads?: SeedThread[]
   /** Exact Gmail q= responses for the remote snapshots, keeping the provider seam query-aware. */
@@ -180,6 +182,7 @@ export function readSeedRemoteThreadIds(path: string, query: string): string[] {
 export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): SeedLoadResult {
   const fixture = readSeedFixture(path)
   const importedAt = Date.now()
+  const backfillCursor = fixture.backfillCursor ?? 'done'
   let labelsChanged = false
 
   db.transaction(() => {
@@ -197,13 +200,13 @@ export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): S
     db.prepare(
       `INSERT INTO sync_state
        (account_id, backfill_cursor, sweep_cursor, split_metadata_cursor, fts_cursor)
-       VALUES (?, 'done', 'done', 'done', 'done')
+       VALUES (?, ?, 'done', 'done', 'done')
        ON CONFLICT(account_id) DO UPDATE SET
          backfill_cursor = excluded.backfill_cursor,
          sweep_cursor = COALESCE(sync_state.sweep_cursor, excluded.sweep_cursor),
          split_metadata_cursor = COALESCE(sync_state.split_metadata_cursor, excluded.split_metadata_cursor),
          fts_cursor = COALESCE(sync_state.fts_cursor, excluded.fts_cursor)`
-    ).run(fixture.account)
+    ).run(fixture.account, backfillCursor)
   })()
 
   console.log(`[seed] loaded ${fixture.threads.length} threads for ${fixture.account}`)
