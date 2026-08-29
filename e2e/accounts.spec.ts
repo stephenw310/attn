@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 
 // F18 account switching against a seeded two-account store: the whole surface
@@ -70,6 +71,45 @@ test('keyboard and palette switching cover the roster', async ({ page }) => {
     .click()
   await expect(page.getByTestId('account-menu')).toContainText(SECOND)
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Beta launch checklist' })).toBeVisible()
+})
+
+test('an open composer blocks account switching until the draft is saved closed', async ({ page }) => {
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
+
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await composer.typeBody('Draft that must survive an account switch')
+  await composer.expectSaved()
+
+  // The menu's switch, add, and sign-out rows are disabled while composing…
+  await page.getByTestId('account-menu').getByRole('button').first().click()
+  await expect(page.getByTestId('account-switch').filter({ hasText: SECOND })).toBeDisabled()
+  await expect(page.getByTestId('account-add')).toBeDisabled()
+  await expect(page.getByRole('button', { name: /^Sign out/ })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('account-switch')).toHaveCount(0)
+
+  // …and the keyboard switcher is inert, so the draft keeps its surface.
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(composer.root).toBeVisible()
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+
+  // Esc saves and closes the draft (F6); only then does the switch proceed.
+  await composer.editor.click()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+
+  // Nothing was lost: back on the first account, the thread reopens straight
+  // into the saved reply draft with the typed content intact.
+  await page.keyboard.press('ControlOrMeta+1')
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('chip-draft').first()).toBeVisible()
+  await page.keyboard.press('Enter')
+  await composer.root.waitFor()
+  await expect(composer.editor).toContainText('Draft that must survive an account switch')
 })
 
 test('signing out the active account falls back to the survivor, then to onboarding', async ({ page }) => {

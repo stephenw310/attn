@@ -117,6 +117,17 @@ export class ServiceRuntime {
   private readonly handlers: ServiceHandlers
   private readonly sessions = new Map<string, AccountSession>()
   private readonly accountOrder: string[] = []
+  /**
+   * Torn-down sessions whose draft/outbox workers are still quiescing (a Gmail
+   * draft checkpoint gets up to five seconds — AGENTS.md shutdown invariant).
+   * A successor session for the same account must wait these out: two live
+   * executor sets could both select the same outbox row and double a
+   * non-idempotent remote draft create.
+   */
+  private readonly retirements = new Map<string, Promise<void>>()
+  /** The latest roster intent, consulted when a deferred re-create lands. */
+  private desiredAccounts = new Map<string, ServiceAccountAuth | null>()
+  private desiredActiveAccountId: string | null = null
   private readonly indexingSlot = new IndexingSlot((accountId) => accountId === this.activeAccountId)
   private config: ServiceAccountsState['config']
   private activeAccountId: string | null = null
@@ -196,6 +207,11 @@ export class ServiceRuntime {
 
     for (const auth of input.accounts.accounts) this.createSession(auth.id, auth, false)
     for (const seedId of seedIds) this.createSession(seedId, null, true)
+    this.desiredAccounts = new Map<string, ServiceAccountAuth | null>([
+      ...input.accounts.accounts.map((auth): [string, ServiceAccountAuth | null] => [auth.id, auth]),
+      ...seedIds.map((id): [string, ServiceAccountAuth | null] => [id, null])
+    ])
+    this.desiredActiveAccountId = input.accounts.activeAccountId
     this.activeAccountId = this.resolveActiveAccount(input.accounts.activeAccountId, 'initialize')
     this.persistActiveAccount()
   }
@@ -276,7 +292,7 @@ export class ServiceRuntime {
     this.stopped = true
     historyEvents.off('newMail', this.onNewMail)
     this.handlers.stop()
-    const workers: Promise<unknown>[] = []
+    const workers: Promise<unknown>[] = [...this.retirements.values()]
     for (const session of this.sessions.values()) {
       session.syncController.stop()
       session.actionExecutor.stop()
@@ -391,14 +407,17 @@ export class ServiceRuntime {
     session.syncController.stop()
     session.actionExecutor.stop()
     session.snoozeScheduler.stop()
-    void Promise.allSettled([session.draftMirrorExecutor.stop(), session.outboxSender.stop()]).then(
-      (results) => {
+    const retirement = Promise.allSettled([session.draftMirrorExecutor.stop(), session.outboxSender.stop()])
+      .then((results) => {
         for (const result of results) {
           if (result.status === 'rejected')
             this.log('error', `[accounts] worker stop failed: ${String(result.reason)}`)
         }
-      }
-    )
+      })
+      .finally(() => {
+        if (this.retirements.get(session.id) === retirement) this.retirements.delete(session.id)
+      })
+    this.retirements.set(session.id, retirement)
     const limiter = this.gmailQuotaLimiters.get(session.id)
     if (limiter) {
       limiter.dispose(new Error('account removed'))
@@ -408,21 +427,50 @@ export class ServiceRuntime {
     clearUndo(session.id)
   }
 
+  /** Create the account's session now, or once its predecessor's workers retire. */
+  private createSessionWhenRetired(id: string): void {
+    const retirement = this.retirements.get(id)
+    if (!retirement) {
+      const auth = this.desiredAccounts.get(id)
+      if (auth !== undefined) this.createSession(id, auth, auth === null)
+      return
+    }
+    void retirement.then(() => {
+      if (this.stopped || this.sessions.has(id)) return
+      // Re-check the latest intent: the roster may have changed again while
+      // the predecessor quiesced, and only the newest wanted state counts.
+      const auth = this.desiredAccounts.get(id)
+      if (auth === undefined) return
+      this.createSession(id, auth, auth === null)
+      if (this.desiredActiveAccountId === id || this.activeAccountId === null) {
+        this.setActiveAccount(this.resolveActiveAccount(this.desiredActiveAccountId, 'control'))
+      }
+      this.broadcastBadge()
+    })
+  }
+
   private applyAccounts(state: ServiceAccountsState): void {
     if (this.stopped) return
     this.config = state.config
-    const currentSeedIds = [...this.sessions.values()]
-      .filter((session) => session.seeded)
-      .map((session) => session.id)
+    const currentSeedIds = [
+      ...new Set([
+        ...[...this.sessions.values()].filter((session) => session.seeded).map((session) => session.id),
+        ...[...this.desiredAccounts.entries()].filter(([, auth]) => auth === null).map(([id]) => id)
+      ])
+    ]
     const wantedSeedIds = this.input.testSeed ? (state.seedAccountIds ?? currentSeedIds) : []
-    const wantedIds = new Set([...state.accounts.map((auth) => auth.id), ...wantedSeedIds])
+    this.desiredAccounts = new Map<string, ServiceAccountAuth | null>([
+      ...state.accounts.map((auth): [string, ServiceAccountAuth | null] => [auth.id, auth]),
+      ...wantedSeedIds.map((id): [string, ServiceAccountAuth | null] => [id, null])
+    ])
+    this.desiredActiveAccountId = state.activeAccountId
     for (const session of [...this.sessions.values()]) {
-      if (!wantedIds.has(session.id)) this.teardownSession(session)
+      if (!this.desiredAccounts.has(session.id)) this.teardownSession(session)
     }
     for (const auth of state.accounts) {
       const existing = this.sessions.get(auth.id)
       if (!existing) {
-        this.createSession(auth.id, auth, false)
+        this.createSessionWhenRetired(auth.id)
         continue
       }
       const reauthenticated = existing.auth?.generation !== auth.generation
@@ -432,8 +480,14 @@ export class ServiceRuntime {
         // waiting on; new providers pick the new tokens up on creation.
         this.gmailQuotaLimiters.get(auth.id)?.dispose(new Error('authentication changed'))
         this.gmailQuotaLimiters.delete(auth.id)
-        void existing.syncController.resumeOnlineWork()
+        // Reset the session rather than resuming it: the history poller holds
+        // the provider it was built with, so a resume would keep polling on
+        // the replaced credentials until restart (SPEC F18 reconnect).
+        existing.syncController.onSignIn()
       }
+    }
+    for (const seedId of wantedSeedIds) {
+      if (!this.sessions.has(seedId)) this.createSessionWhenRetired(seedId)
     }
     const nextActive = this.resolveActiveAccount(state.activeAccountId, 'control')
     if (nextActive !== this.activeAccountId) this.setActiveAccount(nextActive, { force: true })

@@ -638,21 +638,35 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     })
   }, [reconnectGoogle, serverSearch.run])
 
+  // Switching or adding an account swaps (remounts) the whole mail surface,
+  // which would drop an open composer's not-yet-autosaved keystrokes. The
+  // keyboard and palette are already inert while composing; these guards and
+  // the menu's disabled rows make the pointer path match. `Esc` saves and
+  // closes the draft first (F6), so nothing is ever lost to a switch.
+  const accountActionsBlocked = composerDraft !== null
   // Adding an account is the same OAuth flow as reconnecting: an existing
   // address refreshes its tokens, a new one joins the roster and becomes
-  // active (F18). The account-change reset effect below handles the swap.
+  // active (F18). The account-keyed remount in App handles the swap.
   const addAccount = useCallback(() => {
+    if (accountActionsBlocked) {
+      showToast('Save and close the draft before adding an account')
+      return
+    }
     void reconnectGoogle()
-  }, [reconnectGoogle])
+  }, [accountActionsBlocked, reconnectGoogle, showToast])
   const switchAccount = useCallback(
     (accountId: string) => {
       if (!window.attn || accountId === status.activeAccountId) return
+      if (accountActionsBlocked) {
+        showToast('Save and close the draft before switching accounts')
+        return
+      }
       void window.attn.auth
         .setActiveAccount(accountId)
         .then(onStatus)
         .catch(() => void showToast('Could not switch accounts'))
     },
-    [onStatus, showToast, status.activeAccountId]
+    [accountActionsBlocked, onStatus, showToast, status.activeAccountId]
   )
   const accountCommands = useMemo(
     () => ({
@@ -1488,6 +1502,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         onManageSplits={() => setSplitRulesOpen(true)}
         onSwitchAccount={switchAccount}
         onAddAccount={addAccount}
+        accountActionsBlocked={accountActionsBlocked}
       />
 
       <div

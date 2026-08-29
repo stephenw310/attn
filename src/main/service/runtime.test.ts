@@ -144,6 +144,38 @@ describe('ServiceRuntime with several accounts', () => {
     expect(await listInboxSubjects(second.runtime)).toEqual(['Beta launch', 'Beta digest'])
   })
 
+  it('defers re-creating a re-added account until its predecessor workers retire', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+
+    // Remove and immediately re-add the same account: the removal's draft and
+    // outbox workers are still quiescing, so a second session for the same
+    // rows must not exist yet — two executor sets could double a
+    // non-idempotent remote draft create.
+    runtime.control({
+      kind: 'accounts',
+      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    })
+    runtime.control({
+      kind: 'accounts',
+      accounts: {
+        config: null,
+        accounts: [],
+        activeAccountId: 'primary@attn.test',
+        seedAccountIds: ['primary@attn.test', 'second@attn.test']
+      }
+    })
+    expect(runtime.ready().accountIds).toEqual(['second@attn.test'])
+
+    // Once the retirement settles, the successor session appears and the
+    // requested active account takes effect.
+    await expect
+      .poll(() => runtime.ready().accountIds.includes('primary@attn.test'), { timeout: 2000 })
+      .toBe(true)
+    expect(runtime.ready().activeAccountId).toBe('primary@attn.test')
+    expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
+  })
+
   it('retires a removed seed session and falls back to the survivor', async () => {
     const input = makeInput()
     const { runtime } = await createRuntime(input)

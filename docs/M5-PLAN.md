@@ -149,6 +149,14 @@ roster, durable active-account persistence, multi-account seed fixtures, and the
   guarantees every later renderer read is answered for the new account — the race the tagging design
   existed to prevent.
 
+PR #94 review hardening (2026-08-29): the mail tree now remounts keyed by account so the first post-switch
+frame can never show the previous account's rows; a torn-down account's draft/outbox workers park a
+*retirement* promise that gates re-creating a session for the same id (two executor sets on the same outbox
+rows could double a non-idempotent Gmail draft create); re-authentication resets the account's sync session
+(`onSignIn`) instead of resuming it, so the history poller drops the client built on the replaced
+credentials; and account switching/adding/sign-out are blocked while any composer is open — `Esc` saves and
+closes first — with an e2e proving a typed reply survives a switch attempt.
+
 ---
 
 ### A1 — Token roster and auth sessions (main process)

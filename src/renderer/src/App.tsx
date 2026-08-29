@@ -35,5 +35,8 @@ export default function App(): React.JSX.Element {
       />
     )
   }
-  return <Inbox status={status} onStatus={setStatus} />
+  // Keyed by account: a switch remounts the whole mail tree, so the first
+  // frame for the new account can never carry the previous account's rows,
+  // counts, or caches (F18 — no view may mix accounts).
+  return <Inbox key={status.activeAccountId ?? 'account'} status={status} onStatus={setStatus} />
 }

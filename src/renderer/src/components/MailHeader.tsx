@@ -83,14 +83,18 @@ function AccountMenu({
   onStatus,
   onManageSplits,
   onSwitchAccount,
-  onAddAccount
+  onAddAccount,
+  accountActionsBlocked
 }: {
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
   onManageSplits: () => void
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
+  /** True while a composer is open: switching would drop unsaved keystrokes. */
+  accountActionsBlocked: boolean
 }): React.JSX.Element {
+  const blockedTitle = accountActionsBlocked ? 'Save and close the draft first (Esc)' : undefined
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const { preference, setPreference } = useTheme()
@@ -149,11 +153,13 @@ function AccountMenu({
                 data-testid="account-switch"
                 data-email={account.id}
                 data-active={active ? 'true' : 'false'}
+                disabled={accountActionsBlocked && !active}
+                title={active ? undefined : blockedTitle}
                 onClick={() => {
                   closeMenu()
                   if (!active) onSwitchAccount(account.id)
                 }}
-                className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-[13px] hover:bg-active hover:text-ink ${
+                className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-[13px] hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent ${
                   active ? 'text-ink' : 'text-ink-dim'
                 }`}
               >
@@ -172,11 +178,13 @@ function AccountMenu({
           <button
             type="button"
             data-testid="account-add"
+            disabled={accountActionsBlocked}
+            title={blockedTitle}
             onClick={() => {
               closeMenu()
               onAddAccount()
             }}
-            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
+            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           >
             Add account…
           </button>
@@ -227,9 +235,12 @@ function AccountMenu({
           <hr className="my-1.5 border-edge" />
           <button
             type="button"
+            disabled={accountActionsBlocked}
             onClick={signOut}
-            title="Removes this account's tokens; sign back in any time — local mail stays cached"
-            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
+            title={
+              blockedTitle ?? "Removes this account's tokens; sign back in any time — local mail stays cached"
+            }
+            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           >
             {status.accounts.length > 1 ? `Sign out ${status.email ?? 'account'}` : 'Sign out'}
           </button>
@@ -255,6 +266,7 @@ interface MailHeaderProps {
   onManageSplits: () => void
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
+  accountActionsBlocked: boolean
 }
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
@@ -273,7 +285,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     onToggleSidebar,
     onManageSplits,
     onSwitchAccount,
-    onAddAccount
+    onAddAccount,
+    accountActionsBlocked
   } = props
   const sidebarAction = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
   const sidebarShortcut = `${modKeyLabel()}B`
@@ -325,6 +338,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           onManageSplits={onManageSplits}
           onSwitchAccount={onSwitchAccount}
           onAddAccount={onAddAccount}
+          accountActionsBlocked={accountActionsBlocked}
         />
       </div>
     </header>
