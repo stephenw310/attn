@@ -95,6 +95,11 @@ describe('Inbox readiness service handler', () => {
 
       setCursors.run(ACCOUNT, 'drafts', 'done')
       await expect(handlers.invoke(IPC_CHANNELS.syncGetInboxReady, [])).resolves.toBe(true)
+
+      setCursors.run(ACCOUNT, 'unknown', 'done')
+      await expect(handlers.invoke(IPC_CHANNELS.syncGetInboxReady, [])).rejects.toThrow(
+        'Invalid backfill cursor: unknown'
+      )
     } finally {
       handlers.stop()
       db.close()

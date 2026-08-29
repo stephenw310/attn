@@ -61,7 +61,6 @@ export function InboxZero({
         <section
           data-testid="inbox-zero-message"
           className="app-inbox-zero-card w-full max-w-xl rounded-2xl px-8 py-9"
-          aria-live="polite"
         >
           <p className="text-xs font-semibold tracking-[0.2em] uppercase">Inbox zero</p>
           <time
@@ -75,7 +74,7 @@ export function InboxZero({
           {remaining.length > 0 ? (
             <div className="mt-8 border-t border-current/20 pt-5">
               <p className="app-inbox-zero-muted text-[11px] font-semibold tracking-[0.16em] uppercase">
-                Elsewhere
+                Conversations elsewhere
               </p>
               <div data-testid="inbox-zero-remaining" className="mt-3 flex flex-wrap justify-center gap-2">
                 {remaining.map((split) => (
@@ -87,7 +86,7 @@ export function InboxZero({
                     onClick={() => onSelectSplit(split.id)}
                     className="app-inbox-zero-chip cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium tabular-nums"
                   >
-                    {split.name}: {split.total.toLocaleString()}
+                    {split.name}: {split.total.toLocaleString()} total
                   </button>
                 ))}
               </div>

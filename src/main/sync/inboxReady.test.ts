@@ -10,7 +10,7 @@ describe('inboxBackfillReady', () => {
     expect(inboxBackfillReady('metadata:page-2', 'done')).toBe(false)
     expect(inboxBackfillReady('bodies', 'done')).toBe(false)
     expect(inboxBackfillReady('bodies:page-2', 'done')).toBe(false)
-    expect(inboxBackfillReady('unknown', 'done')).toBe(false)
+    expect(() => inboxBackfillReady('unknown', 'done')).toThrow('Invalid backfill cursor')
   })
 
   it('waits for an upgraded profile to rebuild split metadata', () => {

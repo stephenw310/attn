@@ -217,6 +217,7 @@
   background: var(--attn-login-glow);
 }
 
+/* Fixed photo-overlay colors keep contrast stable across both app themes. */
 .app-inbox-zero-scrim {
   background:
     linear-gradient(rgb(6 10 16 / 18%), rgb(6 10 16 / 48%)),

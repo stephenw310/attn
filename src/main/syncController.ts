@@ -342,6 +342,7 @@ export class SyncController {
           if (this.context.isSignedIn()) void this.resumeOnlineWork()
           return
         }
+        this.inboxRecoveryPending = false
         this.foregroundFailure = null
         this.setState({ phase: 'idle' })
         this.context.broadcastMailChanged()

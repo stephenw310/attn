@@ -27,10 +27,10 @@ test.describe('complete Inbox metadata', () => {
     await expect(page.getByTestId('inbox-zero-message')).toContainText('Inbox zero')
     await expect(page.getByTestId('inbox-zero-message').locator('time')).toHaveText(/\d{1,2}:\d{2}/)
     await expect(page.getByTestId('inbox-zero-split')).toHaveText([
-      'Calendar: 2',
-      'GitHub: 1',
-      'Newsletters: 2',
-      'Other: 2'
+      'Calendar: 2 total',
+      'GitHub: 1 total',
+      'Newsletters: 2 total',
+      'Other: 2 total'
     ])
     expect(await zero.locator('img').getAttribute('src')).not.toMatch(/^https?:/)
 
@@ -40,6 +40,15 @@ test.describe('complete Inbox metadata', () => {
     const path = join(artifactDirectory, 'inbox-zero.png')
     await page.screenshot({ path })
     await testInfo.attach('inbox-zero', { path, contentType: 'image/png' })
+
+    await page.getByTestId('account-menu').getByRole('button').first().click()
+    await page.getByTestId('theme-picker').selectOption('dispatch-light')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dispatch-light')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('theme-picker')).toHaveCount(0)
+    const lightPath = join(artifactDirectory, 'inbox-zero-light.png')
+    await page.screenshot({ path: lightPath })
+    await testInfo.attach('inbox-zero-light', { path: lightPath, contentType: 'image/png' })
 
     await page.locator('[data-testid="inbox-zero-split"][data-split-id="fallback:other"]').click()
     await expect(zero).toHaveCount(0)

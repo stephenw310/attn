@@ -297,12 +297,17 @@ export function useMailData(
         .catch(() => {})
     }
     refresh()
-    return bridge.sync.onState((next) => {
+    const offState = bridge.sync.onState((next) => {
       const nextKey = next.phase === 'syncing' ? `${next.phase}:${next.stage}` : next.phase
       if (nextKey === stateKey) return
       stateKey = nextKey
       refresh()
     })
+    const offMail = bridge.mail.onChanged(() => refresh())
+    return () => {
+      offState()
+      offMail()
+    }
   }, [activeAccount])
 
   useEffect(() => {

@@ -68,11 +68,15 @@ describe('useMailData mailbox refreshes', () => {
       })
     )
     const stop = (): void => {}
-    let emitMailChanged: (() => void) | null = null
+    let inboxReady = false
+    const mailChangedListeners: Array<(requestId: string | null, reason: null) => void> = []
+    const emitMailChanged = (): void => {
+      for (const listener of mailChangedListeners) listener(null, null)
+    }
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
-        getInboxReady: () => Promise.resolve(true),
+        getInboxReady: () => Promise.resolve(inboxReady),
         retry: () => Promise.resolve(),
         onState: () => stop
       },
@@ -87,7 +91,7 @@ describe('useMailData mailbox refreshes', () => {
         getPendingActionCount: () => Promise.resolve(0),
         getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
         onChanged: (listener: (requestId: string | null, reason: null) => void) => {
-          emitMailChanged = () => listener(null, null)
+          mailChangedListeners.push(listener)
           return stop
         }
       },
@@ -133,6 +137,7 @@ describe('useMailData mailbox refreshes', () => {
       await Promise.resolve()
     })
     expect(currentState().loadedInboxSplitId).toBe('preset:github')
+    expect(currentState().inboxBackfillReady).toBe(false)
 
     activeSplitId = 'fallback:other'
     await act(async () => {
@@ -143,8 +148,9 @@ describe('useMailData mailbox refreshes', () => {
     expect(currentState().loadedInboxSplitId).toBe('fallback:other')
 
     let activated = false
+    inboxReady = true
     await act(async () => {
-      emitMailChanged?.()
+      emitMailChanged()
       await Promise.resolve()
       await Promise.resolve()
       activated = currentState().activateInboxSplitCache('preset:github')
@@ -155,6 +161,7 @@ describe('useMailData mailbox refreshes', () => {
     expect(activated).toBe(true)
     expect(currentState().loadedInboxSplitId).toBe('preset:github')
     expect(currentState().realThreads).toEqual([thread('preset:github')])
+    expect(currentState().inboxBackfillReady).toBe(true)
   })
 
   it('does not let an older Inbox snapshot erase rows loaded after switching mailboxes', async () => {

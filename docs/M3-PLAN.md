@@ -1100,7 +1100,8 @@ The zero state appears only when the mailbox is genuinely empty, and verify is g
 
 The active split now replaces its empty list with a full-pane reward. The pane rotates among three bundled
 landscape images by local calendar day and shows the current time, a short affirmation, and buttons for each
-non-empty split with its exact conversation total. Selecting a button opens that split.
+non-empty split with its exact conversation total. The `total` label distinguishes these counts from the
+unread badges in the split strip. Selecting a button opens that split.
 
 `sync:getInboxReady` reads `sync_state.backfill_cursor` through the typed preload bridge. A missing cursor or
 an active Inbox metadata or body stage keeps the ordinary loading state visible. The reward becomes eligible
@@ -1108,6 +1109,10 @@ after the full-body walk checkpoints `drafts` and any one-time split metadata re
 Electron coverage archives the only Important conversation, checks the remaining split totals, writes
 `inbox-zero.png`, and proves that partial backfills and expired-history recovery hide the reward. A recovery
 failure keeps that gate closed until its retry completes.
+The ordered cursor definition is shared with backfill resume parsing, and an ordinary resumed backfill clears
+the recovery gate after successful mailbox reconciliation. The renderer refreshes readiness on both sync-state
+changes and mail invalidations. Electron coverage also types through the split-rule value field and records the
+theme-independent reward under both dark and light app chrome.
 
 ---
 
