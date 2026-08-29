@@ -101,6 +101,19 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
       }
       const target = event.target instanceof Element ? event.target : null
       const context = readerOpen ? 'reader' : outboxOpen ? 'outbox' : 'list'
+      // Reader Escape is the dependable route back to the list. Resolve it
+      // before chord and text-entry guards so stale focus or an armed G guide
+      // cannot turn the key into a no-op. Transient overlays return above and
+      // keep first refusal over Escape.
+      if (readerOpen && event.key === 'Escape') {
+        clearPendingChord()
+        const closeReader = matchKey(event, context)
+        if (closeReader) {
+          event.preventDefault()
+          closeReader.run()
+        }
+        return
+      }
       const modifiedCommand = event.metaKey || event.ctrlKey ? matchKey(event, context) : null
       if (modifiedCommand) {
         clearPendingChord()
@@ -128,11 +141,6 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
       if (pendingChord) {
         if (event.repeat && event.key.toLowerCase() === pendingChord.key) {
           event.preventDefault()
-          return
-        }
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          clearPendingChord()
           return
         }
         if (key !== null && Date.now() <= pendingChord.until) {

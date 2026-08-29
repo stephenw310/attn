@@ -43,6 +43,7 @@ const HORIZONTAL_SCROLLBAR_HEIGHT = 16
 const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
 const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
+const TRIM_COLLAPSED_ATTRIBUTE = 'data-attn-trim-collapsed'
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
 
@@ -103,6 +104,9 @@ function frameReset(surface: MailSurface, layout: MailLayout, appearance: ThemeA
   [${TRIM_MARKER}] {
     display: block !important;
     height: ${TRIM_CONTROL_HEIGHT}px !important;
+  }
+  html[${TRIM_COLLAPSED_ATTRIBUTE}] [${TRIM_MARKER}] {
+    height: calc(${TRIM_CONTROL_HEIGHT}px + var(--attn-trim-scrollbar-height, 0px)) !important;
   }
 `
 }
@@ -436,6 +440,10 @@ export function MessageBody({
     (frame: HTMLIFrameElement) => {
       const doc = frame.contentDocument
       if (!doc?.body) return
+      const scrollbarHeight =
+        doc.documentElement.scrollWidth > doc.documentElement.clientWidth ? HORIZONTAL_SCROLLBAR_HEIGHT : 0
+      doc.documentElement.style.setProperty('--attn-trim-scrollbar-height', `${scrollbarHeight}px`)
+      doc.documentElement.toggleAttribute(TRIM_COLLAPSED_ATTRIBUTE, !expanded)
       const scrollHeight = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1)
       if (scrollHeight > MAX_SAFE_BODY_HEIGHT) {
         setOversizedSrcDoc(srcDoc)
@@ -445,8 +453,6 @@ export function MessageBody({
       const trimTop = trimStart
         ? Math.max(0, trimStart.getBoundingClientRect().top + (doc.defaultView?.scrollY ?? 0))
         : null
-      const scrollbarHeight =
-        doc.documentElement.scrollWidth > doc.documentElement.clientWidth ? HORIZONTAL_SCROLLBAR_HEIGHT : 0
       if (srcDoc !== null) {
         const next = {
           srcDoc,
@@ -464,7 +470,7 @@ export function MessageBody({
         )
       }
     },
-    [srcDoc]
+    [expanded, srcDoc]
   )
 
   const forwardKey = useCallback((event: KeyboardEvent) => {

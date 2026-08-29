@@ -45,6 +45,20 @@ test('shows the minimal registry-derived footer for each keyboard context', asyn
   await expect.poll(() => footerHintIds(page)).toEqual(['navigate', 'open', 'back', 'undo'])
 })
 
+test('Escape leaves the reader while the G guide is armed', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+
+  await page.keyboard.press('g')
+  await expect(page.getByTestId('footer-chord-guide')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  await expect(page.getByTestId('footer-chord-guide')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toHaveCount(0)
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+})
+
 test('guides G completions and clears on every dismissal route', async ({ page }, testInfo) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
   const guide = page.getByTestId('footer-chord-guide')
