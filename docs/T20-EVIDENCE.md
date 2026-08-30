@@ -169,6 +169,11 @@ index instead of scanning `threads` for the visible flag, and the service layer 
 coverage per mail revision so a typing burst or a refresh burst pays once. Repeat calls inside one revision
 now cost nothing, which is the common case: the numbers above are all first calls.
 
+The PR #98 follow-up changes cache invalidation to follow SQLite writes, including background batches that
+do not emit `mail:changed`. Search coverage now reads one `sync_state` row on each request and is not cached.
+The measurements above predate that correction. Handler regression tests cover silent writes, partial
+membership rebuilds, and cursor-only coverage changes.
+
 The perf suite's `local-mail-refresh` measurement never included `getMailboxCounts`, which is how the count
 grew into the slowest read in the refresh without failing anything. It now measures both waves in the order the
 renderer issues them (10,000-thread profile: 6 ms median, 11 ms p95). A 10,000-thread profile only catches gross
@@ -217,7 +222,7 @@ constrains which index a table uses rather than the order tables are joined; `CR
 does, and SQLite will not reorder it. A unit test now asserts the plan drives from `messages`
 (`sync/persist.test.ts`), because the defect was a planner choice rather than a visible mistake in the SQL.
 
-**The job as it now stands** (`npm run e2e:perf:scale`, 40,000 threads / 80,000 messages, imported in about
+**The original job** (`npm run e2e:perf:scale`, 40,000 threads / 80,000 messages, imported in about
 20 seconds, whole run 22 s):
 
 | Read | Healthy, through IPC | Budget | Scanning, measured directly |
@@ -234,6 +239,29 @@ profile stops at 40,000 threads because the fixture is parsed whole and the util
 This was live before the scale profile existed and nothing caught it: quota admits roughly 137 threads a minute,
 so 17 ms per write is invisible during real sync. It shows up wherever writes are local and bulk — seeding a
 test profile, and plausibly a long offline catch-up.
+
+## PR #98 rereview measurements, 2026-08-30
+
+The scale job now calls `attn:test:queryPerfStats` to measure production queries inside the utility process.
+The former keypress-based invalidation could measure a cached mailbox count before the action completed or
+after the renderer refreshed it. Raw query timing removes that race. These measurements exclude IPC and
+are not directly comparable to the renderer timings above.
+
+A separate probe imported the same 40,000-thread, 80,000-message seed through `loadSeed` into SQLite and ran
+the indexed queries alongside the previous scanning shapes, with five samples each:
+
+| Read | Indexed median | Scanning median | Raw query budget |
+|---|---:|---:|---:|
+| System mailbox counts | 1.31 ms | 38.26 ms | 15 ms |
+| All Mail first page | 0.24 ms | 29.53 ms | 20 ms |
+
+The probe asserts equal counts and 101-row pages, then asserts the indexed reads pass and the scanning
+reads exceed their budgets. Common-term search retains its 300 ms budget in the Electron scale job.
+
+Explicit snooze searches also received an indexed path because Gmail cannot search local snooze state.
+On a separate synthetic store with 100,000 matching messages and 100 pending snoozes, an account-driven
+message join took 1,057 ms median; the reminder-first join took 89 ms. Query-plan regression assertions
+require indexed pending-reminder and message-thread lookups before rowid-constrained FTS matching.
 
 ## Quota and bootstrap instrumentation
 

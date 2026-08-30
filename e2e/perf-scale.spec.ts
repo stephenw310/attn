@@ -1,4 +1,6 @@
-import type { Page, TestInfo } from '@playwright/test'
+import type { ElectronApplication, TestInfo } from '@playwright/test'
+import { TEST_CHANNELS } from '../src/shared/ipc'
+import { THREAD_PAGE_SIZE } from '../src/shared/mail'
 import { expect, test } from './electron'
 
 /**
@@ -26,14 +28,16 @@ const PROFILE_THREADS = 40_000
 const SCALE_TEST_TIMEOUT_MS = 15 * 60_000
 const SAMPLE_COUNT = 5
 
-// Each ceiling sits between the two costs measured on this exact profile, so a
-// failure means the read went back to scanning rather than that the machine is
-// busy. Measured directly against the store at 40,000 threads: the mailbox
-// counts cost 3.4 ms indexed and 26.8 ms scanning; the All Mail page 0.5 ms and
-// 30.7 ms. Through IPC the healthy figures land near 19 ms and 6 ms, so a
-// regression would read near 42 ms and 36 ms. Budgets any looser than this — the
-// 150 ms this file first shipped with — pass either way and guard nothing.
-const MAILBOX_COUNTS_CEILING_MS = 30
+// Each ceiling sits between the two raw utility-process costs measured on this
+// exact profile, so a failure means the read went back to scanning rather than
+// that the machine is busy. On 2026-08-30, direct store timings on the 40,000-
+// thread seed measured mailbox counts at 1.3 ms indexed and 38.3 ms scanning,
+// and the All Mail page at 0.24 ms indexed and 29.5 ms scanning. These raw
+// figures are not comparable to the older renderer IPC medians in T20. This
+// spec now times the reads inside the utility process through a test-only IPC
+// seam, because the renderer's ordinary mail-change refresh can warm
+// `getMailboxCounts()` before a timed sample starts.
+const MAILBOX_COUNTS_CEILING_MS = 15
 const ALL_MAIL_PAGE_CEILING_MS = 20
 // An unbounded candidate set turns this into seconds; the bounded window is 134 ms.
 const COMMON_TERM_SEARCH_CEILING_MS = 300
@@ -55,42 +59,47 @@ async function report(testInfo: TestInfo, name: string, samples: readonly number
   })
 }
 
-/**
- * Every sample is a cold read: mailbox counts and search coverage are cached per
- * mail change, so repeating a call without a write measures the cache instead of
- * the query. Starring a thread moves the revision and invalidates both.
- */
-async function invalidateDerivedReads(page: Page): Promise<void> {
-  await page.keyboard.press('s')
-  await expect(page.getByTestId('thread-list')).toBeVisible()
+interface QueryPerfStats {
+  mailboxCounts: {
+    samplesUs: number[]
+    counts: { allMail: number }
+  }
+  allMailPage: {
+    samplesUs: number[]
+    rowCount: number
+  }
+  search: {
+    samplesUs: number[]
+    rowCount: number
+    partial: boolean
+  }
+}
+
+async function queryPerfStats(app: ElectronApplication, runsPerQuery: number): Promise<QueryPerfStats> {
+  return app.evaluate(
+    ({ ipcMain }, input) =>
+      new Promise<QueryPerfStats>((resolve) => {
+        ipcMain.emit(input.channel, {}, input.request, resolve)
+      }),
+    {
+      channel: TEST_CHANNELS.queryPerfStats,
+      request: { runsPerQuery, threadLimit: THREAD_PAGE_SIZE + 1, searchQuery: 'performance' }
+    }
+  )
 }
 
 test.describe('@perfscale reads that must not scale with the store', () => {
-  test('counts, pages, and searches a large profile without scanning it', async ({ page }, testInfo) => {
+  test('counts, pages, and searches a large profile without scanning it', async ({ app, page }, testInfo) => {
     await expect(page.getByTestId('thread-list')).toBeVisible()
-    const storedThreads = await page.evaluate(async () => (await window.attn.mail.getMailboxCounts()).allMail)
+    const stats = await queryPerfStats(app, SAMPLE_COUNT)
+    const storedThreads = stats.mailboxCounts.counts.allMail
     // The profile has to be the large one, or every budget below is meaningless.
     expect(storedThreads, 'All Mail threads in the profile').toBeGreaterThan(PROFILE_THREADS / 2)
+    expect(stats.allMailPage.rowCount, 'All Mail first page size').toBeGreaterThan(0)
+    expect(stats.search.rowCount, 'common-term search result size').toBeGreaterThan(0)
 
-    const countSamples: number[] = []
-    const pageSamples: number[] = []
-    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
-      await invalidateDerivedReads(page)
-      countSamples.push(
-        await page.evaluate(async () => {
-          const started = performance.now()
-          await window.attn.mail.getMailboxCounts()
-          return performance.now() - started
-        })
-      )
-      pageSamples.push(
-        await page.evaluate(async () => {
-          const started = performance.now()
-          await window.attn.mail.listThreadPage('allMail')
-          return performance.now() - started
-        })
-      )
-    }
+    const countSamples = stats.mailboxCounts.samplesUs.map((sample) => sample / 1_000)
+    const pageSamples = stats.allMailPage.samplesUs.map((sample) => sample / 1_000)
     await report(testInfo, 'scale-mailbox-counts', countSamples)
     await report(testInfo, 'scale-all-mail-page', pageSamples)
     expect(median(countSamples), 'median system mailbox counts').toBeLessThan(MAILBOX_COUNTS_CEILING_MS)
@@ -98,18 +107,7 @@ test.describe('@perfscale reads that must not scale with the store', () => {
 
     // "performance" appears in every thread's subject, which is the shape that
     // used to visit every matching message before returning a hundred rows.
-    const searchSamples: number[] = []
-    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
-      await invalidateDerivedReads(page)
-      searchSamples.push(
-        await page.evaluate(async () => {
-          const started = performance.now()
-          const response = await window.attn.mail.search('performance')
-          if (response.rows.length === 0) throw new Error('common-term search returned nothing')
-          return performance.now() - started
-        })
-      )
-    }
+    const searchSamples = stats.search.samplesUs.map((sample) => sample / 1_000)
     await report(testInfo, 'scale-common-term-search', searchSamples)
     expect(median(searchSamples), 'median common-term search').toBeLessThan(COMMON_TERM_SEARCH_CEILING_MS)
   })

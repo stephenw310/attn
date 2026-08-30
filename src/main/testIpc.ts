@@ -87,7 +87,11 @@ export class TestSeams {
           .catch((error) => done?.({ error: errorMessage(error) }))
       }
     )
-    for (const channel of [TEST_CHANNELS.runFtsBackfill, TEST_CHANNELS.searchIndexStats]) {
+    for (const channel of [
+      TEST_CHANNELS.runFtsBackfill,
+      TEST_CHANNELS.searchIndexStats,
+      TEST_CHANNELS.queryPerfStats
+    ]) {
       ipcMain.on(channel, (_event, request: unknown, done?: (result: unknown) => void) => {
         void this.forward(channel, [request])
           .then((result) => done?.(result))

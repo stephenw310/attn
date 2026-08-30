@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
   }
   return {
     FakePoller,
+    runMailboxMembershipBackfill: vi.fn(),
     runInboxBackfill: vi.fn(),
     runLifetimeSweep: vi.fn(),
     runAttachmentFlagWalk: vi.fn(),
@@ -52,6 +53,9 @@ const mocks = vi.hoisted(() => {
   }
 })
 
+vi.mock('./db/mailboxMembership', () => ({
+  runMailboxMembershipBackfill: mocks.runMailboxMembershipBackfill
+}))
 // planBackfillStart is a pure cursor router, so the real one runs here — mocking
 // it would stop these tests from covering how a cursor picks the starting phase.
 vi.mock('./sync/backfill', async (importOriginal) => ({
@@ -235,6 +239,8 @@ function harness(options: { backfillCursor?: string | null } = {}) {
 
 beforeEach(() => {
   mocks.FakePoller.instances = []
+  mocks.runMailboxMembershipBackfill.mockReset()
+  mocks.runMailboxMembershipBackfill.mockResolvedValue({ threadsIndexed: 0, complete: true })
   mocks.runInboxBackfill.mockReset()
   mocks.runLifetimeSweep.mockReset()
   mocks.runAttachmentFlagWalk.mockReset()

@@ -50,7 +50,7 @@ interface SyncControllerContext {
   acquireIndexingSlot?: (accountId: string) => Promise<() => void>
 }
 
-interface FtsBackfillRun {
+interface LocalBackfillRun {
   accountId: string
   generation: number
 }
@@ -64,9 +64,10 @@ export class SyncController {
   private state: SyncState = { phase: 'idle' }
   private running = false
   private lifetimeRunning = false
-  private ftsBackfillRun: FtsBackfillRun | null = null
-  private mailboxBackfillRunning = false
-  private pendingFtsBackfill: FtsBackfillRun | null = null
+  private ftsBackfillRun: LocalBackfillRun | null = null
+  private mailboxBackfillRun: LocalBackfillRun | null = null
+  private pendingFtsBackfill: LocalBackfillRun | null = null
+  private pendingMailboxBackfill: LocalBackfillRun | null = null
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
   private inboxRecoveryPending = false
@@ -176,6 +177,7 @@ export class SyncController {
     this.ftsRetry.clear()
     this.backfillRetryGeneration = null
     this.pendingFtsBackfill = null
+    this.pendingMailboxBackfill = null
     this.running = false
     this.lifetimeRunning = false
     this.lifetimeProgress = null
@@ -262,28 +264,49 @@ export class SyncController {
 
   /**
    * Fill derived mailbox membership for a profile whose rows predate the table.
-   * Unlike the other local passes this runs before any Gmail work: mailbox counts
+   * Unlike the other local passes this starts before Gmail work: mailbox counts
    * and the All Mail list read the table, so a manually upgraded profile shows
    * them incomplete until this finishes. A freshly synced store maintains
    * membership inline and this returns on its first batch.
    */
   private startMailboxMembershipBackfill(accountId: string, generation: number): void {
-    if (this.stopped || this.mailboxBackfillRunning || generation !== this.generation) return
-    this.mailboxBackfillRunning = true
+    if (this.stopped || generation !== this.generation) return
+    const requestedRun = { accountId, generation }
+    if (this.mailboxBackfillRun) {
+      // Reauthentication cancels the old pass at its next batch boundary. Keep
+      // the replacement request until that pass exits so neither run is lost
+      // and two passes never write the same cursor concurrently.
+      if (
+        this.mailboxBackfillRun.accountId !== accountId ||
+        this.mailboxBackfillRun.generation !== generation
+      ) {
+        this.pendingMailboxBackfill = requestedRun
+      }
+      return
+    }
+    this.pendingMailboxBackfill = null
+    this.mailboxBackfillRun = requestedRun
     void runMailboxMembershipBackfill(this.context.db, accountId, {
       shouldContinue: () =>
         !this.stopped && generation === this.generation && this.context.currentAccountId() === accountId
     })
       .then((result) => {
-        this.mailboxBackfillRunning = false
-        if (result.threadsIndexed > 0) {
+        // A canceled generation can still have committed batches. This callback
+        // is account-bound, and the replacement may find no work left to publish.
+        if (!this.stopped && result.threadsIndexed > 0) {
           console.log(`[sync] mailbox membership filled for ${result.threadsIndexed} threads`)
           this.context.broadcastMailChanged()
         }
       })
       .catch((error) => {
-        this.mailboxBackfillRunning = false
         console.error(`[sync] mailbox membership backfill failed: ${errorMessage(error)}`)
+      })
+      .finally(() => {
+        if (this.mailboxBackfillRun !== requestedRun) return
+        this.mailboxBackfillRun = null
+        const pending = this.pendingMailboxBackfill
+        this.pendingMailboxBackfill = null
+        if (pending) this.startMailboxMembershipBackfill(pending.accountId, pending.generation)
       })
   }
 

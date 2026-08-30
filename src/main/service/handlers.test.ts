@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import { openDatabase } from '../db'
-import { refreshThreadMailboxes } from '../db/mailboxMembership'
+import { refreshThreadMailboxes, runMailboxMembershipBackfill } from '../db/mailboxMembership'
 import type { GmailThread } from '../gmail/parse'
 import { ensureAccount } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
@@ -14,8 +14,7 @@ function handlerContext(
   db: ReturnType<typeof openDatabase>,
   provider: ServerSearchProvider,
   broadcastMailChanged = vi.fn(),
-  syncController: SyncController | null = null,
-  mailRevision: () => number = () => 0
+  syncController: SyncController | null = null
 ): ServiceHandlerContext {
   return {
     db,
@@ -39,7 +38,6 @@ function handlerContext(
     draftReopenDelay: () => 0,
     draftInlineImageDelay: () => 0,
     consumeTestDraftSaveFailure: () => false,
-    mailRevision,
     searchWindowOverride: () => null,
     testUserData: false,
     userDataPath: '/tmp/attn-test-user-data',
@@ -228,35 +226,80 @@ describe('derived read caching', () => {
     refreshThreadMailboxes(db, ACCOUNT, id)
   }
 
-  it('serves mailbox counts and search coverage from cache until the mail revision moves', async () => {
+  it('invalidates mailbox counts for silent writes and reuses them between writes', async () => {
     const db = openDatabase(':memory:')
     ensureAccount(db, ACCOUNT, ACCOUNT)
     seedThread(db, 'first')
-    let revision = 0
-    const handlers = createServiceHandlers(handlerContext(db, noProvider, vi.fn(), null, () => revision))
-
+    const handlers = createServiceHandlers(handlerContext(db, noProvider))
     try {
-      const setStage = (phase: string): void => {
-        db.prepare('INSERT OR REPLACE INTO sync_state (account_id, backfill_cursor) VALUES (?, ?)').run(
-          ACCOUNT,
-          phase
-        )
-      }
-      setStage('bodies')
-      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ inbox: 1 })
-      const firstSearch = await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])
-      expect(firstSearch.coverage.bodiesOnDemand).toBe(false)
+      const first = await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
+      expect(first).toMatchObject({ inbox: 1, allMail: 1 })
+      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toBe(first)
 
-      // Writes with no broadcast leave both reads on their cached answer, the
-      // same staleness the unrefreshed thread list already has.
+      // Lifetime writes do not broadcast, but a new read must see their rows.
       seedThread(db, 'second')
-      setStage('all-mail')
-      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ inbox: 1 })
-      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage.bodiesOnDemand).toBe(false)
+      const second = await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
+      expect(second).toMatchObject({ inbox: 2, allMail: 2 })
+      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toBe(second)
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
 
-      revision += 1
-      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ inbox: 2 })
-      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage.bodiesOnDemand).toBe(true)
+  it('refreshes counts between committed membership backfill batches', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    for (const id of ['first', 'second', 'third']) seedThread(db, id)
+    db.prepare('DELETE FROM thread_mailboxes WHERE account_id = ?').run(ACCOUNT)
+    const handlers = createServiceHandlers(handlerContext(db, noProvider))
+    try {
+      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ allMail: 0 })
+      let batches = 0
+      await runMailboxMembershipBackfill(db, ACCOUNT, {
+        batchSize: 2,
+        batchPauseMs: 0,
+        shouldContinue: () => batches++ === 0
+      })
+      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ allMail: 2 })
+      await runMailboxMembershipBackfill(db, ACCOUNT, { batchSize: 2, batchPauseMs: 0 })
+      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ allMail: 3 })
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+
+  it('reads current search coverage after cursor-only sync progress', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const handlers = createServiceHandlers(handlerContext(db, noProvider))
+    try {
+      db.prepare('INSERT INTO sync_state (account_id, backfill_cursor) VALUES (?, ?)').run(ACCOUNT, 'bodies')
+      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage).toEqual({
+        headersComplete: false,
+        headersCapped: false,
+        indexComplete: false,
+        attachmentFlagsComplete: false,
+        bodiesOnDemand: false
+      })
+      db.prepare(
+        `UPDATE sync_state SET backfill_cursor = 'all-mail', sweep_cursor = 'capped:lifetime',
+                               fts_cursor = 'done', attachment_cursor = 'done'
+         WHERE account_id = ?`
+      ).run(ACCOUNT)
+      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage).toEqual({
+        headersComplete: false,
+        headersCapped: true,
+        indexComplete: true,
+        attachmentFlagsComplete: true,
+        bodiesOnDemand: true
+      })
+      db.prepare("UPDATE sync_state SET sweep_cursor = 'done' WHERE account_id = ?").run(ACCOUNT)
+      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage).toMatchObject({
+        headersComplete: true,
+        headersCapped: false
+      })
     } finally {
       handlers.stop()
       db.close()

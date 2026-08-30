@@ -133,6 +133,7 @@ export const TEST_CHANNELS = {
   runExistenceSweep: 'attn:test:runExistenceSweep',
   runFtsBackfill: 'attn:test:runFtsBackfill',
   searchIndexStats: 'attn:test:searchIndexStats',
+  queryPerfStats: 'attn:test:queryPerfStats',
   setSearchWindow: 'attn:test:setSearchWindow',
   utilityState: 'attn:test:utilityState',
   crashUtility: 'attn:test:crashUtility',

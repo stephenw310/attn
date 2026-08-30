@@ -1,13 +1,14 @@
 import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
 import { type InvokeChannel, type MailChangeReason, TEST_CHANNELS } from '../../shared/ipc'
-import type { MessageMailbox, SyncState } from '../../shared/mail'
+import { type MessageMailbox, type SyncState, THREAD_PAGE_SIZE } from '../../shared/mail'
 import { ALLOWED_UNDO_SEND_SECONDS } from '../../shared/outboxTuning'
 import { clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
 import { type Db, openDatabase, schemaVersion } from '../db'
-import { countInboxUnread, listMailboxThreads } from '../db/queries'
+import { countInboxUnread, countSystemMailboxes, listMailboxThreads } from '../db/queries'
+import { searchThreads } from '../db/search'
 import { loadSeed, readSeedRemoteThreadIds, readSeedThread } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
@@ -203,7 +204,6 @@ export class ServiceRuntime {
       draftReopenDelay: () => this.draftReopenDelayMs,
       draftInlineImageDelay: () => this.draftInlineImageDelayMs,
       consumeTestDraftSaveFailure: () => this.consumeDraftSaveFailure(),
-      mailRevision: () => this.mailRevision,
       searchWindowOverride: () => this.searchWindowOverride,
       testUserData: input.testMode,
       userDataPath: input.userDataPath,
@@ -827,6 +827,7 @@ export class ServiceRuntime {
     if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])
     if (channel === TEST_CHANNELS.runFtsBackfill) return this.runTestFtsBackfill(args[0])
     if (channel === TEST_CHANNELS.searchIndexStats) return this.testSearchIndexStats(args[0])
+    if (channel === TEST_CHANNELS.queryPerfStats) return this.testQueryPerfStats(args[0])
     if (channel === TEST_CHANNELS.setSearchWindow) {
       // The partial marker only appears once a search fills its recency window,
       // which a seeded store is far too small to do at the production size.
@@ -1051,6 +1052,39 @@ export class ServiceRuntime {
     return { indexBytes, queries }
   }
 
+  private testQueryPerfStats(value: unknown): unknown {
+    const accountId = this.activeAccountId
+    if (!accountId || !isQueryPerfStatsRequest(value)) throw new Error('invalid query perf request')
+    const runsPerQuery = value.runsPerQuery ?? 1
+    const threadLimit = value.threadLimit ?? THREAD_PAGE_SIZE + 1
+    const searchQuery = value.searchQuery ?? 'performance'
+
+    const time = <T>(read: () => T): { result: T; samplesUs: number[] } => {
+      const samplesUs: number[] = []
+      let result!: T
+      for (let run = 0; run < runsPerQuery; run++) {
+        const startedAt = process.hrtime.bigint()
+        result = read()
+        samplesUs.push(Number(process.hrtime.bigint() - startedAt) / 1_000)
+      }
+      return { result, samplesUs }
+    }
+
+    const mailboxCounts = time(() => countSystemMailboxes(this.db, accountId))
+    const allMailPage = time(() => listMailboxThreads(this.db, accountId, 'allMail', threadLimit))
+    const search = time(() => searchThreads(this.db, accountId, searchQuery))
+
+    return {
+      mailboxCounts: { samplesUs: mailboxCounts.samplesUs, counts: mailboxCounts.result },
+      allMailPage: { samplesUs: allMailPage.samplesUs, rowCount: allMailPage.result.length },
+      search: {
+        samplesUs: search.samplesUs,
+        rowCount: search.result.rows.length,
+        partial: search.result.partial
+      }
+    }
+  }
+
   private async runTestExistenceSweep(value: unknown): Promise<unknown> {
     const accountId = this.activeAccountId
     if (!accountId || !isExistenceSweepRequest(value)) throw new Error('invalid existence sweep request')
@@ -1110,6 +1144,12 @@ interface SearchIndexStatsRequest {
   limit?: number
 }
 
+interface QueryPerfStatsRequest {
+  runsPerQuery?: number
+  threadLimit?: number
+  searchQuery?: string
+}
+
 function optionalPositiveInteger(value: unknown): boolean {
   return value === undefined || (typeof value === 'number' && Number.isInteger(value) && value > 0)
 }
@@ -1133,6 +1173,16 @@ function isSearchIndexStatsRequest(value: unknown): value is SearchIndexStatsReq
     request.queries.every((query) => typeof query === 'string' && query.length > 0) &&
     optionalPositiveInteger(request.runsPerQuery) &&
     optionalPositiveInteger(request.limit)
+  )
+}
+
+function isQueryPerfStatsRequest(value: unknown): value is QueryPerfStatsRequest {
+  if (!value || typeof value !== 'object') return false
+  const request = value as Partial<QueryPerfStatsRequest>
+  return (
+    optionalPositiveInteger(request.runsPerQuery) &&
+    optionalPositiveInteger(request.threadLimit) &&
+    (request.searchQuery === undefined || typeof request.searchQuery === 'string')
   )
 }
 

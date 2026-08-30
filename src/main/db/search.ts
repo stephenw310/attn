@@ -3,7 +3,6 @@ import type { ThreadRow } from '../../shared/mail'
 import {
   type ParsedSearchQuery,
   parseSearchQuery,
-  type SearchCoverage,
   type SearchFilter,
   type SearchResponse,
   type SearchTextTerm,
@@ -158,6 +157,12 @@ interface CandidateOptions {
    */
   recentMessageLimit?: number
   /**
+   * Explicit Snoozed text search must be exact because Gmail cannot apply local
+   * reminder state. Start from the small pending-reminders set so common terms do
+   * not make SQLite scan every message in a large account.
+   */
+  snoozedFirst?: boolean
+  /**
    * Restrict candidates to these thread ids. The server-search intersection asks
    * about at most one page of ids and needs an exact answer for each, so it bounds
    * the query this way instead of by recency, which could drop an older thread it
@@ -194,6 +199,30 @@ function candidateSql(
   ]
   if (options.restrictThreadIds) values.push(...options.restrictThreadIds)
   if (match) {
+    if (options.snoozedFirst) {
+      values.unshift(match, accountId)
+      return `SELECT ${messageAlias}.thread_id, MIN(message_fts.rank) AS score
+        FROM reminders search_snooze INDEXED BY idx_reminders_due
+        CROSS JOIN messages ${messageAlias} INDEXED BY idx_messages_thread
+          ON ${messageAlias}.account_id = search_snooze.account_id
+         AND ${messageAlias}.thread_id = search_snooze.thread_id
+        CROSS JOIN message_fts_map map
+          ON map.account_id = ${messageAlias}.account_id
+         AND map.message_id = ${messageAlias}.id
+        CROSS JOIN message_fts
+          ON message_fts.rowid = map.fts_rowid
+         AND message_fts MATCH ?
+         AND message_fts.account_id = ${messageAlias}.account_id
+        CROSS JOIN threads t
+          ON t.account_id = ${messageAlias}.account_id
+         AND t.id = ${messageAlias}.thread_id
+        WHERE search_snooze.account_id = ?
+          AND search_snooze.kind = 'snooze'
+          AND search_snooze.state = 'pending'
+          ${predicates.map((predicate) => `AND (${predicate})`).join(' ')}
+        GROUP BY ${messageAlias}.thread_id`
+    }
+
     const bounded = options.recentMessageLimit !== undefined
     // Leading binds, in the order the chosen form reads them.
     values.unshift(
@@ -254,6 +283,14 @@ function searchesDrafts(parsed: ParsedSearchQuery): boolean {
     if (filter.kind !== 'in') return false
     const mailbox = systemMailboxName(filter.value)
     return mailbox === 'draft' || mailbox === 'drafts'
+  })
+}
+
+function searchesLocalSnoozes(parsed: ParsedSearchQuery): boolean {
+  return parsed.filters.some((filter) => {
+    if (filter.kind === 'is') return filter.value === 'snoozed'
+    if (filter.kind !== 'in') return false
+    return systemMailboxName(filter.value) === 'snoozed'
   })
 }
 
@@ -408,19 +445,14 @@ export function matchingStoredThreadIds(
 
 export interface SearchThreadsOptions {
   limit?: number
-  /** Already-computed coverage, so a typing burst does not recount bodies. */
-  knownCoverage?: SearchCoverage
   /** Overrides `SEARCH_RECENT_MESSAGE_LIMIT`; tests use it to reach the partial state. */
   recentMessageLimit?: number
 }
 
 /**
- * Run local thread and Drafts search over their authoritative stores.
- *
- * `knownCoverage` lets the caller supply an already-computed coverage snapshot.
- * Coverage counts bodies across every stored message, which costs time
- * proportional to the whole store on a query that otherwise runs per typing
- * pause, so the service layer caches it per mail revision instead.
+ * Run local thread and Drafts search over their authoritative stores. Coverage
+ * is cursor-derived and O(1); text-result candidates are bounded except for
+ * local-only stores such as Drafts and Snoozed.
  */
 export function searchThreads(
   db: Db,
@@ -428,10 +460,10 @@ export function searchThreads(
   query: string,
   options: SearchThreadsOptions = {}
 ): SearchResponse {
-  const { limit = SEARCH_RESULT_LIMIT, knownCoverage } = options
+  const { limit = SEARCH_RESULT_LIMIT } = options
   const parsed = parseSearchQuery(query)
   const match = searchMatchExpression(parsed)
-  const coverage = knownCoverage ?? searchCoverage(db, accountId)
+  const coverage = searchCoverage(db, accountId)
   const resultLimit = Math.max(1, Math.min(Math.trunc(limit), SEARCH_RESULT_LIMIT))
   if (!query.trim() || (!match && parsed.filters.length === 0)) {
     return { rows: [], drafts: [], coverage, partial: false }
@@ -442,7 +474,9 @@ export function searchThreads(
   }
 
   const values: unknown[] = []
-  const recentMessageLimit = match ? (options.recentMessageLimit ?? SEARCH_RECENT_MESSAGE_LIMIT) : undefined
+  const exactLocalSnoozeSearch = searchesLocalSnoozes(parsed)
+  const recentMessageLimit =
+    match && !exactLocalSnoozeSearch ? (options.recentMessageLimit ?? SEARCH_RECENT_MESSAGE_LIMIT) : undefined
   // Count one match past the window to distinguish an exact fit from truncation.
   // This is a bounded read: when filters reject everything
   // inside it the result set is empty, and an empty result still has to say it
@@ -463,6 +497,7 @@ export function searchThreads(
         ).count
       : 0
   const candidates = candidateSql(parsed, match, accountId, values, {
+    snoozedFirst: match !== null && exactLocalSnoozeSearch,
     ...(recentMessageLimit === undefined ? {} : { recentMessageLimit })
   })
   values.push(accountId, resultLimit)

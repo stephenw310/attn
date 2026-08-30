@@ -501,4 +501,84 @@ describe('bounded search candidates', () => {
       db.close()
     }
   })
+
+  it('keeps explicit snoozed text searches exact because Gmail cannot search local snooze state', () => {
+    const db = openDatabase(':memory:')
+    try {
+      for (let index = 0; index < 12; index++) {
+        persistThread(
+          db,
+          ACCOUNT,
+          thread(`bulk-thread-${index}`, {
+            from: 'Planner <plans@example.test>',
+            subject: 'Quarterly planning',
+            body: 'recurring token in every message',
+            at: String(1_700_000_000_000 + index * 60_000)
+          })
+        )
+      }
+      db.prepare(
+        `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+         VALUES (?, 'bulk-thread-0', 'snooze', ?, 'pending')`
+      ).run(ACCOUNT, 1_800_000_000_000)
+
+      for (const query of ['recurring is:snoozed', 'recurring in:snoozed']) {
+        const result = searchThreads(db, ACCOUNT, query, { recentMessageLimit: 4 })
+        expect(result.partial).toBe(false)
+        expect(result.rows.map((row) => row.id)).toEqual(['bulk-thread-0'])
+      }
+
+      const plans: string[][] = []
+      const explainingDb = {
+        prepare: (sql: string) => {
+          const statement = db.prepare(sql)
+          return {
+            get: (...params: unknown[]) => statement.get(...params),
+            all: (...params: unknown[]) => {
+              plans.push(
+                (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map(
+                  (row) => row.detail
+                )
+              )
+              return statement.all(...params)
+            }
+          }
+        }
+      } as typeof db
+
+      expect(
+        searchThreads(explainingDb, ACCOUNT, 'recurring is:snoozed', { recentMessageLimit: 4 }).rows.map(
+          (row) => row.id
+        )
+      ).toEqual(['bulk-thread-0'])
+
+      const candidatePlan = plans.find((plan) =>
+        plan.some((detail) => detail.includes('search_snooze USING INDEX idx_reminders_due'))
+      )
+      expect(candidatePlan).toBeDefined()
+      const snoozeRead = candidatePlan?.findIndex((detail) =>
+        detail.includes('search_snooze USING INDEX idx_reminders_due')
+      )
+      const messageRead = candidatePlan?.findIndex((detail) =>
+        detail.includes('search_message USING INDEX idx_messages_thread')
+      )
+      const mapRead = candidatePlan?.findIndex((detail) =>
+        detail.includes('map USING INDEX sqlite_autoindex_message_fts_map_1')
+      )
+      const ftsRead = candidatePlan?.find((detail) => detail.includes('message_fts VIRTUAL TABLE'))
+      expect(snoozeRead).toBeGreaterThanOrEqual(0)
+      expect(messageRead).toBeGreaterThan(snoozeRead ?? -1)
+      expect(candidatePlan?.[messageRead ?? -1]).toContain('thread_id=?')
+      expect(mapRead).toBeGreaterThan(messageRead ?? -1)
+      expect(ftsRead).toContain(':=M')
+
+      // Negative-looking forms are literal text until the query language grows
+      // negation; they must not activate the exact local snooze path.
+      const literal = searchThreads(db, ACCOUNT, 'recurring -is:snoozed', { recentMessageLimit: 4 })
+      expect(literal.partial).toBe(false)
+      expect(literal.rows).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
 })
