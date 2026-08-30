@@ -414,6 +414,47 @@ describe('searchThreads', () => {
 })
 
 describe('bounded search candidates', () => {
+  it('looks up matched messages by key instead of scanning the account', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(
+        db,
+        ACCOUNT,
+        thread('target', {
+          from: 'Planner <plans@example.test>',
+          subject: 'Plan',
+          body: 'raretoken',
+          at: '100'
+        })
+      )
+      const plans: string[][] = []
+      const explainingDb = {
+        prepare: (sql: string) => {
+          const statement = db.prepare(sql)
+          return {
+            get: (...params: unknown[]) => statement.get(...params),
+            all: (...params: unknown[]) => {
+              plans.push(
+                (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map(
+                  (row) => row.detail
+                )
+              )
+              return statement.all(...params)
+            }
+          }
+        }
+      } as typeof db
+
+      expect(searchThreads(explainingDb, ACCOUNT, 'raretoken').rows.map((row) => row.id)).toEqual(['target'])
+      expect(plans).toHaveLength(1)
+      const messageReads = plans[0].filter((detail) => detail.includes('search_message'))
+      expect(messageReads).toHaveLength(1)
+      expect(messageReads[0]).toContain('(account_id=? AND id=?)')
+    } finally {
+      db.close()
+    }
+  })
+
   it('marks a search partial when its recency window fills, and stays exact below it', () => {
     const db = openDatabase(':memory:')
     try {
@@ -434,6 +475,11 @@ describe('bounded search candidates', () => {
       const whole = searchThreads(db, ACCOUNT, 'recurring', { recentMessageLimit: 50 })
       expect(whole.partial).toBe(false)
       expect(whole.rows).toHaveLength(12)
+
+      // Filling the window exactly does not omit any matching messages.
+      const exact = searchThreads(db, ACCOUNT, 'recurring', { recentMessageLimit: 12 })
+      expect(exact.partial).toBe(false)
+      expect(exact.rows).toHaveLength(12)
 
       // Window smaller than the corpus: the newest matches, marked partial.
       const bounded = searchThreads(db, ACCOUNT, 'recurring', { recentMessageLimit: 4 })

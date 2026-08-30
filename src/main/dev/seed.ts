@@ -49,10 +49,12 @@ interface SeedThread {
   messages: SeedMessage[]
 }
 
-interface SeedFixture {
+interface SeedAccountFixture {
   account: string
   labels?: LabelRow[]
   threads: SeedThread[]
+  /** Override the complete checkpoint for sync-gating e2e coverage. */
+  backfillCursor?: string
   /** E2E-only Gmail snapshots that are not imported until an explicit server search fetches them. */
   remoteThreads?: SeedThread[]
   /** Exact Gmail q= responses for the remote snapshots, keeping the provider seam query-aware. */
@@ -61,20 +63,43 @@ interface SeedFixture {
   splitSetup?: boolean
 }
 
+/**
+ * A fixture file is one account (the original shape) or `{ accounts: [...] }`
+ * for multi-account suites (F18). Thread ids must stay unique across the whole
+ * file so account-agnostic seams (failNextAction, focusThread) stay unambiguous.
+ */
+type SeedFixtureFile = SeedAccountFixture | { accounts: SeedAccountFixture[] }
+
 export interface SeedLoadOptions {
-  /** E2E-only authoritative catalog override; ordinary seeding uses the fixture catalog. */
+  /** E2E-only authoritative catalog override; applies to the first account only (T21 seam). */
   labels?: LabelRow[]
 }
 
 export interface SeedLoadResult {
-  accountId: string
+  accountIds: string[]
   labelsChanged: boolean
 }
 
-function readSeedFixture(path: string): SeedFixture {
-  const fixture = JSON.parse(readFileSync(path, 'utf8')) as SeedFixture
-  if (!fixture.account || !Array.isArray(fixture.threads)) throw new Error('Invalid ATTN_TEST_SEED fixture')
-  return fixture
+function isValidAccountFixture(fixture: Partial<SeedAccountFixture>): fixture is SeedAccountFixture {
+  return Boolean(fixture.account) && Array.isArray(fixture.threads)
+}
+
+/** Every account in the fixture file, in switcher order. */
+function readSeedFixtures(path: string): SeedAccountFixture[] {
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as SeedFixtureFile
+  const candidates: Partial<SeedAccountFixture>[] =
+    'accounts' in parsed && Array.isArray(parsed.accounts)
+      ? parsed.accounts
+      : [parsed as Partial<SeedAccountFixture>]
+  if (candidates.length === 0 || !candidates.every(isValidAccountFixture)) {
+    throw new Error('Invalid ATTN_TEST_SEED fixture')
+  }
+  const seen = new Set<string>()
+  for (const fixture of candidates) {
+    if (seen.has(fixture.account)) throw new Error(`Duplicate seed account ${fixture.account}`)
+    seen.add(fixture.account)
+  }
+  return candidates
 }
 
 function payloadFor(message: SeedMessage): GmailPart {
@@ -160,52 +185,74 @@ function gmailThreadFor(thread: SeedThread, importedAt: number): GmailThread {
   }
 }
 
-/** Read one authoritative seeded snapshot for an e2e provider seam. */
-export function readSeedThread(path: string, threadId: string, now = Date.now()): GmailThread | null {
-  const fixture = readSeedFixture(path)
-  const thread = [...fixture.threads, ...(fixture.remoteThreads ?? [])].find(
-    (candidate) => candidate.id === threadId
-  )
-  return thread ? gmailThreadFor(thread, now) : null
+/**
+ * Read one authoritative seeded snapshot for an e2e provider seam. Scoped to
+ * `accountId` when given; otherwise searched across every account (ids are
+ * unique file-wide).
+ */
+export function readSeedThread(
+  path: string,
+  threadId: string,
+  now = Date.now(),
+  accountId?: string
+): GmailThread | null {
+  for (const fixture of readSeedFixtures(path)) {
+    if (accountId !== undefined && fixture.account !== accountId) continue
+    const thread = [...fixture.threads, ...(fixture.remoteThreads ?? [])].find(
+      (candidate) => candidate.id === threadId
+    )
+    if (thread) return gmailThreadFor(thread, now)
+  }
+  return null
 }
 
 /** List the snapshots returned by the seeded server-search provider for one Gmail query. */
-export function readSeedRemoteThreadIds(path: string, query: string): string[] {
-  const fixture = readSeedFixture(path)
-  const remoteIds = new Set((fixture.remoteThreads ?? []).map((thread) => thread.id))
-  const configured = fixture.remoteSearches?.[query] ?? []
-  return [...new Set(configured)].filter((threadId) => remoteIds.has(threadId))
+export function readSeedRemoteThreadIds(path: string, query: string, accountId?: string): string[] {
+  const ids: string[] = []
+  for (const fixture of readSeedFixtures(path)) {
+    if (accountId !== undefined && fixture.account !== accountId) continue
+    const remoteIds = new Set((fixture.remoteThreads ?? []).map((thread) => thread.id))
+    const configured = fixture.remoteSearches?.[query] ?? []
+    ids.push(...configured.filter((threadId) => remoteIds.has(threadId)))
+  }
+  return [...new Set(ids)]
 }
 
 export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): SeedLoadResult {
-  const fixture = readSeedFixture(path)
+  const fixtures = readSeedFixtures(path)
   const importedAt = Date.now()
   let labelsChanged = false
 
   db.transaction(() => {
-    // Same write path as real sync (persist.ts) — the seam must never grow
-    // parallel SQL that can drift from what production writes.
-    ensureAccount(db, fixture.account, fixture.account)
-    if (fixture.splitSetup) ensureSplitSetup(db, fixture.account)
-    labelsChanged = upsertLabels(db, fixture.account, options.labels ?? fixture.labels ?? [])
-    for (const thread of fixture.threads) {
-      persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))
+    for (const [index, fixture] of fixtures.entries()) {
+      // Same write path as real sync (persist.ts) — the seam must never grow
+      // parallel SQL that can drift from what production writes.
+      ensureAccount(db, fixture.account, fixture.account)
+      if (fixture.splitSetup) ensureSplitSetup(db, fixture.account)
+      const catalog = (index === 0 ? options.labels : undefined) ?? fixture.labels ?? []
+      const changed = upsertLabels(db, fixture.account, catalog)
+      labelsChanged = labelsChanged || changed
+      for (const thread of fixture.threads) {
+        persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))
+      }
+      // Seeded stores never contact Gmail. Default each account to a complete
+      // snapshot, unless its fixture overrides the foreground checkpoint.
+      // Derived metadata and FTS are complete; persistThread indexed every row.
+      db.prepare(
+        `INSERT INTO sync_state
+         (account_id, backfill_cursor, sweep_cursor, split_metadata_cursor, fts_cursor)
+         VALUES (?, ?, 'done', 'done', 'done')
+         ON CONFLICT(account_id) DO UPDATE SET
+           backfill_cursor = excluded.backfill_cursor,
+           sweep_cursor = COALESCE(sync_state.sweep_cursor, excluded.sweep_cursor),
+           split_metadata_cursor = COALESCE(sync_state.split_metadata_cursor, excluded.split_metadata_cursor),
+           fts_cursor = COALESCE(sync_state.fts_cursor, excluded.fts_cursor)`
+      ).run(fixture.account, fixture.backfillCursor ?? 'done')
     }
-    // Seeded stores are complete local snapshots and never contact Gmail. Mark
-    // foreground backfill, derived metadata passes, and the FTS backfill
-    // complete so relaunches stay settled; persistThread indexed every row.
-    db.prepare(
-      `INSERT INTO sync_state
-       (account_id, backfill_cursor, sweep_cursor, split_metadata_cursor, fts_cursor)
-       VALUES (?, 'done', 'done', 'done', 'done')
-       ON CONFLICT(account_id) DO UPDATE SET
-         backfill_cursor = excluded.backfill_cursor,
-         sweep_cursor = COALESCE(sync_state.sweep_cursor, excluded.sweep_cursor),
-         split_metadata_cursor = COALESCE(sync_state.split_metadata_cursor, excluded.split_metadata_cursor),
-         fts_cursor = COALESCE(sync_state.fts_cursor, excluded.fts_cursor)`
-    ).run(fixture.account)
   })()
 
-  console.log(`[seed] loaded ${fixture.threads.length} threads for ${fixture.account}`)
-  return { accountId: fixture.account, labelsChanged }
+  for (const fixture of fixtures) {
+    console.log(`[seed] loaded ${fixture.threads.length} threads for ${fixture.account}`)
+  }
+  return { accountIds: fixtures.map((fixture) => fixture.account), labelsChanged }
 }

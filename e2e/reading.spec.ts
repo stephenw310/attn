@@ -304,9 +304,9 @@ test('collapses sanitized HTML quote and signature blocks behind an expander', a
       const marker = iframe.contentDocument?.querySelector<HTMLElement>('[data-attn-trim-start]')
       const signature = iframe.contentDocument?.querySelector<HTMLElement>('.gmail_signature')
       return marker && signature
-        ? Math.abs(marker.getBoundingClientRect().height - 28) < 1 &&
-            signature.getBoundingClientRect().top >= marker.getBoundingClientRect().bottom &&
-            Math.abs(iframe.clientHeight - marker.getBoundingClientRect().bottom - 16) < 1
+        ? Math.abs(marker.getBoundingClientRect().height - 44) < 1 &&
+            Math.abs(iframe.clientHeight - marker.getBoundingClientRect().bottom) < 1 &&
+            signature.getBoundingClientRect().top >= iframe.clientHeight - 1
         : false
     })
   ).toBe(true)

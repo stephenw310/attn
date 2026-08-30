@@ -11,7 +11,7 @@ import {
   type ThreadRow
 } from '../../../shared/mail'
 import type { MailView } from '../mailDisplay'
-import { shouldClearInactiveSplitCache, useMailData } from './useMailData'
+import { useMailData } from './useMailData'
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void
@@ -60,9 +60,118 @@ afterEach(() => {
 })
 
 describe('useMailData mailbox refreshes', () => {
-  it('keeps warm split pages during the one-time metadata rebuild only', () => {
-    expect(shouldClearInactiveSplitCache('split-metadata')).toBe(false)
-    expect(shouldClearInactiveSplitCache(null)).toBe(true)
+  it('keeps inactive split rows available across ordinary mail changes', async () => {
+    const listThreadPage = vi.fn((_view: string, _cursor: ThreadPageCursor | undefined, splitId?: string) =>
+      Promise.resolve({
+        rows: [thread(splitId ?? 'unsplit')],
+        nextCursor: null,
+        ...(splitId ? { splitRevision: 7 } : {})
+      })
+    )
+    const stop = (): void => {}
+    let inboxReady: boolean | Error = false
+    const mailChangedListeners: Array<(requestId: string | null, reason: null) => void> = []
+    const emitMailChanged = (): void => {
+      for (const listener of mailChangedListeners) listener(null, null)
+    }
+    const bridge = {
+      sync: {
+        getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () =>
+          inboxReady instanceof Error ? Promise.reject(inboxReady) : Promise.resolve(inboxReady),
+        retry: () => Promise.resolve(),
+        onState: () => stop
+      },
+      mail: {
+        listThreadPage,
+        listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listLabels: () => Promise.resolve([]),
+        getMailboxCounts: () =>
+          Promise.resolve({ inbox: 2, allMail: 2, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }),
+        getUnreadCount: () => Promise.resolve(0),
+        getPendingActionCount: () => Promise.resolve(0),
+        getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
+        onChanged: (listener: (requestId: string | null, reason: null) => void) => {
+          mailChangedListeners.push(listener)
+          return stop
+        }
+      },
+      draft: { list: () => Promise.resolve([]) },
+      outbox: {
+        listPending: () => Promise.resolve([]),
+        onChanged: () => stop,
+        onProgress: () => stop
+      }
+    } as unknown as typeof window.attn
+    Object.defineProperty(window, 'attn', { configurable: true, value: bridge })
+
+    const activeViewRef: React.RefObject<MailView> = { current: 'inbox' }
+    const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
+    const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
+    const selection = selectedIndexState()
+    let activeSplitId = 'preset:github'
+    let latest: ReturnType<typeof useMailData> | null = null
+
+    const currentState = (): ReturnType<typeof useMailData> => {
+      if (!latest) throw new Error('hook state was not captured')
+      return latest
+    }
+
+    function Harness(): null {
+      latest = useMailData(
+        'seed@attn.test',
+        activeSplitId,
+        7,
+        activeViewRef,
+        selectedThreadIdRef,
+        selectedDraftIdRef,
+        selection.setState
+      )
+      return null
+    }
+
+    const root = createRoot(document.createElement('div'))
+    mountedRoots.push(root)
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(currentState().loadedInboxSplitId).toBe('preset:github')
+    expect(currentState().inboxBackfillReady).toBe(false)
+
+    activeSplitId = 'fallback:other'
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(currentState().loadedInboxSplitId).toBe('fallback:other')
+
+    let activated = false
+    inboxReady = true
+    await act(async () => {
+      emitMailChanged()
+      await Promise.resolve()
+      await Promise.resolve()
+      activated = currentState().activateInboxSplitCache('preset:github')
+      activeSplitId = 'preset:github'
+      root.render(createElement(Harness))
+      await Promise.resolve()
+    })
+    expect(activated).toBe(true)
+    expect(currentState().loadedInboxSplitId).toBe('preset:github')
+    expect(currentState().realThreads).toEqual([thread('preset:github')])
+    expect(currentState().inboxBackfillReady).toBe(true)
+
+    inboxReady = new Error('Invalid backfill cursor: unknown')
+    await act(async () => {
+      emitMailChanged()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(currentState().inboxBackfillReady).toBe(false)
   })
 
   it('does not let an older Inbox snapshot erase rows loaded after switching mailboxes', async () => {
@@ -75,6 +184,7 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
         retry: () => Promise.resolve(),
         onState: () => stop
       },
@@ -160,6 +270,7 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
         retry: () => Promise.resolve(),
         onState: () => stop
       },
@@ -252,6 +363,7 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
         retry: () => Promise.resolve(),
         onState: () => stop
       },
@@ -323,6 +435,7 @@ describe('useMailData mailbox refreshes', () => {
     const bridge = {
       sync: {
         getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
         retry: () => Promise.resolve(),
         onState: () => stop
       },

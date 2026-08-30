@@ -42,6 +42,14 @@ interface SyncControllerContext {
   getDraftMirrorExecutor: () => DraftMirrorExecutor | null
   getOutboxSender: () => OutboxSender | null
   getSnoozeScheduler: () => SnoozeScheduler | null
+  /**
+   * Gate for the Gmail-heavy historical chain (lifetime sweep → attachment
+   * flags → split metadata). With several accounts, the runtime serializes
+   * these across accounts, active account first (F18); the resolved release
+   * callback must be called exactly once when the chain settles. Absent → run
+   * immediately (single-account tests).
+   */
+  acquireIndexingSlot?: (accountId: string) => Promise<() => void>
 }
 
 interface FtsBackfillRun {
@@ -63,6 +71,7 @@ export class SyncController {
   private pendingFtsBackfill: FtsBackfillRun | null = null
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
+  private inboxRecoveryPending = false
   private pollerRunning = false
   private stopped = false
   private backfillRetryGeneration: number | null = null
@@ -81,6 +90,10 @@ export class SyncController {
 
   getGeneration(): number {
     return this.generation
+  }
+
+  isInboxRecoveryPending(): boolean {
+    return this.inboxRecoveryPending
   }
 
   /** E2E-only seam for exercising renderer state transitions through real IPC. */
@@ -169,6 +182,7 @@ export class SyncController {
     this.lifetimeRunning = false
     this.lifetimeProgress = null
     this.foregroundFailure = null
+    this.inboxRecoveryPending = false
     this.lifetimeRunId++
     this.generation++
   }
@@ -368,6 +382,7 @@ export class SyncController {
           if (this.context.isSignedIn()) void this.resumeOnlineWork()
           return
         }
+        this.inboxRecoveryPending = false
         this.foregroundFailure = null
         this.setState({ phase: 'idle' })
         this.context.broadcastMailChanged()
@@ -450,6 +465,30 @@ export class SyncController {
     this.lifetimeRetry.clear()
     this.lifetimeRunning = true
     const lifetimeRunId = ++this.lifetimeRunId
+    const acquireSlot = this.context.acquireIndexingSlot
+    if (!acquireSlot) {
+      // No cross-account gate configured: start synchronously, as always.
+      this.runLifetimeChain(accountId, provider, generation, lifetimeRunId, () => {})
+      return
+    }
+    void acquireSlot(accountId).then((release) => {
+      // The session can end while this account waited its turn for the slot.
+      if (this.stopped || generation !== this.generation || lifetimeRunId !== this.lifetimeRunId) {
+        if (lifetimeRunId === this.lifetimeRunId) this.lifetimeRunning = false
+        release()
+        return
+      }
+      this.runLifetimeChain(accountId, provider, generation, lifetimeRunId, release)
+    })
+  }
+
+  private runLifetimeChain(
+    accountId: string,
+    provider: GmailMailProvider,
+    generation: number,
+    lifetimeRunId: number,
+    releaseSlot: () => void
+  ): void {
     let failed = false
     console.log(`[sync] lifetime header sweep started for ${accountId}`)
     const active = (): boolean => generation === this.generation && lifetimeRunId === this.lifetimeRunId
@@ -563,6 +602,9 @@ export class SyncController {
           this.scheduleLifetimeRetry(accountId, provider, generation)
         }
       })
+      // Release on every settle — completion, pause, or cancellation. A paused
+      // chain re-acquires when its retry ladder re-enters startLifetimeSweep.
+      .finally(releaseSlot)
   }
 
   private startFtsBackfill(accountId: string, generation: number): void {
@@ -699,6 +741,7 @@ export class SyncController {
       console.warn('[sync] history recovery deferred — backfill in progress')
       return
     }
+    this.inboxRecoveryPending = true
     this.running = true
     this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
     let failure: unknown = new Error('history recovery backfill failed')
@@ -745,6 +788,7 @@ export class SyncController {
       reconcileInboxMembership(this.context.db, accountId, result.inboxThreadIds)
       await reconcilePurgeableMembership(this.context.db, accountId, provider, 'SPAM', result.spamThreadIds)
       await reconcilePurgeableMembership(this.context.db, accountId, provider, 'TRASH', result.trashThreadIds)
+      this.inboxRecoveryPending = false
     } finally {
       if (generation === this.generation) this.running = false
       else if (this.context.isSignedIn()) void this.resumeOnlineWork()

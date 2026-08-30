@@ -80,7 +80,8 @@ export function SearchHeader({
 export function searchCoverageText(coverage: SearchCoverage, partial = false): string {
   const gaps: string[] = []
   if (partial) gaps.push('Showing the newest matches only — narrow the search to reach older mail')
-  if (!coverage.headersComplete) gaps.push('Older headers are still syncing')
+  if (coverage.headersCapped) gaps.push('Older headers are outside the local sync limit')
+  else if (!coverage.headersComplete) gaps.push('Older headers are still syncing')
   if (!coverage.indexComplete) gaps.push('The local index is still filling')
   // Not a count: older mail is header-only by design, so a running fraction that
   // never reaches its denominator told the reader less than the rule does.

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import type { GmailThread } from '../src/main/gmail/parse'
 import { TEST_CHANNELS } from '../src/shared/ipc'
@@ -7,6 +9,7 @@ test.use({ seed: 'fixtures/seed-inbox.json' })
 
 interface SweepRequest {
   resetCursor?: string
+  threadCap?: number
   threads: GmailThread[]
   pages: Array<{
     pageToken?: string
@@ -172,6 +175,66 @@ test('resumes the FTS backfill from its persisted cursor after a utility crash, 
   expect(resumed.parity.mapped).toBe(resumed.parity.messages)
   expect(resumed.parity.ftsRows).toBe(resumed.parity.mapped)
   expect((await utilityState(app, [])).cursors.fts_cursor).toBe('done')
+})
+
+test('resumes a capped lifetime page after relaunch when the limit is raised or disabled', async ({
+  app,
+  page,
+  boot
+}) => {
+  const fixture = JSON.parse(readFileSync(join(__dirname, 'fixtures/seed-inbox.json'), 'utf8')) as {
+    threads: { id: string }[]
+  }
+  const before = await utilityState(
+    app,
+    fixture.threads.map((thread) => thread.id)
+  )
+  expect(before.threadCount).toBe(fixture.threads.length)
+  const first = oldThread('t-capped-first', 2009)
+  const second = oldThread('t-capped-second', 2008)
+  const third = oldThread('t-capped-third', 2007)
+  const request = {
+    threads: [first, second, third],
+    pages: [
+      { pageToken: 'page-2', threadIds: [first.id, second.id], nextPageToken: 'page-3' },
+      { pageToken: 'page-3', threadIds: [third.id] }
+    ]
+  }
+  const cap = before.threadCount + 1
+  expect(await runSweep(app, { ...request, resetCursor: 'lifetime:page-2', threadCap: cap })).toEqual({
+    cursor: 'capped:lifetime:page-2',
+    formats: ['metadata'],
+    pageTokens: ['page-2']
+  })
+  await page.getByTestId('search-open').click()
+  await page.getByTestId('search-input').fill('Utility')
+  await expect(page.getByTestId('search-coverage')).toContainText(
+    'Older headers are outside the local sync limit'
+  )
+  await expect(page.getByTestId('search-coverage')).not.toContainText('Older headers are still syncing')
+  await page.screenshot({ path: join(__dirname, '.artifacts/search-capped.png') })
+
+  const relaunched = await boot.relaunch()
+  expect(await runSweep(relaunched.app, { ...request, threadCap: cap })).toEqual({
+    cursor: 'capped:lifetime:page-2',
+    formats: [],
+    pageTokens: []
+  })
+  expect(await runSweep(relaunched.app, { ...request, threadCap: cap + 1 })).toEqual({
+    cursor: 'capped:lifetime:page-3',
+    formats: ['metadata'],
+    pageTokens: ['page-2', 'page-3']
+  })
+  expect(await runSweep(relaunched.app, { ...request, threadCap: 0 })).toEqual({
+    cursor: 'done',
+    formats: ['metadata'],
+    pageTokens: ['page-3']
+  })
+  expect(await utilityState(relaunched.app, [first.id, second.id, third.id])).toMatchObject({
+    threadCount: 3,
+    messageCount: 3,
+    cursors: { sweep_cursor: 'done' }
+  })
 })
 
 test('surfaces a crash-looped utility to a window that reads sync state after it died', async ({

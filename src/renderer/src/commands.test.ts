@@ -6,7 +6,9 @@ import {
   createDynamicSplitCommand,
   findCommandByShortcut,
   isChordPrefix,
+  listChordCompletions,
   listCommands,
+  listFooterHints,
   matchComposerKey,
   matchKey,
   readingScrollDelta,
@@ -23,7 +25,9 @@ function useCommands(commands: Parameters<typeof registerCommands>[0]): () => vo
 
 function key(
   value: string,
-  options: Partial<Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'metaKey' | 'shiftKey'>> = {}
+  options: Partial<
+    Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'metaKey' | 'repeat' | 'shiftKey'>
+  > = {}
 ): KeyboardEvent {
   return {
     key: value,
@@ -31,6 +35,7 @@ function key(
     altKey: options.altKey ?? false,
     ctrlKey: options.ctrlKey ?? false,
     metaKey: options.metaKey ?? false,
+    repeat: options.repeat ?? false,
     shiftKey: options.shiftKey ?? false
   } as KeyboardEvent
 }
@@ -61,10 +66,12 @@ describe('command catalog', () => {
       'search.open',
       'search.focusQuery',
       'search.allGmail',
+      'search.submit',
       'search.clear',
       'split.previous',
       'split.next',
       'split.manage',
+      'account.add',
       'theme.system',
       'theme.dispatch-dark',
       'theme.dispatch-light',
@@ -108,6 +115,7 @@ describe('command catalog', () => {
       'composer.quote',
       'composer.link',
       'triage.archive',
+      'triage.notDone',
       'triage.snooze',
       'triage.trash',
       'triage.spam',
@@ -248,6 +256,7 @@ describe('keyboard dispatch', () => {
       createCommand('conversation.open', () => {}),
       createCommand('conversation.close', () => {}),
       createCommand('triage.archive', () => {}),
+      createCommand('triage.notDone', () => {}),
       createCommand('triage.undo', () => {})
     ])
     expect(matchKey(key('Enter'), 'list')?.id).toBe('conversation.open')
@@ -255,6 +264,8 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('Escape'), 'reader')?.id).toBe('conversation.close')
     expect(matchKey(key('e'), 'list')?.id).toBe('triage.archive')
     expect(matchKey(key('e'), 'reader')?.id).toBe('triage.archive')
+    expect(matchKey(key('E', { shiftKey: true }), 'list')?.id).toBe('triage.notDone')
+    expect(matchKey(key('E', { shiftKey: true }), 'reader')?.id).toBe('triage.notDone')
     expect(matchKey(key('z'), 'list')?.id).toBe('triage.undo')
     expect(matchKey(key('z'), 'reader')?.id).toBe('triage.undo')
   })
@@ -310,14 +321,114 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('m'), 'list')).toBeNull()
   })
 
-  test('dispatches configured split chords through dynamic command ids', () => {
+  test('keeps dynamic split commands palette-only', () => {
     useCommands([
-      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}, 'g 2'),
-      createDynamicSplitCommand('custom:news', 'Go to: News', () => {}, 'g 6')
+      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}),
+      createDynamicSplitCommand('custom:news', 'Go to: News', () => {})
     ])
-    expect(isChordPrefix('g', 'list')).toBe(true)
-    expect(findCommandByShortcut('g 2', 'list')?.id).toBe('split.goto:preset:github')
-    expect(findCommandByShortcut('g 6', 'reader')?.id).toBe('split.goto:custom:news')
+    expect(listCommands().map((command) => command.id)).toEqual([
+      'split.goto:preset:github',
+      'split.goto:custom:news'
+    ])
+    expect(isChordPrefix('g', 'list')).toBe(false)
+    expect(findCommandByShortcut('g 2', 'list')).toBeNull()
+    expect(findCommandByShortcut('g 6', 'reader')).toBeNull()
+  })
+
+  test('derives ordered chord-guide completions from active registry commands', () => {
+    useCommands([
+      createCommand('view.trash', () => {}),
+      createCommand('view.inbox', () => {}),
+      createCommand('view.drafts', () => {}),
+      createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}),
+      createDynamicSplitCommand('custom:news', 'Go to: News', () => {})
+    ])
+
+    expect(listChordCompletions('g', 'list')).toEqual([
+      { commandId: 'view.inbox', key: 'i', label: 'Inbox' },
+      { commandId: 'view.drafts', key: 'd', label: 'Drafts' },
+      { commandId: 'view.trash', key: 'r', label: 'Trash' }
+    ])
+  })
+
+  test('lists only registered fixed-mailbox completions', () => {
+    useCommands([createCommand('view.inbox', () => {}), createCommand('view.allMail', () => {})])
+    expect(listChordCompletions('g', 'reader')).toEqual([
+      { commandId: 'view.inbox', key: 'i', label: 'Inbox' },
+      { commandId: 'view.allMail', key: 'a', label: 'All Mail' }
+    ])
+  })
+
+  test('derives minimal footer hints and groups paired navigation commands', () => {
+    useCommands([
+      createCommand('palette.open', () => {}),
+      createCommand('composer.new', () => {}),
+      createCommand('navigate.next', () => {}),
+      createCommand('navigate.previous', () => {}),
+      createCommand('conversation.open', () => {}),
+      createCommand('triage.archive', () => {}),
+      createCommand('triage.snooze', () => {}),
+      createCommand('triage.move', () => {}),
+      createCommand('triage.undo', () => {})
+    ])
+    expect(listFooterHints('list')).toEqual([
+      { id: 'navigate', label: 'navigate', order: 10, shortcuts: ['j', 'k'] },
+      { id: 'open', label: 'open', order: 20, shortcuts: ['Enter'] },
+      { id: 'done', label: 'done', order: 30, shortcuts: ['e'] },
+      { id: 'compose', label: 'compose', order: 40, shortcuts: ['c'] },
+      { id: 'undo', label: 'undo', order: 50, shortcuts: ['z'] },
+      { id: 'snooze', label: 'snooze', order: 60, shortcuts: ['h'] },
+      { id: 'move', label: 'move', order: 70, shortcuts: ['v'] },
+      { id: 'palette', label: 'command palette', order: 80, shortcuts: ['Mod+K'] }
+    ])
+  })
+
+  test('shows primary reader and Drafts actions only in their registered contexts', () => {
+    const disposeReader = useCommands([
+      createCommand('composer.reply', () => {}),
+      createCommand('composer.replyAll', () => {}),
+      createCommand('composer.forward', () => {}),
+      createCommand('triage.archive', () => {}),
+      createCommand('triage.snooze', () => {}),
+      createCommand('triage.move', () => {}),
+      createCommand('navigate.next', () => {}),
+      createCommand('navigate.previous', () => {}),
+      createCommand('conversation.close', () => {})
+    ])
+    expect(listFooterHints('reader')).toEqual([
+      { id: 'reply', label: 'reply', order: 10, shortcuts: ['r'] },
+      { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] },
+      { id: 'forward', label: 'forward', order: 12, shortcuts: ['f'] },
+      { id: 'done', label: 'done', order: 20, shortcuts: ['e'] },
+      { id: 'snooze', label: 'snooze', order: 30, shortcuts: ['h'] },
+      { id: 'move', label: 'move', order: 40, shortcuts: ['v'] },
+      { id: 'navigate', label: 'next / previous', order: 50, shortcuts: ['j', 'k'] },
+      { id: 'back', label: 'back to list', order: 60, shortcuts: ['Escape'] }
+    ])
+    disposeReader()
+
+    useCommands([
+      createCommand('palette.open', () => {}),
+      createCommand('composer.new', () => {}),
+      createCommand('navigate.next', () => {}),
+      createCommand('navigate.previous', () => {}),
+      createCommand('conversation.open', () => {}),
+      createCommand('draft.discard', () => {}),
+      createCommand('triage.undo', () => {})
+    ])
+    expect(listFooterHints('list')).toEqual([
+      { id: 'navigate', label: 'navigate', order: 10, shortcuts: ['j', 'k'] },
+      { id: 'open', label: 'open', order: 20, shortcuts: ['Enter'] },
+      {
+        id: 'delete-draft',
+        label: 'delete draft',
+        order: 30,
+        shortcuts: ['Mod+Shift+D']
+      },
+      { id: 'compose', label: 'compose', order: 40, shortcuts: ['c'] },
+      { id: 'undo', label: 'undo', order: 50, shortcuts: ['z'] },
+      { id: 'palette', label: 'command palette', order: 80, shortcuts: ['Mod+K'] }
+    ])
   })
 
   test('requires unmodified keys for chord prefixes and completions', () => {
@@ -327,6 +438,7 @@ describe('keyboard dispatch', () => {
     expect(chordKey(key('h', { ctrlKey: true }))).toBeNull()
     expect(chordKey(key('h', { metaKey: true }))).toBeNull()
     expect(chordKey(key('h', { altKey: true }))).toBeNull()
+    expect(chordKey(key('g', { repeat: true }))).toBeNull()
   })
 
   test('keeps scrolling as an explicit non-command reader primitive', () => {

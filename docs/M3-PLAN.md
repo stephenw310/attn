@@ -27,9 +27,9 @@ tombstone pass followed on 2026-08-22. The sync restructure is complete. What re
 | T24 search UI and operators (F10) | **done**, completed 2026-08-25 | nothing; T25 is unblocked |
 | T25 on-demand fetch and server search (F10) | **done**, completed 2026-08-25 | nothing |
 | T26 palette and registry completeness (F5) | **done**, completed 2026-08-25 | nothing |
-| T27 splits and per-split notifications (F11, F12) | **done**, completed 2026-08-27 | nothing; T28 and T29 are unblocked |
-| T28 contextual chord guide (§9 #14) | **planned**, not started | nothing |
-| T29 inbox zero (F13) | **planned**, not started | nothing |
+| T27 splits and per-split notifications (F11, F12) | **done**, completed 2026-08-27 | nothing; T29 is unblocked |
+| T28 contextual chord guide (§9 #14) | **done**, completed 2026-08-28 | nothing |
+| T29 inbox zero (F13) | **done**, completed 2026-08-29 | nothing |
 | T30 built-in themes (F14) | **done**, completed 2026-08-23 | nothing |
 | T31 move to a label (F4) | **done**, completed 2026-08-27 | nothing |
 
@@ -809,8 +809,8 @@ selection scrolled into view, and assigns `Mod+Shift+D` to draft discard in both
 
 **Status: done, completed 2026-08-27.**
 
-**Depends on:** T22 · **Unblocks:** T28's digit completions, T29's remaining-split counts ·
-**Spec:** F11, F12 (the per-split slice), §5 `Tab`, `Shift+Tab`, `←`, `→`, and `G` `1`–`9`
+**Depends on:** T22 · **Unblocks:** T28's footer guide, T29's remaining-split counts ·
+**Spec:** F11, F12 (the per-split slice), §5 `Tab`, `Shift+Tab`, `←`, and `→`
 
 ### Design (decided)
 
@@ -1008,10 +1008,13 @@ one-time setup marker. One parameterized SQLite classifier now owns ordered assi
 exact counts, notification eligibility, badge counts, and notification click-through. Calendar, GitHub, and
 Newsletters start as editable presets; changes and deletions persist, and Restore is explicit.
 
-The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, `→`, configured `G` digits,
+The Inbox strip supports pointer selection, wrapping `Tab`, `Shift+Tab`, `←`, and `→`,
 per-split selection and scroll, revision-aware page caching, quiet zero counts, and an overflow menu past eight
 visible tabs. Outside Inbox, `Tab` returns to Inbox. The rule manager creates, renames, edits, reorders with
 leading drag handles, deletes, restores, and configures notifications.
+Inactive first pages warm after startup. A cached page now activates in the same renderer state transition as
+its tab, remains available across ordinary mail changes, and revalidates against SQLite in the background. A
+cold page shows loading instead of briefly claiming the split is empty.
 The dragged row follows the pointer while nearby rows move to reveal the nearest drop position. A focused handle
 accepts Up and Down as its keyboard path. It is available from the account menu and command palette. Seeded
 Electron coverage exercises the full path and captures `split-inbox.png`, `split-rules.png`, and
@@ -1025,7 +1028,7 @@ budget. A cold split switch measured 44 ms, and revision-valid cached switches m
 
 ## T28 — The contextual chord guide
 
-**Status: not started.**
+**Status: done, completed 2026-08-28.**
 
 **Depends on:** T22, T27 · **Spec:** §9 #14, F5
 
@@ -1033,19 +1036,20 @@ budget. A cold split switch measured 44 ms, and revision-valid cached switches m
 
 - The footer's default state is one non-wrapping line of commands relevant to the active view, derived from
   the registry rather than from a hand-kept list in `MailFooter`.
-- A pending chord prefix replaces that line with the valid completions, again from the registry: fixed
-  mailbox letters from T22, and split digits from T27's configured order.
+- A pending chord prefix replaces that line with the visible completions from the registry. The `G` guide
+  shows fixed mailbox letters from T22. Split navigation stays on `Tab` and `Shift+Tab`.
 - **Reconcile the two timeouts before writing UI.** Dispatch holds a pending chord for 500 ms
   (`useKeyboardDispatch.ts:56`) and §9 #14 wants the guide visible for 2 to 3 seconds. A guide that outlives
-  the chord it describes is a lie the user acts on. Pick one number, 2 seconds, and use it in both places.
+  the chord it describes is a lie the user acts on. Use one number in both places. T28 initially shipped at
+  2 seconds; dogfood lengthened it to 3 seconds.
   Raising the dispatch window is a behavior change to a shipped key path, so it needs its own test.
 - The guide clears on completion, `Esc`, a view change, or that timeout. The palette and the cheat sheet stay
   the exhaustive references.
 
 ### Testing
 
-- **Unit:** completions derived from the registry for each context, including a view with no split digits.
-- **E2e (seeded):** the default line per view; `G` showing mailbox letters and split digits; dismissal by
+- **Unit:** completions derived from the registry for each context, with dynamic split commands excluded.
+- **E2e (seeded):** the default line per view; `G` showing fixed mailbox letters; dismissal by
   each of the four routes; the raised chord window still completing `g i` and still expiring.
 - **Screenshot artifact:** `chord-guide.png`, added to the `AGENTS.md` list.
 
@@ -1053,11 +1057,24 @@ budget. A cold split switch measured 44 ms, and revision-valid cached switches m
 
 The guide is registry-derived, the two timeouts agree, and verify is green.
 
+### Shipped
+
+Command specs now hold the footer metadata for list, reader, Outbox, search, and composer contexts.
+`MailFooter` subscribes to the active registry, groups paired commands such as `J` and `K`, and renders one
+non-wrapping line across the full window. A pending `G` replaces that line with the active mailbox and split
+completions from the same registry.
+
+`useKeyboardDispatch` owns the guide state and one 3-second timer. Completion, `Esc`, a view change, and the
+timer all clear the same state. Registered prefixes work while a sidebar control has focus. Held-key repeats
+cannot create a phantom prefix, and pressing `G` again restarts the chord instead of swallowing the key.
+Seeded Electron coverage pins all dismissal routes, a 700 ms `G R`, an immediate second mailbox chord, and
+the `chord-guide.png` artifact.
+
 ---
 
 ## T29 — Inbox zero
 
-**Status: not started.**
+**Status: done.**
 
 **Depends on:** T27 · **Spec:** F13
 
@@ -1080,6 +1097,24 @@ The guide is registry-derived, the two timeouts agree, and verify is green.
 ### Done when
 
 The zero state appears only when the mailbox is genuinely empty, and verify is green.
+
+### Shipped
+
+The active split now replaces its empty list with a full-pane reward. The pane rotates among three bundled
+landscape images by local calendar day and shows the current time, a short affirmation, and buttons for each
+non-empty split with its exact conversation total. The `total` label distinguishes these counts from the
+unread badges in the split strip. Selecting a button opens that split.
+
+`sync:getInboxReady` reads `sync_state.backfill_cursor` through the typed preload bridge. A missing cursor or
+an active Inbox metadata or body stage keeps the ordinary loading state visible. The reward becomes eligible
+after the full-body walk checkpoints `drafts` and any one-time split metadata rebuild finishes. Seeded
+Electron coverage archives the only Important conversation, checks the remaining split totals, writes
+`inbox-zero.png`, and proves that partial backfills and expired-history recovery hide the reward. A recovery
+failure keeps that gate closed until its retry completes.
+The ordered cursor definition is shared with backfill resume parsing, and an ordinary resumed backfill clears
+the recovery gate after successful mailbox reconciliation. The renderer refreshes readiness on both sync-state
+changes and mail invalidations. Electron coverage also types through the split-rule value field and records the
+theme-independent reward under both dark and light app chrome.
 
 ---
 
@@ -1238,9 +1273,22 @@ screenshots have been reviewed, and `npm run verify` is green.
 
 ---
 
+## PR #98 review corrections
+
+The message join in local search starts from the bounded match set. A query-plan test prevents SQLite
+from scanning the account's messages before checking that set. The manual upgrade below uses the same
+primary-key order as the current schema, and a test executes the documented SQL to check keys and dates.
+The partial-results marker counts one match past the window, so an exact fit does not claim truncation.
+
+A sweep stopped by its limit stores `capped:lifetime` or `capped:lifetime:<page-token>`, with the processed
+count from the start of that page. Raising the limit or setting it to zero resumes that page and skips
+stored threads without counting them twice. An unchanged or lower limit makes no Gmail requests. Only an
+exhausted listing stores `done`. The search footer distinguishes capped headers from headers still syncing.
+Unit tests cover the cursor and count behavior; the Electron test raises and disables the cap after relaunch.
+
 ## Schema revision 21 → 22: derived mailbox membership and dated index rows
 
-Shipped 2026-08-29 with SPEC §9 #21. Additive and data-preserving, so it qualifies for the manual
+Shipped 2026-08-29 with SPEC §9 #22. Additive and data-preserving, so it qualifies for the manual
 local-upgrade procedure in [AGENTS.md](../AGENTS.md). Run every statement inside one
 `BEGIN IMMEDIATE … COMMIT`, against a stopped database, after taking the untouched backup that procedure
 requires.
@@ -1251,7 +1299,7 @@ CREATE TABLE thread_mailboxes (
   view       TEXT NOT NULL,
   thread_id  TEXT NOT NULL,
   sort_at    INTEGER NOT NULL,
-  PRIMARY KEY (account_id, view, thread_id)
+  PRIMARY KEY (account_id, thread_id, view)
 );
 CREATE INDEX idx_thread_mailboxes_recent
   ON thread_mailboxes (account_id, view, sort_at DESC, thread_id);
@@ -1299,7 +1347,7 @@ T25 registered `search.allGmail`, and T26 shipped the palette and its inventory 
 
 | Question | Why it matters | Decide by |
 |---|---|---|
-| ~~Pathological-mailbox posture~~ | **Decided 2026-08-29 (SPEC §9 #21):** smooth to about one million messages, degraded but not broken beyond it, with server search serving the tail. The 2026-08-29 synthetic probe in [T20-EVIDENCE.md](T20-EVIDENCE.md) showed the ceiling was three query shapes, not sync completeness; the counts, coverage-caching, membership and bounded-search changes shipped with that entry. A perf profile larger than 10,000 threads is the enforcement it still lacks | done |
+| ~~Pathological-mailbox posture~~ | **Decided 2026-08-29 (SPEC §9 #22):** smooth to about one million messages, degraded but not broken beyond it, with server search serving the tail. The 2026-08-29 synthetic probe in [T20-EVIDENCE.md](T20-EVIDENCE.md) showed the ceiling was three query shapes, not sync completeness; the counts, coverage-caching, membership and bounded-search changes shipped with that entry. A perf profile larger than 10,000 threads is the enforcement it still lacks | done |
 
 Open defects and coverage gaps live in [KNOWN-ISSUES.md](KNOWN-ISSUES.md). Manual sign-off evidence is ticked
 in [T20-EVIDENCE.md](T20-EVIDENCE.md).

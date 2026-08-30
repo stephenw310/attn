@@ -2,7 +2,12 @@ import { useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { DraftKind } from '../../../shared/drafts'
 import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
-import { createCommand, createDynamicSplitCommand, registerCommands } from '../commands'
+import {
+  createAccountSwitchCommand,
+  createCommand,
+  createDynamicSplitCommand,
+  registerCommands
+} from '../commands'
 import type { MailView, NavigableMailView } from '../mailDisplay'
 
 interface Options {
@@ -33,13 +38,14 @@ interface Options {
   openSearch: () => void
   focusSearchQuery: () => void
   searchAllEnabled: boolean
-  searchAll: () => void
+  submitSearch: () => void
   clearSearch: () => void
   triage: (action: TriageAction) => void
   openSnooze: () => void
   snoozeAt: (dueAt: number) => void
   openLabel: () => void
   openMove: () => void
+  markNotDone: () => void
   openComposer: () => void
   openReply: (kind: Exclude<DraftKind, 'new'>) => void
   showToast: (message: string) => void
@@ -50,6 +56,13 @@ interface Options {
     manage: () => void
     goTo: readonly { id: string; name: string; run: () => void }[]
   } | null
+  accountCommands: {
+    /** Switcher order (F18); `Mod+1..9` covers the first nine. */
+    accounts: readonly { id: string; email: string }[]
+    activeAccountId: string | null
+    switchTo: (accountId: string) => void
+    add: () => void
+  }
 }
 
 export function useInboxCommands(options: Options): void {
@@ -81,27 +94,32 @@ export function useInboxCommands(options: Options): void {
     openSearch,
     focusSearchQuery,
     searchAllEnabled,
-    searchAll,
+    submitSearch,
     clearSearch,
     triage,
     openSnooze,
     snoozeAt,
     openLabel,
     openMove,
+    markNotDone,
     openComposer,
     openReply,
     showToast,
     reopenUndoDraft,
-    splitCommands
+    splitCommands,
+    accountCommands
   } = options
   const mailCommandsEnabled = !searchOpen || searchBrowsing || readerOpen
   useLayoutEffect(
     () =>
       registerCommands([
         createCommand('search.open', openSearch),
+        ...(searchOpen && !readerOpen && !searchBrowsing
+          ? [createCommand('search.submit', submitSearch)]
+          : []),
         ...(searchBrowsing ? [createCommand('search.focusQuery', focusSearchQuery)] : []),
         ...(searchOpen && !readerOpen && searchAllEnabled
-          ? [createCommand('search.allGmail', searchAll)]
+          ? [createCommand('search.allGmail', submitSearch)]
           : []),
         ...(searchOpen && !readerOpen ? [createCommand('search.clear', clearSearch)] : []),
         ...(splitCommands
@@ -113,15 +131,25 @@ export function useInboxCommands(options: Options): void {
                     createCommand('split.next', splitCommands.next)
                   ]
                 : []),
-              ...splitCommands.goTo.map((split, index) =>
-                createDynamicSplitCommand(
-                  split.id,
-                  `Go to: ${split.name}`,
-                  split.run,
-                  index < 9 ? `g ${index + 1}` : undefined
-                )
+              ...splitCommands.goTo.map((split) =>
+                createDynamicSplitCommand(split.id, `Go to: ${split.name}`, split.run)
               )
             ]
+          : []),
+        createCommand('account.add', accountCommands.add),
+        // With one account there is nothing to switch to; the commands appear
+        // as soon as a second account exists.
+        ...(accountCommands.accounts.length > 1
+          ? accountCommands.accounts.map((account, index) =>
+              createAccountSwitchCommand(
+                account.id,
+                account.id === accountCommands.activeAccountId
+                  ? `Switch to: ${account.email} (current)`
+                  : `Switch to: ${account.email}`,
+                () => accountCommands.switchTo(account.id),
+                index < 9 ? `Mod+${index + 1}` : undefined
+              )
+            )
           : []),
         ...(mailCommandsEnabled
           ? [
@@ -180,6 +208,7 @@ export function useInboxCommands(options: Options): void {
         ...(mailCommandsEnabled && (searchOpen || view !== 'drafts') && selected
           ? [
               createCommand('triage.archive', () => triage({ kind: 'archive', threadIds: [selected.id] })),
+              createCommand('triage.notDone', markNotDone),
               createCommand('triage.snooze', openSnooze, {
                 title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later',
                 argument: {
@@ -233,6 +262,7 @@ export function useInboxCommands(options: Options): void {
         })
       ]),
     [
+      accountCommands,
       clearSelection,
       clearSearch,
       closeReader,
@@ -240,6 +270,7 @@ export function useInboxCommands(options: Options): void {
       discardSelectedDraft,
       extendSelection,
       focusSearchQuery,
+      markNotDone,
       markUnreadOn,
       moveAllowed,
       mailCommandsEnabled,
@@ -261,7 +292,7 @@ export function useInboxCommands(options: Options): void {
       selectedIndex,
       snoozeAt,
       searchOpen,
-      searchAll,
+      submitSearch,
       searchAllEnabled,
       searchBrowsing,
       showToast,

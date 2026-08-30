@@ -62,6 +62,7 @@ export class TestSeams {
       TEST_CHANNELS.failNextDraftSave,
       TEST_CHANNELS.failNextAction,
       TEST_CHANNELS.failNextActionAuth,
+      TEST_CHANNELS.delaySetActiveAccount,
       TEST_CHANNELS.setUndoSendDelay
     ]) {
       ipcMain.on(channel, (_event, ...args: unknown[]) => {

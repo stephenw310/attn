@@ -352,6 +352,7 @@ export function searchCoverage(db: Db, accountId: string): SearchCoverage {
   const backfillPhase = cursors?.backfill_cursor?.split(':')[0]
   return {
     headersComplete: cursors?.sweep_cursor === 'done',
+    headersCapped: cursors?.sweep_cursor?.startsWith('capped:') ?? false,
     indexComplete: cursors?.fts_cursor === 'done',
     attachmentFlagsComplete: cursors?.attachment_cursor === 'done',
     bodiesOnDemand: !eagerBodyStages.has(backfillPhase)

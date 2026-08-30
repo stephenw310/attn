@@ -203,7 +203,8 @@ function candidateSql(
     )
     // The bounded form reads the index alone to pick its window: matching, then
     // the map's own date, and only then the messages and threads the filters and
-    // projection need.
+    // projection need. CROSS JOIN keeps that window ahead of messages; otherwise
+    // SQLite scans the account's messages before checking whether they matched.
     const source = bounded
       ? `(SELECT map.message_id, map.thread_id, message_fts.rank AS rank
           FROM message_fts
@@ -211,7 +212,7 @@ function candidateSql(
           WHERE message_fts MATCH ? AND map.account_id = ? AND message_fts.account_id = ?
           ORDER BY map.internal_date DESC, map.fts_rowid DESC
           LIMIT ?) matched
-         JOIN messages ${messageAlias}
+         CROSS JOIN messages ${messageAlias}
            ON ${messageAlias}.account_id = ? AND ${messageAlias}.id = matched.message_id`
       : `message_fts
          JOIN message_fts_map map ON map.fts_rowid = message_fts.rowid
@@ -442,7 +443,8 @@ export function searchThreads(
 
   const values: unknown[] = []
   const recentMessageLimit = match ? (options.recentMessageLimit ?? SEARCH_RECENT_MESSAGE_LIMIT) : undefined
-  // Counting the window is its own bounded read: when filters reject everything
+  // Count one match past the window to distinguish an exact fit from truncation.
+  // This is a bounded read: when filters reject everything
   // inside it the result set is empty, and an empty result still has to say it
   // only looked at the newest matches.
   const matchedMessages =
@@ -457,7 +459,7 @@ export function searchThreads(
                  LIMIT ?
                )`
             )
-            .get(match, accountId, accountId, recentMessageLimit) as { count: number }
+            .get(match, accountId, accountId, recentMessageLimit + 1) as { count: number }
         ).count
       : 0
   const candidates = candidateSql(parsed, match, accountId, values, {
@@ -498,6 +500,6 @@ export function searchThreads(
     rows: rows.map(toThreadRow),
     drafts: [],
     coverage,
-    partial: matchedMessages === recentMessageLimit
+    partial: recentMessageLimit !== undefined && matchedMessages > recentMessageLimit
   }
 }

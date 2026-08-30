@@ -108,6 +108,12 @@ describe('lifetime sweep cursor routing', () => {
       initialize: false
     })
     expect(planLifetimeSweepStart('done')).toEqual({ kind: 'skip' })
+    expect(planLifetimeSweepStart('capped:lifetime')).toEqual({ kind: 'run', initialize: false })
+    expect(planLifetimeSweepStart('capped:lifetime:page-2')).toEqual({
+      kind: 'run',
+      pageToken: 'page-2',
+      initialize: false
+    })
     expect(() => planLifetimeSweepStart('sent:page-2')).toThrow('Invalid lifetime sweep cursor')
   })
 })
@@ -150,7 +156,7 @@ describe('lifetime header indexing', () => {
     )
   })
 
-  it('stops at the conversation cap and marks the sweep done', async () => {
+  it('stops at the conversation cap without discarding its cursor or making requests', async () => {
     // The walk is newest first, so a cap keeps the newest conversations and
     // leaves the rest to server search. Two already stored, cap of two: the
     // third must never be fetched.
@@ -168,15 +174,60 @@ describe('lifetime header indexing', () => {
     })
 
     expect(mail.getThread).not.toHaveBeenCalled()
+    expect(mail.getProfile).not.toHaveBeenCalled()
+    expect(mail.listThreadIds).not.toHaveBeenCalled()
     expect(mocks.persistThread).not.toHaveBeenCalled()
-    // Done, not paused: a capped sweep is finished, and the footer must not
-    // claim it is still indexing.
-    // Done, not paused, and reported as a completed run: the returned count is
-    // the listing walk, which this sweep stopped at the start of.
-    expect(state.cursor).toBe('done')
+    expect(state.cursor).toBe('capped:lifetime')
     expect(result).toMatchObject({ threadCount: 0 })
     expect(events.onError).not.toHaveBeenCalled()
   })
+
+  it.each([4, 0])(
+    'resumes a partial page when the cap changes to %i without double-counting ids',
+    async (cap) => {
+      const state = { cursor: 'lifetime:page-2', threadIds: new Set(['first', 'second']), done: 2 }
+      const db = fakeDb(state)
+      const mail = provider({
+        listThreadIds: vi.fn(async ({ pageToken } = {}) =>
+          pageToken === 'page-2'
+            ? { threadIds: ['third', 'fourth'], nextPageToken: 'page-3' }
+            : { threadIds: ['fifth'] }
+        )
+      })
+      const events = callbacks()
+      const run = (threadCap: number) =>
+        runLifetimeSweep(db, mail, 'test@example.com', events, {
+          threadCap,
+          requestIntervalMs: 0,
+          pagePauseMs: 0
+        })
+
+      await run(3)
+      expect(state.threadIds).toEqual(new Set(['first', 'second', 'third']))
+      expect(state.cursor).toBe('capped:lifetime:page-2')
+      expect(state.done).toBe(2)
+      vi.mocked(mail.getThread).mockClear()
+      vi.mocked(mail.listThreadIds).mockClear()
+      vi.mocked(mail.getProfile).mockClear()
+      await run(3)
+      await run(2)
+      expect(mail.getThread).not.toHaveBeenCalled()
+      expect(mail.listThreadIds).not.toHaveBeenCalled()
+      expect(mail.getProfile).not.toHaveBeenCalled()
+
+      await run(cap)
+      expect(mail.listThreadIds).toHaveBeenNthCalledWith(1, {
+        pageToken: 'page-2',
+        priority: 'background'
+      })
+      expect(vi.mocked(mail.getThread).mock.calls.map(([id]) => id)).toEqual(
+        cap === 0 ? ['fourth', 'fifth'] : ['fourth']
+      )
+      expect(state.done).toBe(cap === 0 ? 5 : 4)
+      expect(state.cursor).toBe(cap === 0 ? 'done' : 'capped:lifetime:page-3')
+      expect(events.onError).not.toHaveBeenCalled()
+    }
+  )
 
   it('stores the whole account when the cap is disabled', async () => {
     const state: FakeDbState = { cursor: null, threadIds: new Set(['stored']) }

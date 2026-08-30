@@ -7,11 +7,11 @@
 // carving date complements — Gmail's date operators have fuzzy boundaries and
 // a seam gap loses mail silently, while re-listing ids is ~1% of fetch cost.
 
-import type { SyncStage } from '../../shared/mail'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { type SchedulerTime, systemTime } from '../time'
+import { type BackfillPhase, type ParsedCursor, parseBackfillCursor } from './backfillCursor'
 import { hydrateMissingThreadBodies } from './bodies'
 import { isExpiredPageTokenError } from './pageToken'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
@@ -81,12 +81,7 @@ export interface BackfillOptions {
   time?: SchedulerTime
 }
 
-export type BackfillPhase = SyncStage
-
-export interface ParsedCursor {
-  phase: BackfillPhase
-  pageToken?: string
-}
+export type { BackfillPhase, ParsedCursor } from './backfillCursor'
 
 export type BackfillStartPlan = { kind: 'skip' } | { kind: 'run'; cursor: ParsedCursor; initialize: boolean }
 
@@ -96,7 +91,7 @@ export function planBackfillStart(rawCursor: string | null | undefined, recovery
   const resuming = Boolean(rawCursor && rawCursor !== 'done')
   return {
     kind: 'run',
-    cursor: resuming ? parseCursor(rawCursor) : { phase: 'metadata' },
+    cursor: resuming ? parseBackfillCursor(rawCursor) : { phase: 'metadata' },
     initialize: !resuming
   }
 }
@@ -529,28 +524,6 @@ async function listAllThreadIds(
     pageToken = page.nextPageToken
   } while (pageToken)
   return [...threadIds]
-}
-
-function parseCursor(raw: string | null | undefined): ParsedCursor {
-  if (!raw || raw === 'metadata') return { phase: 'metadata' }
-  if (raw === 'bodies') return { phase: 'bodies' }
-  if (raw === 'drafts') return { phase: 'drafts' }
-  if (raw === 'all-mail') return { phase: 'all-mail' }
-  if (raw === 'spam') return { phase: 'spam' }
-  if (raw === 'trash') return { phase: 'trash' }
-  if (raw === 'reconcile') return { phase: 'reconcile' }
-  if (raw.startsWith('metadata:')) return { phase: 'metadata', pageToken: raw.slice('metadata:'.length) }
-  if (raw.startsWith('bodies:')) return { phase: 'bodies', pageToken: raw.slice('bodies:'.length) }
-  if (raw.startsWith('drafts:')) return { phase: 'drafts', pageToken: raw.slice('drafts:'.length) }
-  if (raw.startsWith('all-mail:')) return { phase: 'all-mail', pageToken: raw.slice('all-mail:'.length) }
-  if (raw.startsWith('spam:')) return { phase: 'spam', pageToken: raw.slice('spam:'.length) }
-  if (raw.startsWith('trash:')) return { phase: 'trash', pageToken: raw.slice('trash:'.length) }
-  // The dedicated SENT stage retired when the unfiltered all-mail stage
-  // subsumed it. A profile resuming mid-`sent` restarts at all-mail — the
-  // stored page token belongs to a SENT-scoped listing and cannot continue an
-  // unfiltered one, and skip-if-present makes the re-walk cheap.
-  if (raw === 'sent' || raw.startsWith('sent:')) return { phase: 'all-mail' }
-  throw new Error(`Invalid backfill cursor: ${raw}`)
 }
 
 function checkpoint(db: Db, accountId: string, cursor: string): void {

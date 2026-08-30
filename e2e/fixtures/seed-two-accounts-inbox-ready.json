@@ -1,0 +1,15 @@
+{
+  "accounts": [
+    {
+      "account": "ready@attn.test",
+      "splitSetup": true,
+      "threads": []
+    },
+    {
+      "account": "syncing@attn.test",
+      "splitSetup": true,
+      "backfillCursor": "bodies",
+      "threads": []
+    }
+  ]
+}

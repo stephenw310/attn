@@ -220,7 +220,7 @@ test('enters result browsing and returns to the query with its text intact', asy
   await expect(list).toHaveCSS('outline-style', 'none')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveCount(1)
   await expect(page.getByTestId('footer-shortcut-search-browse')).toHaveCount(0)
-  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/K/↑/↓navigate')
+  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knavigate')
   await page.keyboard.press('j')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveAttribute(
     'data-thread-id',

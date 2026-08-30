@@ -36,7 +36,9 @@ test('boots the built app with an isolated store and working IPC bridge', async 
   expect(await page.evaluate(() => typeof window.attn?.mail.listThreads)).toBe('function')
   expect(await page.evaluate(() => window.attn.auth.getStatus())).toEqual({
     configured: false,
-    signedIn: false
+    signedIn: false,
+    accounts: [],
+    activeAccountId: null
   })
   expect(await page.evaluate(() => window.attn.mail.listThreads('inbox'))).toEqual([])
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(0)
@@ -139,19 +141,29 @@ test.describe('seeded inbox smoke coverage', () => {
     ])
     await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
     await expect(page.getByTestId('pending-count')).toHaveCount(0)
-    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/K/↑/↓navigate')
+    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knavigate')
     await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
     for (const [id, text] of [
       ['done', 'Edone'],
-      ['move', 'Vmove'],
-      ['trash', '#trash'],
-      ['star', 'Sstar'],
-      ['unread', 'Uunread'],
-      ['spam', '!spam'],
-      ['undo', 'Zundo']
+      ['compose', 'Ccompose'],
+      ['undo', 'Zundo'],
+      ['snooze', 'Hsnooze'],
+      ['move', 'Vmove']
     ]) {
       await expect(page.getByTestId(`footer-shortcut-${id}`)).toContainText(text)
     }
+    await expect(page.getByTestId('footer-shortcut-palette')).toContainText('command palette')
+    await expect
+      .poll(() =>
+        page
+          .getByTestId('footer-shortcuts')
+          .evaluate((element) =>
+            Array.from(element.querySelectorAll('[data-testid^="footer-shortcut-"]')).map((hint) =>
+              hint.getAttribute('data-testid')?.replace('footer-shortcut-', '')
+            )
+          )
+      )
+      .toEqual(['navigate', 'open', 'done', 'compose', 'undo', 'snooze', 'move', 'palette'])
   })
 
   test('J/K and arrow keys move list selection without opening a conversation', async ({ page }) => {
@@ -189,8 +201,8 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('conversation-back')).toHaveText('← Inbox')
     await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
     await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
-    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knext conversation')
-    await expect(page.getByTestId('footer-shortcut-scroll')).toContainText('↑/↓/Spacescroll')
+    await expect(page.getByTestId('footer-shortcut-reply')).toContainText('Rreply')
+    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knext / previous')
     await expect(page.getByTestId('footer-shortcut-back')).toContainText('Escback to list')
     await expect(page.getByTestId('footer-shortcut-done')).toContainText('Edone')
     // Pin the whole reader hint set rather than the absence of named hints: this
@@ -205,21 +217,7 @@ test.describe('seeded inbox smoke coverage', () => {
             )
           )
       )
-      .toEqual([
-        'navigate',
-        'scroll',
-        'back',
-        'select',
-        'done',
-        'snooze',
-        'move',
-        'label',
-        'trash',
-        'star',
-        'unread',
-        'spam',
-        'undo'
-      ])
+      .toEqual(['reply', 'reply-all', 'forward', 'done', 'snooze', 'move', 'navigate', 'back'])
     await expect(page.getByTestId('message-card')).toHaveCount(2)
     await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
     await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')

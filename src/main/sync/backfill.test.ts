@@ -443,4 +443,9 @@ describe('backfill cursor routing', () => {
       initialize: true
     })
   })
+
+  it('rejects cursors that are not in the ordered backfill phase list', () => {
+    expect(() => planBackfillStart('unknown')).toThrow('Invalid backfill cursor: unknown')
+    expect(() => planBackfillStart('reconcile:page-1')).toThrow('Invalid backfill cursor: reconcile:page-1')
+  })
 })

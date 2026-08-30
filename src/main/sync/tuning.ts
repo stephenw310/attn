@@ -25,7 +25,7 @@ export const ALL_MAIL_WINDOW = 'newer_than:12m'
 /**
  * How many conversations the lifetime sweep keeps locally, newest first.
  *
- * SPEC §9 #21 targets smooth operation to roughly a million messages, and this
+ * SPEC §9 #22 targets smooth operation to roughly a million messages, and this
  * is what makes that target real rather than aspirational. At about 2.5 messages
  * per thread, 400,000 threads is that million.
  *
@@ -84,7 +84,7 @@ export const SEARCH_RESULT_LIMIT = 100
  * Matching messages a text search considers, newest first, before filters and
  * projection run. A word common enough to appear in most mail otherwise matches
  * every message in the account, and the outer query orders by recency rather
- * than rank, so its row limit cannot push into the index scan. Reaching this
- * window marks the response partial.
+ * than rank, so its row limit cannot push into the index scan. Matches beyond
+ * this window mark the response partial.
  */
 export const SEARCH_RECENT_MESSAGE_LIMIT = 2_000

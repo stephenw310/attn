@@ -403,6 +403,7 @@ describe('search coverage', () => {
     try {
       expect(searchCoverage(db, ACCOUNT)).toEqual({
         headersComplete: false,
+        headersCapped: false,
         indexComplete: false,
         attachmentFlagsComplete: false,
         bodiesOnDemand: false
@@ -418,6 +419,11 @@ describe('search coverage', () => {
       // searchable by body text until it is opened.
       db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run('all-mail', ACCOUNT)
       expect(searchCoverage(db, ACCOUNT)).toMatchObject({ bodiesOnDemand: true })
+      db.prepare('UPDATE sync_state SET sweep_cursor = ? WHERE account_id = ?').run(
+        'capped:lifetime:page-2',
+        ACCOUNT
+      )
+      expect(searchCoverage(db, ACCOUNT)).toMatchObject({ headersComplete: false, headersCapped: true })
       db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run('done', ACCOUNT)
       expect(searchCoverage(db, ACCOUNT)).toMatchObject({ bodiesOnDemand: true })
     } finally {

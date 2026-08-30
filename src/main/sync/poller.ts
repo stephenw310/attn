@@ -318,7 +318,10 @@ export class HistoryPoller {
         labelsChanged || draftsChanged || plan === null || plan.refetchThreadIds.length > 0
       )
       this.options.kickExecutor?.()
-      if (plan && plan.newMail.length > 0) historyEvents.emit('newMail', plan.newMail)
+      // Tagged with the owning account: several pollers share this emitter (F18).
+      if (plan && plan.newMail.length > 0) {
+        historyEvents.emit('newMail', this.options.accountId, plan.newMail)
+      }
     } catch (error) {
       if (!this.stopped) this.options.onError(error)
     } finally {

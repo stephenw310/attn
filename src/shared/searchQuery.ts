@@ -23,6 +23,7 @@ export interface ParsedSearchQuery {
 
 export interface SearchCoverage {
   headersComplete: boolean
+  headersCapped: boolean
   indexComplete: boolean
   attachmentFlagsComplete: boolean
   /**
