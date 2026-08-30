@@ -1,0 +1,536 @@
+# M4 Implementation Plan: Power Finish
+
+**Audience:** the engineers building M4. Same contract as [M1-PLAN.md](M1-PLAN.md), [M2-PLAN.md](M2-PLAN.md),
+and [M3-PLAN.md](M3-PLAN.md). Every task is one PR. Nothing is done until `npm run verify` is green. "Spec F8"
+means a section of [SPEC.md](SPEC.md) (v0.16). Read the section before starting the task.
+
+**Basis:** SPEC §8 M4, F8 (snippets), F9 (follow-up reminders), F12 (badge polish), F15 (settings), F17
+(AI reply drafting), §6 Packaging (auto-update, signing, notarization), §9 #5 (remote images), and the
+deferrals the earlier plans parked here: the settings surface (M1-PLAN T9/T8 notes), the remote-image block
+toggle (M1-PLAN, T11 notes), the Windows numeric badge overlay (M1-PLAN accepted deviations), and the
+`Mod+/` cheat sheet (the two "lands at M4" stubs in `MailHeader.tsx`).
+
+**Goal:** M4 turns a daily-drivable triage client into a finished v1. Three power features land (snippets,
+follow-up reminders, AI drafting), every deferred toggle gets its settings home, and the packaged app learns
+to update itself with real signatures. M4 is the last milestone before the v1 tag, so it ends with a
+sign-off task that rolls up every outstanding manual check.
+
+## Task list
+
+| Task | State | Blocks |
+|---|---|---|
+| T32 settings surface and cheat sheet (F15) | planned | T33, T34's manager, T36's enable pane |
+| T33 remote-image control (§9 #5) | planned | nothing |
+| T34 snippets (F8) | planned | nothing |
+| T35 follow-up reminders (F9) | planned | nothing |
+| T36 AI drafting foundation (F17) | planned | T37 |
+| T37 AI drafting in the composer (F17) | planned | nothing |
+| T38 Windows numeric badge overlay (F12) | planned | nothing |
+| T39 auto-update, signing, notarization (§6) | planned | T40's update-in-place check |
+| T40 M4 exit and v1 sign-off | planned | the v1 tag |
+
+**Why this order.** T32 goes first because three other tasks hang panes on it: T33's toggle, T34's manager,
+and T36's enable screen. F17 is split in two on purpose. As one task it would be the largest PR in the
+repo's history (provider client, key storage, enable screen, streaming, voice, refine), and M2 already set
+the precedent of splitting the composer into T14A through T14E. T39 is independent of everything else but
+has operator lead time (certificates, notary credentials), so start its prerequisites in week one even if
+the code lands late.
+
+**What M4 does not absorb.** T29 (inbox zero, F13) stays in M3-PLAN and is still owed there. The
+KNOWN-ISSUES gaps stay in KNOWN-ISSUES, with one exception: GAP-1's wanted assertions ride T35, because T35
+changes the exact poller path GAP-1 describes.
+
+---
+
+## Global rules (carried from M3, still binding)
+
+1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single snapshot and
+   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 21. T34 bumps it to 22 and publishes its
+   dogfood DDL below. A real dogfood profile gets the manual additive upgrade in AGENTS.md.
+2. **IPC has three parts:** main handler, preload bridge, and the typed channel map in `src/shared/`. All in
+   the same commit.
+3. **Mail content is untrusted**, incoming and outgoing alike. In M4 this extends to LLM output: an AI draft
+   enters the composer through the same sanitize path as pasted content.
+4. **Select on `data-testid`** in e2e.
+5. **Every user-facing action is a registered command** (F5). The palette inventory test asserts this, so a
+   new settings control without a command is a red test, not a review comment.
+6. **One reducer, two sources.** Nothing in M4 may add a second write path for mail state. Follow-up
+   resurfacing (T35) goes through the same reducer as snooze return.
+7. **Interactive work outranks background work.** AI streaming (T37) and update downloads (T39) must not
+   delay sends, action replay, or polling.
+8. **Time is injectable.** Every new timer takes `SchedulerTime` from `src/main/time.ts`. T35's follow-up
+   deadlines and T39's update-check interval both qualify. No test waits on wall-clock time.
+9. **If your task changes the verify pipeline, harness behavior, or the screenshot-artifact list, update
+   AGENTS.md in the same PR.**
+
+---
+
+## T32: settings surface and keyboard cheat sheet
+
+**Status: planned.**
+
+**Depends on:** nothing · **Unblocks:** T33, T34, T36 · **Spec:** F15, F16, D6, §5
+
+### Why
+
+Every settings-shaped decision since M1 has been deferred to "the M4 settings surface", and the account
+menu ships two dead items whose tooltips literally say so (`MailHeader.tsx`, the `Settings` and
+`Cheat sheet` entries). The undo-send delay has been configurable in the database since M2
+(`outbox/queue.ts` reads `undoSendDelaySeconds`) with no way to set it. Auto-advance direction is
+hardcoded. The F16 macOS menu-bar icon has no toggle. This task builds the surface those switches live on.
+
+### Design (decided)
+
+- **A full-window settings view**, not a dialog. It replaces the content region the way the new-message
+  composer does: the prior list or reader stays mounted and hidden, and `Esc` or Back restores it exactly.
+  The sidebar stays visible. Open it with `Mod+,`, the account-menu item, or the palette command
+  `Open settings`.
+- **Sections at ship time:** Account (address, sign out), Triage (undo-send delay 0/5/8/10/20/30s;
+  auto-advance direction next/previous/back-to-list), Notifications (per-split toggles link to the existing
+  T27 rule manager in `SplitRuleManager.tsx`; do not rebuild it), Background (launch at login; macOS
+  menu-bar icon, default off, wired to the existing tray code in `background.ts`), Appearance (the four F14
+  themes). T33, T34, and T36 each add their own section in their own PR.
+- **Storage:** the existing `settings` table through `src/main/settings.ts`. It is already keyed by
+  `account_id`, so no namespacing scheme is needed. New keys: `autoAdvanceDirection`, `menuBarIcon`.
+  `undoSendDelaySeconds` and `launchAtLogin` already exist.
+- **Every control is also a palette command** (rule 5): `Set undo send delay…`, `Set auto-advance…`, and so
+  on. The theme commands from T30 already exist; the settings pane reuses them.
+- **The cheat sheet (`Mod+/`)** is a dismissable overlay listing the §5 keyboard map. It renders from the
+  command registry, not from a hardcoded table, so a new command with a shortcut appears without editing the
+  sheet. It groups by the registry's existing categories. `Esc` closes it. Both dead account-menu items are
+  replaced by the real entries in this PR.
+
+### Implementation guide
+
+- Settings reads and writes cross the bridge as one typed `settings:get`/`settings:set` pair with a
+  key allowlist in `src/shared/`, not one channel per key.
+- Auto-advance direction is consumed where triage advance already happens in `Inbox.tsx`; the setting
+  changes the target row selection, nothing else.
+- The menu-bar toggle only installs or removes the macOS `Tray`. Windows tray behavior is unchanged (F16
+  says the Windows tray is always present).
+
+### Testing
+
+- E2e: open settings by `Mod+,`, by account menu, and by palette. Change the undo-send delay, send a seeded
+  message, and assert the countdown uses the new window. Change auto-advance to previous and assert the
+  triage advance direction. Relaunch with `boot.relaunch()` and assert both persist.
+- E2e: `Mod+/` opens the cheat sheet, shows the `G` chords, and `Esc` closes it. A registered command with
+  a shortcut added by the test seam appears on the sheet.
+- New screenshot artifacts `settings.png` and `cheat-sheet.png`, added to the AGENTS.md list in this PR.
+
+### Done when
+
+The two "lands at M4" stubs are gone, every listed setting persists across relaunch, the palette inventory
+covers the new commands, and the cheat sheet needs no source edit to stay current.
+
+---
+
+## T33: remote-image control
+
+**Status: planned.**
+
+**Depends on:** T32 · **Unblocks:** nothing · **Spec:** §6 Security, §9 #5
+
+### Why
+
+Decision #5 shipped "default load" with a promise: a global "block remote images" toggle plus per-sender
+overrides. M1 deferred the toggle to the settings surface. Remote images are the one place mail reading
+leaks the user's IP and read-time to a sender, so v1 should not ship without the off switch.
+
+### Design (decided)
+
+- **Enforcement lives in the main process**, in the same request layer that already strips the
+  `Cross-Origin-Resource-Policy` header for mail-frame images (§6). When blocking is on and the sender has
+  no override, image requests originating from the mail frame are cancelled. The renderer cannot be the
+  enforcement point; it is sandboxed and untrusted mail markup runs inside it.
+- **Blocked rendering degrades quietly.** Cancelled images leave placeholders; layout must not collapse.
+  The message card shows a one-line banner: `Remote images blocked · Load once · Always load from this
+  sender`. `Load once` re-renders that message with loading permitted for that render only. `Always load`
+  writes a per-sender override.
+- **Storage:** the global toggle and per-sender overrides are `settings` rows (`remoteImages` and
+  `remoteImages:allow:<address>`), account-scoped. The default stays load (decision #5 stands).
+- The settings section lists current sender overrides and can remove them. Toggle and removal are palette
+  commands.
+
+### Testing
+
+- Unit: the request-filter decision function (URL, frame origin, toggle, override set) is pure; test the
+  matrix, including the CORP-strip interaction.
+- E2e: seed HTML mail whose image points at a local HTTP server the test controls. With blocking on, open
+  the message and assert the server got no request and the banner shows. Click `Load once`, assert exactly
+  one request. Set `Always load`, relaunch, reopen, assert loading without a banner.
+- A cancelled image load makes Chromium log a console error (`net::ERR_BLOCKED_BY_CLIENT`), and the boot
+  fixture fails any test with renderer console errors. The task must reconcile the two: either cancel in a
+  way that does not log, or teach the fixture a narrowly scoped allowlist for exactly this message.
+- New screenshot artifact `remote-images-blocked.png`, added to the AGENTS.md list.
+
+### Done when
+
+With blocking on, opening mail produces zero image-fetch requests, overrides survive relaunch, and the
+default-load behavior is byte-identical to today for users who never touch the toggle.
+
+---
+
+## T34: snippets
+
+**Status: planned.**
+
+**Depends on:** T32 (manager pane) · **Unblocks:** nothing · **Spec:** F8
+
+### Why
+
+F8 in full: named reusable text blocks, inserted by palette or a `;trigger` typed inline, with an optional
+subject and a `{cursor}` marker. This is the feature the Lexical decision was made for (M2-PLAN, editor
+decision): expansion must be a single undoable step with correct caret placement, which needs a real
+document model.
+
+### Design (decided)
+
+- **Schema bump to 22.** New `snippets` table; the same bump drops `outbox.remote_updated_at`, which is
+  written and never read (KNOWN-ISSUES REF-5 says to fold the drop into the next bump). The drop still
+  qualifies for the AGENTS.md manual procedure even though it is not additive: the column is never read, so
+  no row loses meaningful data. Dogfood DDL, one transaction per that procedure:
+
+  ```sql
+  CREATE TABLE snippets (
+    account_id TEXT NOT NULL,
+    id         TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    trigger    TEXT,
+    subject    TEXT,
+    body_html  TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (account_id, id)
+  );
+  CREATE UNIQUE INDEX idx_snippets_trigger
+    ON snippets (account_id, trigger) WHERE trigger IS NOT NULL;
+  ALTER TABLE outbox DROP COLUMN remote_updated_at;
+  PRAGMA user_version = 22;
+  ```
+
+- **Two insertion paths, one implementation.** The palette command `Snippet: <name>` and the inline
+  `;trigger` both call the same composer insertion: replace the trigger text (if any) with the snippet
+  body, place the caret at `{cursor}` or at the end, and commit it as one Lexical history entry so one
+  `Mod+Z` reverses the whole expansion. `Mod+;` opens the snippet picker inside the composer (§5 already
+  reserves it).
+- **Trigger matching is deliberate, not eager.** A trigger fires when the user types the full `;word`
+  followed by a space or Enter. No fuzzy matching inline; fuzzy lives in the palette.
+- **Subject fills, never overwrites.** A snippet with a subject sets the composer subject only when the
+  subject is empty.
+- **Snippet bodies are untrusted** (rule 3): they pass the composer sanitize path on save and on insert.
+- **The manager** is a T32 settings section: list, create, edit, rename, delete, with the same editor
+  component the composer uses for the body.
+
+### Testing
+
+- Unit: trigger matcher (mid-word `;` does not fire, trailing space fires, unknown trigger inert);
+  subject fill-only rule; sanitize on save.
+- E2e (extend `ComposerPage`): type `;intro ` and assert expansion; one `Mod+Z` restores the literal
+  `;intro`; `{cursor}` placement proven by typing immediately after expansion and asserting position;
+  palette insertion into an empty composer; manager CRUD survives `boot.relaunch()`; a snippet with a
+  subject does not clobber an existing subject.
+- New screenshot artifact `snippet-manager.png`, added to the AGENTS.md list.
+
+### Done when
+
+F8's acceptance criteria hold: insertion under 50ms, `{cursor}` lands the caret, `;trigger` expansion is
+one undo step. The DDL above is in the PR notes.
+
+---
+
+## T35: follow-up reminders
+
+**Status: planned.**
+
+**Depends on:** nothing · **Unblocks:** nothing · **Spec:** F9, F4 (snooze mechanics)
+
+### Why
+
+F9: "remind me if no reply". Send with a deadline; if nobody replies by then, the thread resurfaces at the
+top of the inbox with a **Follow up** chip. Any reply cancels it. This is the last v1 feature that touches
+the reminder machinery, and it reuses almost all of it: the `reminders` table already has a `kind` column
+(default `'snooze'`) whose primary key `(account_id, thread_id, kind)` lets a snooze and a follow-up
+coexist on one thread. No schema bump.
+
+### Design (decided)
+
+- **Set at compose, created at send.** The composer footer gets a follow-up control (3 days / 1 week /
+  custom, sharing the snooze natural-language parser), plus a palette command. The chosen deadline rides
+  the outbox row, and the reminder row is written when the outbox transitions to `sent`, not when the send
+  is queued. Creating it earlier would leave a live reminder behind an undone send.
+- **Cancel on any reply.** The poller path that already wakes snoozed threads on inbound mail
+  (`sync/poller.ts`, `SnoozeScheduler.wakeThread`) grows the mirror rule: a new non-draft message on the
+  thread cancels a pending follow-up. "Any participant" includes the user; a second outbound message means
+  the user followed up themselves.
+- **Resurface like a snooze return.** At the deadline, the scheduler restores the thread to Inbox through
+  the same reducer as snooze return (rule 6), marks it with the **Follow up** chip, and sorts it above
+  normal mail in the list until it is triaged. Catch-up on boot applies (D2).
+- **Visible in the reminders view.** Pending follow-ups list in the Snoozed view (`G` then `H`) alongside
+  snoozes, labeled by kind.
+- Timers run on `SchedulerTime` (rule 8).
+
+### Testing
+
+This task also owns GAP-1's wanted assertions, because it modifies exactly that path:
+
+- Unit (poller): an inbound message triggers `wakeThread` for a snoozed thread and cancels a pending
+  follow-up; a DRAFT does neither.
+- Unit (scheduler): a due follow-up returns the thread and survives a restart; an undone send creates no
+  reminder; the `sent` transition creates exactly one.
+- E2e: send with a follow-up under the seeded provider, advance fake time, assert the chip and the
+  above-normal-mail sort; inject an inbound reply before the deadline and assert no resurfacing; snooze
+  `t-roadmap`, inject inbound mail, and assert the returned chip (GAP-1's e2e). Relaunch catch-up: quit
+  before the deadline, relaunch after it, assert immediate resurfacing.
+- Remove GAP-1 from KNOWN-ISSUES in this PR.
+
+### Done when
+
+F9's acceptance criteria hold: a reply from any participant cancels within one poll interval, and
+resurfaced threads are visually distinct and sort above normal mail.
+
+---
+
+## T36: AI drafting foundation
+
+**Status: planned.**
+
+**Depends on:** T32 (enable pane) · **Unblocks:** T37 · **Spec:** F17, D2, §6
+
+### Why
+
+F17 is opt-in, bring-your-own-key AI reply drafting. This task builds everything except the composer
+experience: the provider client, key custody, the enable screen, and the test seam T37's e2e needs. The
+split keeps each PR reviewable and puts the security-sensitive half (keys, network, guardrails) in its own
+diff.
+
+### Design (decided)
+
+- **The LLM client lives in the main process** (`src/main/ai/`). D2 says requests go directly from the
+  client to the chosen provider, and the renderer-sandbox invariant means the renderer is not that client.
+  Main is the right process rather than the utility: the key comes from `safeStorage`, which is main-only,
+  and no SQLite access is needed. Streaming crosses to the renderer as typed IPC events
+  (`ai:generate` → chunk events → done/error, plus `ai:cancel`), following the acknowledged-toast pattern
+  from T18.
+- **Keys live in `safeStorage`, never in SQLite.** The `settings` table is plaintext. The key is stored
+  beside the OAuth tokens' pattern, and removing it in the UI deletes it from the OS keychain (F17
+  guardrail).
+- **Two wire protocols, one interface:** the Anthropic Messages API and OpenAI-compatible chat completions
+  (which covers Ollama and LM Studio for local models). Provider, base URL (for compatible endpoints), and
+  model are user-selectable with a sensible default per provider, recorded in code.
+- **The enable screen states what leaves the machine** and when, verbatim per F17: the current thread, the
+  voice profile, and any selected style examples, sent to the chosen provider only when a draft is
+  requested. Enabling requires a key. Disabling stops all LLM traffic.
+- **Voice profile** (tone preset plus free-text standing rules, and the voice-matching toggle) stores in
+  the `settings` table. It contains no mail content, so plaintext storage is fine.
+- **Test seam:** `attn:test:installFakeAiProvider` in `src/main/testIpc.ts`, disabled outside the env seam
+  like every other seam. It scripts streamed chunks, records every request payload, and is the only way e2e
+  ever exercises F17. Real endpoints stay out of e2e, mirroring the Gmail rule.
+
+### Testing
+
+- Unit: request shaping for both protocols (system prompt, thread content, voice rules, style examples,
+  model); key round-trip and deletion against a fake `safeStorage`; disabled state short-circuits before
+  any network object is constructed.
+- E2e: enable flow through the settings pane with the fake provider; disable and assert the seam records
+  zero requests when T37's command is invoked (this assertion lands here as a placeholder command and is
+  strengthened in T37).
+
+### Done when
+
+A key can be added, used by a scripted generation round-trip in tests, and removed; the enable screen shows
+the disclosure text; with the feature off, no code path reaches a provider.
+
+---
+
+## T37: AI drafting in the composer
+
+**Status: planned.**
+
+**Depends on:** T36 · **Unblocks:** nothing · **Spec:** F17, §5
+
+### Why
+
+The user-facing half of F17: generate a reply into the composer as a fully editable draft, refine it with a
+one-line instruction, and never auto-send.
+
+### Design (decided)
+
+- **Shortcut decided: `Mod+J`**, command name `Draft AI reply`. Nothing in §5 or the registry uses it, and
+  the palette inventory test will catch a future collision. This PR records the assignment in SPEC §5 and
+  F17 (the spec explicitly left it to M4).
+- **Where it works:** in the reader and in an open inline reply composer. Invoked from the reader with no
+  composer open, it opens the inline reply composer first, then streams into it. It is unavailable in a
+  new-message composer in v1; F17 scopes drafting to replying to an open thread.
+- **Streaming is editable and one undo step.** Chunks append into Lexical as normal editable content, with
+  history coalesced so a single `Mod+Z` removes the whole draft (F17: insertion is undoable like any other
+  edit). The insert passes the composer sanitize path (rule 3).
+- **`Esc` cancels cleanly:** it aborts the stream via `ai:cancel` and keeps the text already inserted,
+  still as one undoable step. A second `Esc` behaves like any composer `Esc`.
+- **Inline refine:** after a draft lands, a one-line instruction field ("shorter", "more formal")
+  regenerates. The regeneration replaces the prior AI-inserted region as a single undoable step; text the
+  user edited by hand is theirs, so refine is offered only while the AI region is unedited.
+- **Voice matching:** when the toggle is on, a handful of the user's recent sent replies are selected
+  locally from the store and sent as style examples. When it is off, no sent-mail content may appear in the
+  request; the seam's recorded payloads are the proof.
+- **Never auto-sends.** Output lands behind the normal send flow, undo send included. Generation must not
+  block the UI (F17 acceptance), and it yields to interactive work (rule 7).
+
+### Testing
+
+- E2e with the fake provider: `Mod+J` in the reader opens the reply composer and streams the scripted
+  draft; the result is editable and sends through the normal outbox; one `Mod+Z` removes it; `Esc`
+  mid-stream stops cleanly with partial text present; refine replaces the draft; with voice matching off,
+  no recorded payload contains sent-mail content; with the feature disabled, `Mod+J` shows the disabled
+  hint and the seam records zero requests.
+- Unit: sent-reply selection for style examples (recency, own-reply filter, count cap).
+- New screenshot artifact `ai-draft.png`, added to the AGENTS.md list.
+
+### Done when
+
+F17's acceptance criteria hold end to end under the seam: zero traffic when disabled, `Esc` cancels
+cleanly, voice-matching-off sends no sent-mail content, and insertion is one undo step.
+
+---
+
+## T38: Windows numeric badge overlay
+
+**Status: planned.**
+
+**Depends on:** nothing · **Unblocks:** nothing · **Spec:** F12
+
+### Why
+
+M1 shipped the Windows badge as a static dot with the count in its tooltip and recorded the rendered
+numeric overlay as M4 packaging polish (M1-PLAN accepted deviations). This is that task.
+
+### Design (decided)
+
+- A pure function renders the count into an overlay bitmap (nativeImage): centered numerals, `99+` cap,
+  legible at 16px. The existing badge update path in `notify.ts`/`index.ts` swaps the static dot for the
+  rendered image; the tooltip keeps the exact count. macOS `setBadgeCount` is untouched.
+
+### Testing
+
+- Unit: the bitmap generator is pure and platform-independent; assert dimensions, the `99+` cap, and that
+  0 clears the overlay. These run on any OS.
+- The e2e suite runs on macOS and cannot see a Windows overlay. Manual evidence on a Windows machine
+  (counts 1, 42, 150, then 0) is recorded in T40's exit checklist, following the T20-EVIDENCE convention.
+
+### Done when
+
+The unit matrix is green and the Windows manual check is ticked in the T40 checklist.
+
+---
+
+## T39: auto-update, signing, and notarization
+
+**Status: planned.**
+
+**Depends on:** operator-supplied credentials (below) · **Unblocks:** T40 · **Spec:** §6 Packaging
+
+### Why
+
+Personal-build packaging shipped at M1 exit: `package.yml` produces ad-hoc-signed macOS artifacts and an
+unsigned Windows installer. v1 needs the rest of §6 Packaging: real signatures, notarization, and
+auto-update from GitHub Releases.
+
+### Operator prerequisites (start these first; they gate the task)
+
+1. An Apple Developer ID Application certificate and notarytool credentials (Apple ID or App Store Connect
+   API key), as CI secrets.
+2. A Windows code-signing certificate, as a CI secret.
+3. **A decision the task must record before wiring the feed:** whether the release repository is public.
+   electron-updater reads a public GitHub Releases feed anonymously; a private repo needs a token or a
+   separate public release repo. Decide, and write the choice into this section.
+
+### Design (decided)
+
+- **Signing comes before auto-update inside this task.** Squirrel.Mac rejects unsigned updates, so an
+  unsigned build that checks for updates is worse than none. Order of landing: macOS Developer ID signing +
+  notarization in `package.yml`, then Windows signing, then the updater.
+- **Updater:** electron-updater against GitHub Releases. Check on launch and every 6 hours
+  (`SchedulerTime`, rule 8). Download in the background at background priority (rule 7). When a version is
+  ready, surface a quiet toast and a palette command `Restart to update`. Never force a restart; a normal
+  quit applies the update. Dev and e2e builds never check (the updater is constructed only in packaged,
+  non-seeded runs).
+- **`npm run package:verify` grows teeth:** it asserts a valid Developer ID signature and notarization
+  ticket on macOS artifacts and an Authenticode signature on the Windows installer, so an expired secret
+  fails the workflow instead of shipping an unsigned build.
+- **Scope guard:** signing does not change the OAuth posture. Distribution stays dev-mode (each user's own
+  OAuth client, decision #2); Google verification remains deferred.
+
+### Testing
+
+- Unit: the update state machine (idle → checking → downloading → ready → applied, plus error/backoff) with
+  injectable time and a fake feed; the packaged/seeded/dev gating.
+- Real updates cannot run under the e2e harness. Manual evidence for T40's checklist: on each OS, install
+  build N, publish build N+1 to a test release, and observe check, background download, toast, and
+  update-on-quit.
+
+### Done when
+
+Both installers verify as signed, macOS artifacts are notarized, `package:verify` enforces it, and the
+manual update-in-place run is ticked for both OSes in T40's checklist.
+
+---
+
+## T40: M4 exit and v1 sign-off
+
+**Status: planned.**
+
+**Depends on:** every task above · **Unblocks:** the v1 tag
+
+### Why
+
+M4 is the last milestone, so its exit list is also v1's. Earlier milestones left manual items open on
+purpose (real-OS and real-Gmail checks that the harness cannot run); they come due here, once, together.
+
+### The exit checklist
+
+Feature evidence (this milestone):
+
+- [ ] Real-Gmail follow-up run: send with a 3-day follow-up from a dogfood profile, reply from another
+      account, confirm cancellation; let a second one expire and confirm resurfacing.
+- [ ] AI drafting against one real provider (any, including a local Ollama): enable, draft, refine, send,
+      disable, and confirm zero traffic after disable (proxy or provider dashboard).
+- [ ] Windows numeric badge manual check (from T38).
+- [ ] Signed/notarized install and update-in-place on both OSes (from T39).
+- [ ] Every new screenshot artifact inspected: `settings.png`, `cheat-sheet.png`,
+      `remote-images-blocked.png`, `snippet-manager.png`, `ai-draft.png`.
+
+Inherited manual items (owed by earlier milestones, still open as of 2026-08-30; verify against their plan
+docs and tick or strike with evidence):
+
+- [ ] M1's real-OS notification click-through smoke (M1-PLAN exit checklist).
+- [ ] M2's real-Gmail bootstrap, exactly-once, and hydration observations (M2-PLAN T20).
+- [ ] M2's one-week sole-client dogfood run, extended to exercise snippets, follow-ups, and AI drafting.
+- [ ] M3's T29 inbox zero, which must ship before this checklist closes.
+
+Bookkeeping:
+
+- [ ] SPEC §8 status paragraph updated; the M4 bullet marked done.
+- [ ] KNOWN-ISSUES re-verified: every entry either still true (re-stamp) or removed by a named PR.
+- [ ] The perf suite is green on the release build; §7 budgets hold with all M4 features enabled.
+
+### Done when
+
+Every box is ticked or explicitly struck with a recorded reason, and the v1 tag is cut from a green
+`npm run verify` on `main`.
+
+---
+
+## Out of scope for M4
+
+The v1.1 items stay v1.1: the global-hotkey quick panel, multi-account, custom themes. Send later stays
+v1.5 (F7, the companion Apps Script). Google OAuth verification stays deferred (decision #2). Read statuses
+stay v2 (D2). Full keyboard remapping stays post-v1. AI beyond reply drafting (summaries, auto-triage,
+semantic search) stays v2+; T36's provider client is not an invitation to add background AI features, which
+F17 forbids regardless.
+
+## Open questions
+
+| Question | Why it matters | Decide by |
+|---|---|---|
+| Public release repo or private-feed workaround for auto-update? | Gates T39's feed wiring | Before T39's updater lands; record in T39 |
+| Default model per provider | Users see it on the enable screen | T36 review; record in code and F17 if the spec should name it |
+| The M3 pathological-mailbox posture question (M3-PLAN) is still open | §7 budgets vs. lifetime headers | Unchanged; not an M4 gate |
