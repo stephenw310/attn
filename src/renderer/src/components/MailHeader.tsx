@@ -100,14 +100,23 @@ function AccountMenu({
 }): React.JSX.Element {
   const blockedTitle = accountActionsBlocked ? 'Save and close the draft first (Esc)' : undefined
   const [open, setOpen] = useState(false)
-  const [openedStatuses, setOpenedStatuses] = useState<AccountSyncStatus[] | null>(null)
+  const [openedStatuses, setOpenedStatuses] = useState<{
+    statuses: AccountSyncStatus[]
+    source: readonly AccountSyncStatus[] | null
+  } | null>(null)
+  const pushedStatusesRef = useRef(accountStatuses)
+  pushedStatusesRef.current = accountStatuses
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const { preference, setPreference } = useTheme()
   // The pushed statuses move only on phase changes (they are what keeps the
   // chip live); the unread counts in them can lag, so an open menu re-reads
-  // the full statuses once and prefers that answer.
+  // the full statuses once. A later push supersedes that snapshot, including
+  // when it arrives while the snapshot request is still pending.
   const healthById = new Map(
-    [...(accountStatuses ?? []), ...(openedStatuses ?? [])].map((health) => [health.accountId, health])
+    [
+      ...(accountStatuses ?? []),
+      ...(openedStatuses?.source === accountStatuses ? openedStatuses.statuses : [])
+    ].map((health) => [health.accountId, health])
   )
   // The chip itself carries an attention mark while *any* account needs the
   // user, so a background failure is visible without opening the menu (F18).
@@ -118,10 +127,11 @@ function AccountMenu({
   useEffect(() => {
     if (!open || !window.attn) return
     let stale = false
+    const source = pushedStatusesRef.current
     window.attn.auth
       .getAccountStatuses()
       .then((statuses) => {
-        if (!stale) setOpenedStatuses(statuses)
+        if (!stale) setOpenedStatuses({ statuses, source })
       })
       .catch(() => {})
     return () => {

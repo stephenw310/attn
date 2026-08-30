@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication } from '@playwright/test'
-import { TEST_CHANNELS } from '../src/shared/ipc'
+import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 
@@ -14,6 +14,45 @@ test.use({ seed: 'fixtures/seed-two-accounts.json' })
 
 const PRIMARY = 'primary@attn.test'
 const SECOND = 'second@attn.test'
+
+/** Hold one real IPC result after main has finished, without a timing-based sleep. */
+async function holdNextAccountResponse(
+  app: ElectronApplication,
+  channel: string
+): Promise<() => Promise<void>> {
+  await app.evaluate(({ ipcMain }, channel) => {
+    type Handler = Parameters<typeof ipcMain.handle>[1]
+    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
+    const original = handlers.get(channel)
+    if (!original) throw new Error(`Missing handler: ${channel}`)
+    ipcMain.removeHandler(channel)
+    ipcMain.handle(channel, async (...args) => {
+      ipcMain.removeHandler(channel)
+      ipcMain.handle(channel, original)
+      const result = await original(...args)
+      await new Promise<void>((resolve) => {
+        Object.assign(globalThis, { releaseAccountResponse: resolve })
+      })
+      return result
+    })
+  }, channel)
+  return async () => {
+    await app.evaluate(() => {
+      const state = globalThis as unknown as { releaseAccountResponse: () => void }
+      state.releaseAccountResponse()
+    })
+  }
+}
+
+async function expectAccountResponseHeld(app: ElectronApplication): Promise<void> {
+  await expect
+    .poll(() =>
+      app.evaluate(
+        () => typeof (globalThis as unknown as { releaseAccountResponse?: () => void }).releaseAccountResponse
+      )
+    )
+    .toBe('function')
+}
 
 interface AccountDataStats {
   rowTotal: number
@@ -226,6 +265,65 @@ test('the account menu shows a one-line status for every account', async ({ page
   await expect(statuses).toHaveCount(2)
   await expect(statuses.first()).toHaveText('Live · 1 unread')
   await expect(statuses.nth(1)).toHaveText('Live · 2 unread')
+})
+
+for (const holdSnapshot of [false, true]) {
+  test(`an open account menu follows live health changes${holdSnapshot ? ' during a snapshot read' : ''}`, async ({
+    app,
+    page
+  }) => {
+    await expect(page.getByTestId('thread-row')).toHaveCount(2)
+    const release = holdSnapshot ? await holdNextAccountResponse(app, IPC_CHANNELS.accountsGetStatuses) : null
+    const chip = page.getByTestId('account-menu').getByRole('button').first()
+    await chip.click()
+    await expect(page.getByTestId('account-status').first()).toContainText('Live')
+    if (release) await expectAccountResponseHeld(app)
+    await app.evaluate(({ ipcMain }, channel) => {
+      ipcMain.emit(channel, {}, { phase: 'error', message: 'Temporary sync failure' })
+    }, TEST_CHANNELS.setSyncState)
+    await expect(chip).toHaveAttribute('data-attention', 'true')
+    await expect(page.getByTestId('account-status').first()).toContainText('Error')
+    if (release) {
+      await release()
+      await expect(page.getByTestId('account-status').first()).toContainText('Error')
+    }
+    await app.evaluate(({ ipcMain }, channel) => {
+      ipcMain.emit(channel, {}, { phase: 'idle' })
+    }, TEST_CHANNELS.setSyncState)
+    await expect(page.getByTestId('account-status').first()).toContainText('Live')
+    await expect(chip).not.toHaveAttribute('data-attention', 'true')
+  })
+}
+
+test('account removal blocks shortcuts and composer opens until the response settles', async ({
+  app,
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(2)
+  const release = await holdNextAccountResponse(app, IPC_CHANNELS.accountsRemove)
+  await page.getByTestId('account-menu').getByRole('button').first().click()
+  await page.getByTestId('account-remove').click()
+  await expect(page.getByTestId('remove-account-dialog')).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+2')
+  await page.keyboard.press('c')
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('remove-account-dialog')).toBeVisible()
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+
+  await page.getByTestId('remove-account-keep').click()
+  await expectAccountResponseHeld(app)
+  expect((await page.evaluate(() => window.attn.auth.getStatus())).activeAccountId).toBe(SECOND)
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
+  await page.keyboard.press('c')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await release()
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  expect(await page.evaluate(() => window.attn.draft.list())).toEqual([])
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.expectFrom(SECOND)
 })
 
 test('a switch restores each account’s last view and selection', async ({ page }) => {

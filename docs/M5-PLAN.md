@@ -269,6 +269,11 @@ read and the pushed `accounts:statusChanged` broadcast, so background failures a
 switching. Only the §7 100ms switch measurement remains with A7's perf job. Spec F18, F3, F5, F15, §7,
 §9 #21(h).
 
+PR #96 review fixes preserve split records across the keyed remount and reload the saved page extent
+before restoring selection and scroll. `accountRestore.spec.ts` covers row 105 in Inbox, an Inbox
+split, and All Mail. The open account menu gives newer status broadcasts priority over its snapshot,
+including a snapshot response that arrives after a broadcast; `accounts.spec.ts` covers both orders.
+
 - Tag every mail-facing read result and broadcast with `accountId` (`mail:changed`, `sync:state`,
   `outbox:changed`/`outbox:progress`, list/conversation/draft/outbox/search results). The renderer holds
   `activeAccountId` from `AuthStatus`, ignores broadcasts for other accounts (except roster-level
@@ -401,6 +406,12 @@ survivor-then-onboarding, and Cancel.
 proves zero rows/FTS/spool via a test seam, survivor account intact, relaunch durability, and last-account
 fallback to the signed-out screen; a second e2e removes with Keep, proves the rows survive but nothing
 lists them, and re-adds the account to prove sync resumes from cursors without a fresh backfill.
+
+PR #96 review fixes cancel each removed session's Gmail reads before retirement. Late responses
+cannot refill dormant or purged rows; draft mutations retain their existing shutdown grace period.
+Runtime tests hold a real client's history response across Keep and Delete removal and verify the
+survivor is unchanged. The confirmation blocks keyboard dispatch, and the pending removal uses the
+account-switch composer guard until its response settles. E2e holds that response to exercise the race.
 
 ### A7 — Multi-account performance and isolation audit
 

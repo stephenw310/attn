@@ -1,12 +1,16 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import type { ThreadPage } from '../../shared/mail'
 import { storeActionError } from '../actions/execute'
-import { openDatabase } from '../db'
-import { historyEvents } from '../sync/poller'
+import { type Db, openDatabase } from '../db'
+import { readSeedThread } from '../dev/seed'
+import type { GmailClient } from '../gmail/client'
+import { GmailMailProvider } from '../gmail/provider'
+import { type HistoryPoller, historyEvents } from '../sync/poller'
+import type { SyncController } from '../syncController'
 import type { ServiceEvent, ServiceInitialize } from './protocol'
 import { IndexingSlot, ServiceRuntime } from './runtime'
 
@@ -83,6 +87,7 @@ describe('ServiceRuntime with several accounts', () => {
   afterEach(async () => {
     for (const runtime of runtimes) await runtime.stop()
     runtimes = []
+    vi.unstubAllGlobals()
     if (dir) rmSync(dir, { recursive: true, force: true })
     dir = null
   })
@@ -116,6 +121,98 @@ describe('ServiceRuntime with several accounts', () => {
     const page = (await runtime.invoke(IPC_CHANNELS.mailListThreads, [{ view: 'inbox' }])) as ThreadPage
     return page.rows.map((row) => row.subject ?? '')
   }
+
+  it.each(['Keep', 'Delete'])(
+    'discards a late history response after removing an account with %s',
+    async (choice) => {
+      const input = makeInput()
+      const { runtime } = await createRuntime(input)
+      const accountId = 'primary@attn.test'
+      // Keep seeded scheduling, but use the runtime's real client/provider with
+      // a held transport response. This exercises the session cancellation scope.
+      await runtime.internal('apply-accounts', [
+        {
+          config: { client_id: 'test-client', client_secret: 'test-secret' },
+          accounts: [
+            {
+              id: accountId,
+              generation: 1,
+              tokens: { access_token: 'test-access', expires_at: Date.now() + 3_600_000 }
+            }
+          ],
+          activeAccountId: accountId
+        }
+      ])
+      const internals = runtime as unknown as {
+        db: Db
+        sessions: Map<string, { syncController: SyncController }>
+        makeClientFor(id: string): GmailClient
+      }
+      const controller = internals.sessions.get(accountId)?.syncController
+      if (!controller) throw new Error('Seeded account session missing')
+      const polling = controller as unknown as {
+        startHistoryPoller(id: string, provider: GmailMailProvider, generation: number): void
+        poller: HistoryPoller
+      }
+      let releaseThread!: (response: Response) => void
+      let readSignal: AbortSignal | null | undefined
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: string | URL, init?: RequestInit) => {
+          const url = String(input)
+          if (url.includes('/history?'))
+            return new Response(
+              JSON.stringify({
+                historyId: '2',
+                history: [{ id: '2', messages: [{ id: 'm-late', threadId: 't-late' }] }]
+              })
+            )
+          if (url.includes('/threads/t-late?')) {
+            readSignal = init?.signal
+            return new Promise<Response>((resolve) => {
+              releaseThread = resolve
+            })
+          }
+          throw new Error(`Unexpected Gmail read: ${url}`)
+        })
+      )
+      internals.db
+        .prepare('UPDATE sync_state SET last_history_id = ? WHERE account_id = ?')
+        .run('1', accountId)
+      polling.startHistoryPoller(
+        accountId,
+        new GmailMailProvider(internals.makeClientFor(accountId)),
+        controller.getGeneration()
+      )
+      const cycle = polling.poller.runNow()
+      await vi.waitFor(() => expect(releaseThread).toBeTypeOf('function'))
+      await runtime.internal('apply-accounts', [
+        {
+          config: null,
+          accounts: [],
+          seedAccountIds: ['second@attn.test'],
+          activeAccountId: 'second@attn.test'
+        }
+      ])
+      expect(readSignal?.aborted).toBe(true)
+      if (choice === 'Delete') await runtime.internal('remove-account-data', [accountId])
+
+      const lateThread = readSeedThread(input.testSeed ?? '', 't-alpha')
+      const message = lateThread?.messages?.[0]
+      if (!lateThread || !message) throw new Error('Seeded thread missing')
+      lateThread.id = 't-late'
+      message.id = 'm-late'
+      message.threadId = 't-late'
+      // Even a buffered response that ignores AbortSignal cannot reach SQLite.
+      releaseThread(new Response(JSON.stringify(lateThread)))
+      await cycle
+      const rows = internals.db
+        .prepare('SELECT id FROM messages WHERE account_id = ? ORDER BY id')
+        .all(accountId)
+      expect(rows).toEqual(choice === 'Delete' ? [] : [{ id: 'm-alpha' }])
+      expect(await listInboxSubjects(runtime)).toEqual(['Beta launch', 'Beta digest'])
+    }
+  )
 
   it('serves the active account only, switches durably, and sums the badge', async () => {
     const input = makeInput()

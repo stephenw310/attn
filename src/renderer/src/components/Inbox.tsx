@@ -76,6 +76,7 @@ interface ViewRecord {
   rowId: string | null
   index: number
   scrollTop: number
+  loadedRows?: number
 }
 
 interface MoveRequest {
@@ -206,7 +207,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedIndex: 0,
     readerOpen: false
   })
-  const resetAccountRef = useRef<string | null | undefined>(undefined)
   const composerOpeningRef = useRef(false)
   const accountSwitchPendingRef = useRef(false)
   const draftOpenRequestRef = useRef(0)
@@ -347,6 +347,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [searchDraftMode, searchDrafts, searchThreads]
   )
   const threads = searchOpen ? searchThreads : mailboxThreads
+  const loadedRowsRef = useRef(0)
+  loadedRowsRef.current = mailboxThreads.length
   const moveCacheRows = useMemo<ThreadRow[]>(
     () =>
       threads.map((thread) => ({
@@ -388,8 +390,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const loadMoreVisibleThreads = useCallback(() => {
     if (pagedView) void loadMoreThreads(pagedView)
   }, [loadMoreThreads, pagedView])
-  const { selectedIds, clearSelection, resetSelection, toggleFocusedSelection, extendSelectionTo } =
-    useSelectionState(threads, selectedIndex, setSelectedIndex)
+  const { selectedIds, clearSelection, toggleFocusedSelection, extendSelectionTo } = useSelectionState(
+    threads,
+    selectedIndex,
+    setSelectedIndex
+  )
 
   const showDraft = useCallback(
     (draft: Draft) => {
@@ -460,29 +465,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     [clearSelection, realSnoozedThreads, realThreads]
   )
 
-  // Account-scoped UI state has one reset owner. New transient surfaces, such
-  // as the M2 composer, join this block rather than growing another effect.
-  useEffect(() => {
-    if (resetAccountRef.current === activeAccount) return
-    resetAccountRef.current = activeAccount
-    setSelectedIndex(0)
-    setSearchOpen(false)
-    setSearchQuery('')
-    setReaderOpen(false)
-    setSnoozeOpen(false)
-    setSplitRulesOpen(false)
-    setLabelTargetIds(null)
-    setMoveRequest(null)
-    setComposerDraft(null)
-    setDetachedDraftThread(null)
-    setComposerError(null)
-    setExitingThreadIds(new Set())
-    selectedThreadIdRef.current = null
-    selectedDraftIdRef.current = null
-    splitViewStateRef.current.clear()
-    pendingSplitRestoreRef.current = null
-    resetSelection()
-  }, [activeAccount, resetSelection])
+  // App keys this tree by account: transient state starts fresh on each mount,
+  // while the saved view and split records above survive the round trip.
 
   useEffect(() => {
     // Taking consumes the recovered pointer; skip while a switch is settling
@@ -793,7 +777,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const removeActiveAccount = useCallback(
     (deleteData: boolean) => {
       const target = status.activeAccountId
-      if (!window.attn || !target) return
+      if (!window.attn || !target || composerOpenRef.current || accountSwitchPendingRef.current) return
+      accountSwitchPendingRef.current = true
+      setAccountSwitchPending(true)
       setRemoveAccountConfirm(false)
       void window.attn.auth
         .removeAccount(target, deleteData)
@@ -802,6 +788,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           onStatus(next)
         })
         .catch(() => void showToast('Could not remove the account'))
+        .finally(() => {
+          accountSwitchPendingRef.current = false
+          setAccountSwitchPending(false)
+        })
     },
     [onStatus, showToast, status.activeAccountId]
   )
@@ -839,7 +829,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     viewStateRef.current.set(current, {
       rowId: current === 'drafts' ? selectedDraftIdRef.current : selectedThreadIdRef.current,
       index: selectedIndexRef.current,
-      scrollTop
+      scrollTop,
+      loadedRows: loadedRowsRef.current
     })
   }, [])
 
@@ -854,6 +845,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       splitViewStateRef.current.set(currentSplitId, {
         rowId: selectedThreadIdRef.current,
         index: selectedIndexRef.current,
+        loadedRows: loadedRowsRef.current,
         scrollTop: readerOpenRef.current
           ? (splitViewStateRef.current.get(currentSplitId)?.scrollTop ?? 0)
           : (listElRef.current?.scrollTop ?? 0)
@@ -930,6 +922,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           // presses J and immediately clicks another split.
           rowId: mailboxThreads[selectedIndexRef.current]?.id ?? selectedThreadIdRef.current,
           index: selectedIndexRef.current,
+          loadedRows: mailboxThreads.length,
           scrollTop: readerOpenRef.current
             ? (splitViewStateRef.current.get(currentId)?.scrollTop ?? 0)
             : (listElRef.current?.scrollTop ?? 0)
@@ -985,7 +978,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   useLayoutEffect(() => {
     const pending = pendingViewRestoreRef.current
     if (!pending || pending.view !== view || !viewRowsLoaded) return
-    pendingViewRestoreRef.current = null
     const record = pending.record
     const rowIds =
       view === 'drafts'
@@ -994,6 +986,18 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           ? realOutbox.map((item) => item.id)
           : threads.map((thread) => thread.id)
     const restoredIndex = record.rowId ? rowIds.indexOf(record.rowId) : -1
+    // A remount starts with one page. Load the saved extent (for scroll) and
+    // selected row before deciding that the row has left this mailbox.
+    if (
+      pagedView &&
+      activePageState?.nextCursor &&
+      ((record.rowId !== null && restoredIndex < 0) ||
+        rowIds.length < (record.loadedRows ?? record.index + 1))
+    ) {
+      void loadMoreThreads(pagedView)
+      return
+    }
+    pendingViewRestoreRef.current = null
     const nextIndex =
       restoredIndex >= 0 ? restoredIndex : Math.max(0, Math.min(record.index, rowIds.length - 1))
     const draftLikeView = view === 'drafts' || view === 'outbox'
@@ -1002,7 +1006,16 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     setSelectedIndex(nextIndex)
     const list = listElRef.current
     if (list) list.scrollTop = record.scrollTop
-  }, [realDrafts, realOutbox, threads, view, viewRowsLoaded])
+  }, [
+    activePageState?.nextCursor,
+    loadMoreThreads,
+    pagedView,
+    realDrafts,
+    realOutbox,
+    threads,
+    view,
+    viewRowsLoaded
+  ])
 
   useLayoutEffect(() => {
     const pending = pendingSplitRestoreRef.current
@@ -1023,10 +1036,18 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     ) {
       return
     }
-    pendingSplitRestoreRef.current = null
     const restoredIndex = pending.record.rowId
       ? realThreads.findIndex((thread) => thread.id === pending.record.rowId)
       : -1
+    if (
+      threadPagination.inbox?.nextCursor &&
+      ((pending.record.rowId !== null && restoredIndex < 0) ||
+        realThreads.length < (pending.record.loadedRows ?? pending.record.index + 1))
+    ) {
+      void loadMoreThreads('inbox')
+      return
+    }
+    pendingSplitRestoreRef.current = null
     const nextIndex =
       restoredIndex >= 0
         ? restoredIndex
@@ -1034,7 +1055,16 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedThreadIdRef.current = realThreads[nextIndex]?.id ?? null
     setSelectedIndex(nextIndex)
     if (listElRef.current) listElRef.current.scrollTop = pending.record.scrollTop
-  }, [loadedInboxSplitId, loadedInboxSplitStale, realThreads, splits.activeSplitId, splits.state, view])
+  }, [
+    loadedInboxSplitId,
+    loadedInboxSplitStale,
+    loadMoreThreads,
+    realThreads,
+    splits.activeSplitId,
+    splits.state,
+    threadPagination.inbox?.nextCursor,
+    view
+  ])
 
   const openOutboxNow = useCallback(() => {
     if (view === 'outbox') {
@@ -1680,6 +1710,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       moveRequest !== null ||
       composerDraft !== null ||
       splitRulesOpen ||
+      removeAccountConfirm ||
       accountSwitchPending,
     readerOpen,
     outboxOpen: !searchOpen && view === 'outbox',

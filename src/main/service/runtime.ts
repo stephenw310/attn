@@ -59,6 +59,7 @@ interface AccountSession {
   /** Null for seeded e2e accounts, which never talk to Gmail. */
   auth: ServiceAccountAuth | null
   readonly seeded: boolean
+  readAbort: AbortController
   readonly syncController: SyncController
   readonly actionExecutor: ActionExecutor
   readonly draftMirrorExecutor: DraftMirrorExecutor
@@ -310,6 +311,7 @@ export class ServiceRuntime {
       if (this.sessions.has(accountId)) throw new Error('account session still active')
       const retirement = this.retirements.get(accountId)
       if (retirement) await retirement
+      if (this.sessions.has(accountId)) throw new Error('account session still active')
       const purged = purgeAccountRows(this.db, accountId)
       for (const outboxId of purged.outboxSpoolIds) cleanOutboxSpool(this.input.userDataPath, outboxId)
       this.log(
@@ -365,6 +367,7 @@ export class ServiceRuntime {
     this.handlers.stop()
     const workers: Promise<unknown>[] = [...this.retirements.values()]
     for (const session of this.sessions.values()) {
+      session.readAbort.abort(new Error('account session stopped'))
       session.syncController.stop()
       session.actionExecutor.stop()
       session.snoozeScheduler.stop()
@@ -459,6 +462,7 @@ export class ServiceRuntime {
       id,
       auth,
       seeded,
+      readAbort: new AbortController(),
       syncController,
       actionExecutor,
       draftMirrorExecutor,
@@ -477,6 +481,10 @@ export class ServiceRuntime {
   }
 
   private teardownSession(session: AccountSession): void {
+    // Invalidate every Gmail read before purging or replacing this session.
+    // Mutations keep their worker-owned grace period so returned draft ids
+    // still become durable before those workers retire.
+    session.readAbort.abort(new Error('account removed'))
     this.sessions.delete(session.id)
     const orderIndex = this.accountOrder.indexOf(session.id)
     if (orderIndex >= 0) this.accountOrder.splice(orderIndex, 1)
@@ -565,6 +573,8 @@ export class ServiceRuntime {
       const reauthenticated = existing.auth?.generation !== auth.generation
       existing.auth = auth
       if (reauthenticated) {
+        existing.readAbort.abort(new Error('authentication changed'))
+        existing.readAbort = new AbortController()
         // A fresh interactive sign-in replaces whatever a stuck client was
         // waiting on; new providers pick the new tokens up on creation.
         this.gmailQuotaLimiters.get(auth.id)?.dispose(new Error('authentication changed'))
@@ -652,7 +662,7 @@ export class ServiceRuntime {
         session.auth = { ...auth, tokens }
         this.emit({ kind: 'token-update', accountId: id, tokens, generation: auth.generation })
       },
-      { quotaLimiter }
+      { quotaLimiter, readSignal: session.readAbort.signal }
     )
   }
 

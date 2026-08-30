@@ -5,6 +5,8 @@ export interface ViewRecordSnapshot {
   rowId: string | null
   index: number
   scrollTop: number
+  /** Reload this extent before applying a saved scroll offset. */
+  loadedRows?: number
 }
 
 /**
