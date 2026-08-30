@@ -122,6 +122,7 @@ export const COMMAND_SPECS = {
   },
   'split.manage': { title: 'Manage inbox splits', context: 'global' },
   'account.add': { title: 'Add account…', context: 'global' },
+  'account.remove': { title: 'Remove account…', context: 'global' },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
     title: 'Use Dark theme',

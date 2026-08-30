@@ -120,6 +120,8 @@ type SnoozeRequest = InvokeChannels[typeof IPC_CHANNELS.mailSnooze]['args'][0]
 export interface ServiceHandlerContext {
   db: Db
   currentAccountId: () => string | null
+  /** Per-account one-line health readouts for the account menu (F18). */
+  accountStatuses: () => import('../../shared/auth').AccountSyncStatus[]
   makeClient: () => GmailClient | null
   makeProvider: () => GmailMailProvider | null
   makeServerSearchProvider: () => ServerSearchProvider | null
@@ -426,7 +428,10 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const id = saveDraft(context.db, account, prepared.draft, now, prepared.defaultSignatureFingerprint)
     return {
       id,
-      draft: prepared.draft.id === null ? { ...prepared.draft, id, createdAt: now, updatedAt: now } : null
+      draft:
+        prepared.draft.id === null
+          ? { ...prepared.draft, id, accountId: account, createdAt: now, updatedAt: now }
+          : null
     }
   })
   handle(IPC_CHANNELS.draftGet, (_event, id) => {
@@ -1005,6 +1010,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     }
     return result
   })
+  handle(IPC_CHANNELS.accountsGetStatuses, () => context.accountStatuses())
   handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
     const account = context.currentAccountId()
     return account ? pendingActionCount(context.db, account) : 0

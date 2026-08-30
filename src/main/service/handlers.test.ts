@@ -18,6 +18,7 @@ function handlerContext(
   return {
     db,
     currentAccountId: () => ACCOUNT,
+    accountStatuses: () => [],
     makeClient: () => null,
     makeProvider: () => null,
     makeServerSearchProvider: () => provider,

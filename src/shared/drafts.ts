@@ -4,6 +4,13 @@ export type DraftKind = 'new' | 'reply' | 'replyAll' | 'forward'
 
 export interface Draft {
   id: string
+  /**
+   * The owning account (F18/F6): bound at open — the account active when a
+   * new draft was created, the source thread's owner for replies/forwards —
+   * and never rebound. The composer's From renders this, not whatever account
+   * happens to be active.
+   */
+  accountId: string
   kind: DraftKind
   to: MailAddress[]
   cc: MailAddress[]
@@ -48,7 +55,9 @@ export interface DraftAttachmentMutationResult {
   changed: boolean
 }
 
-export interface DraftSaveInput extends Omit<Draft, 'id' | 'createdAt' | 'updatedAt'> {
+// The account is never the renderer's to choose: saves bind to the draft row's
+// stored owner in the main process (F6).
+export interface DraftSaveInput extends Omit<Draft, 'id' | 'accountId' | 'createdAt' | 'updatedAt'> {
   id: string | null
 }
 

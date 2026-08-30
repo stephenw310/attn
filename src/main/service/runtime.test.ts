@@ -6,6 +6,7 @@ import { IPC_CHANNELS } from '../../shared/ipc'
 import type { ThreadPage } from '../../shared/mail'
 import { storeActionError } from '../actions/execute'
 import { openDatabase } from '../db'
+import { historyEvents } from '../sync/poller'
 import type { ServiceEvent, ServiceInitialize } from './protocol'
 import { IndexingSlot, ServiceRuntime } from './runtime'
 
@@ -45,7 +46,7 @@ const TWO_ACCOUNTS = {
           messages: [
             {
               id: 'm-beta',
-              labelIds: ['INBOX', 'UNREAD'],
+              labelIds: ['INBOX', 'UNREAD', 'IMPORTANT'],
               receivedDaysAgo: 0,
               from: 'Bea <bea@example.com>',
               to: 'second@attn.test',
@@ -144,6 +145,30 @@ describe('ServiceRuntime with several accounts', () => {
     const second = await createRuntime(makeInput())
     expect(second.runtime.ready().activeAccountId).toBe('second@attn.test')
     expect(await listInboxSubjects(second.runtime)).toEqual(['Beta launch', 'Beta digest'])
+  })
+
+  it('surfaces notification candidates for inactive accounts, roster members only', async () => {
+    const input = makeInput()
+    const { runtime, events } = await createRuntime(input)
+    expect(runtime.ready().activeAccountId).toBe('primary@attn.test')
+
+    // A poll cycle on the *inactive* account must still notify (F12/F18). The
+    // seeded thread is IMPORTANT, the one starter split with notify on.
+    historyEvents.emit('newMail', 'second@attn.test', [{ threadId: 't-beta', messageId: 'm-beta' }])
+    const candidates = events.filter((event) => event.kind === 'notification-candidates').at(-1)
+    expect(candidates?.kind === 'notification-candidates' ? candidates.accountId : null).toBe(
+      'second@attn.test'
+    )
+    expect(
+      candidates?.kind === 'notification-candidates'
+        ? candidates.candidates.map((candidate) => candidate.subject)
+        : []
+    ).toEqual(['Beta launch'])
+
+    // Mail for an account with no session stays silent.
+    const before = events.filter((event) => event.kind === 'notification-candidates').length
+    historyEvents.emit('newMail', 'ghost@attn.test', [{ threadId: 't-ghost', messageId: 'm-ghost' }])
+    expect(events.filter((event) => event.kind === 'notification-candidates')).toHaveLength(before)
   })
 
   it('acknowledges a roster update only once deferred sessions exist, and switches wait for them', async () => {
@@ -253,6 +278,142 @@ describe('ServiceRuntime with several accounts', () => {
     expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
   })
 
+  it('binds reply drafts to the source thread’s owner and never across accounts', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+    expect(runtime.ready().activeAccountId).toBe('primary@attn.test')
+
+    // The race A5 guards: the active account changed between reader open and
+    // R. The other account's thread must not produce a draft bound anywhere.
+    expect(await runtime.invoke(IPC_CHANNELS.draftCreateReply, ['t-beta', 'reply', 'normal'])).toBeNull()
+    const db = openDatabase(input.dbPath)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM outbox').get()).toEqual({ count: 0 })
+    db.close()
+
+    // A reply in a reachable flow binds explicitly to the thread's owner —
+    // the draft carries its account and the composer renders that (F6).
+    const draft = (await runtime.invoke(IPC_CHANNELS.draftCreateReply, ['t-alpha', 'reply', 'normal'])) as {
+      accountId: string
+      threadId: string
+    } | null
+    expect(draft?.accountId).toBe('primary@attn.test')
+    expect(draft?.threadId).toBe('t-alpha')
+  })
+
+  it('reports per-account menu statuses for the whole roster', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+
+    // Seeded controllers are idle → Live; unread follows badge semantics.
+    expect(await runtime.invoke(IPC_CHANNELS.accountsGetStatuses, [])).toEqual([
+      { accountId: 'primary@attn.test', phase: 'live', unread: 1 },
+      { accountId: 'second@attn.test', phase: 'live', unread: 2 }
+    ])
+
+    // An auth-paused queue on a background account surfaces as Reconnect.
+    const db = openDatabase(input.dbPath)
+    db.prepare(
+      `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, attempts, last_error)
+       VALUES ('second@attn.test', 'archive', 't-beta', '{}', 'failed', 3, ?)`
+    ).run(storeActionError(new Error('invalid_grant'), 'auth'))
+    db.close()
+    const statuses = (await runtime.invoke(IPC_CHANNELS.accountsGetStatuses, [])) as Array<{
+      accountId: string
+      phase: string
+    }>
+    expect(statuses.map((status) => status.phase)).toEqual(['live', 'reconnect'])
+  })
+
+  it('adding an account leaves the first account’s cursors byte-identical', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+
+    // Reduce the roster to the primary account alone, then snapshot every
+    // cursor and derived sync column it owns.
+    await runtime.internal('apply-accounts', [
+      { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['primary@attn.test'] }
+    ])
+    const snapshot = (): unknown => {
+      const db = openDatabase(input.dbPath)
+      const row = db.prepare("SELECT * FROM sync_state WHERE account_id = 'primary@attn.test'").get()
+      db.close()
+      return JSON.stringify(row)
+    }
+    const before = snapshot()
+
+    // Adding the second account must not touch the first account's sync rows
+    // in any way — no cursor reset, no re-backfill (F18 acceptance criteria).
+    await runtime.internal('apply-accounts', [
+      {
+        config: null,
+        accounts: [],
+        activeAccountId: null,
+        seedAccountIds: ['primary@attn.test', 'second@attn.test']
+      }
+    ])
+    expect(runtime.ready().accountIds).toContain('second@attn.test')
+    expect(snapshot()).toEqual(before)
+  })
+
+  it('re-adding a kept account resumes its dormant rows and cursors, not a fresh backfill', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+    const syncStateRow = (): unknown => {
+      const db = openDatabase(input.dbPath)
+      const row = db.prepare("SELECT * FROM sync_state WHERE account_id = 'second@attn.test'").get()
+      db.close()
+      return JSON.stringify(row)
+    }
+    const dormantCursor = syncStateRow()
+
+    // Remove with Keep: the roster loses the account, the rows stay.
+    await runtime.internal('apply-accounts', [
+      { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['primary@attn.test'] }
+    ])
+    expect(runtime.ready().accountIds).toEqual(['primary@attn.test'])
+    expect(syncStateRow()).toEqual(dormantCursor)
+
+    // Re-adding the same address resumes from the stored cursors (D3 Keep).
+    await runtime.internal('apply-accounts', [
+      {
+        config: null,
+        accounts: [],
+        activeAccountId: 'second@attn.test',
+        seedAccountIds: ['primary@attn.test', 'second@attn.test']
+      }
+    ])
+    expect(runtime.ready().activeAccountId).toBe('second@attn.test')
+    expect(await listInboxSubjects(runtime)).toEqual(['Beta launch', 'Beta digest'])
+    expect(syncStateRow()).toEqual(dormantCursor)
+  })
+
+  it('purges a removed account’s rows through the remove-account-data operation', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+
+    // The roster update precedes the purge; a still-live session is refused.
+    await expect(runtime.internal('remove-account-data', ['second@attn.test'])).rejects.toThrow(
+      'account session still active'
+    )
+    await runtime.internal('apply-accounts', [
+      { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['primary@attn.test'] }
+    ])
+    await runtime.internal('remove-account-data', ['second@attn.test'])
+
+    const db = openDatabase(input.dbPath)
+    const gone = db
+      .prepare("SELECT COUNT(*) AS count FROM threads WHERE account_id = 'second@attn.test'")
+      .get()
+    const roster = db.prepare("SELECT COUNT(*) AS count FROM accounts WHERE id = 'second@attn.test'").get()
+    const survivor = db
+      .prepare("SELECT COUNT(*) AS count FROM threads WHERE account_id = 'primary@attn.test'")
+      .get()
+    db.close()
+    expect(gone).toEqual({ count: 0 })
+    expect(roster).toEqual({ count: 0 })
+    expect(survivor).toEqual({ count: 1 })
+  })
+
   it('retires a removed seed session and falls back to the survivor', async () => {
     const input = makeInput()
     const { runtime } = await createRuntime(input)
@@ -308,5 +469,36 @@ describe('IndexingSlot', () => {
     releaseA()
     await Promise.all(waiters)
     expect(grants).toEqual(['b', 'c'])
+  })
+
+  it('asks the holder to yield only while the active account is actually waiting', async () => {
+    let active = 'b'
+    const slot = new IndexingSlot((accountId) => accountId === active)
+    const releaseA = await slot.acquire('a')
+
+    // Nobody waits yet: no preemption ask.
+    expect(slot.hasPriorityWaiter('a')).toBe(false)
+
+    // An inactive waiter queues: still no ask.
+    const waiterC = slot.acquire('c')
+    expect(slot.hasPriorityWaiter('a')).toBe(false)
+
+    // The active account queues: the holder must yield at its next boundary.
+    const waiterB = slot.acquire('b')
+    expect(slot.hasPriorityWaiter('a')).toBe(true)
+    // Only the holder is asked — other accounts read false.
+    expect(slot.hasPriorityWaiter('b')).toBe(false)
+    expect(slot.hasPriorityWaiter('c')).toBe(false)
+
+    // A holder that *is* the active account is never asked to yield.
+    active = 'a'
+    expect(slot.hasPriorityWaiter('a')).toBe(false)
+
+    active = 'b'
+    releaseA()
+    const releaseB = await waiterB
+    expect(slot.hasPriorityWaiter('b')).toBe(false)
+    releaseB()
+    ;(await waiterC)()
   })
 })

@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { type AuthSignInResult, type AuthStatus, isSignInCanceled } from '../../../shared/auth'
+import {
+  type AccountSyncStatus,
+  type AuthSignInResult,
+  type AuthStatus,
+  isSignInCanceled
+} from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { ConversationMailbox, MailLabel, ThreadListView, ThreadRow } from '../../../shared/mail'
 import type { MoveDestination } from '../../../shared/move'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
+import { clearAccountView, readAccountView, saveAccountView } from '../accountViewMemory'
 import { actionReconnectMessage } from '../actionReconnect'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
@@ -110,7 +116,14 @@ function sidebarStorage(): Storage | null {
 }
 
 export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
-  const [view, setView] = useState<MailView>('inbox')
+  // The previous visit's snapshot for this account, saved by the guarded
+  // switch before the tree remounted (F18: a warm switch restores the
+  // account's last view, selection, and scroll). Read once per mount.
+  const [restoredView] = useState(() => {
+    const accountId = status.activeAccountId ?? status.email ?? null
+    return accountId ? readAccountView(accountId) : null
+  })
+  const [view, setView] = useState<MailView>(() => restoredView?.view ?? 'inbox')
   const [pendingChord, setPendingChord] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -123,6 +136,8 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const [labelTargetIds, setLabelTargetIds] = useState<readonly string[] | null>(null)
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
+  const [accountStatuses, setAccountStatuses] = useState<AccountSyncStatus[] | null>(null)
+  const [removeAccountConfirm, setRemoveAccountConfirm] = useState(false)
   // A switch can wait on the utility (a retiring session holds it for up to
   // five seconds). Its settle remounts the tree, so while it is in flight
   // every composer open is inert — a composer that opened mid-wait would be
@@ -136,15 +151,40 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const selectedThreadIdRef = useRef<string | null>(null)
   const selectedDraftIdRef = useRef<string | null>(null)
-  const activeViewRef = useRef<MailView>('inbox')
+  const activeViewRef = useRef<MailView>(restoredView?.view ?? 'inbox')
   const listElRef = useRef<HTMLElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const searchSelectedRowIdRef = useRef<string | null>(null)
   const previousSearchRowIdsRef = useRef<readonly string[]>([])
-  const viewStateRef = useRef(new Map<MailView, ViewRecord>())
-  const splitViewStateRef = useRef(new Map<string, ViewRecord>())
-  const pendingSplitRestoreRef = useRef<{ id: string; record: ViewRecord } | null>(null)
-  const pendingViewRestoreRef = useRef<{ view: MailView; record: ViewRecord } | null>(null)
+  const viewStateRef = useRef(new Map<MailView, ViewRecord>(restoredView?.viewRecords ?? []))
+  const splitViewStateRef = useRef(new Map<string, ViewRecord>(restoredView?.splitRecords ?? []))
+  // Cross-account restore rides the same pending-restore machinery a
+  // same-account view switch uses: prime it at mount and the layout effects
+  // below apply selection and scroll once the restored view's rows load.
+  const pendingSplitRestoreRef = useRef<{ id: string; record: ViewRecord } | null>(
+    restoredView?.view === 'inbox' && restoredView.splitId
+      ? {
+          id: restoredView.splitId,
+          record: new Map(restoredView.splitRecords).get(restoredView.splitId) ?? {
+            rowId: null,
+            index: 0,
+            scrollTop: 0
+          }
+        }
+      : null
+  )
+  const pendingViewRestoreRef = useRef<{ view: MailView; record: ViewRecord } | null>(
+    restoredView && (restoredView.view !== 'inbox' || !restoredView.splitId)
+      ? {
+          view: restoredView.view,
+          record: new Map(restoredView.viewRecords).get(restoredView.view) ?? {
+            rowId: null,
+            index: 0,
+            scrollTop: 0
+          }
+        }
+      : null
+  )
   const searchReturnRef = useRef<ViewRecord | null>(null)
   const searchOpenRef = useRef(false)
   searchOpenRef.current = searchOpen
@@ -178,7 +218,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   // The normalized account id — the key the utility uses for revert notices,
   // command usage, and every account-scoped row. `status.email` is display-only.
   const activeAccount = status.activeAccountId ?? status.email ?? null
-  const splits = useSplits(activeAccount)
+  const splits = useSplits(activeAccount, restoredView?.splitId ?? null)
+  const activeSplitIdRef = useRef(splits.activeSplitId)
+  activeSplitIdRef.current = splits.activeSplitId
   const inboxSplitIdsKey = splits.state?.splits.map((split) => split.id).join('\u0000') ?? ''
   const inboxSplitRevision = splits.state?.revision
   const setActiveSplitForFocusRef = useRef(splits.setActiveSplitId)
@@ -641,6 +683,19 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     return window.attn.mail.onActionsReverted(activeAccount, showToast)
   }, [activeAccount, showToast])
 
+  // Live roster health: seeded once, then pushed by the utility whenever any
+  // account's phase or unread moves — the chip's attention mark and the menu
+  // status lines follow without polling (F18).
+  useEffect(() => {
+    const bridge = window.attn
+    if (!bridge) return
+    bridge.auth
+      .getAccountStatuses()
+      .then(setAccountStatuses)
+      .catch(() => {})
+    return bridge.auth.onAccountStatuses(setAccountStatuses)
+  }, [])
+
   const reconnectGoogle = useCallback(async (): Promise<AuthSignInResult | null> => {
     if (!window.attn) return null
     try {
@@ -677,6 +732,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   // was created, and only the ref knows whether a composer is open *now*.
   const composerOpenRef = useRef(false)
   composerOpenRef.current = accountActionsBlocked
+  // Assigned below once the view-record helpers exist; routed through a ref
+  // because this guarded switch is declared before them.
+  const saveAccountSnapshotRef = useRef<() => void>(() => {})
   const switchAccount = useCallback(
     (accountId: string) => {
       if (!window.attn || accountId === status.activeAccountId) return
@@ -685,6 +743,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         return
       }
       if (accountSwitchPendingRef.current) return
+      // Capture this account's view, selection, and scroll before the tree
+      // remounts, so returning here restores them (F18).
+      saveAccountSnapshotRef.current()
       accountSwitchPendingRef.current = true
       setAccountSwitchPending(true)
       void window.attn.auth
@@ -718,14 +779,53 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       switchAccount(result.accountId)
     })
   }, [reconnectGoogle, showToast, switchAccount])
+  // Removing an account is destructive enough for a confirmation that also
+  // decides the local data's fate (F18, D3): Delete purges every local trace,
+  // Keep leaves the rows dormant for a future re-add to resume from cursors.
+  const requestRemoveAccount = useCallback(() => {
+    if (composerOpenRef.current) {
+      showToast('Save and close the draft before removing an account')
+      return
+    }
+    if (accountSwitchPendingRef.current) return
+    setRemoveAccountConfirm(true)
+  }, [showToast])
+  const removeActiveAccount = useCallback(
+    (deleteData: boolean) => {
+      const target = status.activeAccountId
+      if (!window.attn || !target) return
+      setRemoveAccountConfirm(false)
+      void window.attn.auth
+        .removeAccount(target, deleteData)
+        .then((next) => {
+          clearAccountView(target)
+          onStatus(next)
+        })
+        .catch(() => void showToast('Could not remove the account'))
+    },
+    [onStatus, showToast, status.activeAccountId]
+  )
+  useEffect(() => {
+    if (!removeAccountConfirm) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        setRemoveAccountConfirm(false)
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [removeAccountConfirm])
+
   const accountCommands = useMemo(
     () => ({
       accounts: status.accounts,
       activeAccountId: status.activeAccountId,
       switchTo: switchAccount,
-      add: addAccount
+      add: addAccount,
+      remove: requestRemoveAccount
     }),
-    [addAccount, status.accounts, status.activeAccountId, switchAccount]
+    [addAccount, requestRemoveAccount, status.accounts, status.activeAccountId, switchAccount]
   )
 
   const saveActiveViewRecord = useCallback(() => {
@@ -742,6 +842,30 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       scrollTop
     })
   }, [])
+
+  // Everything a warm return to this account restores: the view on screen,
+  // the active split, and every view's selection/scroll records (F18).
+  saveAccountSnapshotRef.current = () => {
+    if (!activeAccount) return
+    saveActiveViewRecord()
+    const rawView = activeViewRef.current
+    const currentSplitId = activeSplitIdRef.current
+    if (rawView === 'inbox' && currentSplitId) {
+      splitViewStateRef.current.set(currentSplitId, {
+        rowId: selectedThreadIdRef.current,
+        index: selectedIndexRef.current,
+        scrollTop: readerOpenRef.current
+          ? (splitViewStateRef.current.get(currentSplitId)?.scrollTop ?? 0)
+          : (listElRef.current?.scrollTop ?? 0)
+      })
+    }
+    saveAccountView(activeAccount, {
+      view: rawView === 'outbox' ? outboxReturnRef.current.view : rawView,
+      splitId: currentSplitId,
+      viewRecords: [...viewStateRef.current],
+      splitRecords: [...splitViewStateRef.current]
+    })
+  }
 
   const switchViewNow = useCallback(
     (next: NavigableMailView) => {
@@ -882,6 +1006,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
   useLayoutEffect(() => {
     const pending = pendingSplitRestoreRef.current
+    // A restored split can have been deleted since the snapshot was taken;
+    // drop the stale restore once the rules are known rather than waiting on
+    // a split that will never activate.
+    if (pending && splits.state && !splits.state.splits.some((split) => split.id === pending.id)) {
+      pendingSplitRestoreRef.current = null
+      return
+    }
     if (
       !pending ||
       view !== 'inbox' ||
@@ -903,7 +1034,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     selectedThreadIdRef.current = realThreads[nextIndex]?.id ?? null
     setSelectedIndex(nextIndex)
     if (listElRef.current) listElRef.current.scrollTop = pending.record.scrollTop
-  }, [loadedInboxSplitId, loadedInboxSplitStale, realThreads, splits.activeSplitId, view])
+  }, [loadedInboxSplitId, loadedInboxSplitStale, realThreads, splits.activeSplitId, splits.state, view])
 
   const openOutboxNow = useCallback(() => {
     if (view === 'outbox') {
@@ -956,7 +1087,21 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   useEffect(() => {
     const bridge = window.attn
     if (!bridge || !activeAccount) return
-    return bridge.mail.onFocusThread((threadId) => {
+    return bridge.mail.onFocusThread((target) => {
+      // A notification for an inactive account switches there first (F12/F18).
+      // The switch runs the guarded path — a live composer blocks it with the
+      // usual toast — and the target stays pending in main, so the remounted
+      // tree for the right account pulls it again and lands here as 'focus'.
+      if (target.kind === 'switch') {
+        switchAccount(target.accountId)
+        return
+      }
+      const threadId = target.threadId
+      if (threadId === null) {
+        // A summary names no single thread; it lands on this account's inbox.
+        switchView('inbox', () => clearSelection())
+        return
+      }
       // Close the old reader before changing lists so auto-read cannot observe
       // an old cursor against Inbox and mutate the wrong thread.
       switchView('inbox', () => {
@@ -995,7 +1140,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         })().catch(() => {})
       })
     })
-  }, [activeAccount, clearSelection, focusInboxThread, switchView])
+  }, [activeAccount, clearSelection, focusInboxThread, switchAccount, switchView])
 
   const updateSearchRows = useCallback(
     (updater: Parameters<typeof search.updateRows>[0]) => {
@@ -1566,15 +1711,69 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
         composerOpen={fullWindowComposerDraft !== null}
         sidebarCollapsed={sidebarCollapsed}
         status={status}
-        onStatus={onStatus}
+        accountStatuses={accountStatuses}
         onReconnectActions={reconnectActions}
         onOpenOutbox={openOutbox}
         onToggleSidebar={toggleSidebar}
         onManageSplits={() => setSplitRulesOpen(true)}
         onSwitchAccount={switchAccount}
         onAddAccount={addAccount}
+        onRemoveAccount={requestRemoveAccount}
         accountActionsBlocked={accountActionsBlocked}
       />
+
+      {removeAccountConfirm && activeAccount && (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled by the dialog's key capture
+        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is the pointer dismissal path
+        <div
+          data-testid="remove-account-dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setRemoveAccountConfirm(false)}
+        >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: the handler only stops backdrop dismissal */}
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Remove ${activeAccount}?`}
+            className="w-[460px] rounded-lg border border-edge bg-raised p-5 shadow-menu"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="text-sm font-semibold text-ink">Remove {activeAccount}?</h2>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
+              This signs the account out and stops its sync. Choose what happens to its mail cached on this
+              device: deleting removes every local trace; keeping leaves it dormant so adding the account
+              again picks up where it left off.
+            </p>
+            <div className="mt-4 flex flex-col gap-1.5">
+              <button
+                type="button"
+                data-testid="remove-account-delete"
+                ref={(element) => element?.focus()}
+                onClick={() => removeActiveAccount(true)}
+                className="w-full cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
+              >
+                Remove and delete local data
+              </button>
+              <button
+                type="button"
+                data-testid="remove-account-keep"
+                onClick={() => removeActiveAccount(false)}
+                className="w-full cursor-pointer rounded-md border border-edge px-3 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
+              >
+                Remove and keep local data
+              </button>
+              <button
+                type="button"
+                data-testid="remove-account-cancel"
+                onClick={() => setRemoveAccountConfirm(false)}
+                className="w-full cursor-pointer rounded-md px-3 py-1.5 text-[13px] text-ink-faint hover:bg-active hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div
         className={`min-h-0 flex-1 ${fullWindowComposerDraft ? 'hidden' : 'flex'}`}
@@ -1756,7 +1955,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                     <Composer
                       key={inlineComposerDraft.id}
                       ref={inlineComposerRef}
-                      account={activeAccount}
                       draft={inlineComposerDraft}
                       mode="inline"
                       initialError={composerError}
@@ -1850,7 +2048,6 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
 
       {fullWindowComposerDraft && activeAccount && (
         <Composer
-          account={activeAccount}
           draft={fullWindowComposerDraft}
           initialError={composerError}
           onClose={closeComposer}
