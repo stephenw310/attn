@@ -145,7 +145,8 @@ export function useMailData(
   activeViewRef: React.RefObject<MailView>,
   selectedThreadIdRef: React.RefObject<string | null>,
   selectedDraftIdRef: React.RefObject<string | null>,
-  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
+  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>,
+  splitsReady = true
 ): MailDataState {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [inboxBackfillReady, setInboxBackfillReady] = useState<boolean | null>(null)
@@ -391,7 +392,7 @@ export function useMailData(
       preserveSelectionOnRefreshRef.current = true
     }
     const bridge = window.attn
-    if (!bridge || !activeAccount) return
+    if (!bridge || !activeAccount || !splitsReady) return
     let cancelled = false
     let deferredRefreshTimer: number | null = null
     let mailChangedPending = false
@@ -468,7 +469,15 @@ export function useMailData(
             const snoozedStillCurrent = mailboxRefreshVersionRef.current.snoozed === snoozedVersion
             const extraViewStillCurrent =
               !extraView || mailboxRefreshVersionRef.current[extraView] === extraViewVersion
-            if (viewStillCurrent && extraViewStillCurrent) {
+            const visibleStillCurrent =
+              viewAtStart === 'inbox'
+                ? inboxStillCurrent
+                : viewAtStart === 'snoozed'
+                  ? snoozedStillCurrent
+                  : extraViewStillCurrent
+            // A targeted focus can supersede this read. Its rows and selection
+            // must stay together, even when the older refresh finishes later.
+            if (viewStillCurrent && visibleStillCurrent) {
               const visible =
                 viewAtStart === 'inbox'
                   ? inboxPage.rows
@@ -509,7 +518,10 @@ export function useMailData(
               )
             }
             setThreadPagination((current) => {
-              const next: ThreadPagination = viewStillCurrent && extraViewStillCurrent ? {} : { ...current }
+              const next: ThreadPagination =
+                viewStillCurrent && extraViewStillCurrent
+                  ? { inbox: current.inbox, snoozed: current.snoozed }
+                  : { ...current }
               if (inboxStillCurrent) {
                 next.inbox = { nextCursor: inboxPage.nextCursor, loadingMore: false }
               }
@@ -575,6 +587,7 @@ export function useMailData(
     const offProgress = bridge.outbox.onProgress(setOutboxProgress)
     return () => {
       cancelled = true
+      inboxSplitPreloadRef.current += 1
       mailboxCountsRequestRef.current += 1
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
@@ -585,6 +598,7 @@ export function useMailData(
     activeAccount,
     activeSplitId,
     splitRevisionValue,
+    splitsReady,
     activeViewRef,
     selectedDraftIdRef,
     selectedThreadIdRef,
@@ -661,7 +675,13 @@ export function useMailData(
     const snoozedStillCurrent = mailboxRefreshVersionRef.current.snoozed === snoozedVersion
     const extraViewStillCurrent =
       !extraView || mailboxRefreshVersionRef.current[extraView] === extraViewVersion
-    if (viewStillCurrent && extraViewStillCurrent) {
+    const visibleStillCurrent =
+      viewAtStart === 'inbox'
+        ? inboxStillCurrent
+        : viewAtStart === 'snoozed'
+          ? snoozedStillCurrent
+          : extraViewStillCurrent
+    if (viewStillCurrent && visibleStillCurrent) {
       const visible =
         viewAtStart === 'inbox'
           ? inboxPage.rows

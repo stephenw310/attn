@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ElectronApplication, Page, TestInfo } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { THREAD_PAGE_SIZE } from '../src/shared/mail'
@@ -395,6 +397,49 @@ async function measureAccountSwitch(
     { pressed: digit, address: email, subject: firstSubject }
   )
 }
+
+test.describe('@perf account switching with split inboxes', () => {
+  test.use({ seed: '.artifacts/perf-split-seed.json' })
+  test.beforeAll(() => {
+    const fixture = JSON.parse(readFileSync(join(__dirname, '.artifacts/perf-seed.json'), 'utf8')) as {
+      accounts: Array<{
+        splitSetup?: boolean
+        threads: Array<{ messages: Array<{ labelIds: string[] }> }>
+      }>
+    }
+    for (const account of fixture.accounts) {
+      account.splitSetup = true
+      for (const thread of account.threads) {
+        for (const message of thread.messages) message.labelIds.push('IMPORTANT')
+      }
+    }
+    writeFileSync(join(__dirname, '.artifacts/perf-split-seed.json'), JSON.stringify(fixture))
+  })
+
+  test('switches split inboxes within 100ms in each direction', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '100')
+    await expect(page.locator('[data-testid="split-tab"][data-split-id="base:important"]')).toHaveAttribute(
+      'data-active',
+      'true'
+    )
+    const warmSecond = await measureAccountSwitch(page, 2, 'perf-second@attn.test', 'Second account thread')
+    const warmFirst = await measureAccountSwitch(page, 1, 'perf@attn.test', 'Performance thread')
+    const toFirst: number[] = []
+    const toSecond: number[] = []
+    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
+      toSecond.push(await measureAccountSwitch(page, 2, 'perf-second@attn.test', 'Second account thread'))
+      toFirst.push(await measureAccountSwitch(page, 1, 'perf@attn.test', 'Performance thread'))
+    }
+    await reportMetric(testInfo, 'split-account-switch-to-first', toFirst, median(toFirst), [warmFirst])
+    await reportMetric(testInfo, 'split-account-switch-to-second', toSecond, median(toSecond), [warmSecond])
+    expect(percentile(toFirst, 0.95), 'p95 warm switch to the larger split inbox').toBeLessThan(
+      ACCOUNT_SWITCH_CEILING_MS
+    )
+    expect(percentile(toSecond, 0.95), 'p95 warm switch to the smaller split inbox').toBeLessThan(
+      ACCOUNT_SWITCH_CEILING_MS
+    )
+  })
+})
 
 async function measureTriageFeedback(page: Page): Promise<number> {
   return page.evaluate(async () => {

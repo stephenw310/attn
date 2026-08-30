@@ -382,12 +382,13 @@ export function listInboxThreads(
   splitId?: string,
   threadId?: string
 ): ThreadRow[] {
-  const sortExpression = 'COALESCE(t.last_msg_at, 0)'
   const assignment = splitId ? splitAssignmentForAccount(db, accountId) : null
   const splitFilter = assignment ? `AND (${assignment.sql}) = ?` : ''
-  const rows = db
-    .prepare(
-      `WITH visible AS (
+  const readRows = (pageLimit: number, recent: boolean, undatedTail = false) => {
+    const sortExpression = recent ? 't.last_msg_at' : 'COALESCE(t.last_msg_at, 0)'
+    return db
+      .prepare(
+        `WITH visible AS (
          SELECT t.account_id, t.id, t.from_display, t.subject, t.snippet, t.last_msg_at,
                 t.is_unread, t.is_starred, t.has_attachment,
               EXISTS(SELECT 1 FROM reminders r
@@ -399,10 +400,12 @@ export function listInboxThreads(
               EXISTS(SELECT 1 FROM outbox o
                      WHERE o.account_id = t.account_id AND o.thread_id = t.id
                        AND o.state IN ('composing', 'drafted')) AS has_draft
-         FROM threads t
-         JOIN thread_labels inbox
+         FROM threads t ${recent ? 'INDEXED BY idx_threads_recent' : ''}
+         ${recent ? 'CROSS JOIN' : 'JOIN'} thread_labels inbox
            ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
          WHERE t.account_id = ? AND t.is_inbox_visible = 1
+           ${recent ? 'AND t.last_msg_at > 0' : ''}
+           ${undatedTail ? 'AND (t.last_msg_at IS NULL OR t.last_msg_at <= 0)' : ''}
            ${splitFilter}
            ${threadId ? 'AND t.id = ?' : ''}
            ${descendingCursorSql(sortExpression, cursor)}
@@ -415,28 +418,37 @@ export function listInboxThreads(
                         WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
        FROM visible v
        ORDER BY COALESCE(v.last_msg_at, 0) DESC, v.id`
-    )
-    .all(
-      accountId,
-      ...(assignment ? [...assignment.params, splitId] : []),
-      ...(threadId ? [threadId] : []),
-      ...cursorValues(cursor),
-      limit
-    ) as {
-    account_id: string
-    id: string
-    from_display: string | null
-    subject: string | null
-    snippet: string | null
-    last_msg_at: number | null
-    is_unread: number
-    is_starred: number
-    has_attachment: number
-    snoozed: number
-    returned: number
-    has_draft: number
-    label_ids: string
-  }[]
+      )
+      .all(
+        accountId,
+        ...(assignment ? [...assignment.params, splitId] : []),
+        ...(threadId ? [threadId] : []),
+        ...cursorValues(cursor),
+        pageLimit
+      ) as {
+      account_id: string
+      id: string
+      from_display: string | null
+      subject: string | null
+      snippet: string | null
+      last_msg_at: number | null
+      is_unread: number
+      is_starred: number
+      has_attachment: number
+      snoozed: number
+      returned: number
+      has_draft: number
+      label_ids: string
+    }[]
+  }
+
+  // COALESCE prevents SQLite from using the date index for ordering, so it
+  // classifies the entire account before LIMIT. Read positive dates directly
+  // from that index, then preserve the original null-as-zero order in the tail.
+  // Targeted membership checks retain their primary-key lookup.
+  const recent = !threadId && limit > 0 && (!cursor || cursor.at > 0)
+  const rows = readRows(limit, recent)
+  if (recent && rows.length < limit) rows.push(...readRows(limit - rows.length, false, true))
 
   return rows.map((r) => ({
     id: r.id,

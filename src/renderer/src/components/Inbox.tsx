@@ -268,13 +268,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     activeViewRef,
     selectedThreadIdRef,
     selectedDraftIdRef,
-    setMailboxSelectedIndex
+    setMailboxSelectedIndex,
+    splits.state !== null
   )
-  useEffect(() => {
-    if (activeAccount && inboxSplitIdsKey && inboxSplitRevision !== undefined) {
-      preloadInboxSplits(inboxSplitIdsKey.split('\u0000'))
-    }
-  }, [activeAccount, inboxSplitIdsKey, inboxSplitRevision, preloadInboxSplits])
   const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
   const online = networkOnline && sync.phase !== 'offline'
   const backingMailView = view === 'outbox' ? outboxReturnRef.current.view : view
@@ -283,6 +279,21 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     realThreads !== null && (!splits.state || loadedInboxSplitId === splits.activeSplitId)
   const activeInboxRowsResolved =
     activeInboxRowsReady && !(loadedInboxSplitStale && (realThreads?.length ?? 0) === 0)
+  useEffect(() => {
+    if (!activeAccount || !activeInboxRowsReady || !inboxSplitIdsKey || inboxSplitRevision === undefined) {
+      return
+    }
+    // Let the visible rows paint and their conversation reads reach the utility
+    // before speculative split queries, which may scan a large mailbox.
+    let timer: number | undefined
+    const frame = window.requestAnimationFrame(() => {
+      timer = window.setTimeout(() => preloadInboxSplits(inboxSplitIdsKey.split('\u0000')), 0)
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [activeAccount, activeInboxRowsReady, inboxSplitIdsKey, inboxSplitRevision, preloadInboxSplits])
   const activeInboxSelectionReady = activeInboxRowsReady && !loadedInboxSplitStale
   const showInboxZero = Boolean(
     !searchOpen &&

@@ -281,6 +281,16 @@ because they can persist partial results before a switch. Regression tests cover
 responses from the previous account, triage and split-notification invalidation, and a partial Gmail
 search that finishes after switching accounts.
 
+The split-inbox follow-up removes another account-size-dependent delay. `listInboxThreads` reads
+positive timestamps in index order so it can stop once a page is full. A separate tail preserves the
+existing null-as-zero ordering, and targeted thread checks retain their primary-key lookup. The renderer
+waits for split setup before loading rows, starts inactive-split preloads after the visible rows paint,
+and cancels the remaining preload work when leaving an account.
+`perf.spec.ts` now measures both switch directions separately with splits enabled. The query regression
+test proves that a full recent page does not evaluate older messages; pagination tests cover positive,
+null, zero, and negative timestamps. Held-response tests also keep a notification's selection and
+pagination intact when an older automatic or manual mailbox refresh finishes afterward.
+
 - Tag every mail-facing read result and broadcast with `accountId` (`mail:changed`, `sync:state`,
   `outbox:changed`/`outbox:progress`, list/conversation/draft/outbox/search results). The renderer holds
   `activeAccountId` from `AuthStatus`, ignores broadcasts for other accounts (except roster-level
