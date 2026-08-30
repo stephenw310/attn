@@ -20,6 +20,7 @@ import {
   type InlineImageRepairRequest,
   type InlineImageRequest,
   type InlineImageResult,
+  type SystemMailboxCounts,
   THREAD_PAGE_SIZE,
   type ThreadListRequest,
   type ThreadListView,
@@ -45,7 +46,6 @@ import { writeAttachment } from '../attachments'
 import type { Db } from '../db'
 import {
   countInboxUnread,
-  countSystemMailboxes,
   getConversation,
   getConversationForDisplay,
   getInlineAttachmentData,
@@ -86,7 +86,6 @@ import type { SnoozeScheduler } from '../scheduler'
 import { readAccountSetting, readSetting, writeAccountSetting, writeSetting } from '../settings'
 import {
   deleteSplit,
-  getSplitState,
   hasSplitSetup,
   reorderSplits,
   restoreSplitPreset,
@@ -132,6 +131,8 @@ export interface ServiceHandlerContext {
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
   broadcastMailChanged: (serverSearchRequestId?: string) => void
+  mailboxCounts: (accountId: string) => SystemMailboxCounts
+  splitState: (accountId: string) => import('../../shared/splits').SplitState
   broadcastOutboxChanged: (change: import('../../shared/outbox').OutboxChanged) => void
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
   trackForegroundProviderWork: <T>(accountId: string, work: () => Promise<T>) => Promise<T>
@@ -820,7 +821,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.mailGetMailboxCounts, () => {
     const account = context.currentAccountId()
     return account
-      ? countSystemMailboxes(context.db, account)
+      ? context.mailboxCounts(account)
       : { inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }
   })
   handle(IPC_CHANNELS.mailGetUnreadCount, () => {
@@ -832,7 +833,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (!account || (context.testUserData && !hasSplitSetup(context.db, account))) {
       return { revision: 0, splits: [], restorablePresetIds: [] }
     }
-    return getSplitState(context.db, account)
+    return context.splitState(account)
   })
   handle(IPC_CHANNELS.splitsGetThreadLocation, (_event, threadId) => {
     const account = context.currentAccountId()

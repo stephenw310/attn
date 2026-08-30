@@ -274,6 +274,13 @@ before restoring selection and scroll. `accountRestore.spec.ts` covers row 105 i
 split, and All Mail. The open account menu gives newer status broadcasts priority over its snapshot,
 including a snapshot response that arrives after a broadcast; `accounts.spec.ts` covers both orders.
 
+Dogfood follow-up (2026-08-30): account switches publish mail rows before requesting sidebar totals.
+`ServiceRuntime` caches mailbox and split totals per account until mail changes or the roster changes.
+The account badge reuses the split unread totals. Foreground Gmail reads bypass and invalidate the cache
+because they can persist partial results before a switch. Regression tests cover delayed totals,
+responses from the previous account, triage and split-notification invalidation, and a partial Gmail
+search that finishes after switching accounts.
+
 - Tag every mail-facing read result and broadcast with `accountId` (`mail:changed`, `sync:state`,
   `outbox:changed`/`outbox:progress`, list/conversation/draft/outbox/search results). The renderer holds
   `activeAccountId` from `AuthStatus`, ignores broadcasts for other accounts (except roster-level
@@ -370,10 +377,9 @@ on A shows the banner only when A is active while B keeps triaging, and reconnec
 ### A6 — Remove account
 
 **Status: done, 2026-08-30.** Spec F18, F15, §9 #21(d). As shipped: `accounts:remove` is a main-owned
-invoke taking `(accountId, deleteData)`; the confirmation dialog (menu row *Remove account…*, which
-replaced the old Sign out row — the legacy `auth:signOut` chain is deleted, remove-with-Keep is the one
-code path — plus the palette command) offers **Remove and delete local data** (default, focused) /
-**Remove and keep local data** /
+invoke taking `(accountId, deleteData)`. The menu and palette say **Sign out**; the confirmation names
+the account and offers **Sign out and delete local data** (default, focused),
+**Sign out and keep local data**, or
 Cancel. Delete routes through the utility's `remove-account-data` operation, which waits out the
 torn-down session's worker retirement, then runs `purgeAccountRows` (`src/main/db/purgeAccount.ts`) —
 the account-keyed tables are *walked from the live schema*, FTS goes through the rowid map, the
@@ -387,7 +393,7 @@ rows/FTS/spool via the `attn:test:accountDataStats` seam plus relaunch durabilit
 rows, an unlisted account, and durable dormancy across relaunch; the fallback e2e covers
 survivor-then-onboarding, and Cancel.
 
-- `accounts:remove` (explicit confirmation in the UI; palette command *Remove account…*): the confirmation
+- `accounts:remove` (explicit confirmation in the UI; palette command *Sign out*): the confirmation
   always removes the token-map entry and stops the account's session and executors, and asks what to do
   with local data — **Delete local data** (default) or **Keep local data** (D3). Delete runs in one
   transaction: the account's rows from **every** account-keyed table (enumerate from the schema, not a
@@ -398,9 +404,8 @@ survivor-then-onboarding, and Cancel.
   existing cursor plan already produce this; the e2e proves it). `__app__` settings survive either way.
 - Active fallback: removing the active account activates the next by position; removing the last account
   lands on F1's signed-out screen (and clears `activeAccountId`).
-- The legacy single-account "Sign out" menu item becomes *Remove account* for the active account —
-  same semantics, one code path. (Today's sign-out already abandoned local rows only by accident of the
-  next sign-in overwriting them; purge-on-remove is the deliberate replacement.)
+- The **Sign out** menu item uses `accounts:remove` for the active account. The legacy `auth:signOut`
+  implementation stays deleted; both local-data choices share the account-removal path.
 
 **Done when:** unit test walks the schema and asserts the purge helper covers every `account_id` table
 (this is the guard that keeps future tables from leaking); e2e removes a seeded account with Delete and

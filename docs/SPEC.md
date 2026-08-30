@@ -573,8 +573,9 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   marks it *Reconnect*, the account chip carries an attention mark while any account needs reauth, and the
   existing auth-paused banner appears when that account is active. Reconnecting resumes that account's
   queues and polling and no other's.
-- **Remove account:** always removes the account's tokens and stops its sync; the confirmation asks what to
-  do with local data (decided 2026-08-28). The default, **Delete local data**, purges every local trace —
+- **Sign out:** the account menu and palette use this short label. The confirmation identifies the account
+  and asks what to do with local data (decided 2026-08-28). Confirming always removes the account's tokens
+  and stops its sync. The default, **Delete local data**, purges every local trace —
   store rows in every account-keyed table, FTS entries, attachment and draft spool files, reminders, and
   per-account settings — so removal is the privacy boundary and re-adding re-syncs from scratch (local data
   is a cache of Gmail, decision #6's posture). **Keep local data** leaves those rows in place, unreadable

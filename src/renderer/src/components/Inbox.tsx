@@ -1835,11 +1835,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={`Remove ${activeAccount}?`}
+            aria-label={`Sign out of ${activeAccount}?`}
             className="w-[460px] rounded-lg border border-edge bg-raised p-5 shadow-menu"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="text-sm font-semibold text-ink">Remove {activeAccount}?</h2>
+            <h2 className="text-sm font-semibold text-ink">Sign out of {activeAccount}?</h2>
             <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
               This signs the account out and stops its sync. Choose what happens to its mail cached on this
               device: deleting removes every local trace; keeping leaves it dormant so adding the account
@@ -1853,7 +1853,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 onClick={() => removeActiveAccount(true)}
                 className="w-full cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
               >
-                Remove and delete local data
+                Sign out and delete local data
               </button>
               <button
                 type="button"
@@ -1861,7 +1861,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 onClick={() => removeActiveAccount(false)}
                 className="w-full cursor-pointer rounded-md border border-edge px-3 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
               >
-                Remove and keep local data
+                Sign out and keep local data
               </button>
               <button
                 type="button"

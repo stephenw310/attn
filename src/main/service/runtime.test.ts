@@ -4,12 +4,16 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import type { ThreadPage } from '../../shared/mail'
+import { OTHER_SPLIT_ID, type SplitState } from '../../shared/splits'
 import { storeActionError } from '../actions/execute'
 import { type Db, openDatabase } from '../db'
+import * as queries from '../db/queries'
 import { readSeedThread } from '../dev/seed'
 import type { GmailClient } from '../gmail/client'
 import { GmailMailProvider } from '../gmail/provider'
+import * as splits from '../splits'
 import { type HistoryPoller, historyEvents } from '../sync/poller'
+import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
 import type { ServiceEvent, ServiceInitialize } from './protocol'
 import { IndexingSlot, ServiceRuntime } from './runtime'
@@ -88,6 +92,7 @@ describe('ServiceRuntime with several accounts', () => {
     for (const runtime of runtimes) await runtime.stop()
     runtimes = []
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
     if (dir) rmSync(dir, { recursive: true, force: true })
     dir = null
   })
@@ -121,6 +126,118 @@ describe('ServiceRuntime with several accounts', () => {
     const page = (await runtime.invoke(IPC_CHANNELS.mailListThreads, [{ view: 'inbox' }])) as ThreadPage
     return page.rows.map((row) => row.subject ?? '')
   }
+
+  it('reuses mailbox totals across account switches and invalidates only changed accounts', async () => {
+    const { runtime } = await createRuntime(makeInput())
+    const count = vi.spyOn(queries, 'countSystemMailboxes')
+    const read = () => runtime.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
+    expect(await read()).toMatchObject({ inbox: 1, allMail: 1 })
+    expect(await read()).toMatchObject({ inbox: 1, allMail: 1 })
+    expect(count).toHaveBeenCalledTimes(1)
+
+    await runtime.internal('set-active-account', ['second@attn.test'])
+    expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
+    await runtime.internal('set-active-account', ['primary@attn.test'])
+    expect(await read()).toMatchObject({ inbox: 1, allMail: 1 })
+    expect(count).toHaveBeenCalledTimes(2)
+
+    await runtime.invoke(IPC_CHANNELS.mailTriage, [{ kind: 'archive', threadIds: ['t-alpha'] }])
+    expect(await read()).toMatchObject({ inbox: 0, allMail: 1 })
+    expect(count).toHaveBeenCalledTimes(3)
+    await runtime.internal('set-active-account', ['second@attn.test'])
+    expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
+    expect(count).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps mailbox totals fresh when a partial Gmail search finishes on another account', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+    const read = () => runtime.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
+    expect(await read()).toMatchObject({ inbox: 1, allMail: 1 })
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let reachedSecond!: () => void
+    const secondRequested = new Promise<void>((resolve) => {
+      reachedSecond = resolve
+    })
+    const provider: ServerSearchProvider = {
+      listThreadIds: async () => ({ threadIds: ['t-new', 't-held'] }),
+      getThread: async (id) => {
+        if (id === 't-held') {
+          reachedSecond()
+          await held
+          throw new Error('provider failed after a partial result')
+        }
+        const thread = readSeedThread(input.testSeed ?? '', 't-alpha')
+        const message = thread?.messages?.[0]
+        if (!thread || !message) throw new Error('Seeded thread missing')
+        thread.id = 't-new'
+        message.id = 'm-new'
+        message.threadId = 't-new'
+        return thread
+      },
+      getAttachmentData: async () => undefined
+    }
+    const internals = runtime as unknown as { makeCurrentServerSearchProvider: () => ServerSearchProvider }
+    vi.spyOn(internals, 'makeCurrentServerSearchProvider').mockReturnValue(provider)
+    const search = runtime.invoke(IPC_CHANNELS.mailSearchAll, ['partial-counts', 'Alpha'])
+    try {
+      await secondRequested
+      const count = vi.spyOn(queries, 'countSystemMailboxes')
+      expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
+      expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
+      expect(count).toHaveBeenCalledTimes(2)
+      await runtime.internal('set-active-account', ['second@attn.test'])
+      release()
+      await expect(search).resolves.toMatchObject({ status: 'error' })
+      await runtime.internal('set-active-account', ['primary@attn.test'])
+      expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
+      expect(count).toHaveBeenCalledTimes(3)
+    } finally {
+      release()
+      await search
+    }
+  })
+
+  it('shares cached split counts with account badges and refreshes them after notification and mail changes', async () => {
+    const input = makeInput()
+    writeFileSync(
+      input.testSeed ?? '',
+      JSON.stringify({ accounts: TWO_ACCOUNTS.accounts.map((account) => ({ ...account, splitSetup: true })) })
+    )
+    const { runtime } = await createRuntime(input)
+    const count = vi.spyOn(splits, 'getSplitState')
+    const read = async () => (await runtime.invoke(IPC_CHANNELS.splitsGetState, [])) as SplitState
+    const statuses = () => runtime.invoke(IPC_CHANNELS.accountsGetStatuses, [])
+    expect((await read()).splits.find((split) => split.id === OTHER_SPLIT_ID)?.unread).toBe(1)
+    await runtime.internal('set-active-account', ['second@attn.test'])
+    await read()
+    await statuses()
+    await runtime.internal('set-active-account', ['primary@attn.test'])
+    await read()
+    expect(count).not.toHaveBeenCalled()
+
+    await runtime.invoke(IPC_CHANNELS.splitsSetNotify, [OTHER_SPLIT_ID, true])
+    expect(await statuses()).toEqual([
+      expect.objectContaining({ accountId: 'primary@attn.test', unread: 1 }),
+      expect.objectContaining({ accountId: 'second@attn.test', unread: 1 })
+    ])
+    expect((await read()).splits.find((split) => split.id === OTHER_SPLIT_ID)?.notify).toBe(true)
+    expect(count).toHaveBeenCalledTimes(1)
+
+    await runtime.invoke(IPC_CHANNELS.mailTriage, [{ kind: 'archive', threadIds: ['t-alpha'] }])
+    expect((await read()).splits.find((split) => split.id === OTHER_SPLIT_ID)).toMatchObject({
+      total: 0,
+      unread: 0
+    })
+    expect(await statuses()).toEqual([
+      expect.objectContaining({ accountId: 'primary@attn.test', unread: 0 }),
+      expect.objectContaining({ accountId: 'second@attn.test', unread: 1 })
+    ])
+    expect(count).toHaveBeenCalledTimes(2)
+  })
 
   it.each(['Keep', 'Delete'])(
     'discards a late history response after removing an account with %s',

@@ -301,7 +301,7 @@ function AccountMenu({
             }
             className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           >
-            {status.accounts.length > 1 ? `Remove ${status.email ?? 'account'}…` : 'Remove account…'}
+            Sign out
           </button>
         </div>
       )}

@@ -295,6 +295,31 @@ for (const holdSnapshot of [false, true]) {
   })
 }
 
+test('account rows render before delayed sidebar totals and ignore totals from the previous account', async ({
+  app,
+  page
+}) => {
+  const inboxCount = page
+    .getByTestId('sidebar-mailbox')
+    .filter({ hasText: /^Inbox/ })
+    .getByTestId('sidebar-count')
+  await expect(inboxCount).toHaveAttribute('data-count', '2')
+  const release = await holdNextAccountResponse(app, IPC_CHANNELS.mailGetMailboxCounts)
+  await page.keyboard.press('ControlOrMeta+2')
+  await expectAccountResponseHeld(app)
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Beta launch checklist' })).toBeVisible()
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha' })).toHaveCount(0)
+  await expect(inboxCount).toHaveCount(0)
+  // Make the primary count distinguishable before releasing the old account's response.
+  await page.keyboard.press('ControlOrMeta+1')
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
+  await page.keyboard.press('e')
+  await expect(inboxCount).toHaveAttribute('data-count', '1')
+  await release()
+  await expect(inboxCount).toHaveAttribute('data-count', '1')
+})
+
 test('account removal blocks shortcuts and composer opens until the response settles', async ({
   app,
   page
@@ -302,6 +327,7 @@ test('account removal blocks shortcuts and composer opens until the response set
   await expect(page.getByTestId('thread-row')).toHaveCount(2)
   const release = await holdNextAccountResponse(app, IPC_CHANNELS.accountsRemove)
   await page.getByTestId('account-menu').getByRole('button').first().click()
+  await expect(page.getByTestId('account-remove')).toHaveText('Sign out')
   await page.getByTestId('account-remove').click()
   await expect(page.getByTestId('remove-account-dialog')).toBeVisible()
   await page.keyboard.press('ControlOrMeta+2')

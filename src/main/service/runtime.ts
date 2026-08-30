@@ -3,13 +3,14 @@ import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
 import { type AccountSyncStatus, accountSyncPhase } from '../../shared/auth'
 import { type InvokeChannel, type MailChangeReason, TEST_CHANNELS } from '../../shared/ipc'
-import type { MessageMailbox, SyncState } from '../../shared/mail'
+import type { MessageMailbox, SyncState, SystemMailboxCounts } from '../../shared/mail'
+import type { SplitState } from '../../shared/splits'
 import { actionQueueStatus, clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
 import { type Db, openDatabase, schemaVersion } from '../db'
 import { accountKeyedTables, purgeAccountRows } from '../db/purgeAccount'
-import { countInboxUnread, listMailboxThreads } from '../db/queries'
+import { countInboxUnread, countSystemMailboxes, listMailboxThreads } from '../db/queries'
 import { loadSeed, readSeedRemoteThreadIds, readSeedThread, readSeedThreadAccount } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
@@ -22,7 +23,7 @@ import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from '../settings'
-import { countNotificationEnabledUnread, hasSplitSetup } from '../splits'
+import { getSplitState, hasSplitSetup } from '../splits'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
 import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
 import { runFtsBackfill } from '../sync/ftsBackfill'
@@ -47,6 +48,11 @@ import type {
 export type ServiceEventSink = (event: ServiceEvent) => void
 
 const ACTIVE_ACCOUNT_SETTING = 'activeAccountId'
+
+interface AccountMailSummary {
+  mailboxCounts?: SystemMailboxCounts
+  splitState?: SplitState
+}
 
 /**
  * One signed-in account's live machinery (F18). Every worker is bound to this
@@ -152,6 +158,7 @@ export class ServiceRuntime {
   private stopped = false
   private schedulersStarted = false
   private mailRevision = 0
+  private readonly mailSummaryByAccount = new Map<string, AccountMailSummary>()
   private lastAccountStatuses = ''
   private draftSaveFailures = 0
   private conversationDelay: { threadId: string; delayMs: number } | null = null
@@ -210,6 +217,8 @@ export class ServiceRuntime {
       db: this.db,
       currentAccountId: () => this.activeAccountId,
       accountStatuses: () => this.accountStatuses(),
+      mailboxCounts: (accountId) => this.mailboxCounts(accountId),
+      splitState: (accountId) => this.accountSplitState(accountId),
       makeClient: () => this.makeClientForActive(),
       makeProvider: () => this.makeProviderForActive(),
       makeServerSearchProvider: () => this.makeCurrentServerSearchProvider(),
@@ -544,6 +553,7 @@ export class ServiceRuntime {
   /** Returns the deferred session creations so callers can await settlement. */
   private applyAccounts(state: ServiceAccountsState): Promise<void>[] {
     if (this.stopped) return []
+    this.mailSummaryByAccount.clear()
     const pendingCreations: Promise<void>[] = []
     this.config = state.config
     const currentSeedIds = [
@@ -708,12 +718,16 @@ export class ServiceRuntime {
 
   private async trackForegroundProviderWork<T>(accountId: string, work: () => Promise<T>): Promise<T> {
     this.foregroundProviderWork.set(accountId, (this.foregroundProviderWork.get(accountId) ?? 0) + 1)
+    this.mailSummaryByAccount.delete(accountId)
     try {
       return await work()
     } finally {
       const remaining = (this.foregroundProviderWork.get(accountId) ?? 1) - 1
       if (remaining > 0) this.foregroundProviderWork.set(accountId, remaining)
       else this.foregroundProviderWork.delete(accountId)
+      // Provider reads can persist partial results without a renderer event
+      // when the user switches accounts before the request settles.
+      this.mailSummaryByAccount.delete(accountId)
     }
   }
 
@@ -729,6 +743,8 @@ export class ServiceRuntime {
     reason?: MailChangeReason
   ): void {
     this.mailRevision += 1
+    if (accountId === null) this.mailSummaryByAccount.clear()
+    else this.mailSummaryByAccount.delete(accountId)
     if (accountId === null || accountId === this.activeAccountId) {
       this.emit({
         kind: 'mail-changed',
@@ -739,11 +755,36 @@ export class ServiceRuntime {
     this.broadcastBadge()
   }
 
+  /** Switching accounts does not change mail. Recount only after mutations or provider reads. */
+  private mailSummary(accountId: string): AccountMailSummary {
+    if (this.foregroundProviderWork.has(accountId)) return {}
+    const cached = this.mailSummaryByAccount.get(accountId)
+    if (cached) return cached
+    const summary: AccountMailSummary = {}
+    this.mailSummaryByAccount.set(accountId, summary)
+    return summary
+  }
+
+  private mailboxCounts(accountId: string): SystemMailboxCounts {
+    const summary = this.mailSummary(accountId)
+    summary.mailboxCounts ??= countSystemMailboxes(this.db, accountId)
+    return summary.mailboxCounts
+  }
+
+  private accountSplitState(accountId: string): SplitState {
+    const summary = this.mailSummary(accountId)
+    summary.splitState ??= getSplitState(this.db, accountId)
+    return summary.splitState
+  }
+
   private accountUnread(accountId: string): number {
     const legacySeed = this.input.testMode && !hasSplitSetup(this.db, accountId)
     return legacySeed
       ? countInboxUnread(this.db, accountId)
-      : countNotificationEnabledUnread(this.db, accountId)
+      : this.accountSplitState(accountId).splits.reduce(
+          (sum, split) => sum + (split.notify ? split.unread : 0),
+          0
+        )
   }
 
   /**
@@ -831,12 +872,14 @@ export class ServiceRuntime {
       const labels = args[0]
       if (labels !== undefined && !isLabelRows(labels)) throw new Error('invalid authoritative label catalog')
       const result = loadSeed(this.db, this.input.testSeed, labels === undefined ? {} : { labels })
+      this.mailSummaryByAccount.clear()
       if (result.labelsChanged) this.broadcastMailChanged(this.activeAccountId)
       return undefined
     }
     if (channel === TEST_CHANNELS.deleteThread) {
       if (!accountId || typeof args[0] !== 'string') throw new Error('invalid thread delete')
       deleteThread(this.db, accountId, args[0])
+      this.mailSummaryByAccount.delete(accountId)
       return undefined
     }
     if (channel === TEST_CHANNELS.delayConversation) {
