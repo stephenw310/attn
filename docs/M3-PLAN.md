@@ -1279,6 +1279,10 @@ The message join in local search starts from the bounded match set. A query-plan
 from scanning the account's messages before checking that set. The manual upgrade below uses the same
 primary-key order as the current schema, and a test executes the documented SQL to check keys and dates.
 The partial-results marker counts one match past the window, so an exact fit does not claim truncation.
+Gmail search excludes only the bounded local results already shown, not every cached match. Cached matches
+outside either the candidate window or the result limit appear in the Gmail section without a redundant
+fetch. Tests cover the production candidate limit, repeated ids across Gmail pages, the result limit, and
+the seeded Electron search path with an empty filtered local window.
 
 A sweep stopped by its limit stores `capped:lifetime` or `capped:lifetime:<page-token>`, with the processed
 count from the start of that page. Raising the limit or setting it to zero resumes that page and skips

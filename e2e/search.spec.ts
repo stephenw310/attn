@@ -93,6 +93,45 @@ test('fetches a server-only result, opens it, and keeps it cached across relaunc
   expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
 })
 
+test('finds cached older matches through Gmail after local search omits them', async ({ app, page }) => {
+  await app.evaluate(({ ipcMain }, request) => ipcMain.emit(request.channel, {}, request.limit), {
+    channel: TEST_CHANNELS.setSearchWindow,
+    limit: 1
+  })
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  const coverage = page.getByTestId('search-coverage')
+  const rows = page.getByTestId('thread-row')
+  const status = page.getByTestId('search-all-gmail')
+  await input.fill('visualsort')
+  await expect(coverage).toHaveAttribute('data-partial', 'true')
+  await expect(rows).toHaveCount(1)
+  await expect(rows).toHaveAttribute('data-thread-id', 't-search-origin')
+
+  await input.press('Enter')
+  await expect(status).toContainText('2 more conversations from Gmail')
+  await expect
+    .poll(() => rows.evaluateAll((elements) => elements.map((row) => row.getAttribute('data-thread-id'))))
+    .toEqual(['t-search-origin', 't-search-return', 't-search-acme'])
+
+  // The newest text match is outside this label, so the local window is empty.
+  // Gmail must still return the older cached match instead of deduping it away.
+  await page.keyboard.press('Escape')
+  const filteredQuery = 'visualsort in:Label_Search'
+  await input.fill(filteredQuery)
+  await expect(coverage).toHaveAttribute('data-search-query', filteredQuery)
+  await expect(coverage).toHaveAttribute('data-partial', 'true')
+  await expect(rows).toHaveCount(0)
+  await input.press('Enter')
+  await expect(status).toContainText('1 more conversation from Gmail')
+  await expect(rows).toHaveCount(1)
+  await expect(rows).toHaveAttribute('data-thread-id', 't-search-acme')
+  await expect(page.getByTestId('thread-section-divider')).toHaveText('More from Gmail')
+  await page.screenshot({ path: join(artifactDirectory, 'server-search-cached.png') })
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Acme annual roadmap')
+})
+
 test('submits Gmail search from the command palette', async ({ page }) => {
   await page.getByTestId('search-open').click()
   await page.getByTestId('search-input').fill('serveronlyneedle')

@@ -778,6 +778,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
         searchAllGmail(context.db, account, provider, boundedQuery, {
           shouldContinue: () => context.currentAccountId() === account,
           signal: controller.signal,
+          recentMessageLimit: context.searchWindowOverride() ?? undefined,
           onStoreChanged: () => {
             storeChanged = true
           }
