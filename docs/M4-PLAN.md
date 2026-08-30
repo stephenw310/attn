@@ -5,14 +5,14 @@ and [M3-PLAN.md](M3-PLAN.md). Every task is one PR. Nothing is done until `npm r
 means a section of [SPEC.md](SPEC.md) (v0.17). Read the section before starting the task.
 
 **Basis:** SPEC §8 M4, F8 (snippets), F9 (follow-up reminders), F12 (badge polish), F15 (settings), F17
-(AI reply drafting), §6 Packaging (auto-update, signing, notarization), §9 #5 (remote images), and the
-deferrals the earlier plans parked here: the settings surface (M1-PLAN T9/T8 notes), the remote-image block
+(AI reply drafting and inline autocomplete), §6 Packaging (auto-update, signing, notarization), §9 #5
+(remote images), and the deferrals the earlier plans parked here: the settings surface (M1-PLAN T9/T8 notes), the remote-image block
 toggle (M1-PLAN, T11 notes), the Windows numeric badge overlay (M1-PLAN accepted deviations), and the
 `Mod+/` cheat sheet (the two "lands at M4" stubs in `MailHeader.tsx`).
 
-**Goal:** M4 turns a daily-drivable triage client into a finished v1. Three power features land (snippets,
-follow-up reminders, AI drafting), every deferred toggle gets its settings home, and the packaged app learns
-to update itself with real signatures. M4 is the last milestone before the v1 tag, so it ends with a
+**Goal:** M4 turns a daily-drivable triage client into a finished v1. Snippets, follow-up reminders, AI reply
+drafting, and inline autocomplete land, every deferred toggle gets its settings home, and the packaged app
+learns to update itself with real signatures. M4 is the last milestone before the v1 tag, so it ends with a
 sign-off task that rolls up every outstanding manual check.
 
 ## Task list
@@ -23,16 +23,18 @@ sign-off task that rolls up every outstanding manual check.
 | T33 remote-image control (§9 #5) | planned | nothing |
 | T34 snippets (F8) | planned | nothing |
 | T35 follow-up reminders (F9) | planned | nothing |
-| T36 AI drafting foundation (F17) | planned | T37 |
-| T37 AI drafting in the composer (F17) | planned | nothing |
+| T36 AI writing foundation (F17) | planned | T37, T37A |
+| T37 AI reply drafting in the composer (F17) | planned | T37A |
+| T37A inline AI autocomplete (F17) | planned | nothing |
 | T38 Windows numeric badge overlay (F12) | planned | nothing |
 | T39 auto-update, signing, notarization (§6) | planned | T40's update-in-place check |
 | T40 M4 exit and v1 sign-off | planned | the v1 tag |
 
 **Why this order.** T32 goes first because three other tasks hang panes on it: T33's toggle, T34's manager,
-and T36's enable screen. F17 is split in two on purpose. As one task it would be the largest PR in the
-repo's history (provider client, key storage, enable screen, streaming, voice, refine), and M2 already set
-the precedent of splitting the composer into T14A through T14E. T39 is independent of everything else but
+and T36's enable screen. F17 has three tasks: shared provider and consent controls, explicit reply drafting,
+then autocomplete with its separate opt-in and typing lifecycle. T37A follows T37 so their cancellation
+and keyboard handling can be tested together. The suffix preserves the existing T38–T40 task references,
+following M2's T14A through T14E precedent. T39 is independent of everything else but
 has operator lead time (certificates, notary credentials), so start its prerequisites in week one even if
 the code lands late.
 
@@ -54,21 +56,23 @@ wanted assertions ride T35, because T35 changes the exact poller path GAP-1 desc
 2. **IPC has three parts:** main handler, preload bridge, and the typed channel map in `src/shared/`. All in
    the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike. In M4 this extends to LLM output: an AI draft
-   enters the composer through the same sanitize path as pasted content.
+   enters the composer through the same sanitize path as pasted content. Autocomplete previews render as
+   text only, and acceptance inserts plain text without interpreting markup.
 4. **Select on `data-testid`** in e2e.
 5. **Every user-facing action is a registered command** (F5). The palette inventory test asserts this, so a
    new settings control without a command is a red test, not a review comment.
 6. **One reducer, two sources.** Nothing in M4 may add a second write path for mail state. Follow-up
    resurfacing (T35) goes through the same reducer as snooze return.
-7. **Interactive work outranks background work.** AI streaming (T37) and update downloads (T39) must not
-   delay sends, action replay, or polling.
+7. **Interactive work outranks background work.** AI streaming (T37), autocomplete (T37A), and update
+   downloads (T39) must not delay typing, saves, sends, action replay, or polling.
 8. **Time is injectable.** Every new timer takes `SchedulerTime` from `src/main/time.ts`. T35's follow-up
-   deadlines and T39's update-check interval both qualify. No test waits on wall-clock time.
+   deadlines, T37A's debounce/rate limits/timeouts, and T39's update-check interval qualify. The renderer
+   autocomplete controller takes an equivalent injectable clock; no test waits on wall-clock time.
 9. **New state declares its account scope** (F18, in v1 since §9 #21). Per-account state carries the owning
    `account_id`; app-global state uses the settings sentinel (`APP_SETTINGS_ACCOUNT_ID`). F18 already
-   decides for M4's features: snippets, the F17 provider key and voice profile, the undo-send delay,
-   auto-advance, and the remote-image preferences are app-global; reminders, drafts, and outbox rows are
-   per-account.
+   decides for M4's features: snippets, the F17 provider key, model, voice profile and enable toggles, the
+   undo-send delay, auto-advance, and remote-image preferences are app-global; reminders, drafts, and
+   outbox rows are per-account.
 10. **If your task changes the verify pipeline, harness behavior, or the screenshot-artifact list, update
     AGENTS.md in the same PR.**
 
@@ -390,16 +394,16 @@ visible and sort above normal mail until handled. The DDL above is in the PR not
 
 ---
 
-## T36: AI drafting foundation
+## T36: AI writing foundation
 
 **Status: planned.**
 
-**Depends on:** T32 (enable pane) · **Unblocks:** T37 · **Spec:** F17, D2, §6
+**Depends on:** T32 (enable pane) · **Unblocks:** T37, T37A · **Spec:** F17, D2, §6
 
 ### Why
 
-F17 is opt-in, bring-your-own-key AI reply drafting. This task builds everything except the composer
-experience: the provider client, key custody, the enable screen, and the test seam T37's e2e needs. The
+F17 provides explicit reply drafting and separately enabled inline autocomplete. This task builds their
+shared provider client, key custody, consent controls, and fake-provider seam. The
 split keeps each PR reviewable and puts the security-sensitive half (keys, network, guardrails) in its own
 diff.
 
@@ -408,34 +412,45 @@ diff.
 - **The LLM client lives in the main process** (`src/main/ai/`). D2 says requests go directly from the
   client to the chosen provider, and the renderer-sandbox invariant means the renderer is not that client.
   Main is the right process rather than the utility: the key comes from `safeStorage`, which is main-only,
-  and no SQLite access is needed. Streaming crosses to the renderer as typed IPC events
-  (`ai:generate` → chunk events → done/error, plus `ai:cancel`), following the acknowledged-toast pattern
-  from T18.
-- **Keys live in `safeStorage`, never in SQLite.** The `settings` table is plaintext. The key is stored
-  beside the OAuth tokens' pattern, and removing it in the UI deletes it from the OS keychain (F17
-  guardrail).
+  and main must not acquire a SQLite handle. Account and stored-context reads use the utility bridge.
+  Streaming crosses to the renderer as typed IPC events (`ai:generate` → chunk events → done/error, plus
+  `ai:cancel`), following the acknowledged-toast pattern from T18. Requests distinguish reply/refine from
+  autocomplete, and main checks the corresponding enable flags before constructing any network request.
+  Cancellation, deadlines, and late-response rejection belong to this shared transport; autocomplete's
+  tighter limits and context builder are owned by T37A.
+- **Keys are encrypted with `safeStorage`, never stored in SQLite.** The `settings` table is plaintext.
+  Follow the OAuth tokens' encrypted-file pattern, but keep LLM credentials separate. Removing a key in
+  the UI deletes its stored ciphertext without changing OAuth credentials (F17 guardrail).
 - **Two wire protocols, one interface:** the Anthropic Messages API and OpenAI-compatible chat completions
   (which covers Ollama and LM Studio for local models). Provider, base URL (for compatible endpoints), and
   model are user-selectable with a sensible default per provider, recorded in code.
-- **The enable screen states what leaves the machine** and when, verbatim per F17: the current thread, the
-  voice profile, and any selected style examples, sent to the chosen provider only when a draft is
-  requested. Enabling requires a key. Disabling stops all LLM traffic.
+- **Separate consent for separate traffic.** The master AI control is off by default. Its reply-drafting
+  disclosure covers the current thread, voice profile, and optional style examples sent on invocation.
+  Autocomplete has its own default-off opt-in, disclosing repeated requests containing unsent authored
+  body text while typing and possible provider charges. T37A connects that control to the composer;
+  enabling reply drafting alone never enables it. The settings UI and palette use the same consent flow.
+  Disabling autocomplete cancels only its work; disabling master AI or removing the key cancels both,
+  drops late responses, and prevents further requests. Explain that already-transmitted content cannot
+  be recalled. Neither request payloads nor generated text may appear in logs.
 - **Voice profile** (tone preset plus free-text standing rules, and the voice-matching toggle) stores in
   the `settings` table. It contains no mail content, so plaintext storage is fine. F18 scopes the provider
-  key, model choice, and voice profile app-global (rule 9): one configuration serves every signed-in
-  account. Style examples are the exception, drawn per draft from the owning account's sent mail (T37).
+  key, model choice, voice profile, and enable toggles app-global (rule 9): one configuration serves every
+  signed-in account. Style examples are drawn only for explicit replies from the owning account's sent
+  mail (T37). Autocomplete uses the current draft's authored-body excerpt only, never style examples.
 - **Test seam:** `attn:test:installFakeAiProvider` in `src/main/testIpc.ts`, disabled outside the env seam
-  like every other seam. It scripts streamed chunks, records every request payload, and is the only way e2e
-  ever exercises F17. Real endpoints stay out of e2e, mirroring the Gmail rule.
+  like every other seam. It scripts chunks, delayed completions, errors, and late responses after cancel;
+  records request purpose, payload, and cancellation; and is the only way e2e exercises F17. Payload
+  recording exists only under this synthetic test seam. Real endpoints stay out of e2e.
 
 ### Testing
 
-- Unit: request shaping for both protocols (system prompt, thread content, voice rules, style examples,
-  model); key round-trip and deletion against a fake `safeStorage`; disabled state short-circuits before
-  any network object is constructed.
+- Unit: request shaping for both protocols and purposes; reply/refine context cannot enter an autocomplete
+  request; key round-trip and deletion against a fake `safeStorage`; disabled state short-circuits before
+  any network object is constructed; disabling during a request aborts it and ignores late chunks.
 - E2e: enable flow through the settings pane with the fake provider; disable and assert the seam records
   zero requests when T37's command is invoked (this assertion lands here as a placeholder command and is
-  strengthened in T37).
+  strengthened in T37). Autocomplete consent remains off after enabling reply drafting and across
+  relaunch; its own enable/disable and payload assertions land in T37A.
 
 ### Done when
 
@@ -444,25 +459,25 @@ the disclosure text; with the feature off, no code path reaches a provider.
 
 ---
 
-## T37: AI drafting in the composer
+## T37: AI reply drafting in the composer
 
 **Status: planned.**
 
-**Depends on:** T36 · **Unblocks:** nothing · **Spec:** F17, §5
+**Depends on:** T36 · **Unblocks:** T37A · **Spec:** F17, §5
 
 ### Why
 
-The user-facing half of F17: generate a reply into the composer as a fully editable draft, refine it with a
-one-line instruction, and never auto-send.
+The explicit-invocation part of F17: generate a reply into the composer as a fully editable draft, refine
+it with a one-line instruction, and never auto-send.
 
 ### Design (decided)
 
-- **Shortcut decided: `Mod+J`**, command name `Draft AI reply`. Nothing in §5 or the registry uses it, and
-  the palette inventory test will catch a future collision. This PR records the assignment in SPEC §5 and
-  F17 (the spec explicitly left it to M4).
-- **Where it works:** in the reader and in an open inline reply composer. Invoked from the reader with no
-  composer open, it opens the inline reply composer first, then streams into it. It is unavailable in a
-  new-message composer in v1; F17 scopes drafting to replying to an open thread.
+- **Shortcut: `Mod+J`**, command name `Draft AI reply`, assigned in SPEC §5 and F17. The palette inventory
+  test must catch a future collision.
+- **Where it works:** in the reader and in an open inline reply/reply-all composer. Invoked from the reader
+  with no composer open, it opens the inline reply composer first, then streams into it. It is unavailable in a
+  new-message or forward composer in v1; F17 scopes whole-body generation to replies. T37A's short
+  completions work in all composer modes under separate consent.
 - **Streaming is editable and one undo step.** Chunks append into Lexical as normal editable content, with
   history coalesced so a single `Mod+Z` removes the whole draft (F17: insertion is undoable like any other
   edit). The insert passes the composer sanitize path (rule 3).
@@ -473,8 +488,11 @@ one-line instruction, and never auto-send.
   user edited by hand is theirs, so refine is offered only while the AI region is unedited.
 - **Voice matching:** when the toggle is on, a handful of the user's recent sent replies are selected
   locally from the store of the account that owns the draft (F18: replies bind to the thread's owning
-  account) and sent as style examples. When it is off, no sent-mail content may appear in the
-  request; the seam's recorded payloads are the proof.
+  account) and sent as style examples. When it is off, no additional sent-mail style examples may appear
+  in the request; existing messages in the current thread remain valid reply context. The seam's recorded
+  payloads are the proof. These examples are never passed to T37A.
+- Starting reply generation or refine cancels pending autocomplete and clears its preview. Autocomplete
+  stays suspended until generation ends and the user resumes typing; AI-inserted chunks cannot trigger it.
 - **Never auto-sends.** Output lands behind the normal send flow, undo send included. Generation must not
   block the UI (F17 acceptance), and it yields to interactive work (rule 7).
 
@@ -483,15 +501,103 @@ one-line instruction, and never auto-send.
 - E2e with the fake provider: `Mod+J` in the reader opens the reply composer and streams the scripted
   draft; the result is editable and sends through the normal outbox; one `Mod+Z` removes it; `Esc`
   mid-stream stops cleanly with partial text present; refine replaces the draft; with voice matching off,
-  no recorded payload contains sent-mail content; with the feature disabled, `Mod+J` shows the disabled
-  hint and the seam records zero requests.
+  no recorded payload contains extra sent-mail style examples; with the feature disabled, `Mod+J` shows
+  the disabled hint and the seam records zero requests.
 - Unit: sent-reply selection for style examples (recency, own-reply filter, count cap).
 - New screenshot artifact `ai-draft.png`, added to the AGENTS.md list.
 
 ### Done when
 
-F17's acceptance criteria hold end to end under the seam: zero traffic when disabled, `Esc` cancels
-cleanly, voice-matching-off sends no sent-mail content, and insertion is one undo step.
+F17's reply-drafting acceptance criteria hold end to end under the seam: zero traffic when disabled,
+`Esc` cancels cleanly, voice-matching-off sends no extra style examples, and insertion is one undo step.
+
+---
+
+## T37A: inline AI autocomplete
+
+**Status: planned.**
+
+**Depends on:** T36 (provider and consent), T37 (composer generation lifecycle) · **Unblocks:** nothing · **Spec:** F17, F15, §5, §7
+
+### Why
+
+Full reply drafting starts from a command and writes the reply body. Autocomplete helps when the user
+already knows what to say: offer the next few words as they type, with no insertion until they accept.
+Repeated transmission of an unfinished draft requires its own consent and request limits.
+
+### Design (decided)
+
+- **Scope and settings:** new messages, replies, reply-all, and forwards, in the existing body editor.
+  Connect T36's separate default-off autocomplete control to the editor, with enable/disable commands and the
+  F17 privacy/cost disclosure. Both master AI and autocomplete must be enabled. Use the configured
+  provider/model; no new service or mailbox index. Persist only the preference, never suggestion state.
+- **Preview, then insertion:** show one completed plain-text suggestion in gray at a collapsed caret,
+  with no line breaks and a 120-character cap. Buffer provider chunks until the suggestion is complete;
+  do not stream partial words into the document. Render a transient preview outside the persisted Lexical
+  document, anchored to the caret through wrapping and scrolling. It must not affect selection, copying,
+  exported HTML, autosave revisions, Gmail mirroring, or sending. Acceptance inserts plain text in the
+  current editable text context as one undoable transaction; undo restores the prior text and caret.
+- **Keyboard ownership:** `Tab` accepts only a current visible preview while the body owns focus. `Esc`
+  clears a visible preview without closing; it also cancels pending work before the normal close path
+  when no preview is visible. With no preview, `Tab` retains its normal behavior. `Shift+Tab`, arrow keys,
+  and `Enter` keep normal navigation/editing. Recipient completion, palette, snippet picker, and dialogs
+  own their keys when active; never install a global Tab interceptor. Route accept/dismiss through the
+  composer's keyboard handling, register enable/disable commands in the palette, and update the cheat
+  sheet. Opening a picker or palette invalidates the preview.
+- **Trigger:** after a deliberate body-typing edit, wait 300ms of inactivity. Require a nonempty authored
+  prefix, a collapsed selection in ordinary editable text, and a focused foreground composer. Mount,
+  draft restore, focus alone, AI chunks, snippet insertion, undo/redo, and suggestion acceptance/dismissal
+  do not trigger requests. Suppress requests during IME composition, selections, T37 generation/refine,
+  open pickers/dialogs, and inside quotes, signatures, tables, or opaque preserved regions. A subsequent
+  deliberate typing edit can trigger another request.
+- **Minimal context:** build a separate autocomplete payload from the authored body, up to 2,000 plain-text
+  characters before the caret and 500 after. Exclude protected quote/signature/opaque nodes from extraction,
+  not just from display, and preserve the cursor boundary when truncating. Do not include thread messages,
+  subject, recipients, attachment content or metadata, voice profile, or sent-mail examples. Do not fetch
+  mail to fill the context. Ambiguous imported regions are excluded, even at the cost of fewer suggestions.
+- **Bounded work:** main enforces one autocomplete request in flight app-wide, at most one start per second
+  and 20 starts per rolling minute. Enforce size caps and purpose-specific consent at the IPC boundary too.
+  Skip rate-limited requests without a deferred queue; no automatic retries. Abort and discard work after
+  1,500ms from dispatch. T36 handles aborts; injected clocks exercise debounce, rate limits, and deadlines.
+  A slow/offline provider or rate limit simply yields no suggestion. Report persistent configuration
+  errors in settings without recurring composer toasts. Explicit reply generation takes priority.
+- **Reject stale results:** bind each request to the account generation, composer instance, draft id,
+  editor revision, caret position, and request sequence. Resolve account ownership through the utility
+  bridge; never trust a renderer-supplied account id alone. Clear the preview and cancel work on any edit,
+  selection/caret change, blur/window deactivation, draft close/send/discard, account change, provider/key
+  change, or disable. Recheck identity, consent, and editor state both on receipt and on acceptance.
+  Abort is best effort; even an uncancellable late result must be ignored. A dismissed result cannot
+  reappear without fresh typing, and no timer may keep a closed composer active.
+- **Ordinary editing wins:** neither requests nor previews may delay input, autosave, or send. Use readable
+  secondary text in all four themes, announce availability without stealing focus or announcing each
+  token, and keep the caret and text layout stable. Only accepted text joins the normal draft/outbox flow.
+
+### Testing
+
+- Unit with injected time and the fake provider: 300ms debounce, one-in-flight and both rate caps, 1,500ms
+  deadline, no retry loop, and disabling or editing while a response is queued. Assert late results fail
+  every identity check, including a remounted composer with the same draft id. Pin bounded payloads with
+  quote/signature/opaque regions and cross-account sent mail present; none may leak into the request.
+- E2e: first enable reply drafting and type; autocomplete records zero requests. Opt in separately and
+  cover new mail, reply, reply-all, and forward; accept with Tab, edit, undo, dismiss with Esc, and continue
+  typing. Assert caret restoration, normal Tab/Shift+Tab/arrow/Enter behavior, and recipient/snippet/palette
+  precedence. Exercise IME, non-collapsed selection, blur, T37 generation/refine, provider failure, timeout,
+  and disabled state after relaunch. No real LLM calls.
+- E2e durability and races: leave a preview unaccepted, then save/close/reopen, copy, mirror, and send;
+  inspect the stored draft and captured provider send payload to prove the preview was absent. Accept a
+  suggestion and prove it follows ordinary autosave and send. Hold a fake response, close the composer,
+  switch accounts through F18's existing guard, open another draft, and release it; it must never appear.
+  Also release stale responses after send/discard, caret edits, disable, or key removal.
+- Performance: extend the composer probe with autocomplete enabled and a delayed fake provider; keystroke
+  and acceptance-to-paint remain below 16ms (§7). Record real-provider suggestion latency separately at
+  T40, along with request counts; do not make network speed a condition of passing local editing tests.
+- Inspect `ai-autocomplete.png` and `ai-autocomplete-light.png`, covering caret placement and wrapping in
+  dark and light modes; cover legibility in all four themes and add artifacts to AGENTS.md when implemented.
+
+### Done when
+
+F17's autocomplete acceptance criteria pass: separate consent, bounded authored-body context, fresh
+suggestions only, correct Tab/Esc/undo behavior, no persistence before acceptance, and no typing slowdown.
 
 ---
 
@@ -633,19 +739,25 @@ Feature evidence (this milestone):
       message's own history event does not cancel either reminder, and exercise a coexisting snooze.
 - [ ] AI drafting against one real provider (any, including a local Ollama): enable, draft, refine, send,
       disable, and confirm zero traffic after disable (proxy or provider dashboard).
+- [ ] Autocomplete against a real provider: separate opt-in, new mail/reply/forward suggestions, Tab/Esc
+      and undo, no unaccepted text in saved or sent mail, and zero typing-triggered requests after disable.
+      Inspect the bounded payload with synthetic draft text, record suggestion latency and request counts,
+      and confirm a slow/offline provider does not delay typing or sending.
 - [ ] Windows numeric badge manual check (from T38).
 - [ ] Signed/notarized install and same-schema update of a populated profile on both OSes; incompatible
       or missing schema metadata is rejected without changing the installation or local data (from T39).
 - [ ] Credential-free personal packaging on both OSes, with no updater traffic or cached installation.
 - [ ] Every new screenshot artifact inspected: `settings.png`, `cheat-sheet.png`,
-      `remote-images-blocked.png`, `snippet-manager.png`, `ai-draft.png`.
+      `remote-images-blocked.png`, `snippet-manager.png`, `ai-draft.png`, `ai-autocomplete.png`,
+      `ai-autocomplete-light.png`.
 
 Inherited manual items (owed by earlier milestones, still open as of 2026-08-30; verify against their plan
 docs and tick or strike with evidence):
 
 - [ ] M1's real-OS notification click-through smoke (M1-PLAN exit checklist).
 - [ ] M2's real-Gmail bootstrap, exactly-once, and hydration observations (M2-PLAN T20).
-- [ ] M2's one-week sole-client dogfood run, extended to exercise snippets, follow-ups, and AI drafting.
+- [ ] M2's one-week sole-client dogfood run, extended to exercise snippets, follow-ups, AI drafting, and
+      autocomplete.
 - [ ] M5 (multi-account) has exited per M5-PLAN, including its A7 isolation audit. SPEC §8: v1 does not
       ship before both milestones exit.
 
@@ -667,9 +779,9 @@ Every box is ticked or explicitly struck with a recorded reason, and the v1 tag 
 Multi-account is no longer post-v1, but it is not M4 either: it is M5 (F18, §9 #21), planned separately.
 The v1.1 items stay v1.1: the global-hotkey quick panel and custom themes. Send later stays v1.5 (F7, the
 companion Apps Script). Google OAuth verification stays deferred (decision #2). Read statuses
-stay v2 (D2). Full keyboard remapping stays post-v1. AI beyond reply drafting (summaries, auto-triage,
-semantic search) stays v2+; T36's provider client is not an invitation to add background AI features, which
-F17 forbids regardless.
+stay v2 (D2). Full keyboard remapping stays post-v1. AI beyond explicit reply drafting and separately
+enabled inline autocomplete (summaries, auto-triage, semantic search) stays v2+; T36's provider client is
+not an invitation to process the mailbox in the background, which F17 forbids.
 
 ## Open questions
 
