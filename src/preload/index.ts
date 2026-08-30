@@ -71,7 +71,9 @@ const api = {
   auth: {
     getStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authGetStatus),
     signIn: (): Promise<AuthSignInResult> => invoke(IPC_CHANNELS.authSignIn),
-    signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut)
+    signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut),
+    setActiveAccount: (accountId: string): Promise<AuthStatus> =>
+      invoke(IPC_CHANNELS.accountsSetActive, accountId)
   },
   settings: {
     initialTheme,

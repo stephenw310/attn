@@ -41,7 +41,7 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
     'I added the launch milestones and owner notes.'
   )
   await expect.poll(mainLog).toContain('[seed] loaded 10 threads for seed@attn.test')
-  await expect.poll(mainLog).toContain('[sync] backfill stages skipped for seeded account seed@attn.test')
+  await expect.poll(mainLog).toContain('[sync] backfill stages skipped for seeded accounts seed@attn.test')
   expect(mainLog()).not.toContain('[sync] history poller started')
 })
 

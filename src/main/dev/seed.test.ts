@@ -40,6 +40,29 @@ describe('resolveInternalDate', () => {
 })
 
 describe('loadSeed', () => {
+  it('keeps each account backfill checkpoint independent', () => {
+    const db = openDatabase(':memory:')
+    const fixturePath = fileURLToPath(
+      new URL('../../../e2e/fixtures/seed-two-accounts-inbox-ready.json', import.meta.url)
+    )
+    try {
+      expect(loadSeed(db, fixturePath).accountIds).toEqual(['ready@attn.test', 'syncing@attn.test'])
+      expect(
+        db
+          .prepare(
+            `SELECT account_id, backfill_cursor, split_metadata_cursor
+             FROM sync_state ORDER BY account_id`
+          )
+          .all()
+      ).toEqual([
+        { account_id: 'ready@attn.test', backfill_cursor: 'done', split_metadata_cursor: 'done' },
+        { account_id: 'syncing@attn.test', backfill_cursor: 'bodies', split_metadata_cursor: 'done' }
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   it('applies one authoritative label catalog and reports only final-state changes', () => {
     const db = openDatabase(':memory:')
     const fixturePath = fileURLToPath(new URL('../../../e2e/fixtures/seed-inbox.json', import.meta.url))

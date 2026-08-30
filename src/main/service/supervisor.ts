@@ -6,7 +6,7 @@ import type { TokenSet } from '../auth/googleAuth'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import type {
   MainToServiceMessage,
-  ServiceAuth,
+  ServiceAccountsState,
   ServiceControl,
   ServiceEvent,
   ServiceInitialize,
@@ -139,7 +139,9 @@ export class ServiceSupervisor {
   }
 
   control(payload: ServiceControl): void {
-    if (payload.kind === 'auth') this.initialize.auth = payload.auth
+    // Mirror auth and focus state into the initialize payload so a restarted
+    // utility resumes from the latest roster rather than the boot-time one.
+    if (payload.kind === 'accounts') this.initialize.accounts = payload.accounts
     if (payload.kind === 'focus') this.initialize.focused = payload.focused
     if (!this.child || !this.readyState) {
       this.queueControl(payload)
@@ -152,17 +154,33 @@ export class ServiceSupervisor {
     }
   }
 
-  setAuth(auth: ServiceAuth | null): void {
-    this.control({ kind: 'auth', auth })
+  setAccounts(accounts: ServiceAccountsState): void {
+    this.control({ kind: 'accounts', accounts })
   }
 
-  cacheTokens(tokens: TokenSet): void {
-    if (this.initialize.auth) this.initialize.auth = { ...this.initialize.auth, tokens }
+  /**
+   * Roster update that resolves only after the utility applied it — deferred
+   * session re-creates included — answering with the utility's actual active
+   * account id, so main never publishes an AuthStatus ahead of the sessions
+   * that back it.
+   */
+  applyAccounts(accounts: ServiceAccountsState): Promise<unknown> {
+    this.initialize.accounts = accounts
+    return this.internal('apply-accounts', accounts)
   }
 
-  signOut(): void {
-    this.initialize.auth = null
-    this.control({ kind: 'sign-out' })
+  cacheTokens(accountId: string, tokens: TokenSet): void {
+    this.initialize.accounts = {
+      ...this.initialize.accounts,
+      accounts: this.initialize.accounts.accounts.map((account) =>
+        account.id === accountId ? { ...account, tokens } : account
+      )
+    }
+  }
+
+  /** Keep the restart snapshot's active pointer in step with a completed switch. */
+  noteActiveAccount(activeAccountId: string | null): void {
+    this.initialize.accounts = { ...this.initialize.accounts, activeAccountId }
   }
 
   async crashForTest(): Promise<ServiceReady> {
@@ -368,10 +386,8 @@ export class ServiceSupervisor {
   }
 
   private queueControl(payload: ServiceControl): void {
-    if (payload.kind === 'auth' || payload.kind === 'sign-out') {
-      this.queuedControls = this.queuedControls.filter(
-        (queued) => queued.kind !== 'auth' && queued.kind !== 'sign-out'
-      )
+    if (payload.kind === 'accounts') {
+      this.queuedControls = this.queuedControls.filter((queued) => queued.kind !== 'accounts')
     } else if (payload.kind === 'focus') {
       this.queuedControls = this.queuedControls.filter((queued) => queued.kind !== 'focus')
     } else if (this.queuedControls.some((queued) => queued.kind === payload.kind)) {

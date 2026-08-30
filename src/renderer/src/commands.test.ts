@@ -71,6 +71,7 @@ describe('command catalog', () => {
       'split.previous',
       'split.next',
       'split.manage',
+      'account.add',
       'theme.system',
       'theme.dispatch-dark',
       'theme.dispatch-light',

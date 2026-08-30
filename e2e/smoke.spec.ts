@@ -36,7 +36,9 @@ test('boots the built app with an isolated store and working IPC bridge', async 
   expect(await page.evaluate(() => typeof window.attn?.mail.listThreads)).toBe('function')
   expect(await page.evaluate(() => window.attn.auth.getStatus())).toEqual({
     configured: false,
-    signedIn: false
+    signedIn: false,
+    accounts: [],
+    activeAccountId: null
   })
   expect(await page.evaluate(() => window.attn.mail.listThreads('inbox'))).toEqual([])
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(0)

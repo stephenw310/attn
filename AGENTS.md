@@ -29,7 +29,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run package:win` | Build and verify the Windows installer for the current architecture |
 | `npm run package:verify` | Assert packaged runtime assets and native module architecture |
 
-**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/login.png`, `inbox.png`, `inbox-light.png`, `all-mail.png`, `sidebar-collapsed.png`, `trash-marker.png`, `reading.png`, `reading-light.png`, `reader-controls.png`, `simple-mail.png`, `mail-layout.png`, `mail-layout-light.png`, `neutral-backgrounds-light.png`, `colored-reply.png`, `label-picker.png`, `move-picker.png`, `auth-paused.png`, `composer.png`, `inline-reply.png`, `draft-chip.png`, `attachments.png`, `newsletter-quote.png`, `gmail-draft.png`, `composer-signature-collapsed.png`, `composer-signature-quote-collapsed.png`, `label-view.png`, `search.png`, `server-search.png`, `palette.png`, `split-inbox.png`, `split-rules.png`, `split-rules-drag.png`, `chord-guide.png`, `inbox-zero.png`, and `inbox-zero-light.png` (grep `e2e/*.spec.ts` for `.artifacts` when adding one, and list it here). After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
+**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/login.png`, `inbox.png`, `inbox-light.png`, `all-mail.png`, `sidebar-collapsed.png`, `trash-marker.png`, `reading.png`, `reading-light.png`, `reader-controls.png`, `simple-mail.png`, `mail-layout.png`, `mail-layout-light.png`, `neutral-backgrounds-light.png`, `colored-reply.png`, `label-picker.png`, `move-picker.png`, `auth-paused.png`, `account-menu.png`, `composer.png`, `inline-reply.png`, `draft-chip.png`, `attachments.png`, `newsletter-quote.png`, `gmail-draft.png`, `composer-signature-collapsed.png`, `composer-signature-quote-collapsed.png`, `label-view.png`, `search.png`, `server-search.png`, `palette.png`, `split-inbox.png`, `split-rules.png`, `split-rules-drag.png`, `chord-guide.png`, `inbox-zero.png`, and `inbox-zero-light.png` (grep `e2e/*.spec.ts` for `.artifacts` when adding one, and list it here). After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
 
 ## How the e2e harness works
 
@@ -105,6 +105,7 @@ docs/SPEC.md         Product & technical spec — source of truth for behavior
 docs/M1-PLAN.md      M1 task guide: triage core
 docs/M2-PLAN.md      M2 task guide: composer, drafts, send, exactly-once outbox
 docs/M3-PLAN.md      M3 task guide: sync restructure + find & focus
+docs/M5-PLAN.md      M5 task guide: multi-account
 docs/KNOWN-ISSUES.md Live triage list: open bugs, coverage gaps, refactor proposals
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies

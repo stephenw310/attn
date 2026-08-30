@@ -56,6 +56,27 @@ test.describe('complete Inbox metadata', () => {
   })
 })
 
+test.describe('account-scoped Inbox readiness', () => {
+  test.use({ seed: 'fixtures/seed-two-accounts-inbox-ready.json' })
+
+  test('switches between the reward and loading state using each account checkpoint', async ({ page }) => {
+    await expect(page.getByTestId('account-menu')).toContainText('ready@attn.test')
+    await expect(page.getByTestId('inbox-zero')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => window.attn?.sync.getInboxReady())).toBe(true)
+
+    await page.keyboard.press('ControlOrMeta+2')
+    await expect(page.getByTestId('account-menu')).toContainText('syncing@attn.test')
+    await expect.poll(() => page.evaluate(() => window.attn?.sync.getInboxReady())).toBe(false)
+    await expect(page.getByTestId('inbox-zero')).toHaveCount(0)
+    await expect(page.getByTestId('thread-list-loading-initial')).toHaveText('Loading conversations…')
+
+    await page.keyboard.press('ControlOrMeta+1')
+    await expect(page.getByTestId('account-menu')).toContainText('ready@attn.test')
+    await expect(page.getByTestId('inbox-zero')).toBeVisible()
+    await expect(page.getByTestId('thread-list-loading-initial')).toHaveCount(0)
+  })
+})
+
 test.describe('partial Inbox metadata', () => {
   test.use({ seed: 'fixtures/seed-inbox-not-ready.json' })
 

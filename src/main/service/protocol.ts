@@ -3,12 +3,28 @@ import type { InvokeChannel, MailChangeReason } from '../../shared/ipc'
 import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
 import type { NotificationCandidate } from './notificationQueries'
 
-export const SERVICE_PROTOCOL_VERSION = 2
+export const SERVICE_PROTOCOL_VERSION = 3
 
-export interface ServiceAuth {
-  config: OAuthConfig | null
+/** One signed-in account's credentials as main relays them to the utility. */
+export interface ServiceAccountAuth {
+  /** Normalized email — the account id used across the store (F18). */
+  id: string
   tokens: TokenSet
+  /** Per-account auth generation; bumped by each interactive sign-in of this account. */
   generation: number
+}
+
+/**
+ * The full authentication state, always sent whole: the roster in switcher
+ * order plus the account the UI should render. Seeded e2e accounts are not in
+ * `accounts` (they have no tokens); `seedAccountIds` names the survivors so a
+ * seeded sign-out can retire a seed session. Omitted → keep current seeds.
+ */
+export interface ServiceAccountsState {
+  config: OAuthConfig | null
+  accounts: ServiceAccountAuth[]
+  activeAccountId: string | null
+  seedAccountIds?: string[]
 }
 
 export interface ServiceInitialize {
@@ -18,13 +34,12 @@ export interface ServiceInitialize {
   downloadsPath: string
   testMode: boolean
   testSeed?: string
-  auth: ServiceAuth | null
+  accounts: ServiceAccountsState
   focused: boolean
 }
 
 export type ServiceControl =
-  | { kind: 'auth'; auth: ServiceAuth | null }
-  | { kind: 'sign-out' }
+  | { kind: 'accounts'; accounts: ServiceAccountsState }
   | { kind: 'focus'; focused: boolean }
   | { kind: 'resume' }
   | { kind: 'refresh-schedulers' }
@@ -32,6 +47,8 @@ export type ServiceControl =
 
 export type ServiceOperation =
   | 'resume-auth-failures'
+  | 'apply-accounts'
+  | 'set-active-account'
   | 'mark-login-item-registered'
   | 'set-notification-pause'
   | 'test'
@@ -43,7 +60,10 @@ export type MainToServiceMessage =
   | { type: 'control'; payload: ServiceControl }
 
 export interface ServiceReady {
-  accountId: string | null
+  /** Resolved active account (persisted choice when valid, else first in roster). */
+  activeAccountId: string | null
+  /** Every live session in switcher order, seeded accounts included. */
+  accountIds: string[]
   schemaVersion: number
   background: {
     launchAtLogin: boolean
@@ -65,7 +85,7 @@ export type ServiceEvent =
       candidates: NotificationCandidate[]
       pausedUntil: number | null
     }
-  | { kind: 'token-update'; tokens: TokenSet; generation: number }
+  | { kind: 'token-update'; accountId: string; tokens: TokenSet; generation: number }
   | { kind: 'log'; level: 'log' | 'warn' | 'error'; message: string }
 
 export type ServiceToMainMessage =

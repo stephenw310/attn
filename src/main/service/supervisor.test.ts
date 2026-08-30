@@ -10,19 +10,20 @@ vi.mock('electron', () => ({
 }))
 
 const READY: ServiceReady = {
-  accountId: 'user@example.com',
+  activeAccountId: 'user@example.com',
+  accountIds: ['user@example.com'],
   schemaVersion: 15,
   background: { launchAtLogin: true, loginItemRegistered: true }
 }
 
 function initialization(): ServiceInitialize {
   return {
-    protocolVersion: 2,
+    protocolVersion: 3,
     dbPath: '/tmp/attn-supervisor-test.db',
     userDataPath: '/tmp/attn-supervisor-test',
     downloadsPath: '/tmp',
     testMode: true,
-    auth: null,
+    accounts: { config: null, accounts: [], activeAccountId: null },
     focused: false
   }
 }
@@ -69,28 +70,25 @@ describe('ServiceSupervisor', () => {
     const started = supervisor.start()
 
     supervisor.control({ kind: 'focus', focused: true })
-    supervisor.setAuth({
+    const accounts = {
       config: { client_id: 'client', client_secret: 'secret' },
-      tokens: { access_token: 'access', expires_at: 1, email: 'user@example.com' },
-      generation: 1
-    })
+      accounts: [
+        {
+          id: 'user@example.com',
+          tokens: { access_token: 'access', expires_at: 1, email: 'user@example.com' },
+          generation: 1
+        }
+      ],
+      activeAccountId: 'user@example.com'
+    }
+    supervisor.setAccounts(accounts)
     expect(child.messages.map((message) => message.type)).toEqual(['initialize'])
 
     child.ready()
     await expect(started).resolves.toEqual(READY)
     expect(child.messages.slice(1)).toEqual([
       { type: 'control', payload: { kind: 'focus', focused: true } },
-      {
-        type: 'control',
-        payload: {
-          kind: 'auth',
-          auth: {
-            config: { client_id: 'client', client_secret: 'secret' },
-            tokens: { access_token: 'access', expires_at: 1, email: 'user@example.com' },
-            generation: 1
-          }
-        }
-      }
+      { type: 'control', payload: { kind: 'accounts', accounts } }
     ])
   })
 

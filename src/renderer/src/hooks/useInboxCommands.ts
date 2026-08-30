@@ -2,7 +2,12 @@ import { useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { DraftKind } from '../../../shared/drafts'
 import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
-import { createCommand, createDynamicSplitCommand, registerCommands } from '../commands'
+import {
+  createAccountSwitchCommand,
+  createCommand,
+  createDynamicSplitCommand,
+  registerCommands
+} from '../commands'
 import type { MailView, NavigableMailView } from '../mailDisplay'
 
 interface Options {
@@ -51,6 +56,13 @@ interface Options {
     manage: () => void
     goTo: readonly { id: string; name: string; run: () => void }[]
   } | null
+  accountCommands: {
+    /** Switcher order (F18); `Mod+1..9` covers the first nine. */
+    accounts: readonly { id: string; email: string }[]
+    activeAccountId: string | null
+    switchTo: (accountId: string) => void
+    add: () => void
+  }
 }
 
 export function useInboxCommands(options: Options): void {
@@ -94,7 +106,8 @@ export function useInboxCommands(options: Options): void {
     openReply,
     showToast,
     reopenUndoDraft,
-    splitCommands
+    splitCommands,
+    accountCommands
   } = options
   const mailCommandsEnabled = !searchOpen || searchBrowsing || readerOpen
   useLayoutEffect(
@@ -122,6 +135,21 @@ export function useInboxCommands(options: Options): void {
                 createDynamicSplitCommand(split.id, `Go to: ${split.name}`, split.run)
               )
             ]
+          : []),
+        createCommand('account.add', accountCommands.add),
+        // With one account there is nothing to switch to; the commands appear
+        // as soon as a second account exists.
+        ...(accountCommands.accounts.length > 1
+          ? accountCommands.accounts.map((account, index) =>
+              createAccountSwitchCommand(
+                account.id,
+                account.id === accountCommands.activeAccountId
+                  ? `Switch to: ${account.email} (current)`
+                  : `Switch to: ${account.email}`,
+                () => accountCommands.switchTo(account.id),
+                index < 9 ? `Mod+${index + 1}` : undefined
+              )
+            )
           : []),
         ...(mailCommandsEnabled
           ? [
@@ -234,6 +262,7 @@ export function useInboxCommands(options: Options): void {
         })
       ]),
     [
+      accountCommands,
       clearSelection,
       clearSearch,
       closeReader,

@@ -40,6 +40,7 @@ export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',
   authSignIn: 'auth:signIn',
   authSignOut: 'auth:signOut',
+  accountsSetActive: 'accounts:setActive',
   settingsGetTheme: 'settings:getTheme',
   settingsSetTheme: 'settings:setTheme',
   settingsGetCommandUsage: 'settings:getCommandUsage',
@@ -123,6 +124,7 @@ export const TEST_CHANNELS = {
   markDraftMirrored: 'attn:test:markDraftMirrored',
   failNextAction: 'attn:test:failNextAction',
   failNextActionAuth: 'attn:test:failNextActionAuth',
+  delaySetActiveAccount: 'attn:test:delaySetActiveAccount',
   setAttachmentPickerFiles: 'attn:test:setAttachmentPickerFiles',
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',
@@ -140,6 +142,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthSignInResult }
   [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
+  [IPC_CHANNELS.accountsSetActive]: { args: [accountId: string]; result: AuthStatus }
   [IPC_CHANNELS.settingsGetTheme]: { args: []; result: ThemePreference }
   [IPC_CHANNELS.settingsSetTheme]: { args: [preference: ThemePreference]; result: ThemePreference }
   [IPC_CHANNELS.settingsGetCommandUsage]: { args: [accountId: string]; result: CommandUsage }
