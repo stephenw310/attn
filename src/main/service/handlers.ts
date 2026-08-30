@@ -98,6 +98,7 @@ import {
 import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
 import { fetchAndCacheThread } from '../sync/fetchThread'
+import { searchCoverage } from '../sync/fts'
 import { OnDemandBodyHydrator } from '../sync/onDemandBodies'
 import { type ServerSearchProvider, searchAllGmail, serverSearchFailure } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
@@ -138,9 +139,36 @@ export interface ServiceHandlerContext {
   draftReopenDelay: () => number
   draftInlineImageDelay: () => number
   consumeTestDraftSaveFailure: () => boolean
+  /** Increments on every `mail:changed` broadcast; the key for derived-read caches. */
+  mailRevision: () => number
+  /** Test-only override of the search recency window; null in production. */
+  searchWindowOverride: () => number | null
   testUserData: boolean
   userDataPath: string
   downloadsPath: string
+}
+
+/**
+ * Cache one account-wide derived read until the next mail change.
+ *
+ * Both users of this scan the whole store, and both are asked for repeatedly
+ * between writes: mailbox counts on startup and after every broadcast, search
+ * coverage after every 25 ms typing pause. SQLite here is synchronous and owns
+ * the utility process's only connection, so an uncached scan is not a slow
+ * query queued behind the others — it stalls every renderer read with it.
+ *
+ * The lifetime sweep deliberately writes without broadcasting, so a cached value
+ * can lag its rows. That matches the list itself, which is not re-read either
+ * until something broadcasts.
+ */
+function revisionCache<T>(compute: (accountId: string) => T): (accountId: string, revision: number) => T {
+  let cached: { accountId: string; revision: number; value: T } | null = null
+  return (accountId, revision) => {
+    if (cached && cached.accountId === accountId && cached.revision === revision) return cached.value
+    const value = compute(accountId)
+    cached = { accountId, revision, value }
+    return value
+  }
 }
 
 type AttachmentDataRequest = Pick<DownloadAttachmentRequest, 'messageId' | 'attachmentId'>
@@ -374,6 +402,10 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   }
   const attemptedInlineImageRepairs = new Set<string>()
   const activeServerSearches = new Map<string, AbortController>()
+  const cachedMailboxCounts = revisionCache((accountId: string) =>
+    countSystemMailboxes(context.db, accountId)
+  )
+  const cachedSearchCoverage = revisionCache((accountId: string) => searchCoverage(context.db, accountId))
   const bodyHydrator = new OnDemandBodyHydrator(
     context.db,
     context.currentAccountId,
@@ -698,12 +730,16 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
           headersComplete: false,
           indexComplete: false,
           attachmentFlagsComplete: false,
-          messagesTotal: 0,
-          messagesWithBody: 0
-        }
+          bodiesOnDemand: false
+        },
+        partial: false
       }
     }
-    return searchThreads(context.db, account, query.slice(0, 1_000))
+    const searchWindow = context.searchWindowOverride()
+    return searchThreads(context.db, account, query.slice(0, 1_000), {
+      knownCoverage: cachedSearchCoverage(account, context.mailRevision()),
+      ...(searchWindow === null ? {} : { recentMessageLimit: searchWindow })
+    })
   })
   handle(IPC_CHANNELS.mailSearchAll, async (_event, requestId, query) => {
     const account = context.currentAccountId()
@@ -789,7 +825,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.mailGetMailboxCounts, () => {
     const account = context.currentAccountId()
     return account
-      ? countSystemMailboxes(context.db, account)
+      ? cachedMailboxCounts(account, context.mailRevision())
       : { inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }
   })
   handle(IPC_CHANNELS.mailGetUnreadCount, () => {

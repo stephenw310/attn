@@ -2,6 +2,7 @@ import type { MailChangeReason } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
+import { runMailboxMembershipBackfill } from './db/mailboxMembership'
 import { GmailApiError } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import { syncRemoteDrafts } from './outbox/draftSync'
@@ -58,6 +59,7 @@ export class SyncController {
   private running = false
   private lifetimeRunning = false
   private ftsBackfillRun: FtsBackfillRun | null = null
+  private mailboxBackfillRunning = false
   private pendingFtsBackfill: FtsBackfillRun | null = null
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
@@ -246,6 +248,33 @@ export class SyncController {
     )
   }
 
+  /**
+   * Fill derived mailbox membership for a profile whose rows predate the table.
+   * Unlike the other local passes this runs before any Gmail work: mailbox counts
+   * and the All Mail list read the table, so a manually upgraded profile shows
+   * them incomplete until this finishes. A freshly synced store maintains
+   * membership inline and this returns on its first batch.
+   */
+  private startMailboxMembershipBackfill(accountId: string, generation: number): void {
+    if (this.stopped || this.mailboxBackfillRunning || generation !== this.generation) return
+    this.mailboxBackfillRunning = true
+    void runMailboxMembershipBackfill(this.context.db, accountId, {
+      shouldContinue: () =>
+        !this.stopped && generation === this.generation && this.context.currentAccountId() === accountId
+    })
+      .then((result) => {
+        this.mailboxBackfillRunning = false
+        if (result.threadsIndexed > 0) {
+          console.log(`[sync] mailbox membership filled for ${result.threadsIndexed} threads`)
+          this.context.broadcastMailChanged()
+        }
+      })
+      .catch((error) => {
+        this.mailboxBackfillRunning = false
+        console.error(`[sync] mailbox membership backfill failed: ${errorMessage(error)}`)
+      })
+  }
+
   private startSync(): void {
     // An alive poller no longer implies the backfill finished (it starts at
     // interactive-ready), so always route through the cursor plan below;
@@ -256,6 +285,9 @@ export class SyncController {
     const accountId = this.context.currentAccountId()
     const provider = this.context.makeProvider(generation)
     if (!accountId) return
+    // Ahead of the provider check: membership is local, so an unconfigured or
+    // offline client still gets working counts and All Mail.
+    this.startMailboxMembershipBackfill(accountId, generation)
     if (!provider) {
       const message = 'OAuth configuration unavailable — add oauth.config.json'
       this.foregroundFailure = { phase: 'error', message }

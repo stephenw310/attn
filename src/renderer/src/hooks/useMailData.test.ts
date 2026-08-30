@@ -4,6 +4,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  type SystemMailboxCounts,
   THREAD_PAGE_SIZE,
   type ThreadPage,
   type ThreadPageCursor,
@@ -308,5 +309,81 @@ describe('useMailData mailbox refreshes', () => {
     expect(listThreadPage).toHaveBeenCalledWith('inbox', undefined, 'preset:github')
     expect(results.at(-1)?.realThreads).toBeNull()
     expect(results.at(-1)?.loadedInboxSplitId).toBeNull()
+  })
+  it('paints the first thread page before the sidebar counts answer', async () => {
+    const rows = [thread('first-paint')]
+    const listThreadPage = vi.fn((view: string) =>
+      Promise.resolve({ rows: view === 'inbox' ? rows : [], nextCursor: null })
+    )
+    // Counting scans membership per mailbox, so on a large account it is the
+    // slowest read in the batch. The list must not wait behind it.
+    const counts = deferred<SystemMailboxCounts>()
+    const getMailboxCounts = vi.fn(() => counts.promise)
+    const stop = (): void => {}
+    const bridge = {
+      sync: {
+        getState: () => Promise.resolve({ phase: 'idle' as const }),
+        retry: () => Promise.resolve(),
+        onState: () => stop
+      },
+      mail: {
+        listThreadPage,
+        listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listLabels: () => Promise.resolve([]),
+        getMailboxCounts,
+        getUnreadCount: () => Promise.resolve(0),
+        getPendingActionCount: () => Promise.resolve(0),
+        getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
+        onChanged: () => stop
+      },
+      draft: { list: () => Promise.resolve([]) },
+      outbox: {
+        listPending: () => Promise.resolve([]),
+        onChanged: () => stop,
+        onProgress: () => stop
+      }
+    } as unknown as typeof window.attn
+    Object.defineProperty(window, 'attn', { configurable: true, value: bridge })
+
+    const activeViewRef: React.RefObject<MailView> = { current: 'inbox' }
+    const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
+    const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
+    const results: ReturnType<typeof useMailData>[] = []
+    const selection = selectedIndexState()
+
+    function Harness(): null {
+      results.push(
+        useMailData(
+          'seed@attn.test',
+          null,
+          null,
+          activeViewRef,
+          selectedThreadIdRef,
+          selectedDraftIdRef,
+          selection.setState
+        )
+      )
+      return null
+    }
+
+    const host = document.createElement('div')
+    const root = createRoot(host)
+    mountedRoots.push(root)
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(results.at(-1)?.realThreads).toEqual(rows)
+    expect(results.at(-1)?.realMailboxCounts).toBeNull()
+
+    await act(async () => {
+      counts.resolve({ inbox: 1, allMail: 1, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 })
+      await counts.promise
+      await Promise.resolve()
+    })
+    expect(results.at(-1)?.realMailboxCounts).toMatchObject({ inbox: 1 })
   })
 })

@@ -1,5 +1,6 @@
 import { messageLabelsMatchMailbox } from '../../shared/mail'
 import type { Db } from '../db'
+import { refreshThreadMailboxes } from '../db/mailboxMembership'
 
 export interface ThreadDelta {
   threadId: string
@@ -65,5 +66,8 @@ export function applyThreadDelta(db: Db, accountId: string, delta: ThreadDelta):
       accountId,
       delta.threadId
     )
+    // An optimistic label change moves the thread between mailboxes, so derived
+    // membership converges inside the same transaction as the labels.
+    refreshThreadMailboxes(db, accountId, delta.threadId)
   })()
 }

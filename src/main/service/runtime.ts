@@ -59,6 +59,7 @@ export class ServiceRuntime {
   private focused: boolean
   private stopped = false
   private mailRevision = 0
+  private searchWindowOverride: number | null = null
   private draftSaveFailures = 0
   private conversationDelay: { threadId: string; delayMs: number } | null = null
   private draftReopenDelayMs = 0
@@ -174,6 +175,8 @@ export class ServiceRuntime {
       draftReopenDelay: () => this.draftReopenDelayMs,
       draftInlineImageDelay: () => this.draftInlineImageDelayMs,
       consumeTestDraftSaveFailure: () => this.consumeDraftSaveFailure(),
+      mailRevision: () => this.mailRevision,
+      searchWindowOverride: () => this.searchWindowOverride,
       testUserData: input.testMode,
       userDataPath: input.userDataPath,
       downloadsPath: input.downloadsPath
@@ -530,6 +533,13 @@ export class ServiceRuntime {
     if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])
     if (channel === TEST_CHANNELS.runFtsBackfill) return this.runTestFtsBackfill(args[0])
     if (channel === TEST_CHANNELS.searchIndexStats) return this.testSearchIndexStats(args[0])
+    if (channel === TEST_CHANNELS.setSearchWindow) {
+      // The partial marker only appears once a search fills its recency window,
+      // which a seeded store is far too small to do at the production size.
+      const limit = args[0]
+      this.searchWindowOverride = typeof limit === 'number' && limit > 0 ? Math.trunc(limit) : null
+      return undefined
+    }
     if (channel === TEST_CHANNELS.utilityState) {
       const ids = args[0]
       if (!accountId || !Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {

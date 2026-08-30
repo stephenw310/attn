@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import { openDatabase } from '../db'
+import { refreshThreadMailboxes } from '../db/mailboxMembership'
 import type { GmailThread } from '../gmail/parse'
 import { ensureAccount } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
@@ -11,7 +12,8 @@ const ACCOUNT = 'search@example.test'
 function handlerContext(
   db: ReturnType<typeof openDatabase>,
   provider: ServerSearchProvider,
-  broadcastMailChanged = vi.fn()
+  broadcastMailChanged = vi.fn(),
+  mailRevision: () => number = () => 0
 ): ServiceHandlerContext {
   return {
     db,
@@ -35,6 +37,8 @@ function handlerContext(
     draftReopenDelay: () => 0,
     draftInlineImageDelay: () => 0,
     consumeTestDraftSaveFailure: () => false,
+    mailRevision,
+    searchWindowOverride: () => null,
     testUserData: false,
     userDataPath: '/tmp/attn-test-user-data',
     downloadsPath: '/tmp/attn-test-downloads'
@@ -125,6 +129,69 @@ describe('server-search service handlers', () => {
       ])
       expect(broadcastMailChanged).toHaveBeenCalledOnce()
       expect(broadcastMailChanged).toHaveBeenCalledWith('request-partial')
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+})
+
+describe('derived read caching', () => {
+  const noProvider: ServerSearchProvider = {
+    listThreadIds: vi.fn(),
+    getThread: vi.fn(),
+    getAttachmentData: vi.fn()
+  }
+
+  function seedThread(db: ReturnType<typeof openDatabase>, id: string): void {
+    db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at, from_display, is_unread, is_starred,
+                            has_attachment)
+       VALUES (?, ?, 'Subject', 1, 'Sender', 0, 0, 0)`
+    ).run(ACCOUNT, id)
+    db.prepare('INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)').run(
+      ACCOUNT,
+      id,
+      'INBOX'
+    )
+    db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
+                             body_text, labels_json)
+       VALUES (?, ?, ?, 'Sender', 'sender@example.test', 'snippet', 1, 'body', '["INBOX"]')`
+    ).run(ACCOUNT, `message-${id}`, id)
+    // Counts read derived membership, which the real write paths maintain.
+    refreshThreadMailboxes(db, ACCOUNT, id)
+  }
+
+  it('serves mailbox counts and search coverage from cache until the mail revision moves', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    seedThread(db, 'first')
+    let revision = 0
+    const handlers = createServiceHandlers(handlerContext(db, noProvider, vi.fn(), () => revision))
+
+    try {
+      const setStage = (phase: string): void => {
+        db.prepare('INSERT OR REPLACE INTO sync_state (account_id, backfill_cursor) VALUES (?, ?)').run(
+          ACCOUNT,
+          phase
+        )
+      }
+      setStage('bodies')
+      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ inbox: 1 })
+      const firstSearch = await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])
+      expect(firstSearch.coverage.bodiesOnDemand).toBe(false)
+
+      // Writes with no broadcast leave both reads on their cached answer, the
+      // same staleness the unrefreshed thread list already has.
+      seedThread(db, 'second')
+      setStage('all-mail')
+      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ inbox: 1 })
+      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage.bodiesOnDemand).toBe(false)
+
+      revision += 1
+      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ inbox: 2 })
+      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage.bodiesOnDemand).toBe(true)
     } finally {
       handlers.stop()
       db.close()

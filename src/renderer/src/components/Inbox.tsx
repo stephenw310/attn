@@ -1590,12 +1590,15 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                 data-testid="search-coverage"
                 data-search-query={search.completedQuery ?? undefined}
                 role={search.failed ? 'alert' : 'status'}
-                className="flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] text-ink-faint"
+                data-partial={search.response?.partial || undefined}
+                className={`flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] ${
+                  search.response?.partial ? 'text-accent' : 'text-ink-faint'
+                }`}
               >
                 {search.failed
                   ? 'Local search could not be completed'
                   : search.response
-                    ? searchCoverageText(search.response.coverage)
+                    ? searchCoverageText(search.response.coverage, search.response.partial)
                     : 'Searching cached mail…'}
               </div>
             )}

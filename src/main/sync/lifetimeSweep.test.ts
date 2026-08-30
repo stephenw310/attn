@@ -150,6 +150,50 @@ describe('lifetime header indexing', () => {
     )
   })
 
+  it('stops at the conversation cap and marks the sweep done', async () => {
+    // The walk is newest first, so a cap keeps the newest conversations and
+    // leaves the rest to server search. Two already stored, cap of two: the
+    // third must never be fetched.
+    const state: FakeDbState = { cursor: null, threadIds: new Set(['newest', 'next']) }
+    const mail = provider({
+      listThreadIds: vi.fn(async () => ({ threadIds: ['newest', 'next', 'older'] })),
+      getThread: vi.fn(async (id) => ({ id, messages: [] }))
+    })
+    const events = callbacks()
+
+    const result = await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', events, {
+      requestIntervalMs: 0,
+      pagePauseMs: 0,
+      threadCap: 2
+    })
+
+    expect(mail.getThread).not.toHaveBeenCalled()
+    expect(mocks.persistThread).not.toHaveBeenCalled()
+    // Done, not paused: a capped sweep is finished, and the footer must not
+    // claim it is still indexing.
+    // Done, not paused, and reported as a completed run: the returned count is
+    // the listing walk, which this sweep stopped at the start of.
+    expect(state.cursor).toBe('done')
+    expect(result).toMatchObject({ threadCount: 0 })
+    expect(events.onError).not.toHaveBeenCalled()
+  })
+
+  it('stores the whole account when the cap is disabled', async () => {
+    const state: FakeDbState = { cursor: null, threadIds: new Set(['stored']) }
+    const mail = provider({
+      listThreadIds: vi.fn(async () => ({ threadIds: ['stored', 'older'] })),
+      getThread: vi.fn(async (id) => ({ id, messages: [] }))
+    })
+
+    await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', callbacks(), {
+      requestIntervalMs: 0,
+      pagePauseMs: 0,
+      threadCap: 0
+    })
+
+    expect(mail.getThread).toHaveBeenCalledWith('older', expect.anything())
+  })
+
   it('resumes from the durable page token and restarts an expired token once', async () => {
     const state = { cursor: 'lifetime:expired', threadIds: new Set<string>() }
     const listThreadIds = vi

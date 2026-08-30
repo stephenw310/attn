@@ -398,36 +398,28 @@ describe('message index maintenance', () => {
 })
 
 describe('search coverage', () => {
-  it('reports cursor completeness and body hydration counts', () => {
+  it('reports coverage from cursors alone, without reading message bodies', () => {
     const db = openDatabase(':memory:')
     try {
       expect(searchCoverage(db, ACCOUNT)).toEqual({
         headersComplete: false,
         indexComplete: false,
         attachmentFlagsComplete: false,
-        messagesTotal: 0,
-        messagesWithBody: 0
+        bodiesOnDemand: false
       })
-      persistThread(
-        db,
-        ACCOUNT,
-        testThread('t1', [
-          testMessage({ id: 'm1', threadId: 't1', bodyText: 'hydrated' }),
-          testMessage({ id: 'm2', threadId: 't1', subject: 'Header only' }),
-          testMessage({ id: 'm3', threadId: 't1', subject: 'Whitespace only', bodyText: ' \t\n\u00a0' })
-        ])
-      )
       db.prepare(
-        `INSERT INTO sync_state (account_id, sweep_cursor, attachment_cursor, fts_cursor)
-         VALUES (?, 'done', 'done', 'done')`
+        `INSERT INTO sync_state (account_id, backfill_cursor, sweep_cursor, attachment_cursor, fts_cursor)
+         VALUES (?, 'bodies:page-2', 'done', 'done', 'done')`
       ).run(ACCOUNT)
-      expect(searchCoverage(db, ACCOUNT)).toEqual({
-        headersComplete: true,
-        indexComplete: true,
-        attachmentFlagsComplete: true,
-        messagesTotal: 3,
-        messagesWithBody: 1
-      })
+      // Still inside the stage that fetches bodies eagerly: nothing to warn about.
+      expect(searchCoverage(db, ACCOUNT)).toMatchObject({ headersComplete: true, bodiesOnDemand: false })
+
+      // Past it, every stage stores headers only, so some stored mail is not
+      // searchable by body text until it is opened.
+      db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run('all-mail', ACCOUNT)
+      expect(searchCoverage(db, ACCOUNT)).toMatchObject({ bodiesOnDemand: true })
+      db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run('done', ACCOUNT)
+      expect(searchCoverage(db, ACCOUNT)).toMatchObject({ bodiesOnDemand: true })
     } finally {
       db.close()
     }

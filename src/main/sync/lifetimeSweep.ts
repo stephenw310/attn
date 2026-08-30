@@ -7,10 +7,13 @@ import { type SchedulerTime, systemTime } from '../time'
 import { isExpiredPageTokenError } from './pageToken'
 import { persistThread } from './persist'
 import type { MailProvider, ThreadIdPage } from './provider'
-
-export const LIFETIME_REQUEST_INTERVAL_MS = 100
-export const LIFETIME_PAGE_PAUSE_MS = 1_000
-export const LIFETIME_FOREGROUND_YIELD_MS = 250
+import {
+  LIFETIME_FOREGROUND_YIELD_MS,
+  LIFETIME_PAGE_PAUSE_MS,
+  LIFETIME_REQUEST_INTERVAL_MS,
+  LIFETIME_THREAD_CAP,
+  LIFETIME_THREAD_CAP_UNLIMITED
+} from './tuning'
 
 export interface LifetimeSweepProgress {
   threadsDone: number
@@ -38,6 +41,8 @@ export interface LifetimeSweepOptions {
   shouldYield?: () => boolean
   /** Cancels future requests and, critically, all writes after an awaited request. */
   shouldContinue?: () => boolean
+  /** Conversations to keep locally, newest first. 0 stores the whole account. */
+  threadCap?: number
 }
 
 export interface LifetimeSweepResult {
@@ -91,6 +96,7 @@ export async function runLifetimeSweep(
   const requestIntervalMs = options.requestIntervalMs ?? LIFETIME_REQUEST_INTERVAL_MS
   const pagePauseMs = options.pagePauseMs ?? LIFETIME_PAGE_PAUSE_MS
   const foregroundYieldMs = options.foregroundYieldMs ?? LIFETIME_FOREGROUND_YIELD_MS
+  const threadCap = options.threadCap ?? LIFETIME_THREAD_CAP
   let lastRequestAt: number | null = null
   let threadsIndexedBySweep = 0
   let indexingElapsedMs = 0
@@ -233,6 +239,15 @@ export async function runLifetimeSweep(
 
       for (const threadId of page.threadIds) {
         if (!shouldContinue()) return null
+        // The walk is newest first, so stopping here keeps the newest N
+        // conversations and leaves the rest to server search. Checked before the
+        // fetch, and against what the store actually holds rather than what this
+        // run has walked, so a resumed sweep honours the same limit.
+        if (threadCap !== LIFETIME_THREAD_CAP_UNLIMITED && threadsIndexed >= threadCap) {
+          checkpoint.run('done', listedThreadsDone, threadsTotal ?? null, accountId)
+          console.log(`[sync] lifetime sweep stopped at the ${threadCap}-conversation limit for ${accountId}`)
+          return { threadCount: listedThreadsDone, ...runMetrics() }
+        }
         if (exists.get(accountId, threadId)) {
           listedThreadsDone++
           continue

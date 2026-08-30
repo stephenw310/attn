@@ -28,6 +28,9 @@ export class TestSeams {
     ipcMain.on(TEST_CHANNELS.focusThread, (_event, threadId: unknown) => {
       if (nonEmptyString(threadId)) this.deps.focusInboxThread(threadId)
     })
+    ipcMain.on(TEST_CHANNELS.setSearchWindow, (_event, limit: unknown, done?: Done) => {
+      this.forwardDone(TEST_CHANNELS.setSearchWindow, [limit], done)
+    })
     ipcMain.on(TEST_CHANNELS.setAttachmentPickerFiles, (_event, paths: unknown) => {
       this.attachmentPickerPaths = Array.isArray(paths)
         ? paths.filter((path): path is string => typeof path === 'string')

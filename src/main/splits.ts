@@ -615,12 +615,14 @@ export function countNotificationEnabledUnread(db: Db, accountId: string): numbe
   return (
     db
       .prepare(
+        // Badge work runs on every mail change, so classification starts from
+        // the INBOX label index: scanning `threads` for the visible flag would
+        // cost the whole account on every write, however small the Inbox is.
         `WITH classified AS (
            SELECT ${assignment.sql} AS split_id, t.is_unread
-           FROM threads t
-           JOIN thread_labels inbox
-             ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
-           WHERE t.account_id = ? AND t.is_inbox_visible = 1
+           FROM thread_labels inbox INDEXED BY idx_thread_labels_label
+           JOIN threads t ON t.account_id = inbox.account_id AND t.id = inbox.thread_id
+           WHERE inbox.account_id = ? AND inbox.label_id = 'INBOX' AND t.is_inbox_visible = 1
          )
          SELECT COALESCE(SUM(is_unread), 0) AS count
          FROM classified

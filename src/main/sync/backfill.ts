@@ -16,7 +16,7 @@ import { hydrateMissingThreadBodies } from './bodies'
 import { isExpiredPageTokenError } from './pageToken'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 import type { DraftPage, ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
-import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './windows'
+import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './tuning'
 
 export interface BackfillCallbacks {
   onProgress: (progress: BackfillProgress) => void

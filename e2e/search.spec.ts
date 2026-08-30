@@ -165,6 +165,36 @@ test('sorts text results newest first and keeps their date headers separated', a
   await page.screenshot({ path: join(artifactDirectory, 'search.png') })
 })
 
+test('marks a search partial when it fills its recency window', async ({ app, page }) => {
+  // Production windows thousands of matches, which no seeded store can fill, so
+  // the seam shrinks it to one match. The marker has to appear for a query whose
+  // matches overflow the window, and stay away for one that fits.
+  await app.evaluate(({ ipcMain }, request) => ipcMain.emit(request.channel, {}, request.limit), {
+    channel: TEST_CHANNELS.setSearchWindow,
+    limit: 1
+  })
+  await page.getByTestId('search-open').click()
+  const input = page.getByTestId('search-input')
+  await input.fill('visualsort')
+
+  const coverage = page.getByTestId('search-coverage')
+  await expect(coverage).toHaveAttribute('data-partial', 'true')
+  await expect(coverage).toContainText('Showing the newest matches only')
+  // The window still returns its newest match rather than nothing.
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  await page.screenshot({ path: join(artifactDirectory, 'search-partial.png') })
+
+  await app.evaluate(({ ipcMain }, request) => ipcMain.emit(request.channel, {}, request.limit), {
+    channel: TEST_CHANNELS.setSearchWindow,
+    limit: 0
+  })
+  await input.fill('')
+  await input.fill('visualsort')
+  await expect(page.getByTestId('thread-row')).toHaveCount(3)
+  await expect(coverage).not.toHaveAttribute('data-partial', 'true')
+  await expect(coverage).not.toContainText('Showing the newest matches only')
+})
+
 test('enters result browsing and returns to the query with its text intact', async ({ page }) => {
   await page.getByTestId('search-open').click()
   const input = page.getByTestId('search-input')

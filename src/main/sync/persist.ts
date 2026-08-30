@@ -2,6 +2,7 @@ import { normalizeEmailKey } from '../../shared/address'
 import { foldForSearch } from '../../shared/contacts'
 import { messageLabelsMatchMailbox } from '../../shared/mail'
 import type { Db } from '../db'
+import { refreshThreadMailboxes, removeThreadMailboxes } from '../db/mailboxMembership'
 import {
   collectAttachments,
   extractBodyHtml,
@@ -277,6 +278,8 @@ export function persistThread(
     for (const label of labelUnion) insertLabel.run(accountId, thread.id, label)
     // After the thread row is current: the index derives its subject from it.
     indexThreadMessages(db, accountId, thread.id)
+    // After the labels are current: membership reads them and the thread flags.
+    refreshThreadMailboxes(db, accountId, thread.id)
   })()
   replayPendingThreadDeltas(db, accountId, thread.id)
   replaySnoozeReminderDelta(db, accountId, thread.id)
@@ -291,11 +294,17 @@ function removeMissingMessages(
 ): string[] {
   if (incomingMessageIds.length === 0) return []
   const placeholders = incomingMessageIds.map(() => '?').join(', ')
+  // Driven from this thread's messages, not from the account's contact rows.
+  // Written the other way round the planner scanned every `contact_messages` row
+  // in the account on every thread write, so storing mail got slower the more
+  // mail was already stored: importing 100,000 threads reached 17 ms each and
+  // never finished. `INDEXED BY` pins the drive, since the planner's own choice
+  // is what regressed here.
   const affected = db
     .prepare(
       `SELECT DISTINCT cm.email
-       FROM contact_messages cm
-       JOIN messages m ON m.account_id = cm.account_id AND m.id = cm.message_id
+       FROM messages m
+       CROSS JOIN contact_messages cm ON cm.account_id = m.account_id AND cm.message_id = m.id
        WHERE m.account_id = ? AND m.thread_id = ? AND m.id NOT IN (${placeholders})`
     )
     .all(accountId, threadId, ...incomingMessageIds) as { email: string }[]
@@ -330,6 +339,7 @@ export function deleteThread(db: Db, accountId: string, threadId: string): void 
        )`
     ).run(accountId, accountId, threadId)
     removeThreadFromIndex(db, accountId, threadId)
+    removeThreadMailboxes(db, accountId, threadId)
     db.prepare('DELETE FROM messages WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM reminders WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM threads WHERE account_id = ? AND id = ?').run(accountId, threadId)

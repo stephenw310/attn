@@ -130,6 +130,7 @@ export const TEST_CHANNELS = {
   runExistenceSweep: 'attn:test:runExistenceSweep',
   runFtsBackfill: 'attn:test:runFtsBackfill',
   searchIndexStats: 'attn:test:searchIndexStats',
+  setSearchWindow: 'attn:test:setSearchWindow',
   utilityState: 'attn:test:utilityState',
   crashUtility: 'attn:test:crashUtility',
   listMailboxThreadIds: 'attn:test:listMailboxThreadIds'

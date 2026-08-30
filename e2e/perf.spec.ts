@@ -152,6 +152,13 @@ async function measureListRender(page: Page): Promise<number> {
   })
 }
 
+/**
+ * Both waves of a mail refresh, in the order the renderer issues them: the rows
+ * that the window shows, then the sidebar counts and header chips. Counting was
+ * missing from this measurement, which is how it grew unnoticed into the slowest
+ * read in the refresh. A 10,000-thread profile only catches gross regressions in
+ * it; a size-dependent one needs a larger generated profile.
+ */
 async function measureLocalMailRefresh(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const started = performance.now()
@@ -159,8 +166,11 @@ async function measureLocalMailRefresh(page: Page): Promise<number> {
       window.attn.mail.listThreads('inbox'),
       window.attn.mail.listSnoozed(),
       window.attn.draft.list(),
-      window.attn.outbox.listPending(),
+      window.attn.outbox.listPending()
+    ])
+    await Promise.all([
       window.attn.mail.listLabels(),
+      window.attn.mail.getMailboxCounts(),
       window.attn.mail.getUnreadCount(),
       window.attn.mail.getPendingActionCount(),
       window.attn.mail.getActionQueueStatus()

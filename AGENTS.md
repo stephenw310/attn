@@ -22,6 +22,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run e2e:only` | E2e without rebuilding — **only** when `out/` already matches `src/` |
 | `npm run e2e:only -- --grep <pattern>` | One test while iterating |
 | `npm run e2e:perf` | Build + generated 10,000-thread Electron profile (windowing, main private + utility heap/external/SQLite-cache memory, list/conversation/bulk/composer budgets) |
+| `npm run e2e:perf:scale` | Build + generated 100,000-thread profile for reads that must not scale with the store (mailbox counts, All Mail paging, common-term search). Opt-in and slow: the profile imports through the production write path for minutes. The 10,000-thread job cannot catch this class — the account scan it was added for measured under a millisecond there |
 | `npm run typecheck` / `npm run lint` | Fast static passes |
 | `npm run toolchain` | Repair Electron binary / native-module ABI (also runs as postinstall) |
 | `npm run package:dir` | Build and verify an unpacked app for the current platform |
@@ -29,7 +30,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run package:win` | Build and verify the Windows installer for the current architecture |
 | `npm run package:verify` | Assert packaged runtime assets and native module architecture |
 
-**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/login.png`, `inbox.png`, `inbox-light.png`, `all-mail.png`, `sidebar-collapsed.png`, `trash-marker.png`, `reading.png`, `reading-light.png`, `reader-controls.png`, `simple-mail.png`, `mail-layout.png`, `mail-layout-light.png`, `neutral-backgrounds-light.png`, `colored-reply.png`, `label-picker.png`, `move-picker.png`, `auth-paused.png`, `composer.png`, `inline-reply.png`, `draft-chip.png`, `attachments.png`, `newsletter-quote.png`, `gmail-draft.png`, `composer-signature-collapsed.png`, `composer-signature-quote-collapsed.png`, `label-view.png`, `search.png`, `server-search.png`, `palette.png`, `split-inbox.png`, `split-rules.png`, and `split-rules-drag.png` (grep `e2e/*.spec.ts` for `.artifacts` when adding one, and list it here). After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
+**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/login.png`, `inbox.png`, `inbox-light.png`, `all-mail.png`, `sidebar-collapsed.png`, `trash-marker.png`, `reading.png`, `reading-light.png`, `reader-controls.png`, `simple-mail.png`, `mail-layout.png`, `mail-layout-light.png`, `neutral-backgrounds-light.png`, `colored-reply.png`, `label-picker.png`, `move-picker.png`, `auth-paused.png`, `composer.png`, `inline-reply.png`, `draft-chip.png`, `attachments.png`, `newsletter-quote.png`, `gmail-draft.png`, `composer-signature-collapsed.png`, `composer-signature-quote-collapsed.png`, `label-view.png`, `search.png`, `search-partial.png`, `server-search.png`, `palette.png`, `split-inbox.png`, `split-rules.png`, and `split-rules-drag.png` (grep `e2e/*.spec.ts` for `.artifacts` when adding one, and list it here). After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
 
 ## How the e2e harness works
 
@@ -109,6 +110,7 @@ docs/KNOWN-ISSUES.md Live triage list: open bugs, coverage gaps, refactor propos
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies
 src/main/            Main process: windows, OAuth, SQLite (db/), Gmail (gmail/, sync/)
+src/main/sync/tuning.ts  Every knob for how much mail is stored and how hard sync works
 src/preload/         contextBridge API — the renderer's only path to the main process
 src/renderer/        React UI (sandboxed)
 src/shared/          Types shared across processes

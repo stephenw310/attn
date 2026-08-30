@@ -412,3 +412,47 @@ describe('searchThreads', () => {
     }
   })
 })
+
+describe('bounded search candidates', () => {
+  it('marks a search partial when its recency window fills, and stays exact below it', () => {
+    const db = openDatabase(':memory:')
+    try {
+      for (let index = 0; index < 12; index++) {
+        persistThread(
+          db,
+          ACCOUNT,
+          thread(`bulk-thread-${index}`, {
+            from: 'Planner <plans@example.test>',
+            subject: 'Quarterly planning',
+            body: 'recurring token in every message',
+            at: String(1_700_000_000_000 + index * 60_000)
+          })
+        )
+      }
+
+      // Window larger than the corpus: exact, and not marked partial.
+      const whole = searchThreads(db, ACCOUNT, 'recurring', { recentMessageLimit: 50 })
+      expect(whole.partial).toBe(false)
+      expect(whole.rows).toHaveLength(12)
+
+      // Window smaller than the corpus: the newest matches, marked partial.
+      const bounded = searchThreads(db, ACCOUNT, 'recurring', { recentMessageLimit: 4 })
+      expect(bounded.partial).toBe(true)
+      expect(bounded.rows.map((row) => row.id)).toEqual([
+        'bulk-thread-11',
+        'bulk-thread-10',
+        'bulk-thread-9',
+        'bulk-thread-8'
+      ])
+
+      // A filter that rejects everything inside the window still reports partial,
+      // which is the case the marker exists for: an empty result that is not proof
+      // the account holds no match.
+      const filtered = searchThreads(db, ACCOUNT, 'recurring is:unread', { recentMessageLimit: 4 })
+      expect(filtered.rows).toEqual([])
+      expect(filtered.partial).toBe(true)
+    } finally {
+      db.close()
+    }
+  })
+})

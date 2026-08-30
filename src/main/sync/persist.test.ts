@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
-import { nonDraftMessages, persistThread, planLabelCatalogUpdate, upsertLabels } from './persist'
+import {
+  ensureAccount,
+  nonDraftMessages,
+  persistThread,
+  planLabelCatalogUpdate,
+  upsertLabels
+} from './persist'
+
+const ACCOUNT = 'persist@example.test'
 
 describe('label catalog persistence', () => {
   it('plans additions, renames, and deletions from an authoritative listing', () => {
@@ -360,6 +368,70 @@ describe('thread snapshot persistence', () => {
       expect(db.prepare('SELECT id FROM threads WHERE account_id = ?').all('account')).toEqual([])
       expect(db.prepare('SELECT id FROM messages WHERE account_id = ?').all('account')).toEqual([])
       expect(db.prepare('SELECT email FROM contacts WHERE account_id = ?').all('account')).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
+})
+
+describe('storing a thread stays proportional to the thread', () => {
+  it('drives the removed-contact lookup from the thread, not the account', () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, ACCOUNT, ACCOUNT)
+      const plans: string[][] = []
+      const explainingDb = {
+        prepare: (sql: string) => {
+          const statement = db.prepare(sql)
+          return {
+            all: (...params: unknown[]) => {
+              if (sql.includes('contact_messages cm')) {
+                plans.push(
+                  (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map(
+                    (row) => row.detail
+                  )
+                )
+              }
+              return statement.all(...params)
+            },
+            run: (...params: unknown[]) => statement.run(...params),
+            get: (...params: unknown[]) => statement.get(...params)
+          }
+        },
+        transaction: (fn: () => void) => db.transaction(fn),
+        pragma: (source: string) => db.pragma(source)
+      } as unknown as typeof db
+
+      persistThread(explainingDb, ACCOUNT, {
+        id: 't-plan',
+        messages: [
+          {
+            id: 'm-plan',
+            threadId: 't-plan',
+            labelIds: ['INBOX'],
+            internalDate: '1000',
+            snippet: 'plan',
+            payload: {
+              mimeType: 'text/plain',
+              headers: [
+                { name: 'From', value: 'Sender <sender@example.test>' },
+                { name: 'To', value: ACCOUNT },
+                { name: 'Subject', value: 'Plan' }
+              ],
+              body: { data: Buffer.from('plan').toString('base64url') }
+            }
+          }
+        ]
+      })
+
+      expect(plans).toHaveLength(1)
+      // Scanning the account's contact rows here made every write cost more as
+      // the store grew: importing 20,000 threads fell from 2,000/s to 84/s.
+      const [first, second] = plans[0]
+      expect(first, plans[0].join(' | ')).toContain('messages')
+      expect(first).not.toContain('contact_messages')
+      expect(second, plans[0].join(' | ')).toContain('contact_messages')
+      expect(second).toContain('message_id=?')
     } finally {
       db.close()
     }
