@@ -49,7 +49,8 @@ wanted assertions ride T35, because T35 changes the exact poller path GAP-1 desc
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single snapshot and
    every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 21. T34 and T35 each bump it (T34 to 22,
    T35 to 23; if T35 lands first the numbers swap) and publish their dogfood DDL in their sections. A real
-   dogfood profile gets the manual additive upgrade in AGENTS.md.
+   dogfood profile gets the manual additive upgrade in AGENTS.md. T39 permits automatic updates only
+   within one schema version; a schema-changing release needs a separate upgrade procedure.
 2. **IPC has three parts:** main handler, preload bridge, and the typed channel map in `src/shared/`. All in
    the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike. In M4 this extends to LLM output: an AI draft
@@ -272,57 +273,120 @@ one undo step. The DDL above is in the PR notes.
 
 F9: "remind me if no reply". Send with a deadline; if nobody replies by then, the thread resurfaces at the
 top of the inbox with a **Follow up** chip. Any reply cancels it. This is the last v1 feature that touches
-the reminder machinery, and it reuses almost all of it: the `reminders` table already has a `kind` column
-(default `'snooze'`) whose primary key `(account_id, thread_id, kind)` lets a snooze and a follow-up
-coexist on one thread. The reminders side needs no schema change; the outbox side needs one column (below).
+the reminder machinery. The `reminders` table already has a `kind` column, defaulting to `'snooze'`, whose
+primary key `(account_id, thread_id, kind)` lets a snooze and a follow-up coexist on one thread. T35 adds
+the outbox deadline and durable reminder fields that identify the message being followed up.
 
 ### Design (decided)
 
 - **Set at compose, created at send.** The composer footer gets a follow-up control (3 days / 1 week /
   custom, sharing the snooze natural-language parser), plus a palette command. The chosen deadline rides
   the outbox row, and the reminder row is written when the outbox transitions to `sent`, not when the send
-  is queued. Creating it earlier would leave a live reminder behind an undone send.
-- **Schema bump: the deadline gets a column.** The current `outbox` table has nowhere to hold it, and
-  `composing` and `queued` rows must survive relaunch with the choice intact, so T35 adds a nullable
-  `follow_up_at` column. This is additive and rides the AGENTS.md manual procedure. Dogfood DDL, one
-  transaction (version 23 after T34's 22; swap the numbers if T35 lands first):
+  is queued. Commit the sent transition, the provider's final thread and message ids, and the reminder
+  together in one transaction, including send-recovery paths. Creating it earlier would leave a live
+  reminder behind an undone send. A later send with a new deadline replaces the same thread's follow-up;
+  replaying the earlier send's completion must not replace that newer reminder.
+- **Persist the originating message, not just the deadline.** Store its Gmail message id, canonical RFC
+  Message-ID, and Gmail `internalDate` on the reminder. The original message's history event never counts
+  as a reply. A distinct non-draft message qualifies when its `internalDate` is later; when dates tie,
+  require `References` or `In-Reply-To` to identify the originating message. Do not order opaque Gmail ids
+  or use the local send-completion time, which can move on retry. Older messages and replayed history do
+  not cancel a newer follow-up. The comparison data stays on the reminder after sent outbox rows are
+  pruned seven days later.
+- **Resolve incomplete origins without retrying delivery.** `drafts.send` or exactly-once recovery gives
+  the final message identity; the post-send read supplies its canonical headers and `internalDate`.
+  That read remains best-effort for sending. If it fails, retain a pending reminder with an unresolved
+  origin, show that its reply check is pending, and retry through the owning account's sync session.
+  Do not fire or cancel that reminder by guessing an origin date. Once resolved, evaluate already-cached
+  replies before arming the deadline, including a reply fetched before the sent transition committed.
+- **Schema bump: persist the deadline and origin.** Composing and queued rows retain the nullable
+  `follow_up_at` choice. The reminder columns below are nullable for existing snoozes; new follow-ups
+  require `origin_message_id`, and cannot fire until their origin date is resolved. This is additive and
+  follows the AGENTS.md manual procedure. Dogfood DDL, in one transaction, uses version 23 after T34's 22;
+  swap the numbers if T35 lands first:
 
   ```sql
+  BEGIN IMMEDIATE;
   ALTER TABLE outbox ADD COLUMN follow_up_at INTEGER;
+  ALTER TABLE reminders ADD COLUMN origin_message_id TEXT;
+  ALTER TABLE reminders ADD COLUMN origin_rfc_message_id TEXT;
+  ALTER TABLE reminders ADD COLUMN origin_internal_date INTEGER;
   PRAGMA user_version = 23;
+  COMMIT;
   ```
 - **Cancel on any reply, through a new feed.** The existing wake path cannot carry this: the poller's
-  `newMail` predicate requires `INBOX` and `UNREAD` and excludes `SENT` (`buildPlan` in `sync/poller.ts`),
+  `newMail` predicate requires `INBOX` and `UNREAD` and excludes `SENT` (`planCycle` in `sync/poller.ts`),
   because it feeds notifications, and "any participant" includes the user, whose second outbound message
-  must also cancel. So T35 adds a separate cancellation feed over non-draft `messagesAdded` events with no
-  other label filter, and leaves the notification predicate and the snooze wake call
-  (`SnoozeScheduler.wakeThread`) exactly as they are.
+  must also cancel. Add a separate feed over non-draft `messagesAdded` candidates with no other label
+  filter, then apply the origin comparison above. Keep the notification predicate and snooze wake
+  eligibility unchanged. An eligible reply cancels a pending follow-up or clears an already-returned
+  follow-up's chip and priority, without undoing the reply's own Inbox membership.
+- **Reconcile replies after history expiry.** Cancellation also runs against authoritative thread
+  snapshots, not only history events. `recoverExpiredHistory` must refresh every thread with a pending
+  or returned follow-up, including archived threads skipped by ordinary backfill. Compare its non-draft
+  messages with the stored origin using the same function as incremental cancellation. Persist a
+  per-account recovery-pending guard before these reads, and retain it across restart. While it is set,
+  defer new follow-up returns until these checks finish. Persist cancellations
+  before advancing the recovered history checkpoint; a failed or interrupted check keeps recovery
+  retryable. Never treat a failed read as evidence of no reply. Ordinary snapshot refreshes perform the
+  same comparison, so a reply cannot be missed merely because it was cached before the reminder existed.
 - **Resurface like a snooze return.** At the deadline, the scheduler restores the thread to Inbox through
   the same reducer as snooze return (rule 6), marks it with the **Follow up** chip, and sorts it above
-  normal mail in the list until it is triaged. Catch-up on boot applies (D2).
+  normal mail in the list until it is triaged. Catch-up on boot applies (D2), subject to unresolved-origin
+  and history-recovery checks above.
+- **A pending snooze wins over the follow-up deadline.** If a follow-up becomes due while that thread is
+  snoozed, leave the follow-up pending and keep the thread out of Inbox. Arm the next check for the snooze
+  deadline, not the already-past follow-up deadline. When the snooze returns, settle its state and any
+  overdue follow-up in one transaction and enqueue at most one Inbox restoration. This prevents
+  `replaySnoozeReminderDelta` from hiding the returned thread on the next refresh. If snooze returns first,
+  the later follow-up marks and prioritizes the thread when due without duplicating an Inbox mutation.
+  If both are due at startup, use the same transaction. A qualifying reply still cancels the follow-up
+  and uses F4's existing snooze-wake rules.
+- **Triage updates both reminder kinds deliberately.** Archive or Move cancels a pending snooze, as today,
+  and completes any returned follow-up. It also cancels an overdue follow-up that was waiting only for
+  that snooze, so the scheduler cannot immediately reverse the user's archive or Move. An ordinary archive
+  leaves a not-yet-due follow-up pending; Spam and Trash cancel it. Snoozing a returned follow-up makes it
+  pending again until the new snooze returns. Undo and permanent-failure recovery restore the affected
+  reminder snapshots together with the label delta. Refresh the scheduler after each such state change.
 - **Visible in the reminders view.** Pending follow-ups list in the Snoozed view (`G` then `H`) alongside
-  snoozes, labeled by kind.
+  snoozes, labeled by kind. A thread with both kinds stays one conversation row, showing both deadlines
+  and whether its follow-up is waiting for snooze return or an origin check.
 - Timers run on `SchedulerTime` (rule 8).
 
 ### Testing
 
 This task also owns GAP-1's wanted assertions, because it modifies exactly that path:
 
-- Unit (poller): an inbound message triggers `wakeThread` for a snoozed thread and cancels a pending
-  follow-up; a `SENT`-labeled message cancels the follow-up without triggering `wakeThread` or a
-  notification; a DRAFT does neither.
-- Unit (scheduler): a due follow-up returns the thread and survives a restart; an undone send creates no
-  reminder; the `sent` transition creates exactly one.
+- Unit (poller): the originating sent message, older messages, and DRAFTs never cancel the reminder.
+  Replaying an eligible reply is idempotent. A later inbound reply cancels it and retains the existing
+  `wakeThread` behavior. A later `SENT` message cancels it without a snooze wake or notification. Cover
+  equal-date reply headers, a reply
+  cached before origin resolution, and a new follow-up followed by replay of the previous send's history.
+- Unit (recovery): expire history while a follow-up is pending, return an archived thread containing a
+  later reply through a snapshot, and prove cancellation before checkpoint advance. Interrupt and retry
+  the pass, including a failed thread read; neither may produce a false return or lose the cancellation.
+  Keep the origin comparison effective after pruning its sent outbox row.
+- Unit (scheduler and sender): a due follow-up returns the thread and survives a restart; an undone send
+  creates no reminder; normal send and exactly-once recovery create exactly one atomically. A failed
+  origin read does not retry the send or fire the reminder. Cover both deadline orders, equal deadlines,
+  and both deadlines missed while closed. Re-fetch the thread after return and prove it remains visible.
+  Assert one queued Inbox restoration, no timer loop while snoozed, and reply cancellation during the wait.
+- Unit (triage): archive and Move while an overdue follow-up waits for snooze, Spam and Trash before the
+  follow-up is due, snoozing a returned follow-up, undo, and permanent-failure recovery. A future follow-up
+  survives ordinary archive; completing a returned follow-up clears its chip and priority.
 - E2e: send with a follow-up under the seeded provider, advance fake time, assert the chip and the
-  above-normal-mail sort; inject an inbound reply before the deadline and assert no resurfacing; snooze
-  `t-roadmap`, inject inbound mail, and assert the returned chip (GAP-1's e2e). Relaunch catch-up: quit
-  before the deadline, relaunch after it, assert immediate resurfacing.
+  above-normal-mail sort. First replay the originating sent message through history and prove the
+  reminder survives. Inject a later reply before the deadline and assert no resurfacing. Exercise expired
+  history with a reply present only in the recovered snapshot. Snooze `t-roadmap`, inject inbound mail,
+  and assert the returned chip (GAP-1's e2e). Also cover a follow-up due before snooze and both deadlines
+  missed across `boot.relaunch()`, with a subsequent refresh proving the return remains visible.
 - Remove GAP-1 from KNOWN-ISSUES in this PR.
 
 ### Done when
 
-F9's acceptance criteria hold: a reply from any participant cancels within one poll interval, and
-resurfaced threads are visually distinct and sort above normal mail.
+F9's acceptance criteria hold: only a subsequent reply cancels, including one found during history
+recovery; a pending snooze postpones follow-up return without losing it; and returned follow-ups remain
+visible and sort above normal mail until handled. The DDL above is in the PR notes.
 
 ---
 
@@ -489,29 +553,63 @@ auto-update from GitHub Releases.
 - **Signing comes before auto-update inside this task.** Squirrel.Mac rejects unsigned updates, so an
   unsigned build that checks for updates is worse than none. Order of landing: macOS Developer ID signing +
   notarization in `package.yml`, then Windows signing, then the updater.
+- **Keep personal and public-release builds separate.** Existing `package:dir`, `package:mac`,
+  `package:mac:all`, and `package:win` remain usable without signing credentials. Their default mode is
+  personal: ad-hoc signing on macOS, unsigned Windows artifacts, and no updater. Add an explicit release
+  mode for the publishing workflow, with packaged metadata declaring the distribution mode and schema
+  version. Missing metadata defaults to personal; `app.isPackaged` alone never enables updates. A failed
+  release signature check must fail publication, not silently fall back to personal mode.
 - **Updater:** electron-updater against GitHub Releases. Check on launch and every 6 hours
   (`SchedulerTime`, rule 8). Download in the background at background priority (rule 7). When a version is
   ready, surface a quiet toast and a palette command `Restart to update`. Never force a restart; a normal
-  quit applies the update. Dev and e2e builds never check (the updater is constructed only in packaged,
-  non-seeded runs).
-- **`npm run package:verify` grows teeth:** it asserts a valid Developer ID signature and notarization
-  ticket on macOS artifacts and an Authenticode signature on the Windows installer, so an expired secret
-  fails the workflow instead of shipping an unsigned build.
+  quit applies the update. Construct the updater only in packaged, non-seeded release builds. Personal,
+  dev, and e2e builds neither check nor install a cached update. Route update restarts through the existing
+  awaited shutdown so draft mirroring and sending quiesce before the installer takes over.
+- **Automatic updates never cross a schema version.** `openDatabase` rejects a different nonzero
+  `user_version`; downloading a new binary is not a database upgrade. Publish separate feeds for each
+  `CURRENT_SCHEMA_VERSION` and include the required schema version in update metadata. Before download
+  and again before installation, require an exact match among the running build, the local database,
+  and the target release. Missing or mismatched metadata rejects the update, including cached downloads.
+  The release verifier checks that feed metadata agrees with the packaged schema, so a schema-changing
+  artifact cannot enter the prior schema's feed. Existing installations stay on their compatible feed.
+  Moving to a new schema requires a separate, explicit upgrade procedure with backup and data-preservation
+  checks; it never deletes the profile, tokens, drafts, queued sends, or reminders automatically. This
+  task does not add a runtime migration framework.
+- **Verification follows the build mode.** `npm run package:verify` retains runtime-asset and native-module
+  checks for every build, including unpacked `package:dir` smoke tests. The release workflow additionally
+  invokes `npm run package:verify -- --release`, which requires release metadata, a valid Developer ID
+  signature and notarization ticket on macOS artifacts, and an Authenticode signature on the Windows
+  installer. It also checks feed and packaged schema agreement. Personal verification requires the
+  updater-disabled metadata but no certificate or notarization credentials. Expired or missing release
+  credentials fail the release workflow without breaking personal packaging.
 - **Scope guard:** signing does not change the OAuth posture. Distribution stays dev-mode (each user's own
   OAuth client, decision #2); Google verification remains deferred.
 
 ### Testing
 
 - Unit: the update state machine (idle → checking → downloading → ready → applied, plus error/backoff) with
-  injectable time and a fake feed; the packaged/seeded/dev gating.
+  injectable time and a fake feed. Cover release, personal, dev, seeded, and missing-mode gating; a
+  packaged personal build must construct no updater and make zero feed requests. Reject missing schema
+  metadata, incompatible targets, and stale cached updates before download or install. Verify that a
+  restart awaits the existing worker shutdown before invoking the installer.
+- Verification fixtures: valid personal artifacts pass without signing credentials; release artifacts
+  with absent or invalid signatures, missing notarization, or inconsistent schema metadata fail. A
+  personal artifact presented to `--release` fails rather than being published.
 - Real updates cannot run under the e2e harness. Manual evidence for T40's checklist: on each OS, install
-  build N, publish build N+1 to a test release, and observe check, background download, toast, and
-  update-on-quit.
+  build N with populated mail, settings, reminders, and composing and queued outbox rows. Publish a newer
+  build with the same schema to a test feed, observe download and update-on-quit, and verify the profile
+  opens with its data intact. Use synthetic mail and a profile without Gmail credentials for queued-send
+  checks, without the runtime test seam that disables updates. The test must not send real mail. Offer
+  a newer incompatible-schema build and missing-schema metadata. Neither may download or replace the
+  installed app. Record a credential-free personal packaging smoke
+  and confirm it performs no update traffic on both OSes.
 
 ### Done when
 
-Both installers verify as signed, macOS artifacts are notarized, `package:verify` enforces it, and the
-manual update-in-place run is ticked for both OSes in T40's checklist.
+Public-release installers verify as signed, macOS release artifacts are notarized, and release
+verification enforces schema compatibility. Personal packaging still works without credentials and
+cannot auto-update. T40 records the populated-profile update and incompatible-update rejection on both
+OSes.
 
 ---
 
@@ -531,11 +629,14 @@ purpose (real-OS and real-Gmail checks that the harness cannot run); they come d
 Feature evidence (this milestone):
 
 - [ ] Real-Gmail follow-up run: send with a 3-day follow-up from a dogfood profile, reply from another
-      account, confirm cancellation; let a second one expire and confirm resurfacing.
+      account, confirm cancellation; let a second one expire and confirm resurfacing. Confirm the sent
+      message's own history event does not cancel either reminder, and exercise a coexisting snooze.
 - [ ] AI drafting against one real provider (any, including a local Ollama): enable, draft, refine, send,
       disable, and confirm zero traffic after disable (proxy or provider dashboard).
 - [ ] Windows numeric badge manual check (from T38).
-- [ ] Signed/notarized install and update-in-place on both OSes (from T39).
+- [ ] Signed/notarized install and same-schema update of a populated profile on both OSes; incompatible
+      or missing schema metadata is rejected without changing the installation or local data (from T39).
+- [ ] Credential-free personal packaging on both OSes, with no updater traffic or cached installation.
 - [ ] Every new screenshot artifact inspected: `settings.png`, `cheat-sheet.png`,
       `remote-images-blocked.png`, `snippet-manager.png`, `ai-draft.png`.
 

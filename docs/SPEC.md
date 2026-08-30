@@ -409,8 +409,23 @@ Named, reusable text blocks inserted into the composer via palette ("Snippet: �
 
 When sending, optionally set "remind me if no reply" (composer control or palette: 3 days / 1 week / custom). If no reply arrives by the deadline, the thread resurfaces at the top of the inbox with a **Follow up** chip. Any reply cancels the reminder. Pending follow-ups are listed in the Snoozed/Reminders view.
 
+The sent message that created the reminder does not cancel it. A subsequent reply from any participant,
+including the user, does. The reminder retains its originating message identity and date independently of
+outbox retention. Replies discovered through history-expiry recovery cancel it just as incremental history
+does; unresolved origin reads or incomplete recovery do not establish that no reply arrived.
+
+A pending snooze postpones follow-up resurfacing until the snooze returns. If both deadlines have passed,
+the thread returns once, with no pending snooze left to hide it on the next sync. A qualifying reply still
+cancels the follow-up and follows F4's snooze-wake rules. Archive and Move complete returned follow-ups and
+cancel overdue follow-ups waiting for a snooze; ordinary archive preserves future follow-ups. Spam and
+Trash cancel follow-ups. Snoozing a returned follow-up postpones it to the new snooze return. Undo restores
+the reminder states affected by triage.
+
 **Acceptance criteria**
 - Reply from any participant cancels the reminder within one poll interval.
+- The originating sent message and replayed older history never cancel a newer follow-up.
+- History-expiry recovery detects replies in authoritative snapshots before permitting new follow-up returns.
+- Coexisting snooze and follow-up deadlines produce one stable return, including after relaunch.
 - Resurfaced threads are visually distinct and sort above normal mail.
 
 ### F10 — Instant search
@@ -716,6 +731,13 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
 **HTML mail rendering:** sanitized (DOMPurify-class allowlist), rendered in a sandboxed `<iframe>`/webview with no script execution, links open in the system browser. Some legitimate senders serve images with `Cross-Origin-Resource-Policy: same-origin`, which Chromium would block inside that frame; the app removes only that response header, only for image requests originating from the mail frame — no other request or header is modified. The frame is measured after load and on resize, preserves horizontal overflow inside the frame, and remains mounted when quote/signature visibility changes. A shared surface classifier gives fallback content and HTML without a non-neutral authored canvas the native Attn treatment; non-neutral backgrounds and background images keep a light document canvas. Native mail clears sender background patches in every palette. It keeps authored inline text colors in light palettes; in dark palettes it adjusts chromatic colors to readable contrast and replaces low-contrast neutral foregrounds with the native default. Constrained sender canvases center within a solid light mail surface. Typography, media, tables, layout attributes, and layout-only CSS are not canvas evidence. The composer quote preview uses the same decision. Filename-bearing MIME parts count as attachments whether Gmail supplies an attachment ID or inline base64url data. The stored `inlineData` field is withheld from `ConversationMsg`, and inline-delivered attachments can download without a network request. For `cid:` rendering, however, `mail:getInlineImage` deliberately sends matching image content through the typed preload bridge as an allowlisted-MIME base64 `dataUrl`, capped at 25 MB; the renderer assigns that value to the image in the scriptless mail iframe. A direct MIME Content-ID match takes precedence, with a unique CID or `alt` filename accepted as a compatibility alias when sender HTML and MIME generated different identifiers. Ambiguous and unresolved references remain inert broken-image placeholders.
 
 **Packaging:** `electron-builder`; auto-update via GitHub Releases. macOS notarization + Windows code signing required for public distribution (skippable for personal builds). *Status:* personal-build packaging shipped early, at M1 exit — a manually dispatched GitHub Actions workflow produces macOS DMG/ZIP for both architectures (ad-hoc signed) and a Windows NSIS installer (unsigned), each verified by `npm run package:verify`. Auto-update and real signing/notarization remain M4.
+
+M4 keeps personal packaging available without signing credentials and disables its updater, even when
+packaged. Public-release builds require explicit release metadata and signature verification. Automatic
+updates stay within the installed database's schema version, using separate feeds and matching schema
+metadata checked before download and installation. Missing or incompatible metadata rejects the update
+without replacing the app or changing local data. A schema-changing release needs a separate upgrade
+procedure; auto-update never deletes a profile or adds a runtime compatibility-migration framework.
 
 **Testing:** unit tests on the reducer/sync engine (the correctness core — replay recorded history streams), command-registry tests (every command has a handler + palette entry), Playwright smoke e2e (sign-in stubbed, triage loop, compose/send against a mock provider).
 
