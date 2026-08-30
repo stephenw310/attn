@@ -2,7 +2,7 @@
 
 **Audience:** the engineers building M4. Same contract as [M1-PLAN.md](M1-PLAN.md), [M2-PLAN.md](M2-PLAN.md),
 and [M3-PLAN.md](M3-PLAN.md). Every task is one PR. Nothing is done until `npm run verify` is green. "Spec F8"
-means a section of [SPEC.md](SPEC.md) (v0.16). Read the section before starting the task.
+means a section of [SPEC.md](SPEC.md) (v0.17). Read the section before starting the task.
 
 **Basis:** SPEC §8 M4, F8 (snippets), F9 (follow-up reminders), F12 (badge polish), F15 (settings), F17
 (AI reply drafting), §6 Packaging (auto-update, signing, notarization), §9 #5 (remote images), and the
@@ -36,17 +36,20 @@ the precedent of splitting the composer into T14A through T14E. T39 is independe
 has operator lead time (certificates, notary credentials), so start its prerequisites in week one even if
 the code lands late.
 
-**What M4 does not absorb.** T29 (inbox zero, F13) stays in M3-PLAN and is still owed there. The
-KNOWN-ISSUES gaps stay in KNOWN-ISSUES, with one exception: GAP-1's wanted assertions ride T35, because T35
-changes the exact poller path GAP-1 describes.
+**What M4 does not absorb.** Multi-account (F18) is M5, planned in [M5-PLAN.md](M5-PLAN.md) and running in
+parallel; SPEC §8 says the two milestones may interleave and v1 ships only when both exit. M4 tasks touch
+none of M5's surfaces, but F18's scoping rules bind M4's new state (global rule 9), and T32 and T38 note
+where they meet M5's shipped work. The KNOWN-ISSUES gaps stay in KNOWN-ISSUES, with one exception: GAP-1's
+wanted assertions ride T35, because T35 changes the exact poller path GAP-1 describes.
 
 ---
 
 ## Global rules (carried from M3, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single snapshot and
-   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 21. T34 bumps it to 22 and publishes its
-   dogfood DDL below. A real dogfood profile gets the manual additive upgrade in AGENTS.md.
+   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 21. T34 and T35 each bump it (T34 to 22,
+   T35 to 23; if T35 lands first the numbers swap) and publish their dogfood DDL in their sections. A real
+   dogfood profile gets the manual additive upgrade in AGENTS.md.
 2. **IPC has three parts:** main handler, preload bridge, and the typed channel map in `src/shared/`. All in
    the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike. In M4 this extends to LLM output: an AI draft
@@ -60,8 +63,13 @@ changes the exact poller path GAP-1 describes.
    delay sends, action replay, or polling.
 8. **Time is injectable.** Every new timer takes `SchedulerTime` from `src/main/time.ts`. T35's follow-up
    deadlines and T39's update-check interval both qualify. No test waits on wall-clock time.
-9. **If your task changes the verify pipeline, harness behavior, or the screenshot-artifact list, update
-   AGENTS.md in the same PR.**
+9. **New state declares its account scope** (F18, in v1 since §9 #21). Per-account state carries the owning
+   `account_id`; app-global state uses the settings sentinel (`APP_SETTINGS_ACCOUNT_ID`). F18 already
+   decides for M4's features: snippets, the F17 provider key and voice profile, the undo-send delay,
+   auto-advance, and the remote-image preferences are app-global; reminders, drafts, and outbox rows are
+   per-account.
+10. **If your task changes the verify pipeline, harness behavior, or the screenshot-artifact list, update
+    AGENTS.md in the same PR.**
 
 ---
 
@@ -85,14 +93,17 @@ hardcoded. The F16 macOS menu-bar icon has no toggle. This task builds the surfa
   composer does: the prior list or reader stays mounted and hidden, and `Esc` or Back restores it exactly.
   The sidebar stays visible. Open it with `Mod+,`, the account-menu item, or the palette command
   `Open settings`.
-- **Sections at ship time:** Account (address, sign out), Triage (undo-send delay 0/5/8/10/20/30s;
-  auto-advance direction next/previous/back-to-list), Notifications (per-split toggles link to the existing
-  T27 rule manager in `SplitRuleManager.tsx`; do not rebuild it), Background (launch at login; macOS
-  menu-bar icon, default off, wired to the existing tray code in `background.ts`), Appearance (the four F14
-  themes). T33, T34, and T36 each add their own section in their own PR.
-- **Storage:** the existing `settings` table through `src/main/settings.ts`. It is already keyed by
-  `account_id`, so no namespacing scheme is needed. New keys: `autoAdvanceDirection`, `menuBarIcon`.
-  `undoSendDelaySeconds` and `launchAtLogin` already exist.
+- **Sections at ship time:** Accounts (the signed-in roster with add, remove, and `Mod+1..9` reorder per
+  F15 v0.17 — the behaviors behind those controls are M5's A-tasks, so T32 gives them their settings home
+  and wires whatever M5 has shipped by then, without reimplementing account management), Triage (undo-send
+  delay 0/5/8/10/20/30s; auto-advance direction next/previous/back-to-list), Notifications (per-split
+  toggles link to the existing T27 rule manager in `SplitRuleManager.tsx`; do not rebuild it), Background
+  (launch at login; macOS menu-bar icon, default off, wired to the existing tray code in `background.ts`),
+  Appearance (the four F14 themes). T33, T34, and T36 each add their own section in their own PR.
+- **Storage:** the existing `settings` table through `src/main/settings.ts`. Every key this task adds is
+  app-global per F18's scoping, so it lives under the table's app sentinel, exactly how
+  `undoSendDelaySeconds` and `launchAtLogin` are stored today. New keys: `autoAdvanceDirection`,
+  `menuBarIcon`.
 - **Every control is also a palette command** (rule 5): `Set undo send delay…`, `Set auto-advance…`, and so
   on. The theme commands from T30 already exist; the settings pane reuses them.
 - **The cheat sheet (`Mod+/`)** is a dismissable overlay listing the §5 keyboard map. It renders from the
@@ -143,19 +154,27 @@ leaks the user's IP and read-time to a sender, so v1 should not ship without the
   `Cross-Origin-Resource-Policy` header for mail-frame images (§6). When blocking is on and the sender has
   no override, image requests originating from the mail frame are cancelled. The renderer cannot be the
   enforcement point; it is sandboxed and untrusted mail markup runs inside it.
+- **The filter must know the sender behind each request.** The request URL names the image host and every
+  mail iframe's origin is the same `about:srcdoc`, so neither identifies the message. The reader registers
+  each mounted message frame with the main process keyed by message id, and the main process resolves that
+  id to the sender address from the local store. Nothing in the markup or the request itself is trusted for
+  this decision. Two messages from different senders can reference the same image URL and get different
+  answers.
 - **Blocked rendering degrades quietly.** Cancelled images leave placeholders; layout must not collapse.
   The message card shows a one-line banner: `Remote images blocked · Load once · Always load from this
   sender`. `Load once` re-renders that message with loading permitted for that render only. `Always load`
   writes a per-sender override.
 - **Storage:** the global toggle and per-sender overrides are `settings` rows (`remoteImages` and
-  `remoteImages:allow:<address>`), account-scoped. The default stays load (decision #5 stands).
+  `remoteImages:allow:<address>`), app-global under the settings sentinel (rule 9): a privacy preference
+  about a sender does not change per mailbox. The default stays load (decision #5 stands).
 - The settings section lists current sender overrides and can remove them. Toggle and removal are palette
   commands.
 
 ### Testing
 
-- Unit: the request-filter decision function (URL, frame origin, toggle, override set) is pure; test the
-  matrix, including the CORP-strip interaction.
+- Unit: the request-filter decision function (URL, resolved sender, toggle, override set) is pure; test
+  the matrix, including the CORP-strip interaction, an unregistered frame (default deny while blocking is
+  on), and two senders referencing the same image URL where one is allowed and one is blocked.
 - E2e: seed HTML mail whose image points at a local HTTP server the test controls. With blocking on, open
   the message and assert the server got no request and the banner shows. Click `Load once`, assert exactly
   one request. Set `Always load`, relaunch, reopen, assert loading without a banner.
@@ -187,9 +206,12 @@ document model.
 ### Design (decided)
 
 - **Schema bump to 22.** New `snippets` table; the same bump drops `outbox.remote_updated_at`, which is
-  written and never read (KNOWN-ISSUES REF-5 says to fold the drop into the next bump). The drop still
-  qualifies for the AGENTS.md manual procedure even though it is not additive: the column is never read, so
-  no row loses meaningful data. Dogfood DDL, one transaction per that procedure:
+  written and never read (KNOWN-ISSUES REF-5 says to fold the drop into the next bump). The table is
+  additive and rides the AGENTS.md manual dogfood procedure. The drop is not additive, so it does not:
+  AGENTS.md routes destructive changes through an explicit task-level migration design, and this paragraph
+  is that design. The column has no reader, so the drop deletes nothing any code path uses; the operator
+  still takes the procedure's backup first, runs its before/after checks, and applies everything with the
+  version stamp in one transaction. Dogfood DDL:
 
   ```sql
   CREATE TABLE snippets (
@@ -208,6 +230,8 @@ document model.
   PRAGMA user_version = 22;
   ```
 
+- **Snippets are app-global** (F18's scoping, rule 9). The table still carries `account_id` because every
+  table does (D4); v1 writes the app sentinel so one snippet set serves every signed-in account.
 - **Two insertion paths, one implementation.** The palette command `Snippet: <name>` and the inline
   `;trigger` both call the same composer insertion: replace the trigger text (if any) with the snippet
   body, place the caret at `{cursor}` or at the end, and commit it as one Lexical history entry so one
@@ -250,7 +274,7 @@ F9: "remind me if no reply". Send with a deadline; if nobody replies by then, th
 top of the inbox with a **Follow up** chip. Any reply cancels it. This is the last v1 feature that touches
 the reminder machinery, and it reuses almost all of it: the `reminders` table already has a `kind` column
 (default `'snooze'`) whose primary key `(account_id, thread_id, kind)` lets a snooze and a follow-up
-coexist on one thread. No schema bump.
+coexist on one thread. The reminders side needs no schema change; the outbox side needs one column (below).
 
 ### Design (decided)
 
@@ -258,10 +282,21 @@ coexist on one thread. No schema bump.
   custom, sharing the snooze natural-language parser), plus a palette command. The chosen deadline rides
   the outbox row, and the reminder row is written when the outbox transitions to `sent`, not when the send
   is queued. Creating it earlier would leave a live reminder behind an undone send.
-- **Cancel on any reply.** The poller path that already wakes snoozed threads on inbound mail
-  (`sync/poller.ts`, `SnoozeScheduler.wakeThread`) grows the mirror rule: a new non-draft message on the
-  thread cancels a pending follow-up. "Any participant" includes the user; a second outbound message means
-  the user followed up themselves.
+- **Schema bump: the deadline gets a column.** The current `outbox` table has nowhere to hold it, and
+  `composing` and `queued` rows must survive relaunch with the choice intact, so T35 adds a nullable
+  `follow_up_at` column. This is additive and rides the AGENTS.md manual procedure. Dogfood DDL, one
+  transaction (version 23 after T34's 22; swap the numbers if T35 lands first):
+
+  ```sql
+  ALTER TABLE outbox ADD COLUMN follow_up_at INTEGER;
+  PRAGMA user_version = 23;
+  ```
+- **Cancel on any reply, through a new feed.** The existing wake path cannot carry this: the poller's
+  `newMail` predicate requires `INBOX` and `UNREAD` and excludes `SENT` (`buildPlan` in `sync/poller.ts`),
+  because it feeds notifications, and "any participant" includes the user, whose second outbound message
+  must also cancel. So T35 adds a separate cancellation feed over non-draft `messagesAdded` events with no
+  other label filter, and leaves the notification predicate and the snooze wake call
+  (`SnoozeScheduler.wakeThread`) exactly as they are.
 - **Resurface like a snooze return.** At the deadline, the scheduler restores the thread to Inbox through
   the same reducer as snooze return (rule 6), marks it with the **Follow up** chip, and sorts it above
   normal mail in the list until it is triaged. Catch-up on boot applies (D2).
@@ -274,7 +309,8 @@ coexist on one thread. No schema bump.
 This task also owns GAP-1's wanted assertions, because it modifies exactly that path:
 
 - Unit (poller): an inbound message triggers `wakeThread` for a snoozed thread and cancels a pending
-  follow-up; a DRAFT does neither.
+  follow-up; a `SENT`-labeled message cancels the follow-up without triggering `wakeThread` or a
+  notification; a DRAFT does neither.
 - Unit (scheduler): a due follow-up returns the thread and survives a restart; an undone send creates no
   reminder; the `sent` transition creates exactly one.
 - E2e: send with a follow-up under the seeded provider, advance fake time, assert the chip and the
@@ -321,7 +357,9 @@ diff.
   voice profile, and any selected style examples, sent to the chosen provider only when a draft is
   requested. Enabling requires a key. Disabling stops all LLM traffic.
 - **Voice profile** (tone preset plus free-text standing rules, and the voice-matching toggle) stores in
-  the `settings` table. It contains no mail content, so plaintext storage is fine.
+  the `settings` table. It contains no mail content, so plaintext storage is fine. F18 scopes the provider
+  key, model choice, and voice profile app-global (rule 9): one configuration serves every signed-in
+  account. Style examples are the exception, drawn per draft from the owning account's sent mail (T37).
 - **Test seam:** `attn:test:installFakeAiProvider` in `src/main/testIpc.ts`, disabled outside the env seam
   like every other seam. It scripts streamed chunks, records every request payload, and is the only way e2e
   ever exercises F17. Real endpoints stay out of e2e, mirroring the Gmail rule.
@@ -370,7 +408,8 @@ one-line instruction, and never auto-send.
   regenerates. The regeneration replaces the prior AI-inserted region as a single undoable step; text the
   user edited by hand is theirs, so refine is offered only while the AI region is unedited.
 - **Voice matching:** when the toggle is on, a handful of the user's recent sent replies are selected
-  locally from the store and sent as style examples. When it is off, no sent-mail content may appear in the
+  locally from the store of the account that owns the draft (F18: replies bind to the thread's owning
+  account) and sent as style examples. When it is off, no sent-mail content may appear in the
   request; the seam's recorded payloads are the proof.
 - **Never auto-sends.** Output lands behind the normal send flow, undo send included. Generation must not
   block the UI (F17 acceptance), and it yields to interactive work (rule 7).
@@ -408,6 +447,8 @@ numeric overlay as M4 packaging polish (M1-PLAN accepted deviations). This is th
 - A pure function renders the count into an overlay bitmap (nativeImage): centered numerals, `99+` cap,
   legible at 16px. The existing badge update path in `notify.ts`/`index.ts` swaps the static dot for the
   rendered image; the tooltip keeps the exact count. macOS `setBadgeCount` is untouched.
+- The count itself is not this task's business: M5's A2 already sums it across signed-in accounts
+  (F12/F18). T38 changes only how Windows renders the number it is handed.
 
 ### Testing
 
@@ -504,7 +545,8 @@ docs and tick or strike with evidence):
 - [ ] M1's real-OS notification click-through smoke (M1-PLAN exit checklist).
 - [ ] M2's real-Gmail bootstrap, exactly-once, and hydration observations (M2-PLAN T20).
 - [ ] M2's one-week sole-client dogfood run, extended to exercise snippets, follow-ups, and AI drafting.
-- [ ] M3's T29 inbox zero, which must ship before this checklist closes.
+- [ ] M5 (multi-account) has exited per M5-PLAN, including its A7 isolation audit. SPEC §8: v1 does not
+      ship before both milestones exit.
 
 Bookkeeping:
 
@@ -521,8 +563,9 @@ Every box is ticked or explicitly struck with a recorded reason, and the v1 tag 
 
 ## Out of scope for M4
 
-The v1.1 items stay v1.1: the global-hotkey quick panel, multi-account, custom themes. Send later stays
-v1.5 (F7, the companion Apps Script). Google OAuth verification stays deferred (decision #2). Read statuses
+Multi-account is no longer post-v1, but it is not M4 either: it is M5 (F18, §9 #21), planned separately.
+The v1.1 items stay v1.1: the global-hotkey quick panel and custom themes. Send later stays v1.5 (F7, the
+companion Apps Script). Google OAuth verification stays deferred (decision #2). Read statuses
 stay v2 (D2). Full keyboard remapping stays post-v1. AI beyond reply drafting (summaries, auto-triage,
 semantic search) stays v2+; T36's provider client is not an invitation to add background AI features, which
 F17 forbids regardless.
