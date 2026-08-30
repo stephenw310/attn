@@ -40,7 +40,6 @@ import type { ThemePreference } from './theme'
 export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',
   authSignIn: 'auth:signIn',
-  authSignOut: 'auth:signOut',
   accountsSetActive: 'accounts:setActive',
   accountsGetStatuses: 'accounts:getStatuses',
   accountsRemove: 'accounts:remove',
@@ -146,7 +145,6 @@ export const TEST_CHANNELS = {
 export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthSignInResult }
-  [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.accountsSetActive]: { args: [accountId: string]; result: AuthStatus }
   [IPC_CHANNELS.accountsGetStatuses]: { args: []; result: AccountSyncStatus[] }
   [IPC_CHANNELS.accountsRemove]: { args: [accountId: string, deleteData: boolean]; result: AuthStatus }

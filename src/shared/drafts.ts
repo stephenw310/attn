@@ -55,8 +55,11 @@ export interface DraftAttachmentMutationResult {
   changed: boolean
 }
 
-// The account is never the renderer's to choose: saves bind to the draft row's
-// stored owner in the main process (F6).
+// The account is never the renderer's to choose: saves bind to the active
+// account in the main process, and an update whose draft row belongs to another
+// account matches zero rows and fails loudly ('draft is unavailable') rather
+// than rebinding — the composer blocks account switches while open, so that
+// mismatch never happens in normal use (F6/F18).
 export interface DraftSaveInput extends Omit<Draft, 'id' | 'accountId' | 'createdAt' | 'updatedAt'> {
   id: string | null
 }

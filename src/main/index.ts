@@ -209,12 +209,6 @@ async function removeAccount(accountId: string, deleteData: boolean): Promise<Au
   return authStatus()
 }
 
-/** Legacy sign-out: Remove account with Keep semantics, one code path (A6). */
-async function signOut(): Promise<AuthStatus> {
-  if (!activeAccountId) return authStatus()
-  return removeAccount(activeAccountId, false)
-}
-
 async function setActiveAccount(accountId: string): Promise<AuthStatus> {
   if (!rosterAccountIds().includes(accountId)) throw new Error('unknown account')
   // The utility owns the flip: the response guarantees every later read the
@@ -385,7 +379,6 @@ async function initialize(): Promise<void> {
     service: ownedService,
     authStatus,
     signIn,
-    signOut,
     setActiveAccount,
     removeAccount,
     takePendingFocus: takePendingFocusTarget,

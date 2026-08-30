@@ -370,9 +370,10 @@ on A shows the banner only when A is active while B keeps triaging, and reconnec
 ### A6 — Remove account
 
 **Status: done, 2026-08-30.** Spec F18, F15, §9 #21(d). As shipped: `accounts:remove` is a main-owned
-invoke taking `(accountId, deleteData)`; the confirmation dialog (menu row *Remove account…* — the old
-Sign out row, one code path via `auth:signOut` delegating to remove-with-Keep — plus the palette
-command) offers **Remove and delete local data** (default, focused) / **Remove and keep local data** /
+invoke taking `(accountId, deleteData)`; the confirmation dialog (menu row *Remove account…*, which
+replaced the old Sign out row — the legacy `auth:signOut` chain is deleted, remove-with-Keep is the one
+code path — plus the palette command) offers **Remove and delete local data** (default, focused) /
+**Remove and keep local data** /
 Cancel. Delete routes through the utility's `remove-account-data` operation, which waits out the
 torn-down session's worker retirement, then runs `purgeAccountRows` (`src/main/db/purgeAccount.ts`) —
 the account-keyed tables are *walked from the live schema*, FTS goes through the rowid map, the

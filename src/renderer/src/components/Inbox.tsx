@@ -668,16 +668,24 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [activeAccount, showToast])
 
   // Live roster health: seeded once, then pushed by the utility whenever any
-  // account's phase or unread moves — the chip's attention mark and the menu
-  // status lines follow without polling (F18).
+  // account's phase moves — the chip's attention mark and the menu status
+  // lines follow without polling (F18). A push that lands while the seed read
+  // is still in flight is the fresher answer, so the seed never overwrites it.
   useEffect(() => {
     const bridge = window.attn
     if (!bridge) return
+    let pushed = false
+    const unsubscribe = bridge.auth.onAccountStatuses((statuses) => {
+      pushed = true
+      setAccountStatuses(statuses)
+    })
     bridge.auth
       .getAccountStatuses()
-      .then(setAccountStatuses)
+      .then((statuses) => {
+        if (!pushed) setAccountStatuses(statuses)
+      })
       .catch(() => {})
-    return bridge.auth.onAccountStatuses(setAccountStatuses)
+    return unsubscribe
   }, [])
 
   const reconnectGoogle = useCallback(async (): Promise<AuthSignInResult | null> => {
@@ -787,7 +795,16 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           clearAccountView(target)
           onStatus(next)
         })
-        .catch(() => void showToast('Could not remove the account'))
+        .catch(() => {
+          void showToast('Could not remove the account')
+          // The removal can fail after main already dropped the tokens and
+          // activated the next account; re-pull the status so this tree never
+          // keeps rendering a removed account over another account's reads.
+          void window.attn?.auth
+            .getStatus()
+            .then(onStatus)
+            .catch(() => {})
+        })
         .finally(() => {
           accountSwitchPendingRef.current = false
           setAccountSwitchPending(false)
@@ -795,8 +812,13 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     },
     [onStatus, showToast, status.activeAccountId]
   )
+  const removeAccountDeleteRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
     if (!removeAccountConfirm) return
+    // Focus the first choice once, on open — an inline ref callback would
+    // re-run on every re-render and yank focus back onto the destructive
+    // button after the user tabbed to Keep or Cancel.
+    removeAccountDeleteRef.current?.focus()
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.stopPropagation()
@@ -835,21 +857,33 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [])
 
   // Everything a warm return to this account restores: the view on screen,
-  // the active split, and every view's selection/scroll records (F18).
+  // the active split, and every view's selection/scroll records (F18). While
+  // search is open the live selection and scroll describe the *search* list,
+  // so the records take the pre-search state `openSearch` stashed instead —
+  // mirroring the `!wasSearching` guard in switchViewNow.
   saveAccountSnapshotRef.current = () => {
     if (!activeAccount) return
-    saveActiveViewRecord()
+    const searching = searchOpenRef.current
+    const searchReturn = searchReturnRef.current
     const rawView = activeViewRef.current
+    if (!searching) saveActiveViewRecord()
+    else if (searchReturn && rawView !== 'outbox') {
+      viewStateRef.current.set(rawView, { ...searchReturn, loadedRows: loadedRowsRef.current })
+    }
     const currentSplitId = activeSplitIdRef.current
     if (rawView === 'inbox' && currentSplitId) {
-      splitViewStateRef.current.set(currentSplitId, {
-        rowId: selectedThreadIdRef.current,
-        index: selectedIndexRef.current,
-        loadedRows: loadedRowsRef.current,
-        scrollTop: readerOpenRef.current
-          ? (splitViewStateRef.current.get(currentSplitId)?.scrollTop ?? 0)
-          : (listElRef.current?.scrollTop ?? 0)
-      })
+      if (!searching) {
+        splitViewStateRef.current.set(currentSplitId, {
+          rowId: selectedThreadIdRef.current,
+          index: selectedIndexRef.current,
+          loadedRows: loadedRowsRef.current,
+          scrollTop: readerOpenRef.current
+            ? (splitViewStateRef.current.get(currentSplitId)?.scrollTop ?? 0)
+            : (listElRef.current?.scrollTop ?? 0)
+        })
+      } else if (searchReturn) {
+        splitViewStateRef.current.set(currentSplitId, { ...searchReturn, loadedRows: loadedRowsRef.current })
+      }
     }
     saveAccountView(activeAccount, {
       view: rawView === 'outbox' ? outboxReturnRef.current.view : rawView,
@@ -986,14 +1020,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           ? realOutbox.map((item) => item.id)
           : threads.map((thread) => thread.id)
     const restoredIndex = record.rowId ? rowIds.indexOf(record.rowId) : -1
-    // A remount starts with one page. Load the saved extent (for scroll) and
-    // selected row before deciding that the row has left this mailbox.
-    if (
-      pagedView &&
-      activePageState?.nextCursor &&
-      ((record.rowId !== null && restoredIndex < 0) ||
-        rowIds.length < (record.loadedRows ?? record.index + 1))
-    ) {
+    // Drafts have no loaded/empty sentinel: a freshly remounted tree renders
+    // an empty list before the first read lands. Hold a restore that expects
+    // rows until they arrive rather than consuming it against nothing.
+    if (view === 'drafts' && rowIds.length === 0 && (record.rowId !== null || record.index > 0)) return
+    // A remount starts with one page. Reload up to the saved extent (for the
+    // scroll offset and the selected row) before restoring — but never hunt a
+    // vanished row beyond it, which would page the entire mailbox.
+    if (pagedView && activePageState?.nextCursor && rowIds.length < (record.loadedRows ?? record.index + 1)) {
       void loadMoreThreads(pagedView)
       return
     }
@@ -1041,8 +1075,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       : -1
     if (
       threadPagination.inbox?.nextCursor &&
-      ((pending.record.rowId !== null && restoredIndex < 0) ||
-        realThreads.length < (pending.record.loadedRows ?? pending.record.index + 1))
+      realThreads.length < (pending.record.loadedRows ?? pending.record.index + 1)
     ) {
       void loadMoreThreads('inbox')
       return
@@ -1779,7 +1812,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
               <button
                 type="button"
                 data-testid="remove-account-delete"
-                ref={(element) => element?.focus()}
+                ref={removeAccountDeleteRef}
                 onClick={() => removeActiveAccount(true)}
                 className="w-full cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
               >

@@ -712,7 +712,13 @@ export class SyncController {
    * settles (its `.finally` releases the slot to that account) and re-queues
    * itself here, so the preempted cursor resumes once the slot comes back.
    * Returns false when the halt was a real cancellation — sign-out, session
-   * reset, shutdown — which must park, not re-queue.
+   * reset, shutdown — which must park, not re-queue. When those all still
+   * hold, the only remaining halt cause was a preemption ask, so re-queue
+   * without re-reading it: the ask can evaporate between the page boundary
+   * and this settle (the active account switched again), and parking then
+   * would strand the chain with no retry scheduled. A re-queue with nobody
+   * waiting is free — the slot grants immediately and the durable cursor
+   * resumes where it stopped.
    */
   private requeueAfterPreemption(
     accountId: string,
@@ -722,7 +728,6 @@ export class SyncController {
     if (this.stopped || generation !== this.generation || this.context.currentAccountId() !== accountId) {
       return false
     }
-    if (!this.preemptRequested(accountId)) return false
     console.log(`[sync] historical indexing preempted by the active account; requeueing ${accountId}`)
     this.lifetimeRunning = false
     this.startLifetimeSweep(accountId, provider, generation)

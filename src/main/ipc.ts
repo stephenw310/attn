@@ -25,7 +25,6 @@ export interface IpcContext {
   service: ServiceSupervisor
   authStatus: () => AuthStatus
   signIn: () => Promise<AuthSignInResult>
-  signOut: () => Promise<AuthStatus>
   setActiveAccount: (accountId: string) => Promise<AuthStatus>
   removeAccount: (accountId: string, deleteData: boolean) => Promise<AuthStatus>
   takePendingFocus: () => PendingFocusTarget | null
@@ -37,7 +36,6 @@ export function registerIpc(context: IpcContext): () => void {
   const mainOwned = new Set<InvokeChannel>([
     IPC_CHANNELS.authGetStatus,
     IPC_CHANNELS.authSignIn,
-    IPC_CHANNELS.authSignOut,
     IPC_CHANNELS.accountsSetActive,
     IPC_CHANNELS.accountsRemove,
     IPC_CHANNELS.draftPickAttachments,
@@ -48,7 +46,6 @@ export function registerIpc(context: IpcContext): () => void {
   ])
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
-  handle(IPC_CHANNELS.authSignOut, () => context.signOut())
   handle(IPC_CHANNELS.accountsSetActive, (_event, accountId) => {
     if (typeof accountId !== 'string' || accountId.length === 0) throw new Error('invalid account id')
     return context.setActiveAccount(accountId)

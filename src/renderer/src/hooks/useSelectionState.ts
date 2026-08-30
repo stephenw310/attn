@@ -8,7 +8,6 @@ interface SelectableThread {
 interface SelectionState {
   selectedIds: ReadonlySet<string>
   clearSelection: () => void
-  resetSelection: () => void
   toggleFocusedSelection: () => void
   extendSelectionTo: (index: number) => void
 }
@@ -79,7 +78,6 @@ export function useSelectionState(
   return {
     selectedIds,
     clearSelection,
-    resetSelection: clearSelection,
     toggleFocusedSelection,
     extendSelectionTo
   }
