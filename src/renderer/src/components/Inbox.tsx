@@ -17,6 +17,7 @@ import { useInboxCommands } from '../hooks/useInboxCommands'
 import { useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
 import { useLocalSearch } from '../hooks/useLocalSearch'
 import { useMailData } from '../hooks/useMailData'
+import { useRestoreTarget } from '../hooks/useRestoreTarget'
 import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
 import { useSelectionState } from '../hooks/useSelectionState'
 import { useServerSearch } from '../hooks/useServerSearch'
@@ -800,7 +801,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           // The removal can fail after main already dropped the tokens and
           // activated the next account; re-pull the status so this tree never
           // keeps rendering a removed account over another account's reads.
-          void window.attn?.auth
+          return window.attn?.auth
             .getStatus()
             .then(onStatus)
             .catch(() => {})
@@ -1004,6 +1005,30 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
             ? mailboxRows[backingCachedView] !== undefined
             : true
 
+  const pendingThreadRestore =
+    view === 'inbox' && pendingSplitRestoreRef.current?.id === splits.activeSplitId
+      ? pendingSplitRestoreRef.current.record
+      : pendingViewRestoreRef.current?.view === view
+        ? pendingViewRestoreRef.current.record
+        : null
+  const missingRestoreTarget =
+    viewRowsLoaded &&
+    pagedView &&
+    activePageState?.nextCursor &&
+    pendingThreadRestore?.rowId &&
+    threads.length >= (pendingThreadRestore.loadedRows ?? pendingThreadRestore.index + 1) &&
+    !threads.some((thread) => thread.id === pendingThreadRestore.rowId)
+      ? pendingThreadRestore.rowId
+      : null
+  const restoreTargetPresent = useRestoreTarget(
+    pagedView,
+    missingRestoreTarget,
+    activePageState?.nextCursor ?? null,
+    view === 'inbox' ? splits.activeSplitId : null,
+    view === 'inbox' ? inboxSplitRevision : undefined,
+    mailRevision
+  )
+
   // Restore the returning view's selection and scroll once its rows are in
   // state. Selection follows the thread id first — refreshed rows may have
   // moved it — and falls back to the clamped index when the thread left the
@@ -1025,10 +1050,14 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     // rows until they arrive rather than consuming it against nothing.
     if (view === 'drafts' && rowIds.length === 0 && (record.rowId !== null || record.index > 0)) return
     // A remount starts with one page. Reload up to the saved extent (for the
-    // scroll offset and the selected row) before restoring — but never hunt a
-    // vanished row beyond it, which would page the entire mailbox.
+    // scroll offset and the selected row) before restoring. Beyond that extent,
+    // only keep paging if a targeted read confirms the row still belongs here.
     if (pagedView && activePageState?.nextCursor && rowIds.length < (record.loadedRows ?? record.index + 1)) {
       void loadMoreThreads(pagedView)
+      return
+    }
+    if (missingRestoreTarget && pagedView && restoreTargetPresent !== false) {
+      if (restoreTargetPresent) void loadMoreThreads(pagedView)
       return
     }
     pendingViewRestoreRef.current = null
@@ -1043,9 +1072,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   }, [
     activePageState?.nextCursor,
     loadMoreThreads,
+    missingRestoreTarget,
     pagedView,
     realDrafts,
     realOutbox,
+    restoreTargetPresent,
     threads,
     view,
     viewRowsLoaded
@@ -1080,6 +1111,10 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
       void loadMoreThreads('inbox')
       return
     }
+    if (missingRestoreTarget && restoreTargetPresent !== false) {
+      if (restoreTargetPresent) void loadMoreThreads('inbox')
+      return
+    }
     pendingSplitRestoreRef.current = null
     const nextIndex =
       restoredIndex >= 0
@@ -1092,7 +1127,9 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
     loadedInboxSplitId,
     loadedInboxSplitStale,
     loadMoreThreads,
+    missingRestoreTarget,
     realThreads,
+    restoreTargetPresent,
     splits.activeSplitId,
     splits.state,
     threadPagination.inbox?.nextCursor,

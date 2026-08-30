@@ -93,6 +93,8 @@ const api = {
       invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage)
   },
   mail: {
+    findThreadInView: (request: ThreadListRequest, threadId: string): Promise<ThreadPage> =>
+      listThreadPage({ ...request, cursor: undefined, threadId }),
     search: (query: string): Promise<SearchResponse> => invoke(IPC_CHANNELS.mailSearch, query),
     searchAll: (requestId: string, query: string): Promise<ServerSearchResponse> =>
       invoke(IPC_CHANNELS.mailSearchAll, requestId, query),

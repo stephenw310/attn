@@ -151,6 +151,49 @@ describe('two-account read isolation', () => {
     db.close()
   })
 
+  it('targeted restoration reads enforce account and mailbox membership', async () => {
+    const db = await twoAccountStore()
+    ensureSplitSetup(db, A)
+    const cases: { read: (id: string) => { id: string }[]; member: string; excluded: string }[] = [
+      {
+        read: (id) => queries.listInboxThreads(db, A, 1, null, undefined, id),
+        member: 'alpha-t2',
+        excluded: 'alpha-t5'
+      },
+      {
+        read: (id) => queries.listInboxThreads(db, A, 1, null, IMPORTANT_SPLIT_ID, id),
+        member: 'alpha-t1',
+        excluded: 'alpha-t2'
+      },
+      {
+        read: (id) => queries.listLabelThreads(db, A, 'alpha-label', 1, null, id),
+        member: 'alpha-t2',
+        excluded: 'alpha-t1'
+      },
+      {
+        read: (id) => queries.listSnoozedThreads(db, A, 1, null, id),
+        member: 'alpha-t7',
+        excluded: 'alpha-t1'
+      }
+    ]
+    for (const [view, member, excluded] of [
+      ['allMail', 'alpha-t3', 'alpha-t5'],
+      ['sent', 'alpha-t3', 'alpha-t1'],
+      ['starred', 'alpha-t4', 'alpha-t3'],
+      ['spam', 'alpha-t5', 'alpha-t6'],
+      ['trash', 'alpha-t6', 'alpha-t5']
+    ] as const) {
+      cases.push({ read: (id) => queries.listMailboxThreads(db, A, view, 1, null, id), member, excluded })
+    }
+    for (const { read, member, excluded } of cases) {
+      expect(read(member).map((row) => row.id)).toEqual([member])
+      expect(read(excluded)).toEqual([])
+      expect(read(member.replace('alpha-', 'beta-'))).toEqual([])
+      expect(read('missing-thread')).toEqual([])
+    }
+    db.close()
+  })
+
   it('sweeps every read export of queries.ts and search.ts (add new reads here)', () => {
     const covered = new Set([
       'listMailboxThreads',

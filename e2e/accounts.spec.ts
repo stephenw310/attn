@@ -326,6 +326,73 @@ test('account removal blocks shortcuts and composer opens until the response set
   await composer.expectFrom(SECOND)
 })
 
+test('failed removal keeps composing blocked until the recovery status settles', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(2)
+  await app.evaluate(({ ipcMain }, channels) => {
+    type Handler = Parameters<typeof ipcMain.handle>[1]
+    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
+    const remove = handlers.get(channels.accountsRemove)
+    const status = handlers.get(channels.authGetStatus)
+    const save = handlers.get(channels.draftSave)
+    if (!remove || !status || !save) throw new Error('Missing account/draft handlers')
+    const activity = { draftSaves: 0 }
+    Object.assign(globalThis, { removalActivity: activity })
+    ipcMain.removeHandler(channels.draftSave)
+    ipcMain.handle(channels.draftSave, (...args) => {
+      activity.draftSaves++
+      return save(...args)
+    })
+    ipcMain.removeHandler(channels.accountsRemove)
+    ipcMain.handle(channels.accountsRemove, async (...args) => {
+      await remove(...args)
+      throw new Error('Simulated failure after account retirement')
+    })
+    ipcMain.removeHandler(channels.authGetStatus)
+    ipcMain.handle(channels.authGetStatus, async (...args) => {
+      const result = await status(...args)
+      await new Promise<void>((resolve) => {
+        Object.assign(globalThis, { releaseAccountResponse: resolve })
+      })
+      return result
+    })
+  }, IPC_CHANNELS)
+  await page.getByTestId('account-menu').getByRole('button').first().click()
+  await page.getByTestId('account-remove').click()
+  await page.getByTestId('remove-account-keep').click()
+  await expectAccountResponseHeld(app)
+  await expect(page.getByTestId('toast')).toContainText('Could not remove the account')
+  // Let the rejection's React update commit before exercising the shortcut.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      })
+  )
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
+  await page.keyboard.press('c')
+  // Wait through the draft IPC queue before asserting that composing stayed blocked.
+  await page.evaluate(() => window.attn.draft.list())
+  expect(
+    await app.evaluate(
+      () => (globalThis as unknown as { removalActivity: { draftSaves: number } }).removalActivity.draftSaves
+    )
+  ).toBe(0)
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await app.evaluate(() => {
+    const state = globalThis as unknown as { releaseAccountResponse: () => void }
+    state.releaseAccountResponse()
+  })
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+  expect(await page.evaluate(() => window.attn.draft.list())).toEqual([])
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.expectFrom(SECOND)
+  await composer.editor.fill('Text typed after account recovery')
+  await composer.expectSaved()
+  await expect(composer.editor).toContainText('Text typed after account recovery')
+})
+
 test('a switch restores each account’s last view and selection', async ({ page }) => {
   await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
