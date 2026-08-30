@@ -47,6 +47,7 @@ import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
 import { CommandPalette } from './CommandPalette'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
+import { InboxZero } from './InboxZero'
 import { MailFooter } from './MailFooter'
 import { MailHeader } from './MailHeader'
 import { MailSidebar } from './MailSidebar'
@@ -184,6 +185,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   setActiveSplitForFocusRef.current = splits.setActiveSplitId
   const {
     sync,
+    inboxBackfillReady,
     networkOnline,
     realThreads,
     setRealThreads,
@@ -239,6 +241,16 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
   const activeInboxRowsResolved =
     activeInboxRowsReady && !(loadedInboxSplitStale && (realThreads?.length ?? 0) === 0)
   const activeInboxSelectionReady = activeInboxRowsReady && !loadedInboxSplitStale
+  const showInboxZero = Boolean(
+    !searchOpen &&
+      view === 'inbox' &&
+      !readerOpen &&
+      activeInboxRowsResolved &&
+      inboxBackfillReady === true &&
+      realThreads?.length === 0 &&
+      splits.state &&
+      splits.activeSplitId
+  )
   const mailboxThreads: DisplayThread[] = useMemo(
     () =>
       backingMailView === 'inbox'
@@ -1667,13 +1679,22 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
                   openOutboxItem(index)
                 }}
               />
+            ) : showInboxZero && splits.state && splits.activeSplitId ? (
+              <InboxZero
+                activeSplitId={splits.activeSplitId}
+                splits={splits.state.splits}
+                listRef={listElRef}
+                onSelectSplit={switchSplit}
+              />
             ) : (
               <ThreadList
                 threads={threads}
                 view={searchOpen ? 'search' : threadListKind(view)}
                 hasMore={!searchOpen && activePageState?.nextCursor !== null && activePageState !== undefined}
                 loadingMore={!searchOpen && (activePageState?.loadingMore ?? false)}
-                loadingInitial={!searchOpen && view === 'inbox' && !activeInboxRowsResolved}
+                loadingInitial={
+                  !searchOpen && view === 'inbox' && (!activeInboxRowsResolved || inboxBackfillReady !== true)
+                }
                 syncing={!searchOpen && sync.phase === 'syncing'}
                 readerOpen={readerOpen}
                 selectedIndex={selectedIndex}

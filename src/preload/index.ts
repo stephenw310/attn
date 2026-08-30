@@ -266,6 +266,7 @@ const api = {
   },
   sync: {
     getState: (): Promise<SyncState> => invoke(IPC_CHANNELS.syncGetState),
+    getInboxReady: (): Promise<boolean> => invoke(IPC_CHANNELS.syncGetInboxReady),
     retry: (): Promise<void> => invoke(IPC_CHANNELS.syncRetry),
     onState: (cb: (s: SyncState) => void): (() => void) => {
       const listener = (_e: unknown, s: SyncState): void => cb(s)

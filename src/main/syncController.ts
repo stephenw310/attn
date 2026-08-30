@@ -69,6 +69,7 @@ export class SyncController {
   private pendingFtsBackfill: FtsBackfillRun | null = null
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
+  private inboxRecoveryPending = false
   private pollerRunning = false
   private stopped = false
   private backfillRetryGeneration: number | null = null
@@ -87,6 +88,10 @@ export class SyncController {
 
   getGeneration(): number {
     return this.generation
+  }
+
+  isInboxRecoveryPending(): boolean {
+    return this.inboxRecoveryPending
   }
 
   /** E2E-only seam for exercising renderer state transitions through real IPC. */
@@ -175,6 +180,7 @@ export class SyncController {
     this.lifetimeRunning = false
     this.lifetimeProgress = null
     this.foregroundFailure = null
+    this.inboxRecoveryPending = false
     this.lifetimeRunId++
     this.generation++
   }
@@ -344,6 +350,7 @@ export class SyncController {
           if (this.context.isSignedIn()) void this.resumeOnlineWork()
           return
         }
+        this.inboxRecoveryPending = false
         this.foregroundFailure = null
         this.setState({ phase: 'idle' })
         this.context.broadcastMailChanged()
@@ -702,6 +709,7 @@ export class SyncController {
       console.warn('[sync] history recovery deferred — backfill in progress')
       return
     }
+    this.inboxRecoveryPending = true
     this.running = true
     this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
     let failure: unknown = new Error('history recovery backfill failed')
@@ -748,6 +756,7 @@ export class SyncController {
       reconcileInboxMembership(this.context.db, accountId, result.inboxThreadIds)
       await reconcilePurgeableMembership(this.context.db, accountId, provider, 'SPAM', result.spamThreadIds)
       await reconcilePurgeableMembership(this.context.db, accountId, provider, 'TRASH', result.trashThreadIds)
+      this.inboxRecoveryPending = false
     } finally {
       if (generation === this.generation) this.running = false
       else if (this.context.isSignedIn()) void this.resumeOnlineWork()

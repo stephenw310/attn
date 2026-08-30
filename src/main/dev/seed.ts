@@ -53,6 +53,8 @@ interface SeedAccountFixture {
   account: string
   labels?: LabelRow[]
   threads: SeedThread[]
+  /** Override the complete checkpoint for sync-gating e2e coverage. */
+  backfillCursor?: string
   /** E2E-only Gmail snapshots that are not imported until an explicit server search fetches them. */
   remoteThreads?: SeedThread[]
   /** Exact Gmail q= responses for the remote snapshots, keeping the provider seam query-aware. */
@@ -233,19 +235,19 @@ export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): S
       for (const thread of fixture.threads) {
         persistThread(db, fixture.account, gmailThreadFor(thread, importedAt))
       }
-      // Seeded stores are complete local snapshots and never contact Gmail. Mark
-      // foreground backfill, derived metadata passes, and the FTS backfill
-      // complete so relaunches stay settled; persistThread indexed every row.
+      // Seeded stores never contact Gmail. Default each account to a complete
+      // snapshot, unless its fixture overrides the foreground checkpoint.
+      // Derived metadata and FTS are complete; persistThread indexed every row.
       db.prepare(
         `INSERT INTO sync_state
          (account_id, backfill_cursor, sweep_cursor, split_metadata_cursor, fts_cursor)
-         VALUES (?, 'done', 'done', 'done', 'done')
+         VALUES (?, ?, 'done', 'done', 'done')
          ON CONFLICT(account_id) DO UPDATE SET
            backfill_cursor = excluded.backfill_cursor,
            sweep_cursor = COALESCE(sync_state.sweep_cursor, excluded.sweep_cursor),
            split_metadata_cursor = COALESCE(sync_state.split_metadata_cursor, excluded.split_metadata_cursor),
            fts_cursor = COALESCE(sync_state.fts_cursor, excluded.fts_cursor)`
-      ).run(fixture.account)
+      ).run(fixture.account, fixture.backfillCursor ?? 'done')
     }
   })()
 
