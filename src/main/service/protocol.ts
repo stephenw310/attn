@@ -49,6 +49,7 @@ export type ServiceOperation =
   | 'resume-auth-failures'
   | 'apply-accounts'
   | 'set-active-account'
+  | 'remove-account-data'
   | 'mark-login-item-registered'
   | 'set-notification-pause'
   | 'test'
@@ -79,6 +80,7 @@ export type ServiceEvent =
   | { kind: 'body-hydration-failed'; accountId: string; threadId: string }
   | { kind: 'actions-reverted'; accountId: string; actions: RevertedAction[] }
   | { kind: 'badge'; unreadCount: number }
+  | { kind: 'accounts-status'; statuses: import('../../shared/auth').AccountSyncStatus[] }
   | {
       kind: 'notification-candidates'
       accountId: string

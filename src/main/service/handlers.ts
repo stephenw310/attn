@@ -20,6 +20,7 @@ import {
   type InlineImageRepairRequest,
   type InlineImageRequest,
   type InlineImageResult,
+  type SystemMailboxCounts,
   THREAD_PAGE_SIZE,
   type ThreadListRequest,
   type ThreadListView,
@@ -45,7 +46,6 @@ import { writeAttachment } from '../attachments'
 import type { Db } from '../db'
 import {
   countInboxUnread,
-  countSystemMailboxes,
   getConversation,
   getConversationForDisplay,
   getInlineAttachmentData,
@@ -86,7 +86,6 @@ import type { SnoozeScheduler } from '../scheduler'
 import { readAccountSetting, readSetting, writeAccountSetting, writeSetting } from '../settings'
 import {
   deleteSplit,
-  getSplitState,
   hasSplitSetup,
   reorderSplits,
   restoreSplitPreset,
@@ -120,6 +119,8 @@ type SnoozeRequest = InvokeChannels[typeof IPC_CHANNELS.mailSnooze]['args'][0]
 export interface ServiceHandlerContext {
   db: Db
   currentAccountId: () => string | null
+  /** Per-account one-line health readouts for the account menu (F18). */
+  accountStatuses: () => import('../../shared/auth').AccountSyncStatus[]
   makeClient: () => GmailClient | null
   makeProvider: () => GmailMailProvider | null
   makeServerSearchProvider: () => ServerSearchProvider | null
@@ -130,6 +131,8 @@ export interface ServiceHandlerContext {
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
   broadcastMailChanged: (serverSearchRequestId?: string) => void
+  mailboxCounts: (accountId: string) => SystemMailboxCounts
+  splitState: (accountId: string) => import('../../shared/splits').SplitState
   broadcastOutboxChanged: (change: import('../../shared/outbox').OutboxChanged) => void
   broadcastBodyHydrationFailed: (accountId: string, threadId: string) => void
   trackForegroundProviderWork: <T>(accountId: string, work: () => Promise<T>) => Promise<T>
@@ -186,8 +189,15 @@ const THREAD_LIST_VIEWS: readonly ThreadListView[] = [
 
 function isThreadListRequest(value: unknown): value is ThreadListRequest {
   if (!value || typeof value !== 'object') return false
-  const request = value as { view?: unknown; labelId?: unknown; splitId?: unknown; cursor?: unknown }
+  const request = value as {
+    view?: unknown
+    labelId?: unknown
+    splitId?: unknown
+    cursor?: unknown
+    threadId?: unknown
+  }
   if (request.cursor !== undefined && !isThreadPageCursor(request.cursor)) return false
+  if (request.threadId !== undefined && !nonEmptyString(request.threadId)) return false
   if (request.view === 'label') return nonEmptyString(request.labelId)
   if (request.splitId !== undefined && (request.view !== 'inbox' || !nonEmptyString(request.splitId))) {
     return false
@@ -426,7 +436,10 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const id = saveDraft(context.db, account, prepared.draft, now, prepared.defaultSignatureFingerprint)
     return {
       id,
-      draft: prepared.draft.id === null ? { ...prepared.draft, id, createdAt: now, updatedAt: now } : null
+      draft:
+        prepared.draft.id === null
+          ? { ...prepared.draft, id, accountId: account, createdAt: now, updatedAt: now }
+          : null
     }
   })
   handle(IPC_CHANNELS.draftGet, (_event, id) => {
@@ -779,25 +792,27 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const input = isThreadListRequest(request) ? request : null
     if (!account || !input) return threadPage([])
     const cursor = input.cursor ?? null
-    const limit = THREAD_PAGE_SIZE + 1
+    const limit = input.threadId ? 1 : THREAD_PAGE_SIZE + 1
     if (input.view === 'label') {
-      return threadPage(listLabelThreads(context.db, account, input.labelId, limit, cursor))
+      return threadPage(listLabelThreads(context.db, account, input.labelId, limit, cursor, input.threadId))
     }
     if (input.view === 'inbox') {
-      if (!input.splitId) return threadPage(listInboxThreads(context.db, account, limit, cursor))
+      if (!input.splitId) {
+        return threadPage(listInboxThreads(context.db, account, limit, cursor, undefined, input.threadId))
+      }
       return context.db.transaction(() => {
         const revision = splitRevision(context.db, account)
         return threadPage(
-          listInboxThreads(context.db, account, limit, cursor, input.splitId),
+          listInboxThreads(context.db, account, limit, cursor, input.splitId, input.threadId),
           false,
           revision
         )
       })()
     }
     if (input.view === 'snoozed') {
-      return threadPage(listSnoozedThreads(context.db, account, limit, cursor), true)
+      return threadPage(listSnoozedThreads(context.db, account, limit, cursor, input.threadId), true)
     }
-    return threadPage(listMailboxThreads(context.db, account, input.view, limit, cursor))
+    return threadPage(listMailboxThreads(context.db, account, input.view, limit, cursor, input.threadId))
   })
   handle(IPC_CHANNELS.mailListLabels, () => {
     const account = context.currentAccountId()
@@ -806,7 +821,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.mailGetMailboxCounts, () => {
     const account = context.currentAccountId()
     return account
-      ? countSystemMailboxes(context.db, account)
+      ? context.mailboxCounts(account)
       : { inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }
   })
   handle(IPC_CHANNELS.mailGetUnreadCount, () => {
@@ -818,7 +833,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (!account || (context.testUserData && !hasSplitSetup(context.db, account))) {
       return { revision: 0, splits: [], restorablePresetIds: [] }
     }
-    return getSplitState(context.db, account)
+    return context.splitState(account)
   })
   handle(IPC_CHANNELS.splitsGetThreadLocation, (_event, threadId) => {
     const account = context.currentAccountId()
@@ -1005,6 +1020,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     }
     return result
   })
+  handle(IPC_CHANNELS.accountsGetStatuses, () => context.accountStatuses())
   handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
     const account = context.currentAccountId()
     return account ? pendingActionCount(context.db, account) : 0

@@ -14,6 +14,7 @@ import {
 
 const draft: Draft = {
   id: 'local-draft',
+  accountId: 'user@attn.test',
   kind: 'new',
   to: [],
   cc: [],

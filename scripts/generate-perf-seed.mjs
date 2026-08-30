@@ -11,6 +11,14 @@ const messageCount = Number(messageArgument?.slice('--messages='.length) ?? 10_0
 if (!Number.isSafeInteger(messageCount) || messageCount < 1) {
   throw new Error('--messages must be a positive integer')
 }
+// The M5/A7 profile: a second signed-in account with its own smaller mailbox,
+// so every existing budget runs with another live account present and the
+// warm account-switch p95 has something real to switch to (F18, §7).
+const secondArgument = process.argv.find((argument) => argument.startsWith('--second-account='))
+const secondThreadCount = Number(secondArgument?.slice('--second-account='.length) ?? 1_000)
+if (!Number.isSafeInteger(secondThreadCount) || secondThreadCount < 0) {
+  throw new Error('--second-account must be a non-negative integer')
+}
 const threadCount = Math.min(10_000, messageCount)
 const baseDate = Date.UTC(2026, 0, 1)
 
@@ -52,6 +60,38 @@ const threads = Array.from({ length: threadCount }, (_, index) => {
   }
 })
 
+const secondThreads = Array.from({ length: secondThreadCount }, (_, index) => {
+  const number = index + 1
+  return {
+    id: `perf-second-thread-${number}`,
+    historyId: String(50_000 + number),
+    messages: [
+      {
+        id: `perf-second-message-${number}`,
+        labelIds: ['INBOX', ...(number % 2 === 0 ? ['UNREAD'] : [])],
+        internalDate: String(baseDate + number * 60_000),
+        from: `Second Sender ${number} <second${number}@example.test>`,
+        to: 'perf-second@attn.test',
+        subject: `Second account thread ${number}`,
+        snippet: `Second-account fixture message ${number}.`,
+        bodyText: `Cached body for the second account, thread ${number}.`
+      }
+    ]
+  }
+})
+
 mkdirSync(dirname(output), { recursive: true })
-writeFileSync(output, `${JSON.stringify({ account: 'perf@attn.test', threads })}\n`)
-console.log(`[perf-seed] wrote ${threadCount} threads and ${messageCount} messages to ${output}`)
+const fixture =
+  secondThreadCount > 0
+    ? {
+        accounts: [
+          { account: 'perf@attn.test', threads },
+          { account: 'perf-second@attn.test', threads: secondThreads }
+        ]
+      }
+    : { account: 'perf@attn.test', threads }
+writeFileSync(output, `${JSON.stringify(fixture)}\n`)
+console.log(
+  `[perf-seed] wrote ${threadCount} threads and ${messageCount} messages` +
+    `${secondThreadCount > 0 ? ` plus a ${secondThreadCount}-thread second account` : ''} to ${output}`
+)

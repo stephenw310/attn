@@ -136,6 +136,36 @@ describe('split inbox', () => {
     expect(listInboxThreads(db, 'account', 10, null, 'preset:github').map((row) => row.id)).toEqual(['cross'])
   })
 
+  it('stops evaluating old messages once the requested recent split page is full', () => {
+    for (let index = 0; index < 50; index++) {
+      insertThread(`old-${index}`, index + 1, [{ id: `old-message-${index}`, from: 'old@query.test' }])
+    }
+    for (let index = 1; index <= 3; index++) {
+      insertThread(`recent-${index}`, index * 100, [
+        { id: `recent-message-${index}`, from: 'new@query.test' }
+      ])
+    }
+    const state = saveSplit(db, 'account', {
+      name: 'Query test',
+      operator: 'any',
+      conditions: [{ type: 'senderDomain', value: 'query.test' }],
+      notify: false
+    })
+    const custom = state.splits.find((split) => split.kind === 'custom')
+    if (!custom) throw new Error('Expected custom split')
+    let oldMessageEvaluations = 0
+    db.function('lower', { deterministic: true }, (value: unknown) => {
+      if (value === 'old@query.test') oldMessageEvaluations++
+      return String(value ?? '').toLowerCase()
+    })
+
+    expect(listInboxThreads(db, 'account', 2, null, custom.id).map((row) => row.id)).toEqual([
+      'recent-3',
+      'recent-2'
+    ])
+    expect(oldMessageEvaluations).toBe(0)
+  })
+
   it('does not recreate deleted presets and restores only the requested preset', () => {
     ensureSplitSetup(db, 'account')
     const initialRevision = splitRevision(db, 'account')

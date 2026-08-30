@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import { openDatabase } from '../db'
+import { countSystemMailboxes } from '../db/queries'
 import type { GmailThread } from '../gmail/parse'
+import { getSplitState } from '../splits'
 import { ensureAccount } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
@@ -18,6 +20,9 @@ function handlerContext(
   return {
     db,
     currentAccountId: () => ACCOUNT,
+    accountStatuses: () => [],
+    mailboxCounts: (accountId) => countSystemMailboxes(db, accountId),
+    splitState: (accountId) => getSplitState(db, accountId),
     makeClient: () => null,
     makeProvider: () => null,
     makeServerSearchProvider: () => provider,
