@@ -5,9 +5,7 @@ import { hydrateMissingThreadBodies } from './bodies'
 import { missingBodyMessageIds } from './bodyHydration'
 import { persistThread } from './persist'
 import type { MailProvider } from './provider'
-
-export const BODY_HYDRATION_TIMEOUT_MS = 30_000
-export const MAX_RETAINED_BODY_HYDRATION_STATES = 256
+import { BODY_HYDRATION_TIMEOUT_MS, MAX_RETAINED_BODY_HYDRATION_STATES } from './tuning'
 
 export type BodyHydrationAttemptState = 'idle' | 'loading' | 'unavailable'
 

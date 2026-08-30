@@ -9,6 +9,7 @@ import { hydrateMissingThreadBodies } from './bodies'
 import { fetchAndCacheThread } from './fetchThread'
 import { deleteThread } from './persist'
 import type { HistoryRecord, MailProvider } from './provider'
+import { BACKGROUND_POLL_MS, FOREGROUND_POLL_MS } from './tuning'
 
 export interface NewMail {
   threadId: string
@@ -199,9 +200,6 @@ export async function runHistoryCycle(
   db.prepare('UPDATE sync_state SET last_history_id = ? WHERE account_id = ?').run(plan.historyId, accountId)
   return plan
 }
-
-export const FOREGROUND_POLL_MS = 15_000
-export const BACKGROUND_POLL_MS = 60_000
 
 export interface HistoryPollerOptions {
   db: Db

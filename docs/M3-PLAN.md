@@ -1290,6 +1290,13 @@ stored threads without counting them twice. An unchanged or lower limit makes no
 exhausted listing stores `done`. The search footer distinguishes capped headers from headers still syncing.
 Unit tests cover the cursor and count behavior; the Electron test raises and disables the cap after relaunch.
 
+Tuning defaults are grouped by behavior without changing their values. `src/main/sync/tuning.ts` now also
+owns polling and retry delays, bootstrap concurrency, Gmail page sizes and quota policy, body hydration
+bounds, and the diagnostic list limit. `src/shared/outboxTuning.ts` owns composer checkpoints, send recovery,
+shutdown deadlines, retention, and undo-send options. The renderer's interaction timings live in
+`src/renderer/src/tuning.ts`. These are compile-time defaults; existing injected options and persisted
+preferences retain their behavior. Protocol, MIME, schema, and security constants stay with their owners.
+
 ## Schema revision 21 → 22: derived mailbox membership and dated index rows
 
 Shipped 2026-08-29 with SPEC §9 #22. Additive and data-preserving, so it qualifies for the manual

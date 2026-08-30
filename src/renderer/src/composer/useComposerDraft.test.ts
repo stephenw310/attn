@@ -4,13 +4,8 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import type { Draft } from '../../../shared/drafts'
-import {
-  type ComposerDraftController,
-  MIRROR_IDLE_MS,
-  MIRROR_PAYLOAD_IDLE_MS,
-  mirrorIdleMs,
-  useComposerDraft
-} from './useComposerDraft'
+import { MIRROR_IDLE_MS, MIRROR_PAYLOAD_IDLE_MS } from '../../../shared/outboxTuning'
+import { type ComposerDraftController, mirrorIdleMs, useComposerDraft } from './useComposerDraft'
 
 const draft: Draft = {
   id: 'local-draft',

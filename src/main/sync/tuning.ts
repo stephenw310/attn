@@ -1,13 +1,11 @@
-// Every knob that decides how much mail Attn stores and how hard it works to
-// store it, in one file so a load-time experiment is a one-line change.
+// Compile-time defaults for mail storage, reads, sync scheduling, and Gmail
+// throughput. Keep this module free of runtime dependencies. Existing injected
+// options and the OAuth project's quota override still take precedence.
 //
-// This file replaces the narrower `windows.ts`: the date windows were never the
-// only tunables, and having the pacing constants scattered across the modules
-// that use them meant reasoning about sync cost required opening six files.
-// Values that describe a *contract* rather than a preference stay where they are
-// enforced: Gmail's quota unit table lives in `gmail/quota.ts` because it is
-// Google's table, not ours, and `THREAD_PAGE_SIZE` lives in `shared/mail.ts`
-// because the renderer pages against it.
+// Composer and outbox policy lives in `shared/outboxTuning.ts`; renderer timing
+// lives in `renderer/src/tuning.ts`. Protocol contracts stay with their owners:
+// Gmail's per-method quota costs in `gmail/quota.ts`, and renderer paging in
+// `shared/mail.ts`. Equal values do not imply that two policies should be linked.
 
 // ---------------------------------------------------------------------------
 // How much mail is stored
@@ -30,7 +28,7 @@ export const ALL_MAIL_WINDOW = 'newer_than:12m'
  * per thread, 400,000 threads is that million.
  *
  * The cost it bounds is time, not just disk. Gmail admits background work at
- * 6,000 quota units a minute, less a 400-unit interactive reserve, and a thread
+ * 6,000 quota units a minute, less a 500-unit interactive reserve, and a thread
  * fetch costs 40: about 137 threads a minute. 400,000 threads is therefore
  * roughly 48 hours of app-open time, so an account several times larger spends
  * months indexing and tens of gigabytes doing it.
@@ -47,6 +45,61 @@ export const LIFETIME_THREAD_CAP = 400_000
 
 /** No cap: store the entire account, whatever it costs. */
 export const LIFETIME_THREAD_CAP_UNLIMITED = 0
+
+// ---------------------------------------------------------------------------
+// Gmail requests and quota policy
+// ---------------------------------------------------------------------------
+
+/** Request page sizes, not total sync or search limits. */
+export const GMAIL_THREAD_PAGE_SIZE = 100
+export const GMAIL_DRAFT_PAGE_SIZE = 100
+export const GMAIL_HISTORY_PAGE_SIZE = 500
+
+/** Fallback when the OAuth configuration does not specify the project's quota. */
+export const DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE = 6_000
+export const GMAIL_QUOTA_BURST_SECONDS = 6
+
+/** Cumulative floors: each priority leaves these units available to higher priorities. */
+export const GMAIL_QUOTA_RESERVED_UNITS = {
+  send: 0,
+  action: 200,
+  polling: 300,
+  foreground: 400,
+  background: 500
+} as const
+
+/** Refresh an access token before its expiry to allow time for the next request. */
+export const GMAIL_TOKEN_REFRESH_MARGIN_MS = 60_000
+
+/** A 401 refresh consumes the same attempt budget as transient retries. */
+export const GMAIL_MAX_RETRIES = 7
+/** The exponent starts at one, so the first transient retry waits twice this base. */
+export const GMAIL_RETRY_BASE_MS = 1_000
+export const GMAIL_RETRY_MAX_MS = 65_000
+export const GMAIL_RETRY_JITTER_MS = 1_000
+
+// ---------------------------------------------------------------------------
+// Foreground sync and retries
+// ---------------------------------------------------------------------------
+
+export const FOREGROUND_POLL_MS = 15_000
+export const BACKGROUND_POLL_MS = 60_000
+export const OFFLINE_SYNC_RETRY_MS = 15_000
+export const LIFETIME_RETRY_MS = 15_000
+export const FTS_RETRY_MS = 15_000
+
+/** Independent concurrency limits for thread and draft bootstrap fetches. */
+export const BACKFILL_THREAD_CONCURRENCY = 3
+export const BACKFILL_DRAFT_CONCURRENCY = 3
+
+/** Retry ladder shared by queued mail actions, draft mirrors, and the outbox sender. */
+export const MAIL_RETRY_FIRST_MS = 5_000
+export const MAIL_RETRY_SECOND_MS = 30_000
+export const MAIL_RETRY_MAX_MS = 60_000
+
+/** Bound a body fetch and the retained unavailable states for opened conversations. */
+export const BODY_HYDRATION_TIMEOUT_MS = 30_000
+export const MAX_RETAINED_BODY_HYDRATION_STATES = 256
 
 // ---------------------------------------------------------------------------
 // How hard the background passes work
@@ -76,6 +129,9 @@ export const MAILBOX_BACKFILL_BATCH_PAUSE_MS = 10
 // ---------------------------------------------------------------------------
 // How much a read is allowed to look at
 // ---------------------------------------------------------------------------
+
+/** Internal diagnostic reads; renderer mailbox reads use THREAD_PAGE_SIZE plus lookahead. */
+export const THREAD_LIST_LIMIT = 10_000
 
 /** Rows a local search returns. */
 export const SEARCH_RESULT_LIMIT = 100

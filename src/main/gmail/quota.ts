@@ -1,3 +1,4 @@
+import { GMAIL_QUOTA_BURST_SECONDS, GMAIL_QUOTA_RESERVED_UNITS } from '../sync/tuning'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 
 /**
@@ -33,8 +34,6 @@ export type GmailQuotaMethod = keyof typeof GMAIL_QUOTA_UNITS
 export type GmailRequestPriority = 'send' | 'action' | 'polling' | 'foreground' | 'background'
 
 const PRIORITIES: GmailRequestPriority[] = ['send', 'action', 'polling', 'foreground', 'background']
-
-export const DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE = 6_000
 
 export interface GmailQuotaConfig {
   /** The actual per-minute, per-user quota configured for this OAuth project. */
@@ -75,16 +74,8 @@ interface Admission {
   cost: number
 }
 
-const DEFAULT_RESERVED_UNITS: Record<GmailRequestPriority, number> = {
-  send: 0,
-  action: 200,
-  polling: 300,
-  foreground: 400,
-  background: 500
-}
 const MAX_REQUEST_COST = Math.max(...Object.values(GMAIL_QUOTA_UNITS))
 const QUOTA_WINDOW_MS = 60_000
-const DEFAULT_BURST_SECONDS = 6
 
 /** A priority queue over a burst bucket guarded by a strict rolling-minute budget. */
 export class GmailQuotaLimiter {
@@ -113,7 +104,7 @@ export class GmailQuotaLimiter {
       config.capacity ??
       Math.min(
         config.unitsPerMinute,
-        Math.max(MAX_REQUEST_COST, (config.unitsPerMinute * DEFAULT_BURST_SECONDS) / 60)
+        Math.max(MAX_REQUEST_COST, (config.unitsPerMinute * GMAIL_QUOTA_BURST_SECONDS) / 60)
       )
     if (!Number.isFinite(this.capacity) || this.capacity <= 0) {
       throw new Error('Gmail quota capacity must be positive')
@@ -122,7 +113,7 @@ export class GmailQuotaLimiter {
       throw new Error('Gmail quota capacity cannot exceed the rolling-minute limit')
     }
     this.refillPerMs = config.unitsPerMinute / QUOTA_WINDOW_MS
-    this.reservedUnits = { ...DEFAULT_RESERVED_UNITS, ...config.reservedUnits }
+    this.reservedUnits = { ...GMAIL_QUOTA_RESERVED_UNITS, ...config.reservedUnits }
     for (const priority of PRIORITIES) {
       this.reservedUnits[priority] = Math.min(this.capacity, this.reservedUnits[priority])
     }

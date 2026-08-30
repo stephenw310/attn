@@ -27,6 +27,7 @@ import type {
 import { messageLabelsMatchMailbox } from '../../shared/mail'
 import { splitAssignmentForAccount } from '../splits'
 import { needsBodyHydration } from '../sync/bodyHydration'
+import { THREAD_LIST_LIMIT } from '../sync/tuning'
 import type { Db } from './index'
 import type { MaterializedMailboxView } from './mailboxMembership'
 
@@ -42,9 +43,6 @@ interface StoredOutboxAttachment {
   contentId?: string
   inline?: boolean
 }
-
-/** Upper bound for internal diagnostics; renderer mailbox reads request one 101-row lookahead page. */
-export const THREAD_LIST_LIMIT = 10_000
 
 function descendingCursorSql(sortExpression: string, cursor: ThreadPageCursor | null): string {
   return cursor ? `AND (${sortExpression} < ? OR (${sortExpression} = ? AND t.id > ?))` : ''

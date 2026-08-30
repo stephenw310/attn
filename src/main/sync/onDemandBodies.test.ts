@@ -2,13 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import type { GmailThread } from '../gmail/parse'
 import { systemTime } from '../time'
-import {
-  BODY_HYDRATION_TIMEOUT_MS,
-  type HydrationEffects,
-  MAX_RETAINED_BODY_HYDRATION_STATES,
-  OnDemandBodyHydrator
-} from './onDemandBodies'
+import { type HydrationEffects, OnDemandBodyHydrator } from './onDemandBodies'
 import type { MailProvider } from './provider'
+import { BODY_HYDRATION_TIMEOUT_MS, MAX_RETAINED_BODY_HYDRATION_STATES } from './tuning'
 
 const thread: GmailThread = { id: 'thread-1', messages: [] }
 

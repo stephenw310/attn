@@ -21,9 +21,7 @@ import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership }
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { runSplitMetadataRebuild, type SplitMetadataProgress } from './sync/splitMetadata'
 import { sameSyncState } from './sync/state'
-
-const LIFETIME_RETRY_MS = 15_000
-const FTS_RETRY_MS = 15_000
+import { FTS_RETRY_MS, LIFETIME_RETRY_MS, OFFLINE_SYNC_RETRY_MS } from './sync/tuning'
 
 interface SyncControllerContext {
   db: Db
@@ -78,7 +76,7 @@ export class SyncController {
   private generation = 0
   private lifetimeRunId = 0
   private poller: HistoryPoller | null = null
-  private readonly offlineRetry = new OfflineRetryScheduler(15_000)
+  private readonly offlineRetry = new OfflineRetryScheduler(OFFLINE_SYNC_RETRY_MS)
   private readonly lifetimeRetry = new OfflineRetryScheduler(LIFETIME_RETRY_MS)
   private readonly ftsRetry = new OfflineRetryScheduler(FTS_RETRY_MS)
 

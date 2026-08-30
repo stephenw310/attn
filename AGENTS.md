@@ -111,7 +111,9 @@ docs/KNOWN-ISSUES.md Live triage list: open bugs, coverage gaps, refactor propos
 README.md            Human onboarding: prerequisites, OAuth client, scripts
 design/explorations/ Static HTML visual-direction studies
 src/main/            Main process: windows, OAuth, SQLite (db/), Gmail (gmail/, sync/)
-src/main/sync/tuning.ts  Every knob for how much mail is stored and how hard sync works
+src/main/sync/tuning.ts  Mail storage, read limits, sync scheduling, and Gmail throughput defaults
+src/shared/outboxTuning.ts  Composer checkpoints, send recovery, undo-send options, and retention defaults
+src/renderer/src/tuning.ts  Renderer interaction timings
 src/preload/         contextBridge API — the renderer's only path to the main process
 src/renderer/        React UI (sandboxed)
 src/shared/          Types shared across processes

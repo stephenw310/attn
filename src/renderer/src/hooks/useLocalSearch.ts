@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ThreadRow } from '../../../shared/mail'
 import type { SearchResponse } from '../../../shared/searchQuery'
-
-const SEARCH_DEBOUNCE_MS = 25
+import { SEARCH_DEBOUNCE_MS } from '../tuning'
 
 interface LocalSearchState {
   response: SearchResponse | null

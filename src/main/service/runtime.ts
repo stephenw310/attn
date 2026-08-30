@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
 import { type InvokeChannel, type MailChangeReason, TEST_CHANNELS } from '../../shared/ipc'
 import type { MessageMailbox, SyncState } from '../../shared/mail'
+import { ALLOWED_UNDO_SEND_SECONDS } from '../../shared/outboxTuning'
 import { clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
@@ -11,7 +12,7 @@ import { loadSeed, readSeedRemoteThreadIds, readSeedThread } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { GmailMailProvider } from '../gmail/provider'
-import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE, GmailQuotaLimiter } from '../gmail/quota'
+import { GmailQuotaLimiter } from '../gmail/quota'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { cachePrimarySendAs } from '../outbox/sendAs'
@@ -28,6 +29,7 @@ import { deleteThread, type LabelRow } from '../sync/persist'
 import { historyEvents, type NewMail } from '../sync/poller'
 import type { MailProvider } from '../sync/provider'
 import type { ServerSearchProvider } from '../sync/serverSearch'
+import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE } from '../sync/tuning'
 import { SyncController } from '../syncController'
 import { createServiceHandlers, type ServiceHandlers } from './handlers'
 import { candidatesFor, notificationPausedUntil, setNotificationPausedUntil } from './notificationQueries'
@@ -789,7 +791,7 @@ export class ServiceRuntime {
     }
     if (channel === TEST_CHANNELS.setUndoSendDelay) {
       const seconds = args[0]
-      if (typeof seconds === 'number' && [0, 5, 8, 10, 20, 30].includes(seconds)) {
+      if (typeof seconds === 'number' && ALLOWED_UNDO_SEND_SECONDS.has(seconds)) {
         writeSetting(this.db, 'undoSendDelaySeconds', String(seconds))
       }
       return undefined

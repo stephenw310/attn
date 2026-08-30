@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
+import { SENT_OUTBOX_RETENTION_MS } from '../../shared/outboxTuning'
 import { type Db, openDatabase } from '../db'
 import { getConversationForDisplay } from '../db/queries'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
@@ -14,7 +15,6 @@ import {
   executeDraftSendProtocol,
   isRetryableOutboxPreflightError,
   OutboxSender,
-  SENT_OUTBOX_RETENTION_MS,
   verifyKnownDraft
 } from './sender'
 

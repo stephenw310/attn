@@ -104,6 +104,22 @@ Restart the app and click **Sign in with Google**. The browser will show Google'
 - **Testing-mode refresh tokens expire after about 7 days**, so expect to re-authenticate roughly weekly.
 - `gmail.modify` is a restricted scope: public distribution would require Google's app verification plus a security assessment. Out of scope for v1.
 
+## Development tuning
+
+Compile-time defaults are grouped by behavior:
+
+- [Sync tuning](src/main/sync/tuning.ts): mail windows, historical cap, read limits, polling, retries,
+  concurrency, Gmail request sizes, and quota policy.
+- [Composer and outbox tuning](src/shared/outboxTuning.ts): save checkpoints, send recovery, shutdown
+  deadlines, undo-send options, and retention.
+- [Renderer tuning](src/renderer/src/tuning.ts): search and autocomplete delays, keyboard chords,
+  toast duration, and the Inbox Zero clock.
+
+Changes to these files require a rebuild. Existing injected options, the OAuth quota override, and
+persisted preferences still take precedence where supported. Keep unrelated settings independent even
+when their values match. Protocol constants, schema versions, MIME rules, security limits, and component
+layout measurements stay with the code that enforces them.
+
 ## Repository layout
 
 ```

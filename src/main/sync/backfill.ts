@@ -16,7 +16,13 @@ import { hydrateMissingThreadBodies } from './bodies'
 import { isExpiredPageTokenError } from './pageToken'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 import type { DraftPage, ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
-import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './tuning'
+import {
+  ALL_MAIL_WINDOW,
+  BACKFILL_DRAFT_CONCURRENCY,
+  BACKFILL_THREAD_CONCURRENCY,
+  INBOX_BODIES_WINDOW,
+  INBOX_METADATA_WINDOW
+} from './tuning'
 
 export interface BackfillCallbacks {
   onProgress: (progress: BackfillProgress) => void
@@ -436,7 +442,7 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
       ? page.threadIds.filter((threadId) => !exists.get(options.accountId, threadId))
       : page.threadIds
     let completed = 0
-    await mapConcurrent(wanted, 3, async (threadId) => {
+    await mapConcurrent(wanted, BACKFILL_THREAD_CONCURRENCY, async (threadId) => {
       try {
         await options.onThread(threadId)
       } catch (error) {
@@ -487,7 +493,7 @@ async function runDraftPhase(options: DraftPhaseOptions): Promise<void> {
     }
 
     let completed = 0
-    await mapConcurrent(page.drafts, 3, async (summary) => {
+    await mapConcurrent(page.drafts, BACKFILL_DRAFT_CONCURRENCY, async (summary) => {
       try {
         await reconcileRemoteDraft(
           options.db,

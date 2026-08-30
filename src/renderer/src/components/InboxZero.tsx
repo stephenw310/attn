@@ -3,6 +3,7 @@ import type { SplitSummary } from '../../../shared/splits'
 import alpineDawn from '../assets/inbox-zero/alpine-dawn.jpg'
 import coastalDusk from '../assets/inbox-zero/coastal-dusk.jpg'
 import forestMorning from '../assets/inbox-zero/forest-morning.jpg'
+import { INBOX_ZERO_CLOCK_INTERVAL_MS } from '../tuning'
 
 const BACKGROUNDS = [alpineDawn, coastalDusk, forestMorning] as const
 const AFFIRMATIONS = ['All clear.', 'You are caught up.', 'Done for now.'] as const
@@ -37,7 +38,7 @@ export function InboxZero({
   )
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 30_000)
+    const timer = window.setInterval(() => setNow(new Date()), INBOX_ZERO_CLOCK_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [])
 

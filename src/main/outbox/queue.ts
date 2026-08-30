@@ -9,14 +9,12 @@ import type {
   ReopenOutboxResult
 } from '../../shared/outbox'
 import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
+import { ALLOWED_UNDO_SEND_SECONDS, DEFAULT_UNDO_SEND_SECONDS } from '../../shared/outboxTuning'
 import type { Db } from '../db'
 import { readSetting } from '../settings'
 import { getDraft } from './drafts'
 import { planTransition } from './machine'
 import { validateMimeRecipients } from './mime'
-
-const DEFAULT_UNDO_SEND_SECONDS = 5
-const ALLOWED_UNDO_SEND_SECONDS = new Set([0, 5, 8, 10, 20, 30])
 
 interface QueueRow {
   id: string
