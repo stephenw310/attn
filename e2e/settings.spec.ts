@@ -461,3 +461,175 @@ test.describe('historical sync limit', () => {
     await expect(relaunched.getByTestId('settings-sync-limit-mode')).toHaveValue('default')
   })
 })
+
+test.describe('"Sent with Attn" footer', () => {
+  test.use({ seed: 'fixtures/seed-two-accounts.json' })
+
+  async function setSendAsSignature(app: ElectronApplication, signature: string): Promise<void> {
+    const error = await app.evaluate(
+      ({ ipcMain }, input) =>
+        new Promise<string | undefined>((resolve) =>
+          ipcMain.emit(input.channel, {}, input.signature, resolve)
+        ),
+      { channel: TEST_CHANNELS.setSendAsSignature, signature }
+    )
+    if (error) throw new Error(error)
+  }
+
+  async function expectStoredFooter(page: Page, accountId: string, value: boolean): Promise<void> {
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (id) => window.attn.settings.getAccount(id).then((settings) => settings.attnSignatureEnabled),
+          accountId
+        )
+      )
+      .toBe(value)
+  }
+
+  function footer(page: Page) {
+    return page.getByTestId('composer-attn-signature')
+  }
+
+  test('rides new drafts for the enabled account only and never retains an untouched draft', async ({
+    app,
+    boot,
+    page
+  }) => {
+    await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
+    await setSendAsSignature(app, '<div>Best,</div><div>Chao</div>')
+    await runPaletteCommand(page, 'Enable "Sent with Attn" footer')
+    await expectStoredFooter(page, 'primary@attn.test', true)
+
+    // The footer lands after the (collapsed) Gmail signature, visible and
+    // secondary-styled; the caret stays in the writing area.
+    const composer = new ComposerPage(page)
+    await composer.openNew()
+    await expect(composer.signature).toHaveCount(1)
+    await composer.expectSignatureCollapsed()
+    await expect(footer(page)).toHaveText('Sent with Attn')
+    await expect(footer(page)).toBeVisible()
+
+    // Untouched footer-and-signature drafts are discarded on close.
+    await page.keyboard.press('Escape')
+    await expect(composer.root).toHaveCount(0)
+    await page.keyboard.press('g')
+    await page.keyboard.press('d')
+    await expect(page.getByTestId('view-title')).toHaveText('Drafts')
+    await expect(page.getByTestId('draft-row')).toHaveCount(0)
+    await page.keyboard.press('g')
+    await page.keyboard.press('i')
+
+    // The other account keeps its own default (off).
+    await page.keyboard.press('ControlOrMeta+2')
+    await expect(page.getByTestId('account-menu')).toContainText('second@attn.test')
+    await composer.openNew()
+    await expect(footer(page)).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(composer.root).toHaveCount(0)
+    await page.keyboard.press('ControlOrMeta+1')
+    await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
+
+    // The preference survives relaunch and shows in settings.
+    const { page: relaunched } = await boot.relaunch()
+    await expect(relaunched.getByTestId('thread-row')).toHaveCount(2)
+    await relaunched.keyboard.press('ControlOrMeta+,')
+    await expect(relaunched.getByTestId('settings-attn-signature')).toBeChecked()
+  })
+
+  test('footer rides the draft lifecycle: reopen, preference change, undo send, and removal', async ({
+    app,
+    page
+  }, testInfo) => {
+    await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
+    await setSendAsSignature(app, '<div>Best,</div><div>Chao</div>')
+    await page.evaluate(() =>
+      window.attn.settings.setAccount('primary@attn.test', 'attnSignatureEnabled', true)
+    )
+    await expectStoredFooter(page, 'primary@attn.test', true)
+
+    // Reply composer: footer present exactly once, before the quote.
+    await row(page, 'Alpha roadmap review').click()
+    let composer = new ComposerPage(page)
+    await composer.openReply()
+    await expect(footer(page)).toHaveCount(1)
+    await expect(footer(page)).toBeVisible()
+
+    mkdirSync(artifactDirectory, { recursive: true })
+    const darkPath = join(artifactDirectory, 'composer-attn-signature.png')
+    await page.screenshot({ path: darkPath })
+    await testInfo.attach('composer-attn-signature', { path: darkPath, contentType: 'image/png' })
+    await page.emulateMedia({ colorScheme: 'light' })
+    const lightPath = join(artifactDirectory, 'composer-attn-signature-light.png')
+    await page.screenshot({ path: lightPath })
+    await testInfo.attach('composer-attn-signature-light', { path: lightPath, contentType: 'image/png' })
+    await page.emulateMedia({ colorScheme: 'dark' })
+
+    await composer.editor.click()
+    await composer.typeBody('Reply that keeps its footer.')
+    await composer.expectSaved()
+    await page.keyboard.press('Escape')
+    await expect(composer.root).toHaveCount(0)
+
+    // A preference change leaves the saved draft unchanged.
+    await page.evaluate(() =>
+      window.attn.settings.setAccount('primary@attn.test', 'attnSignatureEnabled', false)
+    )
+    await expectStoredFooter(page, 'primary@attn.test', false)
+    await composer.openReply()
+    await expect(footer(page)).toHaveCount(1)
+    await expect(composer.editor).toContainText('Reply that keeps its footer.')
+
+    // Undo send returns the intact composer; the queued body carried exactly
+    // one footer line.
+    await composer.triggerSend()
+    await expect(composer.root).toHaveCount(0)
+    const optimistic = page.locator('[data-testid="message-card"][data-pending="true"]')
+    await expect(optimistic).toHaveCount(1)
+    await expect
+      .poll(async () => {
+        const text = await optimistic
+          .getByTestId('html-body-frame')
+          .contentFrame()
+          .locator('body')
+          .innerText()
+        return text.split('Sent with Attn').length - 1
+      })
+      .toBe(1)
+    await page.keyboard.press('z')
+    await expect(composer.root).toBeVisible()
+    await expect(footer(page)).toHaveCount(1)
+
+    // Deleting the footer is an ordinary edit: it survives save and reopen,
+    // and nothing reinserts it — not even a fresh send. (The save-revision
+    // counters are per composer mount, so the reopened mount gets a fresh
+    // driver before its retrying save assertion.)
+    composer = new ComposerPage(page)
+    await composer.root.waitFor()
+    await footer(page).click()
+    await page.keyboard.press('Home')
+    await page.keyboard.press('Shift+End')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('Backspace')
+    await expect(composer.editor).not.toContainText('Sent with Attn')
+    await expect(composer.editor).toContainText('Reply that keeps its footer.')
+    await composer.expectSaved()
+    await page.keyboard.press('Escape')
+    await expect(composer.root).toHaveCount(0)
+    await composer.openReply()
+    await expect(composer.editor).toContainText('Reply that keeps its footer.')
+    await expect(composer.editor).not.toContainText('Sent with Attn')
+    await composer.triggerSend()
+    await expect(composer.root).toHaveCount(0)
+    await expect
+      .poll(async () => {
+        const text = await optimistic
+          .getByTestId('html-body-frame')
+          .contentFrame()
+          .locator('body')
+          .innerText()
+        return text.includes('Sent with Attn')
+      })
+      .toBe(false)
+  })
+})

@@ -1911,6 +1911,12 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         createCommand('settings.open', () => openSettings(null)),
         createCommand('settings.reorderAccounts', () => openSettings('accounts')),
         createCommand('settings.syncLimit', () => openSettings('syncLimit')),
+        createCommand('compose.attnFooter.enable', () =>
+          updateAccountSetting('attnSignatureEnabled', true)
+        ),
+        createCommand('compose.attnFooter.disable', () =>
+          updateAccountSetting('attnSignatureEnabled', false)
+        ),
         createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
         createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
         createCommand('settings.launchAtLogin', () =>
@@ -1932,7 +1938,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         createCommand('notifications.resume', () => updateAppSetting('notificationsPausedUntil', null)),
         createCommand('cheatsheet.open', openCheatSheet)
       ]),
-    [openCheatSheet, openSettings, updateAppSetting]
+    [openCheatSheet, openSettings, updateAccountSetting, updateAppSetting]
   )
 
   useKeyboardDispatch({

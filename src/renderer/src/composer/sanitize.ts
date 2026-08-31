@@ -89,7 +89,13 @@ let importPurifier: DOMPurify | null = null
 const hooked = new WeakSet<DOMPurify>()
 const outgoingDataHooked = new WeakSet<DOMPurify>()
 const importAttributesHooked = new WeakSet<DOMPurify>()
-const COMPOSER_DATA_ATTRIBUTES = new Set(['data-attn-cid', 'data-attn-opaque', 'data-smartmail', 'data-surl'])
+const COMPOSER_DATA_ATTRIBUTES = new Set([
+  'data-attn-cid',
+  'data-attn-opaque',
+  'data-attn-signature',
+  'data-smartmail',
+  'data-surl'
+])
 
 export function isGmailSignatureAttributes(
   className: string | null | undefined,
@@ -209,6 +215,7 @@ export function sanitizeOutgoingHtml(html: string): string {
       'style',
       'data-attn-cid',
       'data-attn-opaque',
+      'data-attn-signature',
       'data-smartmail',
       'data-surl'
     ],

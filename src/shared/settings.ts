@@ -68,6 +68,9 @@ export const LIFETIME_THREAD_CAP_ALL_MAIL = 0
  * longer active, so a late completion cannot land on a newly selected
  * account's controls.
  */
+/** The exact optional footer line (F6). Plain text — no link, image, or tracking. */
+export const ATTN_SIGNATURE_LINE = 'Sent with Attn'
+
 export interface AccountSettings {
   /**
    * Historical sync limit override (F2, §9 #22): conversations of additional
@@ -77,6 +80,12 @@ export interface AccountSettings {
    * and on-demand reads still add rows.
    */
   lifetimeThreadCap: number | null
+  /**
+   * Include the "Sent with Attn" footer when creating a local draft (F6).
+   * Default off; the preference affects new drafts only — open, saved, and
+   * queued drafts keep exactly the body the user last saw.
+   */
+  attnSignatureEnabled: boolean
 }
 
 export type AccountSettingKey = keyof AccountSettings
@@ -93,6 +102,10 @@ export function validateAccountSettingUpdate(key: unknown, value: unknown): Acco
       if (value !== null && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)) {
         throw new Error('invalid historical sync limit')
       }
+      return { key, value }
+    }
+    case 'attnSignatureEnabled': {
+      if (typeof value !== 'boolean') throw new Error('invalid attnSignatureEnabled value')
       return { key, value }
     }
     default:

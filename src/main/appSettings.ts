@@ -15,12 +15,16 @@ import {
 import type { Db } from './db'
 import { undoSendDelayMs } from './outbox/queue'
 import { notificationPausedUntil, setNotificationPausedUntil } from './service/notificationQueries'
+import { attnSignatureEnabled } from './outbox/sendAs'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from './settings'
 import { storedLifetimeThreadCap } from './sync/lifetimeCap'
 
 /** The account-scoped snapshot for the owning account (F18 rule 9). */
 export function readAccountSettings(db: Db, accountId: string): AccountSettings {
-  return { lifetimeThreadCap: storedLifetimeThreadCap(db, accountId) }
+  return {
+    lifetimeThreadCap: storedLifetimeThreadCap(db, accountId),
+    attnSignatureEnabled: attnSignatureEnabled(db, accountId)
+  }
 }
 
 export function readAppSettings(db: Db): AppSettings {

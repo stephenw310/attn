@@ -76,6 +76,8 @@ describe('command catalog', () => {
       'settings.open',
       'settings.reorderAccounts',
       'settings.syncLimit',
+      'compose.attnFooter.enable',
+      'compose.attnFooter.disable',
       'settings.undoSendDelay',
       'settings.autoAdvance',
       'settings.launchAtLogin',

@@ -7,6 +7,7 @@ import {
   type AccountSettings,
   type AppSettingKey,
   type AppSettings,
+  ATTN_SIGNATURE_LINE,
   AUTO_ADVANCE_DIRECTIONS,
   AUTO_ADVANCE_LABELS,
   DEFAULT_LIFETIME_THREAD_CAP,
@@ -25,6 +26,7 @@ export type SettingsControl =
   | 'syncLimit'
   | 'undoSendDelay'
   | 'autoAdvance'
+  | 'attnFooter'
   | 'launchAtLogin'
   | 'menuBarIcon'
 
@@ -434,6 +436,35 @@ export function SettingsView({
                   </option>
                 ))}
               </select>
+            </label>
+          </section>
+
+          <section data-testid="settings-compose" aria-label="Compose">
+            <h2 className={SECTION_TITLE}>Compose</h2>
+            <label className={`mt-2 ${ROW}`}>
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[13px] text-ink">
+                  Include “{ATTN_SIGNATURE_LINE}”{activeEmail ? ` — ${activeEmail}` : ''}
+                </span>
+                <span className={NOTE}>
+                  Adds the line{' '}
+                  <span data-testid="settings-attn-signature-preview" className="text-ink-dim">
+                    {ATTN_SIGNATURE_LINE}
+                  </span>{' '}
+                  after your Gmail signature in new drafts only — it stays editable and removable in the
+                  composer, and changing this never touches open, saved, or queued drafts.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                data-testid="settings-attn-signature"
+                data-settings-control="attnFooter"
+                aria-label="Include Sent with Attn"
+                disabled={!accountSettings}
+                checked={accountSettings?.attnSignatureEnabled ?? false}
+                onChange={(event) => onUpdateAccountSetting('attnSignatureEnabled', event.target.checked)}
+                className="size-4 cursor-pointer accent-accent"
+              />
             </label>
           </section>
 

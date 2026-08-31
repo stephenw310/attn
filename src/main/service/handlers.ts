@@ -80,12 +80,18 @@ import { addInlineImage, isSupportedInlineImageMimeType } from '../outbox/inline
 import type { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from '../outbox/queue'
 import { planReply } from '../outbox/replyPlan'
-import { prepareDraftWithCachedPrimarySignature } from '../outbox/sendAs'
+import { ATTN_SIGNATURE_SETTING, prepareDraftWithCachedPrimarySignature } from '../outbox/sendAs'
 import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
 import type { SnoozeScheduler } from '../scheduler'
-import { readAccountSetting, readSetting, writeAccountSetting, writeSetting } from '../settings'
+import {
+  deleteAccountSetting,
+  readAccountSetting,
+  readSetting,
+  writeAccountSetting,
+  writeSetting
+} from '../settings'
 import {
   deleteSplit,
   hasSplitSetup,
@@ -431,6 +437,11 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const update = validateAccountSettingUpdate(key, value)
     if (update.key === 'lifetimeThreadCap') {
       applyLifetimeCapChange(context.db, context.syncController(), account, update.value)
+    } else if (update.key === 'attnSignatureEnabled') {
+      // Absent means off (F6): disabling removes the row so a re-added
+      // account starts from the documented default.
+      if (update.value) writeAccountSetting(context.db, account, ATTN_SIGNATURE_SETTING, 'true')
+      else deleteAccountSetting(context.db, account, ATTN_SIGNATURE_SETTING)
     }
     return readAccountSettings(context.db, account)
   })

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { DraftSaveInput } from '../../shared/drafts'
+import { ATTN_SIGNATURE_LINE } from '../../shared/settings'
 import type { Db } from '../db'
 import { textFromRaw } from '../gmail/parse'
 import { readAccountSetting, writeAccountSetting } from '../settings'
@@ -10,6 +11,17 @@ export const SEND_AS_DISPLAY_NAME_SETTING = 'sendAsDisplayName'
 export const SEND_AS_SIGNATURE_SOURCE_SETTING = 'sendAsSignatureSource'
 export const SEND_AS_SIGNATURE_HTML_SETTING = 'sendAsSignatureHtml'
 export const SEND_AS_SIGNATURE_TEXT_SETTING = 'sendAsSignatureText'
+export const ATTN_SIGNATURE_SETTING = 'attnSignatureEnabled'
+
+/** The footer element the composer's AttnFooterNode round-trips (F6/T32B).
+    The gray is a fixed mid tone so recipients and all four themes read it as
+    secondary; the marker attribute is what identity survives on. */
+const ATTN_FOOTER_HTML = `<div data-attn-signature="footer"><span style="color:#888888">${ATTN_SIGNATURE_LINE}</span></div>`
+const ATTN_FOOTER_SELECTOR = '[data-attn-signature="footer"]'
+
+export function attnSignatureEnabled(db: Db, accountId: string): boolean {
+  return readAccountSetting(db, accountId, ATTN_SIGNATURE_SETTING) === 'true'
+}
 
 export interface DraftSignature {
   bodyHtml: string
@@ -120,7 +132,45 @@ export function cachedPrimarySignature(db: Db, accountId: string): DraftSignatur
   }
 }
 
-/** Apply the primary saved signature to an empty composer of any kind. */
+/** Does the signature already end in the exact standalone footer line? Quoted
+    history is never inspected for this deduplication (F6). */
+function signatureContainsFooterLine(signatureHtml: string): boolean {
+  const { JSDOM } = require('jsdom') as typeof import('jsdom')
+  const document = new JSDOM(signatureHtml).window.document
+  const signature = signatureElement(document.body)
+  if (!signature) return false
+  return textFromRaw('text/html', signature.innerHTML)
+    .split('\n')
+    .some((line) => line.trim() === ATTN_SIGNATURE_LINE)
+}
+
+/** Append the footer after the signature wrapper, inside the body envelope. */
+function withAttnFooter(signature: DraftSignature | null): DraftSignature {
+  if (!signature) {
+    return {
+      bodyHtml: `<div dir="ltr"><div><br></div>${ATTN_FOOTER_HTML}</div>`,
+      bodyText: `\n${ATTN_SIGNATURE_LINE}`
+    }
+  }
+  const { JSDOM } = require('jsdom') as typeof import('jsdom')
+  const document = new JSDOM(signature.bodyHtml).window.document
+  const root = document.body.firstElementChild
+  if (root?.tagName === 'DIV') root.insertAdjacentHTML('beforeend', ATTN_FOOTER_HTML)
+  else document.body.insertAdjacentHTML('beforeend', ATTN_FOOTER_HTML)
+  return {
+    bodyHtml: document.body.innerHTML,
+    bodyText: `${signature.bodyText}\n${ATTN_SIGNATURE_LINE}`
+  }
+}
+
+/**
+ * Apply the account's insertion defaults — the cached primary signature and,
+ * when enabled, the "Sent with Attn" footer — to an empty composer of any
+ * kind (F6). Defaults apply only here, at local draft creation: reopen,
+ * import, autosave, mirror, send, retry, and undo never call this, so a
+ * setting change leaves existing drafts exactly as saved, and a deleted
+ * footer is never reinserted. The cache itself is never mutated.
+ */
 export function prepareDraftWithCachedPrimarySignature(
   db: Db,
   accountId: string,
@@ -130,10 +180,15 @@ export function prepareDraftWithCachedPrimarySignature(
     return { draft, defaultSignatureFingerprint: null }
   }
   const signature = cachedPrimarySignature(db, accountId)
-  if (!signature) return { draft, defaultSignatureFingerprint: null }
+  const footerWanted = attnSignatureEnabled(db, accountId)
+  if (!signature && !footerWanted) return { draft, defaultSignatureFingerprint: null }
+  const applied =
+    footerWanted && !(signature && signatureContainsFooterLine(signature.bodyHtml))
+      ? withAttnFooter(signature)
+      : (signature as DraftSignature)
   return {
-    draft: { ...draft, bodyHtml: signature.bodyHtml, bodyText: signature.bodyText },
-    defaultSignatureFingerprint: signatureFingerprint(signature.bodyHtml)
+    draft: { ...draft, bodyHtml: applied.bodyHtml, bodyText: applied.bodyText },
+    defaultSignatureFingerprint: signatureFingerprint(applied.bodyHtml)
   }
 }
 
@@ -261,13 +316,29 @@ function semantics(element: Element): SignatureSemantics {
   }
 }
 
+/**
+ * Fingerprint the draft's insertion defaults. A signature-only body keeps the
+ * original formula so every stored pre-footer fingerprint still verifies; a
+ * body carrying the footer hashes both regions as one baseline (T32B).
+ */
 function signatureFingerprint(bodyHtml: string): string | null {
   const { JSDOM } = require('jsdom') as typeof import('jsdom')
   const document = new JSDOM(bodyHtml).window.document
   const signature = signatureElement(document.body)
-  if (!signature) return null
+  const footer = footerElement(document.body)
+  if (!signature && !footer) return null
+  if (!footer) {
+    return createHash('sha256')
+      .update(JSON.stringify(semantics(signature as Element)))
+      .digest('hex')
+  }
   return createHash('sha256')
-    .update(JSON.stringify(semantics(signature)))
+    .update(
+      JSON.stringify({
+        signature: signature ? semantics(signature) : null,
+        footer: semantics(footer)
+      })
+    )
     .digest('hex')
 }
 
@@ -275,10 +346,14 @@ function signatureElement(root: ParentNode): Element | null {
   return root.querySelector('.gmail_signature, [data-smartmail="gmail_signature"]')
 }
 
+function footerElement(root: ParentNode): Element | null {
+  return root.querySelector(ATTN_FOOTER_SELECTOR)
+}
+
 function hasContentOutsideSignature(document: Document): boolean {
   const body = document.body.cloneNode(true) as HTMLElement
-  const clonedSignature = signatureElement(body)
-  clonedSignature?.remove()
+  signatureElement(body)?.remove()
+  footerElement(body)?.remove()
   if (body.textContent?.trim()) return true
   return body.querySelector('img, table, hr, svg, video, audio, canvas') !== null
 }
@@ -294,17 +369,15 @@ export function hasOnlyDefaultPrimarySignature(
   draft: Pick<DraftSaveInput, 'kind' | 'bodyHtml' | 'bodyText'>,
   defaultSignatureFingerprint: string | null | undefined
 ): boolean {
-  if (!draft.bodyHtml.includes('gmail_signature')) return false
+  if (!draft.bodyHtml.includes('gmail_signature') && !draft.bodyHtml.includes('data-attn-signature')) {
+    return false
+  }
   if (!defaultSignatureFingerprint) return false
   const { JSDOM } = require('jsdom') as typeof import('jsdom')
   const currentDocument = new JSDOM(draft.bodyHtml).window.document
-  const currentSignature = signatureElement(currentDocument.body)
-  if (!currentSignature || hasContentOutsideSignature(currentDocument)) {
-    return false
-  }
-  return (
-    createHash('sha256')
-      .update(JSON.stringify(semantics(currentSignature)))
-      .digest('hex') === defaultSignatureFingerprint
-  )
+  if (hasContentOutsideSignature(currentDocument)) return false
+  // The stored fingerprint decides which regions the baseline had; comparing
+  // against it also catches a deleted footer or signature (the draft is then
+  // an authored edit, and its removal is never undone by reinsertion).
+  return signatureFingerprint(draft.bodyHtml) === defaultSignatureFingerprint
 }

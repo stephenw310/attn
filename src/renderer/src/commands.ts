@@ -126,6 +126,8 @@ export const COMMAND_SPECS = {
   'settings.open': { title: 'Open settings', shortcut: 'Mod+,', context: 'global' },
   'settings.reorderAccounts': { title: 'Reorder accounts…', context: 'global' },
   'settings.syncLimit': { title: 'Set historical sync limit…', context: 'global' },
+  'compose.attnFooter.enable': { title: 'Enable "Sent with Attn" footer', context: 'global' },
+  'compose.attnFooter.disable': { title: 'Disable "Sent with Attn" footer', context: 'global' },
   'settings.undoSendDelay': { title: 'Set undo send delay…', context: 'global' },
   'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
   'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },
