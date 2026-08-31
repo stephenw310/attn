@@ -36,7 +36,7 @@ Each was verified against the acceptance criteria in SPEC §4 and the plan docs'
 
 ### GAP-2: `outbox/drafts.ts` CRUD has no unit tests
 
-**Verified:** 2026-08-21 · **Owed by:** T14A's Testing bullets
+**Verified:** 2026-08-31 (re-checked: `drafts.test.ts` still covers none of the five) · **Owed by:** T14A's Testing bullets
 
 `reopenThreadDraft`, `closeDraft`'s delete-versus-tombstone branch, `listDrafts` ordering and empty exclusion,
 `takeRecoveredDraft`, and `upgradeReplyToReplyAll` are untested. `drafts.test.ts` exists but covers the
@@ -47,37 +47,35 @@ as `outbox/{spool,queue,inlineImages}.test.ts` show.
 
 ### GAP-3: no assertion that a DRAFT never drives the thread snippet
 
-**Verified:** 2026-08-21 · **Owed by:** T14B
+**Verified:** 2026-08-31 (re-checked) · **Owed by:** T14B
 
 Only the `nonDraftMessages` filter is unit-tested. The `t-roadmap` fixture's newest message is a DRAFT, which
 makes it the natural place to assert the row's snippet and `last_msg_at`, but no test does.
 
 ### GAP-4: offline bulk replay runs at N=3, not N=20
 
-**Verified:** 2026-08-22 · **Criterion:** F2 "airplane mode: 20 archives"
+**Verified:** 2026-08-31 · **Criterion:** F2 "airplane mode: 20 archives"
 
-`triage.spec.ts:344` loops three times. The perf suite now covers the F4 side of scale, with a 100-thread
+`triage.spec.ts:347` (the offline-replay loop) still runs three iterations. The perf suite now covers the F4 side of scale, with a 100-thread
 archive and undo at 10,000 threads (`perf.spec.ts:394`), so this is the remaining scale gap.
 
 ### GAP-5: crash recovery is tested with a graceful quit
 
-**Verified:** 2026-08-21
+**Verified:** 2026-08-31
 
-`boot.relaunch()` calls `boot.app.close()` (`e2e/electron.ts:132`). The plan itself calls this an approximation.
+`boot.relaunch()` calls `boot.app.close()` (`e2e/electron.ts:141`). The plan itself calls this an approximation.
 A SIGKILL variant would make the continuous-typing and queued-row cases real force-kills rather than clean
 shutdowns.
 
 ### GAP-6: the T18 auth-pause e2e injects a 401, not `invalid_grant`
 
-**Verified:** 2026-08-21
+**Verified:** 2026-08-31
 
-`testIpc.ts:219` installs an action failure with status 401. The promised case is a failed token refresh. That
+`testIpc.ts` forwards `failNextActionAuth` (line 70), whose utility handler installs an action failure with status 401. The promised case is a failed token refresh. That
 path is unit-covered (`client.test.ts:22-26`, `executor.test.ts:239,278`), so the e2e is a fidelity gap rather
 than an untested path.
 
----
-
-### GAP-7: composer paint-delta metrics are unmeasurable in the current cloud container
+### GAP-7: frame-timed perf metrics are unmeasurable in the current cloud container
 
 **Verified:** 2026-08-31 · **Owed by:** T37A's performance bullet / T40's perf evidence
 
@@ -89,8 +87,14 @@ commit `cbb899e` (T35, before any AI code) measures identically, and keystroke *
 additions (`composer-keystroke-mutation-autocomplete`, `composer-autocomplete-accept`) are in place but the
 paint-side assertions cannot pass in this container.
 
-**Wanted:** run `npm run e2e:perf -- --grep "opens and types in the composer"` on hardware with real vsync
-(the T20-EVIDENCE convention) and record the paint-delta numbers in T40's exit checklist.
+The 2026-08-31 full `e2e:perf` run (recorded in [T40-EVIDENCE.md](T40-EVIDENCE.md)) confirms the scope is
+every frame-timed metric, not just the composer: search-keystroke-to-results reads a constant ~1,013ms
+(the 1Hz frame), scroll-frame pacing and one split-switch p95 outlier fail the same way, while every
+non-paint metric passes well inside budget (warm account switch p95 42ms vs the 100ms F18 budget,
+composer open 10ms, keystroke mutation medians 4–5ms) and `e2e:perf:scale` passes outright.
+
+**Wanted:** run `npm run e2e:perf` on hardware with real vsync (the T20-EVIDENCE convention) and record
+the frame-timed numbers in T40's exit checklist.
 
 ## Refactors
 
@@ -99,22 +103,22 @@ somebody found and verified it, not because it is scheduled.
 
 ### REF-1: two components far exceed the ~350-line bar *(review R3)*
 
-**Verified:** 2026-08-22
+**Verified:** 2026-08-31
 
-`Composer.tsx` is 1,060 lines and `Inbox.tsx` is 829, against the bar R1 set at roughly 350. Both grew
-again in #65. Clean seams exist:
+`Composer.tsx` is 1,397 lines and `Inbox.tsx` is 2,458, against the bar R1 set at roughly 350; both grew
+through M3–M4 (splits, settings deep links, follow-ups, AI drafting). Clean seams exist:
 `InlineQuote` plus `quoteSrcDoc` out of the composer, and the label and snooze picker wiring out of `Inbox`.
 
 ### REF-3: two MIME builders with subtly different header rules *(review R6)*
 
-**Verified:** 2026-08-21
+**Verified:** 2026-08-31
 
-`outbox/mime.ts` (464 lines, send) and `outbox/draftMime.ts` (319 lines, draft mirror) each implement CRLF and
+`outbox/mime.ts` (465 lines, send) and `outbox/draftMime.ts` (319 lines, draft mirror) each implement CRLF and
 RFC 2047 encoding separately. The two encoders must agree, and no test asserts that they do.
 
 ### REF-4: outbox row deserialization is hand-rolled at eight sites *(review R7)*
 
-**Verified:** 2026-08-21
+**Verified:** 2026-08-31 (re-checked; `sender.ts` gained T35's follow-up columns in the same inline style)
 
 `outbox/drafts.ts`, `outbox/mirror.ts`, `outbox/queue.ts`, `outbox/sender.ts`, and `outbox/draftSync.ts` all
 parse rows inline, and `draftSync.ts` alone does it four times. No shared row-to-object helper exists.

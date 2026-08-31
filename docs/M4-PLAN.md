@@ -94,7 +94,7 @@ follow-up below, and T40 requires its resolution before sign-off.
 
 ## T32: settings surface and keyboard cheat sheet
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `2eda759`; review follow-ups in `1e3d082`).** Real-OS login/menu-bar evidence stays in T40.
 
 **Depends on:** nothing · **Unblocks:** T32A, T32B, T33, T34, T36 · **Spec:** F15, F16, F18, D6, §5
 
@@ -211,7 +211,7 @@ source edit to stay current.
 
 ## T32A: per-account historical sync limit
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `64f8e87`; review follow-ups in `1e3d082`).** Real-Gmail cap observations stay in T40.
 
 **Depends on:** T32 · **Unblocks:** nothing · **Spec:** F2, F10, F15, F18, §9 #22
 
@@ -286,7 +286,7 @@ coverage is accurate, existing local data remains intact, and other accounts kee
 
 ## T32B: optional "Sent with Attn" signature footer
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `80a9cad`; Gmail signature-font interplay merged in `9aa2d61`).**
 
 **Depends on:** T32 · **Unblocks:** T37 · **Spec:** F6, F15, F18
 
@@ -364,7 +364,7 @@ default, and the saved draft determines exactly what the recipient receives.
 
 ## T33: remote-image control
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `df70c80`; review follow-ups incl. the CSP-layer e2e in `1e3d082`).**
 
 **Depends on:** T32 · **Unblocks:** nothing · **Spec:** §6 Security, §9 #5
 
@@ -418,7 +418,7 @@ default-load behavior is byte-identical to today for users who never touch the t
 
 ## T34: snippets
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `e4d428e`; cursor-marker review follow-ups in `1e3d082`).**
 
 **Depends on:** T32 (manager pane) · **Unblocks:** nothing · **Spec:** F8
 
@@ -492,7 +492,7 @@ one undo step. The DDL above is in the PR notes.
 
 ## T35: follow-up reminders
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `cbb899e`).** Schema v24; the dogfood DDL is in the commit message. Real-Gmail follow-up runs stay in T40.
 
 **Depends on:** nothing · **Unblocks:** nothing · **Spec:** F9, F4 (snooze mechanics)
 
@@ -622,7 +622,7 @@ visible and sort above normal mail until handled. The DDL above is in the PR not
 
 ## T36: AI writing foundation
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `b87a3ec`).** Default models per provider are recorded in `AI_PROVIDER_PRESETS` (src/shared/ai.ts).
 
 **Depends on:** T32 (enable pane) · **Unblocks:** T37, T37A · **Spec:** F17, D2, §6
 
@@ -687,7 +687,7 @@ the disclosure text; with the feature off, no code path reaches a provider.
 
 ## T37: AI reply drafting in the composer
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `12be729`).** Real-provider runs stay in T40.
 
 **Depends on:** T36, T32B (signature integration) · **Unblocks:** T37A · **Spec:** F17, F6, §5
 
@@ -745,7 +745,7 @@ F17's reply-drafting acceptance criteria hold end to end under the seam: zero tr
 
 ## T37A: inline AI autocomplete
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `2a50fda`).** Real-provider runs and on-hardware paint metrics stay in T40 (KNOWN-ISSUES GAP-7).
 
 **Depends on:** T36 (provider and consent), T37 (composer generation lifecycle) · **Unblocks:** nothing · **Spec:** F17, F15, §5, §7
 
@@ -834,7 +834,7 @@ suggestions only, correct Tab/Esc/undo behavior, no persistence before acceptanc
 
 ## T38: Windows numeric badge overlay
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `1ed0d80`).** The Windows visual check stays in T40.
 
 **Depends on:** nothing · **Unblocks:** nothing · **Spec:** F12
 
@@ -866,7 +866,7 @@ The unit matrix is green and the Windows manual check is ticked in the T40 check
 
 ## T39: auto-update, signing, and notarization
 
-**Status: planned.**
+**Status: code parts shipped (2026-08-31, `8ace1ab`); operator-credential parts open.** The state machine, gating, distribution metadata, and `package:verify --release` are in and tested; Apple/Windows signing credentials, the release-feed repository decision (deferred into `ATTN_RELEASE_FEED`, so no code blocks on it), and the publishing workflow that stamps `requiredSchemaVersion` into the feed remain operator work recorded in T40.
 
 **Depends on:** operator-supplied credentials (below) · **Unblocks:** T40 · **Spec:** §6 Packaging
 
@@ -952,7 +952,7 @@ OSes.
 
 ## T40: M4 exit and v1 sign-off
 
-**Status: planned.**
+**Status: in progress (2026-08-31).** Engineering evidence and open manual items are recorded in [T40-EVIDENCE.md](T40-EVIDENCE.md); the harness-checkable boxes are ticked there, the real-OS/real-Gmail/credentialed ones remain open.
 
 **Depends on:** every task above · **Unblocks:** the v1 tag
 
@@ -1035,8 +1035,8 @@ not an invitation to process the mailbox in the background, which F17 forbids.
 
 | Question | Why it matters | Decide by |
 |---|---|---|
-| Public release repo or private-feed workaround for auto-update? | Gates T39's feed wiring | Before T39's updater lands; record in T39 |
-| Default model per provider | Users see it on the enable screen | T36 review; record in code and F17 if the spec should name it |
+| Public release repo or private-feed workaround for auto-update? | Gates the release workflow, not the code: T39 landed with the feed read from packaged metadata (`ATTN_RELEASE_FEED=owner/repo` at release-package time), so the operator decision is deferred without blocking wiring | Before the first published release; record the chosen repo here |
+| ~~Default model per provider~~ | Resolved at T36: recorded in code as `AI_PROVIDER_PRESETS` (src/shared/ai.ts) and shown on the settings pane; F17 keeps naming no model | — |
 
 The mailbox-size posture is resolved by SPEC §9 #22 and PR #98. T32A supplies its deferred user control;
 T40 retains the performance and real-mailbox evidence requirements.
