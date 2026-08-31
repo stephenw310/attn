@@ -33,6 +33,7 @@ import {
   useState
 } from 'react'
 import type { MailAddress } from '../../../shared/address'
+import type { AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import { escapeHtmlText as escapeHtml } from '../../../shared/html'
@@ -47,6 +48,7 @@ import { forceLightMailCss } from '../mailCss'
 import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
+import { AiDraftPlugin } from './AiDraftPlugin'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
@@ -66,6 +68,12 @@ interface ComposerProps {
   onClose: () => void
   onExit?: () => void
   onToast: ShowToast
+  /** T37 AI reply drafting: the invocation counter and reply context source. */
+  aiDraft?: {
+    request: number
+    claim: () => boolean
+    getThreadContext: () => AiThreadMessage[] | null
+  }
 }
 
 export interface ComposerHandle {
@@ -741,7 +749,7 @@ function ComposerCommandPlugin({
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { draft, mode = 'full', initialError = null, onClose, onExit, onToast },
+  { draft, mode = 'full', initialError = null, onClose, onExit, onToast, aiDraft },
   ref
 ): React.JSX.Element {
   const [to, setTo] = useState<MailAddress[]>(draft.to)
@@ -1274,6 +1282,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 onPreservedContent={notePreservedContent}
               />
               <SnippetsPlugin onInserted={handleSnippetInserted} />
+              {aiDraft && (
+                <AiDraftPlugin
+                  kind={draft.kind}
+                  request={aiDraft.request}
+                  claim={aiDraft.claim}
+                  getThreadContext={aiDraft.getThreadContext}
+                  onToast={onToast}
+                />
+              )}
               <InlineQuote
                 draftId={draft.id}
                 html={draft.quoteHtml}

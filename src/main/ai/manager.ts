@@ -35,6 +35,8 @@ import {
 export interface FakeAiScript {
   chunks?: string[]
   delayMs?: number
+  /** When set, chunks arrive one per interval — the mid-stream cancel probe. */
+  chunkIntervalMs?: number
   error?: string
   hang?: boolean
 }
@@ -183,15 +185,28 @@ export class AiManager {
     entry.record = record
     fake.requests.push(record)
     const script = fake.script
-    this.time.timers.setTimeout(() => {
+    const chunks = script.chunks ?? []
+    const interval = script.chunkIntervalMs ?? 0
+    let next = 0
+    const step = (): void => {
       if (entry.settled || script.hang) return
       if (script.error !== undefined) {
         this.fail(entry, script.error)
         return
       }
-      for (const text of script.chunks ?? []) this.chunk(entry, text)
+      if (interval > 0) {
+        if (next < chunks.length) {
+          this.chunk(entry, chunks[next++])
+          this.time.timers.setTimeout(step, interval)
+          return
+        }
+        this.settle(entry, {})
+        return
+      }
+      for (const text of chunks) this.chunk(entry, text)
       this.settle(entry, {})
-    }, script.delayMs ?? 0)
+    }
+    this.time.timers.setTimeout(step, script.delayMs ?? 0)
   }
 
   private async runReal(

@@ -192,6 +192,22 @@ describe('fake provider streaming', () => {
     expect(payload).not.toContain('Ping?')
   })
 
+  it('a paced script delivers chunk by chunk, so a mid-stream cancel keeps a true partial', async () => {
+    const { manager, timers, events } = harness({ enabled: true })
+    manager.installFakeProvider({ chunks: ['one', 'two', 'three'], chunkIntervalMs: 10 })
+    const { requestId } = await manager.generate(replyRequest)
+    timers.fire(10)
+    timers.fire(10)
+    expect(events).toEqual([
+      { requestId, kind: 'chunk', text: 'one' },
+      { requestId, kind: 'chunk', text: 'two' }
+    ])
+    manager.cancel(requestId)
+    timers.fire(Number.MAX_SAFE_INTEGER)
+    expect(events).toHaveLength(2)
+    expect(manager.fakeProviderRequests()[0].canceled).toBe(true)
+  })
+
   it('a scripted error surfaces as an error event', async () => {
     const { manager, timers, events } = harness({ enabled: true })
     manager.installFakeProvider({ error: 'provider exploded' })

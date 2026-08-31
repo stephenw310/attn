@@ -260,11 +260,17 @@ describe('keyboard dispatch', () => {
       createCommand('composer.close', () => {}),
       createCommand('composer.discard', () => {}),
       createCommand('composer.send', () => {}),
-      createCommand('composer.link', () => {})
+      createCommand('composer.link', () => {}),
+      createCommand('composer.aiDraft', () => {}),
+      createCommand('triage.archive', () => {})
     ])
     expect(matchKey(key('d', { metaKey: true, shiftKey: true }), 'list')?.id).toBe('draft.discard')
     expect(matchKey(key('d', { ctrlKey: true, shiftKey: true }), 'reader')).toBeNull()
     expect(matchComposerKey(key('Escape'))?.id).toBe('composer.close')
+    // Global allowInComposer commands dispatch in the composer too (T37);
+    // plain mail commands never do.
+    expect(matchComposerKey(key('j', { ctrlKey: true }))?.id).toBe('composer.aiDraft')
+    expect(matchComposerKey(key('e'))).toBeNull()
     expect(matchComposerKey(key('d', { metaKey: true, shiftKey: true }))?.id).toBe('composer.discard')
     expect(matchComposerKey(key('d', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.discard')
     expect(matchComposerKey(key('Enter', { metaKey: true }))?.id).toBe('composer.send')

@@ -64,6 +64,7 @@ export const IPC_CHANNELS = {
   aiDeleteKey: 'ai:deleteKey',
   aiGenerate: 'ai:generate',
   aiCancel: 'ai:cancel',
+  aiStyleExamples: 'ai:styleExamples',
   aiStreamEvent: 'ai:streamEvent',
   contactsSearch: 'contacts:search',
   draftSave: 'draft:save',
@@ -213,6 +214,10 @@ export interface InvokeChannels {
   [IPC_CHANNELS.aiDeleteKey]: { args: []; result: AiSettings }
   [IPC_CHANNELS.aiGenerate]: { args: [request: AiGenerateRequest]; result: { requestId: string } }
   [IPC_CHANNELS.aiCancel]: { args: [requestId: string]; result: undefined }
+  // T37 voice matching: the active account's recent sent replies, selected
+  // locally in the utility; the renderer attaches them only when the voice
+  // toggle is on, and the transport strips them again when it is off.
+  [IPC_CHANNELS.aiStyleExamples]: { args: []; result: string[] }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {
     args: [draft: DraftSaveInput]

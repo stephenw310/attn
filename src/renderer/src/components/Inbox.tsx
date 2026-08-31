@@ -12,6 +12,7 @@ import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
 import { clearAccountView, readAccountView, saveAccountView } from '../accountViewMemory'
 import { actionReconnectMessage } from '../actionReconnect'
+import { aiThreadContext } from '../aiContext'
 import { createCommand, registerCommands } from '../commands'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
@@ -523,6 +524,18 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
   useEffect(() => {
     activeComposerDraftIdRef.current = composerDraft?.id ?? null
   }, [composerDraft?.id])
+
+  // T37 AI reply drafting: one Inbox-owned command serves the reader and the
+  // composer. An invocation parks in the pending ref until the (possibly just
+  // opened) reply composer's plugin claims it — claiming is one-shot, so a
+  // remounted composer can never replay a consumed invocation.
+  const [aiDraftRequest, setAiDraftRequest] = useState(0)
+  const aiDraftPendingRef = useRef(false)
+  const claimAiDraftRequest = useCallback(() => {
+    if (!aiDraftPendingRef.current) return false
+    aiDraftPendingRef.current = false
+    return true
+  }, [])
 
   useEffect(() => {
     const visibleCount = searchDraftMode
@@ -1729,6 +1742,22 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
     finishReaderClose()
   }, [closeComposer, finishReaderClose])
 
+  // Stable views of the state the Draft-AI-reply command reads at invocation
+  // time (its registration must not churn on every keystroke or selection).
+  const composerDraftRef = useRef(composerDraft)
+  composerDraftRef.current = composerDraft
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+  const openReplyRef = useRef(openReply)
+  openReplyRef.current = openReply
+  const conversationRef = useRef(conversation)
+  conversationRef.current = conversation
+  const getAiThreadContext = useCallback(() => aiThreadContext(conversationRef.current), [])
+  const requestAiDraft = useCallback(() => {
+    aiDraftPendingRef.current = true
+    setAiDraftRequest((count) => count + 1)
+  }, [])
+
   const snoozeSelected = useCallback(
     (dueAt: number) => {
       if (!window.attn || !selected) return
@@ -1927,17 +1956,29 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
         createCommand('privacy.remoteImages.overrides', () => openSettings('remoteImages')),
         createCommand('snippets.manage', () => openSettings('snippets')),
         createCommand('ai.settings', () => openSettings('aiWriting')),
-        // T36 placeholder: the command exists (and its disabled state provably
-        // reaches no provider); T37 streams the draft into the composer.
+        // T37 (F17): from the reader the command opens the inline reply first,
+        // then streams into it; in a reply composer it streams in place. New
+        // messages and forwards are out of v1's whole-body generation scope.
         createCommand('composer.aiDraft', () => {
           void window.attn?.ai
             .getSettings()
             .then((ai) => {
-              showToast(
-                ai.enabled
-                  ? 'AI reply drafting is coming in the next update'
-                  : 'Enable AI writing in Settings to draft replies'
-              )
+              if (!ai.enabled) {
+                showToast('Enable AI writing in Settings to draft replies')
+                return
+              }
+              const open = composerDraftRef.current
+              if (open) {
+                if (open.kind === 'reply' || open.kind === 'replyAll') requestAiDraft()
+                else showToast('AI drafting writes replies — reply to a conversation to use it')
+                return
+              }
+              if (readerOpenRef.current && selectedRef.current) {
+                requestAiDraft()
+                openReplyRef.current('reply')
+                return
+              }
+              showToast('Open a conversation to draft an AI reply')
             })
             .catch(() => {})
         }),
@@ -1962,7 +2003,7 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
         createCommand('notifications.resume', () => updateAppSetting('notificationsPausedUntil', null)),
         createCommand('cheatsheet.open', openCheatSheet)
       ]),
-    [openCheatSheet, openSettings, showToast, updateAccountSetting, updateAppSetting]
+    [openCheatSheet, openSettings, requestAiDraft, showToast, updateAccountSetting, updateAppSetting]
   )
 
   useKeyboardDispatch({
@@ -2281,6 +2322,11 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
                       onClose={closeComposer}
                       onExit={closeComposerAndReader}
                       onToast={showToast}
+                      aiDraft={{
+                        request: aiDraftRequest,
+                        claim: claimAiDraftRequest,
+                        getThreadContext: getAiThreadContext
+                      }}
                     />
                   ) : null
                 }

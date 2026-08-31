@@ -309,9 +309,15 @@ export const COMMAND_SPECS = {
   'composer.numbering': { title: 'Numbered list', context: 'composer' },
   'composer.quote': { title: 'Block quote', context: 'composer' },
   'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
-  // F17: available from the reader (T36 lands the command and its disabled
-  // hint; T37 streams into the composer and widens where it runs).
-  'composer.aiDraft': { title: 'Draft AI reply', shortcut: 'Mod+J', context: 'reader' },
+  // F17: works from the reader (opening the inline reply first) and inside a
+  // reply/reply-all composer; elsewhere the single Inbox-owned handler explains
+  // itself with a hint instead of registering per-context duplicates.
+  'composer.aiDraft': {
+    title: 'Draft AI reply',
+    shortcut: 'Mod+J',
+    context: 'global',
+    allowInComposer: true
+  },
   'composer.snippets': { title: 'Insert snippet…', shortcut: 'Mod+;', context: 'composer' },
   'composer.followUp': { title: 'Remind me if no reply…', context: 'composer' },
   'triage.archive': {
@@ -645,10 +651,14 @@ export function matchComposerKey(event: KeyboardEvent): Command | null {
     Boolean
   )
   const shortcut = [...modifiers, event.key.toLowerCase()].join('+')
+  // The same context rule the palette applies: composer commands plus the
+  // global allowInComposer set (Mod+J AI drafting, Mod+/ cheat sheet — Mod+K
+  // never reaches here because the palette claims it in the capture phase).
+  // Chord shortcuts contain a space and can never equal a single keystroke.
   return (
     commands.find(
       (command) =>
-        command.context === 'composer' &&
+        commandMatchesContext(command, 'composer') &&
         commandShortcuts(command).some((candidate) => candidate.toLowerCase() === shortcut.toLowerCase())
     ) ?? null
   )

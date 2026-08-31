@@ -42,8 +42,8 @@ describe('buildPrompt', () => {
   it('autocomplete prompts contain only the bounded excerpt — never voice or examples', () => {
     const request: AiAutocompleteRequest = {
       purpose: 'autocomplete',
-      prefix: 'x'.repeat(AUTOCOMPLETE_MAX_PREFIX_CHARS + 500) + 'BEFORE',
-      suffix: 'AFTER' + 'y'.repeat(AUTOCOMPLETE_MAX_SUFFIX_CHARS + 500)
+      prefix: `${'x'.repeat(AUTOCOMPLETE_MAX_PREFIX_CHARS + 500)}BEFORE`,
+      suffix: `AFTER${'y'.repeat(AUTOCOMPLETE_MAX_SUFFIX_CHARS + 500)}`
     }
     const prompt = buildPrompt(request, voice)
     const payload = prompt.system + prompt.messages.map((message) => message.content).join('')
@@ -56,7 +56,7 @@ describe('buildPrompt', () => {
     const content = prompt.messages[0].content
     const beforeSection = content.slice(0, content.indexOf('Text after the caret:'))
     expect(beforeSection.length).toBeLessThan(AUTOCOMPLETE_MAX_PREFIX_CHARS + 100)
-    expect(content.endsWith('AFTER' + 'y'.repeat(AUTOCOMPLETE_MAX_SUFFIX_CHARS - 5))).toBe(true)
+    expect(content.endsWith(`AFTER${'y'.repeat(AUTOCOMPLETE_MAX_SUFFIX_CHARS - 5)}`)).toBe(true)
   })
 })
 

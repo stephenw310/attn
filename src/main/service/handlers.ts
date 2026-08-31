@@ -44,6 +44,7 @@ import {
   undoLast
 } from '../actions'
 import type { ActionExecutor } from '../actions/executor'
+import { listStyleExamples } from '../ai/styleExamples'
 import { readAiStoredSettings, writeAiStoredSetting } from '../aiSettings'
 import { readAccountSettings, readAppSettings, writeAppSetting } from '../appSettings'
 import { writeAttachment } from '../attachments'
@@ -478,6 +479,10 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => {
     const update = validateAiSettingUpdate(key, value)
     return { ...writeAiStoredSetting(context.db, update), keyPresent: false }
+  })
+  handle(IPC_CHANNELS.aiStyleExamples, () => {
+    const account = context.currentAccountId()
+    return account ? listStyleExamples(context.db, account) : []
   })
   handle(IPC_CHANNELS.snippetsList, () => listSnippets(context.db))
   handle(IPC_CHANNELS.snippetsSave, (_event, input) => {

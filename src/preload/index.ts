@@ -123,6 +123,7 @@ const api = {
     generate: (request: AiGenerateRequest): Promise<{ requestId: string }> =>
       invoke(IPC_CHANNELS.aiGenerate, request),
     cancel: (requestId: string): Promise<void> => invoke(IPC_CHANNELS.aiCancel, requestId),
+    styleExamples: (): Promise<string[]> => invoke(IPC_CHANNELS.aiStyleExamples),
     onStreamEvent: (cb: (event: AiStreamEvent) => void): (() => void) => {
       const listener = (_event: unknown, payload: AiStreamEvent): void => cb(payload)
       ipcRenderer.on(IPC_CHANNELS.aiStreamEvent, listener)
