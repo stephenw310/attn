@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { emptyDraftInput } from '../../shared/drafts'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import type { ThreadPage } from '../../shared/mail'
 import { OTHER_SPLIT_ID, type SplitState } from '../../shared/splits'
@@ -11,6 +12,8 @@ import * as queries from '../db/queries'
 import { readSeedThread } from '../dev/seed'
 import type { GmailClient } from '../gmail/client'
 import { GmailMailProvider } from '../gmail/provider'
+import { saveDraft } from '../outbox/drafts'
+import * as spool from '../outbox/spool'
 import * as splits from '../splits'
 import { type HistoryPoller, historyEvents } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
@@ -125,6 +128,24 @@ describe('ServiceRuntime with several accounts', () => {
   async function listInboxSubjects(runtime: ServiceRuntime): Promise<string[]> {
     const page = (await runtime.invoke(IPC_CHANNELS.mailListThreads, [{ view: 'inbox' }])) as ThreadPage
     return page.rows.map((row) => row.subject ?? '')
+  }
+
+  async function prepareAttachmentRemoval() {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+    const { db } = runtime as unknown as { db: Db }
+    const source = join(input.userDataPath, 'private.txt')
+    writeFileSync(source, 'private attachment')
+    const drafts = []
+    for (const accountId of ['primary@attn.test', 'second@attn.test']) {
+      const id = saveDraft(db, accountId, emptyDraftInput(), 10)
+      await spool.spoolDraftAttachments(db, input.userDataPath, accountId, id, [source])
+      drafts.push({ id, directory: join(input.userDataPath, 'outbox', id) })
+    }
+    await runtime.internal('apply-accounts', [
+      { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['primary@attn.test'] }
+    ])
+    return { runtime, db, drafts }
   }
 
   it('reuses mailbox totals across account switches and invalidates only changed accounts', async () => {
@@ -626,6 +647,70 @@ describe('ServiceRuntime with several accounts', () => {
     expect(gone).toEqual({ count: 0 })
     expect(roster).toEqual({ count: 0 })
     expect(survivor).toEqual({ count: 1 })
+  })
+
+  it('waits for spool deletion before purging rows or recreating the removed session', async () => {
+    const { runtime, db, drafts } = await prepareAttachmentRemoval()
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const deleting = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const remove = spool.deleteOutboxSpool
+    vi.spyOn(spool, 'deleteOutboxSpool').mockImplementationOnce(async (...args) => {
+      started()
+      await gate
+      await remove(...args)
+    })
+    let settled = false
+    const deletion = runtime.internal('remove-account-data', ['second@attn.test']).then(() => {
+      settled = true
+    })
+    let readd: Promise<unknown> | undefined
+    try {
+      await deleting
+      expect(settled).toBe(false)
+      expect(db.prepare('SELECT id FROM outbox WHERE id = ?').get(drafts[1].id)).toBeDefined()
+      expect(existsSync(drafts[1].directory)).toBe(true)
+
+      readd = runtime.internal('apply-accounts', [
+        {
+          config: null,
+          accounts: [],
+          activeAccountId: 'second@attn.test',
+          seedAccountIds: ['primary@attn.test', 'second@attn.test']
+        }
+      ])
+      expect(runtime.ready().accountIds).not.toContain('second@attn.test')
+    } finally {
+      release()
+    }
+    await deletion
+    await readd
+    expect(runtime.ready().activeAccountId).toBe('second@attn.test')
+    expect(await listInboxSubjects(runtime)).toEqual([])
+    expect(db.prepare('SELECT id FROM outbox WHERE id = ?').get(drafts[1].id)).toBeUndefined()
+    expect(existsSync(drafts[1].directory)).toBe(false)
+    expect(existsSync(drafts[0].directory)).toBe(true)
+  })
+
+  it('rejects failed spool deletion without losing the account records needed for a retry', async () => {
+    const { runtime, db, drafts } = await prepareAttachmentRemoval()
+    vi.spyOn(spool, 'deleteOutboxSpool').mockRejectedValueOnce(new Error('EACCES: attachment is locked'))
+    await expect(runtime.internal('remove-account-data', ['second@attn.test'])).rejects.toThrow('EACCES')
+    expect(db.prepare('SELECT id FROM accounts WHERE id = ?').get('second@attn.test')).toBeDefined()
+    expect(db.prepare('SELECT id FROM outbox WHERE id = ?').get(drafts[1].id)).toBeDefined()
+    expect(existsSync(drafts[1].directory)).toBe(true)
+    expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
+
+    await runtime.internal('remove-account-data', ['second@attn.test'])
+    expect(db.prepare('SELECT id FROM accounts WHERE id = ?').get('second@attn.test')).toBeUndefined()
+    expect(db.prepare('SELECT id FROM outbox WHERE id = ?').get(drafts[1].id)).toBeUndefined()
+    expect(existsSync(drafts[1].directory)).toBe(false)
+    expect(existsSync(drafts[0].directory)).toBe(true)
   })
 
   it('retires a removed seed session and falls back to the survivor', async () => {

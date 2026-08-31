@@ -582,6 +582,9 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   and unlisted until the same address is added again, at which point sync resumes from its stored cursors
   instead of re-backfilling. The active account falls to the next remaining one; removing the last account
   returns to F1's signed-out screen.
+  Deletion waits for attachment files before purging the identifying store rows. If deletion fails, the
+  account stays signed out, the remaining data stays available for a retry, and a dismissible warning
+  remains visible after the view changes. Re-adding the account allows another Delete attempt.
 - Out of scope for v1: unified inbox, cross-account search, moving mail between accounts, a From-account
   picker in the composer (F6), per-account themes.
 

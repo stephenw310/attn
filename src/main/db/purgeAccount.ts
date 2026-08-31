@@ -27,8 +27,14 @@ export function accountKeyedTables(db: Db): string[] {
 export interface AccountPurgeResult {
   /** The account-keyed tables the purge visited (unit-test guard surface). */
   tables: string[]
-  /** Outbox ids whose spool directories the caller must remove from disk. */
+  /** Outbox ids owned by the account at the time of the purge. */
   outboxSpoolIds: string[]
+}
+
+export function accountOutboxSpoolIds(db: Db, accountId: string): string[] {
+  return (db.prepare('SELECT id FROM outbox WHERE account_id = ?').all(accountId) as { id: string }[]).map(
+    (row) => row.id
+  )
 }
 
 /**
@@ -36,13 +42,11 @@ export interface AccountPurgeResult {
  * every account-keyed table, the FTS index entries, and the roster row in
  * `accounts` itself. Deliberately excluded: `__app__` settings (they are not
  * the account's) and the spool files on disk — SQLite cannot delete those, so
- * their ids are returned for the caller to clean after commit (SPEC F18, D3).
+ * the caller must await their deletion before purging the identifying rows (SPEC F18, D3).
  */
 export function purgeAccountRows(db: Db, accountId: string): AccountPurgeResult {
   const tables = accountKeyedTables(db)
-  const outboxSpoolIds = (
-    db.prepare('SELECT id FROM outbox WHERE account_id = ?').all(accountId) as { id: string }[]
-  ).map((row) => row.id)
+  const outboxSpoolIds = accountOutboxSpoolIds(db, accountId)
   db.transaction(() => {
     removeAccountFromIndex(db, accountId)
     for (const table of tables) {
