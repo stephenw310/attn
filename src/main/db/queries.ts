@@ -170,15 +170,16 @@ export function listMailboxThreads(
   if (view === 'allMail') {
     // Paged from `thread_mailboxes`: its index already holds this view in sort
     // order, so a page is a range read instead of a membership test against every
-    // thread in the account.
+    // thread in the account. A saved selection needs the thread-key index instead:
+    // the recency index cannot constrain thread_id after its sort_at column.
     const sortExpression = 'mailbox.sort_at'
     rows = db
       .prepare(
         wrap(`SELECT ${THREAD_PROJECTION_SQL}, mailbox.sort_at AS mailbox_last_msg_at
-              FROM thread_mailboxes mailbox INDEXED BY idx_thread_mailboxes_recent
+              FROM thread_mailboxes mailbox ${threadId ? '' : 'INDEXED BY idx_thread_mailboxes_recent'}
               JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
               WHERE mailbox.account_id = ? AND mailbox.view = 'allMail'
-                ${threadId ? 'AND t.id = ?' : ''}
+                ${threadId ? 'AND mailbox.thread_id = ?' : ''}
                 ${descendingCursorSql(sortExpression, cursor)}
               ORDER BY mailbox_last_msg_at DESC, t.id
               LIMIT ?`)
