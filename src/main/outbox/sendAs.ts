@@ -37,6 +37,8 @@ function hasCurrentSignatureEnvelope(bodyHtml: string): boolean {
 }
 
 function signatureBody(rawHtml: string): DraftSignature {
+  // Gmail's API omits its separator/quote-position checkbox. Do not guess it
+  // or add a "-- " line that is absent from the returned signature HTML.
   const sanitized = sanitizeQuoteHtml(rawHtml).trim()
   if (!sanitized) return { bodyHtml: '', bodyText: '' }
   const text = textFromRaw('text/html', sanitized)

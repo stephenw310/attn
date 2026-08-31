@@ -4,6 +4,20 @@ import { describe, expect, it } from 'vitest'
 import { sanitizeDraftHtmlForImport, sanitizeOutgoingHtml } from './sanitize'
 
 describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
+  it('keeps only the native Gmail separator marker and strips active content', () => {
+    const sanitized = sanitizeOutgoingHtml(
+      '<span class="gmail_signature_prefix" onclick="steal()" data-smartmail="gmail_signature">-- </span>' +
+        '<div class="gmail_signature_prefix">Wrong tag</div>' +
+        '<span class="gmail_signature_prefix custom">Other class</span>'
+    )
+    const document = new DOMParser().parseFromString(sanitized, 'text/html')
+    expect(document.querySelectorAll('[class]')).toHaveLength(1)
+    expect(document.querySelector('.gmail_signature_prefix')?.outerHTML).toBe(
+      '<span class="gmail_signature_prefix">-- </span>'
+    )
+    expect(sanitized).not.toMatch(/onclick|data-smartmail/)
+  })
+
   it('retains only the constrained composer surface', () => {
     const sanitized = {
       allowed: sanitizeOutgoingHtml('<p><strong>Safe</strong> <a href="https://attn.test">good</a></p>'),
@@ -87,6 +101,22 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
     expect(
       sanitizeOutgoingHtml('<table background="https://tracker.test/p.gif"><tr><td>x</td></tr></table>')
     ).not.toContain('tracker.test')
+  })
+
+  it('keeps legacy font typography without allowing handlers, resource styles, or attributes on other tags', () => {
+    const html =
+      '<font face="Arial, sans-serif" color="#123456" size="+2" dir="auto" onclick="steal()" style="background-image:url(https://tracker.test/pixel)">Type</font>' +
+      '<span face="Arial" color="red" size="5">Plain</span><a href="javascript:steal()">Link</a>'
+    for (const sanitized of [sanitizeDraftHtmlForImport(html), sanitizeOutgoingHtml(html)]) {
+      const document = new DOMParser().parseFromString(sanitized, 'text/html')
+      const font = document.querySelector('font')
+      expect(font?.getAttribute('face')).toBe('Arial, sans-serif')
+      expect(font?.getAttribute('color')).toBe('#123456')
+      expect(font?.getAttribute('size')).toBe('+2')
+      expect(font?.getAttribute('dir')).toBe('auto')
+      expect(document.querySelector('span')?.attributes.length).toBe(0)
+      expect(sanitized).not.toMatch(/onclick|javascript:|tracker\.test|background-image/)
+    }
   })
 
   it('keeps safe authored backgrounds and drops backgrounds that load resources', () => {

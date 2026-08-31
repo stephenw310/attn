@@ -5,7 +5,9 @@ import { QuoteNode } from '@lexical/rich-text'
 import { TableCellNode, TableNode, TableRowNode } from '@lexical/table'
 import { TextNode } from 'lexical'
 import { GmailSignatureNode } from './nodes/GmailSignatureNode'
+import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { ImageNode } from './nodes/ImageNode'
+import { LegacyFontNode } from './nodes/LegacyFontNode'
 import { OpaqueHtmlNode } from './nodes/OpaqueHtmlNode'
 import { StyledTextNode } from './nodes/StyledTextNode'
 
@@ -21,6 +23,8 @@ export const editorConfig: InitialConfigType = {
     TableCellNode,
     ImageNode,
     GmailSignatureNode,
+    GmailSignaturePrefixNode,
+    LegacyFontNode,
     OpaqueHtmlNode,
     StyledTextNode,
     {

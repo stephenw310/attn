@@ -323,6 +323,111 @@ test('discards signature-only new mail after the saved Gmail signature changes',
   await expect.poll(() => page.evaluate(async () => (await window.attn.draft.list()).length)).toBe(0)
 })
 
+test('keeps legacy-font Gmail signatures editable without preview scrollbars', async ({
+  app,
+  page
+}, testInfo) => {
+  const line = (html: string): string =>
+    `<div style="color:rgb(34,34,34)"><font face="arial, sans-serif">${html}</font></div>`
+  const link = (label: string, href: string): string =>
+    `<a href="${href}" rel="noopener noreferrer" style="color:rgb(18,100,163);text-decoration:none" target="_blank">${label}</a>`
+  await setSendAsSignature(
+    app,
+    `<div dir="ltr">${[
+      line('Best,'),
+      line('Alex Rivera'),
+      line(`Product @ ${link('Northstar', 'https://northstar.test/')}`),
+      line(
+        `${link('northstar.test', 'https://northstar.test/')} | ${link('Team', 'https://northstar.test/team')} | ${link('News', 'https://northstar.test/news')}`
+      ),
+      line(`Made by ${link('Northstar', 'https://northstar.test/')} | Planning software for busy teams`)
+    ].join('')}</div>`
+  )
+  await page.emulateMedia({ colorScheme: 'light' })
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.expectSignatureCollapsed()
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+  await composer.revealSignature()
+  await expect(composer.editor.locator('iframe')).toHaveCount(0)
+  await expect(composer.signature.locator('font')).toHaveCount(5)
+  await expect(composer.signature.getByText('Alex Rivera', { exact: true })).toHaveCSS(
+    'font-family',
+    'arial, sans-serif'
+  )
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'composer-signature-font.png')
+  await page.screenshot({ path })
+  await testInfo.attach('composer-signature-font', { path, contentType: 'image/png' })
+
+  // Rendering the imported font markup must not turn the default into authored content.
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => window.attn.draft.list())).toEqual([])
+
+  await composer.openNew()
+  await composer.revealSignature()
+  await composer.signature.getByText('Alex Rivera', { exact: true }).click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' edited')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  const saved = await page.evaluate(async () => (await window.attn.draft.list())[0])
+  expect(saved?.bodyText).toContain('Alex Rivera edited')
+  expect(saved?.bodyHtml.match(/<font face="arial, sans-serif"/g)).toHaveLength(5)
+  expect(saved?.bodyHtml).toContain('https://northstar.test/team')
+  expect(saved?.bodyHtml).not.toContain('iframe')
+})
+
+test('keeps automatic font direction when editing and reopening a Gmail draft', async ({ app, page }) => {
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-auto-font',
+        'Automatic font direction',
+        '<div dir="ltr"><font face="Arial" dir="auto">שלום Alex</font></div>'
+      )
+    }
+  )
+  if (error) throw new Error(error)
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Automatic font direction' }).click()
+  const composer = new ComposerPage(page)
+  const font = composer.editor.locator('font')
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+  await expect(font).toHaveAttribute('dir', 'auto')
+  await expect(font).toHaveCSS('direction', 'rtl')
+  await font.click()
+  await font.evaluate((element) => {
+    const text = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode()
+    if (!text) throw new Error('font text missing')
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.collapse(true)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+  })
+  await page.keyboard.insertText('Alex ')
+  await expect(font).toHaveText('Alex שלום Alex')
+  await expect(font).toHaveCSS('direction', 'ltr')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  const savedDirection = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((row) => row.subject === 'Automatic font direction')
+    const document = new DOMParser().parseFromString(draft?.bodyHtml ?? '', 'text/html')
+    return document.querySelector('font')?.getAttribute('dir')
+  })
+  expect(savedDirection).toBe('auto')
+  await page.getByTestId('draft-row').filter({ hasText: 'Automatic font direction' }).click()
+  await expect(font).toHaveAttribute('dir', 'auto')
+  await expect(font).toHaveText('Alex שלום Alex')
+  await expect(font).toHaveCSS('direction', 'ltr')
+})
+
 test('keeps formatting edits made inside the saved Gmail signature', async ({ app, page }) => {
   await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
@@ -1566,6 +1671,90 @@ test('hydrates Gmail CID images and imports its signature as editable composer c
   expect(savedHtml).not.toContain('<p')
   expect(savedHtml).toContain('<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr">')
   expect(savedHtml).toContain('Chao Wu — edited')
+})
+
+test('groups the Gmail signature separator without changing its saved position or spacing', async ({
+  app,
+  page
+}, testInfo) => {
+  const gmailHtml =
+    '<div dir="ltr"><div><br clear="all"></div><div>Draft from Gmail</div><div><br></div><span class="gmail_signature_prefix">-- </span><br><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature"><div>Best,</div><div><font face="arial, sans-serif">Alex Rivera</font></div><div><a href="https://northstar.test/">Northstar</a></div></div></div>'
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft('gmail-signature-prefix', 'Gmail signature separator', gmailHtml)
+    }
+  )
+  if (error) throw new Error(error)
+  await page.emulateMedia({ colorScheme: 'light' })
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Gmail signature separator' }).click()
+  const composer = new ComposerPage(page)
+  const prefix = page.getByTestId('composer-gmail-signature-prefix')
+  await composer.expectSignatureCollapsed()
+  await expect(prefix).toHaveCount(1)
+  await expect(prefix).toBeHidden()
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+  await expect(composer.editor.locator('iframe')).toHaveCount(0)
+
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const collapsedPath = join(dir, 'composer-signature-prefix-collapsed.png')
+  await page.screenshot({ path: collapsedPath })
+  await testInfo.attach('signature separator collapsed', { path: collapsedPath, contentType: 'image/png' })
+  await composer.revealSignature()
+  await expect(prefix).toBeVisible()
+  await expect(prefix).toHaveText('-- ')
+  await expect(composer.signature.getByText('Best,', { exact: true })).toBeVisible()
+  expect(
+    await prefix.evaluate((element) => {
+      const next = element.nextElementSibling
+      return next ? next.getBoundingClientRect().top - element.getBoundingClientRect().bottom : null
+    })
+  ).toBeCloseTo(0, 0)
+  const expandedPath = join(dir, 'composer-signature-prefix-expanded.png')
+  await page.screenshot({ path: expandedPath })
+  await testInfo.attach('signature separator expanded', { path: expandedPath, contentType: 'image/png' })
+
+  await composer.editor.getByText('Draft from Gmail', { exact: true }).click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' edited')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  const saved = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((row) => row.subject === 'Gmail signature separator')
+    if (!draft) throw new Error('saved draft missing')
+    const document = new DOMParser().parseFromString(draft.bodyHtml, 'text/html')
+    const prefix = document.querySelector('.gmail_signature_prefix')
+    const signature = document.querySelector('.gmail_signature')
+    return {
+      text: draft.bodyText,
+      prefixText: prefix?.textContent,
+      prefixStyle: prefix?.getAttribute('style'),
+      prefixOutside: prefix?.parentElement === signature?.parentElement,
+      singleLineBreak:
+        prefix?.nextElementSibling?.tagName === 'BR' &&
+        prefix.nextElementSibling.nextElementSibling === signature,
+      prefixCount: document.querySelectorAll('.gmail_signature_prefix').length
+    }
+  })
+  expect(saved.text).toContain('Draft from Gmail edited\n\n-- \nBest,\nAlex Rivera\nNorthstar')
+  expect(saved).toMatchObject({
+    prefixText: '-- ',
+    prefixStyle: null,
+    prefixOutside: true,
+    singleLineBreak: true,
+    prefixCount: 1
+  })
+  await page.getByTestId('draft-row').filter({ hasText: 'Gmail signature separator' }).click()
+  await composer.expectSignatureCollapsed()
+  await expect(prefix).toBeHidden()
+  await expect(prefix).toHaveCount(1)
+  await composer.revealSignature()
+  await expect(prefix).toHaveText('-- ')
 })
 
 test('hydrates bracketed percent-encoded CID images inside preserved HTML', async ({ app, page }) => {

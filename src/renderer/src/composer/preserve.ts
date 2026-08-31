@@ -1,5 +1,11 @@
 import { type DefaultTreeAdapterTypes, parseFragment } from 'parse5'
-import { COMPOSER_STYLE_PROPERTIES, isGmailSignatureAttributes, sanitizeDraftHtmlForImport } from './sanitize'
+import {
+  COMPOSER_STYLE_PROPERTIES,
+  isGmailSignatureAttributes,
+  isGmailSignaturePrefixClass,
+  LEGACY_FONT_ATTRIBUTES,
+  sanitizeDraftHtmlForImport
+} from './sanitize'
 
 const REPRESENTABLE_TAGS = new Set([
   'p',
@@ -18,6 +24,7 @@ const REPRESENTABLE_TAGS = new Set([
   'li',
   'blockquote',
   'span',
+  'font',
   'img',
   'table',
   'thead',
@@ -31,6 +38,7 @@ const REPRESENTABLE_TAGS = new Set([
 const GLOBAL_ATTRIBUTES = new Set(['style', 'title', 'dir'])
 const TAG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
   a: new Set(['href', 'rel', 'target']),
+  font: new Set(LEGACY_FONT_ATTRIBUTES),
   img: new Set(['src', 'alt', 'width', 'height', 'data-attn-cid', 'data-surl']),
   ol: new Set(['start']),
   td: new Set(['colspan', 'rowspan']),
@@ -184,12 +192,14 @@ function unsupportedReason(element: Element, hasStylesheet: boolean): string | n
   )
   const gmailSignature =
     tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
+  const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(attributes.get('class'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.getAttributeNames()) {
     if (attribute === 'class' && isInertClass(attributes.get('class') ?? '', hasStylesheet)) continue
     if (
       !GLOBAL_ATTRIBUTES.has(attribute) &&
       !tagAttributes.has(attribute) &&
+      !(gmailSignaturePrefix && attribute === 'class') &&
       !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute))
     ) {
       return `${tag}[${attribute}]`
@@ -216,6 +226,7 @@ function sourceUnsupportedReason(
   const attributes = new Map(element.attrs.map((attribute) => [attribute.name, attribute.value]))
   const gmailSignature =
     tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
+  const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(attributes.get('class'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.attrs) {
     const inertClass = attribute.name === 'class' && isInertClass(attribute.value, hasStylesheet)
@@ -223,6 +234,7 @@ function sourceUnsupportedReason(
       !inertClass &&
       !GLOBAL_ATTRIBUTES.has(attribute.name) &&
       !tagAttributes.has(attribute.name) &&
+      !(gmailSignaturePrefix && attribute.name === 'class') &&
       !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute.name))
     ) {
       return `${tag}[${attribute.name}]`
@@ -376,6 +388,29 @@ export function sanitizedDomMatchesSource(source: string, sanitized: string): bo
   )
 }
 
+/** Group only an adjacent marked separator with its signature, never ordinary authored dashes. */
+function groupGmailSignaturePrefixes(document: Document): void {
+  const previousContent = (node: Node): ChildNode | null => {
+    let previous = node.previousSibling
+    while (previous?.nodeType === Node.TEXT_NODE && !previous.textContent?.trim()) {
+      previous = previous.previousSibling
+    }
+    return previous
+  }
+  for (const signature of document.querySelectorAll(
+    'div.gmail_signature, div[data-smartmail="gmail_signature"]'
+  )) {
+    const lineBreak = previousContent(signature)
+    if (!(lineBreak instanceof HTMLBRElement)) continue
+    const prefix = previousContent(lineBreak)
+    if (!(prefix instanceof HTMLSpanElement) || !isGmailSignaturePrefixClass(prefix.getAttribute('class'))) {
+      continue
+    }
+    signature.prepend(prefix)
+    lineBreak.remove()
+  }
+}
+
 /** Replace only top-most unsupported regions so nested source survives as one exact unit. */
 export function prepareHtmlForEditor(html: string): { html: string; issues: string[] } {
   if (!html.trim()) return { html: '', issues: [] }
@@ -407,6 +442,12 @@ export function prepareHtmlForEditor(html: string): { html: string; issues: stri
   const safe = sanitizeDraftHtmlForImport(marked)
   const document = new DOMParser().parseFromString(safe, 'text/html')
   materializeInheritedTextStyles(document)
+  groupGmailSignaturePrefixes(document)
+  // Lexical's whitespace walker does not list FONT as inline. This import-only
+  // hint keeps spaces between adjacent fonts; the node's style sanitizer drops it.
+  for (const font of document.body.querySelectorAll<HTMLElement>('font')) {
+    font.style.display = 'inline'
+  }
   return { html: document.body.innerHTML, issues }
 }
 

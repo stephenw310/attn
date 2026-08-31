@@ -1,7 +1,7 @@
 import { $generateHtmlFromNodes } from '@lexical/html'
 import type { EditorState, LexicalEditor, SerializedEditorState, SerializedLexicalNode } from 'lexical'
 import { opaqueHtmlText, restoreOpaqueHtml } from './preserve'
-import { sanitizeOutgoingHtml } from './sanitize'
+import { isGmailSignaturePrefixClass, sanitizeOutgoingHtml } from './sanitize'
 
 interface SerializedElement extends SerializedLexicalNode {
   children?: SerializedLexicalNode[]
@@ -126,6 +126,12 @@ function wrapGmailSignatures(html: string): string {
     if (!dedicatedWrapper) {
       signature.replaceWith(wrapper)
       wrapper.append(signature)
+    }
+    const prefix = signature.firstElementChild
+    if (prefix?.tagName === 'SPAN' && isGmailSignaturePrefixClass(prefix.getAttribute('class'))) {
+      // The editor groups these for collapsing. Gmail expects the marked
+      // separator outside its signature, with exactly one line break between.
+      signature.before(prefix, document.createElement('br'))
     }
     if (!isBlankGmailRow(previousMeaningfulSibling(wrapper))) {
       const spacer = document.createElement('div')

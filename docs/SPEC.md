@@ -389,9 +389,11 @@ footer is absent and the composer owns its action footer, so editing controls ca
   this signature is untouched. Closing it discards the row, and the draft mirror skips it. That decision
   uses the signature applied to the draft rather than the latest account cache. A Gmail setting change
   therefore cannot turn an older untouched signature into authored content. Gmail does not expose its
-  separate reply and forward signature-default choices through this resource, so Attn uses the primary
-  signature for every local composer. A signature already present in an imported Gmail draft remains
-  editable and round-trips with that draft.
+  separate reply and forward signature-default choices or the checkbox that removes the `-- ` separator
+  through this resource. Attn uses the primary signature for every local composer and does not invent a
+  separator absent from that HTML. A signature already present in an imported Gmail draft remains
+  editable and round-trips with that draft. An adjacent Gmail-marked separator collapses with the signature
+  in Attn, but exports before it with one line break, retaining its trailing space in plain text.
 - **Attn signature footer (M4 T32B):** an optional `Sent with Attn` line follows the account's Gmail
   signature, or the authored body when no signature exists, before any quoted history. The setting is
   off by default and applies per account to newly created local drafts in every composer mode. Show the

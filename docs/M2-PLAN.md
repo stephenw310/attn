@@ -1034,6 +1034,25 @@ handling, poll failure isolation, and sender refresh. Seeded Electron coverage p
 editable and survives serialization, and that closing a signature-only new message, reply, or forward
 discards it.
 
+Legacy Gmail `<font>` markup stays editable through `LegacyFontNode`, which preserves its face, color,
+size, and direction attributes, including `dir="auto"`. The import pass keeps spaces between adjacent font
+runs. Regression coverage checks signature-only discard, editing, HTML and JSON round trips, automatic
+direction changes in Electron, and the `composer-signature-font.png` artifact.
+
+Gmail's `gmail_signature_prefix` separator imports as editable content and shares the signature's collapse
+boundary. Serialization restores the marked span before the signature with one line break and preserves
+the trailing space in `-- ` in the plain-text alternative. The temporary whitespace hint stays out of saved
+HTML, and authored separator styles survive unchanged. The separator never becomes a read-only frame
+or gains an extra blank row on repeated save and reopen. Ordinary unmarked dashes stay outside the collapse
+boundary. Electron coverage records the collapsed and expanded states in `composer-signature-prefix-collapsed.png`
+and `composer-signature-prefix-expanded.png`.
+
+The [send-as resource](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.settings.sendAs)
+does not expose Gmail's checkbox for removing the separator and placing signatures before quoted replies.
+Attn therefore preserves separators in imported drafts but does not add one to a new draft when the cached
+signature HTML has none. Matching that checkbox for new Attn drafts would require a separate local preference;
+it cannot be inferred reliably from old messages or another account's signature.
+
 ---
 
 ## Accepted-risk register (decisions made by this plan — don't relitigate ad hoc)
