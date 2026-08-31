@@ -2295,13 +2295,14 @@ test('restores the collapsed quote on a reply Gmail merged into one document', a
   await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
 })
 
-test('keeps a reply signature and quoted history collapsed after Gmail appends empty lines', async ({
+test('keeps a reply signature and quoted history collapsed with empty lines beside nested wrappers', async ({
   app,
   page
 }, testInfo) => {
   const signature =
     '<div class="gmail_signature" data-smartmail="gmail_signature"><div>Bests,</div><div>Alex Rivera</div><a href="https://northstar.test/">Northstar</a></div>'
-  const merged = `<div dir="ltr"><div><br></div>${signature}<div class="gmail_quote"><div class="gmail_attr">On Mon, Christy wrote:</div><blockquote><table width="600"><tr><td>Internal account notes.</td></tr></table></blockquote></div><div><br></div></div>`
+  const emptyLine = '<div><br></div>'
+  const merged = `<div dir="ltr"><div>${emptyLine}${signature}<div class="gmail_quote"><div class="gmail_attr">On Mon, Christy wrote:</div><blockquote><table width="600"><tr><td>Internal account notes.</td></tr></table></blockquote></div>${emptyLine}</div>${emptyLine}</div>`
   const error = await app.evaluate(
     ({ ipcMain }, args) =>
       new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
@@ -2321,7 +2322,10 @@ test('keeps a reply signature and quoted history collapsed after Gmail appends e
   mkdirSync(dir, { recursive: true })
   const path = join(dir, 'composer-reply-empty-lines.png')
   await page.screenshot({ path })
-  await testInfo.attach('reply with Gmail trailing empty lines', { path, contentType: 'image/png' })
+  await testInfo.attach('reply with Gmail empty lines beside nested wrappers', {
+    path,
+    contentType: 'image/png'
+  })
   await composer.revealSignatureWithKeyboard()
   await expect(composer.signature).toContainText('Alex Rivera')
   await expect(page.frameLocator('[data-testid="composer-quote"]').locator('body')).toContainText(
@@ -2339,6 +2343,7 @@ test('keeps a reply signature and quoted history collapsed after Gmail appends e
   expect(saved?.bodyHtml).toContain('gmail_signature')
   expect(saved?.bodyHtml).not.toContain('gmail_quote')
   expect(saved?.quoteHtml).toContain('Internal account notes.')
+  expect(saved?.quoteHtml.endsWith(emptyLine.repeat(2))).toBe(true)
   const savedId = await composer.root.getAttribute('data-draft-id')
   await page.getByTestId('composer-close').click()
   await expect(composer.root).toHaveCount(0)
@@ -2349,4 +2354,6 @@ test('keeps a reply signature and quoted history collapsed after Gmail appends e
   await expect(composer.root).toHaveAttribute('data-draft-id', savedId ?? '')
   await composer.expectSignatureAndQuoteCollapsed()
   await expect(composer.editor).toContainText('My reply')
+  const reopened = await page.evaluate(async (id) => window.attn.draft.get(id ?? ''), savedId)
+  expect(reopened?.quoteHtml).toBe(saved?.quoteHtml)
 })

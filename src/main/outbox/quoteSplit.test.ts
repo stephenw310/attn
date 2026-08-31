@@ -94,6 +94,53 @@ describe('recovering a quoted trail from a round-tripped draft', () => {
     expect(splitQuotedTrail(reassembled, '')).toEqual(split)
   })
 
+  it('finds a quote inside a wrapper followed by an empty editor line', () => {
+    const html = '<div dir="ltr"><div>answer<blockquote>quote</blockquote></div><div><br></div></div>'
+    const split = splitQuotedTrail(html, '')
+    expect(split.bodyHtml).toBe('<div dir="ltr"><div>answer</div></div>')
+    expect(split.quoteHtml).toBe('<blockquote>quote</blockquote><div><br></div>')
+    expect(splitQuotedTrail(draftHtmlBody(split), '')).toEqual(split)
+  })
+
+  it.each([
+    '<blockquote>Original</blockquote>',
+    '<div class="gmail_quote"><blockquote>Original</blockquote></div>'
+  ])('preserves empty lines around each nested wrapper for %s', (quote) => {
+    const beforeOuter = '<p><br></p>'
+    const beforeInner = '<div dir="ltr"><br></div>'
+    const afterQuote = '<p>\u00a0</p>'
+    const afterInner = '<div><br></div>'
+    const afterOuter = '<span><br></span>'
+    const html = `${beforeOuter}<div dir="ltr">${beforeInner}<div><div>answer</div>${quote}${afterQuote}</div>${afterInner}</div>${afterOuter}`
+    const split = splitQuotedTrail(html, '')
+    expect(split.bodyHtml).toBe(
+      `${beforeOuter}<div dir="ltr">${beforeInner}<div><div>answer</div></div></div>`
+    )
+    expect(split.quoteHtml).toBe(`${quote}${afterQuote}${afterInner}${afterOuter}`)
+    let reassembled = draftHtmlBody(split)
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const again = splitQuotedTrail(reassembled, '')
+      expect(again).toEqual(split)
+      expect(draftHtmlBody(again)).toBe(reassembled)
+      reassembled = draftHtmlBody(again)
+    }
+  })
+
+  it.each([
+    '<div>one more thing</div>',
+    '<div><img src="cid:authored-image"></div>',
+    '<div style="border-top:1px solid red"><br></div>'
+  ])('does not descend past authored content beside a wrapper: %s', (suffix) => {
+    const html = `<div dir="ltr"><div>${ATTN_REPLY}</div><div><br></div>${suffix}</div>`
+    expect(splitQuotedTrail(html, '')).toEqual({ bodyHtml: html, quoteHtml: '', bodyText: '', quoteText: '' })
+  })
+
+  it('does not manufacture an authored body from empty lines beside a quote-only wrapper', () => {
+    const html =
+      '<div dir="ltr"><p><br></p><div><blockquote>Only a quote</blockquote></div><div><br></div></div>'
+    expect(splitQuotedTrail(html, '')).toEqual({ bodyHtml: html, quoteHtml: '', bodyText: '', quoteText: '' })
+  })
+
   it.each(['<div><img src="cid:authored-image"></div>', '<div style="border-top:1px solid red"><br></div>'])(
     'does not move visible content following a quote: %s',
     (suffix) => {

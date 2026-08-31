@@ -114,20 +114,27 @@ function locateQuote(
       quoteHtml: html.slice(offset, contentEnd).trim()
     }
   }
-  const meaningful = children.filter((node) => !isBlank(node))
+  const meaningful = children.filter((node) => !isEmptyLine(node))
   if (meaningful.length !== 1) return null
   const wrapper = meaningful[0]
   if (!isElement(wrapper)) return null
   const location = wrapper.sourceCodeLocation
   if (!location?.startTag || !location.endTag) return null
-  return locateQuote(
+  const found = locateQuote(
     html,
     wrapper.childNodes,
     location.startTag.endOffset,
     location.endTag.startOffset,
-    `${open}${html.slice(location.startOffset, location.startTag.endOffset)}`,
+    // Keep empty siblings before the wrapper on the authored side.
+    `${open}${html.slice(contentStart, location.startTag.endOffset)}`,
     `${html.slice(location.endTag.startOffset, location.endOffset)}${close}`
   )
+  if (!found) return null
+  // Empty siblings after each wrapper follow the quote, in their original order.
+  return {
+    ...found,
+    quoteHtml: `${found.quoteHtml}${html.slice(location.endOffset, contentEnd)}`.trim()
+  }
 }
 
 /**

@@ -1071,8 +1071,9 @@ messages. Reopened drafts return beneath their source; a missing source falls ba
 The keyed composer stays mounted while source messages load or change, preserving unsaved edits. Incoming
 mail does not steal the reader's cursor. List shortcuts keep their default source selection. No schema change is required.
 
-The Gmail draft quote splitter now accepts plain trailing empty editor lines without pulling quoted history
-into the editable body. It preserves those lines and leaves authored content below quotes untouched.
+The Gmail draft quote splitter accepts empty editor lines after quotes and beside nested wrappers without
+pulling quoted history into the editable body. It preserves leading empty siblings with the body and trailing
+empty siblings with the quote, in order. Authored or styled content below quotes still prevents splitting.
 `e2e/message-replies.spec.ts` covers a customer exchange followed by an internal forward, separate drafts,
 recipient and header isolation, source attachments, and palette targeting. The composer regression covers
 signature and quote collapse after importing, editing, and reopening a Gmail reply with trailing empty lines.
