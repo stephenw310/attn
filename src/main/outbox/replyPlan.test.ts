@@ -81,7 +81,7 @@ describe('reply planning', () => {
       }
     })
 
-    expect(planReply('reply', conversation([source]), SELF).to).toEqual([])
+    expect(planReply('reply', conversation([source]), SELF).to).toEqual([address('Maya', 'maya@example.com')])
     expect(planReply('replyAll', conversation([source]), SELF).to).toEqual([
       address('Maya', 'maya@example.com')
     ])
@@ -177,6 +177,41 @@ describe('reply planning', () => {
 
   it('rejects an empty conversation', () => {
     expect(() => planReply('reply', conversation([]), SELF)).toThrow('empty conversation')
+  })
+
+  it.each<ReplyKind>(['reply', 'replyAll', 'forward'])('targets an earlier message for %s', (kind) => {
+    const original = message({
+      recipients: {
+        ...EMPTY_RECIPIENTS,
+        to: [address('Me', SELF)],
+        cc: [address('Priya', 'priya@example.com')],
+        replyTo: [address('Original replies', 'original-replies@example.com')]
+      }
+    })
+    const colleague = message({
+      id: 'colleague-message',
+      at: original.at + 1_000,
+      fromEmail: 'colleague@example.com',
+      rfcMessageId: '<colleague@example.com>',
+      bodyText: 'Private side conversation',
+      bodyHtml: '<p>Private side conversation</p>'
+    })
+    const plan = planReply(kind, conversation([original, colleague]), SELF, original.id)
+    expect(plan.sourceMessageId).toBe(original.id)
+    expect(plan.quoteText).toContain(original.bodyText.split('\n')[0])
+    expect(plan.quoteHtml).not.toContain('Private side conversation')
+    expect(plan.to).toEqual(
+      kind === 'forward' ? [] : [address('Original replies', 'original-replies@example.com')]
+    )
+    expect(plan.cc).toEqual(kind === 'replyAll' ? [address('Priya', 'priya@example.com')] : [])
+    expect(plan.inReplyTo).toBe(kind === 'forward' ? null : original.rfcMessageId)
+    expect(plan.references).toEqual(kind === 'forward' ? [] : [...original.references, original.rfcMessageId])
+  })
+
+  it('never falls back to the newest message when an explicit source is unavailable', () => {
+    expect(() => planReply('reply', conversation([message()]), SELF, 'different-thread-message')).toThrow(
+      'Source message is unavailable'
+    )
   })
 })
 

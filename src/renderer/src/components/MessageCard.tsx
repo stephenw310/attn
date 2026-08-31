@@ -4,7 +4,7 @@ import type { MailAddress, MessageAttachment, MessageRecipients } from '../../..
 import { formatBytes } from '../formatBytes'
 import { MessageBody } from '../MessageBody'
 import type { DisplayMessage } from '../mailDisplay'
-import { mailPresentationForHtml } from '../mailSurface'
+import { mailReadingForHtml } from '../mailReading'
 import { useTheme } from '../theme'
 
 function firstName(address: MailAddress, account: string | null): string {
@@ -83,6 +83,8 @@ interface MessageCardProps {
   account: string | null
   onToast: (message: string) => void
   collapsed?: boolean
+  active?: boolean
+  hasInlineComposer?: boolean
   onToggleCollapsed?: () => void
   trimExpanded?: boolean
   onToggleTrim: () => void
@@ -96,6 +98,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     account,
     onToast,
     collapsed = false,
+    active = false,
+    hasInlineComposer = false,
     onToggleCollapsed,
     trimExpanded = false,
     onToggleTrim,
@@ -103,7 +107,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
   } = props
   const { appearance } = useTheme()
   const [viewOriginal, setViewOriginal] = useState(false)
-  const detectedPresentation = useMemo(() => mailPresentationForHtml(message.html), [message.html])
+  const reading = useMemo(() => mailReadingForHtml(message.html), [message.html])
+  const detectedPresentation = reading.presentation
   const presentation =
     viewOriginal && detectedPresentation.surface === 'native'
       ? { ...detectedPresentation, surface: 'light' as const }
@@ -141,7 +146,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className="rounded-sm border border-edge bg-ground"
+        className={`border border-edge ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-sm bg-active' : 'rounded-sm bg-ground'}`}
       >
         <button
           type="button"
@@ -173,7 +178,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className="rounded-[10px] border border-edge bg-ground px-5 py-4"
+      className={`border border-edge px-5 py-4 ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-[10px] bg-active/50' : 'rounded-[10px] bg-ground'}`}
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
@@ -239,6 +244,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           surface={presentation.surface}
           layout={presentation.layout}
           appearance={appearance}
+          viewOriginal={viewOriginal}
+          parts={reading.parts}
           threadId={threadId}
           messageId={message.id}
           attachments={message.attachments}

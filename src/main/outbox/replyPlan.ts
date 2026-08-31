@@ -142,16 +142,36 @@ function replyReferences(source: ConversationMsg): { inReplyTo: string | null; r
   return { inReplyTo, references }
 }
 
-export function planReply(kind: ReplyKind, conversation: Conversation, accountEmail: string): ReplyPlan {
-  const source =
-    kind === 'forward'
-      ? latestMessage(conversation.messages)
-      : latestReplyMessage(conversation.messages, accountEmail)
+export function replySourceMessage(
+  kind: ReplyKind,
+  conversation: Conversation,
+  accountEmail: string,
+  sourceMessageId?: string
+): ConversationMsg {
+  if (sourceMessageId !== undefined) {
+    const source = conversation.messages.find((message) => message.id === sourceMessageId)
+    if (!source) throw new Error('Source message is unavailable in this conversation')
+    return source
+  }
+  return kind === 'forward'
+    ? latestMessage(conversation.messages)
+    : latestReplyMessage(conversation.messages, accountEmail)
+}
+
+export function planReply(
+  kind: ReplyKind,
+  conversation: Conversation,
+  accountEmail: string,
+  sourceMessageId?: string
+): ReplyPlan {
+  const source = replySourceMessage(kind, conversation, accountEmail, sourceMessageId)
   const self = new Set([normalizeEmailKey(accountEmail)])
   const replyTargets =
-    source.recipients.replyTo.length > 0
-      ? source.recipients.replyTo
-      : [{ name: source.fromName, email: source.fromEmail }]
+    normalizeEmailKey(source.fromEmail) === normalizeEmailKey(accountEmail)
+      ? source.recipients.to
+      : source.recipients.replyTo.length > 0
+        ? source.recipients.replyTo
+        : [{ name: source.fromName, email: source.fromEmail }]
 
   if (kind === 'forward') {
     const quote = forwardQuote(source, conversation.subject)

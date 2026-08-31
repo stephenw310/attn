@@ -1,11 +1,12 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-mail-layout.json' })
 
 test('separates native, centered, and full-bleed sender canvases', async ({ page }, testInfo) => {
-  await expect(page.getByTestId('thread-row')).toHaveCount(9)
+  await expect(page.getByTestId('thread-row')).toHaveCount(11)
 
   await page.getByTestId('thread-row').filter({ hasText: 'Plain layout' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
@@ -153,3 +154,61 @@ test('keeps sender canvases solid and removes native line backgrounds in light t
   await page.screenshot({ path: neutralPath })
   await testInfo.attach('neutral light mail backgrounds', { path: neutralPath, contentType: 'image/png' })
 })
+
+for (const appearance of ['light', 'dark'] as const) {
+  test(`normalizes Apple Mail pasted backgrounds in the ${appearance} reader and reply preview`, async ({
+    page
+  }, testInfo) => {
+    await page.getByTestId('account-menu').getByRole('button').first().click()
+    await page.getByTestId('theme-picker').selectOption(`dispatch-${appearance}`)
+    await expect(page.locator('html')).toHaveAttribute('data-theme', `dispatch-${appearance}`)
+    await page.keyboard.press('Escape')
+    await page.getByTestId('thread-row').filter({ hasText: 'Apple Mail pasted backgrounds' }).click()
+    await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'native')
+    const frame = page.frameLocator('[data-testid="html-body-frame"]')
+    for (const id of ['apple-greeting', 'apple-spacer', 'apple-question', 'apple-close']) {
+      await expect(frame.locator(`#${id}`)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+      await expect(frame.locator(`#${id} > span`)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    }
+    await expect(frame.locator('#apple-question')).toHaveCSS(
+      'color',
+      appearance === 'light' ? 'rgb(32, 33, 36)' : 'rgb(233, 234, 238)'
+    )
+    await expect(frame.locator('#apple-question')).toContainText('Can we schedule a call?')
+    if (appearance === 'dark') {
+      await page.getByTestId('mail-original-toggle').click()
+      await expect(frame.locator('#apple-question')).toHaveCSS('background-color', 'rgb(58, 58, 60)')
+      await expect(frame.locator('#apple-question > span')).toHaveCSS(
+        'background-color',
+        'rgb(255, 255, 255)'
+      )
+      await page.getByTestId('mail-original-toggle').click()
+      await expect(frame.locator('#apple-question')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    }
+    const dir = join(__dirname, '.artifacts')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, `apple-mail-backgrounds-${appearance}.png`)
+    await page.screenshot({ path })
+    await testInfo.attach(`Apple Mail backgrounds ${appearance}`, { path, contentType: 'image/png' })
+
+    const composer = new ComposerPage(page)
+    await composer.openReply()
+    await page.getByTestId('composer-quote-toggle').click()
+    const quote = page.frameLocator('[data-testid="composer-quote"]')
+    // The outgoing sanitizer intentionally removes sender IDs.
+    const question = quote.getByText('Thanks for the update. Can we schedule a call?', { exact: true })
+    await expect(question).toBeVisible()
+    await expect(question).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    await expect(question.locator('..')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    // The display cleanup must not rewrite the original quote that will be sent.
+    const draftId = await composer.root.getAttribute('data-draft-id')
+    await expect
+      .poll(async () =>
+        page.evaluate(async (id) => (await window.attn.draft.get(id ?? ''))?.quoteHtml, draftId)
+      )
+      .toContain('background-color: rgb(58, 58, 60)')
+    const quotePath = join(dir, `apple-mail-quote-${appearance}.png`)
+    await page.screenshot({ path: quotePath })
+    await testInfo.attach(`Apple Mail quote ${appearance}`, { path: quotePath, contentType: 'image/png' })
+  })
+}

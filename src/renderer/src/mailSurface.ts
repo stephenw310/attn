@@ -1,3 +1,5 @@
+import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
+
 export type MailSurface = 'native' | 'light'
 export type MailLayout = 'padded' | 'centered' | 'full-bleed'
 
@@ -897,6 +899,7 @@ export function mailPresentationForHtml(html: string | null): MailPresentation {
   document.querySelectorAll(SIGNATURE).forEach((element) => {
     element.remove()
   })
+  normalizeAppleMailLineBackgrounds(document)
 
   // Keep quoted content in the document while resolving stylesheet selectors.
   // A real canvas in a forward still belongs to the visible message, even when

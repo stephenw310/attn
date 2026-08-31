@@ -44,6 +44,7 @@ import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
 import { formatBytes } from '../formatBytes'
 import type { ShowToast } from '../hooks/useToast'
+import { normalizeAppleMailLineBackgrounds } from '../mailAppleBackgrounds'
 import { forceLightMailCss } from '../mailCss'
 import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
@@ -65,6 +66,7 @@ import { useComposerDraft } from './useComposerDraft'
 interface ComposerProps {
   draft: Draft
   mode?: 'full' | 'inline'
+  attachedToMessage?: boolean
   initialError?: string | null
   onClose: () => void
   onExit?: () => void
@@ -292,7 +294,14 @@ function InlineQuote({
   useEffect(() => {
     if (!html) return
     let cancelled = false
-    const document = new DOMParser().parseFromString(sanitizeOutgoingHtml(html), 'text/html')
+    // Detect the paste artifact before outgoing sanitization drops its CSS marker.
+    // Only the detached display copy changes, and it still passes through the sanitizer.
+    const displayCopy = new DOMParser().parseFromString(html, 'text/html')
+    normalizeAppleMailLineBackgrounds(displayCopy)
+    const document = new DOMParser().parseFromString(
+      sanitizeOutgoingHtml(displayCopy.body.innerHTML),
+      'text/html'
+    )
     if (surface === 'native' && appearance === 'dark') normalizeNativeMailDocument(document.body)
     if (appearance === 'light' || surface === 'light') {
       document.querySelectorAll('style').forEach((style) => {
@@ -765,7 +774,7 @@ function ComposerCommandPlugin({
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { draft, mode = 'full', initialError = null, onClose, onExit, onToast, aiDraft },
+  { draft, mode = 'full', attachedToMessage = false, initialError = null, onClose, onExit, onToast, aiDraft },
   ref
 ): React.JSX.Element {
   const [to, setTo] = useState<MailAddress[]>(draft.to)
@@ -1031,7 +1040,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <section
       className={`${
         mode === 'inline'
-          ? 'flex w-full flex-none flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-composer'
+          ? `flex w-full flex-none flex-col overflow-hidden border border-edge bg-raised ${attachedToMessage ? 'rounded-b-[10px]' : 'rounded-xl shadow-composer'}`
           : 'flex min-h-0 flex-1 flex-col bg-raised/35'
       } ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}

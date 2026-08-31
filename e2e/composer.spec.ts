@@ -2242,6 +2242,7 @@ test('discard removes the local recovery surface', async ({ boot, page }) => {
 })
 
 test('keeps the caret in a recipient field while a preserved region sits in the body', async ({
+  app,
   boot,
   page
 }) => {
@@ -2277,11 +2278,17 @@ test('keeps the caret in a recipient field while a preserved region sits in the 
 
   // Relaunch so the draft is reloaded from the store, then leave the recovered
   // full-window composer and reopen the draft inline on its own thread.
-  ;({ page } = await boot.relaunch())
+  ;({ app, page } = await boot.relaunch())
   const composer = new ComposerPage(page)
   await expect(composer.root).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
+  // A fast reply shortcut must not replace the saved draft while its reopen is
+  // still crossing IPC, especially when an imported draft has no known source.
+  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.delayMs), {
+    channel: TEST_CHANNELS.delayDraftReopen,
+    delayMs: 500
+  })
   await page.getByTestId('thread-row').first().click()
   await page.keyboard.press('Enter')
   // Inline placement is load-bearing: the editor only takes focus on open in
@@ -2331,4 +2338,67 @@ test('restores the collapsed quote on a reply Gmail merged into one document', a
   await expect(composer.editor).not.toContainText('Newsletter')
   await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).toHaveCount(0)
   await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+})
+
+test('keeps a reply signature and quoted history collapsed with empty lines beside nested wrappers', async ({
+  app,
+  page
+}, testInfo) => {
+  const signature =
+    '<div class="gmail_signature" data-smartmail="gmail_signature"><div>Bests,</div><div>Alex Rivera</div><a href="https://northstar.test/">Northstar</a></div>'
+  const emptyLine = '<div><br></div>'
+  const merged = `<div dir="ltr"><div>${emptyLine}${signature}<div class="gmail_quote"><div class="gmail_attr">On Mon, Christy wrote:</div><blockquote><table width="600"><tr><td>Internal account notes.</td></tr></table></blockquote></div>${emptyLine}</div>${emptyLine}</div>`
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteReplyDraft('reply-empty-lines', 'Re: Q3 roadmap review', merged)
+    }
+  )
+  if (error) throw new Error(error)
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  const composer = new ComposerPage(page)
+  await composer.expectSignatureAndQuoteCollapsed()
+  await expect(composer.editor.locator('iframe')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'composer-reply-empty-lines.png')
+  await page.screenshot({ path })
+  await testInfo.attach('reply with Gmail empty lines beside nested wrappers', {
+    path,
+    contentType: 'image/png'
+  })
+  await composer.revealSignatureWithKeyboard()
+  await expect(composer.signature).toContainText('Alex Rivera')
+  await expect(page.frameLocator('[data-testid="composer-quote"]').locator('body')).toContainText(
+    'Internal account notes.'
+  )
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+Home')
+  await composer.typeBody('My reply')
+  await composer.expectSaved()
+  const saved = await page.evaluate(
+    async (id) => window.attn.draft.get(id ?? ''),
+    await composer.root.getAttribute('data-draft-id')
+  )
+  expect(saved?.bodyText).toContain('My reply')
+  expect(saved?.bodyHtml).toContain('gmail_signature')
+  expect(saved?.bodyHtml).not.toContain('gmail_quote')
+  expect(saved?.quoteHtml).toContain('Internal account notes.')
+  expect(saved?.quoteHtml.endsWith(emptyLine.repeat(2))).toBe(true)
+  const savedId = await composer.root.getAttribute('data-draft-id')
+  await page.getByTestId('composer-close').click()
+  await expect(composer.root).toHaveCount(0)
+  // This imported draft has no known source. Reopen that saved draft instead
+  // of asking R to start a reply to the currently selected message.
+  await page.getByTestId('conversation-back').click()
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  await expect(composer.root).toHaveAttribute('data-draft-id', savedId ?? '')
+  await composer.expectSignatureAndQuoteCollapsed()
+  await expect(composer.editor).toContainText('My reply')
+  const reopened = await page.evaluate(async (id) => window.attn.draft.get(id ?? ''), savedId)
+  expect(reopened?.quoteHtml).toBe(saved?.quoteHtml)
 })

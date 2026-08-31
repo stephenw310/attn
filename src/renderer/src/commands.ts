@@ -80,6 +80,7 @@ export const COMMAND_SPECS = {
   'message.next': { title: 'Next message in conversation', shortcut: 'n', context: 'reader' },
   'message.previous': { title: 'Previous message in conversation', shortcut: 'p', context: 'reader' },
   'message.toggle': { title: 'Expand or collapse message', shortcut: 'o', context: 'reader' },
+  'message.openOrReplyAll': { title: 'Open message or reply all', shortcut: 'Enter', context: 'reader' },
   'message.trim.toggle': { title: 'Show or hide trimmed message content', context: 'reader' },
   'sync.retry': { title: 'Retry mail sync', context: 'global', allowInComposer: true },
   'sync.error.copy': {
@@ -273,10 +274,21 @@ export const COMMAND_SPECS = {
     context: 'reader',
     footer: { reader: { id: 'reply', label: 'reply', order: 10 } }
   },
+  'message.reply': {
+    title: 'Reply to this message',
+    context: 'reader'
+  },
+  'message.replyAll': {
+    title: 'Reply all to this message',
+    context: 'reader'
+  },
+  'message.forward': {
+    title: 'Forward this message',
+    context: 'reader'
+  },
   'composer.replyAll': {
     title: 'Reply all',
     shortcut: 'a',
-    shortcutAliases: ['Enter'],
     context: 'reader',
     footer: { reader: { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] } }
   },
