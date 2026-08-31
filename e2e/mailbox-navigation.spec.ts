@@ -31,7 +31,8 @@ async function createClosedDrafts(page: Page, count: number): Promise<void> {
           inReplyTo: null,
           references: [],
           quoteHtml: '',
-          quoteText: ''
+          quoteText: '',
+          followUpAt: null
         })
         await window.attn.draft.close(id)
       }

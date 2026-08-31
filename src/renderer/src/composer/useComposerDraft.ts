@@ -10,7 +10,7 @@ import {
 } from '../../../shared/outboxTuning'
 import { serializeEditorState } from './serialize'
 
-type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments'>
+type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments' | 'followUpAt'>
 
 export function mirrorIdleMs(attachments: DraftSaveInput['attachments']): number {
   const bytes = (attachments ?? []).reduce((total, attachment) => total + attachment.sizeBytes, 0)

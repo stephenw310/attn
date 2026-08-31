@@ -133,6 +133,7 @@ describe('command catalog', () => {
       'composer.quote',
       'composer.link',
       'composer.snippets',
+      'composer.followUp',
       'triage.archive',
       'triage.notDone',
       'triage.snooze',

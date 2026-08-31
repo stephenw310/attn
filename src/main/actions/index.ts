@@ -5,6 +5,9 @@ import { isMoveDestination } from '../../shared/move'
 import type { Db } from '../db'
 import { applyThreadDelta } from '../store/mutate'
 import {
+  type FollowUpReminderSnapshot,
+  followUpReminderSnapshot,
+  restoreFollowUpReminder,
   restoreSnoozeReminder,
   type SnoozeReminderSnapshot,
   snoozeReminderSnapshot
@@ -19,6 +22,7 @@ interface MoveUndoAction {
   add: string[]
   remove: string[]
   reminderBefore: SnoozeReminderSnapshot | null
+  followUpBefore: FollowUpReminderSnapshot | null
   revertsQueueId?: number
 }
 
@@ -112,6 +116,44 @@ function moveChangesReminder(reminder: SnoozeReminderSnapshot | null): boolean {
   return reminder?.state === 'pending' || reminder?.state === 'returned'
 }
 
+/**
+ * The deliberate follow-up triage matrix (T35/F9). Spam and Trash cancel the
+ * reminder outright. Archive and Move complete a returned one and cancel an
+ * overdue pending one — otherwise the scheduler would resurface the thread
+ * right after the user filed it — while a future deadline survives an
+ * ordinary archive. No other verb touches it: unlike a returned snooze, the
+ * Follow up chip holds until the thread is actually filed (opening marks the
+ * thread read through this same path, and reading is not answering).
+ */
+function settleFollowUpForTriage(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  action: TriageAction,
+  now: number
+): void {
+  if (action.kind === 'unsnooze') return
+  if (action.kind === 'spam' || action.kind === 'trash') {
+    db.prepare(
+      `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
+       WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up'
+         AND state IN ('pending', 'returned')`
+    ).run(accountId, threadId)
+    return
+  }
+  if (action.kind === 'archive' || action.kind === 'move') {
+    db.prepare(
+      `UPDATE reminders SET state = 'done'
+       WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up' AND state = 'returned'`
+    ).run(accountId, threadId)
+    db.prepare(
+      `UPDATE reminders SET state = 'canceled'
+       WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up' AND state = 'pending'
+         AND due_at <= ?`
+    ).run(accountId, threadId, now)
+  }
+}
+
 function movesToMailbox(action: TriageAction): boolean {
   return action.kind === 'move' || action.kind === 'spam' || action.kind === 'trash'
 }
@@ -156,6 +198,10 @@ function apply(
   const remindersBefore = new Map(
     action.threadIds.map((threadId) => [threadId, snoozeReminderSnapshot(db, accountId, threadId)] as const)
   )
+  const followUpsBefore = new Map(
+    action.threadIds.map((threadId) => [threadId, followUpReminderSnapshot(db, accountId, threadId)] as const)
+  )
+  const now = Date.now()
   const undo: UndoAction[] = movesToMailbox(action)
     ? []
     : action.threadIds.map((id): UndoAction => {
@@ -175,8 +221,14 @@ function apply(
       if (movesToMailbox(action)) {
         const labels = labelsBefore.get(threadId) ?? new Set<string>()
         const reminderBefore = remindersBefore.get(threadId) ?? null
+        const followUpBefore = followUpsBefore.get(threadId) ?? null
         const delta = effectiveLabelDelta(plan, labels, labelsOnEveryMessageBefore?.get(threadId) ?? labels)
-        if (delta.add.length === 0 && delta.remove.length === 0 && !moveChangesReminder(reminderBefore)) {
+        if (
+          delta.add.length === 0 &&
+          delta.remove.length === 0 &&
+          !moveChangesReminder(reminderBefore) &&
+          !moveChangesReminder(followUpBefore)
+        ) {
           continue
         }
         const moveUndo: MoveUndoAction = {
@@ -188,13 +240,15 @@ function apply(
           // per-message membership, so checking the thread-label union here
           // would leave the destination applied to the whole thread.
           remove: [...delta.add],
-          reminderBefore
+          reminderBefore,
+          followUpBefore
         }
         db.prepare(
           `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
            WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'
              AND state IN ('pending', 'returned')`
         ).run(accountId, threadId)
+        settleFollowUpForTriage(db, accountId, threadId, action, now)
         applyThreadDelta(db, accountId, { threadId, ...delta })
         if (delta.add.length === 0 && delta.remove.length === 0) {
           undo.push(moveUndo)
@@ -208,7 +262,8 @@ function apply(
             add: delta.add,
             remove: delta.remove,
             actionKind,
-            ...(moveChangesReminder(reminderBefore) ? { reminderBefore } : {})
+            ...(moveChangesReminder(reminderBefore) ? { reminderBefore } : {}),
+            ...(moveChangesReminder(followUpBefore) ? { followUpBefore } : {})
           })
         )
         moveUndo.revertsQueueId = Number(queued.lastInsertRowid)
@@ -238,15 +293,23 @@ function apply(
            WHERE account_id = ? AND thread_id = ? AND kind = 'snooze' AND state = 'returned'`
         ).run(accountId, threadId)
       }
+      settleFollowUpForTriage(db, accountId, threadId, action, now)
       applyThreadDelta(db, accountId, { threadId, add: plan.add, remove: plan.remove })
       const archiveWasAlreadyApplied = action.kind === 'archive' && !labelsBefore.get(threadId)?.has('INBOX')
       if (!archiveWasAlreadyApplied) {
         const reminderBefore = recoveryReminderForAction(action, remindersBefore.get(threadId) ?? null)
+        const followUpBefore = followUpsBefore.get(threadId) ?? null
         const queued = enqueue.run(
           accountId,
           plan.queueKind,
           threadId,
-          JSON.stringify({ add: plan.add, remove: plan.remove, actionKind, reminderBefore })
+          JSON.stringify({
+            add: plan.add,
+            remove: plan.remove,
+            actionKind,
+            reminderBefore,
+            ...(moveChangesReminder(followUpBefore) ? { followUpBefore } : {})
+          })
         )
         const queueId = Number(queued.lastInsertRowid)
         refs.push(
@@ -272,6 +335,7 @@ function applyMoveUndo(db: Db, accountId: string, action: MoveUndoAction): void 
   const [threadId] = action.threadIds
   if (!threadId) return
   const reminderBeforeUndo = snoozeReminderSnapshot(db, accountId, threadId)
+  const followUpBeforeUndo = followUpReminderSnapshot(db, accountId, threadId)
   if (action.add.length > 0 || action.remove.length > 0) {
     applyThreadDelta(db, accountId, { threadId, add: action.add, remove: action.remove })
     db.prepare(
@@ -285,11 +349,13 @@ function applyMoveUndo(db: Db, accountId: string, action: MoveUndoAction): void 
         remove: action.remove,
         actionKind: 'undo',
         reminderBefore: reminderBeforeUndo,
+        followUpBefore: followUpBeforeUndo,
         ...(action.revertsQueueId ? { revertsQueueId: action.revertsQueueId } : {})
       })
     )
   }
   restoreSnoozeReminder(db, accountId, threadId, action.reminderBefore)
+  restoreFollowUpReminder(db, accountId, threadId, action.followUpBefore)
 }
 
 function applySnooze(
@@ -314,7 +380,14 @@ function applySnooze(
   for (const threadId of threadIds) {
     const wasInInbox = labelsFor(db, accountId, threadId).has('INBOX')
     const reminderBefore = snoozeReminderSnapshot(db, accountId, threadId)
+    const followUpBefore = followUpReminderSnapshot(db, accountId, threadId)
     upsertReminder.run(accountId, threadId, dueAt)
+    // Snoozing a returned follow-up postpones it: pending again until the new
+    // snooze returns, when the joint settle resurfaces both (T35/F9).
+    db.prepare(
+      `UPDATE reminders SET state = 'pending'
+       WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up' AND state = 'returned'`
+    ).run(accountId, threadId)
     applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
     // v1 snooze is local-only by decision (SPEC §9 #6): Gmail sees a plain
     // archive. Gmail-side labels + exact-time return arrive with the v1.5
@@ -323,7 +396,13 @@ function applySnooze(
       const queued = enqueue.run(
         accountId,
         threadId,
-        JSON.stringify({ add: [], remove: ['INBOX'], actionKind, reminderBefore })
+        JSON.stringify({
+          add: [],
+          remove: ['INBOX'],
+          actionKind,
+          reminderBefore,
+          ...(followUpBefore?.state === 'returned' ? { followUpBefore } : {})
+        })
       )
       refs.push(
         queueIntentRef(

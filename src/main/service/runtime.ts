@@ -19,6 +19,7 @@ import { accountKeyedTables, accountOutboxSpoolIds, purgeAccountRows } from '../
 import { countInboxUnread, countSystemMailboxes, listMailboxThreads } from '../db/queries'
 import { searchThreads } from '../db/search'
 import { loadSeed, readSeedRemoteThreadIds, readSeedThread, readSeedThreadAccount } from '../dev/seed'
+import { settleFollowUpCandidates } from '../followUps'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { GmailMailProvider } from '../gmail/provider'
@@ -38,8 +39,8 @@ import { runFtsBackfill } from '../sync/ftsBackfill'
 import { effectiveLifetimeThreadCap } from '../sync/lifetimeCap'
 import { runLifetimeSweep } from '../sync/lifetimeSweep'
 import { deleteThread, type LabelRow } from '../sync/persist'
-import { historyEvents, type NewMail } from '../sync/poller'
-import type { MailProvider } from '../sync/provider'
+import { historyEvents, type NewMail, runHistoryCycle } from '../sync/poller'
+import type { HistoryRecord, MailProvider } from '../sync/provider'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE } from '../sync/tuning'
 import { SyncController } from '../syncController'
@@ -179,6 +180,8 @@ export class ServiceRuntime {
   private setActiveAccountDelayMs = 0
   /** Test-only seeded providers, keyed by the owning account (A5 seam). */
   private readonly actionProviders = new Map<string, ActionRecoveryProvider>()
+  /** Test-only send-capable providers (T35 seam): seeded sends can complete. */
+  private readonly outboxProviders = new Map<string, MailProvider>()
 
   private readonly onNewMail = (accountId: string, newMail: NewMail[]): void => {
     // Every signed-in account notifies, active or not (F12/F18). Batching is
@@ -473,14 +476,17 @@ export class ServiceRuntime {
     const outboxSender = new OutboxSender(
       this.db,
       () => (this.sessions.get(id) ? id : null),
-      () => this.makeProviderFor(id),
+      () => this.outboxProviders.get(id) ?? this.makeProviderFor(id),
       (payload) => this.emitForAccount(id, { kind: 'outbox-changed', payload }),
       {
         beforeRemote: (signal) => draftMirrorExecutor.waitForIdle(signal),
         spoolRoot: join(this.input.userDataPath, 'outbox'),
         cleanSpool: (outboxId) => cleanOutboxSpool(this.input.userDataPath, outboxId),
         progress: (payload) => this.emitForAccount(id, { kind: 'outbox-progress', payload }),
-        mailChanged: () => this.broadcastMailChanged(id)
+        mailChanged: () => this.broadcastMailChanged(id),
+        // A send with a follow-up created or settled its reminder: re-arm the
+        // scheduler so the deadline (or its cancellation) takes effect (T35).
+        followUpsChanged: () => this.sessions.get(id)?.snoozeScheduler.refresh()
       }
     )
     const snoozeScheduler = new SnoozeScheduler(
@@ -1071,6 +1077,11 @@ export class ServiceRuntime {
       const spoolEntries = existsSync(spoolRoot) ? readdirSync(spoolRoot) : []
       return { rowTotal, perTable, ftsRows: perTable.message_fts ?? 0, accountsRow, spoolEntries }
     }
+    if (channel === TEST_CHANNELS.installSendProvider) {
+      this.installTestSendProvider()
+      return undefined
+    }
+    if (channel === TEST_CHANNELS.runHistoryCycle) return this.runTestHistoryCycle(args[0])
     if (channel === TEST_CHANNELS.runLifetimeSweep) return this.runTestLifetimeSweep(args[0])
     if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])
     if (channel === TEST_CHANNELS.runFtsBackfill) return this.runTestFtsBackfill(args[0])
@@ -1131,6 +1142,129 @@ export class ServiceRuntime {
       }
     }
     throw new Error(`test operation is not implemented: ${channel}`)
+  }
+
+  /**
+   * T35 e2e seam: a send-capable in-memory provider for the active seeded
+   * account, so the production OutboxSender can carry a queued row through
+   * create/update/send and the post-send read — reminder creation and origin
+   * resolution run the real code path, with zero Gmail.
+   */
+  private installTestSendProvider(): void {
+    const seedPath = this.input.testSeed
+    const accountId = this.activeAccountId
+    if (!seedPath || !accountId) return
+    const drafts = new Map<string, { raw: string; threadId: string | null }>()
+    const sentByThread = new Map<
+      string,
+      Array<{ id: string; internalDate: number; rfcMessageId: string | null }>
+    >()
+    let sequence = 0
+    const rfcIdOf = (raw: string): string | null => /^Message-ID:\s*(<[^>]+>)\s*$/im.exec(raw)?.[1] ?? null
+    const provider = {
+      createDraft: async (input: { raw: string; threadId?: string | null }) => {
+        sequence++
+        const id = `test-draft-${sequence}`
+        drafts.set(id, { raw: input.raw, threadId: input.threadId ?? null })
+        return id
+      },
+      updateDraft: async (input: { id: string; raw?: string; threadId?: string | null }) => {
+        const existing = drafts.get(input.id)
+        if (!existing) throw new GmailApiError(404, 'test draft unavailable')
+        drafts.set(input.id, {
+          raw: input.raw ?? existing.raw,
+          threadId: input.threadId ?? existing.threadId
+        })
+      },
+      sendDraft: async (id: string) => {
+        const draft = drafts.get(id)
+        if (!draft) throw new GmailApiError(404, 'test draft unavailable')
+        drafts.delete(id)
+        sequence++
+        const messageId = `test-sent-${sequence}`
+        const threadId = draft.threadId ?? `t-test-sent-${sequence}`
+        const sent = sentByThread.get(threadId) ?? []
+        sent.push({ id: messageId, internalDate: Date.now(), rfcMessageId: rfcIdOf(draft.raw) })
+        sentByThread.set(threadId, sent)
+        return { id: messageId, threadId }
+      },
+      getThread: async (threadId: string): Promise<GmailThread> => {
+        const base = readSeedThread(seedPath, threadId, Date.now(), accountId)
+        const messages = [...(base?.messages ?? [])]
+        for (const sent of sentByThread.get(threadId) ?? []) {
+          messages.push({
+            id: sent.id,
+            threadId,
+            labelIds: ['SENT'],
+            internalDate: String(sent.internalDate),
+            snippet: 'Sent from the e2e send seam.',
+            payload: {
+              mimeType: 'text/plain',
+              headers: [
+                { name: 'From', value: `Test <${accountId}>` },
+                { name: 'Subject', value: 'e2e send' },
+                ...(sent.rfcMessageId ? [{ name: 'Message-ID', value: sent.rfcMessageId }] : [])
+              ]
+            }
+          })
+        }
+        if (messages.length === 0) throw new GmailApiError(404, 'test thread unavailable')
+        return { id: threadId, messages }
+      }
+    } as unknown as MailProvider
+    this.outboxProviders.set(accountId, provider)
+  }
+
+  /**
+   * T35/GAP-1 e2e seam: run the production history cycle against supplied
+   * records and thread snapshots — the reply-candidate settle, the snooze
+   * wake, and the checkpoint advance all execute the shipped code.
+   */
+  private async runTestHistoryCycle(value: unknown): Promise<void> {
+    const accountId = this.activeAccountId
+    const session = accountId ? this.sessions.get(accountId) : null
+    if (!accountId || !session) throw new Error('no active account for history cycle')
+    const request = (value ?? {}) as { records?: unknown; threads?: unknown }
+    const records = Array.isArray(request.records) ? (request.records as HistoryRecord[]) : []
+    const supplied = new Map(
+      (Array.isArray(request.threads) ? (request.threads as GmailThread[]) : []).map(
+        (thread) => [thread.id, thread] as const
+      )
+    )
+    this.db
+      .prepare(
+        `INSERT INTO sync_state (account_id, last_history_id) VALUES (?, '1')
+         ON CONFLICT(account_id) DO UPDATE SET last_history_id = '1'`
+      )
+      .run(accountId)
+    const seedPath = this.input.testSeed
+    const provider = {
+      listHistory: async () => ({ history: records, historyId: '2' }),
+      getThread: async (threadId: string): Promise<GmailThread> => {
+        const thread =
+          supplied.get(threadId) ??
+          (seedPath ? readSeedThread(seedPath, threadId, Date.now(), accountId) : null)
+        if (!thread) throw new GmailApiError(404, 'test thread unavailable')
+        return thread
+      }
+    } as unknown as MailProvider
+    await runHistoryCycle(this.db, accountId, provider, {
+      wakeThread: (threadId) => session.snoozeScheduler.wakeThread(threadId),
+      settleFollowUps: (candidates) => {
+        if (
+          settleFollowUpCandidates(
+            this.db,
+            accountId,
+            candidates.map((candidate) => candidate.threadId)
+          )
+        ) {
+          session.snoozeScheduler.refresh()
+        }
+      },
+      hydrate: async () => {}
+    })
+    session.snoozeScheduler.refresh()
+    this.broadcastMailChanged(accountId)
   }
 
   private installActionFailure(threadId: unknown, status: 400 | 401): void {

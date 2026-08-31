@@ -40,7 +40,7 @@ function providerFor(pages: HistoryPage[]): MailProvider {
 }
 
 function plan(refetchThreadIds: string[] = []): FetchedHistoryPlan {
-  return { historyId: '11', refetchThreadIds, newMail: [], promoteInboxThreadIds: [] }
+  return { historyId: '11', refetchThreadIds, newMail: [], promoteInboxThreadIds: [], replyCandidates: [] }
 }
 
 function checkpointDb(lastHistoryId = '10'): { db: Db; checkpoint: () => string } {
@@ -89,9 +89,16 @@ afterEach(() => {
 describe('history cycle planner', () => {
   it('dedupes every affected thread and identifies only inbound unread mail', () => {
     expect(planCycle(fixture)).toEqual({
-      refetchThreadIds: ['t-label', 't-deleted', 't-inbound', 't-self', 't-read'],
+      refetchThreadIds: ['t-label', 't-deleted', 't-inbound', 't-self', 't-read', 't-draft'],
       newMail: [{ threadId: 't-inbound', messageId: 'm-inbound' }],
-      promoteInboxThreadIds: ['t-inbound', 't-self', 't-read']
+      promoteInboxThreadIds: ['t-inbound', 't-self', 't-read'],
+      // The cancellation feed (T35): every non-draft messagesAdded — the
+      // user's own SENT reply included — with no other label filter.
+      replyCandidates: [
+        { threadId: 't-inbound', messageId: 'm-inbound' },
+        { threadId: 't-self', messageId: 'm-self' },
+        { threadId: 't-read', messageId: 'm-read' }
+      ]
     })
   })
 

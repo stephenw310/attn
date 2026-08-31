@@ -204,6 +204,8 @@ interface FakeSendRow {
   account_id: string
   state: FakeSendState
   kind: 'new'
+  created_at: number
+  follow_up_at: number | null
   gmail_draft_id: string | null
   gmail_message_id: string | null
   rfc_message_id: string
@@ -249,7 +251,9 @@ function fakeRow(patch: Partial<FakeSendRow> = {}): FakeSendRow {
     references_json: '[]',
     quote_html: '',
     quote_text: '',
+    created_at: NOW,
     updated_at: NOW,
+    follow_up_at: null,
     send_at: NOW,
     attempts: 0,
     verify_attempts: 0,
@@ -260,7 +264,10 @@ function fakeRow(patch: Partial<FakeSendRow> = {}): FakeSendRow {
 
 class FakeOutboxDb {
   readonly rows = new Map<string, FakeSendRow>()
-  readonly db = { prepare: (sql: string) => this.prepare(sql) } as unknown as Db
+  readonly db = {
+    prepare: (sql: string) => this.prepare(sql),
+    transaction: (fn: (...args: unknown[]) => unknown) => fn
+  } as unknown as Db
 
   constructor(...rows: FakeSendRow[]) {
     for (const row of rows) this.rows.set(row.id, row)

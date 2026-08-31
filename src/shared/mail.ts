@@ -15,12 +15,19 @@ export interface ThreadRow {
   /** The thread has a pending local snooze reminder, even when another view exposes it. */
   snoozed: boolean
   returned: boolean
+  /** A follow-up reminder fired: Follow up chip + above-normal sort (T35/F9). */
+  followUpReturned?: boolean
   hasDraft: boolean
   labelIds: string[]
 }
 
 export interface SnoozedThreadRow extends ThreadRow {
+  /** The earliest pending deadline of either kind — the view's sort key. */
   dueAt: number
+  snoozeDueAt?: number | null
+  followUpDueAt?: number | null
+  /** Why a due follow-up has not fired: snooze return or origin check pending. */
+  followUpAwaiting?: 'snooze' | 'origin' | null
 }
 
 export interface MailLabel {

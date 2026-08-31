@@ -312,7 +312,8 @@ test('opens an outbox-backed Drafts result in the composer', async ({ page }) =>
       inReplyTo: null,
       references: [],
       quoteHtml: '',
-      quoteText: ''
+      quoteText: '',
+      followUpAt: null
     })
     await window.attn.draft.close(id)
     return id
@@ -497,7 +498,8 @@ test('restores Outbox scroll after leaving search', async ({ app, page }) => {
         inReplyTo: null,
         references: [],
         quoteHtml: '',
-        quoteText: ''
+        quoteText: '',
+        followUpAt: null
       })
       await window.attn.outbox.send(id)
     }

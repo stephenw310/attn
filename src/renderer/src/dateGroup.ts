@@ -1,9 +1,15 @@
 type RelativeDateGroup = 'Today' | 'Yesterday' | 'Last 7 days' | 'Earlier this month'
 type YearDateGroup = `${number}`
 
-export type DateGroup = RelativeDateGroup | YearDateGroup
+export type DateGroup = 'Follow up' | RelativeDateGroup | YearDateGroup
 
-export function dateGroup(thread: { lastMsgAt: number }, now = new Date()): DateGroup {
+export function dateGroup(
+  thread: { lastMsgAt: number; followUpReturned?: boolean },
+  now = new Date()
+): DateGroup {
+  // Returned follow-ups lead the inbox in their own section (T35/F9): they
+  // sort above normal mail, where a relative-date heading would mislead.
+  if (thread.followUpReturned) return 'Follow up'
   const messageDate = new Date(thread.lastMsgAt)
   const startOfDay = (date: Date): number =>
     new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()

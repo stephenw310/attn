@@ -34,16 +34,6 @@ unless a plan doc says so.
 
 Each was verified against the acceptance criteria in SPEC §4 and the plan docs' Testing bullets.
 
-### GAP-1: "a reply during snooze wakes it" is asserted nowhere
-
-**Verified:** 2026-08-21 · **Criterion:** F4
-
-Implemented at `poller.ts:184-186` calling `SnoozeScheduler.wakeThread`. In tests, `wakeThread` appears only as a
-`vi.fn()` on a fake scheduler (`syncController.test.ts:120,171`), so nothing asserts the real behavior.
-
-**Wanted:** a poller unit test that an inbound message triggers `wakeThread`; a scheduler unit test that it
-returns the pending reminder; an e2e that snoozes `t-roadmap`, injects inbound mail, and expects the chip.
-
 ### GAP-2: `outbox/drafts.ts` CRUD has no unit tests
 
 **Verified:** 2026-08-21 · **Owed by:** T14A's Testing bullets

@@ -2,7 +2,12 @@ import type { RevertedAction, RevertedActionKind } from '../../shared/actionReve
 import type { Db } from '../db'
 import type { GmailThread } from '../gmail/parse'
 import { applyThreadDelta } from '../store/mutate'
-import { restoreSnoozeReminder, type SnoozeReminderSnapshot } from '../store/reminders'
+import {
+  type FollowUpReminderSnapshot,
+  restoreFollowUpReminder,
+  restoreSnoozeReminder,
+  type SnoozeReminderSnapshot
+} from '../store/reminders'
 import { nonDraftMessages, persistThread } from '../sync/persist'
 import type { GetThreadOptions, MailActionProvider } from '../sync/provider'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
@@ -45,6 +50,7 @@ interface DecodedQueueRow {
   intent: QueueIntent
   actionKind?: RevertedActionKind
   reminderBefore?: SnoozeReminderSnapshot | null
+  followUpBefore?: FollowUpReminderSnapshot | null
 }
 
 type RecoveryOutcome =
@@ -165,12 +171,21 @@ export class ActionExecutor {
           // poison the queue. Recover the thread from Gmail without replaying
           // or trying to infer the corrupt mutation.
           if (row.state === 'pending') this.markRecovering(row, accountId, error, 'permanent')
-          const outcome = await this.recover(row, accountId, provider, null, 'labels', undefined, reverted)
+          const outcome = await this.recover(
+            row,
+            accountId,
+            provider,
+            null,
+            'labels',
+            undefined,
+            undefined,
+            reverted
+          )
           if (outcome.kind === 'continue') continue
           if (outcome.kind === 'retry') retryMs = outcome.delayMs
           break
         }
-        const { intent, actionKind, reminderBefore } = decoded
+        const { intent, actionKind, reminderBefore, followUpBefore } = decoded
         if (row.state === 'recovering') {
           const outcome = await this.recover(
             row,
@@ -179,6 +194,7 @@ export class ActionExecutor {
             intent,
             actionKind,
             reminderBefore,
+            followUpBefore,
             reverted
           )
           if (outcome.kind === 'continue') continue
@@ -210,6 +226,7 @@ export class ActionExecutor {
               intent,
               actionKind,
               reminderBefore,
+              followUpBefore,
               reverted
             )
             if (outcome.kind === 'continue') continue
@@ -243,6 +260,7 @@ export class ActionExecutor {
     intent: QueueIntent | null,
     actionKind: RevertedActionKind | undefined,
     reminderBefore: SnoozeReminderSnapshot | null | undefined,
+    followUpBefore: FollowUpReminderSnapshot | null | undefined,
     reverted: RevertedAction[]
   ): Promise<RecoveryOutcome> {
     if (this.stopping || this.accountId() !== accountId) return { kind: 'stop' }
@@ -278,11 +296,14 @@ export class ActionExecutor {
         if (reminderBefore !== undefined) {
           restoreSnoozeReminder(this.db, accountId, row.thread_id, reminderBefore)
         }
+        if (followUpBefore !== undefined) {
+          restoreFollowUpReminder(this.db, accountId, row.thread_id, followUpBefore)
+        }
         persistThread(this.db, accountId, snapshot)
-        // An automatic snooze return Gmail rejected is kept visible locally, but
-        // only as this one repair. A standing override would fight every later
-        // snapshot of the thread.
-        if (actionKind === 'snoozeReturn') {
+        // An automatic snooze or follow-up return Gmail rejected is kept
+        // visible locally, but only as this one repair. A standing override
+        // would fight every later snapshot of the thread.
+        if (actionKind === 'snoozeReturn' || actionKind === 'followUpReturn') {
           applyThreadDelta(this.db, accountId, { threadId: row.thread_id, add: ['INBOX'], remove: [] })
         }
       })()
@@ -300,7 +321,7 @@ export class ActionExecutor {
         intent ?? syntheticIntent(row.kind, row.thread_id),
         row.subject ?? '',
         returnedToInbox,
-        actionKind === 'snoozeReturn' ? 'keptLocal' : 'restored',
+        actionKind === 'snoozeReturn' || actionKind === 'followUpReturn' ? 'keptLocal' : 'restored',
         actionKind
       )
     )
@@ -321,7 +342,8 @@ export class ActionExecutor {
             }
           : { kind: row.kind, threadId: row.thread_id },
       actionKind: payload.actionKind,
-      reminderBefore: payload.reminderBefore
+      reminderBefore: payload.reminderBefore,
+      followUpBefore: payload.followUpBefore
     }
   }
 

@@ -87,6 +87,14 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           Returned
         </span>
       )}
+      {thread.followUpReturned && (
+        <span
+          data-testid="chip-follow-up"
+          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
+        >
+          Follow up
+        </span>
+      )}
       {thread.dueAt !== undefined && (
         <span
           data-testid="chip-snooze-due"
@@ -94,6 +102,21 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
         >
           {thread.dueLabel}
+        </span>
+      )}
+      {thread.followUpDueLabel !== undefined && (
+        <span
+          data-testid="chip-follow-up-due"
+          data-follow-up-awaiting={thread.followUpAwaiting ?? undefined}
+          title={`Follow up if no reply — ${thread.followUpDueLabel}`}
+          className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
+        >
+          {`Follow up ${thread.followUpDueLabel}`}
+          {thread.followUpAwaiting === 'origin'
+            ? ' · reply check pending'
+            : thread.followUpAwaiting === 'snooze'
+              ? ' · after snooze'
+              : ''}
         </span>
       )}
     </>

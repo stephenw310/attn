@@ -20,6 +20,13 @@ export interface CyclePlan {
   refetchThreadIds: string[]
   newMail: NewMail[]
   promoteInboxThreadIds: string[]
+  /**
+   * Every non-draft messagesAdded event, with no other label filter (T35/F9):
+   * the notification predicate above requires INBOX+UNREAD and excludes SENT,
+   * but a follow-up is canceled by any subsequent reply — the user's own
+   * outbound message included — so cancellation reads this wider feed.
+   */
+  replyCandidates: NewMail[]
 }
 
 export interface FetchedHistoryPlan extends CyclePlan {
@@ -32,6 +39,7 @@ export function planCycle(records: HistoryRecord[]): CyclePlan {
   const refetchThreadIds = new Set<string>()
   const newMail = new Map<string, NewMail>()
   const promoteInboxThreadIds = new Set<string>()
+  const replyCandidates = new Map<string, NewMail>()
 
   for (const record of records) {
     for (const message of record.messages ?? []) refetchThreadIds.add(message.threadId)
@@ -41,6 +49,9 @@ export function planCycle(records: HistoryRecord[]): CyclePlan {
       const labels = new Set(message.labelIds ?? [])
       if (labels.has('INBOX') && labels.has('UNREAD') && !labels.has('SENT')) {
         newMail.set(message.id, { threadId: message.threadId, messageId: message.id })
+      }
+      if (!labels.has('DRAFT')) {
+        replyCandidates.set(message.id, { threadId: message.threadId, messageId: message.id })
       }
       if (labels.has('INBOX')) promoteInboxThreadIds.add(message.threadId)
     }
@@ -55,7 +66,8 @@ export function planCycle(records: HistoryRecord[]): CyclePlan {
   return {
     refetchThreadIds: [...refetchThreadIds],
     newMail: [...newMail.values()],
-    promoteInboxThreadIds: [...promoteInboxThreadIds]
+    promoteInboxThreadIds: [...promoteInboxThreadIds],
+    replyCandidates: [...replyCandidates.values()]
   }
 }
 
@@ -152,6 +164,11 @@ export interface HistoryCycleEffects {
   fetchThread?: typeof fetchAndCacheThread
   hydrate?: typeof hydrateMissingThreadBodies
   remove?: (threadId: string) => void
+  /**
+   * Settle follow-up reminders against the refetched store (T35). Runs
+   * before the checkpoint advances so a crash retries the cancellation.
+   */
+  settleFollowUps?: (candidates: NewMail[]) => void
 }
 
 export async function runHistoryCycle(
@@ -194,6 +211,10 @@ export async function runHistoryCycle(
       throw error
     }
   }
+  // Cancellation first: a reply that both wakes a snooze and answers a
+  // follow-up must settle the follow-up before the wake's joint return could
+  // resurface it (F9 keeps F4's wake rules otherwise).
+  effects.settleFollowUps?.(plan.replyCandidates)
   for (const threadId of new Set(plan.newMail.map((mail) => mail.threadId))) {
     effects.wakeThread?.(threadId)
   }
@@ -211,6 +232,7 @@ export interface HistoryPollerOptions {
   onCycleComplete: (changed: boolean) => void
   onError: (error: unknown) => void
   wakeThread?: (threadId: string) => void
+  settleFollowUps?: (candidates: NewMail[]) => void
   kickExecutor?: () => void
   syncLabels?: () => Promise<boolean | undefined>
   syncSendAs?: () => Promise<void>
@@ -278,7 +300,7 @@ export class HistoryPoller {
             this.options.db,
             this.options.accountId,
             this.options.provider,
-            { wakeThread: this.options.wakeThread }
+            { wakeThread: this.options.wakeThread, settleFollowUps: this.options.settleFollowUps }
           )
         } catch (error) {
           if (!(error instanceof GmailApiError) || error.status !== 404) throw error

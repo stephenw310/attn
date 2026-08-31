@@ -37,6 +37,7 @@ import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import { escapeHtmlText as escapeHtml } from '../../../shared/html'
 import { type Snippet, subjectAfterSnippetInsert } from '../../../shared/snippets'
+import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
 import type { ThemeAppearance } from '../../../shared/theme'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
@@ -570,12 +571,133 @@ function PasteContentPlugin({
   return null
 }
 
+/**
+ * "Remind me if no reply" (T35/F9): the chosen deadline rides the draft's
+ * outbox row; the reminder is created only when the send commits. Shares the
+ * snooze natural-language parser for the custom field.
+ */
+function FollowUpControl({
+  followUpAt,
+  onChange,
+  open,
+  onOpenChange
+}: {
+  followUpAt: number | null
+  onChange: (value: number | null) => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}): React.JSX.Element {
+  const [custom, setCustom] = useState('')
+  const parsedCustom = useMemo(() => (custom.trim() ? parseSnoozeText(custom) : null), [custom])
+  const customValid = parsedCustom !== null && parsedCustom > Date.now()
+  const choose = (value: number | null): void => {
+    onChange(value)
+    onOpenChange(false)
+    setCustom('')
+  }
+  const preset = (days: number): number => Date.now() + days * 24 * 60 * 60 * 1000
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs ${
+          followUpAt !== null ? 'text-accent' : 'text-ink-faint hover:bg-active hover:text-ink'
+        }`}
+        data-testid="composer-follow-up"
+        data-follow-up-at={followUpAt ?? undefined}
+        aria-expanded={open}
+        aria-label="Remind me if no reply"
+        title="Remind me if no reply"
+        onClick={() => onOpenChange(!open)}
+      >
+        <span aria-hidden>⏰</span>
+        {followUpAt !== null ? `Follow up ${formatSnoozeDate(followUpAt)}` : 'Remind me'}
+      </button>
+      {open && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: Escape containment for the transient popover; its buttons and input carry the interactions
+        <div
+          className="absolute bottom-full left-0 z-30 mb-2 flex w-72 flex-col gap-1 rounded-lg border border-edge bg-raised p-2 shadow-2xl"
+          data-composer-transient
+          data-testid="follow-up-popover"
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return
+            event.preventDefault()
+            event.stopPropagation()
+            onOpenChange(false)
+          }}
+        >
+          <p className="px-1 text-[11px] text-ink-faint">
+            If nobody replies by the deadline, the thread resurfaces in your inbox.
+          </p>
+          <button
+            type="button"
+            className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+            data-testid="follow-up-preset-3d"
+            onClick={() => choose(preset(3))}
+          >
+            In 3 days
+          </button>
+          <button
+            type="button"
+            className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+            data-testid="follow-up-preset-1w"
+            onClick={() => choose(preset(7))}
+          >
+            In 1 week
+          </button>
+          <div className="flex items-center gap-1.5 px-1 pt-1">
+            <input
+              className="h-8 min-w-0 flex-1 rounded-md border border-edge bg-canvas px-2 text-xs text-ink outline-none focus:border-accent"
+              data-testid="follow-up-custom-input"
+              aria-label="Custom follow-up deadline"
+              placeholder="e.g. next Friday"
+              value={custom}
+              onChange={(event) => setCustom(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || !customValid || parsedCustom === null) return
+                event.preventDefault()
+                event.stopPropagation()
+                choose(parsedCustom)
+              }}
+            />
+            <button
+              type="button"
+              className="h-8 rounded-md bg-accent/20 px-2.5 text-xs font-semibold text-accent disabled:opacity-45"
+              data-testid="follow-up-custom-confirm"
+              disabled={!customValid}
+              onClick={() => parsedCustom !== null && choose(parsedCustom)}
+            >
+              Set
+            </button>
+          </div>
+          {custom.trim() !== '' && (
+            <p className="px-1 text-[11px] text-ink-faint" data-testid="follow-up-resolved">
+              {customValid && parsedCustom !== null ? formatSnoozeDate(parsedCustom) : 'Pick a future time'}
+            </p>
+          )}
+          {followUpAt !== null && (
+            <button
+              type="button"
+              className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-faint hover:bg-active hover:text-ink"
+              data-testid="follow-up-clear"
+              onClick={() => choose(null)}
+            >
+              Don't remind me
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface CommandPluginProps {
   onAttach: () => void
   onRemoveAttachment: () => void
   onClose: () => void
   onDiscard: () => void
   onSend: () => void
+  onFollowUp: () => void
 }
 
 function ComposerCommandPlugin({
@@ -583,7 +705,8 @@ function ComposerCommandPlugin({
   onRemoveAttachment,
   onClose,
   onDiscard,
-  onSend
+  onSend,
+  onFollowUp
 }: CommandPluginProps): null {
   const [editor] = useLexicalComposerContext()
   const quote = useCallback(() => {
@@ -600,6 +723,7 @@ function ComposerCommandPlugin({
         createCommand('composer.send', onSend),
         createCommand('composer.attach', onAttach),
         createCommand('composer.removeAttachment', onRemoveAttachment),
+        createCommand('composer.followUp', onFollowUp),
         createCommand('composer.bold', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')),
         createCommand('composer.italic', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')),
         createCommand('composer.underline', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline')),
@@ -611,7 +735,7 @@ function ComposerCommandPlugin({
         ),
         createCommand('composer.quote', quote)
       ]),
-    [editor, onAttach, onRemoveAttachment, onClose, onDiscard, onSend, quote]
+    [editor, onAttach, onRemoveAttachment, onClose, onDiscard, onSend, onFollowUp, quote]
   )
   return null
 }
@@ -627,6 +751,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [attaching, setAttaching] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [subject, setSubject] = useState(draft.subject)
+  const [followUpAt, setFollowUpAt] = useState<number | null>(draft.followUpAt)
+  const [followUpOpen, setFollowUpOpen] = useState(false)
   const [showCopies, setShowCopies] = useState(draft.cc.length > 0 || draft.bcc.length > 0)
   const [closing, setClosing] = useState(false)
   const [sendError, setSendError] = useState<string | null>(initialError)
@@ -1139,6 +1265,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 onClose={mode === 'inline' ? closeAndExit : closeAndSave}
                 onDiscard={discard}
                 onSend={send}
+                onFollowUp={() => setFollowUpOpen(true)}
               />
               <PasteContentPlugin
                 draftId={draft.id}
@@ -1211,6 +1338,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
+                <FollowUpControl
+                  followUpAt={followUpAt}
+                  open={followUpOpen}
+                  onOpenChange={setFollowUpOpen}
+                  onChange={(value) => {
+                    setFollowUpAt(value)
+                    updateFields({ followUpAt: value })
+                  }}
+                />
                 <button
                   type="button"
                   className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"

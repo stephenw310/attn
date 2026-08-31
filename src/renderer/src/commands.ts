@@ -309,6 +309,7 @@ export const COMMAND_SPECS = {
   'composer.quote': { title: 'Block quote', context: 'composer' },
   'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
   'composer.snippets': { title: 'Insert snippet…', shortcut: 'Mod+;', context: 'composer' },
+  'composer.followUp': { title: 'Remind me if no reply…', context: 'composer' },
   'triage.archive': {
     title: 'Mark done',
     shortcut: 'e',

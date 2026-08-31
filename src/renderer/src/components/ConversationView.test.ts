@@ -25,6 +25,7 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: Date.now()
@@ -91,6 +92,7 @@ it('opens a message appended to the current conversation by default', async () =
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: Date.now()

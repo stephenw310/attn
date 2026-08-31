@@ -13,6 +13,7 @@ import {
 } from '../../shared/outboxTuning'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
+import { createFollowUpOnSent, evaluateThreadFollowUp, resolveFollowUpOrigins } from '../followUps'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import { readAccountSetting } from '../settings'
 import { isOfflineFailure } from '../sync/failure'
@@ -46,7 +47,9 @@ interface SendRow {
   references_json: string
   quote_html: string
   quote_text: string
+  created_at: number
   updated_at: number
+  follow_up_at: number | null
   send_at: number | null
   attempts: number
   verify_attempts: number
@@ -207,6 +210,8 @@ export interface OutboxSenderOptions {
   cleanSpool?: (id: string) => void
   progress?: (progress: OutboxProgress | null) => void
   mailChanged?: () => void
+  /** A follow-up reminder was created or settled: re-arm the scheduler (T35). */
+  followUpsChanged?: () => void
 }
 
 /** The sole production chokepoint that may call Gmail drafts.send. */
@@ -223,6 +228,7 @@ export class OutboxSender {
   private readonly cleanSpool: (id: string) => void
   private readonly progress: (progress: OutboxProgress | null) => void
   private readonly mailChanged: () => void
+  private readonly followUpsChanged: () => void
 
   constructor(
     private readonly db: Db,
@@ -237,6 +243,7 @@ export class OutboxSender {
     this.cleanSpool = options.cleanSpool ?? (() => {})
     this.progress = options.progress ?? (() => {})
     this.mailChanged = options.mailChanged ?? (() => {})
+    this.followUpsChanged = options.followUpsChanged ?? (() => {})
   }
 
   start(): void {
@@ -332,7 +339,8 @@ export class OutboxSender {
         `SELECT id, account_id, state, kind, gmail_draft_id, gmail_message_id, rfc_message_id,
                 to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
-                references_json, quote_html, quote_text, updated_at, send_at, attempts, verify_attempts
+                references_json, quote_html, quote_text, created_at, updated_at, follow_up_at, send_at,
+                attempts, verify_attempts
          FROM outbox
          WHERE account_id = ? AND (
            (state = 'sending' AND (send_at IS NULL OR send_at <= ?)) OR
@@ -413,7 +421,8 @@ export class OutboxSender {
         `SELECT id, account_id, state, kind, gmail_draft_id, gmail_message_id, rfc_message_id,
                 to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
-                references_json, quote_html, quote_text, updated_at, send_at, attempts, verify_attempts
+                references_json, quote_html, quote_text, created_at, updated_at, follow_up_at, send_at,
+                attempts, verify_attempts
          FROM outbox WHERE account_id = ? AND id = ? AND state = 'sending'`
       )
       .get(accountId, id) as SendRow | undefined
@@ -771,14 +780,33 @@ export class OutboxSender {
     gmailMessageId: string | null = row.gmail_message_id
   ): Promise<void> {
     const now = this.time.now()
-    const settled = this.db
-      .prepare(
-        `UPDATE outbox SET state = 'sent', gmail_message_id = COALESCE(?, gmail_message_id),
-         send_at = NULL, last_error = NULL, updated_at = ?
-         WHERE account_id = ? AND id = ? AND state = 'sending'`
-      )
-      .run(gmailMessageId, now, row.account_id, row.id)
-    if (settled.changes === 0) return
+    // The follow-up reminder commits with the sent transition (T35/F9): an
+    // undone or failed send can never leave one behind, and a crash between
+    // the two can never lose one. Its origin stays unresolved until the
+    // post-send read (or the account's sync session) supplies internalDate.
+    let settledChanges = 0
+    this.db.transaction(() => {
+      settledChanges = this.db
+        .prepare(
+          `UPDATE outbox SET state = 'sent', gmail_message_id = COALESCE(?, gmail_message_id),
+           send_at = NULL, last_error = NULL, updated_at = ?
+           WHERE account_id = ? AND id = ? AND state = 'sending'`
+        )
+        .run(gmailMessageId, now, row.account_id, row.id).changes
+      if (settledChanges === 0 || row.follow_up_at === null) return
+      if (!threadId) {
+        console.warn(`[outbox] sent ${row.id} with a follow-up but no thread id — reminder skipped`)
+        return
+      }
+      createFollowUpOnSent(this.db, row.account_id, {
+        threadId,
+        dueAt: row.follow_up_at,
+        gmailMessageId: gmailMessageId ?? row.gmail_message_id,
+        rfcMessageId: row.rfc_message_id,
+        rowCreatedAt: row.created_at
+      })
+    })()
+    if (settledChanges === 0) return
     this.cleanSpool(row.id)
     this.pruneSent(row.account_id, now)
     this.notify({ kind: 'changed' })
@@ -788,9 +816,18 @@ export class OutboxSender {
     try {
       const thread = await provider.getThread(threadId, { format: 'full', signal, priority: 'send' })
       if (persistThread(this.db, row.account_id, thread)) this.mailChanged()
+      // The read that just landed resolves the reminder's origin and settles
+      // it against already-cached replies — including one fetched before the
+      // sent transition committed — before any deadline can arm.
+      if (row.follow_up_at !== null) {
+        resolveFollowUpOrigins(this.db, row.account_id)
+        evaluateThreadFollowUp(this.db, row.account_id, threadId)
+        this.followUpsChanged()
+      }
       this.notify({ kind: 'changed' })
     } catch (error) {
       console.warn(`[outbox] sent ${row.id}, but refresh failed: ${errorMessage(error)}`)
+      if (row.follow_up_at !== null) this.followUpsChanged()
     }
   }
 

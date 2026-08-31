@@ -120,6 +120,9 @@ const THREAD_AUXILIARY_PROJECTION_SQL = `EXISTS(SELECT 1 FROM reminders r
               EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
                        AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
+              EXISTS(SELECT 1 FROM reminders r
+                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
+                       AND r.kind = 'follow_up' AND r.state = 'returned') AS follow_up_returned,
               EXISTS(SELECT 1 FROM outbox o
                      WHERE o.account_id = t.account_id AND o.thread_id = t.id
                        AND o.state IN ('composing', 'drafted')) AS has_draft`
@@ -140,6 +143,7 @@ interface MailboxThreadQueryRow {
   has_attachment: number
   snoozed: number
   returned: number
+  follow_up_returned: number
   has_draft: number
   label_ids: string
 }
@@ -313,6 +317,7 @@ export function listMailboxThreads(
     hasAttachment: r.has_attachment === 1,
     snoozed: r.snoozed === 1,
     returned: r.returned === 1,
+    followUpReturned: r.follow_up_returned === 1,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids)
   }))
@@ -373,6 +378,7 @@ export function listLabelThreads(
     hasAttachment: r.has_attachment === 1,
     snoozed: r.snoozed === 1,
     returned: r.returned === 1,
+    followUpReturned: r.follow_up_returned === 1,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids)
   }))
@@ -401,6 +407,9 @@ export function listInboxThreads(
               EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
                        AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
+              EXISTS(SELECT 1 FROM reminders r
+                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
+                       AND r.kind = 'follow_up' AND r.state = 'returned') AS follow_up_returned,
               EXISTS(SELECT 1 FROM outbox o
                      WHERE o.account_id = t.account_id AND o.thread_id = t.id
                        AND o.state IN ('composing', 'drafted')) AS has_draft
@@ -411,7 +420,7 @@ export function listInboxThreads(
            ${recent ? 'AND t.last_msg_at > 0' : ''}
            ${undatedTail ? 'AND (t.last_msg_at IS NULL OR t.last_msg_at <= 0)' : ''}
            ${splitFilter}
-           ${threadId ? 'AND t.id = ?' : ''}
+           ${threadId ? 'AND t.id = ?' : FOLLOW_UP_TIER_EXCLUSION_SQL}
            ${descendingCursorSql(sortExpression, cursor)}
          ORDER BY ${sortExpression} DESC, t.id
          LIMIT ?
@@ -441,6 +450,7 @@ export function listInboxThreads(
       has_attachment: number
       snoozed: number
       returned: number
+      follow_up_returned: number
       has_draft: number
       label_ids: string
     }[]
@@ -451,25 +461,89 @@ export function listInboxThreads(
   // from that index, then preserve the original null-as-zero order in the tail.
   // Targeted membership checks retain their primary-key lookup.
   const recent = !threadId && limit > 0 && (!cursor || cursor.at > 0)
+  // Returned follow-ups sort above normal mail until triaged (F9): the first
+  // page leads with them, and every page excludes them from the dated keyset
+  // flow so pagination never duplicates or skips a row.
+  const tier =
+    !threadId && !cursor ? readFollowUpTier(db, accountId, assignment ? { assignment, splitId } : null) : []
   const rows = readRows(limit, recent)
   if (recent && rows.length < limit) rows.push(...readRows(limit - rows.length, false, true))
 
+  return [
+    ...tier,
+    ...rows.map((r) => ({
+      id: r.id,
+      fromDisplay: r.from_display ?? '',
+      subject: r.subject ?? '(no subject)',
+      snippet: r.snippet ?? '',
+      lastMsgAt: r.last_msg_at ?? 0,
+      unread: r.is_unread === 1,
+      starred: r.is_starred === 1,
+      hasAttachment: r.has_attachment === 1,
+      snoozed: r.snoozed === 1,
+      returned: r.returned === 1,
+      followUpReturned: r.follow_up_returned === 1,
+      hasDraft: r.has_draft === 1,
+      labelIds: labelIds(r.label_ids)
+    }))
+  ]
+}
+
+const FOLLOW_UP_TIER_EXCLUSION_SQL = `AND NOT EXISTS (
+             SELECT 1 FROM reminders fr
+             WHERE fr.account_id = t.account_id AND fr.thread_id = t.id
+               AND fr.kind = 'follow_up' AND fr.state = 'returned')`
+
+/** The above-normal tier: every returned follow-up in this inbox view (F9). */
+function readFollowUpTier(
+  db: Db,
+  accountId: string,
+  split: { assignment: { sql: string; params: unknown[] }; splitId: string | undefined } | null
+): ThreadRow[] {
+  const rows = db
+    .prepare(
+      `WITH visible AS (
+         SELECT ${THREAD_PROJECTION_SQL}, COALESCE(t.last_msg_at, 0) AS mailbox_last_msg_at, fr.due_at
+         FROM reminders fr
+         JOIN threads t ON t.account_id = fr.account_id AND t.id = fr.thread_id
+         JOIN thread_labels inbox
+           ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
+         WHERE fr.account_id = ? AND fr.kind = 'follow_up' AND fr.state = 'returned'
+           AND t.is_inbox_visible = 1
+           ${split ? `AND (${split.assignment.sql}) = ?` : ''}
+         ORDER BY fr.due_at DESC, t.id
+       )
+       SELECT v.*,
+              COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
+                        FROM thread_labels tl
+                        WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+       FROM visible v
+       ORDER BY v.due_at DESC, v.id`
+    )
+    .all(accountId, ...(split ? [...split.assignment.params, split.splitId] : [])) as MailboxThreadQueryRow[]
   return rows.map((r) => ({
     id: r.id,
     fromDisplay: r.from_display ?? '',
     subject: r.subject ?? '(no subject)',
     snippet: r.snippet ?? '',
-    lastMsgAt: r.last_msg_at ?? 0,
+    lastMsgAt: r.mailbox_last_msg_at ?? 0,
     unread: r.is_unread === 1,
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
     snoozed: r.snoozed === 1,
     returned: r.returned === 1,
+    followUpReturned: true,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids)
   }))
 }
 
+/**
+ * The Snoozed/Reminders view lists every thread with a pending reminder of
+ * either kind (F4/F9): one row per thread, showing both deadlines and — for a
+ * follow-up that has not fired — whether it waits on a snooze return or on an
+ * unresolved origin check. Sorted by the earliest pending deadline.
+ */
 export function listSnoozedThreads(
   db: Db,
   accountId: string,
@@ -479,18 +553,30 @@ export function listSnoozedThreads(
 ): SnoozedThreadRow[] {
   const rows = db
     .prepare(
-      `WITH visible AS (
+      `WITH live AS (
+         SELECT account_id, thread_id,
+                MIN(CASE WHEN kind = 'snooze' THEN due_at END) AS snooze_due,
+                MIN(CASE WHEN kind = 'follow_up' THEN due_at END) AS follow_up_due,
+                MAX(CASE WHEN kind = 'follow_up' AND origin_internal_date IS NULL THEN 1 ELSE 0 END)
+                  AS follow_up_origin_pending,
+                MIN(due_at) AS due_at
+         FROM reminders
+         WHERE account_id = ? AND state = 'pending' AND kind IN ('snooze', 'follow_up')
+         GROUP BY account_id, thread_id
+       ),
+       visible AS (
          SELECT t.account_id, t.id, t.from_display, t.subject, t.snippet, t.last_msg_at,
-                t.is_unread, t.is_starred, t.has_attachment, r.due_at,
+                t.is_unread, t.is_starred, t.has_attachment,
+                live.due_at, live.snooze_due, live.follow_up_due, live.follow_up_origin_pending,
               EXISTS(SELECT 1 FROM outbox o
                      WHERE o.account_id = t.account_id AND o.thread_id = t.id
                        AND o.state IN ('composing', 'drafted')) AS has_draft
-         FROM reminders r
-         JOIN threads t ON t.account_id = r.account_id AND t.id = r.thread_id
-         WHERE r.account_id = ? AND r.kind = 'snooze' AND r.state = 'pending'
+         FROM live
+         JOIN threads t ON t.account_id = live.account_id AND t.id = live.thread_id
+         WHERE 1 = 1
            ${threadId ? 'AND t.id = ?' : ''}
-           ${ascendingCursorSql('r.due_at', cursor)}
-         ORDER BY r.due_at ASC, t.id
+           ${ascendingCursorSql('live.due_at', cursor)}
+         ORDER BY live.due_at ASC, t.id
          LIMIT ?
        )
        SELECT v.*,
@@ -511,6 +597,9 @@ export function listSnoozedThreads(
     is_starred: number
     has_attachment: number
     due_at: number
+    snooze_due: number | null
+    follow_up_due: number | null
+    follow_up_origin_pending: number
     has_draft: number
     label_ids: string
   }[]
@@ -524,11 +613,21 @@ export function listSnoozedThreads(
     unread: r.is_unread === 1,
     starred: r.is_starred === 1,
     hasAttachment: r.has_attachment === 1,
-    snoozed: true,
+    snoozed: r.snooze_due !== null,
     returned: false,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids),
-    dueAt: r.due_at
+    dueAt: r.due_at,
+    snoozeDueAt: r.snooze_due,
+    followUpDueAt: r.follow_up_due,
+    followUpAwaiting:
+      r.follow_up_due === null
+        ? null
+        : r.follow_up_origin_pending === 1
+          ? 'origin'
+          : r.snooze_due !== null
+            ? 'snooze'
+            : null
   }))
 }
 

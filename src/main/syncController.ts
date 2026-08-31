@@ -3,6 +3,14 @@ import type { SyncState } from '../shared/mail'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
 import { runMailboxMembershipBackfill } from './db/mailboxMembership'
+import {
+  evaluateThreadFollowUp,
+  followUpRecoveryPending,
+  liveFollowUpThreadIds,
+  resolveFollowUpOrigins,
+  setFollowUpRecoveryPending,
+  settleFollowUpCandidates
+} from './followUps'
 import { GmailApiError } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import { syncRemoteDrafts } from './outbox/draftSync'
@@ -14,10 +22,13 @@ import { type AttachmentFlagProgress, runAttachmentFlagWalk } from './sync/attac
 import { planBackfillStart, runInboxBackfill } from './sync/backfill'
 import { reconcileThreadExistence } from './sync/existenceSweep'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
+import { fetchAndCacheThread } from './sync/fetchThread'
 import { runFtsBackfill } from './sync/ftsBackfill'
 import { syncLabelCatalog } from './sync/labels'
 import { effectiveLifetimeThreadCap } from './sync/lifetimeCap'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
+import { deleteThread } from './sync/persist'
+import type { NewMail } from './sync/poller'
 import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { runSplitMetadataRebuild, type SplitMetadataProgress } from './sync/splitMetadata'
@@ -495,6 +506,12 @@ export class SyncController {
         this.foregroundFailure = null
         this.publishSettledState()
         if (changed) this.context.broadcastMailChanged()
+        // A crash after recovery advanced its checkpoint but before the
+        // follow-up re-checks finished leaves the persisted guard set; the
+        // ordinary cycle finishes those checks so returns can resume (T35).
+        if (followUpRecoveryPending(this.context.db, accountId)) {
+          void this.finishFollowUpRecovery(accountId, provider, generation)
+        }
       },
       onError: (error) => {
         if (generation !== this.generation) return
@@ -504,6 +521,7 @@ export class SyncController {
         this.publishForegroundFailure(error, '[sync] history poll failed')
       },
       wakeThread: (threadId) => this.context.getSnoozeScheduler()?.wakeThread(threadId),
+      settleFollowUps: (candidates) => this.settleFollowUps(accountId, candidates),
       syncLabels: () => syncLabelCatalog(this.context.db, accountId, provider),
       syncSendAs: () =>
         syncPrimarySendAs(this.context.db, accountId, provider, { priority: 'polling' }).then(
@@ -853,6 +871,10 @@ export class SyncController {
     }
     this.inboxRecoveryPending = true
     this.running = true
+    // Expired history means a reply may exist that only an authoritative
+    // snapshot can show: no follow-up may return until every live one has
+    // been re-checked. Persisted, so a restart mid-recovery stays deferred.
+    setFollowUpRecoveryPending(this.context.db, accountId, true)
     this.setState({ phase: 'syncing', stage: 'metadata', threadsDone: 0 })
     let failure: unknown = new Error('history recovery backfill failed')
     try {
@@ -898,10 +920,80 @@ export class SyncController {
       reconcileInboxMembership(this.context.db, accountId, result.inboxThreadIds)
       await reconcilePurgeableMembership(this.context.db, accountId, provider, 'SPAM', result.spamThreadIds)
       await reconcilePurgeableMembership(this.context.db, accountId, provider, 'TRASH', result.trashThreadIds)
+      // Recovery re-lists INBOX only; a thread with a live follow-up can be
+      // archived, so each one is refreshed authoritatively before returns
+      // resume. A failed read keeps the guard set and recovery retryable.
+      await this.refreshLiveFollowUps(accountId, provider, generation)
+      setFollowUpRecoveryPending(this.context.db, accountId, false)
+      this.context.getSnoozeScheduler()?.refresh()
       this.inboxRecoveryPending = false
     } finally {
       if (generation === this.generation) this.running = false
       else if (this.context.isSignedIn()) void this.resumeOnlineWork()
+    }
+  }
+
+  /** Poller-cycle hook (T35): settle live follow-ups against the refetched store. */
+  private settleFollowUps(accountId: string, candidates: NewMail[]): void {
+    const changed = settleFollowUpCandidates(
+      this.context.db,
+      accountId,
+      candidates.map((candidate) => candidate.threadId)
+    )
+    if (changed) {
+      this.context.getSnoozeScheduler()?.refresh()
+      this.context.broadcastMailChanged()
+    }
+  }
+
+  private async refreshLiveFollowUps(
+    accountId: string,
+    provider: GmailMailProvider,
+    generation: number
+  ): Promise<void> {
+    const threadIds = liveFollowUpThreadIds(this.context.db, accountId)
+    for (const threadId of threadIds) {
+      if (this.stopped || generation !== this.generation) throw new Error('authentication session changed')
+      try {
+        await fetchAndCacheThread(this.context.db, accountId, provider, threadId, {
+          format: 'full',
+          priority: 'background'
+        })
+      } catch (error) {
+        // A permanently gone thread takes its reminders with it; any other
+        // failure keeps the guard set — never evidence of no reply.
+        if (error instanceof GmailApiError && error.status === 404) {
+          deleteThread(this.context.db, accountId, threadId)
+          continue
+        }
+        throw error
+      }
+    }
+    resolveFollowUpOrigins(this.context.db, accountId)
+    let changed = false
+    for (const threadId of threadIds) {
+      if (evaluateThreadFollowUp(this.context.db, accountId, threadId)) changed = true
+    }
+    if (changed) this.context.broadcastMailChanged()
+  }
+
+  private followUpRecoveryRunning = false
+
+  private async finishFollowUpRecovery(
+    accountId: string,
+    provider: GmailMailProvider,
+    generation: number
+  ): Promise<void> {
+    if (this.followUpRecoveryRunning) return
+    this.followUpRecoveryRunning = true
+    try {
+      await this.refreshLiveFollowUps(accountId, provider, generation)
+      setFollowUpRecoveryPending(this.context.db, accountId, false)
+      this.context.getSnoozeScheduler()?.refresh()
+    } catch (error) {
+      console.warn(`[sync] follow-up recovery re-check failed: ${errorMessage(error)}`)
+    } finally {
+      this.followUpRecoveryRunning = false
     }
   }
 

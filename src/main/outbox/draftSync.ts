@@ -245,6 +245,7 @@ export async function parseRemoteDraft(
       : splitQuotedTrail(bodies.bodyHtml, bodies.bodyText)
   const input: DraftSaveInput = {
     id: null,
+    followUpAt: null,
     kind,
     to: parseAddressList(header(message, 'To')),
     cc: parseAddressList(header(message, 'Cc')),

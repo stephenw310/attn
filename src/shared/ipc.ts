@@ -149,6 +149,8 @@ export const TEST_CHANNELS = {
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',
   remoteDraft: 'attn:test:remoteDraft',
+  installSendProvider: 'attn:test:installSendProvider',
+  runHistoryCycle: 'attn:test:runHistoryCycle',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
   runExistenceSweep: 'attn:test:runExistenceSweep',
   runFtsBackfill: 'attn:test:runFtsBackfill',

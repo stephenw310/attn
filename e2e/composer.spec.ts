@@ -1490,7 +1490,8 @@ test('preserves rich and opaque draft regions while editing elsewhere', async ({
         inReplyTo: null,
         references: [],
         quoteHtml: '',
-        quoteText: ''
+        quoteText: '',
+        followUpAt: null
       } as const)
     })
     await window.attn.draft.close(id)
@@ -1874,7 +1875,8 @@ test('keeps the selected draft stable when a refresh reorders the list', async (
         inReplyTo: null,
         references: [],
         quoteHtml: '',
-        quoteText: ''
+        quoteText: '',
+        followUpAt: null
       }
     }
   })
@@ -1899,7 +1901,8 @@ test('keeps the selected draft stable when a refresh reorders the list', async (
       inReplyTo: null,
       references: [],
       quoteHtml: '',
-      quoteText: ''
+      quoteText: '',
+      followUpAt: null
     }
     const { id } = await window.attn.draft.save(input)
     await window.attn.draft.close(id)
@@ -2032,7 +2035,8 @@ test('persists content supplied while creating an id-less draft', async ({ page 
       inReplyTo: '<parent@example.com>',
       references: ['<root@example.com>'],
       quoteHtml: '',
-      quoteText: ''
+      quoteText: '',
+      followUpAt: null
     })
     return window.attn.draft.get(id)
   })
@@ -2067,7 +2071,8 @@ test('lists every distinct draft after relaunch in newest-first order', async ({
         inReplyTo: null,
         references: [],
         quoteHtml: '',
-        quoteText: ''
+        quoteText: '',
+        followUpAt: null
       })
       await window.attn.draft.close(id)
       await new Promise((resolve) => window.setTimeout(resolve, 2))
@@ -2226,7 +2231,8 @@ test('keeps the caret in a recipient field while a preserved region sits in the 
       inReplyTo: null,
       references: [],
       quoteHtml: '',
-      quoteText: ''
+      quoteText: '',
+      followUpAt: null
     })
   })
 

@@ -455,6 +455,7 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
           hasAttachment: false,
           snoozed: false,
           returned: false,
+          followUpReturned: false,
           hasDraft: true,
           labelIds: [],
           lastMsgAt: draft.updatedAt

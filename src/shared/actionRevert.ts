@@ -5,6 +5,7 @@ export type RevertedActionKind =
   | 'untrash'
   | 'snooze'
   | 'snoozeReturn'
+  | 'followUpReturn'
   | 'unsnooze'
   | 'undo'
   | 'spam'
@@ -35,6 +36,7 @@ const actionPhrase: Record<RevertedActionKind, string> = {
   untrash: 'restore from trash',
   snooze: 'snooze',
   snoozeReturn: 'return snoozed',
+  followUpReturn: 'resurface for follow-up',
   unsnooze: 'unsnooze',
   undo: 'undo the change to',
   spam: 'mark as spam',

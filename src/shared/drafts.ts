@@ -25,6 +25,11 @@ export interface Draft {
   references: string[]
   quoteHtml: string
   quoteText: string
+  /**
+   * "Remind me if no reply" deadline (T35/F9), chosen at compose. It rides
+   * the outbox row; the reminder itself is created at the sent transition.
+   */
+  followUpAt: number | null
   createdAt: number
   updatedAt: number
 }
@@ -80,6 +85,7 @@ export function emptyDraftInput(): DraftSaveInput {
     inReplyTo: null,
     references: [],
     quoteHtml: '',
-    quoteText: ''
+    quoteText: '',
+    followUpAt: null
   }
 }

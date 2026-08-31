@@ -57,6 +57,7 @@ it('loads the next page when keyboard selection approaches the loaded tail', asy
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: 100 - index
@@ -110,6 +111,7 @@ it('keeps a manual scroll offset when a page is appended without moving the sele
       hasAttachment: false,
       snoozed: false,
       returned: false,
+      followUpReturned: false,
       hasDraft: false,
       labelIds: [],
       lastMsgAt: count - index
@@ -166,6 +168,7 @@ it('skips the row tree when an unrelated parent update preserves its props', asy
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: Date.now()
@@ -222,6 +225,7 @@ it('windows large lists while keeping an offscreen keyboard selection mounted', 
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: Date.now() - index * 60_000
@@ -280,6 +284,7 @@ it('projects virtual rows into the space left by an exiting row without moving t
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: now - index * 1_000
@@ -393,6 +398,7 @@ it('keeps repeated date headers at distinct positions while projecting an exit',
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt
@@ -489,6 +495,7 @@ it('measures the sizer against the list when scrolling a selection into view', a
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: todayAtNoon.getTime() - index * 60_000

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { TriageAction } from '../../shared/actions'
 import { type Db, openDatabase } from '../db'
 import { type LabelMailboxView, listMailboxThreads } from '../db/queries'
 import { SnoozeScheduler } from '../scheduler'
@@ -10,6 +11,7 @@ import {
   pendingActionCount,
   performTriage,
   recordOutboxSendUndo,
+  snoozeThreads,
   undoLast
 } from '.'
 import { storeActionError } from './execute'
@@ -541,5 +543,106 @@ describe('outbox undo stack', () => {
     dropOutboxSendUndo(ACCOUNT, 'outbox-1')
 
     expect(undoLast(db, ACCOUNT)).toBeNull()
+  })
+})
+
+describe('follow-up triage matrix (T35/F9)', () => {
+  function followUpDb(state: 'pending' | 'returned', dueAt: number, threadId = 't-f'): Db {
+    const db = openDatabase(':memory:')
+    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+    db.prepare('INSERT INTO threads (account_id, id) VALUES (?, ?)').run(ACCOUNT, threadId)
+    db.prepare('INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)').run(
+      ACCOUNT,
+      threadId,
+      'INBOX'
+    )
+    db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state,
+         origin_message_id, origin_rfc_message_id, origin_internal_date)
+       VALUES (?, ?, 'follow_up', ?, ?, 'm-origin', '<o@x>', 1)`
+    ).run(ACCOUNT, threadId, dueAt, state)
+    return db
+  }
+
+  function followUpState(db: Db, threadId = 't-f'): string | undefined {
+    return (
+      db
+        .prepare("SELECT state FROM reminders WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up'")
+        .get(ACCOUNT, threadId) as { state: string } | undefined
+    )?.state
+  }
+
+  it('archive completes a returned follow-up', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)
+    expect(followUpState(db)).toBe('done')
+  })
+
+  it('archive cancels an overdue pending follow-up so the return cannot reverse it', () => {
+    const db = followUpDb('pending', Date.now() - 1_000)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)
+    expect(followUpState(db)).toBe('canceled')
+  })
+
+  it('a future follow-up survives ordinary archive', () => {
+    const db = followUpDb('pending', Date.now() + 60_000)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)
+    expect(followUpState(db)).toBe('pending')
+  })
+
+  it('trash and spam cancel a follow-up before it is due', () => {
+    for (const kind of ['trash', 'spam'] as const) {
+      const db = followUpDb('pending', Date.now() + 60_000)
+      performTriage(db, ACCOUNT, { kind, threadIds: ['t-f'] }, false)
+      expect(followUpState(db)).toBe('canceled')
+    }
+  })
+
+  it('marking read or starring leaves the returned chip in place — reading is not answering', () => {
+    const actions: TriageAction[] = [
+      { kind: 'markUnread', threadIds: ['t-f'], on: false },
+      { kind: 'star', threadIds: ['t-f'], on: true }
+    ]
+    for (const action of actions) {
+      const db = followUpDb('returned', 1)
+      performTriage(db, ACCOUNT, action, false)
+      expect(followUpState(db)).toBe('returned')
+    }
+  })
+
+  it('snoozing a returned follow-up makes it pending until the snooze returns', () => {
+    const db = followUpDb('returned', 1)
+    snoozeThreads(db, ACCOUNT, ['t-f'], Date.now() + 60_000)
+    expect(followUpState(db)).toBe('pending')
+  })
+
+  it('undoing an archive restores the follow-up snapshot with the labels', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'trash', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('done')
+    undoLast(db, ACCOUNT)
+    expect(followUpState(db)).toBe('returned')
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM thread_labels WHERE account_id = ? AND thread_id = 't-f' AND label_id = 'INBOX'"
+        )
+        .get(ACCOUNT)
+    ).toBeDefined()
+  })
+
+  it('the queued payload carries the follow-up snapshot for Gmail-rejection recovery', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)
+    const payloads = (db.prepare('SELECT payload FROM action_queue').all() as Array<{ payload: string }>).map(
+      (row) => JSON.parse(row.payload) as Record<string, unknown>
+    )
+    expect(payloads).toHaveLength(1)
+    expect(payloads[0].followUpBefore).toMatchObject({
+      state: 'returned',
+      originMessageId: 'm-origin',
+      originRfcMessageId: '<o@x>',
+      originInternalDate: 1
+    })
   })
 })

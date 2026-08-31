@@ -25,6 +25,7 @@ export interface DraftRow {
   references_json: string
   quote_html: string
   quote_text: string
+  follow_up_at: number | null
   created_at: number
   updated_at: number
   local_revision: number
@@ -33,7 +34,7 @@ export interface DraftRow {
 
 const DRAFT_COLUMNS = `id, account_id, gmail_draft_id, gmail_message_id, state, kind, to_json, cc_json,
   bcc_json, subject, body_html, body_text, attachments_json, thread_id, source_message_id, in_reply_to,
-  references_json, quote_html, quote_text, created_at, updated_at, local_revision,
+  references_json, quote_html, quote_text, follow_up_at, created_at, updated_at, local_revision,
   default_signature_fingerprint`
 
 function parseJson<T>(value: string): T {
@@ -58,6 +59,7 @@ export function toDraft(row: DraftRow): Draft {
     references: parseJson<string[]>(row.references_json),
     quoteHtml: row.quote_html,
     quoteText: row.quote_text,
+    followUpAt: row.follow_up_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
@@ -273,8 +275,8 @@ export function saveDraft(
         `INSERT INTO outbox (
            id, account_id, state, kind, to_json, cc_json, bcc_json, subject, body_html, body_text,
            attachments_json, thread_id, source_message_id, in_reply_to, references_json, quote_html,
-           quote_text, created_at, updated_at, local_revision, default_signature_fingerprint
-         ) VALUES (?, ?, 'composing', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           quote_text, follow_up_at, created_at, updated_at, local_revision, default_signature_fingerprint
+         ) VALUES (?, ?, 'composing', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         accountId,
@@ -292,6 +294,7 @@ export function saveDraft(
         JSON.stringify(input.references),
         input.quoteHtml,
         input.quoteText,
+        input.followUpAt,
         now,
         now,
         isEffectivelyEmptyDraft(input, defaultSignatureFingerprint) ? 0 : 1,
@@ -305,7 +308,7 @@ export function saveDraft(
         `UPDATE outbox SET
            kind = ?, to_json = ?, cc_json = ?, bcc_json = ?, subject = ?, body_html = ?, body_text = ?,
            attachments_json = ?, thread_id = ?, source_message_id = ?, in_reply_to = ?, references_json = ?,
-           quote_html = ?, quote_text = ?,
+           quote_html = ?, quote_text = ?, follow_up_at = ?,
            updated_at = ?, local_revision = local_revision + 1
          WHERE account_id = ? AND id = ? AND state = 'composing'`
       )
@@ -324,6 +327,7 @@ export function saveDraft(
         JSON.stringify(input.references),
         input.quoteHtml,
         input.quoteText,
+        input.followUpAt,
         now,
         accountId,
         id
@@ -380,7 +384,8 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
     kind: draft.kind,
     sourceMessageId: draft.source_message_id,
     quoteHtml: draft.quote_html,
-    quoteText: draft.quote_text
+    quoteText: draft.quote_text,
+    followUpAt: null
   }
   const forwardEditedSincePlan = input.kind === 'forward' && draft.local_revision > 1
   return (

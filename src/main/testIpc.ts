@@ -75,6 +75,13 @@ export class TestSeams {
         })
       })
     }
+    for (const channel of [TEST_CHANNELS.installSendProvider, TEST_CHANNELS.runHistoryCycle]) {
+      ipcMain.on(channel, (_event, request: unknown, done?: (error?: string) => void) => {
+        void this.forward(channel, [request])
+          .then(() => done?.())
+          .catch((error) => done?.(errorMessage(error)))
+      })
+    }
     ipcMain.on(
       TEST_CHANNELS.runLifetimeSweep,
       (_event, request: unknown, done?: (result: unknown) => void) => {

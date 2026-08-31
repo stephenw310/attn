@@ -1,12 +1,14 @@
 import type { RevertedActionKind } from '../../shared/actionRevert'
 import { stringArray } from '../../shared/guards'
-import type { SnoozeReminderSnapshot } from '../store/reminders'
+import type { FollowUpReminderSnapshot, SnoozeReminderSnapshot } from '../store/reminders'
 
 export interface LabelDeltaPayload {
   add: string[]
   remove: string[]
   actionKind?: RevertedActionKind
   reminderBefore?: SnoozeReminderSnapshot | null
+  /** Pre-action follow-up reminder, restored with the labels on revert (T35). */
+  followUpBefore?: FollowUpReminderSnapshot | null
   revertsQueueId?: number
 }
 
@@ -25,6 +27,9 @@ export function decodeLabelDelta(payload: string): LabelDeltaPayload {
   if (candidate.reminderBefore !== undefined && !validReminder(candidate.reminderBefore)) {
     throw new Error('Invalid action queue reminder snapshot')
   }
+  if (candidate.followUpBefore !== undefined && !validFollowUp(candidate.followUpBefore)) {
+    throw new Error('Invalid action queue follow-up snapshot')
+  }
   if (
     candidate.revertsQueueId !== undefined &&
     (!Number.isSafeInteger(candidate.revertsQueueId) || candidate.revertsQueueId <= 0)
@@ -36,6 +41,7 @@ export function decodeLabelDelta(payload: string): LabelDeltaPayload {
     remove,
     ...(candidate.actionKind ? { actionKind: candidate.actionKind } : {}),
     ...(candidate.reminderBefore !== undefined ? { reminderBefore: candidate.reminderBefore } : {}),
+    ...(candidate.followUpBefore !== undefined ? { followUpBefore: candidate.followUpBefore } : {}),
     ...(candidate.revertsQueueId !== undefined ? { revertsQueueId: candidate.revertsQueueId } : {})
   }
 }
@@ -47,6 +53,7 @@ const actionKinds = new Set<RevertedActionKind>([
   'untrash',
   'snooze',
   'snoozeReturn',
+  'followUpReturn',
   'unsnooze',
   'undo',
   'spam',
@@ -69,5 +76,16 @@ function validReminder(value: unknown): value is SnoozeReminderSnapshot | null {
       candidate.state === 'returned' ||
       candidate.state === 'done' ||
       candidate.state === 'canceled')
+  )
+}
+
+function validFollowUp(value: unknown): value is FollowUpReminderSnapshot | null {
+  if (!validReminder(value)) return false
+  if (value === null) return true
+  const candidate = value as Partial<FollowUpReminderSnapshot>
+  return (
+    (candidate.originMessageId === null || typeof candidate.originMessageId === 'string') &&
+    (candidate.originRfcMessageId === null || typeof candidate.originRfcMessageId === 'string') &&
+    (candidate.originInternalDate === null || typeof candidate.originInternalDate === 'number')
   )
 }

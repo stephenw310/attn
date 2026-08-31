@@ -44,6 +44,9 @@
           "threadId": "t-inbound",
           "labelIds": ["INBOX", "UNREAD"]
         }
+      },
+      {
+        "message": { "id": "m-draft", "threadId": "t-draft", "labelIds": ["DRAFT"] }
       }
     ]
   }
