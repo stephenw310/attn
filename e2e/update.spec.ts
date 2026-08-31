@@ -1,4 +1,5 @@
-import { IPC_CHANNELS } from '../src/shared/ipc'
+import type { ElectronApplication } from '@playwright/test'
+import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 
 // T39 wiring under the harness, where no updater may exist: seeded builds
@@ -8,6 +9,15 @@ import { expect, test } from './electron'
 // manual T40 evidence — they cannot run under the e2e harness.
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
+
+async function emitSeam(app: ElectronApplication, channel: string, request?: unknown): Promise<void> {
+  const error = await app.evaluate(
+    ({ ipcMain }, input) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(input.channel, {}, input.request, resolve)),
+    { channel, request }
+  )
+  if (error) throw new Error(error)
+}
 
 test('a seeded build has no updater: idle state, refused restart, quiet ready toast', async ({
   app,
@@ -45,4 +55,17 @@ test('a seeded build has no updater: idle state, refused restart, quiet ready to
   await expect(page.getByTestId('toast')).toContainText('Update 9.9.9 ready')
   await sendReady()
   await expect(page.getByTestId('toast')).toContainText('Update 9.9.9 ready')
+})
+
+test('a ready update that predates the window is announced by the mount-time read', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+
+  // A download can finish while no window exists; the broadcast then reaches
+  // nobody. Stage a stored ready state and boot a fresh renderer against it:
+  // the subscribe-then-read mount path must announce it without any
+  // broadcast (PR #101 review).
+  await emitSeam(app, TEST_CHANNELS.setUpdateState, { phase: 'ready', readyVersion: '9.9.10' })
+  await page.reload()
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await expect(page.getByTestId('toast')).toContainText('Update 9.9.10 ready')
 })

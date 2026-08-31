@@ -156,7 +156,12 @@ describe('searchAllGmail', () => {
     }
   })
 
-  it('finds a cached old match outside the recency window and dedupes it across Gmail pages', async () => {
+  // Seeding SEARCH_RECENT_MESSAGE_LIMIT (2,000) threads through the real
+  // persistThread path takes ~3.5s alone and crosses the 5s default under a
+  // loaded parallel suite run; the budget covers the seeding, not a wait.
+  it('finds a cached old match outside the recency window and dedupes it across Gmail pages', {
+    timeout: 20_000
+  }, async () => {
     const db = openDatabase(':memory:')
     try {
       ensureAccount(db, ACCOUNT, ACCOUNT)

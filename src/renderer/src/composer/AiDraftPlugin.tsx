@@ -92,6 +92,8 @@ export function AiDraftPlugin({
   const [refineDismissed, setRefineDismissed] = useState(false)
   const [refineText, setRefineText] = useState('')
   const runRef = useRef<AiRun | null>(null)
+  /** Set on unmount so the awaits inside a preparing start() stop cold. */
+  const disposedRef = useRef(false)
   const landedTextRef = useRef('')
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const claimRef = useRef(claim)
@@ -203,17 +205,21 @@ export function AiDraftPlugin({
         onToastRef.current('AI drafting writes replies — open it from a reply composer')
         return
       }
+      // Capture the conversation before any await: once this turn yields, the
+      // composer can close and another conversation can open, and a later read
+      // would draft against the newly selected thread (PR #101 review).
+      const thread = getThreadContextRef.current()
       let settings: Awaited<ReturnType<typeof bridge.ai.getSettings>>
       try {
         settings = await bridge.ai.getSettings()
       } catch {
         return
       }
+      if (disposedRef.current) return
       if (!settings.enabled) {
         onToastRef.current('Enable AI writing in Settings to draft replies')
         return
       }
-      const thread = getThreadContextRef.current()
       if (!thread || thread.length === 0) {
         onToastRef.current('The conversation is still loading — try again in a moment')
         return
@@ -226,6 +232,7 @@ export function AiDraftPlugin({
         } catch {
           // Voice matching is best effort; the draft proceeds without it.
         }
+        if (disposedRef.current) return
       }
       const refine = refineInstruction !== undefined
       const run: AiRun = {
@@ -267,9 +274,16 @@ export function AiDraftPlugin({
           ...(refine ? { instruction: refineInstruction, priorDraft } : {}),
           ...(styleExamples ? { styleExamples } : {})
         })
+        // The unmount cleanup could not cancel a request whose id was still in
+        // flight; a generation landing on a disposed plugin is canceled here.
+        if (!run.active) {
+          void bridge.ai.cancel(result.requestId).catch(() => {})
+          return
+        }
         run.requestId = result.requestId
         for (const event of pending.splice(0)) handle(event)
       } catch (error) {
+        if (disposedRef.current) return
         onToastRef.current(errorMessage(error))
         finish()
       }
@@ -323,14 +337,17 @@ export function AiDraftPlugin({
   }, [edited, editor, phase, regionText])
 
   // Unmount (draft closed, sent, or switched) cancels silently; late events
-  // can never reach another draft because the subscription dies here too.
+  // can never reach another draft because the subscription dies here too. A
+  // run whose request id is still in flight is canceled by start() when the
+  // id lands and finds the run deactivated.
   useEffect(
     () => () => {
+      disposedRef.current = true
       unsubscribeRef.current?.()
       unsubscribeRef.current = null
       const run = runRef.current
-      if (run?.active && typeof run.requestId === 'string') {
-        void window.attn?.ai.cancel(run.requestId).catch(() => {})
+      if (run?.active) {
+        if (typeof run.requestId === 'string') void window.attn?.ai.cancel(run.requestId).catch(() => {})
         run.active = false
       }
     },

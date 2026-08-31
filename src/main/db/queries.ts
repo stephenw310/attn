@@ -394,7 +394,12 @@ export function listInboxThreads(
 ): ThreadRow[] {
   const assignment = splitId ? splitAssignmentForAccount(db, accountId) : null
   const splitFilter = assignment ? `AND (${assignment.sql}) = ?` : ''
-  const readRows = (pageLimit: number, recent: boolean, undatedTail = false) => {
+  const readRows = (
+    pageLimit: number,
+    recent: boolean,
+    undatedTail = false,
+    pageCursor: ThreadPageCursor | null = null
+  ) => {
     const sortExpression = recent ? 't.last_msg_at' : 'COALESCE(t.last_msg_at, 0)'
     return db
       .prepare(
@@ -421,7 +426,7 @@ export function listInboxThreads(
            ${undatedTail ? 'AND (t.last_msg_at IS NULL OR t.last_msg_at <= 0)' : ''}
            ${splitFilter}
            ${threadId ? 'AND t.id = ?' : FOLLOW_UP_TIER_EXCLUSION_SQL}
-           ${descendingCursorSql(sortExpression, cursor)}
+           ${descendingCursorSql(sortExpression, pageCursor)}
          ORDER BY ${sortExpression} DESC, t.id
          LIMIT ?
        )
@@ -436,7 +441,7 @@ export function listInboxThreads(
         accountId,
         ...(assignment ? [...assignment.params, splitId] : []),
         ...(threadId ? [threadId] : []),
-        ...cursorValues(cursor),
+        ...cursorValues(pageCursor),
         pageLimit
       ) as {
       account_id: string
@@ -456,18 +461,27 @@ export function listInboxThreads(
     }[]
   }
 
+  // Returned follow-ups sort above normal mail until triaged (F9). The tier
+  // pages by its own due_at keyset — a page boundary inside it continues with
+  // a `tier` cursor (PR #101 review: prepending it wholesale silently dropped
+  // every returned follow-up past the first page) — and once it is exhausted
+  // the dated mailbox flow starts from its beginning, with tier rows excluded
+  // there so pagination never duplicates or skips a row.
+  const tierPhase = !threadId && (!cursor || cursor.tier === 'followUp')
+  const tier = tierPhase
+    ? readFollowUpTier(db, accountId, assignment ? { assignment, splitId } : null, limit, cursor)
+    : []
+  const mailCursor = tierPhase ? null : cursor
+  const mailLimit = Math.max(0, limit - tier.length)
   // COALESCE prevents SQLite from using the date index for ordering, so it
   // classifies the entire account before LIMIT. Read positive dates directly
   // from that index, then preserve the original null-as-zero order in the tail.
   // Targeted membership checks retain their primary-key lookup.
-  const recent = !threadId && limit > 0 && (!cursor || cursor.at > 0)
-  // Returned follow-ups sort above normal mail until triaged (F9): the first
-  // page leads with them, and every page excludes them from the dated keyset
-  // flow so pagination never duplicates or skips a row.
-  const tier =
-    !threadId && !cursor ? readFollowUpTier(db, accountId, assignment ? { assignment, splitId } : null) : []
-  const rows = readRows(limit, recent)
-  if (recent && rows.length < limit) rows.push(...readRows(limit - rows.length, false, true))
+  const recent = !threadId && mailLimit > 0 && (!mailCursor || mailCursor.at > 0)
+  const rows = mailLimit > 0 ? readRows(mailLimit, recent, false, mailCursor) : []
+  if (recent && rows.length < mailLimit) {
+    rows.push(...readRows(mailLimit - rows.length, false, true, mailCursor))
+  }
 
   return [
     ...tier,
@@ -494,12 +508,19 @@ const FOLLOW_UP_TIER_EXCLUSION_SQL = `AND NOT EXISTS (
              WHERE fr.account_id = t.account_id AND fr.thread_id = t.id
                AND fr.kind = 'follow_up' AND fr.state = 'returned')`
 
-/** The above-normal tier: every returned follow-up in this inbox view (F9). */
+/**
+ * The above-normal tier: returned follow-ups in this inbox view (F9), paged by
+ * their own (due_at, id) keyset. Rows carry `followUpTierAt` so a page boundary
+ * inside the tier emits a `tier: 'followUp'` cursor rather than a dated one.
+ */
 function readFollowUpTier(
   db: Db,
   accountId: string,
-  split: { assignment: { sql: string; params: unknown[] }; splitId: string | undefined } | null
+  split: { assignment: { sql: string; params: unknown[] }; splitId: string | undefined } | null,
+  limit: number,
+  cursor: ThreadPageCursor | null
 ): ThreadRow[] {
+  if (limit <= 0) return []
   const rows = db
     .prepare(
       `WITH visible AS (
@@ -511,7 +532,9 @@ function readFollowUpTier(
          WHERE fr.account_id = ? AND fr.kind = 'follow_up' AND fr.state = 'returned'
            AND t.is_inbox_visible = 1
            ${split ? `AND (${split.assignment.sql}) = ?` : ''}
+           ${descendingCursorSql('fr.due_at', cursor)}
          ORDER BY fr.due_at DESC, t.id
+         LIMIT ?
        )
        SELECT v.*,
               COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
@@ -520,7 +543,12 @@ function readFollowUpTier(
        FROM visible v
        ORDER BY v.due_at DESC, v.id`
     )
-    .all(accountId, ...(split ? [...split.assignment.params, split.splitId] : [])) as MailboxThreadQueryRow[]
+    .all(
+      accountId,
+      ...(split ? [...split.assignment.params, split.splitId] : []),
+      ...cursorValues(cursor),
+      limit
+    ) as (MailboxThreadQueryRow & { due_at: number })[]
   return rows.map((r) => ({
     id: r.id,
     fromDisplay: r.from_display ?? '',
@@ -533,6 +561,7 @@ function readFollowUpTier(
     snoozed: r.snoozed === 1,
     returned: r.returned === 1,
     followUpReturned: true,
+    followUpTierAt: r.due_at,
     hasDraft: r.has_draft === 1,
     labelIds: labelIds(r.label_ids)
   }))

@@ -230,7 +230,8 @@ function isThreadListRequest(value: unknown): value is ThreadListRequest {
 
 function isThreadPageCursor(value: unknown): value is ThreadPageCursor {
   if (!value || typeof value !== 'object') return false
-  const cursor = value as { at?: unknown; id?: unknown }
+  const cursor = value as { at?: unknown; id?: unknown; tier?: unknown }
+  if (cursor.tier !== undefined && cursor.tier !== 'followUp') return false
   return typeof cursor.at === 'number' && Number.isFinite(cursor.at) && nonEmptyString(cursor.id)
 }
 
@@ -242,11 +243,22 @@ function threadPage<Row extends ThreadRow>(
   const hasMore = rows.length > THREAD_PAGE_SIZE
   const pageRows = hasMore ? rows.slice(0, THREAD_PAGE_SIZE) : rows
   const last = pageRows.at(-1)
+  // A page ending inside the inbox's returned-follow-up tier continues by the
+  // tier's own due_at keyset; every other view pages by its date sort key.
+  const tierAt = last && typeof last.followUpTierAt === 'number' ? last.followUpTierAt : undefined
   const cursorAt =
     snoozed && last && 'dueAt' in last && typeof last.dueAt === 'number' ? last.dueAt : last?.lastMsgAt
+  const nextCursor: ThreadPageCursor | null =
+    hasMore && last
+      ? tierAt !== undefined
+        ? { at: tierAt, id: last.id, tier: 'followUp' }
+        : cursorAt !== undefined
+          ? { at: cursorAt, id: last.id }
+          : null
+      : null
   return {
     rows: pageRows,
-    nextCursor: hasMore && last && cursorAt !== undefined ? { at: cursorAt, id: last.id } : null,
+    nextCursor,
     ...(splitRevisionValue === undefined ? {} : { splitRevision: splitRevisionValue })
   }
 }

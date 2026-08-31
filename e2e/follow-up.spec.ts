@@ -152,6 +152,37 @@ test('the originating send never cancels; a real reply does, before the deadline
   await expect(designRow(page).getByTestId('chip-follow-up')).toHaveCount(0)
 })
 
+test('Escape closes the follow-up popover and returns focus before closing the composer', async ({
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await designRow(page).click()
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+
+  // Opening moves focus into the popover, so its Escape containment sees the
+  // key instead of the composer's close handling (PR #101 review).
+  await page.getByTestId('composer-follow-up').click()
+  const popover = page.getByTestId('follow-up-popover')
+  await expect(popover).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? null))
+    .toBe('follow-up-popover')
+
+  await page.keyboard.press('Escape')
+  await expect(popover).toHaveCount(0)
+  await expect(composer.root).toBeVisible()
+
+  // Dismissal hands focus back to the trigger; the next Escape is the
+  // composer's ordinary close.
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? null))
+    .toBe('composer-follow-up')
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+})
+
 test('a reply during snooze wakes the thread with its Returned chip (GAP-1)', async ({ app, page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   const row = designRow(page)

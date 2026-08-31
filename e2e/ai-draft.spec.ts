@@ -155,6 +155,49 @@ test('Esc mid-stream keeps the partial text; the next Esc closes the composer no
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
 })
 
+test('an invocation on a recovered full-window reply never parks for another draft', async ({
+  boot,
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page)
+  await openDesignReader(page)
+  let composer = new ComposerPage(page)
+  await composer.openReply()
+  await composer.typeBody('Recovered reply body.')
+  await composer.expectSaved()
+
+  // Relaunch with the reply still open: it recovers as the FULL-WINDOW
+  // composer, which mounts no drafting plugin to serve an invocation.
+  const relaunched = await boot.relaunch()
+  const app = relaunched.app
+  page = relaunched.page
+  composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await expect(composer.editor).toContainText('Recovered reply body.')
+  await installFakeAi(app, { chunks: ['Must never stream.'] })
+
+  await page.keyboard.press('ControlOrMeta+j')
+  await expect(page.getByTestId('toast')).toContainText(
+    'Open the reply from its conversation to draft with AI'
+  )
+  await expect(page.getByTestId('ai-drafting')).toHaveCount(0)
+
+  // Close the recovered draft, then open an unrelated inline reply. Without
+  // conversation binding the parked invocation would fire right here, into
+  // the wrong draft (PR #101 review).
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await page.getByTestId('thread-row').filter({ hasText: 'Lunch next week' }).click()
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Lunch next week')
+  const lunchReply = new ComposerPage(page)
+  await lunchReply.openReply()
+  await page.waitForTimeout(600)
+  await expect(page.getByTestId('ai-drafting')).toHaveCount(0)
+  await expect(editor(page)).not.toContainText('Must never stream.')
+  expect(await aiRequests(app)).toHaveLength(0)
+})
+
 test('refine replaces the unedited draft as one undo step and hides after hand edits', async ({
   app,
   page

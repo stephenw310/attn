@@ -55,7 +55,11 @@ export function createElectronUpdaterFeed(metadata: DistributionMetadata): Updat
       await autoUpdater.downloadUpdate()
     },
     quitAndInstall: (): void => {
-      autoUpdater.quitAndInstall(true, false)
+      // This is only reached from the explicit `Restart to update` action, so
+      // the user asked for a relaunch: isForceRunAfter must be true or the
+      // silent Windows installer leaves the app closed (PR #101 review). The
+      // never-forced path stays autoInstallOnAppQuit, which does not relaunch.
+      autoUpdater.quitAndInstall(true, true)
     }
   }
 }

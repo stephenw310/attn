@@ -10,6 +10,7 @@ import type { ConversationMailbox, MailLabel, ThreadListView, ThreadRow } from '
 import type { MoveDestination } from '../../../shared/move'
 import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
+import type { UpdateState } from '../../../shared/update'
 import { clearAccountView, readAccountView, saveAccountView } from '../accountViewMemory'
 import { actionReconnectMessage } from '../actionReconnect'
 import { aiThreadContext } from '../aiContext'
@@ -528,26 +529,36 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
   // T39: a ready update surfaces once as a quiet toast; the palette command
   // applies it through the awaited shutdown, and nothing forces a restart.
   const updateToastedRef = useRef<string | null>(null)
-  useEffect(
-    () =>
-      window.attn?.update.onState((state) => {
-        if (state.phase !== 'ready' || state.readyVersion === null) return
-        if (updateToastedRef.current === state.readyVersion) return
-        updateToastedRef.current = state.readyVersion
-        showToast(`Update ${state.readyVersion} ready — it applies on quit, or Restart to update`)
-      }),
-    [showToast]
-  )
+  useEffect(() => {
+    const announce = (state: UpdateState): void => {
+      if (state.phase !== 'ready' || state.readyVersion === null) return
+      if (updateToastedRef.current === state.readyVersion) return
+      updateToastedRef.current = state.readyVersion
+      showToast(`Update ${state.readyVersion} ready — it applies on quit, or Restart to update`)
+    }
+    // Subscribe first, then read: a download that finished while no window
+    // existed still gets announced, and the shared dedupe drops the overlap
+    // when a broadcast races the read (PR #101 review).
+    const unsubscribe = window.attn?.update.onState(announce)
+    void window.attn?.update
+      .getState()
+      .then(announce)
+      .catch(() => {})
+    return unsubscribe
+  }, [showToast])
 
   // T37 AI reply drafting: one Inbox-owned command serves the reader and the
   // composer. An invocation parks in the pending ref until the (possibly just
   // opened) reply composer's plugin claims it — claiming is one-shot, so a
-  // remounted composer can never replay a consumed invocation.
+  // remounted composer can never replay a consumed invocation. The pending
+  // value is the target THREAD id: a composer for any other conversation
+  // finds nothing to claim, so an invocation can never carry into an
+  // unrelated draft (PR #101 review).
   const [aiDraftRequest, setAiDraftRequest] = useState(0)
-  const aiDraftPendingRef = useRef(false)
-  const claimAiDraftRequest = useCallback(() => {
-    if (!aiDraftPendingRef.current) return false
-    aiDraftPendingRef.current = false
+  const aiDraftPendingRef = useRef<string | null>(null)
+  const claimAiDraftRequest = useCallback((threadId: string) => {
+    if (aiDraftPendingRef.current === null || aiDraftPendingRef.current !== threadId) return false
+    aiDraftPendingRef.current = null
     return true
   }, [])
 
@@ -611,6 +622,16 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
       ? composerDraft
       : null
   const fullWindowComposerDraft = composerDraft && !inlineComposerDraft ? composerDraft : null
+  // Render-time mirror for the Draft-AI-reply command: only the inline reply
+  // composer mounts the plugin that can serve an invocation.
+  const inlineComposerDraftIdRef = useRef<string | null>(null)
+  inlineComposerDraftIdRef.current = inlineComposerDraft?.id ?? null
+
+  // A pending AI invocation must not outlive the composer (or the failed
+  // open) it targeted: reopening a reply later must start clean.
+  useEffect(() => {
+    if (composerDraft === null) aiDraftPendingRef.current = null
+  }, [composerDraft])
 
   useEffect(() => {
     writeSidebarCollapsed(sidebarStorage(), sidebarCollapsed)
@@ -620,10 +641,22 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
     setSidebarCollapsed((collapsed) => !collapsed)
   }, [])
 
-  const openSettings = useCallback((control: SettingsControl | null = null) => {
-    setSettingsFocus(control)
-    setSettingsOpen(true)
-  }, [])
+  const openSettings = useCallback(
+    (control: SettingsControl | null = null) => {
+      // Settings hides the mail surface, so a composer would keep running
+      // invisibly underneath — including one whose create round trip is still
+      // in flight, which would mount under Settings and still receive
+      // composer keys (PR #101 review: Mod+Enter from Settings sent the
+      // hidden reply). Same refusal the account actions use.
+      if (composerOpenRef.current || composerOpeningRef.current) {
+        showToast('Save and close the draft before opening Settings')
+        return
+      }
+      setSettingsFocus(control)
+      setSettingsOpen(true)
+    },
+    [showToast]
+  )
   const closeSettings = useCallback(() => {
     setSettingsOpen(false)
     setSettingsFocus(null)
@@ -1729,9 +1762,15 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
           if (draft) {
             setComposerError(null)
             showDraft(draft)
+          } else {
+            // The reply never opened, so a parked AI invocation targeting it
+            // must not wait around for an unrelated later composer.
+            aiDraftPendingRef.current = null
           }
         })
-        .catch(() => {})
+        .catch(() => {
+          aiDraftPendingRef.current = null
+        })
         .finally(() => {
           composerOpeningRef.current = false
         })
@@ -1767,8 +1806,8 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
   const conversationRef = useRef(conversation)
   conversationRef.current = conversation
   const getAiThreadContext = useCallback(() => aiThreadContext(conversationRef.current), [])
-  const requestAiDraft = useCallback(() => {
-    aiDraftPendingRef.current = true
+  const requestAiDraft = useCallback((threadId: string) => {
+    aiDraftPendingRef.current = threadId
     setAiDraftRequest((count) => count + 1)
   }, [])
 
@@ -1990,12 +2029,20 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
               }
               const open = composerDraftRef.current
               if (open) {
-                if (open.kind === 'reply' || open.kind === 'replyAll') requestAiDraft()
-                else showToast('AI drafting writes replies — reply to a conversation to use it')
+                if (open.kind !== 'reply' && open.kind !== 'replyAll') {
+                  showToast('AI drafting writes replies — reply to a conversation to use it')
+                } else if (open.id === inlineComposerDraftIdRef.current && open.threadId) {
+                  requestAiDraft(open.threadId)
+                } else {
+                  // A detached reply (say, recovered after a relaunch) mounts
+                  // no drafting plugin; parking an invocation here would fire
+                  // in whatever reply opens next (PR #101 review).
+                  showToast('Open the reply from its conversation to draft with AI')
+                }
                 return
               }
               if (readerOpenRef.current && selectedRef.current) {
-                requestAiDraft()
+                requestAiDraft(selectedRef.current.id)
                 openReplyRef.current('reply')
                 return
               }
@@ -2353,7 +2400,9 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
                       onToast={showToast}
                       aiDraft={{
                         request: aiDraftRequest,
-                        claim: claimAiDraftRequest,
+                        claim: () =>
+                          inlineComposerDraft.threadId !== null &&
+                          claimAiDraftRequest(inlineComposerDraft.threadId),
                         getThreadContext: getAiThreadContext
                       }}
                     />

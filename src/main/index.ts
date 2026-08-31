@@ -9,7 +9,7 @@ import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { AppSettingUpdate } from '../shared/settings'
 import type { ThemePreference } from '../shared/theme'
-import { UPDATE_STATE_IDLE } from '../shared/update'
+import { UPDATE_STATE_IDLE, type UpdateState } from '../shared/update'
 import { AiKeyStore } from './ai/keyStore'
 import { AiManager } from './ai/manager'
 import { oauthConfigSearchDirs } from './auth/configPaths'
@@ -86,6 +86,9 @@ let appUpdater: AppUpdater | null = null
 // The opened database's schema, from the utility's ready handshake: updates
 // must match it exactly, and a manual dogfood upgrade would change it.
 let openedSchemaVersion: number | null = null
+// Test-only: lets the seeded harness stage a stored update state for the
+// renderer's mount-time read; always null outside ATTN_TEST_USER_DATA.
+let updateStateOverride: UpdateState | null = null
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
@@ -93,6 +96,9 @@ const testSeams = new TestSeams(Boolean(testUserData), {
   focusInboxThread: (threadId, accountId) => {
     const owner = accountId ?? activeAccountId
     if (owner) focusInboxThread(owner, threadId)
+  },
+  setUpdateStateOverride: (state) => {
+    updateStateOverride = state
   }
 })
 
@@ -560,7 +566,7 @@ async function initialize(): Promise<void> {
     acknowledgePendingFocus: acknowledgeFocusTarget,
     applySettingEffects,
     update: {
-      getState: () => appUpdater?.state() ?? UPDATE_STATE_IDLE,
+      getState: () => updateStateOverride ?? appUpdater?.state() ?? UPDATE_STATE_IDLE,
       restart: () => appUpdater?.restartToApply() ?? Promise.resolve(false)
     },
     ai: {

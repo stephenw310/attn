@@ -605,9 +605,22 @@ function FollowUpControl({
     setCustom('')
   }
   const preset = (days: number): number => Date.now() + days * 24 * 60 * 60 * 1000
+  // Focus follows the popover (PR #101 review): its Escape containment only
+  // sees the key when focus is inside, so opening moves focus onto the
+  // popover and dismissing hands it back to the trigger — from where the
+  // next Escape reaches the composer's ordinary close handling.
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+  const wasOpenRef = useRef(false)
+  useEffect(() => {
+    if (open) popoverRef.current?.focus()
+    else if (wasOpenRef.current) triggerRef.current?.focus()
+    wasOpenRef.current = open
+  }, [open])
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs ${
           followUpAt !== null ? 'text-accent' : 'text-ink-faint hover:bg-active hover:text-ink'
@@ -625,7 +638,9 @@ function FollowUpControl({
       {open && (
         // biome-ignore lint/a11y/noStaticElementInteractions: Escape containment for the transient popover; its buttons and input carry the interactions
         <div
-          className="absolute bottom-full left-0 z-30 mb-2 flex w-72 flex-col gap-1 rounded-lg border border-edge bg-raised p-2 shadow-2xl"
+          ref={popoverRef}
+          tabIndex={-1}
+          className="absolute bottom-full left-0 z-30 mb-2 flex w-72 flex-col gap-1 rounded-lg border border-edge bg-raised p-2 shadow-2xl outline-none"
           data-composer-transient
           data-testid="follow-up-popover"
           onKeyDown={(event) => {

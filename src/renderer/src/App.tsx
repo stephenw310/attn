@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AuthStatus } from '../../shared/auth'
 import { Inbox } from './components/Inbox'
 import { LoginScreen } from './components/LoginScreen'
+import { orderRoster } from './roster'
 
 const attn = window.attn
 
@@ -13,13 +14,15 @@ export default function App(): React.JSX.Element {
   const [removalError, setRemovalError] = useState<string | null>(null)
 
   // A reorder response carries a status snapshot computed when the reorder
-  // committed, which can predate an account switch made while it was in
-  // flight — and a switch remounts the keyed Inbox, so no Inbox-held state
-  // survives to judge it. Reordering never changes the active account:
-  // adopt only the roster ordering, onto whatever status is live when the
-  // response finally lands (PR #101 review).
+  // committed, which can predate an account switch — or a removal — made
+  // while it was in flight, and a switch remounts the keyed Inbox, so no
+  // Inbox-held state survives to judge it. Reordering never changes the
+  // active account or the membership: adopt only the ordering, restricted to
+  // whatever roster is live when the response finally lands (PR #101 review).
   const applyReorderedRoster = useCallback((next: AuthStatus) => {
-    setStatus((current) => (current ? { ...current, accounts: next.accounts } : next))
+    setStatus((current) =>
+      current ? { ...current, accounts: orderRoster(current.accounts, next.accounts) } : next
+    )
   }, [])
 
   const loadStatus = useCallback(() => {
