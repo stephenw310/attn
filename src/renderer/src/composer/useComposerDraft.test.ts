@@ -9,6 +9,7 @@ import { type ComposerDraftController, mirrorIdleMs, useComposerDraft } from './
 
 const draft: Draft = {
   id: 'local-draft',
+  accountId: 'user@attn.test',
   kind: 'new',
   to: [],
   cc: [],

@@ -18,6 +18,40 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('account read cancellation', () => {
+  it('rejects late reads and new reads, but preserves a returned mutation id', async () => {
+    const readAbort = new AbortController()
+    let releaseRead!: (response: Response) => void
+    let releaseCreate!: (response: Response) => void
+    const fetchMock = vi.fn(
+      (_url: unknown, init?: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          if (init?.method === 'POST') releaseCreate = resolve
+          else releaseRead = resolve
+        })
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new GmailClient(
+      { client_id: 'client', client_secret: 'secret' },
+      { access_token: 'access', expires_at: Date.now() + 3_600_000 },
+      vi.fn(),
+      { readSignal: readAbort.signal }
+    )
+    const read = client.get('/threads/t1')
+    const create = client.post('/drafts', {}, { retryTransient: false })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const rejected = expect(read).rejects.toThrow('account removed')
+    readAbort.abort(new Error('account removed'))
+    // Model a transport whose already-buffered response still resolves.
+    releaseRead(new Response(JSON.stringify({ id: 't1' })))
+    releaseCreate(new Response(JSON.stringify({ id: 'remote-draft' })))
+    await rejected
+    await expect(create).resolves.toEqual({ id: 'remote-draft' })
+    await expect(client.get('/profile')).rejects.toThrow('account removed')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('Gmail token refresh failures', () => {
   it('types a missing refresh token as an authentication failure', async () => {
     await expect(expiredClient().get('/threads/t1')).rejects.toBeInstanceOf(GmailAuthError)

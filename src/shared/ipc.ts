@@ -1,6 +1,6 @@
 import type { ActionRevertNotice } from './actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from './actions'
-import type { AuthSignInResult, AuthStatus } from './auth'
+import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from './auth'
 import type { CommandUsage } from './commandUsage'
 import type { ContactSearchResult } from './contacts'
 import type {
@@ -25,6 +25,7 @@ import type {
   ThreadListRequest,
   ThreadPage
 } from './mail'
+import type { PendingFocusTarget } from './notifications'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
 import type { SearchResponse, ServerSearchResponse } from './searchQuery'
 import type {
@@ -39,8 +40,9 @@ import type { ThemePreference } from './theme'
 export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',
   authSignIn: 'auth:signIn',
-  authSignOut: 'auth:signOut',
   accountsSetActive: 'accounts:setActive',
+  accountsGetStatuses: 'accounts:getStatuses',
+  accountsRemove: 'accounts:remove',
   settingsGetTheme: 'settings:getTheme',
   settingsSetTheme: 'settings:setTheme',
   settingsGetCommandUsage: 'settings:getCommandUsage',
@@ -100,6 +102,7 @@ export const IPC_CHANNELS = {
   mailActionsReverted: 'mail:actionsReverted',
   mailBodyHydrationFailed: 'mail:bodyHydrationFailed',
   mailFocusThreadAvailable: 'mail:focusThreadAvailable',
+  accountsStatusChanged: 'accounts:statusChanged',
   syncState: 'sync:state'
 } as const
 
@@ -137,14 +140,16 @@ export const TEST_CHANNELS = {
   setSearchWindow: 'attn:test:setSearchWindow',
   utilityState: 'attn:test:utilityState',
   crashUtility: 'attn:test:crashUtility',
+  accountDataStats: 'attn:test:accountDataStats',
   listMailboxThreadIds: 'attn:test:listMailboxThreadIds'
 } as const
 
 export interface InvokeChannels {
   [IPC_CHANNELS.authGetStatus]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.authSignIn]: { args: []; result: AuthSignInResult }
-  [IPC_CHANNELS.authSignOut]: { args: []; result: AuthStatus }
   [IPC_CHANNELS.accountsSetActive]: { args: [accountId: string]; result: AuthStatus }
+  [IPC_CHANNELS.accountsGetStatuses]: { args: []; result: AccountSyncStatus[] }
+  [IPC_CHANNELS.accountsRemove]: { args: [accountId: string, deleteData: boolean]; result: AuthStatus }
   [IPC_CHANNELS.settingsGetTheme]: { args: []; result: ThemePreference }
   [IPC_CHANNELS.settingsSetTheme]: { args: [preference: ThemePreference]; result: ThemePreference }
   [IPC_CHANNELS.settingsGetCommandUsage]: { args: [accountId: string]; result: CommandUsage }
@@ -198,7 +203,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncGetInboxReady]: { args: []; result: boolean }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
-  [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: string | null }
+  [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: PendingFocusTarget | null }
   [IPC_CHANNELS.mailSearch]: { args: [query: string]; result: SearchResponse }
   [IPC_CHANNELS.mailSearchAll]: {
     args: [requestId: string, query: string]
@@ -263,6 +268,7 @@ export interface BroadcastChannels {
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
+  [IPC_CHANNELS.accountsStatusChanged]: AccountSyncStatus[]
   [IPC_CHANNELS.syncState]: SyncState
 }
 
@@ -276,6 +282,7 @@ const BROADCAST_CHANNELS = {
   [IPC_CHANNELS.mailActionsReverted]: true,
   [IPC_CHANNELS.mailBodyHydrationFailed]: true,
   [IPC_CHANNELS.mailFocusThreadAvailable]: true,
+  [IPC_CHANNELS.accountsStatusChanged]: true,
   [IPC_CHANNELS.syncState]: true
 } satisfies Record<BroadcastChannel, true>
 

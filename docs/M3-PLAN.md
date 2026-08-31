@@ -1297,13 +1297,23 @@ shutdown deadlines, retention, and undo-send options. The renderer's interaction
 `src/renderer/src/tuning.ts`. These are compile-time defaults; existing injected options and persisted
 preferences retain their behavior. Protocol, MIME, schema, and security constants stay with their owners.
 
-A second review found and corrected three more failure paths. Reauthentication during a paused mailbox
+A second review found and corrected additional failure paths. Reauthentication during a paused mailbox
 membership rebuild now queues a replacement pass after the canceled pass exits. Mailbox counts invalidate
 on SQLite writes, including background batches without a mail broadcast, and search coverage reads the
 current sync cursors on each request. Explicit snooze searches retain older local matches outside the recent
 message window because Gmail cannot search local snooze state. Their query starts from pending reminders
 and looks up each thread's messages by index. Regression tests exercise each path against the real SQLite
-store. The scale suite measures raw utility queries so a warm handler cache cannot hide an account scan.
+store. The scale suite measures raw utility queries so a warm summary cache cannot hide an account scan.
+
+The review also integrates PR #96's account restore and removal changes from `main`. Mailbox summaries now
+use the runtime's per-account cache with SQLite write invalidation. Targeted All Mail lookups retain the
+materialized index, and account restore retains the row-first refresh order. The standard performance
+profile includes two accounts; the scale and search-index profiles explicitly keep a single account.
+The split benchmark uses the supported Tab shortcuts and recognizes Inbox Zero when the target is empty.
+
+The integration review also reproduced a pre-existing account-switch race while a reply was still opening.
+Switch, add, and remove actions now treat a pending composer as open. A delayed-reply Electron test checks
+that the draft opens under the original account and switching becomes available after the composer closes.
 
 ## Schema revision 21 → 22: derived mailbox membership and dated index rows
 

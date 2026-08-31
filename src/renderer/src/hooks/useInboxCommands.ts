@@ -62,6 +62,8 @@ interface Options {
     activeAccountId: string | null
     switchTo: (accountId: string) => void
     add: () => void
+    /** Opens the Remove-account confirmation for the active account (F18, D3). */
+    remove: () => void
   }
 }
 
@@ -137,6 +139,7 @@ export function useInboxCommands(options: Options): void {
             ]
           : []),
         createCommand('account.add', accountCommands.add),
+        createCommand('account.remove', accountCommands.remove),
         // With one account there is nothing to switch to; the commands appear
         // as soon as a second account exists.
         ...(accountCommands.accounts.length > 1

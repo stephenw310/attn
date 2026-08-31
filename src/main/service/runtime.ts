@@ -1,15 +1,24 @@
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
+import { type AccountSyncStatus, accountSyncPhase } from '../../shared/auth'
 import { type InvokeChannel, type MailChangeReason, TEST_CHANNELS } from '../../shared/ipc'
-import { type MessageMailbox, type SyncState, THREAD_PAGE_SIZE } from '../../shared/mail'
+import {
+  type MessageMailbox,
+  type SyncState,
+  type SystemMailboxCounts,
+  THREAD_PAGE_SIZE
+} from '../../shared/mail'
 import { ALLOWED_UNDO_SEND_SECONDS } from '../../shared/outboxTuning'
-import { clearUndo } from '../actions'
+import type { SplitState } from '../../shared/splits'
+import { actionQueueStatus, clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
 import { type Db, openDatabase, schemaVersion } from '../db'
+import { accountKeyedTables, purgeAccountRows } from '../db/purgeAccount'
 import { countInboxUnread, countSystemMailboxes, listMailboxThreads } from '../db/queries'
 import { searchThreads } from '../db/search'
-import { loadSeed, readSeedRemoteThreadIds, readSeedThread } from '../dev/seed'
+import { loadSeed, readSeedRemoteThreadIds, readSeedThread, readSeedThreadAccount } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { GmailMailProvider } from '../gmail/provider'
@@ -21,7 +30,7 @@ import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from '../settings'
-import { countNotificationEnabledUnread, hasSplitSetup } from '../splits'
+import { getSplitState, hasSplitSetup } from '../splits'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
 import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
 import { runFtsBackfill } from '../sync/ftsBackfill'
@@ -48,6 +57,12 @@ export type ServiceEventSink = (event: ServiceEvent) => void
 
 const ACTIVE_ACCOUNT_SETTING = 'activeAccountId'
 
+interface AccountMailSummary {
+  revision: number
+  mailboxCounts?: SystemMailboxCounts
+  splitState?: SplitState
+}
+
 /**
  * One signed-in account's live machinery (F18). Every worker is bound to this
  * account through its `accountId()` callback, so the executor classes stay
@@ -59,6 +74,7 @@ interface AccountSession {
   /** Null for seeded e2e accounts, which never talk to Gmail. */
   auth: ServiceAccountAuth | null
   readonly seeded: boolean
+  readAbort: AbortController
   readonly syncController: SyncController
   readonly actionExecutor: ActionExecutor
   readonly draftMirrorExecutor: DraftMirrorExecutor
@@ -90,6 +106,20 @@ export class IndexingSlot {
       }
       this.queue.push({ accountId, grant })
     })
+  }
+
+  /**
+   * True while `accountId` holds the slot, is not itself the priority account,
+   * and a priority (active) account is waiting behind it. The holder's chain
+   * polls this through its pacing hooks and hands the slot over at the next
+   * page boundary — safe because every stage's cursor is durable (F18).
+   */
+  hasPriorityWaiter(accountId: string): boolean {
+    return (
+      this.holder === accountId &&
+      !this.isPriority(accountId) &&
+      this.queue.some((queued) => this.isPriority(queued.accountId))
+    )
   }
 
   private makeRelease(accountId: string): () => void {
@@ -138,17 +168,22 @@ export class ServiceRuntime {
   private schedulersStarted = false
   private mailRevision = 0
   private searchWindowOverride: number | null = null
+  private readonly mailSummaryByAccount = new Map<string, AccountMailSummary>()
+  private lastAccountStatuses = ''
   private draftSaveFailures = 0
   private conversationDelay: { threadId: string; delayMs: number } | null = null
   private draftReopenDelayMs = 0
   private draftInlineImageDelayMs = 0
   private setActiveAccountDelayMs = 0
-  private actionProvider: ActionRecoveryProvider | null = null
+  /** Test-only seeded providers, keyed by the owning account (A5 seam). */
+  private readonly actionProviders = new Map<string, ActionRecoveryProvider>()
 
   private readonly onNewMail = (accountId: string, newMail: NewMail[]): void => {
-    // Notification routing for inactive accounts is A4 scope; until then only
-    // the active account's poll cycles surface candidates.
-    if (accountId !== this.activeAccountId || !this.sessions.has(accountId)) return
+    // Every signed-in account notifies, active or not (F12/F18). Batching is
+    // per account per poll cycle by construction: each account's poller emits
+    // its own newMail event, so one busy account summarizes while another's
+    // two arrivals still show as detail toasts.
+    if (!this.sessions.has(accountId)) return
     this.emit({
       kind: 'notification-candidates',
       accountId,
@@ -174,14 +209,26 @@ export class ServiceRuntime {
     let seedIds: string[] = []
     if (input.testSeed) {
       const existing = this.db.prepare('SELECT id FROM accounts ORDER BY rowid').all() as { id: string }[]
-      seedIds =
-        existing.length > 0 ? existing.map((row) => row.id) : loadSeed(this.db, input.testSeed).accountIds
+      if (existing.length === 0) {
+        seedIds = loadSeed(this.db, input.testSeed).accountIds
+      } else {
+        // A removed-with-Keep account leaves its rows behind (F18, D3): the
+        // persisted seed roster is what keeps it off the boot roster, exactly
+        // as the token file does for real accounts.
+        const persisted = readSetting(this.db, 'seedAccountIds')
+        const wanted = persisted ? (JSON.parse(persisted) as string[]) : existing.map((row) => row.id)
+        seedIds = existing.map((row) => row.id).filter((id) => wanted.includes(id))
+      }
+      writeSetting(this.db, 'seedAccountIds', JSON.stringify(seedIds))
       this.log('log', `[sync] backfill stages skipped for seeded accounts ${seedIds.join(', ')}`)
     }
 
     this.handlers = createServiceHandlers({
       db: this.db,
       currentAccountId: () => this.activeAccountId,
+      accountStatuses: () => this.accountStatuses(),
+      mailboxCounts: (accountId) => this.mailboxCounts(accountId),
+      splitState: (accountId) => this.accountSplitState(accountId),
       makeClient: () => this.makeClientForActive(),
       makeProvider: () => this.makeProviderForActive(),
       makeServerSearchProvider: () => this.makeCurrentServerSearchProvider(),
@@ -275,6 +322,25 @@ export class ServiceRuntime {
       this.setActiveAccount(accountId)
       return this.activeAccountId
     }
+    if (operation === 'remove-account-data') {
+      const accountId = args[0]
+      if (typeof accountId !== 'string' || accountId.length === 0) throw new Error('unknown account')
+      // The roster update precedes this call, so no session may exist; the
+      // torn-down session's draft/outbox workers still get their quiesce
+      // before the rows they might touch disappear (AGENTS shutdown rule).
+      if (this.sessions.has(accountId)) throw new Error('account session still active')
+      const retirement = this.retirements.get(accountId)
+      if (retirement) await retirement
+      if (this.sessions.has(accountId)) throw new Error('account session still active')
+      const purged = purgeAccountRows(this.db, accountId)
+      for (const outboxId of purged.outboxSpoolIds) cleanOutboxSpool(this.input.userDataPath, outboxId)
+      this.log(
+        'log',
+        `[accounts] deleted local data for ${accountId} (${purged.tables.length} tables, ${purged.outboxSpoolIds.length} spool entries)`
+      )
+      this.broadcastBadge()
+      return undefined
+    }
     if (operation === 'mark-login-item-registered') {
       writeSetting(this.db, 'loginItemRegistered', 'true')
       return undefined
@@ -321,6 +387,7 @@ export class ServiceRuntime {
     this.handlers.stop()
     const workers: Promise<unknown>[] = [...this.retirements.values()]
     for (const session of this.sessions.values()) {
+      session.readAbort.abort(new Error('account session stopped'))
       session.syncController.stop()
       session.actionExecutor.stop()
       session.snoozeScheduler.stop()
@@ -356,7 +423,7 @@ export class ServiceRuntime {
     const actionExecutor = new ActionExecutor(
       this.db,
       () => (this.sessions.get(id) ? id : null),
-      () => (id === this.activeAccountId ? this.actionProvider : null) ?? this.makeProviderFor(id),
+      () => this.actionProviders.get(id) ?? this.makeProviderFor(id),
       {
         notify: () => this.broadcastMailChanged(id),
         notifyReverted: (accountId, actions) => this.broadcastActionsReverted(accountId, actions)
@@ -398,18 +465,24 @@ export class ServiceRuntime {
       hasForegroundProviderWork: (accountId) =>
         this.foregroundProviderWork.size > 0 || this.otherAccountWorkBusy(accountId),
       mailRevision: () => this.mailRevision,
-      broadcastState: (payload) => this.emitForAccount(id, { kind: 'sync-state', payload }),
+      broadcastState: (payload) => {
+        this.emitForAccount(id, { kind: 'sync-state', payload })
+        // Any account's phase change can flip its menu/chip readout.
+        this.broadcastAccountStatuses()
+      },
       broadcastMailChanged: (reason) => this.broadcastMailChanged(id, undefined, reason),
       getActionExecutor: () => actionExecutor,
       getDraftMirrorExecutor: () => draftMirrorExecutor,
       getOutboxSender: () => outboxSender,
       getSnoozeScheduler: () => snoozeScheduler,
-      acquireIndexingSlot: (accountId) => this.indexingSlot.acquire(accountId)
+      acquireIndexingSlot: (accountId) => this.indexingSlot.acquire(accountId),
+      shouldPreemptIndexing: (accountId) => this.indexingSlot.hasPriorityWaiter(accountId)
     })
     const session: AccountSession = {
       id,
       auth,
       seeded,
+      readAbort: new AbortController(),
       syncController,
       actionExecutor,
       draftMirrorExecutor,
@@ -428,6 +501,10 @@ export class ServiceRuntime {
   }
 
   private teardownSession(session: AccountSession): void {
+    // Invalidate every Gmail read before purging or replacing this session.
+    // Mutations keep their worker-owned grace period so returned draft ids
+    // still become durable before those workers retire.
+    session.readAbort.abort(new Error('account removed'))
     this.sessions.delete(session.id)
     const orderIndex = this.accountOrder.indexOf(session.id)
     if (orderIndex >= 0) this.accountOrder.splice(orderIndex, 1)
@@ -451,6 +528,7 @@ export class ServiceRuntime {
       this.gmailQuotaLimiters.delete(session.id)
     }
     this.actionRevertNotices.clear(session.id)
+    this.actionProviders.delete(session.id)
     clearUndo(session.id)
   }
 
@@ -486,6 +564,7 @@ export class ServiceRuntime {
   /** Returns the deferred session creations so callers can await settlement. */
   private applyAccounts(state: ServiceAccountsState): Promise<void>[] {
     if (this.stopped) return []
+    this.mailSummaryByAccount.clear()
     const pendingCreations: Promise<void>[] = []
     this.config = state.config
     const currentSeedIds = [
@@ -499,6 +578,9 @@ export class ServiceRuntime {
       ...state.accounts.map((auth): [string, ServiceAccountAuth | null] => [auth.id, auth]),
       ...wantedSeedIds.map((id): [string, ServiceAccountAuth | null] => [id, null])
     ])
+    // Keep the persisted seed roster in step so a removed-with-Keep account
+    // stays dormant across relaunch (its rows survive in `accounts`).
+    if (this.input.testSeed) writeSetting(this.db, 'seedAccountIds', JSON.stringify(wantedSeedIds))
     this.desiredActiveAccountId = state.activeAccountId
     for (const session of [...this.sessions.values()]) {
       if (!this.desiredAccounts.has(session.id)) this.teardownSession(session)
@@ -512,6 +594,8 @@ export class ServiceRuntime {
       const reauthenticated = existing.auth?.generation !== auth.generation
       existing.auth = auth
       if (reauthenticated) {
+        existing.readAbort.abort(new Error('authentication changed'))
+        existing.readAbort = new AbortController()
         // A fresh interactive sign-in replaces whatever a stuck client was
         // waiting on; new providers pick the new tokens up on creation.
         this.gmailQuotaLimiters.get(auth.id)?.dispose(new Error('authentication changed'))
@@ -599,7 +683,7 @@ export class ServiceRuntime {
         session.auth = { ...auth, tokens }
         this.emit({ kind: 'token-update', accountId: id, tokens, generation: auth.generation })
       },
-      { quotaLimiter }
+      { quotaLimiter, readSignal: session.readAbort.signal }
     )
   }
 
@@ -645,12 +729,16 @@ export class ServiceRuntime {
 
   private async trackForegroundProviderWork<T>(accountId: string, work: () => Promise<T>): Promise<T> {
     this.foregroundProviderWork.set(accountId, (this.foregroundProviderWork.get(accountId) ?? 0) + 1)
+    this.mailSummaryByAccount.delete(accountId)
     try {
       return await work()
     } finally {
       const remaining = (this.foregroundProviderWork.get(accountId) ?? 1) - 1
       if (remaining > 0) this.foregroundProviderWork.set(accountId, remaining)
       else this.foregroundProviderWork.delete(accountId)
+      // Provider reads can persist partial results without a renderer event
+      // when the user switches accounts before the request settles.
+      this.mailSummaryByAccount.delete(accountId)
     }
   }
 
@@ -666,6 +754,8 @@ export class ServiceRuntime {
     reason?: MailChangeReason
   ): void {
     this.mailRevision += 1
+    if (accountId === null) this.mailSummaryByAccount.clear()
+    else this.mailSummaryByAccount.delete(accountId)
     if (accountId === null || accountId === this.activeAccountId) {
       this.emit({
         kind: 'mail-changed',
@@ -676,15 +766,98 @@ export class ServiceRuntime {
     this.broadcastBadge()
   }
 
+  /**
+   * Reuse per-account summaries between writes on this SQLite connection.
+   * Background passes can commit without broadcasting a mail change. Unrelated
+   * writes, including saved account selection, can cause an extra recompute.
+   */
+  private mailSummary(accountId: string): AccountMailSummary {
+    if (this.foregroundProviderWork.has(accountId)) return { revision: -1 }
+    const revision = (this.db.prepare('SELECT total_changes() AS revision').get() as { revision: number })
+      .revision
+    const cached = this.mailSummaryByAccount.get(accountId)
+    if (cached && cached.revision === revision) return cached
+    const summary: AccountMailSummary = { revision }
+    this.mailSummaryByAccount.set(accountId, summary)
+    return summary
+  }
+
+  private mailboxCounts(accountId: string): SystemMailboxCounts {
+    const summary = this.mailSummary(accountId)
+    summary.mailboxCounts ??= countSystemMailboxes(this.db, accountId)
+    return summary.mailboxCounts
+  }
+
+  private accountSplitState(accountId: string): SplitState {
+    const summary = this.mailSummary(accountId)
+    summary.splitState ??= getSplitState(this.db, accountId)
+    return summary.splitState
+  }
+
+  private accountUnread(accountId: string): number {
+    const legacySeed = this.input.testMode && !hasSplitSetup(this.db, accountId)
+    return legacySeed
+      ? countInboxUnread(this.db, accountId)
+      : this.accountSplitState(accountId).splits.reduce(
+          (sum, split) => sum + (split.notify ? split.unread : 0),
+          0
+        )
+  }
+
+  /**
+   * The account menu's per-account readout: sync phase, reconnect need, and
+   * unread, for every session in switcher order — a background account's
+   * failure must be discoverable without switching to it (F18).
+   */
+  private accountStatuses(): AccountSyncStatus[] {
+    return this.accountOrder.flatMap((accountId) => {
+      const session = this.sessions.get(accountId)
+      if (!session) return []
+      return [
+        {
+          accountId,
+          phase: accountSyncPhase(
+            session.syncController.getState(),
+            actionQueueStatus(this.db, accountId).authPaused
+          ),
+          unread: this.accountUnread(accountId)
+        }
+      ]
+    })
+  }
+
   private broadcastBadge(): void {
     let unreadCount = 0
-    for (const session of this.sessions.values()) {
-      const legacySeed = this.input.testMode && !hasSplitSetup(this.db, session.id)
-      unreadCount += legacySeed
-        ? countInboxUnread(this.db, session.id)
-        : countNotificationEnabledUnread(this.db, session.id)
-    }
+    for (const session of this.sessions.values()) unreadCount += this.accountUnread(session.id)
     this.emit({ kind: 'badge', unreadCount })
+    this.broadcastAccountStatuses()
+  }
+
+  /**
+   * Push the roster's health when a *phase* moves: a background account's
+   * Reconnect/Offline must reach the account chip live, not only when the
+   * menu next opens (F18). Deliberately keyed on phases alone — they are
+   * cheap to read (controller state plus a tiny action_queue scan), while the
+   * per-account unread counts are aggregate queries that must not run on
+   * every mail-change; the menu re-reads full statuses when it opens.
+   */
+  private broadcastAccountStatuses(): void {
+    const fingerprint = JSON.stringify(
+      this.accountOrder.map((accountId) => {
+        const session = this.sessions.get(accountId)
+        if (!session) return [accountId, null]
+        return [
+          accountId,
+          accountSyncPhase(
+            session.syncController.getState(),
+            actionQueueStatus(this.db, accountId).authPaused
+          )
+        ]
+      })
+    )
+    if (fingerprint === this.lastAccountStatuses) return
+    this.lastAccountStatuses = fingerprint
+    this.emit({ kind: 'accounts-status', statuses: this.accountStatuses() })
   }
 
   private broadcastActionsReverted(accountId: string, actions: RevertedAction[]): void {
@@ -716,12 +889,14 @@ export class ServiceRuntime {
       const labels = args[0]
       if (labels !== undefined && !isLabelRows(labels)) throw new Error('invalid authoritative label catalog')
       const result = loadSeed(this.db, this.input.testSeed, labels === undefined ? {} : { labels })
+      this.mailSummaryByAccount.clear()
       if (result.labelsChanged) this.broadcastMailChanged(this.activeAccountId)
       return undefined
     }
     if (channel === TEST_CHANNELS.deleteThread) {
       if (!accountId || typeof args[0] !== 'string') throw new Error('invalid thread delete')
       deleteThread(this.db, accountId, args[0])
+      this.mailSummaryByAccount.delete(accountId)
       return undefined
     }
     if (channel === TEST_CHANNELS.delayConversation) {
@@ -823,6 +998,34 @@ export class ServiceRuntime {
       const view = mailbox === 'all-mail' ? 'allMail' : mailbox
       return listMailboxThreads(this.db, accountId, view).map((row) => row.id)
     }
+    if (channel === TEST_CHANNELS.accountDataStats) {
+      const requested = args[0]
+      if (typeof requested !== 'string' || requested.length === 0) {
+        throw new Error('invalid account stats request')
+      }
+      // A6's zero-trace proof: per-table row counts across every
+      // account-keyed table, the roster row, and the whole spool inventory
+      // (an orphaned spool directory for *any* account fails the check).
+      const perTable: Record<string, number> = {}
+      let rowTotal = 0
+      for (const table of accountKeyedTables(this.db)) {
+        const count = (
+          this.db.prepare(`SELECT COUNT(*) AS count FROM "${table}" WHERE account_id = ?`).get(requested) as {
+            count: number
+          }
+        ).count
+        perTable[table] = count
+        rowTotal += count
+      }
+      const accountsRow = (
+        this.db.prepare('SELECT COUNT(*) AS count FROM accounts WHERE id = ?').get(requested) as {
+          count: number
+        }
+      ).count
+      const spoolRoot = join(this.input.userDataPath, 'outbox')
+      const spoolEntries = existsSync(spoolRoot) ? readdirSync(spoolRoot) : []
+      return { rowTotal, perTable, ftsRows: perTable.message_fts ?? 0, accountsRow, spoolEntries }
+    }
     if (channel === TEST_CHANNELS.runLifetimeSweep) return this.runTestLifetimeSweep(args[0])
     if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])
     if (channel === TEST_CHANNELS.runFtsBackfill) return this.runTestFtsBackfill(args[0])
@@ -887,30 +1090,32 @@ export class ServiceRuntime {
 
   private installActionFailure(threadId: unknown, status: 400 | 401): void {
     if (!this.input.testSeed || typeof threadId !== 'string') return
-    const snapshot = readSeedThread(this.input.testSeed, threadId)
-    if (!snapshot) return
+    // The failure arms the thread's *owning* account, active or not — a
+    // background account's auth pause must be reproducible too (F18/A5).
+    const owner = readSeedThreadAccount(this.input.testSeed, threadId)
+    if (!owner || !readSeedThread(this.input.testSeed, threadId)) return
     let rejectTarget = true
     const mutate = async (requestedThreadId: string): Promise<void> => {
       if (requestedThreadId !== threadId) return
       if (!rejectTarget) {
-        if (status === 401) this.actionProvider = null
+        if (status === 401) this.actionProviders.delete(owner)
         return
       }
       rejectTarget = false
       const reason = status === 401 ? 'authentication e2e failure' : 'permanent e2e failure'
       throw new GmailApiError(status, `gmail /threads/${threadId}/modify failed (${status}): ${reason}`)
     }
-    this.actionProvider = {
+    this.actionProviders.set(owner, {
       modifyThread: mutate,
       trashThread: mutate,
       untrashThread: mutate,
       getThread: async (requestedThreadId) => {
         const requested = readSeedThread(this.input.testSeed as string, requestedThreadId)
         if (!requested) throw new GmailApiError(404, 'seed thread unavailable')
-        if (requestedThreadId === threadId) this.actionProvider = null
+        if (requestedThreadId === threadId) this.actionProviders.delete(owner)
         return requested
       }
-    }
+    })
   }
 
   private async runTestLifetimeSweep(value: unknown): Promise<unknown> {

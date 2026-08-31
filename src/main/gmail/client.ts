@@ -52,6 +52,8 @@ export interface GmailClientOptions {
   random?: () => number
   quota?: GmailQuotaConfig
   quotaLimiter?: GmailQuotaLimiter
+  /** Account removal cancels reads; draft mutations retain their shutdown grace period. */
+  readSignal?: AbortSignal
 }
 
 interface MultipartMedia {
@@ -75,6 +77,7 @@ export class GmailClient {
   private readonly time: SchedulerTime
   private readonly random: () => number
   private readonly quotaLimiter: GmailQuotaLimiter
+  private readonly readSignal: AbortSignal | undefined
 
   constructor(
     private readonly config: OAuthConfig,
@@ -84,6 +87,7 @@ export class GmailClient {
   ) {
     this.time = options.time ?? systemTime
     this.random = options.random ?? Math.random
+    this.readSignal = options.readSignal
     this.quotaLimiter =
       options.quotaLimiter ??
       new WeightedQuotaLimiter(options.quota ?? { unitsPerMinute: DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE }, {
@@ -138,11 +142,19 @@ export class GmailClient {
     params?: Record<string, string | string[]>,
     options?: { signal?: AbortSignal; priority?: GmailRequestPriority }
   ): Promise<T> {
-    return this.request('GET', path, {
+    const signal =
+      this.readSignal && options?.signal
+        ? AbortSignal.any([this.readSignal, options.signal])
+        : (this.readSignal ?? options?.signal)
+    signal?.throwIfAborted()
+    const result = await this.request<T>('GET', path, {
       params,
-      signal: options?.signal,
+      signal,
       priority: options?.priority
     })
+    // Also fence a response whose body completed concurrently with removal.
+    signal?.throwIfAborted()
+    return result
   }
 
   async post<T>(

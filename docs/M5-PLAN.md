@@ -114,12 +114,12 @@ These are the load-bearing choices from §9 #21(g)(h); every task below assumes 
 | Task | State | Blocks |
 |---|---|---|
 | A1 token roster + auth sessions (main) | **done**, 2026-08-28 | nothing |
-| A2 utility runtime: session-per-account + executors | **mostly done**, 2026-08-28 — liveness unit tests + slot preemption remain | A4, A5 |
-| A3 active-account switching: shell + switcher UI | **done**, 2026-08-28 — per-account last-view restore remains | A4, A5, A6 |
-| A4 notifications, badge, focus routing | **planned** (badge sum shipped with A2) | nothing |
-| A5 composer/outbox/reconnect per-account correctness | **planned** | nothing |
-| A6 remove account | **planned** | nothing |
-| A7 multi-account perf + isolation audit | **planned** | v1 sign-off |
+| A2 utility runtime: session-per-account + executors | **done**, 2026-08-30 — liveness tests + page-boundary slot preemption landed | A4, A5 |
+| A3 active-account switching: shell + switcher UI | **done**, 2026-08-30 — last-view restore + menu status landed | A4, A5, A6 |
+| A4 notifications, badge, focus routing | **done**, 2026-08-30 | nothing |
+| A5 composer/outbox/reconnect per-account correctness | **done**, 2026-08-30 | nothing |
+| A6 remove account | **done**, 2026-08-30 | nothing |
+| A7 multi-account perf + isolation audit | **done (engineering)**, 2026-08-30 — real-Gmail dogfood observation remains | v1 sign-off |
 
 A1 → A2 → A3 is a strict sequence; A4, A5, A6 are independent of each other after A3; A7 closes the
 milestone.
@@ -212,11 +212,15 @@ existing e2e suite passes with the reshaped `AuthStatus`.
 
 ### A2 — Utility runtime: one sync session per account, executors drain all accounts
 
-**Status: mostly done, 2026-08-28** — shipped as per-account executor sets (deviations note above). Still
-open from "Done when": the mock-provider liveness tests (a queued send on the *inactive* account leaving
-on deadline, a snooze return firing on the inactive account, an offline queue on a non-active account
-draining after relaunch, add-account leaving the first account's cursors byte-identical) and indexing-slot
-preemption at a page boundary. Spec F2, F18, §9 #21(b)(g).
+**Status: done, 2026-08-30** — shipped as per-account executor sets (deviations note above). The
+remaining "Done when" work landed 2026-08-30: `src/main/service/liveness.test.ts` proves the inactive
+account's send deadline, snooze return, and post-relaunch offline drain against the runtime's exact
+worker wiring, plus two pollers cycling independently on their own cadences and cursors;
+`runtime.test.ts` proves add-account leaves the first account's `sync_state` row byte-identical; and
+the indexing slot now preempts at page boundaries — `IndexingSlot.hasPriorityWaiter` feeds a
+`shouldPreemptIndexing` pacing check in the chain's `shouldContinue`, the halted chain re-queues
+itself, and the liveness test shows the preempted sweep resuming from its durable cursor (page two,
+not page one) after the active account's chain runs. Spec F2, F18, §9 #21(b)(g).
 
 - Protocol: the `auth` control message becomes `accounts` — the full roster (config + token sets +
   per-account generations) plus `activeAccountId`. `sign-out` becomes per-account removal-from-roster
@@ -255,10 +259,37 @@ only).
 
 ### A3 — Active-account switching: IPC tagging, renderer shell, switcher UI
 
-**Status: done, 2026-08-28** — with events filtered active-only instead of tagged (deviations note above).
-Still open: per-account last-view/selection restore on switch (a switch currently keeps the view kind and
-resets selection), the per-account one-line sync status in the account menu, the reconnect mark (A5 owns
-its state), and the §7 100ms switch measurement (A7's perf job). Spec F18, F3, F5, F15, §7, §9 #21(h).
+**Status: done, 2026-08-30** — with events filtered active-only instead of tagged (deviations note above).
+The 2026-08-30 slice closed the remainder: per-account last-view/selection/scroll restore rides the
+existing pending-restore machinery — the guarded switch snapshots the leaving account's view records
+into renderer session memory (`accountViewMemory.ts`, above the remount boundary) and the remounted
+tree primes its restore refs from it, split included; and the account menu shows a live one-line
+per-account status (Live/Syncing/Offline/Error/Reconnect plus unread) fed by the `accounts:getStatuses`
+read and the pushed `accounts:statusChanged` broadcast, so background failures are discoverable without
+switching. Only the §7 100ms switch measurement remains with A7's perf job. Spec F18, F3, F5, F15, §7,
+§9 #21(h).
+
+PR #96 review fixes preserve split records across the keyed remount and reload the saved page extent
+before restoring selection and scroll. `accountRestore.spec.ts` covers row 105 in Inbox, an Inbox
+split, and All Mail. The open account menu gives newer status broadcasts priority over its snapshot,
+including a snapshot response that arrives after a broadcast; `accounts.spec.ts` covers both orders.
+
+Dogfood follow-up (2026-08-30): account switches publish mail rows before requesting sidebar totals.
+`ServiceRuntime` caches mailbox and split totals per account until mail changes or the roster changes.
+The account badge reuses the split unread totals. Foreground Gmail reads bypass and invalidate the cache
+because they can persist partial results before a switch. Regression tests cover delayed totals,
+responses from the previous account, triage and split-notification invalidation, and a partial Gmail
+search that finishes after switching accounts.
+
+The split-inbox follow-up removes another account-size-dependent delay. `listInboxThreads` reads
+positive timestamps in index order so it can stop once a page is full. A separate tail preserves the
+existing null-as-zero ordering, and targeted thread checks retain their primary-key lookup. The renderer
+waits for split setup before loading rows, starts inactive-split preloads after the visible rows paint,
+and cancels the remaining preload work when leaving an account.
+`perf.spec.ts` now measures both switch directions separately with splits enabled. The query regression
+test proves that a full recent page does not evaluate older messages; pagination tests cover positive,
+null, zero, and negative timestamps. Held-response tests also keep a notification's selection and
+pagination intact when an older automatic or manual mailbox refresh finishes afterward.
 
 - Tag every mail-facing read result and broadcast with `accountId` (`mail:changed`, `sync:state`,
   `outbox:changed`/`outbox:progress`, list/conversation/draft/outbox/search results). The renderer holds
@@ -286,7 +317,19 @@ persisted active account; new visual artifacts (e.g. `account-menu.png`, listed 
 
 ### A4 — Notifications, badge, and focus routing across accounts
 
-**Status: planned.** Spec F12, F18, §9 #21(e).
+**Status: done, 2026-08-30.** Spec F12, F18, §9 #21(e). As shipped: every signed-in account's poll
+cycles surface candidates (the runtime's active-account gate is gone); `MailNotifier` holds the roster
+and suffixes titles with the owning address whenever more than one account is signed in (detail and
+summary forms — the planning stayed in `notify.ts` beside its tests rather than moving to
+`shared/notifications.ts`, which now carries the `PendingFocusTarget` wire type instead);
+`pendingFocus` carries `accountId`, and a click for an inactive account resolves to a `switch` ask that
+runs the renderer's *guarded* switch — a live composer blocks it with the standard toast, and the
+target stays pending (TTL-bound) so the remounted tree for the right account consumes it. Summary
+clicks land on the owning account's inbox. Badge stays the A2 roster sum; `MailNotifier.updateBadge`
+logs count changes so e2e can assert the sum headless. Unit coverage in `notify.test.ts` (account
+naming, focus planning with a switch, roster-membership click guard) and `runtime.test.ts` (inactive
+candidates); e2e in `accounts.spec.ts` (notification-driven switch + focus, summary click, composer
+guard, badge sum).
 
 - `MailNotifier` drops its single-account gate: candidates already carry `accountId`; planned
   notifications name the owning account whenever the roster has more than one entry (title suffix, both
@@ -304,7 +347,21 @@ badge sum across two seeded accounts.
 
 ### A5 — Composer, outbox, and reconnect per-account correctness
 
-**Status: planned.** Spec F6, F18, §9 #21(c).
+**Status: done, 2026-08-30.** Spec F6, F18, §9 #21(c). As shipped: `Draft` carries its owning
+`accountId` (bound at open, populated from the outbox row; excluded from `DraftSaveInput` so the
+renderer can never rebind it) and the composer From renders the draft's account rather than the active
+one; a `runtime.test.ts` case pins the reply-binding race — a reply asked of a thread the active
+account does not own creates nothing. The account chip carries an attention mark while any account
+reads Reconnect/Error (pushed `accounts:statusChanged`), the auth-paused banner stays scoped to the
+active account's own queue by construction (the readouts are active-account reads), and
+`attn:test:failNextAction`/`failNextActionAuth` now arm the *owning* account of the target thread
+(derived from the seed — per-account provider map), so background-account failures are reproducible.
+Per-account resume shipped earlier (third review round). The undo-send window's UI contract — toast
+hidden by the switch, deadline untouched, Z inert on the other account, reopen on the owner — is
+e2e-proven; the deadline send itself is A2's liveness unit test (seeded accounts have no provider).
+`DraftMirrorExecutor.stop()`'s quiesce holds per account by construction: the runtime stops every
+session's own executor set and awaits them all. E2e in `accounts.spec.ts` (auth pause + reconnect
+isolation, undo-send switch, From/Drafts membership round trip).
 
 - Draft account binding: `draft:createReply` and outbox rows already carry `account_id` — make the binding
   explicit and asserted: new drafts bind to the account active at open; reply/forward drafts bind to the
@@ -329,9 +386,24 @@ on A shows the banner only when A is active while B keeps triaging, and reconnec
 
 ### A6 — Remove account
 
-**Status: planned.** Spec F18, F15, §9 #21(d).
+**Status: done, 2026-08-30.** Spec F18, F15, §9 #21(d). As shipped: `accounts:remove` is a main-owned
+invoke taking `(accountId, deleteData)`. The menu and palette say **Sign out**; the confirmation names
+the account and offers **Sign out and delete local data** (default, focused),
+**Sign out and keep local data**, or
+Cancel. Delete routes through the utility's `remove-account-data` operation, which waits out the
+torn-down session's worker retirement, then runs `purgeAccountRows` (`src/main/db/purgeAccount.ts`) —
+the account-keyed tables are *walked from the live schema*, FTS goes through the rowid map, the
+`accounts` roster row goes too, and the outbox spool ids come back for post-commit file cleanup.
+`purgeAccount.test.ts` seeds a row into every account-keyed table generically from `table_info`, so a
+future table is covered (or fails loudly) the day it lands. Keep leaves rows dormant; in seeded test
+profiles a persisted `seedAccountIds` app setting keeps a Keep-removed account off the boot roster
+(production uses the token file for the same purpose), and `runtime.test.ts` proves a re-added kept
+account resumes with its `sync_state` row byte-identical — no fresh backfill. E2e: Delete proves zero
+rows/FTS/spool via the `attn:test:accountDataStats` seam plus relaunch durability; Keep proves dormant
+rows, an unlisted account, and durable dormancy across relaunch; the fallback e2e covers
+survivor-then-onboarding, and Cancel.
 
-- `accounts:remove` (explicit confirmation in the UI; palette command *Remove account…*): the confirmation
+- `accounts:remove` (explicit confirmation in the UI; palette command *Sign out*): the confirmation
   always removes the token-map entry and stops the account's session and executors, and asks what to do
   with local data — **Delete local data** (default) or **Keep local data** (D3). Delete runs in one
   transaction: the account's rows from **every** account-keyed table (enumerate from the schema, not a
@@ -342,9 +414,8 @@ on A shows the banner only when A is active while B keeps triaging, and reconnec
   existing cursor plan already produce this; the e2e proves it). `__app__` settings survive either way.
 - Active fallback: removing the active account activates the next by position; removing the last account
   lands on F1's signed-out screen (and clears `activeAccountId`).
-- The legacy single-account "Sign out" menu item becomes *Remove account* for the active account —
-  same semantics, one code path. (Today's sign-out already abandoned local rows only by accident of the
-  next sign-in overwriting them; purge-on-remove is the deliberate replacement.)
+- The **Sign out** menu item uses `accounts:remove` for the active account. The legacy `auth:signOut`
+  implementation stays deleted; both local-data choices share the account-removal path.
 
 **Done when:** unit test walks the schema and asserts the purge helper covers every `account_id` table
 (this is the guard that keeps future tables from leaking); e2e removes a seeded account with Delete and
@@ -352,9 +423,42 @@ proves zero rows/FTS/spool via a test seam, survivor account intact, relaunch du
 fallback to the signed-out screen; a second e2e removes with Keep, proves the rows survive but nothing
 lists them, and re-adds the account to prove sync resumes from cursors without a fresh backfill.
 
+PR #96 review fixes cancel each removed session's Gmail reads before retirement. Late responses
+cannot refill dormant or purged rows; draft mutations retain their existing shutdown grace period.
+Runtime tests hold a real client's history response across Keep and Delete removal and verify the
+survivor is unchanged. The confirmation blocks keyboard dispatch, and the pending removal uses the
+account-switch composer guard until its response settles. E2e holds that response to exercise the race.
+
 ### A7 — Multi-account performance and isolation audit
 
-**Status: planned.** Spec §7, F18 acceptance criteria.
+**Status: engineering done, 2026-08-30; the real-Gmail dogfood observation remains.** Spec §7, F18
+acceptance criteria. As shipped: the default perf profile is now two accounts — the 10,000-thread
+primary plus a generated 1,000-thread second account (`generate-perf-seed.mjs --second-account`,
+`--second-account=0` keeps the FTS-latency seed single-account) — so **every existing budget runs with
+a second live account present**, and a new `@perf` test drives `Mod+2`/`Mod+1` round trips end-to-end
+(guarded switch → utility pointer flip → remount → first page painted) asserting warm-switch p95
+under the §7 100ms budget. The perf job already runs in CI on PRs via `verify.yml`'s `e2e:perf` step,
+which picks the two-account profile up unchanged. The isolation audit is executable:
+`src/main/db/isolation.test.ts` runs **every** read export of `db/queries.ts` and `db/search.ts`
+against a mirrored two-account store and asserts no foreign rows (with an export checklist that fails
+the suite when a new read query is not swept), and the `accounts.spec.ts` e2e proves search, contact
+autocomplete, and the label/move pickers stay scoped after repeated switches.
+
+**Perf evidence (2026-08-30, shared Linux dev container, 10k-thread primary + 1k-thread second
+account):** warm account switch samples (alternating `Mod+2`/`Mod+1`, in-page keydown → other
+account's first page painted) `[42, 83, 45, 91, 46, 83, 44, 87, 41, 84]`ms — switching to the
+1k-thread account ~41–46ms, to the 10k-thread account ~83–91ms — **median 83ms, p95 91ms, budget
+100ms (§7): held**, warmups 55/87ms. Of the pre-existing T20 budgets, 13 of 17 held unchanged against
+the two-account profile on this container; the four that failed (split re-bucket, scroll-frame
+pacing/memory, the 50k-message seed boot, composer paint delta) **fail identically at the pre-M5
+baseline commit with the original single-account seed on the same container** (A/B via a `HEAD`
+worktree, 2026-08-30) — a shared-hardware/software-rendering limitation, not a regression; CI's
+`e2e:perf` job on this PR is the authoritative run for those. As a hedge, the roster-status push was
+also made phase-keyed so the per-account unread aggregates never run on every mail-change.
+
+**Remaining before M5 sign-off:** the real-Gmail dogfood observation with two real accounts (add the
+second account mid-lifetime-sweep; observe slot preemption, notification routing, badge sum) — needs a
+maintainer with real credentials, recorded here in M2's dogfood-run format.
 
 - Perf job variant: two seeded profiles (10k + 1k threads) measuring warm account switch p95 against the
   100ms budget, steady-state memory against the 500MB ceiling with both accounts live, and list/triage

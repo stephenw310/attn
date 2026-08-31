@@ -145,7 +145,8 @@ export function useMailData(
   activeViewRef: React.RefObject<MailView>,
   selectedThreadIdRef: React.RefObject<string | null>,
   selectedDraftIdRef: React.RefObject<string | null>,
-  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
+  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>,
+  splitsReady = true
 ): MailDataState {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [inboxBackfillReady, setInboxBackfillReady] = useState<boolean | null>(null)
@@ -192,6 +193,20 @@ export function useMailData(
   }
   const activeAccountRef = useRef(activeAccount)
   activeAccountRef.current = activeAccount
+  const mailboxCountsRequestRef = useRef(0)
+  const refreshMailboxCounts = useCallback(() => {
+    const bridge = window.attn
+    if (!bridge || !activeAccount) return
+    const request = ++mailboxCountsRequestRef.current
+    void bridge.mail
+      .getMailboxCounts()
+      .then((counts) => {
+        if (activeAccountRef.current === activeAccount && mailboxCountsRequestRef.current === request) {
+          setRealMailboxCounts(counts)
+        }
+      })
+      .catch(() => {})
+  }, [activeAccount])
   const activeSplitIdRef = useRef(activeSplitId)
   activeSplitIdRef.current = activeSplitId
   const splitRevisionRef = useRef(splitRevisionValue)
@@ -377,7 +392,7 @@ export function useMailData(
       preserveSelectionOnRefreshRef.current = true
     }
     const bridge = window.attn
-    if (!bridge || !activeAccount) return
+    if (!bridge || !activeAccount || !splitsReady) return
     let cancelled = false
     let deferredRefreshTimer: number | null = null
     let mailChangedPending = false
@@ -421,11 +436,9 @@ export function useMailData(
         mailboxRefreshVersionRef.current[extraView] = extraViewVersion
       }
       // Two waves, not one batch. The utility process answers reads one at a
-      // time on a synchronous SQLite connection, so everything requested
-      // together lands after the slowest of them. The list is what the window
-      // shows; sidebar counts and header chips are not, and mailbox counting
-      // scans membership per mailbox. Asking for them first would hold the first
-      // paint behind that scan on a large account.
+      // time on a synchronous SQLite connection, so a full mailbox count must
+      // not keep the visible rows, account restore target, or cached reader
+      // behind an aggregate scan.
       void Promise.all([
         listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, {
           splitId: activeSplitId ?? undefined,
@@ -445,7 +458,15 @@ export function useMailData(
           const snoozedStillCurrent = mailboxRefreshVersionRef.current.snoozed === snoozedVersion
           const extraViewStillCurrent =
             !extraView || mailboxRefreshVersionRef.current[extraView] === extraViewVersion
-          if (viewStillCurrent && extraViewStillCurrent) {
+          const visibleStillCurrent =
+            viewAtStart === 'inbox'
+              ? inboxStillCurrent
+              : viewAtStart === 'snoozed'
+                ? snoozedStillCurrent
+                : extraViewStillCurrent
+          // A targeted focus can supersede this read. Its rows and selection
+          // must stay together, even when the older refresh finishes later.
+          if (viewStillCurrent && visibleStillCurrent) {
             const visible =
               viewAtStart === 'inbox'
                 ? inboxPage.rows
@@ -486,7 +507,10 @@ export function useMailData(
             )
           }
           setThreadPagination((current) => {
-            const next: ThreadPagination = viewStillCurrent && extraViewStillCurrent ? {} : { ...current }
+            const next: ThreadPagination =
+              viewStillCurrent && extraViewStillCurrent
+                ? { inbox: current.inbox, snoozed: current.snoozed }
+                : { ...current }
             if (inboxStillCurrent) {
               next.inbox = { nextCursor: inboxPage.nextCursor, loadingMore: false }
             }
@@ -508,16 +532,15 @@ export function useMailData(
         })
         .then(async () => {
           if (cancelled) return
-          const [nextLabels, mailboxCounts, unread, pending, actionStatus] = await Promise.all([
+          const [nextLabels, unread, pending, actionStatus] = await Promise.all([
             bridge.mail.listLabels(),
-            bridge.mail.getMailboxCounts(),
             bridge.mail.getUnreadCount(),
             bridge.mail.getPendingActionCount(),
             bridge.mail.getActionQueueStatus()
           ])
           if (cancelled) return
           setLabels((current) => reuseLabels(current, nextLabels))
-          setRealMailboxCounts(mailboxCounts)
+          refreshMailboxCounts()
           setRealUnreadTotal(unread)
           setPendingActionCount(pending)
           setPausedActionCount(actionStatus.paused)
@@ -560,6 +583,8 @@ export function useMailData(
     const offProgress = bridge.outbox.onProgress(setOutboxProgress)
     return () => {
       cancelled = true
+      inboxSplitPreloadRef.current += 1
+      mailboxCountsRequestRef.current += 1
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
       offOutbox()
@@ -569,9 +594,11 @@ export function useMailData(
     activeAccount,
     activeSplitId,
     splitRevisionValue,
+    splitsReady,
     activeViewRef,
     selectedDraftIdRef,
     selectedThreadIdRef,
+    refreshMailboxCounts,
     setSelectedIndex
   ])
 
@@ -627,7 +654,6 @@ export function useMailData(
     if (extraView && extraViewVersion !== null) {
       mailboxRefreshVersionRef.current[extraView] = extraViewVersion
     }
-    // Rows first, counts after: same reason as the full refresh above.
     const [inboxPage, snoozedPage, drafts, extraPage] = await Promise.all([
       listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, {
         splitId: activeSplitIdRef.current ?? undefined,
@@ -645,7 +671,13 @@ export function useMailData(
     const snoozedStillCurrent = mailboxRefreshVersionRef.current.snoozed === snoozedVersion
     const extraViewStillCurrent =
       !extraView || mailboxRefreshVersionRef.current[extraView] === extraViewVersion
-    if (viewStillCurrent && extraViewStillCurrent) {
+    const visibleStillCurrent =
+      viewAtStart === 'inbox'
+        ? inboxStillCurrent
+        : viewAtStart === 'snoozed'
+          ? snoozedStillCurrent
+          : extraViewStillCurrent
+    if (viewStillCurrent && visibleStillCurrent) {
       const visible =
         viewAtStart === 'inbox'
           ? inboxPage.rows
@@ -690,9 +722,7 @@ export function useMailData(
       return next
     })
     setRealDrafts(drafts)
-    const mailboxCounts = await window.attn.mail.getMailboxCounts()
-    if (activeAccountRef.current !== account) return
-    setRealMailboxCounts(mailboxCounts)
+    refreshMailboxCounts()
   }
 
   /**

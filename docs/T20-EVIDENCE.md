@@ -171,7 +171,7 @@ now cost nothing, which is the common case: the numbers above are all first call
 
 The PR #98 follow-up changes cache invalidation to follow SQLite writes, including background batches that
 do not emit `mail:changed`. Search coverage now reads one `sync_state` row on each request and is not cached.
-The measurements above predate that correction. Handler regression tests cover silent writes, partial
+The measurements above predate that correction. Runtime and handler regression tests cover silent writes, partial
 membership rebuilds, and cursor-only coverage changes.
 
 The perf suite's `local-mail-refresh` measurement never included `getMailboxCounts`, which is how the count

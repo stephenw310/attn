@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ElectronApplication, Page, TestInfo } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { THREAD_PAGE_SIZE } from '../src/shared/mail'
@@ -17,6 +19,10 @@ const PALETTE_OPEN_CEILING_MS = 50
 const PALETTE_RERANK_CEILING_MS = 30
 const SPLIT_SWITCH_CEILING_MS = 50
 const SPLIT_REBUCKET_CEILING_MS = 1_000
+// §7's F18 budget: a warm account switch renders the other account's cached
+// list in under 100ms — the whole journey, guarded switch through utility
+// pointer flip to the remounted first page of rows.
+const ACCOUNT_SWITCH_CEILING_MS = 100
 const COMPOSER_MUTATION_CEILING_MS = 8
 // Two 60Hz vsync intervals. The paint sample is timed from before the key is
 // dispatched, so on its own it carries CDP dispatch latency plus a wait for the
@@ -322,21 +328,24 @@ async function measureMailboxSwitch(page: Page, chordKey: string, expectedTitle:
 
 async function measureSplitSwitch(
   page: Page,
-  position: number,
+  direction: 'next' | 'previous',
   splitId: string,
   expectedCount: number
 ): Promise<number> {
   return page.evaluate(
-    async ({ digit, expectedSplitId, count }) => {
+    async ({ move, expectedSplitId, count }) => {
       const ready = (): boolean =>
         document
           .querySelector(`[data-testid="split-tab"][data-split-id="${expectedSplitId}"]`)
           ?.getAttribute('aria-selected') === 'true' &&
-        document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') ===
-          String(count)
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }))
+        (count === 0
+          ? document.querySelector('[data-testid="inbox-zero"]') !== null
+          : document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') ===
+            String(count))
       const started = performance.now()
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: String(digit), bubbles: true }))
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', shiftKey: move === 'previous', bubbles: true })
+      )
       if (ready()) return performance.now() - started
       return new Promise<number>((resolve, reject) => {
         const timeout = window.setTimeout(() => {
@@ -352,9 +361,98 @@ async function measureSplitSwitch(
         observer.observe(document.body, { childList: true, subtree: true, attributes: true })
       })
     },
-    { digit: position, expectedSplitId: splitId, count: expectedCount }
+    { move: direction, expectedSplitId: splitId, count: expectedCount }
   )
 }
+
+async function measureAccountSwitch(
+  page: Page,
+  digit: number,
+  email: string,
+  firstSubject: string
+): Promise<number> {
+  return page.evaluate(
+    async ({ pressed, address, subject }) => {
+      const ready = (): boolean =>
+        (document.querySelector('[data-testid="account-menu"]')?.textContent ?? '').includes(address) &&
+        document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') === '100' &&
+        (document.querySelector('[data-testid="thread-subject"]')?.textContent ?? '').includes(subject)
+      const mac = /mac/i.test(navigator.platform)
+      const started = performance.now()
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: String(pressed),
+          metaKey: mac,
+          ctrlKey: !mac,
+          bubbles: true
+        })
+      )
+      if (ready()) return performance.now() - started
+      return new Promise<number>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          observer.disconnect()
+          reject(new Error(`Timed out switching to ${address}`))
+        }, 10_000)
+        const observer = new MutationObserver(() => {
+          if (!ready()) return
+          window.clearTimeout(timeout)
+          observer.disconnect()
+          resolve(performance.now() - started)
+        })
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true
+        })
+      })
+    },
+    { pressed: digit, address: email, subject: firstSubject }
+  )
+}
+
+test.describe('@perf account switching with split inboxes', () => {
+  test.use({ seed: '.artifacts/perf-split-seed.json' })
+  test.beforeAll(() => {
+    const fixture = JSON.parse(readFileSync(join(__dirname, '.artifacts/perf-seed.json'), 'utf8')) as {
+      accounts: Array<{
+        splitSetup?: boolean
+        threads: Array<{ messages: Array<{ labelIds: string[] }> }>
+      }>
+    }
+    for (const account of fixture.accounts) {
+      account.splitSetup = true
+      for (const thread of account.threads) {
+        for (const message of thread.messages) message.labelIds.push('IMPORTANT')
+      }
+    }
+    writeFileSync(join(__dirname, '.artifacts/perf-split-seed.json'), JSON.stringify(fixture))
+  })
+
+  test('switches split inboxes within 100ms in each direction', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '100')
+    await expect(page.locator('[data-testid="split-tab"][data-split-id="base:important"]')).toHaveAttribute(
+      'data-active',
+      'true'
+    )
+    const warmSecond = await measureAccountSwitch(page, 2, 'perf-second@attn.test', 'Second account thread')
+    const warmFirst = await measureAccountSwitch(page, 1, 'perf@attn.test', 'Performance thread')
+    const toFirst: number[] = []
+    const toSecond: number[] = []
+    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
+      toSecond.push(await measureAccountSwitch(page, 2, 'perf-second@attn.test', 'Second account thread'))
+      toFirst.push(await measureAccountSwitch(page, 1, 'perf@attn.test', 'Performance thread'))
+    }
+    await reportMetric(testInfo, 'split-account-switch-to-first', toFirst, median(toFirst), [warmFirst])
+    await reportMetric(testInfo, 'split-account-switch-to-second', toSecond, median(toSecond), [warmSecond])
+    expect(percentile(toFirst, 0.95), 'p95 warm switch to the larger split inbox').toBeLessThan(
+      ACCOUNT_SWITCH_CEILING_MS
+    )
+    expect(percentile(toSecond, 0.95), 'p95 warm switch to the smaller split inbox').toBeLessThan(
+      ACCOUNT_SWITCH_CEILING_MS
+    )
+  })
+})
 
 async function measureTriageFeedback(page: Page): Promise<number> {
   return page.evaluate(async () => {
@@ -512,6 +610,29 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     expect(await page.getByTestId('thread-row').count()).toBeLessThan(100)
   })
 
+  test('switches accounts warm within the F18 100ms budget', async ({ page }, testInfo) => {
+    await expect(page.getByTestId('thread-list')).toHaveAttribute(
+      'data-thread-count',
+      String(THREAD_PAGE_SIZE)
+    )
+    await expect(page.getByTestId('account-menu')).toContainText('perf@attn.test')
+
+    // First visits pay one-time mount and read costs on each side; the budget
+    // is the *warm* switch (§7), so both surfaces are visited before sampling.
+    const warmup = [
+      await measureAccountSwitch(page, 2, 'perf-second@attn.test', 'Second account thread'),
+      await measureAccountSwitch(page, 1, 'perf@attn.test', 'Performance thread')
+    ]
+    const samples: number[] = []
+    for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
+      samples.push(await measureAccountSwitch(page, 2, 'perf-second@attn.test', 'Second account thread'))
+      samples.push(await measureAccountSwitch(page, 1, 'perf@attn.test', 'Performance thread'))
+    }
+
+    await reportMetric(testInfo, 'account-switch', samples, median(samples), warmup)
+    expect(percentile(samples, 0.95), 'p95 warm account switch').toBeLessThan(ACCOUNT_SWITCH_CEILING_MS)
+  })
+
   test('re-buckets 10,000 threads and switches splits within the F11 budgets', async ({ page }, testInfo) => {
     await expect(page.getByTestId('thread-list')).toHaveAttribute(
       'data-thread-count',
@@ -535,12 +656,14 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     )
     await expect(page.getByTestId('split-tab')).toHaveCount(6)
 
-    const coldMs = await measureSplitSwitch(page, 5, mutation.splitId, THREAD_PAGE_SIZE)
+    // New custom splits follow Important. Exercise the supported Tab navigation;
+    // numbered G chords are no longer assigned to split commands.
+    const coldMs = await measureSplitSwitch(page, 'next', mutation.splitId, THREAD_PAGE_SIZE)
     await reportMetric(testInfo, 'split-switch-cold', [coldMs], coldMs)
     const samples: number[] = []
     for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
-      await measureSplitSwitch(page, 4, 'base:important', 0)
-      samples.push(await measureSplitSwitch(page, 5, mutation.splitId, THREAD_PAGE_SIZE))
+      await measureSplitSwitch(page, 'previous', 'base:important', 0)
+      samples.push(await measureSplitSwitch(page, 'next', mutation.splitId, THREAD_PAGE_SIZE))
     }
     await reportMetric(testInfo, 'split-switch', samples, median(samples))
     expect(percentile(samples, 0.95), 'p95 split switch').toBeLessThan(SPLIT_SWITCH_CEILING_MS)

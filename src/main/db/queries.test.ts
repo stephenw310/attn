@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ensureSplitSetup } from '../splits'
 import { type Db, openDatabase } from '.'
 import {
   MATERIALIZED_MAILBOX_VIEWS,
@@ -111,6 +112,44 @@ describe('thread list queries', () => {
       listInboxThreads(db, 'account', 1, { at: 300, id: 'newest-z' }).map((thread) => thread.id)
     ).toEqual(['older'])
   })
+
+  it.each([undefined, 'fallback:other'])(
+    'pages across positive, null, zero, and negative dates in %s',
+    (splitId) => {
+      if (splitId) ensureSplitSetup(db, 'account')
+      const insertThread = db.prepare(
+        "INSERT INTO threads (account_id, id, last_msg_at) VALUES ('account', ?, ?)"
+      )
+      const insertLabel = db.prepare(
+        "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES ('account', ?, 'INBOX')"
+      )
+      for (const [id, at] of [
+        ['positive-low', 1],
+        ['null-a', null],
+        ['zero-b', 0],
+        ['null-c', null],
+        ['negative', -1]
+      ] as const) {
+        insertThread.run(id, at)
+        insertLabel.run(id)
+      }
+      const ids: string[] = []
+      let cursor: { at: number; id: string } | null = null
+      for (;;) {
+        const page = listInboxThreads(db, 'account', 2, cursor, splitId)
+        if (page.length === 0) break
+        ids.push(...page.map((row) => row.id))
+        const last = page[page.length - 1]
+        cursor = { at: last.lastMsgAt, id: last.id }
+        expect(ids.length).toBeLessThanOrEqual(7)
+      }
+      expect(ids).toEqual(['newest', 'older', 'positive-low', 'null-a', 'null-c', 'zero-b', 'negative'])
+      expect(listInboxThreads(db, 'account', 0, null, splitId)).toEqual([])
+      expect(listInboxThreads(db, 'account', 1, null, splitId, 'null-c')).toEqual([
+        expect.objectContaining({ id: 'null-c', lastMsgAt: 0 })
+      ])
+    }
+  )
 
   it('returns pending snoozes with their labels', () => {
     expect(listSnoozedThreads(db, 'account')).toEqual([

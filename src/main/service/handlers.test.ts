@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import { openDatabase } from '../db'
-import { refreshThreadMailboxes, runMailboxMembershipBackfill } from '../db/mailboxMembership'
+import { countSystemMailboxes } from '../db/queries'
 import type { GmailThread } from '../gmail/parse'
+import { getSplitState } from '../splits'
 import { ensureAccount } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
@@ -19,6 +20,9 @@ function handlerContext(
   return {
     db,
     currentAccountId: () => ACCOUNT,
+    accountStatuses: () => [],
+    mailboxCounts: (accountId) => countSystemMailboxes(db, accountId),
+    splitState: (accountId) => getSplitState(db, accountId),
     makeClient: () => null,
     makeProvider: () => null,
     makeServerSearchProvider: () => provider,
@@ -199,76 +203,12 @@ describe('server-search service handlers', () => {
   })
 })
 
-describe('derived read caching', () => {
+describe('search coverage', () => {
   const noProvider: ServerSearchProvider = {
     listThreadIds: vi.fn(),
     getThread: vi.fn(),
     getAttachmentData: vi.fn()
   }
-
-  function seedThread(db: ReturnType<typeof openDatabase>, id: string): void {
-    db.prepare(
-      `INSERT INTO threads (account_id, id, subject, last_msg_at, from_display, is_unread, is_starred,
-                            has_attachment)
-       VALUES (?, ?, 'Subject', 1, 'Sender', 0, 0, 0)`
-    ).run(ACCOUNT, id)
-    db.prepare('INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)').run(
-      ACCOUNT,
-      id,
-      'INBOX'
-    )
-    db.prepare(
-      `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
-                             body_text, labels_json)
-       VALUES (?, ?, ?, 'Sender', 'sender@example.test', 'snippet', 1, 'body', '["INBOX"]')`
-    ).run(ACCOUNT, `message-${id}`, id)
-    // Counts read derived membership, which the real write paths maintain.
-    refreshThreadMailboxes(db, ACCOUNT, id)
-  }
-
-  it('invalidates mailbox counts for silent writes and reuses them between writes', async () => {
-    const db = openDatabase(':memory:')
-    ensureAccount(db, ACCOUNT, ACCOUNT)
-    seedThread(db, 'first')
-    const handlers = createServiceHandlers(handlerContext(db, noProvider))
-    try {
-      const first = await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
-      expect(first).toMatchObject({ inbox: 1, allMail: 1 })
-      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toBe(first)
-
-      // Lifetime writes do not broadcast, but a new read must see their rows.
-      seedThread(db, 'second')
-      const second = await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
-      expect(second).toMatchObject({ inbox: 2, allMail: 2 })
-      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toBe(second)
-    } finally {
-      handlers.stop()
-      db.close()
-    }
-  })
-
-  it('refreshes counts between committed membership backfill batches', async () => {
-    const db = openDatabase(':memory:')
-    ensureAccount(db, ACCOUNT, ACCOUNT)
-    for (const id of ['first', 'second', 'third']) seedThread(db, id)
-    db.prepare('DELETE FROM thread_mailboxes WHERE account_id = ?').run(ACCOUNT)
-    const handlers = createServiceHandlers(handlerContext(db, noProvider))
-    try {
-      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ allMail: 0 })
-      let batches = 0
-      await runMailboxMembershipBackfill(db, ACCOUNT, {
-        batchSize: 2,
-        batchPauseMs: 0,
-        shouldContinue: () => batches++ === 0
-      })
-      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ allMail: 2 })
-      await runMailboxMembershipBackfill(db, ACCOUNT, { batchSize: 2, batchPauseMs: 0 })
-      expect(await handlers.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])).toMatchObject({ allMail: 3 })
-    } finally {
-      handlers.stop()
-      db.close()
-    }
-  })
 
   it('reads current search coverage after cursor-only sync progress', async () => {
     const db = openDatabase(':memory:')

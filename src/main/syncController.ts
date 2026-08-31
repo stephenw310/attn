@@ -48,6 +48,15 @@ interface SyncControllerContext {
    * immediately (single-account tests).
    */
   acquireIndexingSlot?: (accountId: string) => Promise<() => void>
+  /**
+   * True while the active account is waiting on the indexing slot this
+   * account holds. The chain checks it at every page boundary and, when set,
+   * settles early and re-queues itself — the durable cursors are what make
+   * that hand-over free (F18, §9 #21(g)).
+   */
+  shouldPreemptIndexing?: (accountId: string) => boolean
+  /** Test-only pacing overrides threaded through the historical chain stages. */
+  lifetimePacing?: { requestIntervalMs?: number; pagePauseMs?: number; foregroundYieldMs?: number }
 }
 
 interface LocalBackfillRun {
@@ -514,11 +523,19 @@ export class SyncController {
     console.log(`[sync] lifetime header sweep started for ${accountId}`)
     const active = (): boolean => generation === this.generation && lifetimeRunId === this.lifetimeRunId
     // Both passes share one posture: the same cancellation guard, the same
-    // yield-to-foreground rule, and the same retry ladder.
+    // yield-to-foreground rule, and the same retry ladder. A preemption ask —
+    // the active account waiting on the slot this account holds — reads as a
+    // cancellation at the next page boundary; the settle handlers below
+    // re-queue instead of parking (F18).
     const pacing = {
-      shouldContinue: () => !this.stopped && active() && this.context.currentAccountId() === accountId,
+      shouldContinue: () =>
+        !this.stopped &&
+        active() &&
+        this.context.currentAccountId() === accountId &&
+        !this.preemptRequested(accountId),
       shouldYield: () => this.shouldYieldLifetime(accountId),
-      snapshotRevision: this.context.mailRevision
+      snapshotRevision: this.context.mailRevision,
+      ...this.context.lifetimePacing
     }
     const pause = (error: unknown, prefix: string): void => {
       failed = true
@@ -546,6 +563,7 @@ export class SyncController {
       .then(async (result) => {
         if (!active()) return
         if (!result || failed) {
+          if (!failed && this.requeueAfterPreemption(accountId, provider, generation)) return
           this.lifetimeRunning = false
           return
         }
@@ -579,6 +597,7 @@ export class SyncController {
         )
         if (!active()) return
         if (!flags || failed) {
+          if (!failed && this.requeueAfterPreemption(accountId, provider, generation)) return
           this.lifetimeRunning = false
           return
         }
@@ -599,8 +618,12 @@ export class SyncController {
           pacing
         )
         if (!active()) return
+        if (!splitMetadata || failed) {
+          if (!failed && this.requeueAfterPreemption(accountId, provider, generation)) return
+          this.lifetimeRunning = false
+          return
+        }
         this.lifetimeRunning = false
-        if (!splitMetadata || failed) return
         if (splitMetadata.threadsRefreshed > 0) {
           console.log(
             `[sync] split metadata rebuild done: ${splitMetadata.threadsRefreshed} threads refreshed for ${accountId}`
@@ -731,6 +754,37 @@ export class SyncController {
   private publishSettledState(): void {
     if (this.running || this.pollerRunning) return
     this.setState(this.foregroundFailure ?? this.lifetimeProgress ?? { phase: 'idle' })
+  }
+
+  private preemptRequested(accountId: string): boolean {
+    return this.context.shouldPreemptIndexing?.(accountId) ?? false
+  }
+
+  /**
+   * A chain stage that halted because the active account wants the slot
+   * settles (its `.finally` releases the slot to that account) and re-queues
+   * itself here, so the preempted cursor resumes once the slot comes back.
+   * Returns false when the halt was a real cancellation — sign-out, session
+   * reset, shutdown — which must park, not re-queue. When those all still
+   * hold, the only remaining halt cause was a preemption ask, so re-queue
+   * without re-reading it: the ask can evaporate between the page boundary
+   * and this settle (the active account switched again), and parking then
+   * would strand the chain with no retry scheduled. A re-queue with nobody
+   * waiting is free — the slot grants immediately and the durable cursor
+   * resumes where it stopped.
+   */
+  private requeueAfterPreemption(
+    accountId: string,
+    provider: GmailMailProvider,
+    generation: number
+  ): boolean {
+    if (this.stopped || generation !== this.generation || this.context.currentAccountId() !== accountId) {
+      return false
+    }
+    console.log(`[sync] historical indexing preempted by the active account; requeueing ${accountId}`)
+    this.lifetimeRunning = false
+    this.startLifetimeSweep(accountId, provider, generation)
+    return true
   }
 
   private shouldYieldLifetime(accountId: string): boolean {

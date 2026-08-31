@@ -109,10 +109,14 @@ export interface ThreadPage<Row extends ThreadRow = ThreadRow> {
 }
 
 /** A local list read targets one 100-row page of a system mailbox or Gmail user label. */
-export type ThreadListRequest =
+export type ThreadListRequest = (
   | { view: 'inbox'; splitId?: string; cursor?: ThreadPageCursor }
   | { view: Exclude<ThreadListView, 'inbox'>; cursor?: ThreadPageCursor }
   | { view: 'label'; labelId: string; cursor?: ThreadPageCursor }
+) & {
+  /** Check one thread's membership without paging through the mailbox. */
+  threadId?: string
+}
 
 /** Mailboxes whose membership and reader contents depend on per-message labels. */
 export type MessageMailbox = 'all-mail' | 'spam' | 'trash'

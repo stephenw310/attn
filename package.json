@@ -22,8 +22,8 @@
     "test:unit": "vitest run",
     "e2e": "npm run build && node scripts/run-e2e.mjs",
     "e2e:only": "node scripts/run-e2e.mjs",
-    "e2e:perf": "npm run build && node scripts/generate-perf-seed.mjs && node scripts/generate-perf-seed.mjs --messages=50000 --output=e2e/.artifacts/perf-search-seed.json && node scripts/run-e2e.mjs --perf --grep @perf --grep-invert @perfscale",
-    "e2e:perf:only": "node scripts/generate-perf-seed.mjs && node scripts/generate-perf-seed.mjs --messages=50000 --output=e2e/.artifacts/perf-search-seed.json && node scripts/run-e2e.mjs --perf --grep @perf --grep-invert @perfscale",
+    "e2e:perf": "npm run build && node scripts/generate-perf-seed.mjs && node scripts/generate-perf-seed.mjs --messages=50000 --second-account=0 --output=e2e/.artifacts/perf-search-seed.json && node scripts/run-e2e.mjs --perf --grep @perf --grep-invert @perfscale",
+    "e2e:perf:only": "node scripts/generate-perf-seed.mjs && node scripts/generate-perf-seed.mjs --messages=50000 --second-account=0 --output=e2e/.artifacts/perf-search-seed.json && node scripts/run-e2e.mjs --perf --grep @perf --grep-invert @perfscale",
     "verify": "npm run typecheck && npx biome ci . && npm run test:unit && npm run e2e",
     "package:dir": "npm run package:clean && npm run build && electron-builder --dir && npm run package:verify",
     "package:mac": "npm run package:clean && npm run build && electron-builder --mac && npm run package:verify",
@@ -36,8 +36,8 @@
     "postinstall": "node scripts/ensure-electron-toolchain.mjs",
     "toolchain": "node scripts/ensure-electron-toolchain.mjs",
     "prepare": "lefthook install",
-    "e2e:perf:scale": "npm run build && node scripts/generate-perf-seed.mjs --threads=40000 --messages=80000 --spread-labels --output=e2e/.artifacts/perf-scale-seed.json && node scripts/run-e2e.mjs --perf --grep @perfscale",
-    "e2e:perf:scale:only": "node scripts/generate-perf-seed.mjs --threads=40000 --messages=80000 --spread-labels --output=e2e/.artifacts/perf-scale-seed.json && node scripts/run-e2e.mjs --perf --grep @perfscale"
+    "e2e:perf:scale": "npm run build && node scripts/generate-perf-seed.mjs --threads=40000 --messages=80000 --second-account=0 --spread-labels --output=e2e/.artifacts/perf-scale-seed.json && node scripts/run-e2e.mjs --perf --grep @perfscale",
+    "e2e:perf:scale:only": "node scripts/generate-perf-seed.mjs --threads=40000 --messages=80000 --second-account=0 --spread-labels --output=e2e/.artifacts/perf-scale-seed.json && node scripts/run-e2e.mjs --perf --grep @perfscale"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",

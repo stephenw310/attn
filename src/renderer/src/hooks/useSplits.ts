@@ -29,11 +29,15 @@ function splitBridge(): NonNullable<typeof window.attn>['splits'] {
   return bridge.splits
 }
 
-export function useSplits(account: string | null): SplitData {
+export function useSplits(account: string | null, initialSplitId: string | null = null): SplitData {
   const [state, setState] = useState<SplitState | null>(null)
   const [activeSplitId, setActiveSplitIdState] = useState<string | null>(null)
   const activeSplitIdRef = useRef(activeSplitId)
   activeSplitIdRef.current = activeSplitId
+  // A cross-account restore seeds the last active split. It participates only
+  // while nothing newer chose a split, and `applyState` validates it against
+  // the loaded rules — a since-deleted split falls back to the default (F18).
+  const initialSplitIdRef = useRef(initialSplitId)
   const requestRef = useRef(0)
   const appliedRevisionRef = useRef(-1)
 
@@ -42,7 +46,7 @@ export function useSplits(account: string | null): SplitData {
     appliedRevisionRef.current = next.revision
     setState(next)
     setActiveSplitIdState((current) => {
-      const candidate = current ?? activeSplitIdRef.current
+      const candidate = current ?? activeSplitIdRef.current ?? initialSplitIdRef.current
       return candidate && next.splits.some((split) => split.id === candidate)
         ? candidate
         : defaultActiveSplit(next)

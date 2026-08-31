@@ -21,7 +21,7 @@ The e2e suite (Playwright) drives the **real built Electron app** — main proce
 | `npm run e2e` | Build + e2e only |
 | `npm run e2e:only` | E2e without rebuilding — **only** when `out/` already matches `src/` |
 | `npm run e2e:only -- --grep <pattern>` | One test while iterating |
-| `npm run e2e:perf` | Build + generated 10,000-thread Electron profile (windowing, main private + utility heap/external/SQLite-cache memory, list/conversation/bulk/composer budgets) |
+| `npm run e2e:perf` | Build + generated two-account Electron profile — 10,000 threads plus a 1,000-thread second account (windowing, main private + utility heap/external/SQLite-cache memory, list/conversation/bulk/composer budgets, warm account-switch p95) |
 | `npm run e2e:perf:scale` | Build + generated 40,000-thread profile for reads that must not scale with the store (mailbox counts, All Mail paging, common-term search). Opt-in: the profile imports through the production write path before measuring reads. The 10,000-thread job cannot catch this class — the account scan it was added for measured under a millisecond there |
 | `npm run typecheck` / `npm run lint` | Fast static passes |
 | `npm run toolchain` | Repair Electron binary / native-module ABI (also runs as postinstall) |
