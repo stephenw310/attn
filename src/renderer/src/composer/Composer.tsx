@@ -167,11 +167,14 @@ function quoteSrcDoc(body: string, surface: MailSurface, appearance: ThemeAppear
 function InlineQuote({
   draftId,
   html,
+  sourceMessageId,
   expanded: controlledExpanded,
   showToggle = true
 }: {
   draftId: string
   html: string
+  /** The quoted message, so per-sender remote-image exceptions apply (T33). */
+  sourceMessageId: string | null
   expanded?: boolean
   showToggle?: boolean
 }): React.JSX.Element | null {
@@ -184,6 +187,43 @@ function InlineQuote({
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
+
+  // T33: the quote is the same untrusted mail HTML the reader frames render,
+  // so it registers with main's request filter under the quoted message —
+  // an Always-load-from-sender exception covers a reply's quoted history too
+  // (PR #101 review). Without a source id the frame stays unnamed and fails
+  // closed while blocking is on, exactly as before.
+  const [frameNonce, setFrameNonce] = useState<string | null>(null)
+  const [frameEpoch, setFrameEpoch] = useState(0)
+  useEffect(() => {
+    const bridge = window.attn
+    if (!bridge) return
+    return bridge.mail.onRemoteImagesChanged(() => setFrameEpoch((epoch) => epoch + 1))
+  }, [])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: frameEpoch deliberately re-registers so policy changes reach a mounted quote
+  useEffect(() => {
+    const bridge = window.attn
+    setFrameNonce(null)
+    if (!expanded || !html) return
+    if (!bridge || sourceMessageId === null) {
+      setFrameNonce('')
+      return
+    }
+    const nonce = crypto.randomUUID()
+    let stale = false
+    bridge.mail
+      .registerMessageFrame(nonce, sourceMessageId, false)
+      .then(() => {
+        if (!stale) setFrameNonce(nonce)
+      })
+      .catch(() => {
+        if (!stale) setFrameNonce('')
+      })
+    return () => {
+      stale = true
+      void bridge.mail.unregisterMessageFrame(nonce).catch(() => {})
+    }
+  }, [expanded, frameEpoch, html, sourceMessageId])
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
     const paletteShortcut =
@@ -297,10 +337,14 @@ function InlineQuote({
   return (
     <div className="mx-5 mb-5 text-sm text-ink-dim" data-testid="composer-quote-container">
       {/* `allow-same-origin` is needed only to measure this scriptless srcdoc,
-          resolve CID images, and forward keyboard events to the app shell. */}
-      {expanded && (
+          resolve CID images, and forward keyboard events to the app shell.
+          The frame mounts only after main has registered its nonce, so an
+          allowed sender's images are never spuriously cancelled by a race. */}
+      {expanded && frameNonce !== null && (
         <iframe
           ref={frameRef}
+          key={frameNonce}
+          name={frameNonce || undefined}
           title="Quoted history"
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
           data-testid="composer-quote"
@@ -1106,6 +1150,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <InlineQuote
                 draftId={draft.id}
                 html={draft.quoteHtml}
+                sourceMessageId={draft.sourceMessageId}
                 expanded={unifiedSignatureAndQuote ? unifiedContentExpanded : undefined}
                 showToggle={!unifiedSignatureAndQuote}
               />

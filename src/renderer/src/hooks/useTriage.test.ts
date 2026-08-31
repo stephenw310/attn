@@ -76,6 +76,7 @@ test('rolls back overlapping failed star and unread actions independently', asyn
       showToast: () => {},
       autoAdvance: 'next',
       closeReader: () => {},
+      reopenReader: () => {},
       setExitingThreadIds,
       setSelectedIndex
     })
@@ -174,6 +175,7 @@ test('updates inactive Move cache membership immediately and restores it on reje
       showToast: () => {},
       autoAdvance: 'next',
       closeReader: () => {},
+      reopenReader: () => {},
       setExitingThreadIds,
       setSelectedIndex
     })
@@ -208,6 +210,84 @@ test('updates inactive Move cache membership immediately and restores it on reje
     expect(visibleSnoozed).toEqual([snoozedThread])
     expect(visibleAllMail).toEqual([movedThread])
     expect(visibleDestination).toEqual([])
+  } finally {
+    await act(async () => root.unmount())
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+    if (attnDescriptor) Object.defineProperty(window, 'attn', attnDescriptor)
+    else Reflect.deleteProperty(window, 'attn')
+  }
+})
+
+test("a rejected write reopens the reader that 'list' auto-advance closed", async () => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const attnDescriptor = Object.getOwnPropertyDescriptor(window, 'attn')
+  let rejectTriage: ((error: Error) => void) | undefined
+  Object.defineProperty(window, 'attn', {
+    configurable: true,
+    value: {
+      mail: {
+        triage: () =>
+          new Promise<TriageResult>((_resolve, reject) => {
+            rejectTriage = reject
+          })
+      }
+    } as unknown as Window['attn']
+  })
+  const closeReader = vi.fn()
+  const reopenReader = vi.fn()
+
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  let runTriage: ReturnType<typeof useTriage> | undefined
+  function Harness(): null {
+    const [rows, setRows] = useState<ThreadRow[] | null>([{ ...thread, labelIds: ['INBOX'] }])
+    const [, setSnoozedRows] = useState<SnoozedThreadRow[] | null>(null)
+    const [, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
+    const [, setSelectedIndex] = useState(0)
+    runTriage = useTriage({
+      selectedIds: new Set(),
+      selectedIndex: 0,
+      threads: rows ?? [],
+      moveCacheRows: rows ?? [],
+      readerOpen: true,
+      view: 'inbox',
+      activeSplitId: null,
+      searchOpen: false,
+      preserveSelectionOnRefreshRef: { current: true },
+      deferRefreshUntilRef: { current: 0 },
+      selectedThreadIdRef: { current: thread.id },
+      selectedRowRef: { current: null },
+      realThreads: rows,
+      setRealThreads: setRows,
+      realSnoozedThreads: null,
+      setRealSnoozedThreads: setSnoozedRows,
+      mailboxRows: {},
+      setMailboxRows: () => {},
+      clearSelection: () => {},
+      showToast: () => {},
+      autoAdvance: 'list',
+      closeReader,
+      reopenReader,
+      setExitingThreadIds,
+      setSelectedIndex
+    })
+    return null
+  }
+
+  try {
+    await act(async () => root.render(createElement(Harness)))
+    act(() => runTriage?.({ kind: 'archive', threadIds: [thread.id] }))
+    expect(closeReader).toHaveBeenCalledTimes(1)
+    expect(reopenReader).not.toHaveBeenCalled()
+
+    await act(async () => {
+      rejectTriage?.(new Error('utility gone'))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(reopenReader).toHaveBeenCalledTimes(1)
   } finally {
     await act(async () => root.unmount())
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment

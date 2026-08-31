@@ -92,21 +92,28 @@ describe('applyLifetimeCapChange', () => {
     expect(cursors(db)).toEqual({ sweep: 'capped:lifetime:page-4', attachment: 'done' })
   })
 
-  it('expanding a reached limit re-arms a completed attachment pass atomically', () => {
+  it('expanding a reached limit restarts any started attachment pass atomically', () => {
     const db = storeWith({ sweep: 'capped:lifetime:page-4', attachment: 'done' })
     applyLifetimeCapChange(db, recordingControl(), ACCOUNT, 500_000)
     expect(cursors(db)).toEqual({ sweep: 'capped:lifetime:page-4', attachment: 'attachments' })
+    // A partial pass has the same hole as a completed one: its walked pages
+    // precede the ids the expansion imports, so resuming from the saved token
+    // would leave those threads unflagged forever (PR #101 review).
+    const midRun = storeWith({ sweep: 'capped:lifetime:page-2', attachment: 'attachments:tok' })
+    applyLifetimeCapChange(midRun, recordingControl(), ACCOUNT, 500_000)
+    expect(cursors(midRun).attachment).toBe('attachments')
     // All mail from a reached limit behaves the same.
     const unlimited = storeWith({ sweep: 'capped:lifetime', attachment: 'done' })
     applyLifetimeCapChange(unlimited, recordingControl(), ACCOUNT, 0)
     expect(cursors(unlimited).attachment).toBe('attachments')
+    // A pass that never started has nothing to restart: the chain reaches it
+    // after the expanded sweep on its own.
+    const unstarted = storeWith({ sweep: 'capped:lifetime:page-2', attachment: null })
+    applyLifetimeCapChange(unstarted, recordingControl(), ACCOUNT, 500_000)
+    expect(cursors(unstarted).attachment).toBeNull()
   })
 
-  it('leaves a mid-run attachment pass and an exhausted sweep alone', () => {
-    const midRun = storeWith({ sweep: 'capped:lifetime:page-2', attachment: 'attachments:tok' })
-    applyLifetimeCapChange(midRun, recordingControl(), ACCOUNT, 500_000)
-    expect(cursors(midRun).attachment).toBe('attachments:tok')
-
+  it('leaves an exhausted sweep alone', () => {
     // A truly exhausted listing stays done: raising the cap fetches nothing
     // and must not re-arm the attachment pass either.
     const done = storeWith({ sweep: 'done', attachment: 'done' })

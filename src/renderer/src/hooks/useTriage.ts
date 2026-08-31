@@ -59,6 +59,12 @@ interface Options {
   autoAdvance: AutoAdvanceDirection
   /** 'list' auto-advance: return the open reader to the full-width list. */
   closeReader: () => void
+  /**
+   * Undo a 'list' advance whose triage write was rejected outright: the
+   * optimistic rollback restores the rows and selection, and this restores
+   * the reader the advance closed (PR #101 review).
+   */
+  reopenReader: () => void
 }
 
 function flagOwnerKey(threadId: string, field: ThreadFlagSnapshot['field']): string {
@@ -114,7 +120,8 @@ export function useTriage(options: Options): (action: TriageAction) => void {
     setExitingThreadIds,
     setSelectedIndex,
     autoAdvance,
-    closeReader
+    closeReader,
+    reopenReader
   } = options
   const flagOwnersRef = useRef(new Map<string, symbol>())
   const moveOwnersRef = useRef(new Map<string, symbol>())
@@ -270,6 +277,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         updateSearchRows?.((rows) => rollbackThreadMove(rows, ownedSnapshot) ?? rows)
       }
       let selectionRollback: { fromId: string; toId: string | null } | null = null
+      let closedReaderForAdvance = false
       if (isBulk) clearSelection()
       const exitingThreadIds =
         targetedAction.kind === 'archive' && view === 'inbox'
@@ -311,8 +319,10 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         // The reader's default advance is free: the removed row's successor
         // slides into the same index on refresh. The other two directions
         // retarget before the refresh lands (F3 auto-advance setting).
-        if (autoAdvance === 'list') closeReader()
-        else {
+        if (autoAdvance === 'list') {
+          closedReaderForAdvance = true
+          closeReader()
+        } else {
           const selection = selectionAfterExit(threads, exitingThreadIds, selectedIndex, 'previous')
           if (selection && selection.toId !== null && selection.toId !== selection.fromId) {
             selectionRollback = { fromId: selection.fromId, toId: selection.toId }
@@ -345,6 +355,9 @@ export function useTriage(options: Options): (action: TriageAction) => void {
             for (const id of exitingThreadIds) next.delete(id)
             return next
           })
+          // A rejected write rolled the action back entirely; the reader the
+          // 'list' advance closed comes back with it.
+          if (closedReaderForAdvance) reopenReader()
         })
     },
     [
@@ -354,6 +367,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       autoAdvance,
       clearSelection,
       closeReader,
+      reopenReader,
       deferRefreshUntilRef,
       preserveSelectionOnRefreshRef,
       readerOpen,

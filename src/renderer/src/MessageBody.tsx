@@ -15,6 +15,7 @@ import {
   normalizedContentId
 } from './mailInlineImages'
 import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
+import { containsRemoteMailContent } from './mailRemoteContent'
 import {
   type MailLayout,
   type MailSurface,
@@ -337,9 +338,6 @@ function TrimToggle({
   )
 }
 
-/** Anything a mail frame could fetch over the network (T33 banner detection). */
-const REMOTE_IMAGE_REFERENCE = /(?:src|srcset|poster|background)\s*=\s*["']?\s*https?:|url\(\s*["']?https?:/i
-
 interface MailFrameAccess {
   /** The iframe's name; scripts are off in the frame, so markup can't change it. */
   nonce: string
@@ -471,19 +469,26 @@ export function MessageBody({
     }
   }, [frameEpoch, messageId, srcDoc])
 
-  const hasRemoteImages = srcDoc !== null && REMOTE_IMAGE_REFERENCE.test(srcDoc)
-  const remoteImagesBanner = frameAccess?.blocked === true && !frameAccess.imagesAllowed && hasRemoteImages
+  // A policy change (toggle or per-sender override, from Settings, the
+  // palette, or another open message) re-registers this frame so an already
+  // open message picks up its fresh answer without being reopened.
+  useEffect(() => {
+    if (!attn) return
+    return attn.mail.onRemoteImagesChanged(() => setFrameEpoch((epoch) => epoch + 1))
+  }, [])
+
+  const hasRemoteContent = useMemo(() => srcDoc !== null && containsRemoteMailContent(srcDoc), [srcDoc])
+  const remoteImagesBanner = frameAccess?.blocked === true && !frameAccess.imagesAllowed && hasRemoteContent
   const loadImagesOnce = useCallback(() => {
     allowOnceRef.current = true
     setFrameEpoch((epoch) => epoch + 1)
   }, [])
   const alwaysLoadFromSender = useCallback(() => {
-    // The override's sender is resolved from the store in the utility; the
-    // re-registration below picks the new answer up.
-    void attn?.mail
-      .allowRemoteImagesFromSender(messageId)
-      .then(() => setFrameEpoch((epoch) => epoch + 1))
-      .catch(() => {})
+    // The override's sender is resolved from the store in the utility. The
+    // policy-change broadcast above re-registers this frame (and every other
+    // mounted one) exactly once — no local epoch bump, or the frame would
+    // remount twice and fetch a third time.
+    void attn?.mail.allowRemoteImagesFromSender(messageId).catch(() => {})
   }, [messageId])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc

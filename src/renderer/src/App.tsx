@@ -12,6 +12,16 @@ export default function App(): React.JSX.Element {
   const [statusError, setStatusError] = useState<string | null>(null)
   const [removalError, setRemovalError] = useState<string | null>(null)
 
+  // A reorder response carries a status snapshot computed when the reorder
+  // committed, which can predate an account switch made while it was in
+  // flight — and a switch remounts the keyed Inbox, so no Inbox-held state
+  // survives to judge it. Reordering never changes the active account:
+  // adopt only the roster ordering, onto whatever status is live when the
+  // response finally lands (PR #101 review).
+  const applyReorderedRoster = useCallback((next: AuthStatus) => {
+    setStatus((current) => (current ? { ...current, accounts: next.accounts } : next))
+  }, [])
+
   const loadStatus = useCallback(() => {
     if (!attn) return
     setStatusError(null)
@@ -40,6 +50,7 @@ export default function App(): React.JSX.Element {
           key={status.activeAccountId ?? 'account'}
           status={status}
           onStatus={setStatus}
+          onReordered={applyReorderedRoster}
           onRemovalError={setRemovalError}
         />
       )}

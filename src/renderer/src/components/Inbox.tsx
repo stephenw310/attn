@@ -77,6 +77,8 @@ import { Toast } from './Toast'
 interface InboxProps {
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
+  /** Ordering-only status merge, held above the keyed remount (see App). */
+  onReordered: (status: AuthStatus) => void
   onRemovalError: (message: string) => void
 }
 
@@ -125,7 +127,7 @@ function sidebarStorage(): Storage | null {
   }
 }
 
-export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.JSX.Element {
+export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxProps): React.JSX.Element {
   // The previous visit's snapshot for this account, saved by the guarded
   // switch before the tree remounted (F18: a warm switch restores the
   // account's last view, selection, and scroll). Read once per mount.
@@ -1351,6 +1353,9 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   // a ref (the saveAccountSnapshotRef pattern).
   const readerCloseForAdvanceRef = useRef<() => void>(() => {})
   const closeReaderForAdvance = useCallback(() => readerCloseForAdvanceRef.current(), [])
+  // The inverse, for a triage write that is rejected outright: the rollback
+  // restores rows and selection, and this restores the closed reader.
+  const reopenReaderForAdvance = useCallback(() => setReaderOpen(true), [])
 
   const triage = useTriage({
     selectedIds,
@@ -1378,7 +1383,8 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     setExitingThreadIds,
     setSelectedIndex,
     autoAdvance,
-    closeReader: closeReaderForAdvance
+    closeReader: closeReaderForAdvance,
+    reopenReader: reopenReaderForAdvance
   })
 
   const toggleLabel = useCallback(
@@ -2072,7 +2078,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
             accountSettings={accountSettings}
             onUpdateSetting={updateAppSetting}
             onUpdateAccountSetting={updateAccountSetting}
-            onStatus={onStatus}
+            onReordered={onReordered}
             onAddAccount={addAccount}
             onReconnect={reconnectActions}
             onSignOut={requestRemoveAccount}

@@ -26,7 +26,7 @@ import {
   DEFAULT_REMOTE_IMAGE_POLICY,
   MailFrameRegistry,
   type RemoteImagePolicy,
-  shouldBlockMailFrameImage
+  shouldBlockMailFrameRequest
 } from './remoteImages'
 import {
   SERVICE_PROTOCOL_VERSION,
@@ -126,7 +126,7 @@ async function registerMailFrame(
   mailFrames.register(nonce, frame)
   return {
     blocked: remoteImagePolicy.blocked,
-    imagesAllowed: !shouldBlockMailFrameImage(remoteImagePolicy, frame)
+    imagesAllowed: !shouldBlockMailFrameRequest(remoteImagePolicy, frame)
   }
 }
 
@@ -308,16 +308,21 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   // T33 enforcement point: the same request layer that strips CORP below.
   // Only mail frames (about:srcdoc) are filtered — the app shell and other
   // requests are untouched, and with blocking off the behavior is identical
-  // to today (decision #5's default load stands).
+  // to today (decision #5's default load stands). Every network-capable type
+  // is covered, not just images: sanitized mail keeps its <style>, whose
+  // @import/@font-face/url() would otherwise ping the sender through
+  // stylesheet, font, and media requests (PR #101 review).
+  // No `types` filter: every resource type a frame can request is covered,
+  // including ones Electron's filter enum cannot name ('other').
   win.webContents.session.webRequest.onBeforeRequest(
-    { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
+    { urls: ['http://*/*', 'https://*/*'] },
     (details, callback) => {
       if (details.frame?.url !== 'about:srcdoc') {
         callback({})
         return
       }
       callback({
-        cancel: shouldBlockMailFrameImage(remoteImagePolicy, mailFrames.get(details.frame.name))
+        cancel: shouldBlockMailFrameRequest(remoteImagePolicy, mailFrames.get(details.frame.name))
       })
     }
   )
@@ -390,6 +395,9 @@ function handleServiceEvent(event: ServiceEvent): void {
     broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
   } else if (event.kind === 'remote-images') {
     remoteImagePolicy = { blocked: event.blocked, allowedSenders: new Set(event.allowedSenders) }
+    // Mounted mail frames re-register on this signal so a policy change
+    // reaches messages that are already open (PR #101 review).
+    broadcast(IPC_CHANNELS.mailRemoteImagesChanged, undefined)
   } else if (event.kind === 'badge') mailNotifier?.updateBadge(event.unreadCount)
   else if (event.kind === 'accounts-status') broadcast(IPC_CHANNELS.accountsStatusChanged, event.statuses)
   else if (event.kind === 'notification-candidates') {

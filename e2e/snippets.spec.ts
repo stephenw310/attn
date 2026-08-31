@@ -118,14 +118,15 @@ test('`;trigger ` expands at the caret, lands it on {cursor}, and fills only an 
   await composer.openNew()
   await waitForSnippetsLoaded(page, 'Intro')
   await expect(composer.subject).toHaveValue('')
-  await composer.typeBody('Hi ;intro ')
+  // The leading literal {cursor} is user content: expansion must neither
+  // delete it nor treat it as the caret target (PR #101 review).
+  await composer.typeBody('{cursor} Hi ;intro ')
   await expect(composer.editor).toContainText('Glad to meet you,')
   await expect(composer.editor).not.toContainText(';intro')
-  // The caret landed on {cursor}: the next keystroke types at the marker.
+  // The caret landed on the snippet's own {cursor}: the next keystroke types
+  // at the marker, the literal one survives, and the snippet's is consumed.
   await page.keyboard.type('X')
-  await expect(composer.editor).toContainText('Hi Glad to meet you, X - talk soon.')
-  // The marker never survives into the document.
-  await expect(composer.editor).not.toContainText('{cursor}')
+  await expect(composer.editor).toContainText('{cursor} Hi Glad to meet you, X - talk soon.')
   await expect(composer.subject).toHaveValue('Quarterly check-in')
 
   // A mid-word semicolon stays literal, and an unknown trigger is inert.

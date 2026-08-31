@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import {
   COMMAND_CONTEXT_GROUPS,
   type Command,
@@ -65,16 +65,42 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
         else onOpen()
         return
       }
-      if (!open || event.key !== 'Escape') return
-      // The palette can sit above the sheet; its Escape is not ours to spend.
+      if (!open) return
+      // The palette can sit above the sheet; while it is up, input is its.
       if (document.querySelector('[data-testid="command-palette"]')) return
-      event.preventDefault()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+        return
+      }
+      // The sheet is modal: nothing else may reach the surfaces underneath —
+      // a covered composer must not receive Mod+Enter (PR #101 review).
+      // Default behavior stays, so scroll keys still move the focused sheet;
+      // only Tab is fully spent, or focus would walk out of the dialog.
+      if (event.key === 'Tab') event.preventDefault()
       event.stopPropagation()
-      onClose()
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [onClose, onOpen, open])
+
+  // Modal focus: the sheet's scroll region takes focus while open — that is
+  // what makes arrow/page keys scroll it and keeps typing out of whatever the
+  // sheet covers — and the opener's focus comes back on close.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const previous = document.activeElement
+    returnFocusRef.current = previous instanceof HTMLElement ? previous : null
+    scrollRef.current?.focus({ preventScroll: true })
+    return () => {
+      const returnFocus = returnFocusRef.current
+      returnFocusRef.current = null
+      if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true })
+    }
+  }, [open])
 
   const groups = useMemo(() => (open ? sheetGroups(registeredCommands) : []), [open, registeredCommands])
 
@@ -98,7 +124,7 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
             <Kbd>Esc</Kbd> closes
           </span>
         </div>
-        <div className="min-h-0 overflow-y-auto px-5 py-4">
+        <div ref={scrollRef} tabIndex={-1} className="min-h-0 overflow-y-auto px-5 py-4 outline-none">
           <div className="columns-1 gap-8 sm:columns-2 lg:columns-3">
             {groups.map((group) => (
               <div key={group.label} data-testid="cheat-sheet-group" className="mb-6 break-inside-avoid">

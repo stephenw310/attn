@@ -3,7 +3,7 @@ import {
   DEFAULT_REMOTE_IMAGE_POLICY,
   MailFrameRegistry,
   type RemoteImagePolicy,
-  shouldBlockMailFrameImage
+  shouldBlockMailFrameRequest
 } from './remoteImages'
 
 const blocking = (allowed: string[] = []): RemoteImagePolicy => ({
@@ -11,11 +11,11 @@ const blocking = (allowed: string[] = []): RemoteImagePolicy => ({
   allowedSenders: new Set(allowed)
 })
 
-describe('shouldBlockMailFrameImage', () => {
+describe('shouldBlockMailFrameRequest', () => {
   it('passes everything while the default-load decision stands (§9 #5)', () => {
-    expect(shouldBlockMailFrameImage(DEFAULT_REMOTE_IMAGE_POLICY, undefined)).toBe(false)
+    expect(shouldBlockMailFrameRequest(DEFAULT_REMOTE_IMAGE_POLICY, undefined)).toBe(false)
     expect(
-      shouldBlockMailFrameImage(
+      shouldBlockMailFrameRequest(
         { blocked: false, allowedSenders: new Set() },
         { messageId: 'm1', sender: 'a@example.com', allowOnce: false }
       )
@@ -23,9 +23,9 @@ describe('shouldBlockMailFrameImage', () => {
   })
 
   it('fails closed for an unregistered or sender-less frame while blocking', () => {
-    expect(shouldBlockMailFrameImage(blocking(), undefined)).toBe(true)
+    expect(shouldBlockMailFrameRequest(blocking(), undefined)).toBe(true)
     expect(
-      shouldBlockMailFrameImage(blocking(['a@example.com']), {
+      shouldBlockMailFrameRequest(blocking(['a@example.com']), {
         messageId: 'm1',
         sender: null,
         allowOnce: false
@@ -35,10 +35,10 @@ describe('shouldBlockMailFrameImage', () => {
 
   it('admits exactly the Load once render', () => {
     expect(
-      shouldBlockMailFrameImage(blocking(), { messageId: 'm1', sender: 'a@example.com', allowOnce: true })
+      shouldBlockMailFrameRequest(blocking(), { messageId: 'm1', sender: 'a@example.com', allowOnce: true })
     ).toBe(false)
     expect(
-      shouldBlockMailFrameImage(blocking(), { messageId: 'm1', sender: 'a@example.com', allowOnce: false })
+      shouldBlockMailFrameRequest(blocking(), { messageId: 'm1', sender: 'a@example.com', allowOnce: false })
     ).toBe(true)
   })
 
@@ -47,14 +47,14 @@ describe('shouldBlockMailFrameImage', () => {
     // different answers — the decision has no URL input at all.
     const policy = blocking(['allowed@example.com'])
     expect(
-      shouldBlockMailFrameImage(policy, {
+      shouldBlockMailFrameRequest(policy, {
         messageId: 'm-allowed',
         sender: 'Allowed@Example.com',
         allowOnce: false
       })
     ).toBe(false)
     expect(
-      shouldBlockMailFrameImage(policy, {
+      shouldBlockMailFrameRequest(policy, {
         messageId: 'm-blocked',
         sender: 'other@example.com',
         allowOnce: false

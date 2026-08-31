@@ -48,10 +48,13 @@ interface StoredChainCursors {
  * 1. Invalidate the old run's write generation so a mid-flight page cannot
  *    checkpoint over the state written below.
  * 2. In one transaction, persist the preference and — when the change expands
- *    a *reached* limit past a completed attachment pass — reset the
- *    attachment cursor, so newly imported older mail cannot stay permanently
- *    unflagged after a crash (the ids-only pass re-runs after the expanded
- *    walk stops).
+ *    a *reached* limit past an attachment pass that already started — reset
+ *    the attachment cursor, so newly imported older mail cannot stay
+ *    permanently unflagged. A completed pass is the obvious case, but a
+ *    partial pass has the same hole: pages it already walked precede the ids
+ *    the expansion imports, so resuming from its token would skip them
+ *    forever (PR #101 review). The ids-only pass re-runs from page one after
+ *    the expanded walk stops.
  * 3. Schedule this account's historical work again. The shared indexing slot
  *    serializes the replacement behind the settling old chain, which releases
  *    the slot exactly once in its own settle path. Saving never waits for a
@@ -83,7 +86,7 @@ export function applyLifetimeCapChange(
   db.transaction(() => {
     if (next === null) deleteAccountSetting(db, accountId, LIFETIME_CAP_SETTING)
     else writeAccountSetting(db, accountId, LIFETIME_CAP_SETTING, String(next))
-    if (expandsReachedLimit && cursors?.attachment_cursor === 'done') {
+    if (expandsReachedLimit && cursors?.attachment_cursor != null) {
       db.prepare('UPDATE sync_state SET attachment_cursor = ? WHERE account_id = ?').run(
         'attachments',
         accountId

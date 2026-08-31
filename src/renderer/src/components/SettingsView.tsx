@@ -44,7 +44,12 @@ interface SettingsViewProps {
   accountSettings: AccountSettings | null
   onUpdateSetting: <K extends AppSettingKey>(key: K, value: AppSettings[K]) => void
   onUpdateAccountSetting: <K extends AccountSettingKey>(key: K, value: AccountSettings[K]) => void
-  onStatus: (status: AuthStatus) => void
+  /**
+   * Delivers a completed reorder's roster. The receiver adopts only the
+   * ordering: a reorder never changes the active account, so a response that
+   * raced a subsequent account switch must not roll that switch back.
+   */
+  onReordered: (status: AuthStatus) => void
   onAddAccount: () => void
   onReconnect: () => void
   onSignOut: () => void
@@ -77,7 +82,7 @@ export function SettingsView({
   accountSettings,
   onUpdateSetting,
   onUpdateAccountSetting,
-  onStatus,
+  onReordered,
   onAddAccount,
   onReconnect,
   onSignOut,
@@ -141,11 +146,11 @@ export function SettingsView({
       setReorderPending(true)
       bridge.auth
         .reorderAccounts(reordered)
-        .then(onStatus)
+        .then(onReordered)
         .catch(() => onToast('Could not reorder accounts'))
         .finally(() => setReorderPending(false))
     },
-    [onStatus, onToast, reorderPending, status.accounts]
+    [onReordered, onToast, reorderPending, status.accounts]
   )
 
   const pausedUntil = settings?.notificationsPausedUntil ?? null

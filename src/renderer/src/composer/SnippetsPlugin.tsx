@@ -2,16 +2,18 @@ import { $generateNodesFromDOM } from '@lexical/html'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import {
   $addUpdateTag,
-  $getRoot,
   $getSelection,
   $insertNodes,
+  $isElementNode,
   $isRangeSelection,
   $isTextNode,
   COMMAND_PRIORITY_HIGH,
   HISTORY_PUSH_TAG,
   KEY_ENTER_COMMAND,
   KEY_SPACE_COMMAND,
-  type LexicalEditor
+  type LexicalEditor,
+  type LexicalNode,
+  type TextNode
 } from 'lexical'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { matchInlineSnippetTrigger, SNIPPET_CURSOR_MARKER, type Snippet } from '../../../shared/snippets'
@@ -37,14 +39,32 @@ interface SnippetsPluginProps {
 function $insertSnippetBody(editor: LexicalEditor, bodyHtml: string): void {
   const dom = new DOMParser().parseFromString(prepareHtmlForEditor(bodyHtml).html, 'text/html')
   preserveBlankLineBlocks(dom)
-  $insertNodes($generateNodesFromDOM(editor, dom))
+  const nodes = $generateNodesFromDOM(editor, dom)
   // {cursor} names the caret's landing point; the marker itself never survives
-  // into the document. $insertNodes leaves the caret at the end otherwise.
-  for (const text of $getRoot().getAllTextNodes()) {
-    const index = text.getTextContent().indexOf(SNIPPET_CURSOR_MARKER)
-    if (index < 0) continue
-    text.spliceText(index, SNIPPET_CURSOR_MARKER.length, '', true)
-    break
+  // into the document. It is metadata of THIS insertion only, so it is removed
+  // from the generated nodes before they join the draft — a literal {cursor}
+  // the user typed elsewhere is content, never a target (PR #101 review).
+  let marker: { node: TextNode; offset: number } | null = null
+  const scan = (node: LexicalNode): void => {
+    if (marker) return
+    if ($isTextNode(node)) {
+      const index = node.getTextContent().indexOf(SNIPPET_CURSOR_MARKER)
+      if (index >= 0) {
+        node.spliceText(index, SNIPPET_CURSOR_MARKER.length, '', false)
+        marker = { node, offset: index }
+      }
+      return
+    }
+    if ($isElementNode(node)) for (const child of node.getChildren()) scan(child)
+  }
+  for (const node of nodes) scan(node)
+  $insertNodes(nodes)
+  // $insertNodes leaves the caret at the end; an attached marker node retargets
+  // it. (A marker that was a text node's entire content can normalize away
+  // during insertion — the end-of-insert caret is the graceful fallback.)
+  if (marker !== null) {
+    const target = marker as { node: TextNode; offset: number }
+    if (target.node.isAttached()) target.node.select(target.offset, target.offset)
   }
 }
 

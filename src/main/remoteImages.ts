@@ -29,14 +29,17 @@ export interface RegisteredMailFrame {
 }
 
 /**
- * Decide one image request from a mail frame. Pure so the matrix is unit
- * testable: default load passes everything; with blocking on, an
+ * Decide one network request from a mail frame — images, but equally the
+ * stylesheet, font, and media fetches hostile CSS can trigger (`@import`,
+ * `@font-face`): every request type leaks the reader's IP and open time, so
+ * the whole class shares one answer (PR #101 review). Pure so the matrix is
+ * unit testable: default load passes everything; with blocking on, an
  * unregistered frame is denied (fail closed), `Load once` admits exactly the
  * registered render, and otherwise only a stored per-sender override loads.
- * Two messages from different senders can reference the same image URL and
+ * Two messages from different senders can reference the same resource URL and
  * get different answers — the sender, not the URL, is the subject.
  */
-export function shouldBlockMailFrameImage(
+export function shouldBlockMailFrameRequest(
   policy: RemoteImagePolicy,
   frame: RegisteredMailFrame | undefined
 ): boolean {

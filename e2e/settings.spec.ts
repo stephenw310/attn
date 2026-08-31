@@ -2,9 +2,10 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import type { GmailThread } from '../src/main/gmail/parse'
-import { TEST_CHANNELS } from '../src/shared/ipc'
+import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { expectResponseHeld, holdNextResponse } from './holdResponse'
 
 // T32 (F15): the full-window settings surface, its palette commands, the
 // accounts reorder, the notification pause, and the Mod+/ cheat sheet — all
@@ -221,6 +222,53 @@ test.describe('settings surface', () => {
     await page.keyboard.press('Escape')
     await expect(sheet).toHaveCount(0)
   })
+
+  test('the open cheat sheet contains keyboard input: a covered composer cannot act', async ({ page }) => {
+    await expect(page.getByTestId('thread-row')).toHaveCount(8)
+    const composer = new ComposerPage(page)
+    await composer.openNew()
+    await composer.typeBody('Draft under the sheet')
+
+    await page.keyboard.press('ControlOrMeta+/')
+    const sheet = page.getByTestId('cheat-sheet')
+    await expect(sheet).toBeVisible()
+    // The sheet is modal (PR #101 review): the composer underneath must not
+    // receive its send shortcut — no queued send, not even a send error.
+    await page.keyboard.press('ControlOrMeta+Enter')
+    await expect(sheet).toBeVisible()
+    await expect(page.getByTestId('composer-send-error')).toHaveCount(0)
+    await composer.expectPending(0)
+
+    await page.keyboard.press('Escape')
+    await expect(sheet).toHaveCount(0)
+    await expect(composer.root).toBeVisible()
+    // Focus returned to the body: typing continues in the draft.
+    await page.keyboard.type('!')
+    await expect(composer.editor).toContainText('!')
+  })
+
+  test('the account menu withholds Settings while a draft is open', async ({ page }) => {
+    await expect(page.getByTestId('thread-row')).toHaveCount(8)
+    await page.keyboard.press('j')
+    await page.keyboard.press('Enter')
+    const composer = new ComposerPage(page)
+    await composer.openReply()
+
+    // Settings hides the content column while composer key handlers stay
+    // live, so the entry honors the same guard as the other account actions
+    // (PR #101 review).
+    await page.getByTestId('account-menu').getByRole('button').first().click()
+    await expect(page.getByTestId('account-settings')).toBeDisabled()
+    await page.keyboard.press('Escape')
+
+    // Save-and-close the draft; the entry re-arms.
+    await page.keyboard.press('Escape')
+    await expect(composer.root).toHaveCount(0)
+    await page.getByTestId('account-menu').getByRole('button').first().click()
+    await expect(page.getByTestId('account-settings')).toBeEnabled()
+    await page.getByTestId('account-settings').click()
+    await expect(page.getByTestId('settings-view')).toBeVisible()
+  })
 })
 
 test.describe('account reorder', () => {
@@ -290,6 +338,40 @@ test.describe('account reorder', () => {
     await relaunched.getByTestId('remove-account-keep').click()
     await expect(relaunched.getByTestId('account-menu')).toContainText('third@attn.test')
     await expect(row(relaunched, 'Gamma planning')).toBeVisible()
+  })
+
+  test('a held reorder response cannot roll back an account switch it raced', async ({ app, page }) => {
+    await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
+    await page.keyboard.press('ControlOrMeta+,')
+    const rows = page.getByTestId('settings-account-row')
+    await expect(rows).toHaveCount(3)
+
+    // Park the reorder's completed status snapshot in main, then switch away
+    // before letting it land (PR #101 review).
+    const release = await holdNextResponse(app, IPC_CHANNELS.accountsReorder)
+    await rows.nth(0).getByTestId('settings-account-down').click()
+    await expectResponseHeld(app)
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('settings-view')).toHaveCount(0)
+    // The renderer still holds the pre-reorder order, so Mod+2 is second@.
+    await page.keyboard.press('ControlOrMeta+2')
+    await expect(page.getByTestId('account-menu')).toContainText('second@attn.test')
+    await expect(row(page, 'Beta launch')).toBeVisible()
+
+    // The stale snapshot may contribute only the roster ordering. Its landing
+    // has no distinct visible effect (the switch response already carried the
+    // new order), so give it a beat and assert the switch was not rolled
+    // back — the buggy adoption reverted the chip immediately on release.
+    await release()
+    await page.waitForTimeout(500)
+    await expect(page.getByTestId('account-menu')).toContainText('second@attn.test')
+    await expect(row(page, 'Beta launch')).toBeVisible()
+    await page.getByTestId('account-menu').getByRole('button').first().click()
+    const menuRows = page.getByTestId('account-switch')
+    await expect(menuRows.nth(0)).toHaveAttribute('data-email', 'second@attn.test')
+    await expect(menuRows.nth(1)).toHaveAttribute('data-email', 'primary@attn.test')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('account-menu')).toContainText('second@attn.test')
   })
 })
 

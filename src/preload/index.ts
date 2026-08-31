@@ -193,6 +193,11 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
     },
+    onRemoteImagesChanged: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(IPC_CHANNELS.mailRemoteImagesChanged, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.mailRemoteImagesChanged, listener)
+    },
     onActionsReverted: (accountId: string, cb: (message: string) => void | Promise<void>): (() => void) =>
       subscribeToActionReverts(
         accountId,

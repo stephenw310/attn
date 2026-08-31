@@ -115,6 +115,7 @@ export const IPC_CHANNELS = {
   mailGetPendingActionCount: 'mail:getPendingActionCount',
   mailGetActionQueueStatus: 'mail:getActionQueueStatus',
   mailChanged: 'mail:changed',
+  mailRemoteImagesChanged: 'mail:remoteImagesChanged',
   mailActionsReverted: 'mail:actionsReverted',
   mailBodyHydrationFailed: 'mail:bodyHydrationFailed',
   mailFocusThreadAvailable: 'mail:focusThreadAvailable',
@@ -312,6 +313,9 @@ export interface BroadcastChannels {
   [IPC_CHANNELS.outboxChanged]: OutboxChanged
   [IPC_CHANNELS.outboxProgress]: import('./outbox').OutboxProgress | null
   [IPC_CHANNELS.mailChanged]: { serverSearchRequestId?: string; reason?: MailChangeReason }
+  // T33: the stored remote-image policy moved (toggle or per-sender override);
+  // mounted mail frames re-register to pick up their fresh answers.
+  [IPC_CHANNELS.mailRemoteImagesChanged]: undefined
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
@@ -326,6 +330,7 @@ const BROADCAST_CHANNELS = {
   [IPC_CHANNELS.outboxChanged]: true,
   [IPC_CHANNELS.outboxProgress]: true,
   [IPC_CHANNELS.mailChanged]: true,
+  [IPC_CHANNELS.mailRemoteImagesChanged]: true,
   [IPC_CHANNELS.mailActionsReverted]: true,
   [IPC_CHANNELS.mailBodyHydrationFailed]: true,
   [IPC_CHANNELS.mailFocusThreadAvailable]: true,
