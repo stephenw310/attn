@@ -1289,6 +1289,9 @@ count from the start of that page. Raising the limit or setting it to zero resum
 stored threads without counting them twice. An unchanged or lower limit makes no Gmail requests. Only an
 exhausted listing stores `done`. The search footer distinguishes capped headers from headers still syncing.
 Unit tests cover the cursor and count behavior; the Electron test raises and disables the cap after relaunch.
+The sweep ETA targets the smaller of the configured conversation limit and Gmail's account total. The
+displayed account total stays unchanged as a coverage measure. Tests cover a smaller limit, a limit above
+the account size, an unlimited sweep, and reaching the limit without continuing to show time remaining.
 
 Tuning defaults are grouped by behavior without changing their values. `src/main/sync/tuning.ts` now also
 owns polling and retry delays, bootstrap concurrency, Gmail page sizes and quota policy, body hydration
@@ -1314,6 +1317,8 @@ The split benchmark uses the supported Tab shortcuts and recognizes Inbox Zero w
 The integration review also reproduced a pre-existing account-switch race while a reply was still opening.
 Switch, add, and remove actions now treat a pending composer as open. A delayed-reply Electron test checks
 that the draft opens under the original account and switching becomes available after the composer closes.
+The follow-up merge preserves PR #99's account-removal order, awaited attachment cleanup, and persistent
+removal errors alongside these composer guards and the count-cache fixes.
 
 ## Schema revision 21 → 22: derived mailbox membership and dated index rows
 

@@ -1,13 +1,15 @@
 import { existsSync } from 'node:fs'
+import * as filesystem from 'node:fs/promises'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import { openDatabase } from '../db'
 import { parseStoredDraftAttachments } from './draftAttachments'
 import { saveDraft } from './drafts'
 import {
+  deleteOutboxSpool,
   MAX_DRAFT_ATTACHMENT_BYTES,
   MAX_DRAFT_ATTACHMENT_PATHS,
   reconcileOutboxSpool,
@@ -16,9 +18,15 @@ import {
   validateAttachmentCap
 } from './spool'
 
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, rm: vi.fn(actual.rm) }
+})
+
 const roots: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -52,6 +60,32 @@ describe('attachment cap math', () => {
 })
 
 describe('attachment spool ownership', () => {
+  it('reports deletion errors, retains the files for retry, and awaits successful removal', async () => {
+    const { root, db, draftId } = await testStore()
+    const source = join(root, 'private.txt')
+    await writeFile(source, 'private attachment')
+    await spoolDraftAttachments(db, root, 'me@example.com', draftId, [source])
+    const directory = join(root, 'outbox', draftId)
+    vi.mocked(filesystem.rm).mockRejectedValueOnce(new Error('EACCES: attachment is locked'))
+
+    await expect(deleteOutboxSpool(root, draftId)).rejects.toThrow('EACCES')
+    expect(existsSync(directory)).toBe(true)
+    await deleteOutboxSpool(root, draftId)
+    expect(existsSync(directory)).toBe(false)
+    await expect(deleteOutboxSpool(root, draftId)).resolves.toBeUndefined()
+    db.close()
+  })
+
+  it('rejects deletion outside an owned draft directory', async () => {
+    const { root, db } = await testStore()
+    const source = join(root, 'private.txt')
+    await writeFile(source, 'must survive')
+    await expect(deleteOutboxSpool(root, '..')).rejects.toThrow('Invalid attachment spool directory')
+    await expect(deleteOutboxSpool(root, '.')).rejects.toThrow('Invalid attachment spool directory')
+    expect(await readFile(source, 'utf8')).toBe('must survive')
+    db.close()
+  })
+
   it('retries a compare-and-swap conflict instead of discarding copied bytes', async () => {
     const { root, db, draftId } = await testStore()
     const source = join(root, 'dropped.txt')

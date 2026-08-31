@@ -383,72 +383,108 @@ test('account removal blocks shortcuts and composer opens until the response set
   await composer.expectFrom(SECOND)
 })
 
-test('failed removal keeps composing blocked until the recovery status settles', async ({ app, page }) => {
-  await expect(page.getByTestId('thread-row')).toHaveCount(2)
-  await app.evaluate(({ ipcMain }, channels) => {
-    type Handler = Parameters<typeof ipcMain.handle>[1]
-    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
-    const remove = handlers.get(channels.accountsRemove)
-    const status = handlers.get(channels.authGetStatus)
-    const save = handlers.get(channels.draftSave)
-    if (!remove || !status || !save) throw new Error('Missing account/draft handlers')
-    const activity = { draftSaves: 0 }
-    Object.assign(globalThis, { removalActivity: activity })
-    ipcMain.removeHandler(channels.draftSave)
-    ipcMain.handle(channels.draftSave, (...args) => {
-      activity.draftSaves++
-      return save(...args)
-    })
-    ipcMain.removeHandler(channels.accountsRemove)
-    ipcMain.handle(channels.accountsRemove, async (...args) => {
-      await remove(...args)
-      throw new Error('Simulated failure after account retirement')
-    })
-    ipcMain.removeHandler(channels.authGetStatus)
-    ipcMain.handle(channels.authGetStatus, async (...args) => {
-      const result = await status(...args)
-      await new Promise<void>((resolve) => {
-        Object.assign(globalThis, { releaseAccountResponse: resolve })
+for (const { choice, lastAccount } of [
+  { choice: 'keep', lastAccount: false },
+  { choice: 'delete', lastAccount: false },
+  { choice: 'delete', lastAccount: true }
+] as const) {
+  test(`failed ${choice} removal${lastAccount ? ' of the last account' : ''} keeps its warning across recovery and blocks composing until status settles`, async ({
+    app,
+    page
+  }) => {
+    await expect(page.getByTestId('thread-row')).toHaveCount(2)
+    if (lastAccount) {
+      const remaining = await page.evaluate((id) => window.attn.auth.removeAccount(id, false), SECOND)
+      expect(remaining.activeAccountId).toBe(PRIMARY)
+      expect(remaining.accounts).toHaveLength(1)
+    }
+    await app.evaluate(({ ipcMain }, channels) => {
+      type Handler = Parameters<typeof ipcMain.handle>[1]
+      const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
+      const remove = handlers.get(channels.accountsRemove)
+      const status = handlers.get(channels.authGetStatus)
+      const save = handlers.get(channels.draftSave)
+      if (!remove || !status || !save) throw new Error('Missing account/draft handlers')
+      const activity = { draftSaves: 0 }
+      Object.assign(globalThis, { removalActivity: activity })
+      ipcMain.removeHandler(channels.draftSave)
+      ipcMain.handle(channels.draftSave, (...args) => {
+        activity.draftSaves++
+        return save(...args)
       })
-      return result
-    })
-  }, IPC_CHANNELS)
-  await page.getByTestId('account-menu').getByRole('button').first().click()
-  await page.getByTestId('account-remove').click()
-  await page.getByTestId('remove-account-keep').click()
-  await expectAccountResponseHeld(app)
-  await expect(page.getByTestId('toast')).toContainText('Could not remove the account')
-  // Let the rejection's React update commit before exercising the shortcut.
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      ipcMain.removeHandler(channels.accountsRemove)
+      ipcMain.handle(channels.accountsRemove, async (...args) => {
+        // Retire the account but retain its local rows, as a failed spool purge does.
+        await remove(args[0], args[1], false)
+        throw new Error('Simulated failure after account retirement')
       })
-  )
-  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
-  await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
-  await page.keyboard.press('c')
-  // Wait through the draft IPC queue before asserting that composing stayed blocked.
-  await page.evaluate(() => window.attn.draft.list())
-  expect(
-    await app.evaluate(
-      () => (globalThis as unknown as { removalActivity: { draftSaves: number } }).removalActivity.draftSaves
+      ipcMain.removeHandler(channels.authGetStatus)
+      ipcMain.handle(channels.authGetStatus, async (...args) => {
+        const result = await status(...args)
+        await new Promise<void>((resolve) => {
+          Object.assign(globalThis, { releaseAccountResponse: resolve })
+        })
+        return result
+      })
+    }, IPC_CHANNELS)
+    await page.getByTestId('account-menu').getByRole('button').first().click()
+    await page.getByTestId('account-remove').click()
+    await page.getByTestId(`remove-account-${choice}`).click()
+    await expectAccountResponseHeld(app)
+    const warning = page.getByTestId('account-removal-error')
+    await expect(warning).toContainText(
+      choice === 'delete' ? 'Could not delete all local data' : 'Could not remove the account'
     )
-  ).toBe(0)
-  await expect(page.getByTestId('composer')).toHaveCount(0)
-  await app.evaluate(() => {
-    const state = globalThis as unknown as { releaseAccountResponse: () => void }
-    state.releaseAccountResponse()
+    await expect(warning).toContainText(PRIMARY)
+    // Let the rejection's React update commit before exercising the shortcut.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        })
+    )
+    await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+    await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
+    await page.keyboard.press('c')
+    // Wait through the draft IPC queue before asserting that composing stayed blocked.
+    await page.evaluate(() => window.attn.draft.list())
+    expect(
+      await app.evaluate(
+        () =>
+          (globalThis as unknown as { removalActivity: { draftSaves: number } }).removalActivity.draftSaves
+      )
+    ).toBe(0)
+    await expect(page.getByTestId('composer')).toHaveCount(0)
+    await app.evaluate(() => {
+      const state = globalThis as unknown as { releaseAccountResponse: () => void }
+      state.releaseAccountResponse()
+    })
+    if (lastAccount) {
+      await expect(page.getByTestId('login-screen')).toBeVisible()
+      await expect(warning).toContainText('Could not delete all local data')
+      await page.getByTestId('account-removal-error-dismiss').click()
+      await expect(warning).toHaveCount(0)
+      return
+    }
+    await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+    await expect(warning).toBeVisible()
+    if (choice === 'delete') {
+      expect((await accountDataStats(app, PRIMARY)).rowTotal).toBeGreaterThan(0)
+      const directory = join(__dirname, '.artifacts')
+      mkdirSync(directory, { recursive: true })
+      await page.screenshot({ path: join(directory, 'account-removal-error.png') })
+    }
+    await page.getByTestId('account-removal-error-dismiss').click()
+    await expect(warning).toHaveCount(0)
+    expect(await page.evaluate(() => window.attn.draft.list())).toEqual([])
+    const composer = new ComposerPage(page)
+    await composer.openNew()
+    await composer.expectFrom(SECOND)
+    await composer.editor.fill('Text typed after account recovery')
+    await composer.expectSaved()
+    await expect(composer.editor).toContainText('Text typed after account recovery')
   })
-  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
-  expect(await page.evaluate(() => window.attn.draft.list())).toEqual([])
-  const composer = new ComposerPage(page)
-  await composer.openNew()
-  await composer.expectFrom(SECOND)
-  await composer.editor.fill('Text typed after account recovery')
-  await composer.expectSaved()
-  await expect(composer.editor).toContainText('Text typed after account recovery')
-})
+}
 
 test('a switch restores each account’s last view and selection', async ({ page }) => {
   await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
@@ -713,6 +749,35 @@ test('a reply drafted on one account keeps its From and Drafts membership across
   await composer.root.waitFor()
   await composer.expectFrom(PRIMARY)
   await expect(composer.editor).toContainText('Reply bound to the primary account')
+})
+
+test.describe('three-account removal order', () => {
+  test.use({ seed: 'fixtures/seed-three-accounts.json' })
+
+  for (const choice of ['keep', 'delete'] as const) {
+    test(`${choice} moves from the middle account to its successor, then wraps from the last`, async ({
+      page,
+      boot
+    }) => {
+      await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+      await page.keyboard.press('ControlOrMeta+2')
+      await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+      await page.getByTestId('account-menu').getByRole('button').first().click()
+      await page.getByTestId('account-remove').click()
+      await page.getByTestId(`remove-account-${choice}`).click()
+      await expect(page.getByTestId('account-menu')).toContainText('third@attn.test')
+      await expect(page.getByTestId('thread-subject')).toHaveText('Gamma planning')
+
+      const { page: relaunched } = await boot.relaunch()
+      await expect(relaunched.getByTestId('account-menu')).toContainText('third@attn.test')
+      await relaunched.getByTestId('account-menu').getByRole('button').first().click()
+      await expect(relaunched.getByTestId('account-switch')).toHaveCount(2)
+      await relaunched.getByTestId('account-remove').click()
+      await relaunched.getByTestId(`remove-account-${choice}`).click()
+      await expect(relaunched.getByTestId('account-menu')).toContainText(PRIMARY)
+      await expect(relaunched.getByTestId('thread-subject')).toHaveText('Alpha roadmap')
+    })
+  }
 })
 
 test('removing the active account falls back to the survivor, then to onboarding', async ({ page }) => {

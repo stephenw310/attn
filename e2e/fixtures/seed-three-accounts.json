@@ -1,0 +1,61 @@
+{
+  "accounts": [
+    {
+      "account": "primary@attn.test",
+      "threads": [
+        {
+          "id": "t-alpha",
+          "messages": [
+            {
+              "id": "m-alpha",
+              "labelIds": ["INBOX"],
+              "receivedDaysAgo": 0,
+              "from": "Ada <ada@example.com>",
+              "to": "primary@attn.test",
+              "subject": "Alpha roadmap",
+              "bodyText": "First account"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "account": "second@attn.test",
+      "threads": [
+        {
+          "id": "t-beta",
+          "messages": [
+            {
+              "id": "m-beta",
+              "labelIds": ["INBOX"],
+              "receivedDaysAgo": 0,
+              "from": "Bea <bea@example.com>",
+              "to": "second@attn.test",
+              "subject": "Beta launch",
+              "bodyText": "Second account"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "account": "third@attn.test",
+      "threads": [
+        {
+          "id": "t-gamma",
+          "messages": [
+            {
+              "id": "m-gamma",
+              "labelIds": ["INBOX"],
+              "receivedDaysAgo": 0,
+              "from": "Cam <cam@example.com>",
+              "to": "third@attn.test",
+              "subject": "Gamma planning",
+              "bodyText": "Third account"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

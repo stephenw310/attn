@@ -70,6 +70,7 @@ import { Toast } from './Toast'
 interface InboxProps {
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
+  onRemovalError: (message: string) => void
 }
 
 /** Selection and scroll survive a round trip away from each view (SPEC F3). */
@@ -117,7 +118,7 @@ function sidebarStorage(): Storage | null {
   }
 }
 
-export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
+export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.JSX.Element {
   // The previous visit's snapshot for this account, saved by the guarded
   // switch before the tree remounted (F18: a warm switch restores the
   // account's last view, selection, and scroll). Read once per mount.
@@ -815,7 +816,11 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           onStatus(next)
         })
         .catch(() => {
-          void showToast('Could not remove the account')
+          onRemovalError(
+            deleteData
+              ? `Could not delete all local data for ${target}. Re-add the account if needed, then sign out and delete local data again.`
+              : `Could not remove the account ${target}. Check the account menu and try again if it is still listed.`
+          )
           // The removal can fail after main already dropped the tokens and
           // activated the next account; re-pull the status so this tree never
           // keeps rendering a removed account over another account's reads.
@@ -829,7 +834,7 @@ export function Inbox({ status, onStatus }: InboxProps): React.JSX.Element {
           setAccountSwitchPending(false)
         })
     },
-    [onStatus, showToast, status.activeAccountId]
+    [onRemovalError, onStatus, status.activeAccountId]
   )
   const removeAccountDeleteRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {

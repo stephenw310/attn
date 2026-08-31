@@ -15,7 +15,7 @@ import { actionQueueStatus, clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
 import { type Db, openDatabase, schemaVersion } from '../db'
-import { accountKeyedTables, purgeAccountRows } from '../db/purgeAccount'
+import { accountKeyedTables, accountOutboxSpoolIds, purgeAccountRows } from '../db/purgeAccount'
 import { countInboxUnread, countSystemMailboxes, listMailboxThreads } from '../db/queries'
 import { searchThreads } from '../db/search'
 import { loadSeed, readSeedRemoteThreadIds, readSeedThread, readSeedThreadAccount } from '../dev/seed'
@@ -27,7 +27,7 @@ import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { cachePrimarySendAs } from '../outbox/sendAs'
 import { OutboxSender } from '../outbox/sender'
-import { cleanOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
+import { cleanOutboxSpool, deleteOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { SnoozeScheduler } from '../scheduler'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from '../settings'
 import { getSplitState, hasSplitSetup } from '../splits'
@@ -330,16 +330,30 @@ export class ServiceRuntime {
       // before the rows they might touch disappear (AGENTS shutdown rule).
       if (this.sessions.has(accountId)) throw new Error('account session still active')
       const retirement = this.retirements.get(accountId)
-      if (retirement) await retirement
-      if (this.sessions.has(accountId)) throw new Error('account session still active')
-      const purged = purgeAccountRows(this.db, accountId)
-      for (const outboxId of purged.outboxSpoolIds) cleanOutboxSpool(this.input.userDataPath, outboxId)
-      this.log(
-        'log',
-        `[accounts] deleted local data for ${accountId} (${purged.tables.length} tables, ${purged.outboxSpoolIds.length} spool entries)`
-      )
-      this.broadcastBadge()
-      return undefined
+      const deletion = (async () => {
+        await retirement
+        if (this.sessions.has(accountId)) throw new Error('account session still active')
+        // Keep the identifying rows until every directory is gone. A failed
+        // deletion stays retryable and must never be reported as a successful purge.
+        for (const outboxId of accountOutboxSpoolIds(this.db, accountId)) {
+          await deleteOutboxSpool(this.input.userDataPath, outboxId)
+        }
+        const purged = purgeAccountRows(this.db, accountId)
+        this.log(
+          'log',
+          `[accounts] deleted local data for ${accountId} (${purged.tables.length} tables, ${purged.outboxSpoolIds.length} spool entries)`
+        )
+        this.broadcastBadge()
+      })()
+      // A concurrent re-add and normal shutdown must wait for filesystem work
+      // as well as worker retirement. The requesting caller still sees failures.
+      const settled = deletion
+        .catch(() => {})
+        .finally(() => {
+          if (this.retirements.get(accountId) === settled) this.retirements.delete(accountId)
+        })
+      this.retirements.set(accountId, settled)
+      return deletion
     }
     if (operation === 'mark-login-item-registered') {
       writeSetting(this.db, 'loginItemRegistered', 'true')

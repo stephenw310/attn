@@ -183,9 +183,15 @@ export async function runLifetimeSweep(
       // yields, so read the indexed count rather than deriving it from this
       // sweep's listing position.
       threadsIndexed = countIndexedThreads()
+      // The account total describes coverage. ETA describes this sweep, which
+      // stops at the local cap even when Gmail has more conversations.
+      const targetThreads =
+        threadsTotal === undefined || threadCap === LIFETIME_THREAD_CAP_UNLIMITED
+          ? threadsTotal
+          : Math.min(threadsTotal, threadCap)
       const etaMs = estimateRemainingMs(
         threadsIndexed,
-        threadsTotal,
+        targetThreads,
         threadsIndexedBySweep,
         indexingElapsedMs
       )

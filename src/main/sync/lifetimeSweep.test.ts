@@ -338,7 +338,13 @@ describe('lifetime header indexing', () => {
     })
   })
 
-  it('estimates remaining time from metadata indexing, excluding listing work', async () => {
+  it.each([
+    { threadCap: undefined, expectedEtaMs: 7_200 },
+    { threadCap: 4, expectedEtaMs: 2_400 },
+    { threadCap: 20, expectedEtaMs: 7_200 },
+    { threadCap: 0, expectedEtaMs: 7_200 },
+    { threadCap: 1, expectedEtaMs: undefined }
+  ])('estimates remaining metadata work with cap $threadCap', async ({ threadCap, expectedEtaMs }) => {
     let now = 0
     const state = { cursor: 'lifetime', threadIds: new Set<string>() }
     mocks.persistThread.mockImplementation((_db, _accountId, thread: GmailThread) => {
@@ -375,7 +381,8 @@ describe('lifetime header indexing', () => {
       {
         time: { now: () => now, timers: systemTime.timers },
         requestIntervalMs: 0,
-        pagePauseMs: 0
+        pagePauseMs: 0,
+        threadCap
       }
     )
 
@@ -383,11 +390,15 @@ describe('lifetime header indexing', () => {
       expect.objectContaining({
         threadsDone: 1,
         threadsTotal: 10,
-        etaMs: 7_200,
         elapsedMs: 1_000,
         threadsPerMinute: 60
       })
     )
+    // Listing takes 200ms; only the 800ms metadata fetch determines the pace.
+    // Keep the full account total for coverage, but time only the work before
+    // the cap or account end, whichever comes first. At the cap, no ETA remains.
+    const indexed = events.onProgress.mock.calls.find(([event]) => event.threadsDone === 1)?.[0]
+    expect(indexed?.etaMs).toBe(expectedEtaMs)
   })
 
   it('reports actual weighted-limiter wait separately from the sweep duty cycle', async () => {
@@ -546,6 +557,7 @@ describe('lifetime header indexing', () => {
       expect.objectContaining({ threadsDone: 1, reason: 'running' })
     )
     expect(events.onProgress.mock.calls.every(([event]) => !('threadsTotal' in event))).toBe(true)
+    expect(events.onProgress.mock.calls.every(([event]) => !('etaMs' in event))).toBe(true)
   })
 
   it('does not expose hidden persistence as a visible-mail change signal', async () => {

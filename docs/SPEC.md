@@ -188,7 +188,9 @@ Backfill has two distinct completion points:
 
 After interactive readiness, the footer reports **Live · indexing older mail** rather than a blocking
 “Syncing” state. The lifetime line reads **X of Y threads indexed · time remaining**, where X is the account's
-unique local thread count and Y is the current profile thread total; it also exposes an
+unique local thread count and Y is the current profile thread total. The ETA estimates time to the local
+sweep limit or the account total, whichever is smaller; disabling the limit uses the account total. No ETA
+is shown once that target is reached or when the account total is unknown. The footer also exposes an
 explicit quota-wait state instead of appearing stuck during backoff. The top-bar “N to zero” value is the
 total unread Inbox count, not sync progress, and may exceed the current rendered-list window.
 
@@ -582,6 +584,9 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   and unlisted until the same address is added again, at which point sync resumes from its stored cursors
   instead of re-backfilling. The active account falls to the next remaining one; removing the last account
   returns to F1's signed-out screen.
+  Deletion waits for attachment files before purging the identifying store rows. If deletion fails, the
+  account stays signed out, the remaining data stays available for a retry, and a dismissible warning
+  remains visible after the view changes. Re-adding the account allows another Delete attempt.
 - Out of scope for v1: unified inbox, cross-account search, moving mail between accounts, a From-account
   picker in the composer (F6), per-account themes.
 
