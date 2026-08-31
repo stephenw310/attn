@@ -195,14 +195,18 @@ async function adoptServiceAccounts(): Promise<void> {
  * a future re-add to resume from stored cursors (Keep).
  */
 async function removeAccount(accountId: string, deleteData: boolean): Promise<AuthStatus> {
-  if (!rosterAccountIds().includes(accountId)) throw new Error('unknown account')
+  const removedIndex = rosterAccountIds().indexOf(accountId)
+  if (removedIndex < 0) throw new Error('unknown account')
   cancelActiveSignIn()
   if (seedAccountIds.length > 0) seedAccountIds = seedAccountIds.filter((id) => id !== accountId)
   else storedAccounts = removeAccountTokens(app.getPath('userData'), accountId)
   authGenerations.delete(accountId)
   // Removing the active account activates the next by position; removing a
   // background account leaves the surface alone.
-  if (activeAccountId === accountId) activeAccountId = rosterAccountIds()[0] ?? null
+  if (activeAccountId === accountId) {
+    const remaining = rosterAccountIds()
+    activeAccountId = remaining[removedIndex] ?? remaining[0] ?? null
+  }
   await adoptServiceAccounts()
   if (deleteData) await service?.internal('remove-account-data', accountId)
   console.log(`[auth] removed account ${accountId} (${deleteData ? 'deleted' : 'kept'} local data)`)

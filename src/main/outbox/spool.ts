@@ -222,12 +222,17 @@ export async function removeDraftAttachment(
   return { attachments: publicDraftAttachments(next), changed: true }
 }
 
-/** Remove one draft's owned attachment directory without escaping userData. */
-export function cleanOutboxSpool(userDataPath: string, id: string): void {
+/** Await deletion of an owned attachment directory, reporting any filesystem failure. */
+export async function deleteOutboxSpool(userDataPath: string, id: string): Promise<void> {
   const root = resolve(userDataPath, 'outbox')
   const directory = resolve(root, id)
-  if (!isPathInside(root, directory)) return
-  void rm(directory, { recursive: true, force: true }).catch(() => {})
+  if (!isPathInside(root, directory)) throw new Error('Invalid attachment spool directory')
+  await rm(directory, { recursive: true, force: true, maxRetries: 3 })
+}
+
+/** Best-effort cleanup after send/discard; startup reconciliation retries leftovers. */
+export function cleanOutboxSpool(userDataPath: string, id: string): void {
+  void deleteOutboxSpool(userDataPath, id).catch(() => {})
 }
 
 /** Catch cleanup interrupted between the durable sent/discard transition and filesystem removal. */

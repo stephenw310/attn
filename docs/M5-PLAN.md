@@ -390,10 +390,10 @@ on A shows the banner only when A is active while B keeps triaging, and reconnec
 invoke taking `(accountId, deleteData)`. The menu and palette say **Sign out**; the confirmation names
 the account and offers **Sign out and delete local data** (default, focused),
 **Sign out and keep local data**, or
-Cancel. Delete routes through the utility's `remove-account-data` operation, which waits out the
-torn-down session's worker retirement, then runs `purgeAccountRows` (`src/main/db/purgeAccount.ts`) —
-the account-keyed tables are *walked from the live schema*, FTS goes through the rowid map, the
-`accounts` roster row goes too, and the outbox spool ids come back for post-commit file cleanup.
+Cancel. Delete routes through the utility's `remove-account-data` operation, which waits for worker
+retirement and attachment spool deletion before running `purgeAccountRows` (`src/main/db/purgeAccount.ts`).
+The helper walks account-keyed tables from the live schema, removes FTS entries through the rowid map,
+and deletes the `accounts` row.
 `purgeAccount.test.ts` seeds a row into every account-keyed table generically from `table_info`, so a
 future table is covered (or fails loudly) the day it lands. Keep leaves rows dormant; in seeded test
 profiles a persisted `seedAccountIds` app setting keeps a Keep-removed account off the boot roster
@@ -405,12 +405,12 @@ survivor-then-onboarding, and Cancel.
 
 - `accounts:remove` (explicit confirmation in the UI; palette command *Sign out*): the confirmation
   always removes the token-map entry and stops the account's session and executors, and asks what to do
-  with local data — **Delete local data** (default) or **Keep local data** (D3). Delete runs in one
-  transaction: the account's rows from **every** account-keyed table (enumerate from the schema, not a
-  hand-list that rots — walk `CURRENT_SCHEMA` tables for `account_id` columns in a unit-tested helper),
-  its FTS rows (`removeAccountFromIndex` exists), then its outbox/attachment spool files. Keep leaves the
-  rows dormant — no roster entry, so nothing lists or reads them — and re-adding the same normalized
-  address resumes from the stored cursors instead of re-backfilling (the F1 add-or-refresh path plus the
+  with local data — **Delete local data** (default) or **Keep local data** (D3). Delete first awaits
+  outbox/attachment spool deletion, then removes rows from **every** account-keyed table and the FTS
+  index in one transaction. A unit-tested helper enumerates tables with `account_id` columns from the
+  schema so new tables are covered. Keep leaves rows dormant, with no roster entry to list or read them.
+  Re-adding the same normalized address resumes from the stored cursors instead of re-backfilling (the
+  F1 add-or-refresh path plus the
   existing cursor plan already produce this; the e2e proves it). `__app__` settings survive either way.
 - Active fallback: removing the active account activates the next by position; removing the last account
   lands on F1's signed-out screen (and clears `activeAccountId`).
@@ -428,6 +428,13 @@ cannot refill dormant or purged rows; draft mutations retain their existing shut
 Runtime tests hold a real client's history response across Keep and Delete removal and verify the
 survivor is unchanged. The confirmation blocks keyboard dispatch, and the pending removal uses the
 account-switch composer guard until its response settles. E2e holds that response to exercise the race.
+
+The post-merge review follow-up preserves the removed account's roster position, selecting its
+successor and wrapping to the first account only when removing the last position. Keep and Delete
+both have three-account e2e coverage, including relaunch. Delete now waits for spool removal before
+purging the identifying rows. Filesystem failures reject the operation and retain those rows for a
+retry; the error warning survives the account change until dismissed. Runtime tests hold cleanup
+across a re-add, reject a deletion, and retry it while preserving the other account's files.
 
 ### A7 — Multi-account performance and isolation audit
 
