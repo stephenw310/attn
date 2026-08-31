@@ -23,16 +23,28 @@ export interface ParsedSearchQuery {
 
 export interface SearchCoverage {
   headersComplete: boolean
+  headersCapped: boolean
   indexComplete: boolean
   attachmentFlagsComplete: boolean
-  messagesTotal: number
-  messagesWithBody: number
+  /**
+   * Stored mail beyond the eager-bodies window is header-only until opened, so
+   * a body-text term can miss it. This is a flag rather than a count because
+   * counting bodies meant reading every stored message on every search: 414 ms
+   * at a million messages, and it never reaches "complete" anyway, since
+   * on-demand bodies are the design rather than a sync stage that finishes.
+   */
+  bodiesOnDemand: boolean
 }
 
 export interface SearchResponse {
   rows: ThreadRow[]
   drafts: Draft[]
   coverage: SearchCoverage
+  /**
+   * The search filled its recency window, so matches older than the newest few
+   * thousand — or ones only a filter would have selected — were not considered.
+   */
+  partial: boolean
 }
 
 export type ServerSearchResponse =

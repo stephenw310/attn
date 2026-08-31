@@ -65,7 +65,9 @@ attachment flags, so `has:attachment` is trustworthy before bodies are hydrated.
 pass only covers rows that predate the index (a manually upgraded dogfood profile) and finishes immediately
 on a freshly synced store.
 
-That is four cursors, not three. Any task that moves or restarts sync has to carry all four.
+That is five cursors, not three: `mailbox_cursor` joined them on 2026-08-29 for derived mailbox
+membership, and unlike the rest it runs before any Gmail work because counts and All Mail read its
+table. Any task that moves or restarts sync has to carry all five.
 
 ### The shipped stage pipeline
 
@@ -1271,6 +1273,96 @@ screenshots have been reviewed, and `npm run verify` is green.
 
 ---
 
+## PR #98 review corrections
+
+The message join in local search starts from the bounded match set. A query-plan test prevents SQLite
+from scanning the account's messages before checking that set. The manual upgrade below uses the same
+primary-key order as the current schema, and a test executes the documented SQL to check keys and dates.
+The partial-results marker counts one match past the window, so an exact fit does not claim truncation.
+Gmail search excludes only the bounded local results already shown, not every cached match. Cached matches
+outside either the candidate window or the result limit appear in the Gmail section without a redundant
+fetch. Tests cover the production candidate limit, repeated ids across Gmail pages, the result limit, and
+the seeded Electron search path with an empty filtered local window.
+
+A sweep stopped by its limit stores `capped:lifetime` or `capped:lifetime:<page-token>`, with the processed
+count from the start of that page. Raising the limit or setting it to zero resumes that page and skips
+stored threads without counting them twice. An unchanged or lower limit makes no Gmail requests. Only an
+exhausted listing stores `done`. The search footer distinguishes capped headers from headers still syncing.
+Unit tests cover the cursor and count behavior; the Electron test raises and disables the cap after relaunch.
+The sweep ETA targets the smaller of the configured conversation limit and Gmail's account total. The
+displayed account total stays unchanged as a coverage measure. Tests cover a smaller limit, a limit above
+the account size, an unlimited sweep, and reaching the limit without continuing to show time remaining.
+
+Tuning defaults are grouped by behavior without changing their values. `src/main/sync/tuning.ts` now also
+owns polling and retry delays, bootstrap concurrency, Gmail page sizes and quota policy, body hydration
+bounds, and the diagnostic list limit. `src/shared/outboxTuning.ts` owns composer checkpoints, send recovery,
+shutdown deadlines, retention, and undo-send options. The renderer's interaction timings live in
+`src/renderer/src/tuning.ts`. These are compile-time defaults; existing injected options and persisted
+preferences retain their behavior. Protocol, MIME, schema, and security constants stay with their owners.
+
+A second review found and corrected additional failure paths. Reauthentication during a paused mailbox
+membership rebuild now queues a replacement pass after the canceled pass exits. Mailbox counts invalidate
+on SQLite writes, including background batches without a mail broadcast, and search coverage reads the
+current sync cursors on each request. Explicit snooze searches retain older local matches outside the recent
+message window because Gmail cannot search local snooze state. Their query starts from pending reminders
+and looks up each thread's messages by index. Regression tests exercise each path against the real SQLite
+store. The scale suite measures raw utility queries so a warm summary cache cannot hide an account scan.
+
+The review also integrates PR #96's account restore and removal changes from `main`. Mailbox summaries now
+use the runtime's per-account cache with SQLite write invalidation. Targeted All Mail lookups retain the
+materialized index, and account restore retains the row-first refresh order. The standard performance
+profile includes two accounts; the scale and search-index profiles explicitly keep a single account.
+The split benchmark uses the supported Tab shortcuts and recognizes Inbox Zero when the target is empty.
+
+The integration review also reproduced a pre-existing account-switch race while a reply was still opening.
+Switch, add, and remove actions now treat a pending composer as open. A delayed-reply Electron test checks
+that the draft opens under the original account and switching becomes available after the composer closes.
+The follow-up merge preserves PR #99's account-removal order, awaited attachment cleanup, and persistent
+removal errors alongside these composer guards and the count-cache fixes.
+
+## Schema revision 21 → 22: derived mailbox membership and dated index rows
+
+Shipped 2026-08-29 with SPEC §9 #22. Additive and data-preserving, so it qualifies for the manual
+local-upgrade procedure in [AGENTS.md](../AGENTS.md). Run every statement inside one
+`BEGIN IMMEDIATE … COMMIT`, against a stopped database, after taking the untouched backup that procedure
+requires.
+
+```sql
+CREATE TABLE thread_mailboxes (
+  account_id TEXT NOT NULL,
+  view       TEXT NOT NULL,
+  thread_id  TEXT NOT NULL,
+  sort_at    INTEGER NOT NULL,
+  PRIMARY KEY (account_id, thread_id, view)
+);
+CREATE INDEX idx_thread_mailboxes_recent
+  ON thread_mailboxes (account_id, view, sort_at DESC, thread_id);
+
+ALTER TABLE sync_state ADD COLUMN mailbox_cursor TEXT;
+
+ALTER TABLE message_fts_map ADD COLUMN internal_date INTEGER;
+CREATE INDEX idx_message_fts_map_recent
+  ON message_fts_map (account_id, internal_date DESC, fts_rowid);
+
+-- Existing map rows carry no date, and NULL sorts last under DESC, so a bounded
+-- search would hide recent mail until this runs. The FTS backfill cannot fill it:
+-- it skips rows the map already holds.
+UPDATE message_fts_map
+SET internal_date = (
+  SELECT m.internal_date FROM messages m
+  WHERE m.account_id = message_fts_map.account_id AND m.id = message_fts_map.message_id
+);
+
+PRAGMA user_version = 22;
+```
+
+`thread_mailboxes` is deliberately left empty: `mailbox_cursor` stays NULL, and the app fills the table on
+the next launch through the resumable pass in `db/mailboxMembership.ts`, before it starts any Gmail work.
+Counts and All Mail read that table, so both are incomplete until the pass finishes — on a large profile,
+watch for the `[sync] mailbox membership filled for N threads` line before judging either.
+
+---
+
 ## Out of scope for M3
 
 Snippets (F8), follow-up reminders (F9), the full settings surface (F15), AI reply drafting (F17), and
@@ -1289,7 +1381,7 @@ T25 registered `search.allGmail`, and T26 shipped the palette and its inventory 
 
 | Question | Why it matters | Decide by |
 |---|---|---|
-| Pathological-mailbox posture: pick a design target such as smooth to 250k messages, then throttle harder, cap, or expose a setting? | §7's budgets are written against 50k messages, and lifetime headers can exceed that | E7's real-mailbox capture in [T20-EVIDENCE.md](T20-EVIDENCE.md), plus T23's measured index size and query latency |
+| ~~Pathological-mailbox posture~~ | **Decided 2026-08-29 (SPEC §9 #22):** smooth to about one million messages, degraded but not broken beyond it, with server search serving the tail. The 2026-08-29 synthetic probe in [T20-EVIDENCE.md](T20-EVIDENCE.md) showed the ceiling was three query shapes, not sync completeness; the counts, coverage-caching, membership and bounded-search changes shipped with that entry. The opt-in 40,000-thread `e2e:perf:scale` profile now checks those bounded reads; the user-facing historical cap control remains M4 T32A | done |
 
 Open defects and coverage gaps live in [KNOWN-ISSUES.md](KNOWN-ISSUES.md). Manual sign-off evidence is ticked
 in [T20-EVIDENCE.md](T20-EVIDENCE.md).

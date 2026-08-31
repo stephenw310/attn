@@ -1,6 +1,7 @@
 import { errorMessage } from '../../shared/error'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
+import { MAIL_RETRY_FIRST_MS, MAIL_RETRY_MAX_MS, MAIL_RETRY_SECOND_MS } from '../sync/tuning'
 
 export type QueueIntent =
   | { kind: 'modifyLabels'; threadId: string; add: string[]; remove: string[] }
@@ -85,5 +86,9 @@ export function classifyActionError(error: unknown): ActionErrorKind {
 }
 
 export function retryDelayMs(previousAttempts: number): number {
-  return previousAttempts === 0 ? 5_000 : previousAttempts === 1 ? 30_000 : 60_000
+  return previousAttempts === 0
+    ? MAIL_RETRY_FIRST_MS
+    : previousAttempts === 1
+      ? MAIL_RETRY_SECOND_MS
+      : MAIL_RETRY_MAX_MS
 }

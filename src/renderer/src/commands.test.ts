@@ -72,6 +72,7 @@ describe('command catalog', () => {
       'split.next',
       'split.manage',
       'account.add',
+      'account.remove',
       'theme.system',
       'theme.dispatch-dark',
       'theme.dispatch-light',

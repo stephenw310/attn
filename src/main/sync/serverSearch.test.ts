@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { openDatabase } from '../db'
-import { SEARCH_RESULT_LIMIT, searchThreads } from '../db/search'
+import { SEARCH_RECENT_MESSAGE_LIMIT, SEARCH_RESULT_LIMIT, searchThreads } from '../db/search'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { ensureAccount, persistThread } from './persist'
@@ -124,7 +124,7 @@ describe('searchAllGmail', () => {
     }
   })
 
-  it('skips locally matching ids beyond the visible local result limit', async () => {
+  it('returns cached matches beyond the visible local result limit without refetching them', async () => {
     const db = openDatabase(':memory:')
     try {
       ensureAccount(db, ACCOUNT, ACCOUNT)
@@ -148,10 +148,55 @@ describe('searchAllGmail', () => {
 
       const result = await searchAllGmail(db, ACCOUNT, provider, 'Remote')
 
+      expect(provider.listThreadIds).toHaveBeenCalledOnce()
+      expect(provider.getThread).not.toHaveBeenCalled()
+      expect(result.rows.map((row) => row.id)).toEqual(overflowLocalIds)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('finds a cached old match outside the recency window and dedupes it across Gmail pages', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, ACCOUNT, ACCOUNT)
+      const old = thread('old-invoice', Date.UTC(2010, 0, 1))
+      for (const message of old.messages ?? []) {
+        if (message.payload) delete message.payload.body
+      }
+      const remote = thread('uncached-invoice', Date.UTC(2009, 0, 1))
+      db.transaction(() => {
+        persistThread(db, ACCOUNT, old, { metadataOnly: true })
+        for (let index = 0; index < SEARCH_RECENT_MESSAGE_LIMIT; index++) {
+          persistThread(db, ACCOUNT, thread(`recent-${index}`, Date.UTC(2026, 0, 1) + index))
+        }
+      })()
+      const query = 'remote before:2011-01-01'
+      expect(searchThreads(db, ACCOUNT, query)).toMatchObject({ rows: [], partial: true })
+      const provider: ServerSearchProvider = {
+        listThreadIds: vi
+          .fn()
+          .mockResolvedValueOnce({ threadIds: [old.id, old.id], nextPageToken: 'page-2' })
+          .mockResolvedValueOnce({ threadIds: [old.id, remote.id] }),
+        getThread: vi.fn(async (id) => {
+          if (id !== remote.id) throw new Error(`unexpected refetch of cached thread ${id}`)
+          return remote
+        }),
+        getAttachmentData: vi.fn(async () => undefined)
+      }
+
+      const result = await searchAllGmail(db, ACCOUNT, provider, query)
+
+      expect(result.rows.map((row) => row.id)).toEqual([old.id, remote.id])
       expect(provider.listThreadIds).toHaveBeenCalledTimes(2)
       expect(provider.getThread).toHaveBeenCalledOnce()
-      expect(provider.getThread).toHaveBeenCalledWith(remote.id, expect.anything())
-      expect(result.rows.map((row) => row.id)).toEqual([remote.id])
+      expect(provider.getThread).toHaveBeenCalledWith(remote.id, expect.objectContaining({ format: 'full' }))
+      expect(provider.getAttachmentData).not.toHaveBeenCalled()
+      expect(
+        db
+          .prepare('SELECT body_text, body_html FROM messages WHERE account_id = ? AND thread_id = ?')
+          .get(ACCOUNT, old.id)
+      ).toEqual({ body_text: '', body_html: null })
     } finally {
       db.close()
     }

@@ -8,7 +8,9 @@ means a section of [SPEC.md](SPEC.md) (v0.17). Read the section before starting 
 (AI reply drafting and inline autocomplete), §6 Packaging (auto-update, signing, notarization), §9 #5
 (remote images), and the deferrals the earlier plans parked here: the settings surface (M1-PLAN T9/T8 notes), the remote-image block
 toggle (M1-PLAN, T11 notes), the Windows numeric badge overlay (M1-PLAN accepted deviations), and the
-`Mod+/` cheat sheet (the two "lands at M4" stubs in `MailHeader.tsx`).
+`Mod+/` cheat sheet (the two "lands at M4" stubs in `MailHeader.tsx`). The 2026-08-30 refresh against
+`main` at `15e13b4` also carries PR #98's historical sync limit into T32A and incorporates the account
+management shipped in PRs #96 and #99.
 
 **Goal:** M4 turns a daily-drivable triage client into a finished v1. Snippets, follow-up reminders, AI reply
 drafting, and inline autocomplete land, every deferred toggle gets its settings home, and the packaged app
@@ -19,7 +21,8 @@ sign-off task that rolls up every outstanding manual check.
 
 | Task | State | Blocks |
 |---|---|---|
-| T32 settings surface and cheat sheet (F15) | planned | T33, T34's manager, T36's enable pane |
+| T32 settings surface and cheat sheet (F15) | planned | T32A, T33, T34's manager, T36's enable pane |
+| T32A per-account historical sync limit (F2, F15) | planned | nothing |
 | T33 remote-image control (§9 #5) | planned | nothing |
 | T34 snippets (F8) | planned | nothing |
 | T35 follow-up reminders (F9) | planned | nothing |
@@ -30,29 +33,34 @@ sign-off task that rolls up every outstanding manual check.
 | T39 auto-update, signing, notarization (§6) | planned | T40's update-in-place check |
 | T40 M4 exit and v1 sign-off | planned | the v1 tag |
 
-**Why this order.** T32 goes first because three other tasks hang panes on it: T33's toggle, T34's manager,
-and T36's enable screen. F17 has three tasks: shared provider and consent controls, explicit reply drafting,
+**Why this order.** T32 goes first because T32A's sync control, T33's toggle, T34's manager, and T36's enable
+screen need it. T32A is separate because changing a running account's sync limit needs its own lifecycle
+and persistence tests. F17 has three tasks: shared provider and consent controls, explicit reply drafting,
 then autocomplete with its separate opt-in and typing lifecycle. T37A follows T37 so their cancellation
 and keyboard handling can be tested together. The suffix preserves the existing T38–T40 task references,
 following M2's T14A through T14E precedent. T39 is independent of everything else but
 has operator lead time (certificates, notary credentials), so start its prerequisites in week one even if
 the code lands late.
 
-**What M4 does not absorb.** Multi-account (F18) is M5, planned in [M5-PLAN.md](M5-PLAN.md) and running in
-parallel; SPEC §8 says the two milestones may interleave and v1 ships only when both exit. M4 tasks touch
-none of M5's surfaces, but F18's scoping rules bind M4's new state (global rule 9), and T32 and T38 note
-where they meet M5's shipped work. The KNOWN-ISSUES gaps stay in KNOWN-ISSUES, with one exception: GAP-1's
-wanted assertions ride T35, because T35 changes the exact poller path GAP-1 describes.
+**What M4 does not absorb.** M5's multi-account implementation and engineering audit have shipped;
+[M5-PLAN.md](M5-PLAN.md) still requires the real-Gmail two-account dogfood observation. T32 reuses that
+implementation and supplies the settings-only account reorder work that remains absent from code.
+F18's scoping rules bind every new preference. The KNOWN-ISSUES gaps stay in KNOWN-ISSUES, with one
+exception: GAP-1's wanted assertions ride T35, because it changes the poller path that GAP-1 describes.
+The merge verification also reproduced an intermittent M5 notification-focus failure; T32 owns the
+follow-up below, and T40 requires its resolution before sign-off.
 
 ---
 
 ## Global rules (carried from M3, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single snapshot and
-   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 21. T34 and T35 each bump it (T34 to 22,
-   T35 to 23; if T35 lands first the numbers swap) and publish their dogfood DDL in their sections. A real
-   dogfood profile gets the manual additive upgrade in AGENTS.md. T39 permits automatic updates only
-   within one schema version; a schema-changing release needs a separate upgrade procedure.
+   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 22 after PR #98. T34 and T35 each bump it
+   (T34 to 23, T35 to 24; if T35 lands first the numbers swap) and publish their dogfood DDL in their
+   sections. A real dogfood profile gets the manual additive upgrade in AGENTS.md. T39 permits automatic updates only
+   within one schema version; a schema-changing release needs a separate upgrade procedure. The DDL in
+   this plan starts from schema 22, preserving `thread_mailboxes`, `mailbox_cursor`, and the current FTS
+   indexes. Profiles still on 21 first need the separate manual PR #98 upgrade in M3-PLAN.
 2. **IPC has three parts:** main handler, preload bridge, and the typed channel map in `src/shared/`. All in
    the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike. In M4 this extends to LLM output: an AI draft
@@ -62,7 +70,9 @@ wanted assertions ride T35, because T35 changes the exact poller path GAP-1 desc
 5. **Every user-facing action is a registered command** (F5). The palette inventory test asserts this, so a
    new settings control without a command is a red test, not a review comment.
 6. **One reducer, two sources.** Nothing in M4 may add a second write path for mail state. Follow-up
-   resurfacing (T35) goes through the same reducer as snooze return.
+   resurfacing (T35) goes through the same reducer as snooze return. Maintain PR #98's derived
+   `thread_mailboxes` rows in the same transaction via `refreshThreadMailboxes`; cached counts and
+   keyset-paged lists must agree after a return, undo, or authoritative snapshot.
 7. **Interactive work outranks background work.** AI streaming (T37), autocomplete (T37A), and update
    downloads (T39) must not delay typing, saves, sends, action replay, or polling.
 8. **Time is injectable.** Every new timer takes `SchedulerTime` from `src/main/time.ts`. T35's follow-up
@@ -72,7 +82,8 @@ wanted assertions ride T35, because T35 changes the exact poller path GAP-1 desc
    `account_id`; app-global state uses the settings sentinel (`APP_SETTINGS_ACCOUNT_ID`). F18 already
    decides for M4's features: snippets, the F17 provider key, model, voice profile and enable toggles, the
    undo-send delay, auto-advance, and remote-image preferences are app-global; reminders, drafts, and
-   outbox rows are per-account.
+   outbox rows and T32A's `lifetimeThreadCap` are per-account. Account ordering belongs to main's
+   encrypted token roster, not a new SQLite column or duplicate settings list.
 10. **If your task changes the verify pipeline, harness behavior, or the screenshot-artifact list, update
     AGENTS.md in the same PR.**
 
@@ -82,7 +93,7 @@ wanted assertions ride T35, because T35 changes the exact poller path GAP-1 desc
 
 **Status: planned.**
 
-**Depends on:** nothing · **Unblocks:** T33, T34, T36 · **Spec:** F15, F16, D6, §5
+**Depends on:** nothing · **Unblocks:** T32A, T33, T34, T36 · **Spec:** F15, F16, F18, D6, §5
 
 ### Why
 
@@ -90,7 +101,9 @@ Every settings-shaped decision since M1 has been deferred to "the M4 settings su
 menu ships two dead items whose tooltips literally say so (`MailHeader.tsx`, the `Settings` and
 `Cheat sheet` entries). The undo-send delay has been configurable in the database since M2
 (`outbox/queue.ts` reads `undoSendDelaySeconds`) with no way to set it. Auto-advance direction is
-hardcoded. The F16 macOS menu-bar icon has no toggle. This task builds the surface those switches live on.
+hardcoded. Account reorder has neither a bridge nor a control despite M5's planned `accounts:reorder`.
+Notification pause works through the Windows tray but has no settings or palette access. This task gives
+those controls a home and connects them to the existing account and notification behavior.
 
 ### Design (decided)
 
@@ -98,17 +111,39 @@ hardcoded. The F16 macOS menu-bar icon has no toggle. This task builds the surfa
   composer does: the prior list or reader stays mounted and hidden, and `Esc` or Back restores it exactly.
   The sidebar stays visible. Open it with `Mod+,`, the account-menu item, or the palette command
   `Open settings`.
-- **Sections at ship time:** Accounts (the signed-in roster with add, remove, and `Mod+1..9` reorder per
-  F15 v0.17 — the behaviors behind those controls are M5's A-tasks, so T32 gives them their settings home
-  and wires whatever M5 has shipped by then, without reimplementing account management), Triage (undo-send
-  delay 0/5/8/10/20/30s; auto-advance direction next/previous/back-to-list), Notifications (per-split
-  toggles link to the existing T27 rule manager in `SplitRuleManager.tsx`; do not rebuild it), Background
-  (launch at login; macOS menu-bar icon, default off, wired to the existing tray code in `background.ts`),
-  Appearance (the four F14 themes). T33, T34, and T36 each add their own section in their own PR.
-- **Storage:** the existing `settings` table through `src/main/settings.ts`. Every key this task adds is
-  app-global per F18's scoping, so it lives under the table's app sentinel, exactly how
-  `undoSendDelaySeconds` and `launchAtLogin` are stored today. New keys: `autoAdvanceDirection`,
-  `menuBarIcon`.
+- **Sections at ship time:** Accounts (live roster, status, add, reconnect, Sign out, and `Mod+1..9` reorder),
+  Triage (undo-send delay; auto-advance next, previous, or back to list), Notifications (global pause and
+  resume; per-account split controls), Background (launch at login; macOS menu-bar icon, default off),
+  and Appearance (the four F14 themes). T32A adds Sync & storage for the active account; T33, T34, and T36
+  add their own sections. Label account-specific settings with the owning email and distinguish them
+  from app-wide preferences.
+- **Reuse shipped account behavior.** Use the same guarded add, switch, reconnect, and Sign out flows as
+  the account menu. Sign out retains Delete/Keep local data, removal-in-progress guards, survivor order,
+  and the persistent deletion-failure warning from #99. Account status comes from `accounts:getStatuses`
+  plus `accounts:statusChanged`; late snapshots cannot replace newer pushes or another account's data.
+- **Account reorder is implementation work, not just wiring.** Add the planned typed `accounts:reorder`
+  command in main, preload, and shared IPC. Accept an exact permutation of the current signed-in roster,
+  reject duplicates, missing or unknown ids, and reject a stale request if the roster changed. Main
+  persists the order through `auth/tokenFile.ts` and `auth/tokenStore.ts`, then publishes the authoritative
+  roster to the utility and renderer without restarting account sessions or changing the active account.
+  Keep the latest tokens when a refresh races the reorder. Menu order, digit shortcuts, and sign-out
+  successor selection use that same order. Use accessible move-up/down controls and a palette entry.
+- **Notification pause:** expose the existing one-hour, until-tomorrow, and resume actions on both OSes,
+  with the paused-until time visible. Reuse `notificationsPausedUntil`, `notificationQueries.ts`, and the
+  existing deadline helpers; the pause spans every account while split `notify` flags remain per-account.
+  Link to `SplitRuleManager.tsx` for those flags. Do not add separate per-account pause state or a second
+  notification scheduler.
+- **Pending notification delivery must survive composer close and account switch.** Resolve the
+  intermittent failure recorded below while integrating account and notification settings. Preserve a
+  target until the correct live account view accepts it; a subscription cleanup or saved-view restore
+  must not silently lose the click. Retain the existing TTL and composer guards.
+- **Storage and defaults:** SQLite preferences use `src/main/settings.ts` inside the utility process.
+  T32's app-wide keys use `APP_SETTINGS_ACCOUNT_ID`; the new keys are `autoAdvanceDirection` and
+  `menuBarIcon`. Reuse `undoSendDelaySeconds`, `launchAtLogin`, and `notificationsPausedUntil`. Read the
+  undo-send choices and default from `src/shared/outboxTuning.ts`, not a second literal list. Keep account
+  reorder in the token roster and T32A's cap under its account id. Settings do not expose every constant
+  collected by PR #98: poll intervals, quota reserves, page sizes, search candidate limits, save deadlines,
+  retries, and renderer timings remain development defaults in their existing tuning modules.
 - **Every control is also a palette command** (rule 5): `Set undo send delay…`, `Set auto-advance…`, and so
   on. The theme commands from T30 already exist; the settings pane reuses them.
 - **The cheat sheet (`Mod+/`)** is a dismissable overlay listing the §5 keyboard map. It renders from the
@@ -118,26 +153,131 @@ hardcoded. The F16 macOS menu-bar icon has no toggle. This task builds the surfa
 
 ### Implementation guide
 
-- Settings reads and writes cross the bridge as one typed `settings:get`/`settings:set` pair with a
-  key allowlist in `src/shared/`, not one channel per key.
+- Add typed `settings:get`/`settings:set` requests with a key allowlist that declares each key's value
+  type and account scope. Keep SQLite work in utility handlers; main applies OS effects through explicit
+  typed operations. Reuse existing theme, split, and account APIs. Never expose arbitrary setting names,
+  OAuth credentials, or a writable account id through a generic settings handler.
 - Auto-advance direction is consumed where triage advance already happens in `Inbox.tsx`; the setting
   changes the target row selection, nothing else.
 - The menu-bar toggle only installs or removes the macOS `Tray`. Windows tray behavior is unchanged (F16
   says the Windows tray is always present).
+- Changing launch at login must explicitly update the OS registration despite the existing
+  `loginItemRegistered` startup guard. Ordinary launches still respect an OS-side disable; test and
+  development runs never register real login items. Reuse the existing Windows hidden-launch arguments.
+- Settings must not introduce an account-switch path around the composer/removal guards. Account-scoped
+  reads and writes bind to the account at dispatch; late completions cannot overwrite a newly selected
+  account's controls. Back restores the correct account's paginated selection and scroll position.
 
 ### Testing
 
 - E2e: open settings by `Mod+,`, by account menu, and by palette. Change the undo-send delay, send a seeded
   message, and assert the countdown uses the new window. Change auto-advance to previous and assert the
   triage advance direction. Relaunch with `boot.relaunch()` and assert both persist.
+- Unit and e2e: reorder three seeded accounts, relaunch, and assert menu order, `Mod+1..9`, stable active
+  account, and sign-out successor order. Reject malformed/stale permutations and preserve concurrent
+  token refreshes; a failed persist leaves the old order intact. Exercise Sign out's Delete/Keep and
+  failure-warning behavior from settings, plus a delayed account-status response superseded by a push.
+- Unit and e2e: pause all accounts, suppress notifications for inactive accounts too, resume, and retain
+  each account's split flags. Exercise settings/palette without a tray icon and persist the deadline
+  across relaunch. Verify background settings with fake OS adapters; reserve real login-item checks for T40.
 - E2e: `Mod+/` opens the cheat sheet, shows the `G` chords, and `Esc` closes it. A registered command with
   a shortcut added by the test seam appears on the sheet.
 - New screenshot artifacts `settings.png` and `cheat-sheet.png`, added to the AGENTS.md list in this PR.
 
+### Notification-focus follow-up from merge verification
+
+Verified on macOS against runtime/test code identical to `main` at `15e13b4`, 2026-08-30. The test
+`an open composer holds a notification switch until the draft closes` in `e2e/accounts.spec.ts:562`
+failed in the full suite and once in five focused repeats. The account switches to `second@attn.test`,
+but the reader never opens `Beta launch checklist`; the final view is that account's inbox list.
+
+Reproduce with `npm run e2e -- --grep 'an open composer holds a notification switch' --repeat-each=5`.
+Inspect `takePendingFocusTarget` in `src/main/index.ts`, `mail.onFocusThread` in `src/preload/index.ts`,
+and the focus/restore effects in `Inbox.tsx`. The exact race still needs isolation; consumption before
+delivery during a subscription change is one path to test. Add a deterministic regression that holds
+the relevant asynchronous response across composer close and account remount. A retry or longer timeout
+does not resolve the defect. This plan PR does not change runtime behavior or weaken the failing test.
+
 ### Done when
 
 The two "lands at M4" stubs are gone, every listed setting persists across relaunch, the palette inventory
-covers the new commands, and the cheat sheet needs no source edit to stay current.
+covers the new commands, the notification-focus regression is resolved, and the cheat sheet needs no
+source edit to stay current.
+
+---
+
+## T32A: per-account historical sync limit
+
+**Status: planned.**
+
+**Depends on:** T32 · **Unblocks:** nothing · **Spec:** F2, F10, F15, F18, §9 #22
+
+### Why
+
+PR #98 bounds lifetime indexing with `LIFETIME_THREAD_CAP`, currently 400,000 conversations, and preserves
+a capped cursor for later expansion. The limit is still compile-time; `runLifetimeSweep` accepts an
+injected `threadCap`, but the production controller does not read a preference. F15 needs a control that
+applies without rebuilding or signing out, independently for work and personal accounts.
+
+### Design (decided)
+
+- Add **Historical sync limit** under **Sync & storage**, labeled with the active account's email. Offer
+  the default from `LIFETIME_THREAD_CAP`, a custom positive safe integer, and **All mail**, encoded as
+  `LIFETIME_THREAD_CAP_UNLIMITED` (`0`). Reject negatives, fractions, invalid strings, and unsafe integers
+  in both the UI and utility handler. Reset to default removes the override. Explain that All mail can
+  require substantial disk space, quota, and app-open time; confirm that choice before applying it.
+- Persist `lifetimeThreadCap` with `readAccountSetting`/`writeAccountSetting`; an absent value falls back
+  to the compile-time default. Delete-local-data removes it; Keep-local-data retains it for re-add. This
+  uses the current settings table and needs no schema bump. The generic settings allowlist owns scope
+  validation, and a palette command opens the same control and confirmation.
+- Describe the limit accurately: it bounds additional historical header fetching, not all local rows or
+  disk usage. Inbox/recent sync, new mail, explicit server search, and on-demand reads can add more rows.
+  Lowering it deletes nothing and does not evict bodies, drafts, or attachments. Body windows and local
+  search result/candidate limits remain unchanged; Gmail search remains available for the uncached tail.
+- Read the saved value for every production lifetime run, including restart, reauthentication, retry,
+  and account-slot handover. Applying a change schedules only that account's historical work; it does not
+  reset auth, restart pollers or send executors, or call the whole-session `resetSession()` shortcut.
+  Settle the old historical chain before starting its replacement and release the shared indexing slot
+  exactly once. Preserve M5's active-account priority and preemption; an inactive account must not start
+  a second concurrent chain. Offline or paused-auth accounts save the preference and apply it on resume.
+- Keep all cap enforcement in the existing lifetime-sweep option; do not apply it to Gmail's page sizes
+  or raise `SEARCH_RECENT_MESSAGE_LIMIT` with it. New timing constants use the existing tuning modules
+  and injected clocks rather than literals in settings components.
+- Raising or disabling a reached limit resumes `capped:lifetime[:page-token]` with its saved page-start
+  count. An unchanged or lower reached limit makes no further lifetime Gmail requests. A truly exhausted
+  `done` cursor stays done. Mid-run changes take effect at the next safe cancellation point and reject
+  late writes from the old run. Preserve history, mailbox, FTS, and split-metadata cursors.
+- Expanding historical coverage must also repair derived attachment flags. `attachment_cursor='done'`
+  currently means a one-time pass over already-stored threads; it cannot cover headers imported later.
+  Invalidate the old run's write generation, then persist the preference and attachment-pass invalidation
+  in one local transaction. Wait for the old chain to settle before starting its replacement, and run
+  the existing ids-only attachment pass after the expanded walk stops. A crash must not leave newly
+  imported mail permanently unflagged, and saving a preference must not wait for a network response. Do not
+  reset unrelated cursors or rebuild mailbox/FTS indexes that `persistThread` already maintains.
+- Refresh search coverage and the footer when the preference takes effect. Keep capped distinct from
+  still syncing or complete. ETA targets the smaller of the limit and account total, while the displayed
+  account total remains the coverage denominator. Do not label capped coverage as fully indexed.
+
+### Testing
+
+- Unit: validation, default/reset, per-account isolation, Delete/Keep behavior, and production-controller
+  option wiring. Cover increase, decrease, unlimited, unchanged, and `done`, with a request held across
+  the change; no stale write, duplicate chain, leaked slot, or unrelated cursor reset is allowed.
+- Unit with a two-account runtime: changing A's limit while B owns the slot preserves fairness, B's
+  settings, sends, and polling. Reauthenticate or restart the utility and resume the saved A cursor.
+  Start with a completed attachment pass, expand into older mail with attachments, crash/relaunch, and
+  prove both the attachment chip and `has:attachment` search become correct without fetching bodies.
+- E2e: use the settings control through the real bridge, not just the existing test seam's `threadCap`
+  override. With a scripted provider, hit a small cap, raise it, and select All mail across relaunches.
+  Assert preserved page token/count, no requests on an unchanged or lower reached limit, no deleted
+  rows, correct coverage/ETA, and another account's unchanged preference. No real Gmail access.
+- Inspect `settings-sync.png` and add it to AGENTS.md when implemented. Re-run the standard two-account
+  performance profile and `npm run e2e:perf:scale` so the new control cannot remove bounded-read behavior.
+
+### Done when
+
+A user can change an account's historical limit without a rebuild or sign-out. Sync resumes durably,
+coverage is accurate, existing local data remains intact, and other accounts keep working.
 
 ---
 
@@ -210,7 +350,7 @@ document model.
 
 ### Design (decided)
 
-- **Schema bump to 22.** New `snippets` table; the same bump drops `outbox.remote_updated_at`, which is
+- **Schema bump to 23.** New `snippets` table; the same bump drops `outbox.remote_updated_at`, which is
   written and never read (KNOWN-ISSUES REF-5 says to fold the drop into the next bump). The table is
   additive and rides the AGENTS.md manual dogfood procedure. The drop is not additive, so it does not:
   AGENTS.md routes destructive changes through an explicit task-level migration design, and this paragraph
@@ -219,6 +359,7 @@ document model.
   version stamp in one transaction. Dogfood DDL:
 
   ```sql
+  BEGIN IMMEDIATE;
   CREATE TABLE snippets (
     account_id TEXT NOT NULL,
     id         TEXT NOT NULL,
@@ -232,7 +373,8 @@ document model.
   CREATE UNIQUE INDEX idx_snippets_trigger
     ON snippets (account_id, trigger) WHERE trigger IS NOT NULL;
   ALTER TABLE outbox DROP COLUMN remote_updated_at;
-  PRAGMA user_version = 22;
+  PRAGMA user_version = 23;
+  COMMIT;
   ```
 
 - **Snippets are app-global** (F18's scoping, rule 9). The table still carries `account_id` because every
@@ -306,7 +448,7 @@ the outbox deadline and durable reminder fields that identify the message being 
 - **Schema bump: persist the deadline and origin.** Composing and queued rows retain the nullable
   `follow_up_at` choice. The reminder columns below are nullable for existing snoozes; new follow-ups
   require `origin_message_id`, and cannot fire until their origin date is resolved. This is additive and
-  follows the AGENTS.md manual procedure. Dogfood DDL, in one transaction, uses version 23 after T34's 22;
+  follows the AGENTS.md manual procedure. Dogfood DDL, in one transaction, uses version 24 after T34's 23;
   swap the numbers if T35 lands first:
 
   ```sql
@@ -315,7 +457,7 @@ the outbox deadline and durable reminder fields that identify the message being 
   ALTER TABLE reminders ADD COLUMN origin_message_id TEXT;
   ALTER TABLE reminders ADD COLUMN origin_rfc_message_id TEXT;
   ALTER TABLE reminders ADD COLUMN origin_internal_date INTEGER;
-  PRAGMA user_version = 23;
+  PRAGMA user_version = 24;
   COMMIT;
   ```
 - **Cancel on any reply, through a new feed.** The existing wake path cannot carry this: the poller's
@@ -378,6 +520,9 @@ This task also owns GAP-1's wanted assertions, because it modifies exactly that 
 - Unit (triage): archive and Move while an overdue follow-up waits for snooze, Spam and Trash before the
   follow-up is due, snoozing a returned follow-up, undo, and permanent-failure recovery. A future follow-up
   survives ordinary archive; completing a returned follow-up clears its chip and priority.
+- Unit: every return, cancellation, undo, and recovery keeps `thread_mailboxes` and cached mailbox counts
+  aligned with paged lists. Extend `db/isolation.test.ts` for new account-keyed reads, and account purge
+  tests for the new reminder/outbox fields. App-global snippets and AI preferences survive sign-out.
 - E2e: send with a follow-up under the seeded provider, advance fake time, assert the chip and the
   above-normal-mail sort. First replay the originating sent message through history and prove the
   reminder survives. Inject a later reply before the deadline and assert no resurfacing. Exercise expired
@@ -617,8 +762,8 @@ numeric overlay as M4 packaging polish (M1-PLAN accepted deviations). This is th
 - A pure function renders the count into an overlay bitmap (nativeImage): centered numerals, `99+` cap,
   legible at 16px. The existing badge update path in `notify.ts`/`index.ts` swaps the static dot for the
   rendered image; the tooltip keeps the exact count. macOS `setBadgeCount` is untouched.
-- The count itself is not this task's business: M5's A2 already sums it across signed-in accounts
-  (F12/F18). T38 changes only how Windows renders the number it is handed.
+- The count itself is not this task's business: M5's A2/A4 already sum it across signed-in accounts
+  and cover notification routing (F12/F18). T38 changes only how Windows renders the number it is handed.
 
 ### Testing
 
@@ -734,6 +879,14 @@ purpose (real-OS and real-Gmail checks that the harness cannot run); they come d
 
 Feature evidence (this milestone):
 
+- [ ] Settings work with two accounts: reorder and relaunch, preserve the active view, Sign out with
+      Delete/Keep, and retain deletion-failure warnings. Pause/resume covers both accounts on both OSes,
+      even without a tray icon. Login and menu-bar toggles have real-OS evidence.
+- [ ] T32's intermittent notification-focus failure is fixed with deterministic regression coverage;
+      closing a composer and switching to the notified account opens its pending conversation reliably.
+- [ ] Historical sync limit: independently change an account's cap, resume after relaunch, lower without
+      deleting mail, and verify capped coverage plus Gmail search. Expanded history includes attachment
+      flags, and the other account keeps polling and sending. Record disk/time expectations for All mail.
 - [ ] Real-Gmail follow-up run: send with a 3-day follow-up from a dogfood profile, reply from another
       account, confirm cancellation; let a second one expire and confirm resurfacing. Confirm the sent
       message's own history event does not cancel either reminder, and exercise a coexisting snooze.
@@ -747,7 +900,7 @@ Feature evidence (this milestone):
 - [ ] Signed/notarized install and same-schema update of a populated profile on both OSes; incompatible
       or missing schema metadata is rejected without changing the installation or local data (from T39).
 - [ ] Credential-free personal packaging on both OSes, with no updater traffic or cached installation.
-- [ ] Every new screenshot artifact inspected: `settings.png`, `cheat-sheet.png`,
+- [ ] Every new screenshot artifact inspected: `settings.png`, `settings-sync.png`, `cheat-sheet.png`,
       `remote-images-blocked.png`, `snippet-manager.png`, `ai-draft.png`, `ai-autocomplete.png`,
       `ai-autocomplete-light.png`.
 
@@ -758,14 +911,18 @@ docs and tick or strike with evidence):
 - [ ] M2's real-Gmail bootstrap, exactly-once, and hydration observations (M2-PLAN T20).
 - [ ] M2's one-week sole-client dogfood run, extended to exercise snippets, follow-ups, AI drafting, and
       autocomplete.
-- [ ] M5 (multi-account) has exited per M5-PLAN, including its A7 isolation audit. SPEC §8: v1 does not
-      ship before both milestones exit.
+- [ ] M5's remaining A7 real-Gmail two-account dogfood observation is recorded: add an account during
+      indexing, observe preemption, notification routing, and the badge sum. Its implementation and
+      executable isolation audit have shipped; preserve those checks for every new M4 account-scoped read.
 
 Bookkeeping:
 
 - [ ] SPEC §8 status paragraph updated; the M4 bullet marked done.
 - [ ] KNOWN-ISSUES re-verified: every entry either still true (re-stamp) or removed by a named PR.
-- [ ] The perf suite is green on the release build; §7 budgets hold with all M4 features enabled.
+- [ ] `npm run e2e:perf` is green on the release build with the 10k + 1k two-account profile, including
+      warm-switch p95. Run `npm run e2e:perf:scale` for the 40k-thread bounded-read checks too. Record the
+      machine and results; §7 budgets must hold with all M4 features enabled. Neither profile alone proves
+      million-message performance, and M5's documented shared-container misses are not waived budgets.
 
 ### Done when
 
@@ -776,7 +933,8 @@ Every box is ticked or explicitly struck with a recorded reason, and the v1 tag 
 
 ## Out of scope for M4
 
-Multi-account is no longer post-v1, but it is not M4 either: it is M5 (F18, §9 #21), planned separately.
+Multi-account implementation belongs to M5 (F18, §9 #21) and has shipped. Its remaining real-Gmail
+observation stays in M5; T32 owns the settings-only reorder follow-up.
 The v1.1 items stay v1.1: the global-hotkey quick panel and custom themes. Send later stays v1.5 (F7, the
 companion Apps Script). Google OAuth verification stays deferred (decision #2). Read statuses
 stay v2 (D2). Full keyboard remapping stays post-v1. AI beyond explicit reply drafting and separately
@@ -789,4 +947,6 @@ not an invitation to process the mailbox in the background, which F17 forbids.
 |---|---|---|
 | Public release repo or private-feed workaround for auto-update? | Gates T39's feed wiring | Before T39's updater lands; record in T39 |
 | Default model per provider | Users see it on the enable screen | T36 review; record in code and F17 if the spec should name it |
-| The M3 pathological-mailbox posture question (M3-PLAN) is still open | §7 budgets vs. lifetime headers | Unchanged; not an M4 gate |
+
+The mailbox-size posture is resolved by SPEC §9 #22 and PR #98. T32A supplies its deferred user control;
+T40 retains the performance and real-mailbox evidence requirements.

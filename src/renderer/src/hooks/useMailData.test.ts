@@ -4,6 +4,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  type SystemMailboxCounts,
   THREAD_PAGE_SIZE,
   type ThreadPage,
   type ThreadPageCursor,
@@ -59,13 +60,14 @@ afterEach(() => {
 })
 
 describe('useMailData mailbox refreshes', () => {
-  it('keeps inactive split rows available across ordinary mail changes', async () => {
-    const listThreadPage = vi.fn((_view: string, _cursor: ThreadPageCursor | undefined, splitId?: string) =>
-      Promise.resolve({
-        rows: [thread(splitId ?? 'unsplit')],
-        nextCursor: null,
-        ...(splitId ? { splitRevision: 7 } : {})
-      })
+  it('waits for split setup and keeps inactive split rows available across ordinary mail changes', async () => {
+    const listThreadPage = vi.fn(
+      (_view: string, _cursor: ThreadPageCursor | undefined, splitId?: string): Promise<ThreadPage> =>
+        Promise.resolve({
+          rows: [thread(splitId ?? 'unsplit')],
+          nextCursor: null,
+          ...(splitId ? { splitRevision: 7 } : {})
+        })
     )
     const stop = (): void => {}
     let inboxReady: boolean | Error = false
@@ -109,7 +111,8 @@ describe('useMailData mailbox refreshes', () => {
     const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
     const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
     const selection = selectedIndexState()
-    let activeSplitId = 'preset:github'
+    let activeSplitId: string | null = null
+    let splitsReady = false
     let latest: ReturnType<typeof useMailData> | null = null
 
     const currentState = (): ReturnType<typeof useMailData> => {
@@ -125,7 +128,8 @@ describe('useMailData mailbox refreshes', () => {
         activeViewRef,
         selectedThreadIdRef,
         selectedDraftIdRef,
-        selection.setState
+        selection.setState,
+        splitsReady
       )
       return null
     }
@@ -136,6 +140,12 @@ describe('useMailData mailbox refreshes', () => {
       root.render(createElement(Harness))
       await Promise.resolve()
       await Promise.resolve()
+    })
+    expect(listThreadPage).not.toHaveBeenCalled()
+    activeSplitId = 'preset:github'
+    splitsReady = true
+    await act(async () => {
+      root.render(createElement(Harness))
     })
     expect(currentState().loadedInboxSplitId).toBe('preset:github')
     expect(currentState().inboxBackfillReady).toBe(false)
@@ -171,6 +181,18 @@ describe('useMailData mailbox refreshes', () => {
       await Promise.resolve()
     })
     expect(currentState().inboxBackfillReady).toBe(false)
+
+    const heldPreload = deferred<ThreadPage>()
+    listThreadPage.mockReturnValueOnce(heldPreload.promise)
+    currentState().preloadInboxSplits(['preset:calendar', 'preset:newsletters'])
+    expect(listThreadPage).toHaveBeenLastCalledWith('inbox', undefined, 'preset:calendar')
+    const requestsBeforeUnmount = listThreadPage.mock.calls.length
+    await act(async () => {
+      root.unmount()
+      heldPreload.resolve({ rows: [], nextCursor: null, splitRevision: 7 })
+    })
+    mountedRoots.splice(mountedRoots.indexOf(root), 1)
+    expect(listThreadPage).toHaveBeenCalledTimes(requestsBeforeUnmount)
   })
 
   it('does not let an older Inbox snapshot erase rows loaded after switching mailboxes', async () => {
@@ -255,100 +277,123 @@ describe('useMailData mailbox refreshes', () => {
     expect(currentState().mailboxRows.allMail).toEqual(allMailRows)
   })
 
-  it('pages to a notification target and keeps the Inbox cursor in sync with the rows', async () => {
-    const firstRows = Array.from({ length: THREAD_PAGE_SIZE }, (_, index) => thread(`page-1-${index}`))
-    const target = thread('notification-target')
-    const firstPageCursor: ThreadPageCursor = { at: 100, id: 'page-1-99' }
-    const listThreadPage = vi.fn((view: string, cursor?: ThreadPageCursor) => {
-      if (view !== 'inbox') return Promise.resolve({ rows: [], nextCursor: null })
-      return Promise.resolve(
-        cursor ? { rows: [target], nextCursor: null } : { rows: firstRows, nextCursor: firstPageCursor }
-      )
-    })
-    const stop = (): void => {}
-    const bridge = {
-      sync: {
-        getState: () => Promise.resolve({ phase: 'idle' as const }),
-        getInboxReady: () => Promise.resolve(true),
-        retry: () => Promise.resolve(),
-        onState: () => stop
-      },
-      mail: {
-        listThreadPage,
-        listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
-        listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
-        listLabels: () => Promise.resolve([]),
-        getMailboxCounts: () =>
-          Promise.resolve({
-            inbox: 101,
-            allMail: 101,
-            sent: 0,
-            starred: 0,
-            snoozed: 0,
-            spam: 0,
-            trash: 0
-          }),
-        getUnreadCount: () => Promise.resolve(0),
-        getPendingActionCount: () => Promise.resolve(0),
-        getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
-        onChanged: () => stop
-      },
-      draft: { list: () => Promise.resolve([]) },
-      outbox: {
-        listPending: () => Promise.resolve([]),
-        onChanged: () => stop,
-        onProgress: () => stop
+  it.each(['automatic', 'manual'] as const)(
+    'keeps notification rows and selection after an older %s refresh finishes',
+    async (refreshKind) => {
+      const firstRows = Array.from({ length: THREAD_PAGE_SIZE }, (_, index) => thread(`page-1-${index}`))
+      const target = thread('notification-target')
+      const firstPageCursor: ThreadPageCursor = { at: 100, id: 'page-1-99' }
+      const listThreadPage = vi.fn((view: string, cursor?: ThreadPageCursor) => {
+        if (view !== 'inbox') return Promise.resolve({ rows: [], nextCursor: null })
+        return Promise.resolve(
+          cursor ? { rows: [target], nextCursor: null } : { rows: firstRows, nextCursor: firstPageCursor }
+        )
+      })
+      const stop = (): void => {}
+      const mailListeners = new Set<() => void>()
+      const bridge = {
+        sync: {
+          getState: () => Promise.resolve({ phase: 'idle' as const }),
+          getInboxReady: () => Promise.resolve(true),
+          retry: () => Promise.resolve(),
+          onState: () => stop
+        },
+        mail: {
+          listThreadPage,
+          listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+          listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+          listLabels: () => Promise.resolve([]),
+          getMailboxCounts: () =>
+            Promise.resolve({
+              inbox: 101,
+              allMail: 101,
+              sent: 0,
+              starred: 0,
+              snoozed: 0,
+              spam: 0,
+              trash: 0
+            }),
+          getUnreadCount: () => Promise.resolve(0),
+          getPendingActionCount: () => Promise.resolve(0),
+          getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
+          onChanged: (listener: () => void) => {
+            mailListeners.add(listener)
+            return () => mailListeners.delete(listener)
+          }
+        },
+        draft: { list: () => Promise.resolve([]) },
+        outbox: {
+          listPending: () => Promise.resolve([]),
+          onChanged: () => stop,
+          onProgress: () => stop
+        }
+      } as unknown as typeof window.attn
+      Object.defineProperty(window, 'attn', { configurable: true, value: bridge })
+
+      const activeViewRef: React.RefObject<MailView> = { current: 'inbox' }
+      const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
+      const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
+      let latest: ReturnType<typeof useMailData> | null = null
+      const selection = selectedIndexState()
+
+      const currentState = (): ReturnType<typeof useMailData> => {
+        if (!latest) throw new Error('hook state was not captured')
+        return latest
       }
-    } as unknown as typeof window.attn
-    Object.defineProperty(window, 'attn', { configurable: true, value: bridge })
 
-    const activeViewRef: React.RefObject<MailView> = { current: 'inbox' }
-    const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
-    const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
-    let latest: ReturnType<typeof useMailData> | null = null
-    const selection = selectedIndexState()
+      function Harness(): null {
+        latest = useMailData(
+          'seed@attn.test',
+          null,
+          null,
+          activeViewRef,
+          selectedThreadIdRef,
+          selectedDraftIdRef,
+          selection.setState
+        )
+        return null
+      }
 
-    const currentState = (): ReturnType<typeof useMailData> => {
-      if (!latest) throw new Error('hook state was not captured')
-      return latest
+      const host = document.createElement('div')
+      const root = createRoot(host)
+      mountedRoots.push(root)
+      await act(async () => {
+        root.render(createElement(Harness))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const olderPage = deferred<ThreadPage>()
+      listThreadPage.mockReturnValueOnce(olderPage.promise)
+      let refresh: Promise<void> | undefined
+      await act(async () => {
+        if (refreshKind === 'manual') refresh = currentState().refreshMailRows()
+        else for (const listener of mailListeners) listener()
+      })
+
+      let targetIndex: number | null = null
+      await act(async () => {
+        targetIndex = await currentState().focusInboxThread(target.id)
+        selectedThreadIdRef.current = target.id
+        selection.setState(targetIndex ?? 0)
+      })
+
+      expect(targetIndex).toBe(THREAD_PAGE_SIZE)
+      expect(listThreadPage).toHaveBeenLastCalledWith('inbox', firstPageCursor, undefined)
+      expect(currentState().realThreads).toHaveLength(THREAD_PAGE_SIZE + 1)
+      expect(currentState().realThreads?.at(-1)?.id).toBe(target.id)
+      await act(async () => {
+        olderPage.resolve({ rows: [target, ...firstRows], nextCursor: null })
+        await refresh
+      })
+      expect(selection.valueRef.current).toBe(THREAD_PAGE_SIZE)
+      expect(currentState().realThreads?.at(-1)?.id).toBe(target.id)
+      expect(currentState().threadPagination.inbox).toEqual({
+        nextCursor: null,
+        loadingMore: false
+      })
     }
-
-    function Harness(): null {
-      latest = useMailData(
-        'seed@attn.test',
-        null,
-        null,
-        activeViewRef,
-        selectedThreadIdRef,
-        selectedDraftIdRef,
-        selection.setState
-      )
-      return null
-    }
-
-    const host = document.createElement('div')
-    const root = createRoot(host)
-    mountedRoots.push(root)
-    await act(async () => {
-      root.render(createElement(Harness))
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-
-    let targetIndex: number | null = null
-    await act(async () => {
-      targetIndex = await currentState().focusInboxThread(target.id)
-    })
-
-    expect(targetIndex).toBe(THREAD_PAGE_SIZE)
-    expect(listThreadPage).toHaveBeenLastCalledWith('inbox', firstPageCursor, undefined)
-    expect(currentState().realThreads).toHaveLength(THREAD_PAGE_SIZE + 1)
-    expect(currentState().realThreads?.at(-1)?.id).toBe(target.id)
-    expect(currentState().threadPagination.inbox).toEqual({
-      nextCursor: null,
-      loadingMore: false
-    })
-  })
+  )
 
   it('does not apply an Inbox page from a stale split-rule revision', async () => {
     const listThreadPage = vi.fn((view: string) =>
@@ -420,5 +465,82 @@ describe('useMailData mailbox refreshes', () => {
     expect(listThreadPage).toHaveBeenCalledWith('inbox', undefined, 'preset:github')
     expect(results.at(-1)?.realThreads).toBeNull()
     expect(results.at(-1)?.loadedInboxSplitId).toBeNull()
+  })
+  it('paints the first thread page before the sidebar counts answer', async () => {
+    const rows = [thread('first-paint')]
+    const listThreadPage = vi.fn((view: string) =>
+      Promise.resolve({ rows: view === 'inbox' ? rows : [], nextCursor: null })
+    )
+    // Counting scans membership per mailbox, so on a large account it is the
+    // slowest read in the batch. The list must not wait behind it.
+    const counts = deferred<SystemMailboxCounts>()
+    const getMailboxCounts = vi.fn(() => counts.promise)
+    const stop = (): void => {}
+    const bridge = {
+      sync: {
+        getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
+        retry: () => Promise.resolve(),
+        onState: () => stop
+      },
+      mail: {
+        listThreadPage,
+        listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listLabels: () => Promise.resolve([]),
+        getMailboxCounts,
+        getUnreadCount: () => Promise.resolve(0),
+        getPendingActionCount: () => Promise.resolve(0),
+        getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
+        onChanged: () => stop
+      },
+      draft: { list: () => Promise.resolve([]) },
+      outbox: {
+        listPending: () => Promise.resolve([]),
+        onChanged: () => stop,
+        onProgress: () => stop
+      }
+    } as unknown as typeof window.attn
+    Object.defineProperty(window, 'attn', { configurable: true, value: bridge })
+
+    const activeViewRef: React.RefObject<MailView> = { current: 'inbox' }
+    const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
+    const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
+    const results: ReturnType<typeof useMailData>[] = []
+    const selection = selectedIndexState()
+
+    function Harness(): null {
+      results.push(
+        useMailData(
+          'seed@attn.test',
+          null,
+          null,
+          activeViewRef,
+          selectedThreadIdRef,
+          selectedDraftIdRef,
+          selection.setState
+        )
+      )
+      return null
+    }
+
+    const host = document.createElement('div')
+    const root = createRoot(host)
+    mountedRoots.push(root)
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(results.at(-1)?.realThreads).toEqual(rows)
+    expect(results.at(-1)?.realMailboxCounts).toBeNull()
+
+    await act(async () => {
+      counts.resolve({ inbox: 1, allMail: 1, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 })
+      await counts.promise
+      await Promise.resolve()
+    })
+    expect(results.at(-1)?.realMailboxCounts).toMatchObject({ inbox: 1 })
   })
 })

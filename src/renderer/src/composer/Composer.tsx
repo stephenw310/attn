@@ -57,7 +57,6 @@ import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
 interface ComposerProps {
-  account: string
   draft: Draft
   mode?: 'full' | 'inline'
   initialError?: string | null
@@ -572,7 +571,7 @@ function ComposerCommandPlugin({
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { account, draft, mode = 'full', initialError = null, onClose, onExit, onToast },
+  { draft, mode = 'full', initialError = null, onClose, onExit, onToast },
   ref
 ): React.JSX.Element {
   const [to, setTo] = useState<MailAddress[]>(draft.to)
@@ -934,10 +933,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         <div
           className="flex min-h-10 shrink-0 items-center border-b border-edge px-4"
           data-testid="composer-from"
-          data-email={account}
+          data-email={draft.accountId}
         >
           <span className="w-10 shrink-0 text-sm font-medium text-ink-faint">From</span>
-          <span className="min-w-0 truncate text-sm text-ink">{account}</span>
+          {/* The draft's owning account, bound at open — never the account that
+              happens to be active (F6/F18). In every reachable flow they agree;
+              rendering the binding is what makes a divergence visible. */}
+          <span className="min-w-0 truncate text-sm text-ink">{draft.accountId}</span>
         </div>
         <div className="relative">
           <RecipientField

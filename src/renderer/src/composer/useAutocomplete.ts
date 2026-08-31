@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ContactSearchResult } from '../../../shared/contacts'
+import { CONTACT_AUTOCOMPLETE_DEBOUNCE_MS } from '../tuning'
 
 export function useAutocomplete(query: string): ContactSearchResult[] {
   const [suggestions, setSuggestions] = useState<ContactSearchResult[]>([])
@@ -19,7 +20,7 @@ export function useAutocomplete(query: string): ContactSearchResult[] {
         .catch(() => {
           if (active) setSuggestions([])
         })
-    }, 80)
+    }, CONTACT_AUTOCOMPLETE_DEBOUNCE_MS)
     return () => {
       active = false
       window.clearTimeout(timer)

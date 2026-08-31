@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
 import { openDatabase } from '../db'
+import { countSystemMailboxes } from '../db/queries'
 import type { GmailThread } from '../gmail/parse'
+import { getSplitState } from '../splits'
 import { ensureAccount } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
@@ -18,6 +20,9 @@ function handlerContext(
   return {
     db,
     currentAccountId: () => ACCOUNT,
+    accountStatuses: () => [],
+    mailboxCounts: (accountId) => countSystemMailboxes(db, accountId),
+    splitState: (accountId) => getSplitState(db, accountId),
     makeClient: () => null,
     makeProvider: () => null,
     makeServerSearchProvider: () => provider,
@@ -37,6 +42,7 @@ function handlerContext(
     draftReopenDelay: () => 0,
     draftInlineImageDelay: () => 0,
     consumeTestDraftSaveFailure: () => false,
+    searchWindowOverride: () => null,
     testUserData: false,
     userDataPath: '/tmp/attn-test-user-data',
     downloadsPath: '/tmp/attn-test-downloads'
@@ -190,6 +196,50 @@ describe('server-search service handlers', () => {
       ])
       expect(broadcastMailChanged).toHaveBeenCalledOnce()
       expect(broadcastMailChanged).toHaveBeenCalledWith('request-partial')
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+})
+
+describe('search coverage', () => {
+  const noProvider: ServerSearchProvider = {
+    listThreadIds: vi.fn(),
+    getThread: vi.fn(),
+    getAttachmentData: vi.fn()
+  }
+
+  it('reads current search coverage after cursor-only sync progress', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const handlers = createServiceHandlers(handlerContext(db, noProvider))
+    try {
+      db.prepare('INSERT INTO sync_state (account_id, backfill_cursor) VALUES (?, ?)').run(ACCOUNT, 'bodies')
+      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage).toEqual({
+        headersComplete: false,
+        headersCapped: false,
+        indexComplete: false,
+        attachmentFlagsComplete: false,
+        bodiesOnDemand: false
+      })
+      db.prepare(
+        `UPDATE sync_state SET backfill_cursor = 'all-mail', sweep_cursor = 'capped:lifetime',
+                               fts_cursor = 'done', attachment_cursor = 'done'
+         WHERE account_id = ?`
+      ).run(ACCOUNT)
+      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage).toEqual({
+        headersComplete: false,
+        headersCapped: true,
+        indexComplete: true,
+        attachmentFlagsComplete: true,
+        bodiesOnDemand: true
+      })
+      db.prepare("UPDATE sync_state SET sweep_cursor = 'done' WHERE account_id = ?").run(ACCOUNT)
+      expect((await handlers.invoke(IPC_CHANNELS.mailSearch, ['body'])).coverage).toMatchObject({
+        headersComplete: true,
+        headersCapped: false
+      })
     } finally {
       handlers.stop()
       db.close()

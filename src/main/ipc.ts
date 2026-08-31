@@ -8,9 +8,8 @@ import {
 } from 'electron'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
+import type { PendingFocusTarget } from '../shared/notifications'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
-import type { PendingFocus } from './notify'
-import { takePendingFocus } from './notify'
 import type { ServiceSupervisor } from './service/supervisor'
 
 type Handler<K extends InvokeChannel> = (
@@ -26,10 +25,9 @@ export interface IpcContext {
   service: ServiceSupervisor
   authStatus: () => AuthStatus
   signIn: () => Promise<AuthSignInResult>
-  signOut: () => Promise<AuthStatus>
   setActiveAccount: (accountId: string) => Promise<AuthStatus>
-  pendingFocus: () => PendingFocus | null
-  clearPendingFocus: () => void
+  removeAccount: (accountId: string, deleteData: boolean) => Promise<AuthStatus>
+  takePendingFocus: () => PendingFocusTarget | null
   setThemePreference: (preference: ThemePreference) => void
   pickAttachmentPaths?: () => Promise<string[]>
 }
@@ -38,8 +36,8 @@ export function registerIpc(context: IpcContext): () => void {
   const mainOwned = new Set<InvokeChannel>([
     IPC_CHANNELS.authGetStatus,
     IPC_CHANNELS.authSignIn,
-    IPC_CHANNELS.authSignOut,
     IPC_CHANNELS.accountsSetActive,
+    IPC_CHANNELS.accountsRemove,
     IPC_CHANNELS.draftPickAttachments,
     IPC_CHANNELS.mailDownloadAttachment,
     IPC_CHANNELS.mailTakePendingFocus,
@@ -48,10 +46,14 @@ export function registerIpc(context: IpcContext): () => void {
   ])
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
-  handle(IPC_CHANNELS.authSignOut, () => context.signOut())
   handle(IPC_CHANNELS.accountsSetActive, (_event, accountId) => {
     if (typeof accountId !== 'string' || accountId.length === 0) throw new Error('invalid account id')
     return context.setActiveAccount(accountId)
+  })
+  handle(IPC_CHANNELS.accountsRemove, (_event, accountId, deleteData) => {
+    if (typeof accountId !== 'string' || accountId.length === 0) throw new Error('invalid account id')
+    if (typeof deleteData !== 'boolean') throw new Error('invalid local-data choice')
+    return context.removeAccount(accountId, deleteData)
   })
   handle(IPC_CHANNELS.settingsSetTheme, (_event, preference) => {
     if (!isThemePreference(preference)) throw new Error('invalid theme preference')
@@ -84,11 +86,7 @@ export function registerIpc(context: IpcContext): () => void {
     const terminal = context.service.terminalState()
     return terminal ?? context.service.invoke(IPC_CHANNELS.syncGetState)
   })
-  handle(IPC_CHANNELS.mailTakePendingFocus, () => {
-    const threadId = takePendingFocus(context.pendingFocus())
-    context.clearPendingFocus()
-    return threadId
-  })
+  handle(IPC_CHANNELS.mailTakePendingFocus, () => context.takePendingFocus())
   for (const channel of INVOKE_CHANNEL_NAMES) {
     if (mainOwned.has(channel)) continue
     handle(channel, (_event, ...args) => context.service.invoke(channel, ...args))

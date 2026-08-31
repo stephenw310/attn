@@ -159,9 +159,9 @@ autocomplete trustworthy. Bodies and attachments are orders of magnitude heavier
 of Inbox bodies are fetched eagerly; everything older hydrates on open. Stage boundaries exist only where
 behavior changes, never just to slice dates: the inbox stage guarantees the triage surface first, stages
 2–6 run at normal background priority, and the lifetime sweep drops to a throttled low-priority posture.
-These are eventual windows, not item caps — an API page size such as 500 must never be presented or
-implemented as “only sync 500 messages.” A count cap may bound the first interactive bootstrap only when
-the remaining window continues in the background or is available on demand.
+These dates define bootstrap windows; an API page size such as 500 must never become an arbitrary
+"only sync 500 messages" limit. The lifetime sweep has a separate, explicit conversation limit under
+§9 #22. Older mail remains available through Gmail search and on-demand reads.
 
 **Lifetime header sweep (T13A as revised by §9 #17; supersedes the Sent-only pass of §9 #15):** after
 interactive readiness, a resumable low-priority pass walks lifetime message headers across the whole account
@@ -177,6 +177,16 @@ progress and quota-wait detail. Importing a user's saved Google Contacts through
 separate opt-in product decision because it adds OAuth scope and consent requirements; autocomplete must not
 imply that the mail-derived index contains an address book the user has never emailed.
 
+**Historical sync limit (M4, F15):** each account has its own limit, defaulting to 400,000 conversations
+from `LIFETIME_THREAD_CAP`. Settings and the palette offer a custom positive integer, reset to default,
+and **All mail**, encoded as `0`, with a warning about disk use, quota, and app-open time. The preference
+survives relaunch and Keep-local-data sign-out; Delete-local-data removes it. Changing it needs neither
+a rebuild nor a sign-out. Increasing the limit resumes a capped cursor; decreasing it stops further
+historical fetching at the next safe point and deletes nothing. It does not limit Inbox/recent sync,
+new mail, explicit Gmail search, or on-demand reads, so it is not a hard row-count or disk-space ceiling.
+Completed attachment indexing must cover headers added by a later expansion too. Other accounts, sends,
+and polling keep working while the affected account's historical chain adopts the new limit.
+
 Backfill has two distinct completion points:
 
 1. **Interactive-ready:** the first recent page is committed and the user can read and triage local mail.
@@ -186,9 +196,15 @@ Backfill has two distinct completion points:
    to mailbox size, Gmail's per-method quota costs, and rate-limit waits; it has no fixed five-minute SLA and
    must never make an already-usable inbox look unavailable.
 
+A capped sweep is usable but not complete. Keep `capped:lifetime[:page-token]` and its page-start count
+durable so a raised limit resumes without duplicate counting. Show capped coverage separately from
+ongoing indexing and from an exhausted `done` cursor, with Gmail search available for older mail.
+
 After interactive readiness, the footer reports **Live · indexing older mail** rather than a blocking
 “Syncing” state. The lifetime line reads **X of Y threads indexed · time remaining**, where X is the account's
-unique local thread count and Y is the current profile thread total; it also exposes an
+unique local thread count and Y is the current profile thread total. The ETA estimates time to the local
+sweep limit or the account total, whichever is smaller; disabling the limit uses the account total. No ETA
+is shown once that target is reached or when the account total is unknown. The footer also exposes an
 explicit quota-wait state instead of appearing stuck during backoff. The top-bar “N to zero” value is the
 total unread Inbox count, not sync progress, and may exceed the current rendered-list window.
 
@@ -207,6 +223,9 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 - Airplane mode: archive 20 conversations, quit the app, relaunch online → all 20 sync; none lost, none duplicated.
 - Kill the app mid-sync → no corruption; next launch resumes from stored `historyId`.
 - A change made in Gmail web (e.g. archive) is reflected locally within one poll interval.
+- Historical-limit changes survive restart, preserve cached mail and unrelated sync cursors, and apply
+  only to the selected account. Raising a cap restores attachment flags for newly indexed older mail;
+  an unchanged or lower reached cap performs no additional lifetime Gmail requests.
 - Losing the network mid-session flips the status to Offline while reads and triage keep working; restoring it returns to Live and drains the queue with no user action.
 
 ### F3 — Inbox list & conversation view
@@ -437,6 +456,11 @@ the reminder states affected by triage.
 - Search is scoped to the active account — the local FTS query and the Enter-submitted Gmail query alike.
   Cross-account search is out of v1 (F18).
 - Local coverage follows the store: header fields match lifetime mail once the sweep completes; body terms and filenames match only hydrated mail, while `has:attachment` matches lifetime-wide once the ids-only attachment pass that follows the sweep has run (§9 #18c). Local results update as the user types. Enter submits the same query to Gmail (`q=`) once and moves focus to the results; a passive row reports remote progress and failures. Threads fetched from Gmail persist through the normal write path and stay cached. Gmail search is unavailable for Drafts and snooze queries because those are backed by Attn's local outbox and reminder state rather than Gmail search state.
+- At large scale, text search considers a bounded recent-match window before filters, and the footer
+  identifies partial results. Explicit snooze queries keep older local matches because Gmail cannot
+  search local reminder state. A historical sync cap is a separate coverage limit; changing it neither
+  removes the search window nor promises exhaustive local results. Search and sync settings explain both
+  limits and retain the **Search all of Gmail** action where supported (§9 #22).
 
 **Acceptance criteria**
 - p95 < 100ms for local queries on a 50,000-message store.
@@ -485,6 +509,9 @@ The inbox is divided into **splits** — tabs above the list, each an independen
 - **Batching:** a poll cycle delivering more than 3 new conversations collapses into one summary notification ("7 new conversations") instead of a burst of toasts. A summary names no single thread, so clicking it raises the window on the inbox rather than opening a conversation — only per-message notifications carry a thread target. Notifications are suppressed entirely while a window is focused.
 - Unread badge: macOS dock badge; Windows taskbar overlay. Counts only notification-enabled splits (i.e., the number that matters, not all mail), summed across every signed-in account (F18).
 - **Multi-account (F18):** notifications cover every signed-in account, not just the active one. With more than one account signed in, the notification names the owning account; batching applies per account per poll cycle; and clicking a notification switches to that account before opening its thread (or its inbox, for summaries).
+- Pause notifications for one hour or until tomorrow, or resume, from settings and the palette on either
+  OS. The existing tray actions use the same app-wide deadline. Pausing suppresses notifications for all
+  accounts without changing their split settings, unread badges, or background sync.
 - Notification latency is bounded by polling: ≤ ~30s foregrounded (D2).
 - **M1 staging:** before splits exist, notifications and the badge cover every unread Inbox conversation. Windows uses a static-dot overlay with the numeric count in its tooltip. Per-split filtering arrives with F11 in M3; a rendered Windows numeric overlay is M4 packaging polish.
 
@@ -508,9 +535,24 @@ normalization that `mailSurface.ts` applies today, with a per-message "View orig
 
 ### F15 — Settings
 
-Minimal surface, all reachable via palette: accounts (add account, remove account, reorder for `Mod+1..9` — F18), undo-send delay, auto-advance direction, per-split notifications, snippet manager, split-rule manager, theme, background behavior (launch at login, tray/menu-bar — see F16), AI writing (enable, provider & key, voice profile, separate autocomplete opt-in — see F17), and a keyboard cheat-sheet (`Mod+/`).
+Settings and the palette expose:
 
-**Entry point (D6):** the account chip in the top bar is the menu — the signed-in accounts with the active one marked (F18), Add account…, Settings (`Mod+,`), Keyboard shortcuts (`Mod+/`), Split rules, Remove account. No hamburger icon; every item is also a palette command.
+- Accounts: live sync status, add, reconnect, Sign out with Delete/Keep local data, and reorder for
+  `Mod+1..9` (F18). Reuse the existing account-management guards and deletion-failure warning.
+- Sync & storage: the active account's historical conversation limit, with default, custom, and All mail
+  choices (F2). This control does not evict cached mail or change body windows and search limits.
+- Triage: undo-send delay and auto-advance direction.
+- Notifications: one app-wide pause/resume deadline and per-account split notification controls.
+- Snippet manager, split-rule manager, and theme.
+- Background behavior: launch at login and the optional macOS menu-bar icon (F16).
+- AI writing: enable, provider and key, voice profile, and separate autocomplete opt-in (F17).
+- Keyboard cheat sheet (`Mod+/`).
+
+Label account-specific controls with the owning email; other preferences apply app-wide. Settings reuse
+the existing default constants and typed APIs. Internal polling, quota, paging, retry, search-window, and
+editor-timing constants remain development tuning rather than user controls.
+
+**Entry point (D6):** the account chip in the top bar is the menu — the signed-in accounts with the active one marked (F18), Add account…, Settings (`Mod+,`), Keyboard shortcuts (`Mod+/`), Split rules, Sign out. No hamburger icon; every item is also a palette command.
 
 ### F16 — Background & tray behavior
 
@@ -606,6 +648,9 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
 - **Add account:** the account menu and palette offer *Add account…*, running F1's OAuth flow. Signing into
   an already-added address refreshes its tokens instead of duplicating the account. There is no hard account
   cap; the switcher digits cover the first nine.
+- **Reorder accounts (M4 settings):** change menu and `Mod+1..9` order without changing the active account,
+  its view, credentials, or running work. Persist the order in the encrypted token roster. Invalid or
+  stale roster permutations fail without partial changes. Sign-out successor selection uses this order.
 - **Switching:** `Mod+1..9` selects by the user-configured order; the account-chip menu and *Switch to
   <address>* palette commands cover every account. A warm switch renders the other account's cached mail in
   < 100ms and restores that account's last view, selection, and scroll from the session. Sidebar
@@ -619,9 +664,10 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   on a retiring session for a few seconds), every composer open is inert, so no draft can appear only to be
   torn down when the switch lands.
 - **Scoping:** threads, labels, splits and their notification settings, contacts and recipient autocomplete ranking,
-  local and server search, snooze and follow-up reminders, drafts, outbox rows, the session undo stack, and
-  command usage all key off the owning account. App-level preferences stay global: theme, launch at
-  login/tray, undo-send delay, auto-advance, notification pause, sidebar collapse, and (when they ship) the
+  local and server search, snooze and follow-up reminders, drafts, outbox rows, the session undo stack,
+  historical sync limit, and command usage all key off the owning account. App-level preferences stay
+  global: theme, launch at login/tray, undo-send delay, auto-advance, notification pause, sidebar collapse,
+  and (when they ship) the
   F17 provider key, model, voice profile and enable toggles (including autocomplete), and F8 snippets.
 - **Background liveness:** every signed-in account keeps working while inactive — polling (the active
   account at F2's 15s/60s cadence, inactive accounts at the 60s background cadence), draining its action
@@ -636,14 +682,18 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   marks it *Reconnect*, the account chip carries an attention mark while any account needs reauth, and the
   existing auth-paused banner appears when that account is active. Reconnecting resumes that account's
   queues and polling and no other's.
-- **Remove account:** always removes the account's tokens and stops its sync; the confirmation asks what to
-  do with local data (decided 2026-08-28). The default, **Delete local data**, purges every local trace —
+- **Sign out:** the account menu and palette use this short label. The confirmation identifies the account
+  and asks what to do with local data (decided 2026-08-28). Confirming always removes the account's tokens
+  and stops its sync. The default, **Delete local data**, purges every local trace —
   store rows in every account-keyed table, FTS entries, attachment and draft spool files, reminders, and
   per-account settings — so removal is the privacy boundary and re-adding re-syncs from scratch (local data
   is a cache of Gmail, decision #6's posture). **Keep local data** leaves those rows in place, unreadable
   and unlisted until the same address is added again, at which point sync resumes from its stored cursors
   instead of re-backfilling. The active account falls to the next remaining one; removing the last account
   returns to F1's signed-out screen.
+  Deletion waits for attachment files before purging the identifying store rows. If deletion fails, the
+  account stays signed out, the remaining data stays available for a retry, and a dismissible warning
+  remains visible after the view changes. Re-adding the account allows another Delete attempt.
 - Out of scope for v1: unified inbox, cross-account search, moving mail between accounts, a From-account
   picker in the composer (F6), per-account themes.
 
@@ -826,9 +876,14 @@ latency and is not a prerequisite for typing, saving, or sending.
 
 ## 8. Milestones
 
+PR #96 review follow-up (2026-08-30): M5 now cancels reads from removed accounts, guards the
+removal transition against composer opens, restores split and paginated selections, and keeps open
+account-menu statuses current. Regression coverage and implementation notes are in
+[M5 A3 and A6](M5-PLAN.md).
+
 Each milestone ends in a usable app; the daily-drivable bar is M2.
 
-**Status (2026-08-28):** all planned M1 feature capabilities are implemented. The engineering exit audit and real-Gmail airplane-mode drain are complete; only the real-OS notification click-through smoke in docs/M1-PLAN.md remains. M2's feature work has shipped: the renderer decomposition (#31), main-process seams (#30), mail-out test scaffolding (#37), sent-mail/contact foundation (#32), full-window composer with crash-safe drafts (#38), MIME builder and reply semantics (#39), on-demand body hydration (#41), drafts as first-class objects with reply/forward entry points, rich content with the zero-loss invariant, and two-way Gmail Drafts sync (#43, #44), outbox send and undo send (#45), self-healing failed actions (#47), outgoing attachments (#48), inline thread drafting (#50), the lifetime header sweep plus the full bounded stage pipeline pulled forward from M3 (#51), and the composer dogfood fixes (#52). T21's poll-cycle label-catalog refresh is implemented with authoritative replacement and change-only UI invalidation. T20's engineering pass ships 10k list windowing and regression budgets; M3 navigation now feeds those lists with 100-row keyset pages instead of transferring the full profile at once. Composer profiling, the weighted Gmail quota limiter, and first-readable/stage/rate/quota-wait telemetry remain recorded in the [T20 evidence](T20-EVIDENCE.md). Still open before M2 sign-off are the real-Gmail bootstrap/exactly-once/hydration observations, real-OS notification click, and the one-week sole-client dogfood run recorded in docs/M2-PLAN.md. Multi-account was pulled into v1 scope on 2026-08-28 (F18, §9 #21) as milestone M5; its switch-account slice (A1–A3: add account, switcher via menu/palette/`Mod+1..9`, per-account sync sessions with background polling for inactive accounts, per-account sign-out) landed the same day, and docs/M5-PLAN.md tracks the rest.
+**Status (2026-08-28):** all planned M1 feature capabilities are implemented. The engineering exit audit and real-Gmail airplane-mode drain are complete; only the real-OS notification click-through smoke in docs/M1-PLAN.md remains. M2's feature work has shipped: the renderer decomposition (#31), main-process seams (#30), mail-out test scaffolding (#37), sent-mail/contact foundation (#32), full-window composer with crash-safe drafts (#38), MIME builder and reply semantics (#39), on-demand body hydration (#41), drafts as first-class objects with reply/forward entry points, rich content with the zero-loss invariant, and two-way Gmail Drafts sync (#43, #44), outbox send and undo send (#45), self-healing failed actions (#47), outgoing attachments (#48), inline thread drafting (#50), the lifetime header sweep plus the full bounded stage pipeline pulled forward from M3 (#51), and the composer dogfood fixes (#52). T21's poll-cycle label-catalog refresh is implemented with authoritative replacement and change-only UI invalidation. T20's engineering pass ships 10k list windowing and regression budgets; M3 navigation now feeds those lists with 100-row keyset pages instead of transferring the full profile at once. Composer profiling, the weighted Gmail quota limiter, and first-readable/stage/rate/quota-wait telemetry remain recorded in the [T20 evidence](T20-EVIDENCE.md). Still open before M2 sign-off are the real-Gmail bootstrap/exactly-once/hydration observations, real-OS notification click, and the one-week sole-client dogfood run recorded in docs/M2-PLAN.md. Multi-account was pulled into v1 scope on 2026-08-28 (F18, §9 #21) as milestone M5; its switch-account slice (A1–A3: add account, switcher via menu/palette/`Mod+1..9`, per-account sync sessions with background polling for inactive accounts, per-account sign-out) landed the same day, and the remaining feature work (A2 liveness proofs and indexing-slot preemption, A3 per-account view restore and menu status, A4 cross-account notifications and focus routing, A5 per-account composer/outbox/reconnect correctness, A6 remove account with Delete/Keep local data, A7's executable isolation sweeps and the two-account perf profile) landed 2026-08-30 — docs/M5-PLAN.md records each task's as-shipped shape; only A7's real-Gmail two-account dogfood observation remains before M5 sign-off.
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading view, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
 - **M1 — Triage core.** First items: **apply the Dispatch direction** (D6 — graphite/amber tokens, `attn:` wordmark, layout per D6, split strip, account menu) and **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). The reading work adds recipients, attachments, quote/signature collapse, and—after M1 dogfood—the full-window conversation that supersedes the interim split. Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
 - **M2 — Mail out.** Composer (rich text, attachments, recipient autocomplete), reply/all/forward, crash-safe drafts, send + undo send, exactly-once outbox. **← daily-drivable.**
@@ -865,3 +920,4 @@ Each milestone ends in a usable app; the daily-drivable bar is M2.
 19. **The utility process owns SQLite (2026-08-22):** §6 commits M3 to running Gmail fetch, backfill, derived-data rebuilds, and FTS indexing in a utility process. S1 moved the sole SQLite connection, every local read, sync, action replay, draft mirroring, outbox sending, and schedulers into that process. Main has no fallback database handle. The action and send state machines live beside their durable rows, so an IPC reply cannot split an executor from its committed state. Every renderer read is a two-hop round trip; the post-move 10,000-thread profile measured cached conversation open at 5 ms p95, local mail refresh at 37 ms p95, and application-owned steady-state memory at 130 MB. The supervisor restarts a crashed utility without restarting the app, and each indexing cursor resumes from SQLite. See docs/S1-DESIGN.md and M3's S1 in docs/M3-PLAN.md.
 20. **Move is separate from Label (2026-08-27; revised 2026-08-28):** `V` chooses one mailbox or user-label destination. Done represents All Mail without `INBOX`, `SPAM`, or `TRASH`. In Inbox, the same picker separates **Mark as important** and **Mark as not important** under Importance because Gmail's `IMPORTANT` mutation can reclassify a thread without naming its resulting split. `L` remains the multi-label membership editor. Move preserves unrelated labels and status flags, removes the active user label when invoked from that label's view, and calls Gmail `users.threads.modify` with the planned system-label delta. The `!` and `#` shortcuts share the same Spam and Trash system-label plans, Gmail operation, and optimistic renderer path; support for older queued `threads.trash` and `threads.untrash` rows remains until those rows drain. A pending-snooze thread reached through another view is movable. Move cancels its reminder, and undo restores the reminder with its prior due time. Drafts, Snoozed, and Outbox retain their dedicated actions.
 21. **Multi-account moves into v1 as switched accounts (2026-08-28; revises #1 and D4, adds F18 and M5).** Dogfood reality: one mailbox is not how the maintainer lives — work and personal Gmail both need triage, and a client that owns only one of them keeps Gmail web open, which defeats the daily-driver goal. The store was built for this from day one (every row keyed by `account_id`, D4), so the cost concentrates in the places that assume "the account": the single-`TokenSet` token file, main's sign-in-replaces-account flow and global auth generation, the singleton sync session in the utility runtime, executors that drain only the current account, the single-account notifier gate, and the renderer's `status.email`. Shape decisions recorded now: (a) **switched accounts, not a unified inbox** — one active account renders at a time, because a merged list reopens every per-account invariant (splits, counts, search scope, triage targets, From identity) for marginal v1 value; (b) **inactive accounts stay fully live** — poll at the 60s background cadence, drain action/outbox/draft queues, fire snooze returns and notifications — because an account that freezes when backgrounded is a profile, not an account; a queued send or snooze return that silently waits for a switch would break F6/F4's promises; (c) **each draft belongs to one account** — new mail binds to the account active at open, replies and forwards to the thread's owner, no From picker in v1 (F6); (d) **Remove account always removes tokens and asks about local data** (updated 2026-08-28): the default purges every local trace — rows, FTS entries, spool files, reminders, per-account settings — because local data is a cache of Gmail (decision #6's posture) and removal is the privacy boundary, while an explicit Keep choice preserves the rows dormant so re-adding the same address resumes from stored cursors instead of re-backfilling; (e) **notifications and the badge span all accounts** and clicks route through an account switch (F12); (f) **search and contact autocomplete stay account-scoped** (F10); (g) **historical indexing serializes across accounts** (active account first) while pollers, executors, and interactive work run concurrently for all — adding an account must never starve triage or another account's correctness work, and the lifetime sweep is the only unbounded quota consumer; (h) **the IPC surface keeps the account implicit** — the utility owns the active-account pointer, and threading an explicit account id through every one of ~60 channels buys nothing while a single-window app shows one account at a time. *As shipped (2026-08-28):* the utility goes one step further and filters renderer-facing broadcasts to the active account instead of tagging them — equivalent isolation with nothing on the wire to mis-filter — while events that are genuinely per-account (`token-update`, `actions-reverted`, `body-hydration-failed`, notification candidates) carry `account_id`; the switch itself resolves as a request/response through the utility so every later read is answered for the new account, and the renderer remounts the mail tree keyed by account (PR #94 review) so the first frame for the new account can never carry the previous account's rows. Sub-decisions still awaiting product sign-off are listed in docs/M5-PLAN.md §Open decisions; each names the default the spec assumes so a reversal is one bounded edit.
+22. **Mailbox-size posture: smooth at ordinary scale, degraded but not broken at extreme scale (2026-08-29):** §7's budgets are written against 50,000 messages, while §9 #17 deliberately targets lifetime headers, so the store can hold far more than the budgets describe. A synthetic probe (docs/T20-EVIDENCE.md, 2026-08-29) found the ceiling was three query shapes rather than sync completeness: mailbox counts, search coverage, and an unbounded search candidate set, all of which scaled with the account instead of the answer. The decision is that Attn targets **smooth operation to roughly one million messages** and **degrades rather than breaks beyond it**, with T25's "Search all of Gmail" serving the tail that local search bounds away. Consequences, all shipped with this entry: mailbox counts are exact and read a derived membership table rather than scanning membership rules; counts are cached between writes on the utility process's single SQLite connection, including background writes that do not broadcast a mail change; search coverage reads the current sync cursors without scanning messages. Local text search considers a bounded window of the newest matching messages and says so in the results footer when that window fills, because an empty result under a filter is otherwise indistinguishable from "no such mail". Explicit snooze searches bypass that window because Gmail cannot search local snooze state. The sweep enforces the target rather than only describing it: it keeps the newest `LIFETIME_THREAD_CAP` conversations (400,000, about a million messages and roughly 48 hours of app-open fetching at Gmail's background quota) and leaves older mail to server search, which the search field advertises on every local result. Raising the cap resumes the walk; lowering it stops fetching and deletes nothing. Every such knob lives in `src/main/sync/tuning.ts`. Deliberately not done: exhaustive search past the window (the server answers that), and a user-facing control for the cap, planned per account in F2/F15 and M4 T32A. E7's real-Gmail bootstrap capture remains open and is the other half of the picture, covering sync timing rather than query cost.

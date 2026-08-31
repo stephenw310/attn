@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { formatActionRevertToast } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
-import type { AuthSignInResult, AuthStatus } from '../shared/auth'
+import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from '../shared/auth'
 import type { CommandUsage } from '../shared/commandUsage'
 import type { ContactSearchResult } from '../shared/contacts'
 import type {
@@ -12,7 +12,6 @@ import type {
   DraftKind,
   DraftSaveInput
 } from '../shared/drafts'
-import { nonEmptyString } from '../shared/guards'
 import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS, type MailChangeReason } from '../shared/ipc'
 import type {
   Conversation,
@@ -32,6 +31,7 @@ import type {
   ThreadPageCursor,
   ThreadRow
 } from '../shared/mail'
+import type { PendingFocusTarget } from '../shared/notifications'
 import type {
   OutboxChanged,
   OutboxItem,
@@ -71,9 +71,16 @@ const api = {
   auth: {
     getStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authGetStatus),
     signIn: (): Promise<AuthSignInResult> => invoke(IPC_CHANNELS.authSignIn),
-    signOut: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authSignOut),
     setActiveAccount: (accountId: string): Promise<AuthStatus> =>
-      invoke(IPC_CHANNELS.accountsSetActive, accountId)
+      invoke(IPC_CHANNELS.accountsSetActive, accountId),
+    removeAccount: (accountId: string, deleteData: boolean): Promise<AuthStatus> =>
+      invoke(IPC_CHANNELS.accountsRemove, accountId, deleteData),
+    getAccountStatuses: (): Promise<AccountSyncStatus[]> => invoke(IPC_CHANNELS.accountsGetStatuses),
+    onAccountStatuses: (cb: (statuses: AccountSyncStatus[]) => void): (() => void) => {
+      const listener = (_event: unknown, statuses: AccountSyncStatus[]): void => cb(statuses)
+      ipcRenderer.on(IPC_CHANNELS.accountsStatusChanged, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.accountsStatusChanged, listener)
+    }
   },
   settings: {
     initialTheme,
@@ -86,6 +93,8 @@ const api = {
       invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage)
   },
   mail: {
+    findThreadInView: (request: ThreadListRequest, threadId: string): Promise<ThreadPage> =>
+      listThreadPage({ ...request, cursor: undefined, threadId }),
     search: (query: string): Promise<SearchResponse> => invoke(IPC_CHANNELS.mailSearch, query),
     searchAll: (requestId: string, query: string): Promise<ServerSearchResponse> =>
       invoke(IPC_CHANNELS.mailSearchAll, requestId, query),
@@ -178,18 +187,18 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.mailBodyHydrationFailed, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailBodyHydrationFailed, listener)
     },
-    onFocusThread: (cb: (threadId: string) => void): (() => void) => {
+    onFocusThread: (cb: (target: PendingFocusTarget) => void): (() => void) => {
       let active = true
       const takePendingFocus = async (): Promise<void> => {
-        let threadId: string | null = null
+        let target: PendingFocusTarget | null = null
         try {
-          threadId = await invoke(IPC_CHANNELS.mailTakePendingFocus)
+          target = await invoke(IPC_CHANNELS.mailTakePendingFocus)
         } catch {
           // App shutdown can race the best-effort pending-focus pull after the
           // main process has already removed its IPC handlers.
           return
         }
-        if (active && nonEmptyString(threadId)) cb(threadId)
+        if (active && target) cb(target)
       }
       const listener = (): void => void takePendingFocus()
       ipcRenderer.on(IPC_CHANNELS.mailFocusThreadAvailable, listener)

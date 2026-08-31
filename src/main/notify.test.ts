@@ -5,7 +5,7 @@ import {
   applyUnreadBadgeToWindow,
   BoundedRetainer,
   isolateNotificationFailure,
-  notificationTarget,
+  notificationClickTarget,
   oneHourFrom,
   PENDING_FOCUS_TTL_MS,
   planNotifications,
@@ -77,6 +77,23 @@ describe('planNotifications', () => {
       1
     )
   })
+
+  it('names the owning account in detail and summary titles when a label is given', () => {
+    // With several accounts signed in, the title answers "which inbox?" before
+    // the click switches there (F12/F18); with one account it stays quiet.
+    expect(planNotifications([mail('one')], { focused: false, accountLabel: 'b@attn.test' })).toEqual([
+      { threadId: 'one', title: 'Sender one · Subject one · b@attn.test', body: 'Snippet one' }
+    ])
+    expect(
+      planNotifications([mail('one'), mail('two'), mail('three'), mail('four')], {
+        focused: false,
+        accountLabel: 'b@attn.test'
+      })
+    ).toEqual([{ title: 'Attn · b@attn.test', body: '4 new conversations' }])
+    expect(planNotifications([mail('one')], { focused: false, accountLabel: null })).toEqual([
+      { threadId: 'one', title: 'Sender one · Subject one', body: 'Snippet one' }
+    ])
+  })
 })
 
 describe('tomorrowStart', () => {
@@ -147,12 +164,34 @@ describe('notification failure isolation', () => {
 })
 
 describe('takePendingFocus', () => {
+  const pending = { accountId: 'a@attn.test', threadId: 't-budget', at: 1_000 }
+
   it('honours a fresh target and drops one nothing picked up in time', () => {
-    expect(takePendingFocus(null)).toBeNull()
-    expect(takePendingFocus({ threadId: 't-budget', at: 1_000 }, 1_000 + PENDING_FOCUS_TTL_MS)).toBe(
-      't-budget'
-    )
-    expect(takePendingFocus({ threadId: 't-budget', at: 1_000 }, 1_001 + PENDING_FOCUS_TTL_MS)).toBeNull()
+    expect(takePendingFocus(null, 'a@attn.test')).toBeNull()
+    expect(takePendingFocus(pending, 'a@attn.test', 1_000 + PENDING_FOCUS_TTL_MS)).toEqual({
+      kind: 'focus',
+      threadId: 't-budget'
+    })
+    expect(takePendingFocus(pending, 'a@attn.test', 1_001 + PENDING_FOCUS_TTL_MS)).toBeNull()
+  })
+
+  it('asks for an account switch while the target names an inactive account', () => {
+    // The click routes through the renderer's guarded switch (F18); the target
+    // stays pending until the remounted tree for the right account pulls it.
+    expect(takePendingFocus(pending, 'b@attn.test', 1_500)).toEqual({
+      kind: 'switch',
+      accountId: 'a@attn.test'
+    })
+    expect(takePendingFocus(pending, null, 1_500)).toEqual({ kind: 'switch', accountId: 'a@attn.test' })
+    // Even a switch ask expires: an unconsumed click must not redirect later.
+    expect(takePendingFocus(pending, 'b@attn.test', 1_001 + PENDING_FOCUS_TTL_MS)).toBeNull()
+  })
+
+  it('resolves a summary click to the inbox of its account', () => {
+    expect(takePendingFocus({ accountId: 'a@attn.test', at: 1_000 }, 'a@attn.test', 1_500)).toEqual({
+      kind: 'focus',
+      threadId: null
+    })
   })
 })
 
@@ -307,21 +346,30 @@ describe('notification retention', () => {
   })
 })
 
-describe('notificationTarget', () => {
-  it('focuses the thread while the notifying account is still signed in', () => {
-    expect(notificationTarget('t-budget', 'a@attn.test', 'a@attn.test')).toBe('t-budget')
+describe('notificationClickTarget', () => {
+  it('routes the click while the notifying account is still on the roster', () => {
+    expect(notificationClickTarget('a@attn.test', 't-budget', ['a@attn.test', 'b@attn.test'])).toEqual({
+      accountId: 'a@attn.test',
+      threadId: 't-budget'
+    })
+    // An inactive account is still a valid target — the click switches to it.
+    expect(notificationClickTarget('b@attn.test', 't-beta', ['a@attn.test', 'b@attn.test'])).toEqual({
+      accountId: 'b@attn.test',
+      threadId: 't-beta'
+    })
   })
 
-  it('drops a target whose account was switched out from under the banner', () => {
-    // A banner can sit in Notification Center across a sign-out/sign-in. Honouring
-    // it would pull the new account away from whatever it is showing to hunt a
-    // thread it does not have.
-    expect(notificationTarget('t-budget', 'a@attn.test', 'b@attn.test')).toBeNull()
-    expect(notificationTarget('t-budget', 'a@attn.test', null)).toBeNull()
-    expect(notificationTarget('t-budget', null, null)).toBeNull()
+  it('drops a target whose account was removed from under the banner', () => {
+    // A banner can sit in Notification Center across a remove/re-add. Honouring
+    // it would hunt a thread no signed-in account has.
+    expect(notificationClickTarget('a@attn.test', 't-budget', ['b@attn.test'])).toBeNull()
+    expect(notificationClickTarget('a@attn.test', 't-budget', [])).toBeNull()
   })
 
-  it('has no target for a summary notification', () => {
-    expect(notificationTarget(undefined, 'a@attn.test', 'a@attn.test')).toBeNull()
+  it('aims a summary click at the account inbox rather than a thread', () => {
+    expect(notificationClickTarget('a@attn.test', undefined, ['a@attn.test'])).toEqual({
+      accountId: 'a@attn.test',
+      threadId: null
+    })
   })
 })

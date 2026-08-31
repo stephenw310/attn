@@ -1,7 +1,8 @@
 import { app, BrowserWindow, type NativeImage, Notification, nativeImage } from 'electron'
 import badgeIcon from '../../resources/tray.png?asset'
+import type { AuthAccount } from '../shared/auth'
 import { errorMessage } from '../shared/error'
-import { NOTIFICATION_SUMMARY_THRESHOLD } from '../shared/notifications'
+import { NOTIFICATION_SUMMARY_THRESHOLD, type PendingFocusTarget } from '../shared/notifications'
 import type { NotificationCandidate } from './service/notificationQueries'
 
 let windowsBadgeIcon: NativeImage | null = null
@@ -59,7 +60,10 @@ export class BoundedRetainer<T> {
 }
 
 export interface PendingFocus {
-  threadId: string
+  /** The account the clicked notification belongs to (F18). */
+  accountId: string
+  /** Absent for a summary click, which lands on the account's inbox. */
+  threadId?: string
   at: number
 }
 
@@ -73,6 +77,8 @@ export interface NotificationContext {
   focused: boolean
   pausedUntil?: number | null
   now?: number
+  /** Names the owning account in titles; null while only one account is signed in (F12). */
+  accountLabel?: string | null
 }
 
 export interface BadgeEffects {
@@ -109,19 +115,20 @@ export function applyUnreadBadgeToWindow(
 /** Keep batching policy independent from Electron so it can be exhaustively unit tested. */
 export function planNotifications(
   newMail: readonly NotificationCandidate[],
-  { focused, pausedUntil, now = Date.now() }: NotificationContext
+  { focused, pausedUntil, now = Date.now(), accountLabel }: NotificationContext
 ): PlannedNotification[] {
   if (focused || (pausedUntil !== null && pausedUntil !== undefined && pausedUntil > now)) return []
 
+  const suffix = accountLabel ? ` · ${accountLabel}` : ''
   const byThread = new Map<string, NotificationCandidate>()
   for (const mail of newMail) byThread.set(mail.threadId, mail)
   const conversations = [...byThread.values()]
   if (conversations.length > SUMMARY_THRESHOLD) {
-    return [{ title: 'Attn', body: `${conversations.length} new conversations` }]
+    return [{ title: `Attn${suffix}`, body: `${conversations.length} new conversations` }]
   }
   return conversations.map((mail) => ({
     threadId: mail.threadId,
-    title: `${mail.sender || 'New message'} · ${mail.subject || '(no subject)'}`,
+    title: `${mail.sender || 'New message'} · ${mail.subject || '(no subject)'}${suffix}`,
     body: mail.snippet
   }))
 }
@@ -135,31 +142,39 @@ export function oneHourFrom(now = Date.now()): number {
 }
 
 /**
- * Consume a focus target requested by a notification click. A renderer that
+ * Resolve a focus target requested by a notification click. A renderer that
  * never picks one up (its window was closed again before it mounted, or the
  * account signed out) must not redirect an unrelated window opened much later,
- * so a stale target is dropped rather than honoured.
+ * so a stale target is dropped rather than honoured. A fresh target for an
+ * inactive account resolves to a `switch` ask — the renderer runs its guarded
+ * account switch, and the caller keeps the target pending so the remounted
+ * tree for the right account can consume it (F18).
  */
-export function takePendingFocus(pending: PendingFocus | null, now = Date.now()): string | null {
-  if (!pending) return null
-  return now - pending.at > PENDING_FOCUS_TTL_MS ? null : pending.threadId
+export function takePendingFocus(
+  pending: PendingFocus | null,
+  activeAccountId: string | null,
+  now = Date.now()
+): PendingFocusTarget | null {
+  if (!pending || now - pending.at > PENDING_FOCUS_TTL_MS) return null
+  if (pending.accountId === activeAccountId) return { kind: 'focus', threadId: pending.threadId ?? null }
+  return { kind: 'switch', accountId: pending.accountId }
 }
 
 /**
  * A banner outlives the session that created it: it can sit in Notification
- * Center across a sign-out and sign-in. Clicking it must not aim a previous
- * account's thread id at the current one — the renderer would leave whatever the
- * user is reading, reset the selection, and only then discover the thread is not
- * there. `pendingFocus` is already cleared on account changes for this reason;
- * a retained click handler would otherwise route straight around that guard.
+ * Center across a sign-out and sign-in. Clicking it must not hunt a removed
+ * account's thread — the click routes only while the owning account is still
+ * on the roster. Which account is *active* no longer matters: a click for an
+ * inactive account switches to it first (F12/F18). A summary click carries no
+ * thread and lands on the account's inbox.
  */
-export function notificationTarget(
+export function notificationClickTarget(
+  accountId: string,
   threadId: string | undefined,
-  notifiedAccount: string | null,
-  currentAccount: string | null
-): string | null {
-  if (!threadId) return null
-  return notifiedAccount !== null && notifiedAccount === currentAccount ? threadId : null
+  rosterIds: readonly string[]
+): { accountId: string; threadId: string | null } | null {
+  if (!rosterIds.includes(accountId)) return null
+  return { accountId, threadId: threadId ?? null }
 }
 
 function getWindowsBadgeIcon(): NativeImage {
@@ -168,17 +183,14 @@ function getWindowsBadgeIcon(): NativeImage {
 }
 
 export class MailNotifier {
-  private accountId: string | null
+  private accounts: AuthAccount[] = []
   private unreadCount = 0
   private readonly shown = new BoundedRetainer<Notification>(NOTIFICATION_RETENTION)
 
   constructor(
-    accountId: string | null,
     private readonly showMainWindow: () => BrowserWindow | null,
-    private readonly focusThread: (threadId: string) => void
-  ) {
-    this.accountId = accountId
-  }
+    private readonly focusThread: (accountId: string, threadId: string | null) => void
+  ) {}
 
   start(): void {
     this.updateBadge(0)
@@ -193,6 +205,9 @@ export class MailNotifier {
   }
 
   updateBadge(unreadCount: number): void {
+    // The OS badge is invisible to headless e2e (and a no-op on Linux); the
+    // change log is what lets tests assert the roster-summed count (F12).
+    if (unreadCount !== this.unreadCount) console.log(`[badge] unread ${unreadCount}`)
     this.unreadCount = unreadCount
     try {
       applyUnreadBadge(process.platform, unreadCount, {
@@ -217,19 +232,29 @@ export class MailNotifier {
     }
   }
 
-  setAccountId(accountId: string | null): void {
-    this.accountId = accountId
-    // Nothing retained can still be actionable for the new account; the click
-    // guard makes this safe either way, so this is purely releasing memory.
-    this.shown.clear()
-    if (!accountId) this.updateBadge(0)
+  /**
+   * The roster the notifier serves — every signed-in account notifies, not
+   * only the active one (F12/F18). Retained banners survive roster changes:
+   * the click guard resolves against the roster live at click time, so a
+   * banner for a since-removed account degrades to raising the window.
+   */
+  setAccounts(accounts: readonly AuthAccount[]): void {
+    this.accounts = [...accounts]
+    if (this.accounts.length === 0) {
+      this.shown.clear()
+      this.updateBadge(0)
+    }
   }
 
   notify(accountId: string, candidates: readonly NotificationCandidate[], pausedUntil: number | null): void {
-    if (accountId !== this.accountId || !Notification.isSupported()) return
+    const account = this.accounts.find((candidate) => candidate.id === accountId)
+    if (!account || !Notification.isSupported()) return
     const planned = planNotifications(candidates, {
       focused: BrowserWindow.getAllWindows().some((win) => win.isFocused()),
-      pausedUntil
+      pausedUntil,
+      // With one account the suffix is noise; with several it is the answer
+      // to "which inbox is this?" before the click switches there (F12).
+      accountLabel: this.accounts.length > 1 ? account.email : null
     })
     for (const item of planned) {
       const notification = new Notification({ title: item.title, body: item.body })
@@ -238,10 +263,16 @@ export class MailNotifier {
       this.shown.retain(notification)
       notification.on('click', () => {
         this.shown.release(notification)
-        // Resolve against the account live *now*, not the one captured at show time.
-        const target = notificationTarget(threadId, accountId, this.accountId)
-        console.log(`[notify] click${target ? ` → focus ${target}` : ' → show window (no live target)'}`)
-        if (target) this.focusThread(target)
+        // Resolve against the roster live *now*, not the one captured at show time.
+        const target = notificationClickTarget(
+          accountId,
+          threadId,
+          this.accounts.map((candidate) => candidate.id)
+        )
+        console.log(
+          `[notify] click${target ? ` → focus ${target.accountId} ${target.threadId ?? '(inbox)'}` : ' → show window (no live target)'}`
+        )
+        if (target) this.focusThread(target.accountId, target.threadId)
         else this.showMainWindow()
       })
       notification.on('failed', () => this.shown.release(notification))

@@ -6,7 +6,7 @@ import type { ServiceSupervisor } from './service/supervisor'
 
 export interface TestSeamDeps {
   service: () => ServiceSupervisor | null
-  focusInboxThread: (threadId: string) => void
+  focusInboxThread: (threadId: string | null, accountId?: string) => void
 }
 
 export class TestSeams {
@@ -25,8 +25,15 @@ export class TestSeams {
 
   register(): void {
     if (!this.enabled) return
-    ipcMain.on(TEST_CHANNELS.focusThread, (_event, threadId: unknown) => {
-      if (nonEmptyString(threadId)) this.deps.focusInboxThread(threadId)
+    ipcMain.on(TEST_CHANNELS.focusThread, (_event, threadId: unknown, accountId: unknown) => {
+      // Models a notification click: a thread target, or an accountId-only
+      // summary click that lands on that account's inbox (F12/F18).
+      const account = nonEmptyString(accountId) ? accountId : undefined
+      if (nonEmptyString(threadId)) this.deps.focusInboxThread(threadId, account)
+      else if (threadId === null && account) this.deps.focusInboxThread(null, account)
+    })
+    ipcMain.on(TEST_CHANNELS.setSearchWindow, (_event, limit: unknown, done?: Done) => {
+      this.forwardDone(TEST_CHANNELS.setSearchWindow, [limit], done)
     })
     ipcMain.on(TEST_CHANNELS.setAttachmentPickerFiles, (_event, paths: unknown) => {
       this.attachmentPickerPaths = Array.isArray(paths)
@@ -84,7 +91,11 @@ export class TestSeams {
           .catch((error) => done?.({ error: errorMessage(error) }))
       }
     )
-    for (const channel of [TEST_CHANNELS.runFtsBackfill, TEST_CHANNELS.searchIndexStats]) {
+    for (const channel of [
+      TEST_CHANNELS.runFtsBackfill,
+      TEST_CHANNELS.searchIndexStats,
+      TEST_CHANNELS.queryPerfStats
+    ]) {
       ipcMain.on(channel, (_event, request: unknown, done?: (result: unknown) => void) => {
         void this.forward(channel, [request])
           .then((result) => done?.(result))
@@ -96,6 +107,14 @@ export class TestSeams {
         .then((result) => done?.(result))
         .catch((error) => done?.({ error: errorMessage(error) }))
     })
+    ipcMain.on(
+      TEST_CHANNELS.accountDataStats,
+      (_event, accountId: unknown, done?: (result: unknown) => void) => {
+        void this.forward(TEST_CHANNELS.accountDataStats, [accountId])
+          .then((result) => done?.(result))
+          .catch((error) => done?.({ error: errorMessage(error) }))
+      }
+    )
     ipcMain.on(
       TEST_CHANNELS.listMailboxThreadIds,
       (_event, mailbox: unknown, done?: (threadIds: string[], error?: string) => void) => {

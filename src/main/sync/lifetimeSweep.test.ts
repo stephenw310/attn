@@ -108,6 +108,12 @@ describe('lifetime sweep cursor routing', () => {
       initialize: false
     })
     expect(planLifetimeSweepStart('done')).toEqual({ kind: 'skip' })
+    expect(planLifetimeSweepStart('capped:lifetime')).toEqual({ kind: 'run', initialize: false })
+    expect(planLifetimeSweepStart('capped:lifetime:page-2')).toEqual({
+      kind: 'run',
+      pageToken: 'page-2',
+      initialize: false
+    })
     expect(() => planLifetimeSweepStart('sent:page-2')).toThrow('Invalid lifetime sweep cursor')
   })
 })
@@ -148,6 +154,95 @@ describe('lifetime header indexing', () => {
     expect(events.onProgress).toHaveBeenCalledWith(
       expect.objectContaining({ threadsDone: 2, threadsTotal: 50, messagesTotal: 70 })
     )
+  })
+
+  it('stops at the conversation cap without discarding its cursor or making requests', async () => {
+    // The walk is newest first, so a cap keeps the newest conversations and
+    // leaves the rest to server search. Two already stored, cap of two: the
+    // third must never be fetched.
+    const state: FakeDbState = { cursor: null, threadIds: new Set(['newest', 'next']) }
+    const mail = provider({
+      listThreadIds: vi.fn(async () => ({ threadIds: ['newest', 'next', 'older'] })),
+      getThread: vi.fn(async (id) => ({ id, messages: [] }))
+    })
+    const events = callbacks()
+
+    const result = await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', events, {
+      requestIntervalMs: 0,
+      pagePauseMs: 0,
+      threadCap: 2
+    })
+
+    expect(mail.getThread).not.toHaveBeenCalled()
+    expect(mail.getProfile).not.toHaveBeenCalled()
+    expect(mail.listThreadIds).not.toHaveBeenCalled()
+    expect(mocks.persistThread).not.toHaveBeenCalled()
+    expect(state.cursor).toBe('capped:lifetime')
+    expect(result).toMatchObject({ threadCount: 0 })
+    expect(events.onError).not.toHaveBeenCalled()
+  })
+
+  it.each([4, 0])(
+    'resumes a partial page when the cap changes to %i without double-counting ids',
+    async (cap) => {
+      const state = { cursor: 'lifetime:page-2', threadIds: new Set(['first', 'second']), done: 2 }
+      const db = fakeDb(state)
+      const mail = provider({
+        listThreadIds: vi.fn(async ({ pageToken } = {}) =>
+          pageToken === 'page-2'
+            ? { threadIds: ['third', 'fourth'], nextPageToken: 'page-3' }
+            : { threadIds: ['fifth'] }
+        )
+      })
+      const events = callbacks()
+      const run = (threadCap: number) =>
+        runLifetimeSweep(db, mail, 'test@example.com', events, {
+          threadCap,
+          requestIntervalMs: 0,
+          pagePauseMs: 0
+        })
+
+      await run(3)
+      expect(state.threadIds).toEqual(new Set(['first', 'second', 'third']))
+      expect(state.cursor).toBe('capped:lifetime:page-2')
+      expect(state.done).toBe(2)
+      vi.mocked(mail.getThread).mockClear()
+      vi.mocked(mail.listThreadIds).mockClear()
+      vi.mocked(mail.getProfile).mockClear()
+      await run(3)
+      await run(2)
+      expect(mail.getThread).not.toHaveBeenCalled()
+      expect(mail.listThreadIds).not.toHaveBeenCalled()
+      expect(mail.getProfile).not.toHaveBeenCalled()
+
+      await run(cap)
+      expect(mail.listThreadIds).toHaveBeenNthCalledWith(1, {
+        pageToken: 'page-2',
+        priority: 'background'
+      })
+      expect(vi.mocked(mail.getThread).mock.calls.map(([id]) => id)).toEqual(
+        cap === 0 ? ['fourth', 'fifth'] : ['fourth']
+      )
+      expect(state.done).toBe(cap === 0 ? 5 : 4)
+      expect(state.cursor).toBe(cap === 0 ? 'done' : 'capped:lifetime:page-3')
+      expect(events.onError).not.toHaveBeenCalled()
+    }
+  )
+
+  it('stores the whole account when the cap is disabled', async () => {
+    const state: FakeDbState = { cursor: null, threadIds: new Set(['stored']) }
+    const mail = provider({
+      listThreadIds: vi.fn(async () => ({ threadIds: ['stored', 'older'] })),
+      getThread: vi.fn(async (id) => ({ id, messages: [] }))
+    })
+
+    await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', callbacks(), {
+      requestIntervalMs: 0,
+      pagePauseMs: 0,
+      threadCap: 0
+    })
+
+    expect(mail.getThread).toHaveBeenCalledWith('older', expect.anything())
   })
 
   it('resumes from the durable page token and restarts an expired token once', async () => {
@@ -243,7 +338,13 @@ describe('lifetime header indexing', () => {
     })
   })
 
-  it('estimates remaining time from metadata indexing, excluding listing work', async () => {
+  it.each([
+    { threadCap: undefined, expectedEtaMs: 7_200 },
+    { threadCap: 4, expectedEtaMs: 2_400 },
+    { threadCap: 20, expectedEtaMs: 7_200 },
+    { threadCap: 0, expectedEtaMs: 7_200 },
+    { threadCap: 1, expectedEtaMs: undefined }
+  ])('estimates remaining metadata work with cap $threadCap', async ({ threadCap, expectedEtaMs }) => {
     let now = 0
     const state = { cursor: 'lifetime', threadIds: new Set<string>() }
     mocks.persistThread.mockImplementation((_db, _accountId, thread: GmailThread) => {
@@ -280,7 +381,8 @@ describe('lifetime header indexing', () => {
       {
         time: { now: () => now, timers: systemTime.timers },
         requestIntervalMs: 0,
-        pagePauseMs: 0
+        pagePauseMs: 0,
+        threadCap
       }
     )
 
@@ -288,11 +390,15 @@ describe('lifetime header indexing', () => {
       expect.objectContaining({
         threadsDone: 1,
         threadsTotal: 10,
-        etaMs: 7_200,
         elapsedMs: 1_000,
         threadsPerMinute: 60
       })
     )
+    // Listing takes 200ms; only the 800ms metadata fetch determines the pace.
+    // Keep the full account total for coverage, but time only the work before
+    // the cap or account end, whichever comes first. At the cap, no ETA remains.
+    const indexed = events.onProgress.mock.calls.find(([event]) => event.threadsDone === 1)?.[0]
+    expect(indexed?.etaMs).toBe(expectedEtaMs)
   })
 
   it('reports actual weighted-limiter wait separately from the sweep duty cycle', async () => {
@@ -451,6 +557,7 @@ describe('lifetime header indexing', () => {
       expect.objectContaining({ threadsDone: 1, reason: 'running' })
     )
     expect(events.onProgress.mock.calls.every(([event]) => !('threadsTotal' in event))).toBe(true)
+    expect(events.onProgress.mock.calls.every(([event]) => !('etaMs' in event))).toBe(true)
   })
 
   it('does not expose hidden persistence as a visible-mail change signal', async () => {

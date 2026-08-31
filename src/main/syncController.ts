@@ -2,6 +2,7 @@ import type { MailChangeReason } from '../shared/ipc'
 import type { SyncState } from '../shared/mail'
 import type { ActionExecutor } from './actions/executor'
 import type { Db } from './db'
+import { runMailboxMembershipBackfill } from './db/mailboxMembership'
 import { GmailApiError } from './gmail/client'
 import type { GmailMailProvider } from './gmail/provider'
 import { syncRemoteDrafts } from './outbox/draftSync'
@@ -20,9 +21,7 @@ import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership }
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
 import { runSplitMetadataRebuild, type SplitMetadataProgress } from './sync/splitMetadata'
 import { sameSyncState } from './sync/state'
-
-const LIFETIME_RETRY_MS = 15_000
-const FTS_RETRY_MS = 15_000
+import { FTS_RETRY_MS, LIFETIME_RETRY_MS, OFFLINE_SYNC_RETRY_MS } from './sync/tuning'
 
 interface SyncControllerContext {
   db: Db
@@ -49,9 +48,18 @@ interface SyncControllerContext {
    * immediately (single-account tests).
    */
   acquireIndexingSlot?: (accountId: string) => Promise<() => void>
+  /**
+   * True while the active account is waiting on the indexing slot this
+   * account holds. The chain checks it at every page boundary and, when set,
+   * settles early and re-queues itself — the durable cursors are what make
+   * that hand-over free (F18, §9 #21(g)).
+   */
+  shouldPreemptIndexing?: (accountId: string) => boolean
+  /** Test-only pacing overrides threaded through the historical chain stages. */
+  lifetimePacing?: { requestIntervalMs?: number; pagePauseMs?: number; foregroundYieldMs?: number }
 }
 
-interface FtsBackfillRun {
+interface LocalBackfillRun {
   accountId: string
   generation: number
 }
@@ -65,8 +73,10 @@ export class SyncController {
   private state: SyncState = { phase: 'idle' }
   private running = false
   private lifetimeRunning = false
-  private ftsBackfillRun: FtsBackfillRun | null = null
-  private pendingFtsBackfill: FtsBackfillRun | null = null
+  private ftsBackfillRun: LocalBackfillRun | null = null
+  private mailboxBackfillRun: LocalBackfillRun | null = null
+  private pendingFtsBackfill: LocalBackfillRun | null = null
+  private pendingMailboxBackfill: LocalBackfillRun | null = null
   private lifetimeProgress: Extract<SyncState, { phase: 'indexing' }> | null = null
   private foregroundFailure: Extract<SyncState, { phase: 'offline' | 'error' }> | null = null
   private inboxRecoveryPending = false
@@ -76,7 +86,7 @@ export class SyncController {
   private generation = 0
   private lifetimeRunId = 0
   private poller: HistoryPoller | null = null
-  private readonly offlineRetry = new OfflineRetryScheduler(15_000)
+  private readonly offlineRetry = new OfflineRetryScheduler(OFFLINE_SYNC_RETRY_MS)
   private readonly lifetimeRetry = new OfflineRetryScheduler(LIFETIME_RETRY_MS)
   private readonly ftsRetry = new OfflineRetryScheduler(FTS_RETRY_MS)
 
@@ -176,6 +186,7 @@ export class SyncController {
     this.ftsRetry.clear()
     this.backfillRetryGeneration = null
     this.pendingFtsBackfill = null
+    this.pendingMailboxBackfill = null
     this.running = false
     this.lifetimeRunning = false
     this.lifetimeProgress = null
@@ -260,6 +271,54 @@ export class SyncController {
     )
   }
 
+  /**
+   * Fill derived mailbox membership for a profile whose rows predate the table.
+   * Unlike the other local passes this starts before Gmail work: mailbox counts
+   * and the All Mail list read the table, so a manually upgraded profile shows
+   * them incomplete until this finishes. A freshly synced store maintains
+   * membership inline and this returns on its first batch.
+   */
+  private startMailboxMembershipBackfill(accountId: string, generation: number): void {
+    if (this.stopped || generation !== this.generation) return
+    const requestedRun = { accountId, generation }
+    if (this.mailboxBackfillRun) {
+      // Reauthentication cancels the old pass at its next batch boundary. Keep
+      // the replacement request until that pass exits so neither run is lost
+      // and two passes never write the same cursor concurrently.
+      if (
+        this.mailboxBackfillRun.accountId !== accountId ||
+        this.mailboxBackfillRun.generation !== generation
+      ) {
+        this.pendingMailboxBackfill = requestedRun
+      }
+      return
+    }
+    this.pendingMailboxBackfill = null
+    this.mailboxBackfillRun = requestedRun
+    void runMailboxMembershipBackfill(this.context.db, accountId, {
+      shouldContinue: () =>
+        !this.stopped && generation === this.generation && this.context.currentAccountId() === accountId
+    })
+      .then((result) => {
+        // A canceled generation can still have committed batches. This callback
+        // is account-bound, and the replacement may find no work left to publish.
+        if (!this.stopped && result.threadsIndexed > 0) {
+          console.log(`[sync] mailbox membership filled for ${result.threadsIndexed} threads`)
+          this.context.broadcastMailChanged()
+        }
+      })
+      .catch((error) => {
+        console.error(`[sync] mailbox membership backfill failed: ${errorMessage(error)}`)
+      })
+      .finally(() => {
+        if (this.mailboxBackfillRun !== requestedRun) return
+        this.mailboxBackfillRun = null
+        const pending = this.pendingMailboxBackfill
+        this.pendingMailboxBackfill = null
+        if (pending) this.startMailboxMembershipBackfill(pending.accountId, pending.generation)
+      })
+  }
+
   private startSync(): void {
     // An alive poller no longer implies the backfill finished (it starts at
     // interactive-ready), so always route through the cursor plan below;
@@ -270,6 +329,9 @@ export class SyncController {
     const accountId = this.context.currentAccountId()
     const provider = this.context.makeProvider(generation)
     if (!accountId) return
+    // Ahead of the provider check: membership is local, so an unconfigured or
+    // offline client still gets working counts and All Mail.
+    this.startMailboxMembershipBackfill(accountId, generation)
     if (!provider) {
       const message = 'OAuth configuration unavailable — add oauth.config.json'
       this.foregroundFailure = { phase: 'error', message }
@@ -461,11 +523,19 @@ export class SyncController {
     console.log(`[sync] lifetime header sweep started for ${accountId}`)
     const active = (): boolean => generation === this.generation && lifetimeRunId === this.lifetimeRunId
     // Both passes share one posture: the same cancellation guard, the same
-    // yield-to-foreground rule, and the same retry ladder.
+    // yield-to-foreground rule, and the same retry ladder. A preemption ask —
+    // the active account waiting on the slot this account holds — reads as a
+    // cancellation at the next page boundary; the settle handlers below
+    // re-queue instead of parking (F18).
     const pacing = {
-      shouldContinue: () => !this.stopped && active() && this.context.currentAccountId() === accountId,
+      shouldContinue: () =>
+        !this.stopped &&
+        active() &&
+        this.context.currentAccountId() === accountId &&
+        !this.preemptRequested(accountId),
       shouldYield: () => this.shouldYieldLifetime(accountId),
-      snapshotRevision: this.context.mailRevision
+      snapshotRevision: this.context.mailRevision,
+      ...this.context.lifetimePacing
     }
     const pause = (error: unknown, prefix: string): void => {
       failed = true
@@ -493,6 +563,7 @@ export class SyncController {
       .then(async (result) => {
         if (!active()) return
         if (!result || failed) {
+          if (!failed && this.requeueAfterPreemption(accountId, provider, generation)) return
           this.lifetimeRunning = false
           return
         }
@@ -526,6 +597,7 @@ export class SyncController {
         )
         if (!active()) return
         if (!flags || failed) {
+          if (!failed && this.requeueAfterPreemption(accountId, provider, generation)) return
           this.lifetimeRunning = false
           return
         }
@@ -546,8 +618,12 @@ export class SyncController {
           pacing
         )
         if (!active()) return
+        if (!splitMetadata || failed) {
+          if (!failed && this.requeueAfterPreemption(accountId, provider, generation)) return
+          this.lifetimeRunning = false
+          return
+        }
         this.lifetimeRunning = false
-        if (!splitMetadata || failed) return
         if (splitMetadata.threadsRefreshed > 0) {
           console.log(
             `[sync] split metadata rebuild done: ${splitMetadata.threadsRefreshed} threads refreshed for ${accountId}`
@@ -678,6 +754,37 @@ export class SyncController {
   private publishSettledState(): void {
     if (this.running || this.pollerRunning) return
     this.setState(this.foregroundFailure ?? this.lifetimeProgress ?? { phase: 'idle' })
+  }
+
+  private preemptRequested(accountId: string): boolean {
+    return this.context.shouldPreemptIndexing?.(accountId) ?? false
+  }
+
+  /**
+   * A chain stage that halted because the active account wants the slot
+   * settles (its `.finally` releases the slot to that account) and re-queues
+   * itself here, so the preempted cursor resumes once the slot comes back.
+   * Returns false when the halt was a real cancellation — sign-out, session
+   * reset, shutdown — which must park, not re-queue. When those all still
+   * hold, the only remaining halt cause was a preemption ask, so re-queue
+   * without re-reading it: the ask can evaporate between the page boundary
+   * and this settle (the active account switched again), and parking then
+   * would strand the chain with no retry scheduled. A re-queue with nobody
+   * waiting is free — the slot grants immediately and the durable cursor
+   * resumes where it stopped.
+   */
+  private requeueAfterPreemption(
+    accountId: string,
+    provider: GmailMailProvider,
+    generation: number
+  ): boolean {
+    if (this.stopped || generation !== this.generation || this.context.currentAccountId() !== accountId) {
+      return false
+    }
+    console.log(`[sync] historical indexing preempted by the active account; requeueing ${accountId}`)
+    this.lifetimeRunning = false
+    this.startLifetimeSweep(accountId, provider, generation)
+    return true
   }
 
   private shouldYieldLifetime(accountId: string): boolean {

@@ -1,15 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ensureSplitSetup } from '../splits'
 import { type Db, openDatabase } from '.'
 import {
+  MATERIALIZED_MAILBOX_VIEWS,
+  type MaterializedMailboxView,
+  refreshThreadMailboxes,
+  runMailboxMembershipBackfill
+} from './mailboxMembership'
+import {
+  allMailMembershipSql,
   countSystemMailboxes,
   getConversation,
   getConversationForDisplay,
   type LabelMailboxView,
+  labeledMailboxMembershipSql,
   listInboxThreads,
   listLabelThreads,
   listMailboxThreads,
   listSnoozedThreads
 } from './queries'
+
+/**
+ * Derived membership is maintained by `persistThread` and `applyThreadDelta`. A
+ * test that writes rows directly is standing in for a profile that predates the
+ * table, so it fills them the way the backfill does.
+ */
+function fillMembership(db: Db, accountId = 'account'): void {
+  for (const row of db.prepare('SELECT id FROM threads WHERE account_id = ?').all(accountId) as {
+    id: string
+  }[]) {
+    refreshThreadMailboxes(db, accountId, row.id)
+  }
+}
 
 describe('thread list queries', () => {
   let db: Db
@@ -50,6 +72,7 @@ describe('thread list queries', () => {
       `INSERT INTO outbox (id, account_id, state, thread_id, created_at, updated_at)
        VALUES ('draft', 'account', 'drafted', 'newest', 0, 0)`
     ).run()
+    fillMembership(db)
   })
 
   afterEach(() => db.close())
@@ -90,6 +113,44 @@ describe('thread list queries', () => {
     ).toEqual(['older'])
   })
 
+  it.each([undefined, 'fallback:other'])(
+    'pages across positive, null, zero, and negative dates in %s',
+    (splitId) => {
+      if (splitId) ensureSplitSetup(db, 'account')
+      const insertThread = db.prepare(
+        "INSERT INTO threads (account_id, id, last_msg_at) VALUES ('account', ?, ?)"
+      )
+      const insertLabel = db.prepare(
+        "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES ('account', ?, 'INBOX')"
+      )
+      for (const [id, at] of [
+        ['positive-low', 1],
+        ['null-a', null],
+        ['zero-b', 0],
+        ['null-c', null],
+        ['negative', -1]
+      ] as const) {
+        insertThread.run(id, at)
+        insertLabel.run(id)
+      }
+      const ids: string[] = []
+      let cursor: { at: number; id: string } | null = null
+      for (;;) {
+        const page = listInboxThreads(db, 'account', 2, cursor, splitId)
+        if (page.length === 0) break
+        ids.push(...page.map((row) => row.id))
+        const last = page[page.length - 1]
+        cursor = { at: last.lastMsgAt, id: last.id }
+        expect(ids.length).toBeLessThanOrEqual(7)
+      }
+      expect(ids).toEqual(['newest', 'older', 'positive-low', 'null-a', 'null-c', 'zero-b', 'negative'])
+      expect(listInboxThreads(db, 'account', 0, null, splitId)).toEqual([])
+      expect(listInboxThreads(db, 'account', 1, null, splitId, 'null-c')).toEqual([
+        expect.objectContaining({ id: 'null-c', lastMsgAt: 0 })
+      ])
+    }
+  )
+
   it('returns pending snoozes with their labels', () => {
     expect(listSnoozedThreads(db, 'account')).toEqual([
       expect.objectContaining({
@@ -111,6 +172,89 @@ describe('thread list queries', () => {
       spam: 0,
       trash: 0
     })
+  })
+
+  it('keeps derived mailbox membership identical to the label rules it replaces', async () => {
+    // Parity is the whole risk of materializing membership: a count that drifts
+    // from its list is worse than a slow one. Compare the stored rows against the
+    // predicates the list queries use, over a fixture holding every awkward case.
+    const insertThread = db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at, from_display, is_unread, is_starred,
+                            has_attachment, is_inbox_visible)
+       VALUES ('account', ?, ?, ?, 'Sender', 0, 0, 0, ?)`
+    )
+    const insertLabel = db.prepare(
+      'INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)'
+    )
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
+                             body_text, labels_json)
+       VALUES ('account', ?, ?, 'Sender', 's@e.test', 'snippet', ?, 'body', ?)`
+    )
+    const fixture: { id: string; visible: number; labels: string[]; messages: (string[] | null)[] }[] = [
+      // A thread with one trashed message and one live one stays in All Mail.
+      { id: 'partly-trashed', visible: 0, labels: ['TRASH'], messages: [['TRASH'], ['SENT']] },
+      // Wholly trashed: out of All Mail and out of Sent.
+      { id: 'all-trashed', visible: 0, labels: ['TRASH', 'SENT'], messages: [['TRASH', 'SENT']] },
+      // Draft-only mail is never a mailbox row.
+      { id: 'draft-only', visible: 0, labels: ['DRAFT'], messages: [['DRAFT']] },
+      // Legacy rows predate per-message labels and fall back to thread labels.
+      { id: 'legacy', visible: 1, labels: ['INBOX', 'STARRED'], messages: [null] },
+      { id: 'spam-only', visible: 0, labels: ['SPAM'], messages: [['SPAM']] },
+      { id: 'archived', visible: 0, labels: ['IMPORTANT'], messages: [['IMPORTANT']] },
+      // Inbox membership needs the label and the visibility flag together.
+      { id: 'inbox-hidden', visible: 0, labels: ['INBOX'], messages: [['INBOX']] },
+      { id: 'starred-inbox', visible: 1, labels: ['INBOX', 'STARRED'], messages: [['INBOX', 'STARRED']] },
+      { id: 'no-messages', visible: 1, labels: ['INBOX'], messages: [] }
+    ]
+    let messageId = 0
+    for (const row of fixture) {
+      insertThread.run(row.id, row.id, 500, row.visible)
+      for (const label of row.labels) insertLabel.run('account', row.id, label)
+      for (const labels of row.messages) {
+        insertMessage.run(`fixture-${messageId++}`, row.id, 500, labels ? JSON.stringify(labels) : null)
+      }
+    }
+    // The seeding above writes rows directly, the way a pre-upgrade profile holds
+    // them, so the backfill is what fills membership here.
+    expect((await runMailboxMembershipBackfill(db, 'account')).complete).toBe(true)
+
+    const expectedFor = (view: MaterializedMailboxView): string[] => {
+      const sql =
+        view === 'allMail'
+          ? `SELECT t.id FROM threads t WHERE t.account_id = ? AND (${allMailMembershipSql()})`
+          : view === 'inbox'
+            ? `SELECT t.id FROM threads t
+               JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+                 AND tl.label_id = 'INBOX'
+               WHERE t.account_id = ? AND t.is_inbox_visible = 1`
+            : `SELECT t.id FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
+               JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+               WHERE mailbox.account_id = ? AND mailbox.label_id = '${view === 'sent' ? 'SENT' : 'STARRED'}'
+                 AND (${labeledMailboxMembershipSql()})`
+      return (db.prepare(sql).all('account') as { id: string }[]).map((row) => row.id).sort()
+    }
+    const storedFor = (view: MaterializedMailboxView): string[] =>
+      (
+        db
+          .prepare(
+            'SELECT thread_id FROM thread_mailboxes WHERE account_id = ? AND view = ? ORDER BY thread_id'
+          )
+          .all('account', view) as { thread_id: string }[]
+      ).map((row) => row.thread_id)
+
+    for (const view of MATERIALIZED_MAILBOX_VIEWS) {
+      expect(storedFor(view), `${view} membership`).toEqual(expectedFor(view))
+    }
+    // Non-empty on both sides, so an all-empty result cannot pass this by accident.
+    expect(storedFor('allMail').length).toBeGreaterThan(0)
+    expect(storedFor('inbox')).toContain('starred-inbox')
+    expect(storedFor('inbox')).not.toContain('inbox-hidden')
+    expect(storedFor('allMail')).toContain('partly-trashed')
+    expect(storedFor('allMail')).not.toContain('all-trashed')
+    // A draft-only thread stays in All Mail, as it does in Gmail: the first
+    // branch of the shipped rule asks only that the thread is not junk-labeled.
+    expect(storedFor('allMail')).toContain('draft-only')
   })
 
   it('continues ascending snoozed pages after equal due dates', () => {
@@ -174,6 +318,7 @@ describe('thread list queries', () => {
     insertThreadLabel.run('only-spam', 'SPAM')
     insertThreadLabel.run('legacy-trash', 'TRASH')
 
+    fillMembership(db)
     expect(mailboxIds('allMail')).toEqual(['mixed'])
     // Trash sorts by the mailbox's newest matching message: mixed's only
     // trashed message (300) files behind both fully trashed threads.
@@ -237,6 +382,7 @@ describe('thread list queries', () => {
     insertThreadLabel.run('starred-spammed', 'STARRED')
     insertThreadLabel.run('starred-spammed', 'SPAM')
 
+    fillMembership(db)
     expect(mailboxIds('sent')).toEqual(['sent-live', 'sent-legacy'])
     expect(mailboxIds('starred')).toEqual(['starred-live'])
     expect(countSystemMailboxes(db, 'account')).toMatchObject({ sent: 2, starred: 1 })
@@ -293,6 +439,7 @@ describe('thread list queries', () => {
     )
     insertThreadLabel.run('INBOX')
     insertThreadLabel.run('TRASH')
+    fillMembership(db, 'other-account')
 
     expect(mailboxIds('allMail')).not.toContain('other-mixed')
     expect(listMailboxThreads(db, 'other-account', 'allMail').map((row) => row.id)).toEqual(['other-mixed'])

@@ -86,12 +86,17 @@ describe('loadSeed', () => {
 })
 
 describe('readSeedRemoteThreadIds', () => {
-  it('returns only the remote snapshots configured for the exact Gmail query', () => {
+  it('returns only cached or remote snapshots configured for the exact Gmail query', () => {
     const fixturePath = fileURLToPath(new URL('../../../e2e/fixtures/seed-search.json', import.meta.url))
 
     expect(readSeedRemoteThreadIds(fixturePath, 'serveronlyneedle -in:drafts')).toEqual([
       't-search-server-only'
     ])
-    expect(readSeedRemoteThreadIds(fixturePath, 'visualsort -in:drafts')).toEqual([])
+    expect(readSeedRemoteThreadIds(fixturePath, 'visualsort -in:drafts')).toEqual([
+      't-search-origin',
+      't-search-return',
+      't-search-acme'
+    ])
+    expect(readSeedRemoteThreadIds(fixturePath, 'unmapped -in:drafts')).toEqual([])
   })
 })

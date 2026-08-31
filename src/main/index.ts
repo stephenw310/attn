@@ -13,7 +13,7 @@ import { loadAccounts, removeAccountTokens, saveAccountTokens } from './auth/tok
 import { isCurrentTokenUpdate } from './auth/tokenUpdate'
 import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
 import { registerIpc } from './ipc'
-import { MailNotifier, type PendingFocus } from './notify'
+import { MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import {
   SERVICE_PROTOCOL_VERSION,
   type ServiceAccountsState,
@@ -55,18 +55,45 @@ let themePreference: ThemePreference = 'system'
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
-  focusInboxThread
+  focusInboxThread: (threadId, accountId) => {
+    const owner = accountId ?? activeAccountId
+    if (owner) focusInboxThread(owner, threadId)
+  }
 })
 
 function broadcast<K extends BroadcastChannel>(channel: K, payload: BroadcastChannels[K]): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
 }
 
-function focusInboxThread(threadId: string): void {
-  pendingFocus = { threadId, at: Date.now() }
+function focusInboxThread(accountId: string, threadId: string | null): void {
+  pendingFocus = { accountId, ...(threadId ? { threadId } : {}), at: Date.now() }
   const win = showMainWindow()
-  console.log(`[notify] focus requested for ${threadId} (window ${win ? 'available' : 'pending'})`)
+  console.log(
+    `[notify] focus requested for ${accountId} ${threadId ?? '(inbox)'} (window ${win ? 'available' : 'pending'})`
+  )
   win?.webContents.send(IPC_CHANNELS.mailFocusThreadAvailable)
+}
+
+/**
+ * Consume the pending focus target for the account on screen. A `switch` ask
+ * leaves the target pending: the renderer runs its guarded account switch and
+ * the remounted tree pulls again, now matching. Anything else — consumed,
+ * expired, or absent — clears it.
+ */
+function takePendingFocusTarget(): ReturnType<typeof takePendingFocus> {
+  const target = takePendingFocus(pendingFocus, activeAccountId)
+  if (target?.kind !== 'switch') pendingFocus = null
+  return target
+}
+
+/**
+ * An active-account change consumes or drops the pending focus target: it
+ * survives only when it names the account now active (the notification-driven
+ * switch completing). A manual switch elsewhere discards it rather than
+ * bouncing the user to the notified account later.
+ */
+function reconcilePendingFocus(): void {
+  if (pendingFocus && pendingFocus.accountId !== activeAccountId) pendingFocus = null
 }
 
 function oauthSearchDirs(): string[] {
@@ -155,27 +182,34 @@ async function signIn(): Promise<AuthSignInResult> {
  * named active account's session exists before anyone reads it.
  */
 async function adoptServiceAccounts(): Promise<void> {
-  const previousActive = activeAccountId
   const result = await service?.applyAccounts(serviceAccountsState())
   if (result === null || typeof result === 'string') activeAccountId = result
   service?.noteActiveAccount(activeAccountId)
-  if (activeAccountId !== previousActive) pendingFocus = null
-  mailNotifier?.setAccountId(activeAccountId)
+  reconcilePendingFocus()
+  mailNotifier?.setAccounts(authStatus().accounts)
 }
 
-/** Remove the active account's tokens; local rows stay cached (F18, D3 Keep). */
-async function signOut(): Promise<AuthStatus> {
+/**
+ * Remove one account (F18, D3): tokens always go and its session stops; the
+ * caller chooses whether the local rows go too (Delete) or stay dormant for
+ * a future re-add to resume from stored cursors (Keep).
+ */
+async function removeAccount(accountId: string, deleteData: boolean): Promise<AuthStatus> {
+  const removedIndex = rosterAccountIds().indexOf(accountId)
+  if (removedIndex < 0) throw new Error('unknown account')
   cancelActiveSignIn()
-  const removed = activeAccountId
-  if (removed) {
-    if (seedAccountIds.length > 0) seedAccountIds = seedAccountIds.filter((id) => id !== removed)
-    else storedAccounts = removeAccountTokens(app.getPath('userData'), removed)
-    authGenerations.delete(removed)
+  if (seedAccountIds.length > 0) seedAccountIds = seedAccountIds.filter((id) => id !== accountId)
+  else storedAccounts = removeAccountTokens(app.getPath('userData'), accountId)
+  authGenerations.delete(accountId)
+  // Removing the active account activates the next by position; removing a
+  // background account leaves the surface alone.
+  if (activeAccountId === accountId) {
+    const remaining = rosterAccountIds()
+    activeAccountId = remaining[removedIndex] ?? remaining[0] ?? null
   }
-  activeAccountId = rosterAccountIds()[0] ?? null
-  pendingFocus = null
   await adoptServiceAccounts()
-  console.log(`[auth] signed out ${removed ?? '(no account)'}`)
+  if (deleteData) await service?.internal('remove-account-data', accountId)
+  console.log(`[auth] removed account ${accountId} (${deleteData ? 'deleted' : 'kept'} local data)`)
   return authStatus()
 }
 
@@ -186,8 +220,8 @@ async function setActiveAccount(accountId: string): Promise<AuthStatus> {
   const result = await service?.internal('set-active-account', accountId)
   activeAccountId = typeof result === 'string' ? result : accountId
   service?.noteActiveAccount(activeAccountId)
-  pendingFocus = null
-  mailNotifier?.setAccountId(activeAccountId)
+  reconcilePendingFocus()
+  mailNotifier?.setAccounts(authStatus().accounts)
   return authStatus()
 }
 
@@ -278,6 +312,7 @@ function handleServiceEvent(event: ServiceEvent): void {
   } else if (event.kind === 'actions-reverted') {
     broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
   } else if (event.kind === 'badge') mailNotifier?.updateBadge(event.unreadCount)
+  else if (event.kind === 'accounts-status') broadcast(IPC_CHANNELS.accountsStatusChanged, event.statuses)
   else if (event.kind === 'notification-candidates') {
     mailNotifier?.notify(event.accountId, event.candidates, event.pausedUntil)
   } else if (event.kind === 'token-update') {
@@ -300,7 +335,7 @@ async function initialize(): Promise<void> {
   for (const account of storedAccounts) {
     if (!authGenerations.has(account.id)) authGenerations.set(account.id, 0)
   }
-  const ownedNotifier = new MailNotifier(null, showMainWindow, focusInboxThread)
+  const ownedNotifier = new MailNotifier(showMainWindow, focusInboxThread)
   mailNotifier = ownedNotifier
   ownedNotifier.start()
   const ownedService = new ServiceSupervisor(join(__dirname, 'service/utility.js'), {
@@ -339,7 +374,7 @@ async function initialize(): Promise<void> {
       : []
   activeAccountId = ready.activeAccountId
   ownedService.noteActiveAccount(activeAccountId)
-  ownedNotifier.setAccountId(ready.activeAccountId)
+  ownedNotifier.setAccounts(authStatus().accounts)
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
   themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
@@ -348,12 +383,9 @@ async function initialize(): Promise<void> {
     service: ownedService,
     authStatus,
     signIn,
-    signOut,
     setActiveAccount,
-    pendingFocus: () => pendingFocus,
-    clearPendingFocus: () => {
-      pendingFocus = null
-    },
+    removeAccount,
+    takePendingFocus: takePendingFocusTarget,
     setThemePreference: (preference) => {
       themePreference = preference
       refreshTitleBarOverlay()

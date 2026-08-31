@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AuthStatus } from '../../../shared/auth'
+import { ACCOUNT_SYNC_PHASE_LABELS, type AccountSyncStatus, type AuthStatus } from '../../../shared/auth'
 import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
@@ -80,37 +80,69 @@ function QueueReadout({
 
 function AccountMenu({
   status,
-  onStatus,
+  accountStatuses,
   onManageSplits,
   onSwitchAccount,
   onAddAccount,
+  onRemoveAccount,
   accountActionsBlocked
 }: {
   status: AuthStatus
-  onStatus: (status: AuthStatus) => void
+  /** Live per-account health, pushed by the utility (F18). */
+  accountStatuses: readonly AccountSyncStatus[] | null
   onManageSplits: () => void
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
+  /** Opens the Remove-account confirmation for the active account (F18, D3). */
+  onRemoveAccount: () => void
   /** True while a composer is open: switching would drop unsaved keystrokes. */
   accountActionsBlocked: boolean
 }): React.JSX.Element {
   const blockedTitle = accountActionsBlocked ? 'Save and close the draft first (Esc)' : undefined
   const [open, setOpen] = useState(false)
+  const [openedStatuses, setOpenedStatuses] = useState<{
+    statuses: AccountSyncStatus[]
+    source: readonly AccountSyncStatus[] | null
+  } | null>(null)
+  const pushedStatusesRef = useRef(accountStatuses)
+  pushedStatusesRef.current = accountStatuses
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const { preference, setPreference } = useTheme()
+  // The pushed statuses move only on phase changes (they are what keeps the
+  // chip live); the unread counts in them can lag, so an open menu re-reads
+  // the full statuses once. A later push supersedes that snapshot, including
+  // when it arrives while the snapshot request is still pending.
+  const healthById = new Map(
+    [
+      ...(accountStatuses ?? []),
+      ...(openedStatuses?.source === accountStatuses ? openedStatuses.statuses : [])
+    ].map((health) => [health.accountId, health])
+  )
+  // The chip itself carries an attention mark while *any* account needs the
+  // user, so a background failure is visible without opening the menu (F18).
+  const chipAttention = (accountStatuses ?? []).some(
+    (health) => health.phase === 'reconnect' || health.phase === 'error'
+  )
+
+  useEffect(() => {
+    if (!open || !window.attn) return
+    let stale = false
+    const source = pushedStatusesRef.current
+    window.attn.auth
+      .getAccountStatuses()
+      .then((statuses) => {
+        if (!stale) setOpenedStatuses({ statuses, source })
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [open])
 
   const closeMenu = useCallback(() => {
     setOpen(false)
     blurActive()
   }, [])
-
-  const signOut = useCallback(() => {
-    closeMenu()
-    window.attn?.auth
-      .signOut()
-      .then(onStatus)
-      .catch(() => {})
-  }, [closeMenu, onStatus])
 
   useEffect(() => {
     if (!open) return
@@ -135,17 +167,27 @@ function AccountMenu({
     <div ref={wrapRef} data-testid="account-menu" className="app-no-drag relative">
       <button
         type="button"
+        data-attention={chipAttention ? 'true' : undefined}
         className={`${CHIP_CLASS} flex cursor-pointer items-center gap-1.5 hover:border-accent hover:text-ink-dim`}
         onClick={() => (open ? closeMenu() : setOpen(true))}
         aria-expanded={open}
         aria-haspopup="menu"
       >
+        {chipAttention && (
+          <span
+            aria-hidden
+            title="An account needs attention"
+            className="size-1.5 flex-none rounded-full bg-accent"
+          />
+        )}
         {status.email ?? 'signed in'} <span className="text-[8px]">▾</span>
       </button>
       {open && (
         <div className="absolute top-full right-0 z-50 mt-2 w-[250px] rounded-lg border border-edge bg-raised p-1.5 shadow-menu">
           {status.accounts.map((account, index) => {
             const active = account.id === status.activeAccountId
+            const health = healthById.get(account.id) ?? null
+            const attention = health?.phase === 'reconnect' || health?.phase === 'error'
             return (
               <button
                 key={account.id}
@@ -163,7 +205,19 @@ function AccountMenu({
                   active ? 'text-ink' : 'text-ink-dim'
                 }`}
               >
-                <span className="min-w-0 truncate">{account.email}</span>
+                <span className="flex min-w-0 flex-col items-start">
+                  <span className="w-full truncate text-left">{account.email}</span>
+                  {health && (
+                    <span
+                      data-testid="account-status"
+                      data-phase={health.phase}
+                      className={`text-[11px] ${attention ? 'font-medium text-accent' : 'text-ink-faint'}`}
+                    >
+                      {ACCOUNT_SYNC_PHASE_LABELS[health.phase]}
+                      {health.unread > 0 ? ` · ${health.unread} unread` : ''}
+                    </span>
+                  )}
+                </span>
                 <span className="flex flex-none items-center gap-1.5">
                   {active && (
                     <span aria-hidden className="text-accent">
@@ -235,14 +289,19 @@ function AccountMenu({
           <hr className="my-1.5 border-edge" />
           <button
             type="button"
+            data-testid="account-remove"
             disabled={accountActionsBlocked}
-            onClick={signOut}
+            onClick={() => {
+              closeMenu()
+              onRemoveAccount()
+            }}
             title={
-              blockedTitle ?? "Removes this account's tokens; sign back in any time — local mail stays cached"
+              blockedTitle ??
+              "Removes this account's sign-in and stops its sync; you choose what happens to its local mail"
             }
             className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           >
-            {status.accounts.length > 1 ? `Sign out ${status.email ?? 'account'}` : 'Sign out'}
+            Sign out
           </button>
         </div>
       )}
@@ -259,13 +318,14 @@ interface MailHeaderProps {
   composerOpen: boolean
   sidebarCollapsed: boolean
   status: AuthStatus
-  onStatus: (status: AuthStatus) => void
+  accountStatuses: readonly AccountSyncStatus[] | null
   onReconnectActions: () => void
   onOpenOutbox: () => void
   onToggleSidebar: () => void
   onManageSplits: () => void
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
+  onRemoveAccount: () => void
   accountActionsBlocked: boolean
 }
 
@@ -279,13 +339,14 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     composerOpen,
     sidebarCollapsed,
     status,
-    onStatus,
+    accountStatuses,
     onReconnectActions,
     onOpenOutbox,
     onToggleSidebar,
     onManageSplits,
     onSwitchAccount,
     onAddAccount,
+    onRemoveAccount,
     accountActionsBlocked
   } = props
   const sidebarAction = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
@@ -334,10 +395,11 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         />
         <AccountMenu
           status={status}
-          onStatus={onStatus}
+          accountStatuses={accountStatuses}
           onManageSplits={onManageSplits}
           onSwitchAccount={onSwitchAccount}
           onAddAccount={onAddAccount}
+          onRemoveAccount={onRemoveAccount}
           accountActionsBlocked={accountActionsBlocked}
         />
       </div>

@@ -206,14 +206,28 @@ export function readSeedThread(
   return null
 }
 
+/** Which fixture account owns a seeded thread id (ids are unique across accounts). */
+export function readSeedThreadAccount(path: string, threadId: string): string | null {
+  for (const fixture of readSeedFixtures(path)) {
+    const owned = [...fixture.threads, ...(fixture.remoteThreads ?? [])].some(
+      (candidate) => candidate.id === threadId
+    )
+    if (owned) return fixture.account
+  }
+  return null
+}
+
 /** List the snapshots returned by the seeded server-search provider for one Gmail query. */
 export function readSeedRemoteThreadIds(path: string, query: string, accountId?: string): string[] {
   const ids: string[] = []
   for (const fixture of readSeedFixtures(path)) {
     if (accountId !== undefined && fixture.account !== accountId) continue
-    const remoteIds = new Set((fixture.remoteThreads ?? []).map((thread) => thread.id))
+    // Gmail can return a cached thread as well as a remote-only snapshot.
+    const knownIds = new Set(
+      [...fixture.threads, ...(fixture.remoteThreads ?? [])].map((thread) => thread.id)
+    )
     const configured = fixture.remoteSearches?.[query] ?? []
-    ids.push(...configured.filter((threadId) => remoteIds.has(threadId)))
+    ids.push(...configured.filter((threadId) => knownIds.has(threadId)))
   }
   return [...new Set(ids)]
 }

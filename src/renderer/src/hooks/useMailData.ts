@@ -145,7 +145,8 @@ export function useMailData(
   activeViewRef: React.RefObject<MailView>,
   selectedThreadIdRef: React.RefObject<string | null>,
   selectedDraftIdRef: React.RefObject<string | null>,
-  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
+  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>,
+  splitsReady = true
 ): MailDataState {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [inboxBackfillReady, setInboxBackfillReady] = useState<boolean | null>(null)
@@ -192,6 +193,20 @@ export function useMailData(
   }
   const activeAccountRef = useRef(activeAccount)
   activeAccountRef.current = activeAccount
+  const mailboxCountsRequestRef = useRef(0)
+  const refreshMailboxCounts = useCallback(() => {
+    const bridge = window.attn
+    if (!bridge || !activeAccount) return
+    const request = ++mailboxCountsRequestRef.current
+    void bridge.mail
+      .getMailboxCounts()
+      .then((counts) => {
+        if (activeAccountRef.current === activeAccount && mailboxCountsRequestRef.current === request) {
+          setRealMailboxCounts(counts)
+        }
+      })
+      .catch(() => {})
+  }, [activeAccount])
   const activeSplitIdRef = useRef(activeSplitId)
   activeSplitIdRef.current = activeSplitId
   const splitRevisionRef = useRef(splitRevisionValue)
@@ -377,7 +392,7 @@ export function useMailData(
       preserveSelectionOnRefreshRef.current = true
     }
     const bridge = window.attn
-    if (!bridge || !activeAccount) return
+    if (!bridge || !activeAccount || !splitsReady) return
     let cancelled = false
     let deferredRefreshTimer: number | null = null
     let mailChangedPending = false
@@ -420,6 +435,10 @@ export function useMailData(
       if (extraView && extraViewVersion !== null) {
         mailboxRefreshVersionRef.current[extraView] = extraViewVersion
       }
+      // Two waves, not one batch. The utility process answers reads one at a
+      // time on a synchronous SQLite connection, so a full mailbox count must
+      // not keep the visible rows, account restore target, or cached reader
+      // behind an aggregate scan.
       void Promise.all([
         listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, {
           splitId: activeSplitId ?? undefined,
@@ -428,101 +447,104 @@ export function useMailData(
         listThreadSnapshot('snoozed', loadedRowCountsRef.current.snoozed ?? 0),
         bridge.draft.list(),
         bridge.outbox.listPending(),
-        bridge.mail.listLabels(),
-        bridge.mail.getMailboxCounts(),
-        bridge.mail.getUnreadCount(),
-        bridge.mail.getPendingActionCount(),
-        bridge.mail.getActionQueueStatus(),
         extraView
           ? listThreadSnapshot(extraView, loadedRowCountsRef.current[extraView] ?? 0)
           : Promise.resolve(null)
       ])
-        .then(
-          ([
-            inboxPage,
-            snoozedPage,
-            drafts,
-            outbox,
-            nextLabels,
-            mailboxCounts,
-            unread,
-            pending,
-            actionStatus,
-            extraPage
-          ]) => {
-            if (cancelled) return
-            const viewStillCurrent = activeViewRef.current === viewAtStart
-            const inboxStillCurrent = mailboxRefreshVersionRef.current.inbox === inboxVersion
-            const snoozedStillCurrent = mailboxRefreshVersionRef.current.snoozed === snoozedVersion
-            const extraViewStillCurrent =
-              !extraView || mailboxRefreshVersionRef.current[extraView] === extraViewVersion
-            if (viewStillCurrent && extraViewStillCurrent) {
-              const visible =
-                viewAtStart === 'inbox'
-                  ? inboxPage.rows
-                  : viewAtStart === 'snoozed'
-                    ? snoozedPage.rows
-                    : viewAtStart === 'drafts'
-                      ? drafts
-                      : viewAtStart === 'outbox'
-                        ? outbox
-                        : (extraPage?.rows ?? [])
-              const selectedId =
-                viewAtStart === 'drafts' || viewAtStart === 'outbox'
-                  ? selectedDraftIdRef.current
-                  : selectedThreadIdRef.current
-              setSelectedIndex((current) =>
-                refreshedSelectionIndex(visible, preserveSelection ? selectedId : null, current)
-              )
-            }
+        .then(([inboxPage, snoozedPage, drafts, outbox, extraPage]) => {
+          if (cancelled) return
+          const viewStillCurrent = activeViewRef.current === viewAtStart
+          const inboxStillCurrent = mailboxRefreshVersionRef.current.inbox === inboxVersion
+          const snoozedStillCurrent = mailboxRefreshVersionRef.current.snoozed === snoozedVersion
+          const extraViewStillCurrent =
+            !extraView || mailboxRefreshVersionRef.current[extraView] === extraViewVersion
+          const visibleStillCurrent =
+            viewAtStart === 'inbox'
+              ? inboxStillCurrent
+              : viewAtStart === 'snoozed'
+                ? snoozedStillCurrent
+                : extraViewStillCurrent
+          // A targeted focus can supersede this read. Its rows and selection
+          // must stay together, even when the older refresh finishes later.
+          if (viewStillCurrent && visibleStillCurrent) {
+            const visible =
+              viewAtStart === 'inbox'
+                ? inboxPage.rows
+                : viewAtStart === 'snoozed'
+                  ? snoozedPage.rows
+                  : viewAtStart === 'drafts'
+                    ? drafts
+                    : viewAtStart === 'outbox'
+                      ? outbox
+                      : (extraPage?.rows ?? [])
+            const selectedId =
+              viewAtStart === 'drafts' || viewAtStart === 'outbox'
+                ? selectedDraftIdRef.current
+                : selectedThreadIdRef.current
+            setSelectedIndex((current) =>
+              refreshedSelectionIndex(visible, preserveSelection ? selectedId : null, current)
+            )
+          }
+          if (inboxStillCurrent) {
+            setRealThreads((current) => reuseThreadRows(current, inboxPage.rows))
+            setLoadedInboxSplitId(inboxSplitId)
+            setLoadedInboxSplitStale(inboxSplitChangeRef.current !== inboxChange)
+          }
+          if (snoozedStillCurrent) {
+            setRealSnoozedThreads((current) =>
+              reuseSnoozedRows(current, snoozedPage.rows as SnoozedThreadRow[])
+            )
+          }
+          if (viewStillCurrent && extraViewStillCurrent) {
+            // Mail changed, so cached rows for the other label-driven views are
+            // stale: keep only the view this refresh just re-read. A refresh
+            // started for an older view must not erase rows fetched after a
+            // mailbox switch.
+            setMailboxRows((current) =>
+              extraView && extraPage
+                ? { [extraView]: reuseThreadRows(current[extraView] ?? null, extraPage.rows) }
+                : {}
+            )
+          }
+          setThreadPagination((current) => {
+            const next: ThreadPagination =
+              viewStillCurrent && extraViewStillCurrent
+                ? { inbox: current.inbox, snoozed: current.snoozed }
+                : { ...current }
             if (inboxStillCurrent) {
-              setRealThreads((current) => reuseThreadRows(current, inboxPage.rows))
-              setLoadedInboxSplitId(inboxSplitId)
-              setLoadedInboxSplitStale(inboxSplitChangeRef.current !== inboxChange)
+              next.inbox = { nextCursor: inboxPage.nextCursor, loadingMore: false }
             }
             if (snoozedStillCurrent) {
-              setRealSnoozedThreads((current) =>
-                reuseSnoozedRows(current, snoozedPage.rows as SnoozedThreadRow[])
-              )
+              next.snoozed = { nextCursor: snoozedPage.nextCursor, loadingMore: false }
             }
-            if (viewStillCurrent && extraViewStillCurrent) {
-              // Mail changed, so cached rows for the other label-driven views are
-              // stale: keep only the view this refresh just re-read. A refresh
-              // started for an older view must not erase rows fetched after a
-              // mailbox switch.
-              setMailboxRows((current) =>
-                extraView && extraPage
-                  ? { [extraView]: reuseThreadRows(current[extraView] ?? null, extraPage.rows) }
-                  : {}
-              )
+            if (viewStillCurrent && extraViewStillCurrent && extraView && extraPage) {
+              next[extraView] = { nextCursor: extraPage.nextCursor, loadingMore: false }
             }
-            setThreadPagination((current) => {
-              const next: ThreadPagination = viewStillCurrent && extraViewStillCurrent ? {} : { ...current }
-              if (inboxStillCurrent) {
-                next.inbox = { nextCursor: inboxPage.nextCursor, loadingMore: false }
-              }
-              if (snoozedStillCurrent) {
-                next.snoozed = { nextCursor: snoozedPage.nextCursor, loadingMore: false }
-              }
-              if (viewStillCurrent && extraViewStillCurrent && extraView && extraPage) {
-                next[extraView] = { nextCursor: extraPage.nextCursor, loadingMore: false }
-              }
-              return next
-            })
-            setRealDrafts(drafts)
-            setRealOutbox(outbox)
-            setOutboxProgress((current) =>
-              current && outbox.some((item) => item.id === current.id && item.state === 'sending')
-                ? current
-                : null
-            )
-            setLabels((current) => reuseLabels(current, nextLabels))
-            setRealMailboxCounts(mailboxCounts)
-            setRealUnreadTotal(unread)
-            setPendingActionCount(pending)
-            setPausedActionCount(actionStatus.paused)
-          }
-        )
+            return next
+          })
+          setRealDrafts(drafts)
+          setRealOutbox(outbox)
+          setOutboxProgress((current) =>
+            current && outbox.some((item) => item.id === current.id && item.state === 'sending')
+              ? current
+              : null
+          )
+        })
+        .then(async () => {
+          if (cancelled) return
+          const [nextLabels, unread, pending, actionStatus] = await Promise.all([
+            bridge.mail.listLabels(),
+            bridge.mail.getUnreadCount(),
+            bridge.mail.getPendingActionCount(),
+            bridge.mail.getActionQueueStatus()
+          ])
+          if (cancelled) return
+          setLabels((current) => reuseLabels(current, nextLabels))
+          refreshMailboxCounts()
+          setRealUnreadTotal(unread)
+          setPendingActionCount(pending)
+          setPausedActionCount(actionStatus.paused)
+        })
         .catch(() => {})
         .finally(() => {
           refreshInFlight = false
@@ -561,6 +583,8 @@ export function useMailData(
     const offProgress = bridge.outbox.onProgress(setOutboxProgress)
     return () => {
       cancelled = true
+      inboxSplitPreloadRef.current += 1
+      mailboxCountsRequestRef.current += 1
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
       offMail()
       offOutbox()
@@ -570,9 +594,11 @@ export function useMailData(
     activeAccount,
     activeSplitId,
     splitRevisionValue,
+    splitsReady,
     activeViewRef,
     selectedDraftIdRef,
     selectedThreadIdRef,
+    refreshMailboxCounts,
     setSelectedIndex
   ])
 
@@ -628,14 +654,13 @@ export function useMailData(
     if (extraView && extraViewVersion !== null) {
       mailboxRefreshVersionRef.current[extraView] = extraViewVersion
     }
-    const [inboxPage, snoozedPage, drafts, mailboxCounts, extraPage] = await Promise.all([
+    const [inboxPage, snoozedPage, drafts, extraPage] = await Promise.all([
       listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, {
         splitId: activeSplitIdRef.current ?? undefined,
         expectedSplitRevision: splitRevisionRef.current ?? undefined
       }),
       listThreadSnapshot('snoozed', loadedRowCountsRef.current.snoozed ?? 0),
       window.attn.draft.list(),
-      window.attn.mail.getMailboxCounts(),
       extraView
         ? listThreadSnapshot(extraView, loadedRowCountsRef.current[extraView] ?? 0)
         : Promise.resolve(null)
@@ -646,7 +671,13 @@ export function useMailData(
     const snoozedStillCurrent = mailboxRefreshVersionRef.current.snoozed === snoozedVersion
     const extraViewStillCurrent =
       !extraView || mailboxRefreshVersionRef.current[extraView] === extraViewVersion
-    if (viewStillCurrent && extraViewStillCurrent) {
+    const visibleStillCurrent =
+      viewAtStart === 'inbox'
+        ? inboxStillCurrent
+        : viewAtStart === 'snoozed'
+          ? snoozedStillCurrent
+          : extraViewStillCurrent
+    if (viewStillCurrent && visibleStillCurrent) {
       const visible =
         viewAtStart === 'inbox'
           ? inboxPage.rows
@@ -691,7 +722,7 @@ export function useMailData(
       return next
     })
     setRealDrafts(drafts)
-    setRealMailboxCounts(mailboxCounts)
+    refreshMailboxCounts()
   }
 
   /**
