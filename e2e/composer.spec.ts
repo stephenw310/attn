@@ -2198,6 +2198,7 @@ test('discard removes the local recovery surface', async ({ boot, page }) => {
 })
 
 test('keeps the caret in a recipient field while a preserved region sits in the body', async ({
+  app,
   boot,
   page
 }) => {
@@ -2232,11 +2233,17 @@ test('keeps the caret in a recipient field while a preserved region sits in the 
 
   // Relaunch so the draft is reloaded from the store, then leave the recovered
   // full-window composer and reopen the draft inline on its own thread.
-  ;({ page } = await boot.relaunch())
+  ;({ app, page } = await boot.relaunch())
   const composer = new ComposerPage(page)
   await expect(composer.root).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
+  // A fast reply shortcut must not replace the saved draft while its reopen is
+  // still crossing IPC, especially when an imported draft has no known source.
+  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.delayMs), {
+    channel: TEST_CHANNELS.delayDraftReopen,
+    delayMs: 500
+  })
   await page.getByTestId('thread-row').first().click()
   await page.keyboard.press('Enter')
   // Inline placement is load-bearing: the editor only takes focus on open in
@@ -2332,9 +2339,14 @@ test('keeps a reply signature and quoted history collapsed after Gmail appends e
   expect(saved?.bodyHtml).toContain('gmail_signature')
   expect(saved?.bodyHtml).not.toContain('gmail_quote')
   expect(saved?.quoteHtml).toContain('Internal account notes.')
+  const savedId = await composer.root.getAttribute('data-draft-id')
   await page.getByTestId('composer-close').click()
   await expect(composer.root).toHaveCount(0)
-  await page.keyboard.press('r')
+  // This imported draft has no known source. Reopen that saved draft instead
+  // of asking R to start a reply to the currently selected message.
+  await page.getByTestId('conversation-back').click()
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  await expect(composer.root).toHaveAttribute('data-draft-id', savedId ?? '')
   await composer.expectSignatureAndQuoteCollapsed()
   await expect(composer.editor).toContainText('My reply')
 })

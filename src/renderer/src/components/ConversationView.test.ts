@@ -2,9 +2,9 @@
 
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import type { DisplayConversation, DisplayThread } from '../mailDisplay'
-import { ConversationView } from './ConversationView'
+import { ConversationView, type MessageReplyTarget } from './ConversationView'
 
 it('skips the reader tree when only footer sync progress changes above it', async () => {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -43,8 +43,10 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     account: 'seed@attn.test',
     online: true,
     scrollRef,
+    replyTargetRef: { current: null as MessageReplyTarget | null },
     inlineComposer: null,
     inlineComposerDraftId: null,
+    inlineComposerSourceMessageId: null,
     onClose,
     onToast,
     onReply: (): void => {}
@@ -127,8 +129,10 @@ it('opens a message appended to the current conversation by default', async () =
     account: 'me@example.com',
     online: true,
     scrollRef,
+    replyTargetRef: { current: null as MessageReplyTarget | null },
     inlineComposer: null,
     inlineComposerDraftId: null,
+    inlineComposerSourceMessageId: null,
     onClose: (): void => {},
     onToast: (): void => {},
     onReply: (): void => {}
@@ -158,20 +162,133 @@ it('opens a message appended to the current conversation by default', async () =
       container.querySelectorAll('[data-testid="message-card"]')[1]?.getAttribute('data-collapsed')
     ).toBe('true')
 
+    await act(async () => {
+      container
+        .querySelector('[data-testid="conversation-message"]')
+        ?.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    })
+    const received = {
+      ...initial,
+      messages: [...initial.messages, message('message-3', 'New incoming mail')]
+    }
+    await act(async () => root.render(createElement(ConversationView, { ...props, conversation: received })))
+    expect(container.querySelector('[data-active-message="true"]')?.getAttribute('data-message-id')).toBe(
+      'message-1'
+    )
+    expect(props.replyTargetRef.current).toEqual({
+      threadId: 'thread-1',
+      messageId: 'message-1',
+      canReply: true
+    })
+
     const appended = {
       ...initial,
-      messages: [...initial.messages, message('outbox:reply-1', 'Queued reply')]
+      messages: [...received.messages, message('outbox:reply-1', 'Queued reply')]
     }
     await act(async () => root.render(createElement(ConversationView, { ...props, conversation: appended })))
     const appendedCards = container.querySelectorAll('[data-testid="message-card"]')
-    expect(appendedCards).toHaveLength(3)
-    expect(appendedCards[2]?.getAttribute('data-pending')).toBe('true')
-    expect(appendedCards[2]?.getAttribute('data-collapsed')).toBe('false')
+    expect(appendedCards).toHaveLength(4)
+    expect(appendedCards[3]?.getAttribute('data-pending')).toBe('true')
+    expect(appendedCards[3]?.getAttribute('data-collapsed')).toBe('false')
+    expect(props.replyTargetRef.current?.canReply).toBe(false)
     expect(document.activeElement?.getAttribute('data-testid')).toBe('conversation-scroll')
   } finally {
     await act(async () => root.unmount())
     container.remove()
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
     actEnvironment.ResizeObserver = previousResizeObserver
+  }
+})
+
+it('keeps unsaved composer state when its source loads, disappears, or moves in the conversation', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {}
+      disconnect(): void {}
+    }
+  )
+  const selected: DisplayThread = {
+    id: 'thread-1',
+    from: 'Jordan',
+    subject: 'Account question',
+    snippet: '',
+    at: '',
+    unread: false,
+    starred: false,
+    hasAttachment: false,
+    snoozed: false,
+    returned: false,
+    hasDraft: true,
+    labelIds: [],
+    lastMsgAt: 0
+  }
+  const message = (id: string): DisplayConversation['messages'][number] => ({
+    id,
+    pending: false,
+    trashed: false,
+    fromName: 'Jordan',
+    fromEmail: 'jordan@example.com',
+    at: '',
+    fullDate: '',
+    recipients: { to: [], cc: [], bcc: [], replyTo: [] },
+    attachments: [],
+    text: id,
+    html: null,
+    bodyState: 'complete'
+  })
+  const props = {
+    selected,
+    selectedIndex: 0,
+    threadCount: 1,
+    threadCountExact: true,
+    mailboxTitle: 'Inbox',
+    account: 'me@example.com',
+    online: true,
+    scrollRef: { current: null as HTMLDivElement | null },
+    replyTargetRef: { current: null as MessageReplyTarget | null },
+    inlineComposer: createElement('textarea', { 'data-testid': 'draft-input', defaultValue: '' }),
+    inlineComposerDraftId: 'draft-1',
+    inlineComposerSourceMessageId: 'source',
+    onClose: (): void => {},
+    onToast: (): void => {},
+    onReply: (): void => {}
+  }
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(createElement(ConversationView, { ...props, conversation: null })))
+    const input = container.querySelector('textarea')
+    if (!input) throw new Error('missing composer')
+    input.value = 'An unsaved reply'
+    for (const ids of [['source', 'later'], ['later'], ['earlier', 'source', 'later']]) {
+      const conversation: DisplayConversation = {
+        threadId: selected.id,
+        subject: selected.subject,
+        messages: ids.map(message),
+        bodyHydrationFailed: false
+      }
+      await act(async () => root.render(createElement(ConversationView, { ...props, conversation })))
+      expect(container.querySelector('textarea')).toBe(input)
+      expect(input.value).toBe('An unsaved reply')
+      const beforeComposer = input.parentElement?.previousElementSibling
+      expect(beforeComposer?.getAttribute('data-message-id')).toBe(
+        ids.includes('source') ? 'source' : 'later'
+      )
+      if (ids.includes('source')) {
+        expect(container.querySelector('[data-active-message="true"]')?.getAttribute('data-message-id')).toBe(
+          'source'
+        )
+        expect(
+          beforeComposer?.querySelector('[data-testid="message-card"]')?.getAttribute('data-collapsed')
+        ).toBe('false')
+      }
+    }
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
+    vi.unstubAllGlobals()
   }
 })

@@ -52,7 +52,7 @@ import {
 } from '../searchView'
 import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
 import { CommandPalette } from './CommandPalette'
-import { ConversationView } from './ConversationView'
+import { ConversationView, type MessageReplyTarget } from './ConversationView'
 import { DraftList } from './DraftList'
 import { InboxZero } from './InboxZero'
 import { MailFooter } from './MailFooter'
@@ -212,10 +212,11 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   const composerOpeningRef = useRef(false)
   const accountSwitchPendingRef = useRef(false)
   const draftOpenRequestRef = useRef(0)
-  const draftOpenTargetRef = useRef<{ request: number; draftId: string } | null>(null)
+  const draftOpenTargetRef = useRef<{ request: number; draftId: string; threadId: string } | null>(null)
   const discardingDraftIdRef = useRef<string | null>(null)
   const activeComposerDraftIdRef = useRef<string | null>(null)
   const inlineComposerRef = useRef<ComposerHandle | null>(null)
+  const messageReplyTargetRef = useRef<MessageReplyTarget | null>(null)
 
   // The normalized account id — the key the utility uses for revert notices,
   // command usage, and every account-scoped row. `status.email` is display-only.
@@ -581,7 +582,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
       // sits before the request, not on its completion.
       if (accountSwitchPendingRef.current) return
       const request = ++draftOpenRequestRef.current
-      draftOpenTargetRef.current = { request, draftId: draft.id }
+      draftOpenTargetRef.current = { request, draftId: draft.id, threadId }
       void window.attn.draft
         .reopen(draft.id)
         .then((reopened) => {
@@ -1596,11 +1597,23 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
       if (
         !window.attn ||
         !selected ||
-        (!searchOpen && view === 'drafts') ||
+        (!readerOpen && !searchOpen && view === 'drafts') ||
         composerOpeningRef.current ||
+        draftOpenTargetRef.current?.threadId === selected.id ||
         accountSwitchPendingRef.current
       )
         return
+      // Keep reply shortcuts available during the initial conversation read.
+      // Once the reader has a cursor, use that exact message instead of the
+      // thread default. The thread id prevents a previous reader's target from
+      // leaking into a fast conversation switch.
+      const target = readerOpen ? messageReplyTargetRef.current : null
+      const useReaderTarget = sourceMessageId === undefined && target?.threadId === selected.id
+      if (useReaderTarget && !target.canReply) {
+        showToast('This message is not available for a reply or forward')
+        return
+      }
+      const replySourceMessageId = useReaderTarget ? target.messageId : sourceMessageId
       if (!readerOpen) {
         selectedThreadIdRef.current = selected.id
         setDetachedDraftThread(null)
@@ -1613,7 +1626,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         ? conversationMailboxForSearch(searchResultQuery)
         : conversationMailboxFor(view)
       void window.attn.draft
-        .createReply(selected.id, kind, replyMailbox, sourceMessageId)
+        .createReply(selected.id, kind, replyMailbox, replySourceMessageId)
         .then((draft) => {
           if (draft) {
             setComposerError(null)
@@ -2081,6 +2094,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
                 account={activeAccount}
                 online={online}
                 scrollRef={conversationScrollRef}
+                replyTargetRef={messageReplyTargetRef}
                 inlineComposer={
                   inlineComposerDraft && activeAccount ? (
                     <Composer
@@ -2088,6 +2102,11 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
                       ref={inlineComposerRef}
                       draft={inlineComposerDraft}
                       mode="inline"
+                      attachedToMessage={
+                        conversation?.messages.some(
+                          (message) => message.id === inlineComposerDraft.sourceMessageId
+                        ) ?? false
+                      }
                       initialError={composerError}
                       onClose={closeComposer}
                       onExit={closeComposerAndReader}
@@ -2096,6 +2115,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
                   ) : null
                 }
                 inlineComposerDraftId={inlineComposerDraft?.id ?? null}
+                inlineComposerSourceMessageId={inlineComposerDraft?.sourceMessageId ?? null}
                 onReply={openReply}
                 onClose={closeReader}
                 onToast={showToast}

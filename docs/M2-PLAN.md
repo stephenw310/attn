@@ -1060,14 +1060,19 @@ it cannot be inferred reliably from old messages or another account's signature.
 Expanded messages expose Reply, Reply all, and Forward. Matching palette commands target the active message
 selected by pointer or `N`/`P`. Explicit source ids cross the typed draft IPC boundary and scope draft reuse,
 recipients, quote content, attachment selection, and reply headers. Reply all upgrades keep the draft's
-original source. Thread shortcuts keep their existing defaults. No schema change is required.
+original source. Reader shortcuts `R`/`A`/`Enter`/`F` use the visible message cursor, which moves with `N`/`P`
+or a click. Replying expands that message and attaches the composer directly beneath it, before any later
+messages. Reopened drafts return beneath their source; a missing source falls back to the conversation end.
+The keyed composer stays mounted while source messages load or change, preserving unsaved edits. Incoming
+mail does not steal the reader's cursor. List shortcuts keep their default source selection. No schema change is required.
 
 The Gmail draft quote splitter now accepts plain trailing empty editor lines without pulling quoted history
 into the editable body. It preserves those lines and leaves authored content below quotes untouched.
 `e2e/message-replies.spec.ts` covers a customer exchange followed by an internal forward, separate drafts,
 recipient and header isolation, source attachments, and palette targeting. The composer regression covers
 signature and quote collapse after importing, editing, and reopening a Gmail reply with trailing empty lines.
-Screenshots are `message-reply-actions.png` and `composer-reply-empty-lines.png`.
+Screenshots are `message-reply-actions.png`, `message-cursor.png`, `message-inline-reply.png`,
+`message-inline-reply-light.png`, and `composer-reply-empty-lines.png`.
 
 ## Accepted-risk register (decisions made by this plan — don't relitigate ad hoc)
 

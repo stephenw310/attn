@@ -84,6 +84,8 @@ interface MessageCardProps {
   account: string | null
   onToast: (message: string) => void
   collapsed?: boolean
+  active?: boolean
+  hasInlineComposer?: boolean
   onToggleCollapsed?: () => void
   trimExpanded?: boolean
   onToggleTrim: () => void
@@ -98,6 +100,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     account,
     onToast,
     collapsed = false,
+    active = false,
+    hasInlineComposer = false,
     onToggleCollapsed,
     trimExpanded = false,
     onToggleTrim,
@@ -144,7 +148,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className="rounded-sm border border-edge bg-ground"
+        className={`border ${hasInlineComposer ? 'rounded-t-[10px] border-accent/40 border-b-0 bg-raised' : active ? 'rounded-sm border-accent/40 bg-active' : 'rounded-sm border-edge bg-ground'}`}
       >
         <button
           type="button"
@@ -176,7 +180,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className="rounded-[10px] border border-edge bg-ground px-5 py-4"
+      className={`border px-5 py-4 ${hasInlineComposer ? 'rounded-t-[10px] border-accent/40 border-b-0 bg-raised' : active ? 'rounded-[10px] border-accent/40 bg-active/50' : 'rounded-[10px] border-edge bg-ground'}`}
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
@@ -293,7 +297,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           </div>
         )}
       </div>
-      {!message.pending && (
+      {!message.pending && !hasInlineComposer && (
         <div data-testid="message-actions" className="mt-4 flex items-center gap-1 border-t border-edge pt-2">
           {(
             [

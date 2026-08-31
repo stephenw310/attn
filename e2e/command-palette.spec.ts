@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
+import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 
@@ -132,8 +133,17 @@ test('keeps focus, selection, and keyboard commands inside the open palette', as
     .toBe(true)
 })
 
-test('opens from the composer quoted-history iframe', async ({ page }) => {
+test('opens from the composer quoted-history iframe after a fast forward while the reader loads', async ({
+  app,
+  page
+}) => {
+  await app.evaluate(({ ipcMain }, args) => ipcMain.emit(args.channel, {}, args.threadId, args.delayMs), {
+    channel: TEST_CHANNELS.delayConversation,
+    threadId: 't-weekly',
+    delayMs: 500
+  })
   await page.getByTestId('thread-subject').getByText('This week in focus', { exact: true }).click()
+  await expect(page.getByTestId('conversation-loading')).toBeVisible()
   await page.keyboard.press('f')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
   await page.getByTestId('composer-quote-toggle').click()

@@ -197,7 +197,7 @@ export function useInboxCommands(options: Options): void {
           title: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
         }),
         createCommand('composer.new', openComposer),
-        ...(mailCommandsEnabled && (searchOpen || view !== 'drafts') && selected
+        ...(mailCommandsEnabled && (readerOpen || searchOpen || view !== 'drafts') && selected
           ? [
               createCommand('composer.reply', () => openReply('reply'), {
                 context: readerOpen ? 'reader' : 'list'

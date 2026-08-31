@@ -59,6 +59,7 @@ import { useComposerDraft } from './useComposerDraft'
 interface ComposerProps {
   draft: Draft
   mode?: 'full' | 'inline'
+  attachedToMessage?: boolean
   initialError?: string | null
   onClose: () => void
   onExit?: () => void
@@ -571,7 +572,7 @@ function ComposerCommandPlugin({
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { draft, mode = 'full', initialError = null, onClose, onExit, onToast },
+  { draft, mode = 'full', attachedToMessage = false, initialError = null, onClose, onExit, onToast },
   ref
 ): React.JSX.Element {
   const [to, setTo] = useState<MailAddress[]>(draft.to)
@@ -823,7 +824,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <section
       className={`${
         mode === 'inline'
-          ? 'flex w-full flex-none flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-composer'
+          ? `flex w-full flex-none flex-col overflow-hidden border bg-raised ${attachedToMessage ? 'rounded-b-[10px] border-accent/40 border-t-edge' : 'rounded-xl border-edge shadow-composer'}`
           : 'flex min-h-0 flex-1 flex-col bg-raised/35'
       } ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}

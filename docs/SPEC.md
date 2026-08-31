@@ -366,20 +366,27 @@ can pan the line horizontally without a native scrollbar changing the footer hei
 `C` opens new mail in a **full-window focused surface** with a centered 800–900px writing measure. The prior
 list or conversation remains mounted but hidden so its selection and scroll are restored exactly when `Esc`
 or the visible Back control saves and closes the draft. From a mail list, `R` or `F` opens the selected
-conversation directly into its inline reply or forward composer. In the reader, `R`/`A`/`Enter`/`F` append
-an inline reply, reply-all, or forward composer beneath the existing messages. Quoted history sits behind a compact inline
+conversation directly into its inline reply or forward composer. In the reader, `N`/`P` moves a visible
+message cursor without expanding the message, and `O` expands or collapses it. Clicking a message also
+selects it. `R`/`A`/`Enter`/`F` replies, replies-all, or forwards the selected message and expands it, with
+the inline composer attached directly beneath that message. Later messages stay below the composer.
+Quoted history sits behind a compact inline
 `...` control. Text-like source mail inherits the composer surface instead of introducing a separate panel,
 normalizing sender-supplied dark foreground colours for contrast, while presentation HTML retains the same
 light document canvas and safe HTML structure used by the reader.
 Each expanded message offers **Reply**, **Reply all**, and **Forward** for that message. The palette exposes
 the same actions as **Reply to this message**, **Reply all to this message**, and **Forward this message**,
-using the active message selected by pointer or `N`/`P`. Thread shortcuts retain their existing defaults.
+using the same selected message as the reader shortcuts. From the list, reply and forward keep their default source selection.
 An explicit message action uses that message's recipients, quote, attachments, and threading headers, even
 after a forward and a colleague's response. Replying to a sent message addresses its original recipients.
 Draft reuse matches the source message as well as the thread and reply/forward kind. Upgrading an existing
 reply to Reply all keeps its original source. Close the current composer before starting another message's
 draft; those actions are disabled while composing, so unsaved content cannot be replaced.
-Opening a conversation with an existing thread-bound draft reopens its newest draft inline. The inline
+Opening a conversation with an existing thread-bound draft reopens its newest draft beneath its saved source,
+selecting and expanding that message. If the source is no longer available, the draft appears at the end of
+the conversation. Loading or refreshing the conversation never remounts the composer or loses unsaved edits.
+New incoming messages do not move the message cursor away from what the user is reading.
+The inline
 composer's close button saves the draft and leaves the reader open; `Esc` or the conversation Back control
 saves it and returns directly to the originating list in one action. Thread-bound drafts opened from Drafts
 return to this same inline context whenever the parent conversation is locally available. While composing, the global mail shortcut
@@ -424,7 +431,7 @@ footer is absent and the composer owns its action footer, so editing controls ca
 - **Rich text (widened 2026-08-15, §9 #16):** bold/italic/underline/strikethrough, bulleted & numbered lists, links, blockquote, **inline images, tables, font family and size, text and background colour, and alignment** — Gmail's own authoring surface. Pasting an image into the body is supported and travels as a `cid:` inline part. Heading levels are deliberately out: Gmail's composer has none, so they would be a superset rather than parity.
 - **Zero formatting loss is an invariant, not an aspiration.** Content Attn's editor cannot represent is preserved byte-for-byte rather than dropped: it renders in place, is not editable inline, and round-trips unchanged through save, Gmail Drafts sync, and send. No draft ever loses formatting by being opened in Attn.
 - **Attachments:** drag-and-drop or picker, up to Gmail's 25MB limit, with progress indication. Attached files are copied into a local spool immediately, so a draft is self-contained even if the original file moves or the app force-quits, and that spool remains the source of the bytes for the rest of the draft's life. A forward starts with the source message's file attachments as well as its quoted inline images; the user may remove forwarded files before sending.
-- **Drafts:** autosaved to the local store one second after typing stops, and at least every five seconds while typing continues, so a force-quit loses at most five seconds of work. The **Gmail Drafts mirror is a separate, slower schedule** — debounced three seconds after typing stops, skipped entirely when nothing changed since the last push — so a composing session produces a handful of `drafts.update` calls rather than one per second. Drafts are listed in the Drafts view (`G` `D`) and reopenable, and thread-bound drafts are marked on their conversation row. A reply or forward the user never contributed to is **discarded on close, not saved**, matching Gmail: its quote, planned recipients and `Re:`/`Fwd:` subject are Attn's own work, so an untouched one leaves no draft row, no conversation mark, and nothing to mirror. Anything the plan does not write — a body, an attached file, a `Bcc`, a recipient on a forward — makes it the user's and keeps it. Attn's reply/reply-all entry points share one local reply slot and its forward entry point shares one local forward slot per conversation; separately identified Gmail drafts remain distinct even when several belong to the same conversation.
+- **Drafts:** autosaved to the local store one second after typing stops, and at least every five seconds while typing continues, so a force-quit loses at most five seconds of work. The **Gmail Drafts mirror is a separate, slower schedule** — debounced three seconds after typing stops, skipped entirely when nothing changed since the last push — so a composing session produces a handful of `drafts.update` calls rather than one per second. Drafts are listed in the Drafts view (`G` `D`) and reopenable, and thread-bound drafts are marked on their conversation row. A reply or forward the user never contributed to is **discarded on close, not saved**, matching Gmail: its quote, planned recipients and `Re:`/`Fwd:` subject are Attn's own work, so an untouched one leaves no draft row, no conversation mark, and nothing to mirror. Anything the plan does not write — a body, an attached file, a `Bcc`, a recipient on a forward — makes it the user's and keeps it. Attn's message-specific reply/reply-all entry points share one local reply slot and its forward entry point shares one local forward slot per source message; separately identified Gmail drafts remain distinct even when several belong to the same conversation.
 - **Draft sync is two-way (2026-08-15):** drafts written or edited in Gmail appear and open in Attn, and Attn's edits flow back. Conflicts resolve last-write-wins, except that a draft open in the composer always wins over a remote change.
 - **A round trip keeps the body and the quoted trail apart (2026-08-16):** Gmail stores a draft as one document, so a reply or forward returns with its quote joined to the body. Attn separates them again on reimport by recognizing the trailing quote structurally — never by matching bytes, since Gmail rewrites markup. Reopening therefore shows the same collapsed quote it showed before the round trip, rather than loading quoted mail into the editor as authored content. Attn declines to split when anything but whitespace follows the quote, because the author typed it there and reassembly always puts the quote last; such a draft stays merged.
 - **A mirrored draft is complete (2026-08-16):** attachments mirror with the body, so a draft composed in Attn can be opened and **sent from Gmail web or mobile** with its files intact. Because Gmail replaces a draft wholesale, each checkpoint re-sends every attachment byte; the mirror interval therefore lengthens once a draft carries meaningful payload, while attaching or removing a file still pushes on the normal interval. Bytes stream from the local spool rather than being held in memory, and a file that Gmail echoes back is recognized as the one already held locally rather than stored a second time.
@@ -436,7 +443,7 @@ footer is absent and the composer owns its action footer, so editing controls ca
 - Composer opens in < 50ms; typing latency is imperceptible (< 16ms/keystroke).
 - Force-quit mid-compose → draft fully recovers on relaunch.
 - Undo within the window always succeeds; the message never reaches the network before the window closes.
-- Queued replies and forwards appear expanded in the conversation immediately; undo removes that projection and restores the composer.
+- Queued replies and forwards appear expanded in the conversation immediately; undo removes that projection and restores the composer beneath its source message.
 - No scenario produces a duplicate send.
 - The optional footer appears once in new mail, replies, reply-all, and forwards, with independent
   account preferences. Its edits or removal survive save, relaunch, Gmail round trips, and undo send.
