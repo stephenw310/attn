@@ -28,7 +28,7 @@ import type {
 import type { PendingFocusTarget } from './notifications'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
 import type { SearchResponse, ServerSearchResponse } from './searchQuery'
-import type { AppSettingKey, AppSettings } from './settings'
+import type { AccountSettingKey, AccountSettings, AppSettingKey, AppSettings } from './settings'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
@@ -49,6 +49,8 @@ export const IPC_CHANNELS = {
   settingsSetTheme: 'settings:setTheme',
   settingsGetAll: 'settings:getAll',
   settingsSet: 'settings:set',
+  settingsGetAccount: 'settings:getAccount',
+  settingsSetAccount: 'settings:setAccount',
   settingsGetCommandUsage: 'settings:getCommandUsage',
   settingsSetCommandUsage: 'settings:setCommandUsage',
   contactsSearch: 'contacts:search',
@@ -162,6 +164,11 @@ export interface InvokeChannels {
   [IPC_CHANNELS.settingsSet]: {
     args: [key: AppSettingKey, value: AppSettings[AppSettingKey]]
     result: AppSettings
+  }
+  [IPC_CHANNELS.settingsGetAccount]: { args: [accountId: string]; result: AccountSettings }
+  [IPC_CHANNELS.settingsSetAccount]: {
+    args: [accountId: string, key: AccountSettingKey, value: AccountSettings[AccountSettingKey]]
+    result: AccountSettings
   }
   [IPC_CHANNELS.settingsGetCommandUsage]: { args: [accountId: string]; result: CommandUsage }
   [IPC_CHANNELS.settingsSetCommandUsage]: {

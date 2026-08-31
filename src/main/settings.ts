@@ -25,8 +25,12 @@ export function writeSetting(db: Db, key: string, value: string): void {
   writeAccountSetting(db, APP_SETTINGS_ACCOUNT_ID, key, value)
 }
 
+export function deleteAccountSetting(db: Db, accountId: string, key: string): void {
+  db.prepare('DELETE FROM settings WHERE account_id = ? AND key = ?').run(accountId, key)
+}
+
 export function deleteSetting(db: Db, key: string): void {
-  db.prepare('DELETE FROM settings WHERE account_id = ? AND key = ?').run(APP_SETTINGS_ACCOUNT_ID, key)
+  deleteAccountSetting(db, APP_SETTINGS_ACCOUNT_ID, key)
 }
 
 export function settingEnabled(db: Db, key: string, defaultValue: boolean): boolean {

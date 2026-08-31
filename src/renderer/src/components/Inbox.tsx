@@ -23,7 +23,7 @@ import { useRestoreTarget } from '../hooks/useRestoreTarget'
 import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
 import { useSelectionState } from '../hooks/useSelectionState'
 import { useServerSearch } from '../hooks/useServerSearch'
-import { useSettings } from '../hooks/useSettings'
+import { useAccountSettings, useSettings } from '../hooks/useSettings'
 import { useSplits } from '../hooks/useSplits'
 import { useSyncActions } from '../hooks/useSyncActions'
 import { useToast } from '../hooks/useToast'
@@ -165,6 +165,10 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   const { settings: appSettings, update: updateAppSetting } = useSettings(showToast)
   const appSettingsRef = useRef(appSettings)
   appSettingsRef.current = appSettings
+  const { accountSettings, updateAccountSetting } = useAccountSettings(
+    status.activeAccountId ?? status.email ?? null,
+    showToast
+  )
   const autoAdvance = appSettings?.autoAdvanceDirection ?? 'next'
   const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
@@ -1906,6 +1910,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
       registerCommands([
         createCommand('settings.open', () => openSettings(null)),
         createCommand('settings.reorderAccounts', () => openSettings('accounts')),
+        createCommand('settings.syncLimit', () => openSettings('syncLimit')),
         createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
         createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
         createCommand('settings.launchAtLogin', () =>
@@ -2056,7 +2061,9 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
             status={status}
             accountStatuses={accountStatuses}
             settings={appSettings}
+            accountSettings={accountSettings}
             onUpdateSetting={updateAppSetting}
+            onUpdateAccountSetting={updateAccountSetting}
             onStatus={onStatus}
             onAddAccount={addAccount}
             onReconnect={reconnectActions}

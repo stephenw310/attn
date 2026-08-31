@@ -3,11 +3,15 @@ import { ACCOUNT_SYNC_PHASE_LABELS, type AccountSyncStatus, type AuthStatus } fr
 import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import { ALLOWED_UNDO_SEND_SECONDS, DEFAULT_UNDO_SEND_SECONDS } from '../../../shared/outboxTuning'
 import {
+  type AccountSettingKey,
+  type AccountSettings,
   type AppSettingKey,
   type AppSettings,
   AUTO_ADVANCE_DIRECTIONS,
   AUTO_ADVANCE_LABELS,
-  isAutoAdvanceDirection
+  DEFAULT_LIFETIME_THREAD_CAP,
+  isAutoAdvanceDirection,
+  LIFETIME_THREAD_CAP_ALL_MAIL
 } from '../../../shared/settings'
 import { formatSnoozeDate } from '../../../shared/snooze'
 import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
@@ -16,14 +20,25 @@ import { useTheme } from '../theme'
 import { Kbd } from './Kbd'
 
 /** A control the palette can deep-link to (`Set undo send delay…` etc.). */
-export type SettingsControl = 'accounts' | 'undoSendDelay' | 'autoAdvance' | 'launchAtLogin' | 'menuBarIcon'
+export type SettingsControl =
+  | 'accounts'
+  | 'syncLimit'
+  | 'undoSendDelay'
+  | 'autoAdvance'
+  | 'launchAtLogin'
+  | 'menuBarIcon'
+
+type SyncLimitMode = 'default' | 'custom' | 'all'
 
 interface SettingsViewProps {
   status: AuthStatus
   /** Live per-account health, pushed by the utility (F18). */
   accountStatuses: readonly AccountSyncStatus[] | null
   settings: AppSettings | null
+  /** The active account's scoped settings; null until its read lands (F18). */
+  accountSettings: AccountSettings | null
   onUpdateSetting: <K extends AppSettingKey>(key: K, value: AppSettings[K]) => void
+  onUpdateAccountSetting: <K extends AccountSettingKey>(key: K, value: AccountSettings[K]) => void
   onStatus: (status: AuthStatus) => void
   onAddAccount: () => void
   onReconnect: () => void
@@ -54,7 +69,9 @@ export function SettingsView({
   status,
   accountStatuses,
   settings,
+  accountSettings,
   onUpdateSetting,
+  onUpdateAccountSetting,
   onStatus,
   onAddAccount,
   onReconnect,
@@ -128,6 +145,30 @@ export function SettingsView({
 
   const pausedUntil = settings?.notificationsPausedUntil ?? null
   const paused = pausedUntil !== null && pausedUntil > Date.now()
+
+  // Historical sync limit (T32A). The stored override decides the resting
+  // mode; a draft carries an in-progress choice (custom typing, the All-mail
+  // confirmation) without writing anything until it is applied.
+  const storedCap = accountSettings?.lifetimeThreadCap ?? null
+  const storedLimitMode: SyncLimitMode =
+    storedCap === null ? 'default' : storedCap === LIFETIME_THREAD_CAP_ALL_MAIL ? 'all' : 'custom'
+  const [limitDraft, setLimitDraft] = useState<{ mode: SyncLimitMode; custom: string } | null>(null)
+  const limitMode = limitDraft?.mode ?? storedLimitMode
+  const customLimitValue =
+    limitDraft?.custom ??
+    String(storedCap !== null && storedCap > 0 ? storedCap : DEFAULT_LIFETIME_THREAD_CAP)
+  const parsedCustomLimit = Number(customLimitValue)
+  const customLimitValid = Number.isSafeInteger(parsedCustomLimit) && parsedCustomLimit > 0
+  const customLimitDirty = limitDraft !== null && String(storedCap ?? '') !== customLimitValue
+  const confirmAllMail = limitMode === 'all' && storedLimitMode !== 'all'
+  const changeLimitMode = (next: string): void => {
+    if (next === 'default') {
+      setLimitDraft(null)
+      if (storedLimitMode !== 'default') onUpdateAccountSetting('lifetimeThreadCap', null)
+    } else if (next === 'custom' || next === 'all') {
+      setLimitDraft({ mode: next, custom: customLimitValue })
+    }
+  }
 
   return (
     <div ref={rootRef} data-testid="settings-view" className="flex min-w-0 flex-1 flex-col">
@@ -246,6 +287,101 @@ export function SettingsView({
                 </button>
               )}
             </div>
+          </section>
+
+          <section data-testid="settings-sync" aria-label="Sync and storage">
+            <h2 className={SECTION_TITLE}>Sync &amp; storage</h2>
+            <div className={`mt-2 ${ROW}`}>
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[13px] text-ink">
+                  Historical sync limit{activeEmail ? ` — ${activeEmail}` : ''}
+                </span>
+                <span className={NOTE}>
+                  Bounds how much additional historical mail is indexed for this account. Inbox and new-mail
+                  sync, Gmail search, and conversations you open can still add mail, and lowering the limit
+                  deletes nothing already stored. Gmail search stays available for the uncached tail.
+                </span>
+              </span>
+              <select
+                data-testid="settings-sync-limit-mode"
+                data-settings-control="syncLimit"
+                aria-label="Historical sync limit"
+                disabled={!accountSettings}
+                value={limitMode}
+                onChange={(event) => changeLimitMode(event.target.value)}
+                className={SELECT}
+              >
+                <option value="default">
+                  Default — {DEFAULT_LIFETIME_THREAD_CAP.toLocaleString()} conversations
+                </option>
+                <option value="custom">Custom…</option>
+                <option value="all">All mail</option>
+              </select>
+            </div>
+            {limitMode === 'custom' && (
+              <div className={ROW}>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-[13px] text-ink">Custom limit (conversations)</span>
+                  <span className={NOTE}>A positive whole number of conversations to keep indexed.</span>
+                </span>
+                <span className="flex flex-none items-center gap-1.5">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    data-testid="settings-sync-limit-custom"
+                    aria-label="Custom historical sync limit"
+                    value={customLimitValue}
+                    onChange={(event) => setLimitDraft({ mode: 'custom', custom: event.target.value })}
+                    className="w-28 rounded-md border border-edge bg-ground px-2 py-1 text-right text-xs text-ink tabular-nums outline-none focus:border-accent"
+                  />
+                  <button
+                    type="button"
+                    data-testid="settings-sync-limit-apply"
+                    disabled={!customLimitValid || !customLimitDirty}
+                    onClick={() => {
+                      if (!customLimitValid) return
+                      setLimitDraft(null)
+                      onUpdateAccountSetting('lifetimeThreadCap', parsedCustomLimit)
+                    }}
+                    className={ACTION_BUTTON}
+                  >
+                    Apply
+                  </button>
+                </span>
+              </div>
+            )}
+            {confirmAllMail && (
+              <div
+                data-testid="settings-sync-limit-confirm"
+                className="mx-3 mt-1 rounded-md border border-accent/40 bg-accent/10 px-3 py-2"
+              >
+                <p className="text-[12px] leading-relaxed text-ink-dim">
+                  Sync all mail for {activeEmail ?? 'this account'}? A large account can require substantial
+                  disk space, Gmail API quota, and time with the app open before indexing completes.
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="settings-sync-limit-confirm-apply"
+                    onClick={() => {
+                      setLimitDraft(null)
+                      onUpdateAccountSetting('lifetimeThreadCap', LIFETIME_THREAD_CAP_ALL_MAIL)
+                    }}
+                    className="cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20"
+                  >
+                    Sync all mail
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="settings-sync-limit-cancel"
+                    onClick={() => setLimitDraft(null)}
+                    className={ACTION_BUTTON}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
 
           <section data-testid="settings-triage" aria-label="Triage">

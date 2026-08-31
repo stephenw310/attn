@@ -54,6 +54,53 @@ export const APP_SETTINGS_DEFAULTS: AppSettings = {
 }
 
 /**
+ * The compile-time historical sync limit (F2, §9 #22). `sync/tuning.ts`
+ * re-exports these as `LIFETIME_THREAD_CAP` / `LIFETIME_THREAD_CAP_UNLIMITED`;
+ * they live here so the renderer's settings surface labels the same numbers
+ * the sweep enforces, with no second literal.
+ */
+export const DEFAULT_LIFETIME_THREAD_CAP = 400_000
+export const LIFETIME_THREAD_CAP_ALL_MAIL = 0
+
+/**
+ * Account-scoped preferences (F18 rule 9): each carries the owning account
+ * id through the bridge, and the utility rejects a write whose account is no
+ * longer active, so a late completion cannot land on a newly selected
+ * account's controls.
+ */
+export interface AccountSettings {
+  /**
+   * Historical sync limit override (F2, §9 #22): conversations of additional
+   * historical header fetching to allow. `null` means the compile-time
+   * default applies; `0` means All mail. It bounds only the lifetime sweep —
+   * lowering it deletes nothing, and inbox sync, new mail, server search,
+   * and on-demand reads still add rows.
+   */
+  lifetimeThreadCap: number | null
+}
+
+export type AccountSettingKey = keyof AccountSettings
+
+export type AccountSettingUpdate = {
+  [K in AccountSettingKey]: { key: K; value: AccountSettings[K] }
+}[AccountSettingKey]
+
+export function validateAccountSettingUpdate(key: unknown, value: unknown): AccountSettingUpdate {
+  switch (key) {
+    case 'lifetimeThreadCap': {
+      // Reject negatives, fractions, invalid strings, and unsafe integers in
+      // the handler too — the UI's own validation is not a boundary.
+      if (value !== null && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)) {
+        throw new Error('invalid historical sync limit')
+      }
+      return { key, value }
+    }
+    default:
+      throw new Error('unknown account setting')
+  }
+}
+
+/**
  * Narrow one settings write to the allowlist. Both ends of the bridge run
  * this: main before forwarding (so OS effects only ever follow a valid write)
  * and the utility before touching SQLite (the renderer is untrusted).

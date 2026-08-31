@@ -5,6 +5,7 @@
 // icon) are main's job after the write returns.
 
 import {
+  type AccountSettings,
   APP_SETTINGS_DEFAULTS,
   type AppSettings,
   type AppSettingUpdate,
@@ -15,6 +16,12 @@ import type { Db } from './db'
 import { undoSendDelayMs } from './outbox/queue'
 import { notificationPausedUntil, setNotificationPausedUntil } from './service/notificationQueries'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from './settings'
+import { storedLifetimeThreadCap } from './sync/lifetimeCap'
+
+/** The account-scoped snapshot for the owning account (F18 rule 9). */
+export function readAccountSettings(db: Db, accountId: string): AccountSettings {
+  return { lifetimeThreadCap: storedLifetimeThreadCap(db, accountId) }
+}
 
 export function readAppSettings(db: Db): AppSettings {
   const autoAdvance = readSetting(db, 'autoAdvanceDirection')

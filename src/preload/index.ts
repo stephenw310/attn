@@ -40,7 +40,7 @@ import type {
   ReopenOutboxResult
 } from '../shared/outbox'
 import type { SearchResponse, ServerSearchResponse } from '../shared/searchQuery'
-import type { AppSettingKey, AppSettings } from '../shared/settings'
+import type { AccountSettingKey, AccountSettings, AppSettingKey, AppSettings } from '../shared/settings'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
@@ -98,7 +98,14 @@ const api = {
       invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage),
     getAll: (): Promise<AppSettings> => invoke(IPC_CHANNELS.settingsGetAll),
     set: <K extends AppSettingKey>(key: K, value: AppSettings[K]): Promise<AppSettings> =>
-      invoke(IPC_CHANNELS.settingsSet, key, value)
+      invoke(IPC_CHANNELS.settingsSet, key, value),
+    getAccount: (accountId: string): Promise<AccountSettings> =>
+      invoke(IPC_CHANNELS.settingsGetAccount, accountId),
+    setAccount: <K extends AccountSettingKey>(
+      accountId: string,
+      key: K,
+      value: AccountSettings[K]
+    ): Promise<AccountSettings> => invoke(IPC_CHANNELS.settingsSetAccount, accountId, key, value)
   },
   mail: {
     findThreadInView: (request: ThreadListRequest, threadId: string): Promise<ThreadPage> =>

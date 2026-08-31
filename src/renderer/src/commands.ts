@@ -125,6 +125,7 @@ export const COMMAND_SPECS = {
   'account.remove': { title: 'Sign out', context: 'global' },
   'settings.open': { title: 'Open settings', shortcut: 'Mod+,', context: 'global' },
   'settings.reorderAccounts': { title: 'Reorder accounts…', context: 'global' },
+  'settings.syncLimit': { title: 'Set historical sync limit…', context: 'global' },
   'settings.undoSendDelay': { title: 'Set undo send delay…', context: 'global' },
   'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
   'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },

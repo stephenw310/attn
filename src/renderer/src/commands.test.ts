@@ -75,6 +75,7 @@ describe('command catalog', () => {
       'account.remove',
       'settings.open',
       'settings.reorderAccounts',
+      'settings.syncLimit',
       'settings.undoSendDelay',
       'settings.autoAdvance',
       'settings.launchAtLogin',

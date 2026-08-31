@@ -28,6 +28,7 @@ import {
   type ThreadPageCursor,
   type ThreadRow
 } from '../../shared/mail'
+import { validateAccountSettingUpdate } from '../../shared/settings'
 import type { ReorderSplitsInput, SaveSplitInput, SplitCondition, SplitPresetId } from '../../shared/splits'
 import { SPLIT_PRESET_IDS } from '../../shared/splits'
 import { isThemePreference } from '../../shared/theme'
@@ -42,7 +43,7 @@ import {
   undoLast
 } from '../actions'
 import type { ActionExecutor } from '../actions/executor'
-import { readAppSettings, writeAppSetting } from '../appSettings'
+import { readAccountSettings, readAppSettings, writeAppSetting } from '../appSettings'
 import { writeAttachment } from '../attachments'
 import type { Db } from '../db'
 import {
@@ -99,6 +100,7 @@ import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
 import { fetchAndCacheThread } from '../sync/fetchThread'
 import { inboxBackfillReady } from '../sync/inboxReady'
+import { applyLifetimeCapChange } from '../sync/lifetimeCap'
 import { OnDemandBodyHydrator } from '../sync/onDemandBodies'
 import { type ServerSearchProvider, searchAllGmail, serverSearchFailure } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
@@ -416,6 +418,22 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.settingsGetAll, () => readAppSettings(context.db))
   handle(IPC_CHANNELS.settingsSet, (_event, key, value) => writeAppSetting(context.db, key, value))
+  handle(IPC_CHANNELS.settingsGetAccount, (_event, accountId) => {
+    const account = requireAccount(context)
+    if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
+    return readAccountSettings(context.db, account)
+  })
+  handle(IPC_CHANNELS.settingsSetAccount, (_event, accountId, key, value) => {
+    // Bind the write to the account named at dispatch: a completion that
+    // lands after a switch must not touch the newly selected account (F18).
+    const account = requireAccount(context)
+    if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
+    const update = validateAccountSettingUpdate(key, value)
+    if (update.key === 'lifetimeThreadCap') {
+      applyLifetimeCapChange(context.db, context.syncController(), account, update.value)
+    }
+    return readAccountSettings(context.db, account)
+  })
   handle(IPC_CHANNELS.settingsGetCommandUsage, (_event, accountId) => {
     const account = requireAccount(context)
     if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')

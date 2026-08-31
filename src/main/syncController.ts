@@ -16,6 +16,7 @@ import { reconcileThreadExistence } from './sync/existenceSweep'
 import { errorMessage, isOfflineFailure, syncFailureState } from './sync/failure'
 import { runFtsBackfill } from './sync/ftsBackfill'
 import { syncLabelCatalog } from './sync/labels'
+import { effectiveLifetimeThreadCap } from './sync/lifetimeCap'
 import { type LifetimeSweepProgress, runLifetimeSweep } from './sync/lifetimeSweep'
 import { HistoryPoller, reconcileInboxMembership, reconcilePurgeableMembership } from './sync/poller'
 import { OfflineRetryScheduler, syncRetryRoute } from './sync/retry'
@@ -126,6 +127,37 @@ export class SyncController {
     if (this.stopped) return
     this.stopped = true
     this.resetSession()
+  }
+
+  /**
+   * Cancel the in-flight historical chain's writes before a cap change
+   * persists (T32A). The canceled run observes the stale run id at its next
+   * safe point, stops without writing, and still releases the shared indexing
+   * slot exactly once in its own settle path; nothing else — auth, pollers,
+   * send executors — is touched.
+   */
+  invalidateLifetimeChain(): void {
+    if (this.stopped) return
+    this.lifetimeRunId++
+    this.lifetimeRunning = false
+    this.lifetimeRetry.clear()
+  }
+
+  /**
+   * Schedule this account's historical work again after a cap change. The
+   * replacement chain reads the saved cap at its start and, when the shared
+   * indexing slot is held by the settling old chain (or another account), it
+   * waits its turn — active-account priority and preemption unchanged. An
+   * offline or paused-auth account simply applies the saved value on resume.
+   */
+  restartLifetimeChain(): void {
+    if (this.stopped || !this.context.isSignedIn()) return
+    const generation = this.generation
+    const accountId = this.context.currentAccountId()
+    if (!accountId) return
+    const provider = this.context.makeProvider(generation)
+    if (!provider) return
+    this.startLifetimeSweep(accountId, provider, generation)
   }
 
   retry(): void {
@@ -535,6 +567,9 @@ export class SyncController {
         !this.preemptRequested(accountId),
       shouldYield: () => this.shouldYieldLifetime(accountId),
       snapshotRevision: this.context.mailRevision,
+      // The saved per-account limit is read at every chain start — restart,
+      // reauthentication, retry, and slot handover included (F2/F15, T32A).
+      threadCap: effectiveLifetimeThreadCap(this.context.db, accountId),
       ...this.context.lifetimePacing
     }
     const pause = (error: unknown, prefix: string): void => {

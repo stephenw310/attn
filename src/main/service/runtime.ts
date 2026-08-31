@@ -34,6 +34,7 @@ import { getSplitState, hasSplitSetup } from '../splits'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
 import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
 import { runFtsBackfill } from '../sync/ftsBackfill'
+import { effectiveLifetimeThreadCap } from '../sync/lifetimeCap'
 import { runLifetimeSweep } from '../sync/lifetimeSweep'
 import { deleteThread, type LabelRow } from '../sync/persist'
 import { historyEvents, type NewMail } from '../sync/poller'
@@ -1193,7 +1194,14 @@ export class ServiceRuntime {
           failure = error
         }
       },
-      { requestIntervalMs: 0, pagePauseMs: 0, threadCap: value.threadCap }
+      {
+        requestIntervalMs: 0,
+        pagePauseMs: 0,
+        // With no explicit override the seam reads the persisted per-account
+        // preference — the same value the production chain reads — so T32A's
+        // e2e can drive the cap through the real settings bridge.
+        threadCap: value.threadCap ?? effectiveLifetimeThreadCap(this.db, accountId)
+      }
     )
     const state = this.db
       .prepare('SELECT sweep_cursor FROM sync_state WHERE account_id = ?')
