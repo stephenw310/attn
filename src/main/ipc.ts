@@ -9,6 +9,7 @@ import {
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { PendingFocusTarget } from '../shared/notifications'
+import { type AppSettingUpdate, validateAppSettingUpdate } from '../shared/settings'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
 import type { ServiceSupervisor } from './service/supervisor'
 
@@ -27,7 +28,11 @@ export interface IpcContext {
   signIn: () => Promise<AuthSignInResult>
   setActiveAccount: (accountId: string) => Promise<AuthStatus>
   removeAccount: (accountId: string, deleteData: boolean) => Promise<AuthStatus>
+  reorderAccounts: (accountIds: string[]) => Promise<AuthStatus>
   takePendingFocus: () => PendingFocusTarget | null
+  acknowledgePendingFocus: (id: number) => void
+  /** OS-side effects of a persisted settings write (login item, menu bar). */
+  applySettingEffects: (update: AppSettingUpdate) => void
   setThemePreference: (preference: ThemePreference) => void
   pickAttachmentPaths?: () => Promise<string[]>
 }
@@ -38,10 +43,13 @@ export function registerIpc(context: IpcContext): () => void {
     IPC_CHANNELS.authSignIn,
     IPC_CHANNELS.accountsSetActive,
     IPC_CHANNELS.accountsRemove,
+    IPC_CHANNELS.accountsReorder,
     IPC_CHANNELS.draftPickAttachments,
     IPC_CHANNELS.mailDownloadAttachment,
     IPC_CHANNELS.mailTakePendingFocus,
+    IPC_CHANNELS.mailAcknowledgePendingFocus,
     IPC_CHANNELS.settingsSetTheme,
+    IPC_CHANNELS.settingsSet,
     IPC_CHANNELS.syncGetState
   ])
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
@@ -55,10 +63,32 @@ export function registerIpc(context: IpcContext): () => void {
     if (typeof deleteData !== 'boolean') throw new Error('invalid local-data choice')
     return context.removeAccount(accountId, deleteData)
   })
+  handle(IPC_CHANNELS.accountsReorder, (_event, accountIds) => {
+    if (
+      !Array.isArray(accountIds) ||
+      !accountIds.every((id): id is string => typeof id === 'string' && id.length > 0)
+    ) {
+      throw new Error('invalid account order')
+    }
+    return context.reorderAccounts(accountIds)
+  })
   handle(IPC_CHANNELS.settingsSetTheme, (_event, preference) => {
     if (!isThemePreference(preference)) throw new Error('invalid theme preference')
     context.setThemePreference(preference)
     return context.service.invoke(IPC_CHANNELS.settingsSetTheme, preference)
+  })
+  handle(IPC_CHANNELS.settingsSet, async (_event, key, value) => {
+    // Validate before forwarding so OS effects only ever follow a write the
+    // utility will accept; the utility re-validates before touching SQLite.
+    const update = validateAppSettingUpdate(key, value)
+    const settings = await context.service.invoke(IPC_CHANNELS.settingsSet, update.key, update.value)
+    context.applySettingEffects(update)
+    return settings
+  })
+  handle(IPC_CHANNELS.mailAcknowledgePendingFocus, (_event, id) => {
+    if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('invalid focus id')
+    context.acknowledgePendingFocus(id)
+    return undefined
   })
   handle(IPC_CHANNELS.draftPickAttachments, async (event, id) => {
     let paths: string[]

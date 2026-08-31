@@ -214,10 +214,13 @@ export class ServiceRuntime {
       } else {
         // A removed-with-Keep account leaves its rows behind (F18, D3): the
         // persisted seed roster is what keeps it off the boot roster, exactly
-        // as the token file does for real accounts.
+        // as the token file does for real accounts. The persisted list also
+        // carries the switcher order, so a settings reorder survives relaunch
+        // in seeded runs the way the token file order does for real accounts.
         const persisted = readSetting(this.db, 'seedAccountIds')
-        const wanted = persisted ? (JSON.parse(persisted) as string[]) : existing.map((row) => row.id)
-        seedIds = existing.map((row) => row.id).filter((id) => wanted.includes(id))
+        const existingIds = existing.map((row) => row.id)
+        const wanted = persisted ? (JSON.parse(persisted) as string[]) : existingIds
+        seedIds = wanted.filter((id) => existingIds.includes(id))
       }
       writeSetting(this.db, 'seedAccountIds', JSON.stringify(seedIds))
       this.log('log', `[sync] backfill stages skipped for seeded accounts ${seedIds.join(', ')}`)
@@ -275,7 +278,8 @@ export class ServiceRuntime {
       schemaVersion: schemaVersion(this.db),
       background: {
         launchAtLogin: settingEnabled(this.db, 'launchAtLogin', true),
-        loginItemRegistered: readSetting(this.db, 'loginItemRegistered') !== undefined
+        loginItemRegistered: readSetting(this.db, 'loginItemRegistered') !== undefined,
+        menuBarIcon: settingEnabled(this.db, 'menuBarIcon', false)
       }
     }
   }
@@ -623,6 +627,13 @@ export class ServiceRuntime {
     for (const seedId of wantedSeedIds) {
       if (!this.sessions.has(seedId)) pendingCreations.push(this.createSessionWhenRetired(seedId))
     }
+    // Mirror the roster's switcher order for live sessions (F15 reorder):
+    // sessions are keyed by id and never restarted by an order change, but
+    // the status broadcasts and `ready()` walk `accountOrder`. Ids without a
+    // session yet keep their creation-time append; the next roster push
+    // re-sorts them once they exist.
+    const desiredOrder = [...this.desiredAccounts.keys()]
+    this.accountOrder.sort((left, right) => desiredOrder.indexOf(left) - desiredOrder.indexOf(right))
     const nextActive = this.resolveActiveAccount(state.activeAccountId, 'control')
     if (nextActive !== this.activeAccountId) this.setActiveAccount(nextActive, { force: true })
     else this.persistActiveAccount()

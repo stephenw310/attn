@@ -123,6 +123,29 @@ export const COMMAND_SPECS = {
   'split.manage': { title: 'Manage inbox splits', context: 'global' },
   'account.add': { title: 'Add account…', context: 'global' },
   'account.remove': { title: 'Sign out', context: 'global' },
+  'settings.open': { title: 'Open settings', shortcut: 'Mod+,', context: 'global' },
+  'settings.reorderAccounts': { title: 'Reorder accounts…', context: 'global' },
+  'settings.undoSendDelay': { title: 'Set undo send delay…', context: 'global' },
+  'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
+  'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },
+  'settings.menuBarIcon': { title: 'Toggle macOS menu-bar icon', context: 'global' },
+  'notifications.pauseHour': {
+    title: 'Pause notifications for 1 hour',
+    context: 'global',
+    allowInComposer: true
+  },
+  'notifications.pauseTomorrow': {
+    title: 'Pause notifications until tomorrow',
+    context: 'global',
+    allowInComposer: true
+  },
+  'notifications.resume': { title: 'Resume notifications', context: 'global', allowInComposer: true },
+  'cheatsheet.open': {
+    title: 'Keyboard shortcuts',
+    shortcut: 'Mod+/',
+    context: 'global',
+    allowInComposer: true
+  },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
     title: 'Use Dark theme',
@@ -323,7 +346,27 @@ export const COMMAND_SPECS = {
 } as const satisfies Record<string, CommandSpec>
 
 export type StaticCommandId = keyof typeof COMMAND_SPECS
-export type CommandId = StaticCommandId | `split.goto:${string}` | `account.switch:${string}`
+export type CommandId =
+  | StaticCommandId
+  | `split.goto:${string}`
+  | `account.switch:${string}`
+  // The e2e-only registration seam (cheat-sheet coverage); see installTestSeam.
+  | `test:${string}`
+
+/**
+ * How the cheat sheet groups the registry (F15): every command context maps to
+ * one §5-style heading, so a new command appears on the sheet without editing
+ * it. Order is the §5 reading order.
+ */
+export const COMMAND_CONTEXT_GROUPS: readonly { context: CommandContext; label: string }[] = [
+  { context: 'global', label: 'Global' },
+  { context: 'navigation', label: 'List & navigation' },
+  { context: 'list', label: 'List & navigation' },
+  { context: 'mail', label: 'Triage' },
+  { context: 'reader', label: 'Conversation' },
+  { context: 'outbox', label: 'Outbox' },
+  { context: 'composer', label: 'Composer' }
+]
 
 export interface CommandArgumentValue {
   label: string
@@ -585,6 +628,32 @@ export function matchComposerKey(event: KeyboardEvent): Command | null {
         commandShortcuts(command).some((candidate) => candidate.toLowerCase() === shortcut.toLowerCase())
     ) ?? null
   )
+}
+
+declare global {
+  interface Window {
+    /** E2e-only (ATTN_TEST_USER_DATA): lets a spec register a shortcut command
+        and assert the cheat sheet picked it up from the registry. */
+    attnTest?: {
+      registerCommand: (id: string, title: string, shortcut?: string) => void
+    }
+  }
+}
+
+if (typeof window !== 'undefined' && window.attn?.testMode) {
+  window.attnTest = {
+    registerCommand: (id, title, shortcut) => {
+      registerCommands([
+        {
+          id: `test:${id}`,
+          title,
+          ...(shortcut ? { shortcut } : {}),
+          context: 'global',
+          run: () => {}
+        }
+      ])
+    }
+  }
 }
 
 const ARROW_STEP = 120

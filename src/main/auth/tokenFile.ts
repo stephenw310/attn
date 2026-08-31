@@ -74,3 +74,35 @@ export function upsertAccount(accounts: readonly StoredAccount[], tokens: TokenS
 export function removeAccount(accounts: readonly StoredAccount[], id: string): StoredAccount[] {
   return accounts.filter((account) => account.id !== id)
 }
+
+/**
+ * Validate that `ids` is an exact permutation of `currentIds` (F15/F18: the
+ * switcher order behind `Mod+1..9`). Duplicates, unknown ids, and a wrong
+ * length all reject — a stale request from before a roster change must not
+ * silently drop or resurrect an account.
+ */
+export function reorderIds(currentIds: readonly string[], ids: readonly string[]): string[] {
+  if (ids.length !== currentIds.length) throw new Error('stale account order')
+  const known = new Set(currentIds)
+  const seen = new Set<string>()
+  for (const id of ids) {
+    if (seen.has(id)) throw new Error('duplicate account in order')
+    seen.add(id)
+    if (!known.has(id)) throw new Error('unknown account in order')
+  }
+  return [...ids]
+}
+
+/**
+ * Reorder the roster to an exact permutation of itself. Token sets are
+ * carried from the current roster, so a refresh that raced the reorder keeps
+ * its newest tokens.
+ */
+export function reorderRoster(accounts: readonly StoredAccount[], ids: readonly string[]): StoredAccount[] {
+  const ordered = reorderIds(
+    accounts.map((account) => account.id),
+    ids
+  )
+  const byId = new Map(accounts.map((account) => [account.id, account]))
+  return ordered.map((id) => byId.get(id) as StoredAccount)
+}

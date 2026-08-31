@@ -74,6 +74,8 @@ test('rolls back overlapping failed star and unread actions independently', asyn
       updateSearchRows: (updater) => setSearchRows(updater),
       clearSelection: () => {},
       showToast: () => {},
+      autoAdvance: 'next',
+      closeReader: () => {},
       setExitingThreadIds,
       setSelectedIndex
     })
@@ -170,6 +172,8 @@ test('updates inactive Move cache membership immediately and restores it on reje
       setMailboxRows,
       clearSelection: () => {},
       showToast: () => {},
+      autoAdvance: 'next',
+      closeReader: () => {},
       setExitingThreadIds,
       setSelectedIndex
     })

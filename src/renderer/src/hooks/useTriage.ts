@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
+import type { AutoAdvanceDirection } from '../../../shared/settings'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
 import { type MailView, userLabelId } from '../mailDisplay'
 import {
@@ -54,6 +55,10 @@ interface Options {
   showToast: (message: string) => void
   setExitingThreadIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
+  /** Where triage lands after removing the focused row (F3, F15 setting). */
+  autoAdvance: AutoAdvanceDirection
+  /** 'list' auto-advance: return the open reader to the full-width list. */
+  closeReader: () => void
 }
 
 function flagOwnerKey(threadId: string, field: ThreadFlagSnapshot['field']): string {
@@ -107,7 +112,9 @@ export function useTriage(options: Options): (action: TriageAction) => void {
     clearSelection,
     showToast,
     setExitingThreadIds,
-    setSelectedIndex
+    setSelectedIndex,
+    autoAdvance,
+    closeReader
   } = options
   const flagOwnersRef = useRef(new Map<string, symbol>())
   const moveOwnersRef = useRef(new Map<string, symbol>())
@@ -287,12 +294,32 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         setExitingThreadIds((current) => new Set([...current, ...exitingThreadIds]))
         const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 550
         deferRefreshUntilRef.current = Math.max(deferRefreshUntilRef.current, Date.now() + duration)
-        const selection = selectionAfterExit(threads, exitingThreadIds, selectedIndex)
+        // 'list' only distinguishes the reader; in the list it means 'next'.
+        const selection = selectionAfterExit(
+          threads,
+          exitingThreadIds,
+          selectedIndex,
+          autoAdvance === 'previous' ? 'previous' : 'next'
+        )
         if (selection) {
           selectionRollback = { fromId: selection.fromId, toId: selection.toId }
           selectedThreadIdRef.current = selection.toId
           preserveSelectionOnRefreshRef.current = selection.toId !== null
           setSelectedIndex(Math.max(0, selection.nextIndex))
+        }
+      } else if (exitingThreadIds.length > 0 && readerOpen && autoAdvance !== 'next') {
+        // The reader's default advance is free: the removed row's successor
+        // slides into the same index on refresh. The other two directions
+        // retarget before the refresh lands (F3 auto-advance setting).
+        if (autoAdvance === 'list') closeReader()
+        else {
+          const selection = selectionAfterExit(threads, exitingThreadIds, selectedIndex, 'previous')
+          if (selection && selection.toId !== null && selection.toId !== selection.fromId) {
+            selectionRollback = { fromId: selection.fromId, toId: selection.toId }
+            selectedThreadIdRef.current = selection.toId
+            preserveSelectionOnRefreshRef.current = true
+            setSelectedIndex(Math.max(0, selection.nextIndex))
+          }
         }
       }
       void window.attn.mail
@@ -324,7 +351,9 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       applyFlagToMailboxRows,
       applyMoveToMailboxRows,
       activeSplitId,
+      autoAdvance,
       clearSelection,
+      closeReader,
       deferRefreshUntilRef,
       preserveSelectionOnRefreshRef,
       readerOpen,

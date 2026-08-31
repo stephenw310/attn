@@ -8,9 +8,11 @@ import {
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
 import type { ConversationMailbox, MailLabel, ThreadListView, ThreadRow } from '../../../shared/mail'
 import type { MoveDestination } from '../../../shared/move'
+import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
 import { clearAccountView, readAccountView, saveAccountView } from '../accountViewMemory'
 import { actionReconnectMessage } from '../actionReconnect'
+import { createCommand, registerCommands } from '../commands'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
 import { useInboxCommands } from '../hooks/useInboxCommands'
@@ -21,6 +23,7 @@ import { useRestoreTarget } from '../hooks/useRestoreTarget'
 import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
 import { useSelectionState } from '../hooks/useSelectionState'
 import { useServerSearch } from '../hooks/useServerSearch'
+import { useSettings } from '../hooks/useSettings'
 import { useSplits } from '../hooks/useSplits'
 import { useSyncActions } from '../hooks/useSyncActions'
 import { useToast } from '../hooks/useToast'
@@ -41,6 +44,8 @@ import {
   userLabelView,
   VIEW_TITLES
 } from '../mailDisplay'
+import { selectionAfterExit } from '../optimisticTriage'
+import { isMacPlatform } from '../platform'
 import {
   conversationMailboxForSearch,
   retainedSearchQuery,
@@ -51,6 +56,7 @@ import {
   triageViewForSearch
 } from '../searchView'
 import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
+import { CheatSheet } from './CheatSheet'
 import { CommandPalette } from './CommandPalette'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
@@ -61,6 +67,7 @@ import { MailSidebar } from './MailSidebar'
 import { OutboxList } from './OutboxList'
 import { SearchHeader, searchCoverageText } from './SearchHeader'
 import { ServerSearchRow } from './ServerSearchRow'
+import { type SettingsControl, SettingsView } from './SettingsView'
 import { SnoozePicker } from './SnoozePicker'
 import { SplitRuleManager } from './SplitRuleManager'
 import { SplitStrip } from './SplitStrip'
@@ -136,6 +143,11 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [splitRulesOpen, setSplitRulesOpen] = useState(false)
+  // Full-window settings view (F15): the prior list or reader stays mounted
+  // and hidden; Esc or Back restores it exactly. The sidebar stays visible.
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsFocus, setSettingsFocus] = useState<SettingsControl | null>(null)
+  const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
   const [labelTargetIds, setLabelTargetIds] = useState<readonly string[] | null>(null)
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
@@ -150,6 +162,10 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   const [detachedDraftThread, setDetachedDraftThread] = useState<DisplayThread | null>(null)
   const [composerError, setComposerError] = useState<string | null>(null)
   const [toast, showToast] = useToast()
+  const { settings: appSettings, update: updateAppSetting } = useSettings(showToast)
+  const appSettingsRef = useRef(appSettings)
+  appSettingsRef.current = appSettings
+  const autoAdvance = appSettings?.autoAdvanceDirection ?? 'next'
   const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const selectedThreadIdRef = useRef<string | null>(null)
@@ -570,6 +586,29 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     setSidebarCollapsed((collapsed) => !collapsed)
   }, [])
 
+  const openSettings = useCallback((control: SettingsControl | null = null) => {
+    setSettingsFocus(control)
+    setSettingsOpen(true)
+  }, [])
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false)
+    setSettingsFocus(null)
+  }, [])
+
+  // Settings Esc rides the bubble phase: overlays that own Escape (palette,
+  // cheat sheet, remove-account dialog) consume it during capture, and the
+  // split manager's own bubble listener is excluded by the guard here.
+  useEffect(() => {
+    if (!settingsOpen || splitRulesOpen || removeAccountConfirm || cheatSheetOpen) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      closeSettings()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cheatSheetOpen, closeSettings, removeAccountConfirm, settingsOpen, splitRulesOpen])
+
   const reopenDraftForThread = useCallback(
     (threadId: string) => {
       const draft = realDrafts.find(
@@ -948,6 +987,8 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
       setLabelTargetIds(null)
       setMoveRequest(null)
       setDetachedDraftThread(null)
+      setSettingsOpen(false)
+      setSettingsFocus(null)
     },
     [clearSelection, invalidateConversations, refreshCachedThreadView, saveActiveViewRecord]
   )
@@ -1187,6 +1228,8 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     setSnoozeOpen(false)
     setLabelTargetIds(null)
     setMoveRequest(null)
+    setSettingsOpen(false)
+    setSettingsFocus(null)
   }, [readerOpen, selectedIndex, view])
 
   const openOutbox = useCallback(() => {
@@ -1207,28 +1250,47 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     setReaderOpen(previous.readerOpen)
   }, [])
 
+  // The focus subscription is stable per account: helper identity changes
+  // route through this ref instead of re-subscribing, so effect churn (a
+  // composer closing, a switch settling) cannot tear down a subscription
+  // while a pull is in flight. Combined with main's acknowledge contract —
+  // a pull never consumes; only the accepting tree clears — a notification
+  // click survives any remount interleaving (T32 regression).
+  const focusHandlersRef = useRef({ clearSelection, focusInboxThread, switchAccount, switchView })
+  focusHandlersRef.current = { clearSelection, focusInboxThread, switchAccount, switchView }
   useEffect(() => {
     const bridge = window.attn
     if (!bridge || !activeAccount) return
     return bridge.mail.onFocusThread((target) => {
+      const handlers = focusHandlersRef.current
       // A notification for an inactive account switches there first (F12/F18).
       // The switch runs the guarded path — a live composer blocks it with the
       // usual toast — and the target stays pending in main, so the remounted
       // tree for the right account pulls it again and lands here as 'focus'.
       if (target.kind === 'switch') {
-        switchAccount(target.accountId)
+        handlers.switchAccount(target.accountId)
         return
       }
+      if (target.accountId !== activeAccount) {
+        // A stale tree can pull a target owned by another account while its
+        // remount settles. Leave it un-acknowledged for the right tree and
+        // nudge the guarded switch (a settling switch ignores the nudge).
+        handlers.switchAccount(target.accountId)
+        return
+      }
+      // This is the correct live account view accepting the click: only now
+      // does the pending target clear in main.
+      void bridge.mail.acknowledgeFocusThread(target.id).catch(() => {})
       const threadId = target.threadId
       if (threadId === null) {
         // A summary names no single thread; it lands on this account's inbox.
-        switchView('inbox', () => clearSelection())
+        handlers.switchView('inbox', () => handlers.clearSelection())
         return
       }
       // Close the old reader before changing lists so auto-read cannot observe
       // an old cursor against Inbox and mutate the wrong thread.
-      switchView('inbox', () => {
-        clearSelection()
+      handlers.switchView('inbox', () => {
+        handlers.clearSelection()
         void (async () => {
           const openTarget = (nextIndex: number): void => {
             // The notification target owns the selection: cancel any saved
@@ -1248,14 +1310,16 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
             if (!location) {
               // The deterministic legacy test profile intentionally has no
               // split setup. Preserve its whole-Inbox notification path.
-              const nextIndex = await focusInboxThread(threadId, null).catch(() => null)
+              const nextIndex = await focusHandlersRef.current
+                .focusInboxThread(threadId, null)
+                .catch(() => null)
               if (nextIndex !== null) openTarget(nextIndex)
               return
             }
             setActiveSplitForFocusRef.current(location.splitId)
-            const nextIndex = await focusInboxThread(threadId, location.splitId, location.revision).catch(
-              () => null
-            )
+            const nextIndex = await focusHandlersRef.current
+              .focusInboxThread(threadId, location.splitId, location.revision)
+              .catch(() => null)
             if (nextIndex === null) continue
             openTarget(nextIndex)
             return
@@ -1263,7 +1327,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         })().catch(() => {})
       })
     })
-  }, [activeAccount, clearSelection, focusInboxThread, switchAccount, switchView])
+  }, [activeAccount])
 
   const updateSearchRows = useCallback(
     (updater: Parameters<typeof search.updateRows>[0]) => {
@@ -1277,6 +1341,12 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
       searchRetainsMovedThread(searchResultQuery, thread, labels),
     [labels, searchResultQuery]
   )
+
+  // 'Back to list' auto-advance closes the reader after a triage removal; the
+  // real close helper is declared below, so the stable wrapper routes through
+  // a ref (the saveAccountSnapshotRef pattern).
+  const readerCloseForAdvanceRef = useRef<() => void>(() => {})
+  const closeReaderForAdvance = useCallback(() => readerCloseForAdvanceRef.current(), [])
 
   const triage = useTriage({
     selectedIds,
@@ -1302,7 +1372,9 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     clearSelection,
     showToast,
     setExitingThreadIds,
-    setSelectedIndex
+    setSelectedIndex,
+    autoAdvance,
+    closeReader: closeReaderForAdvance
   })
 
   const toggleLabel = useCallback(
@@ -1421,6 +1493,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     setReaderOpen(false)
     setDetachedDraftThread(null)
   }, [])
+  readerCloseForAdvanceRef.current = finishReaderClose
   const closeReader = useCallback(() => {
     if (inlineComposerDraft && inlineComposerRef.current) {
       inlineComposerRef.current.exitConversation()
@@ -1652,12 +1725,38 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
       const threadIds = isBulk ? [...selectedIds] : [selected.id]
       closeSnooze()
       if (isBulk) clearSelection()
+      // Snooze removes rows on refresh rather than optimistically, so the
+      // default 'next' advance is free (index preservation). The other two
+      // directions retarget before the refresh lands (F3 auto-advance).
+      if (!searchOpen && view !== 'snoozed') {
+        if (readerOpen && autoAdvance === 'list') finishReaderClose()
+        else if (autoAdvance === 'previous') {
+          const selection = selectionAfterExit(threads, threadIds, selectedIndex, 'previous')
+          if (selection && selection.toId !== null && selection.toId !== selection.fromId) {
+            selectedThreadIdRef.current = selection.toId
+            setSelectedIndex(Math.max(0, selection.nextIndex))
+          }
+        }
+      }
       void window.attn.mail
         .snooze(threadIds, dueAt)
         .then((result) => showToast(result.label))
         .catch(() => {})
     },
-    [clearSelection, closeSnooze, selected, selectedIds, showToast]
+    [
+      autoAdvance,
+      clearSelection,
+      closeSnooze,
+      finishReaderClose,
+      readerOpen,
+      searchOpen,
+      selected,
+      selectedIds,
+      selectedIndex,
+      showToast,
+      threads,
+      view
+    ]
   )
 
   const unsnoozeSelected = useCallback(() => {
@@ -1797,6 +1896,40 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     accountCommands
   })
 
+  // Every settings control is also a palette command (F5, T32 rule 5). The
+  // deep-link commands open the surface focused on their control; the direct
+  // ones act immediately, exactly like the tray menu.
+  const openCheatSheet = useCallback(() => setCheatSheetOpen(true), [])
+  const closeCheatSheet = useCallback(() => setCheatSheetOpen(false), [])
+  useLayoutEffect(
+    () =>
+      registerCommands([
+        createCommand('settings.open', () => openSettings(null)),
+        createCommand('settings.reorderAccounts', () => openSettings('accounts')),
+        createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
+        createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
+        createCommand('settings.launchAtLogin', () =>
+          updateAppSetting('launchAtLogin', !(appSettingsRef.current?.launchAtLogin ?? true))
+        ),
+        ...(isMacPlatform()
+          ? [
+              createCommand('settings.menuBarIcon', () =>
+                updateAppSetting('menuBarIcon', !(appSettingsRef.current?.menuBarIcon ?? false))
+              )
+            ]
+          : []),
+        createCommand('notifications.pauseHour', () =>
+          updateAppSetting('notificationsPausedUntil', oneHourFrom())
+        ),
+        createCommand('notifications.pauseTomorrow', () =>
+          updateAppSetting('notificationsPausedUntil', tomorrowStart())
+        ),
+        createCommand('notifications.resume', () => updateAppSetting('notificationsPausedUntil', null)),
+        createCommand('cheatsheet.open', openCheatSheet)
+      ]),
+    [openCheatSheet, openSettings, updateAppSetting]
+  )
+
   useKeyboardDispatch({
     blocked:
       labelTargets !== undefined ||
@@ -1804,6 +1937,8 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
       composerDraft !== null ||
       splitRulesOpen ||
       removeAccountConfirm ||
+      settingsOpen ||
+      cheatSheetOpen ||
       accountSwitchPending,
     readerOpen,
     outboxOpen: !searchOpen && view === 'outbox',
@@ -1843,6 +1978,8 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         onSwitchAccount={switchAccount}
         onAddAccount={addAccount}
         onRemoveAccount={requestRemoveAccount}
+        onOpenSettings={() => openSettings(null)}
+        onOpenCheatSheet={openCheatSheet}
         accountActionsBlocked={accountActionsBlocked}
       />
 
@@ -1914,7 +2051,26 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
             onOpenOutbox={openOutbox}
           />
         )}
-        <div className="flex min-w-0 flex-1 flex-col">
+        {settingsOpen && activeAccount && (
+          <SettingsView
+            status={status}
+            accountStatuses={accountStatuses}
+            settings={appSettings}
+            onUpdateSetting={updateAppSetting}
+            onStatus={onStatus}
+            onAddAccount={addAccount}
+            onReconnect={reconnectActions}
+            onSignOut={requestRemoveAccount}
+            onManageSplits={() => setSplitRulesOpen(true)}
+            onClose={closeSettings}
+            onToast={showToast}
+            focusControl={settingsFocus}
+          />
+        )}
+        <div
+          className={`min-w-0 flex-1 flex-col ${settingsOpen ? 'hidden' : 'flex'}`}
+          aria-hidden={settingsOpen || undefined}
+        >
           {!readerOpen &&
             !fullWindowComposerDraft &&
             (searchOpen ? (
@@ -2172,6 +2328,8 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         account={activeAccount}
         context={composerDraft ? 'composer' : readerOpen ? 'reader' : view === 'outbox' ? 'outbox' : 'list'}
       />
+
+      <CheatSheet open={cheatSheetOpen} onOpen={openCheatSheet} onClose={closeCheatSheet} />
 
       {fullWindowComposerDraft && activeAccount && (
         <Composer

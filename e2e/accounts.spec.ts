@@ -585,6 +585,46 @@ test('an open composer holds a notification switch until the draft closes', asyn
   await expect(page.getByTestId('conversation-subject')).toHaveText('Beta launch checklist')
 })
 
+test('a notification click survives a pull that dies during the account remount', async ({ app, page }) => {
+  // The T32 regression, made deterministic: hold the switch response after
+  // main has already flipped the active account, and while it is held issue a
+  // focus pull whose delivery is discarded — the exact shape of a pull
+  // consumed by a torn-down subscription during composer close and account
+  // remount. Resolving must not consume: the remounted tree's own pull still
+  // has to find the target and open the conversation.
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
+
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.typeBody('Held-response notification click')
+  await composer.expectSaved()
+
+  await emitNotificationClick(app, 't-beta-launch', SECOND)
+  await expect(page.getByTestId('toast')).toContainText('Save and close the draft')
+  await composer.editor.click()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+
+  const release = await holdNextAccountResponse(app, IPC_CHANNELS.accountsSetActive)
+  await page.keyboard.press('ControlOrMeta+2')
+  await expectAccountResponseHeld(app)
+
+  // The adversarial pull: main answers `focus` (its active account already
+  // flipped), but nothing delivers or acknowledges the result.
+  await app.evaluate(async ({ ipcMain }, channel) => {
+    type Handler = (...args: unknown[]) => Promise<unknown>
+    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`Missing handler: ${channel}`)
+    await handler({})
+  }, IPC_CHANNELS.mailTakePendingFocus)
+
+  await release()
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Beta launch checklist')
+})
+
 test('search, autocomplete, and pickers stay account-scoped after switches', async ({ page }) => {
   await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()

@@ -69,6 +69,8 @@ export interface ServiceReady {
   background: {
     launchAtLogin: boolean
     loginItemRegistered: boolean
+    /** F16: optional macOS menu-bar icon, default off. */
+    menuBarIcon: boolean
   }
 }
 

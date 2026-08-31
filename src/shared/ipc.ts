@@ -28,6 +28,7 @@ import type {
 import type { PendingFocusTarget } from './notifications'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
 import type { SearchResponse, ServerSearchResponse } from './searchQuery'
+import type { AppSettingKey, AppSettings } from './settings'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
@@ -43,8 +44,11 @@ export const IPC_CHANNELS = {
   accountsSetActive: 'accounts:setActive',
   accountsGetStatuses: 'accounts:getStatuses',
   accountsRemove: 'accounts:remove',
+  accountsReorder: 'accounts:reorder',
   settingsGetTheme: 'settings:getTheme',
   settingsSetTheme: 'settings:setTheme',
+  settingsGetAll: 'settings:getAll',
+  settingsSet: 'settings:set',
   settingsGetCommandUsage: 'settings:getCommandUsage',
   settingsSetCommandUsage: 'settings:setCommandUsage',
   contactsSearch: 'contacts:search',
@@ -72,6 +76,7 @@ export const IPC_CHANNELS = {
   syncGetInboxReady: 'sync:getInboxReady',
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
+  mailAcknowledgePendingFocus: 'mail:acknowledgePendingFocus',
   mailSearch: 'mail:search',
   mailSearchAll: 'mail:searchAll',
   mailCancelSearchAll: 'mail:cancelSearchAll',
@@ -150,8 +155,14 @@ export interface InvokeChannels {
   [IPC_CHANNELS.accountsSetActive]: { args: [accountId: string]; result: AuthStatus }
   [IPC_CHANNELS.accountsGetStatuses]: { args: []; result: AccountSyncStatus[] }
   [IPC_CHANNELS.accountsRemove]: { args: [accountId: string, deleteData: boolean]; result: AuthStatus }
+  [IPC_CHANNELS.accountsReorder]: { args: [accountIds: string[]]; result: AuthStatus }
   [IPC_CHANNELS.settingsGetTheme]: { args: []; result: ThemePreference }
   [IPC_CHANNELS.settingsSetTheme]: { args: [preference: ThemePreference]; result: ThemePreference }
+  [IPC_CHANNELS.settingsGetAll]: { args: []; result: AppSettings }
+  [IPC_CHANNELS.settingsSet]: {
+    args: [key: AppSettingKey, value: AppSettings[AppSettingKey]]
+    result: AppSettings
+  }
   [IPC_CHANNELS.settingsGetCommandUsage]: { args: [accountId: string]; result: CommandUsage }
   [IPC_CHANNELS.settingsSetCommandUsage]: {
     args: [accountId: string, usage: CommandUsage]
@@ -204,6 +215,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.syncGetInboxReady]: { args: []; result: boolean }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: PendingFocusTarget | null }
+  [IPC_CHANNELS.mailAcknowledgePendingFocus]: { args: [id: number]; result: undefined }
   [IPC_CHANNELS.mailSearch]: { args: [query: string]; result: SearchResponse }
   [IPC_CHANNELS.mailSearchAll]: {
     args: [requestId: string, query: string]

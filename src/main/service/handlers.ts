@@ -42,6 +42,7 @@ import {
   undoLast
 } from '../actions'
 import type { ActionExecutor } from '../actions/executor'
+import { readAppSettings, writeAppSetting } from '../appSettings'
 import { writeAttachment } from '../attachments'
 import type { Db } from '../db'
 import {
@@ -413,6 +414,8 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     writeSetting(context.db, 'theme', preference)
     return preference
   })
+  handle(IPC_CHANNELS.settingsGetAll, () => readAppSettings(context.db))
+  handle(IPC_CHANNELS.settingsSet, (_event, key, value) => writeAppSetting(context.db, key, value))
   handle(IPC_CHANNELS.settingsGetCommandUsage, (_event, accountId) => {
     const account = requireAccount(context)
     if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')

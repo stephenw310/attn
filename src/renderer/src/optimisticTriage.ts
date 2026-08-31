@@ -277,16 +277,35 @@ export function moveExitsView(
 export function selectionAfterExit(
   threads: readonly { id: string }[],
   targetIds: readonly string[],
-  selectedIndex: number
+  selectedIndex: number,
+  direction: 'next' | 'previous' = 'next'
 ): ExitSelection | null {
   const selectedThread = threads[selectedIndex]
   if (!selectedThread) return null
   const targets = new Set(targetIds)
-  let nextIndex = selectedIndex
-  while (nextIndex < threads.length && targets.has(threads[nextIndex].id)) nextIndex++
-  if (nextIndex >= threads.length) {
-    nextIndex = selectedIndex - 1
-    while (nextIndex >= 0 && targets.has(threads[nextIndex].id)) nextIndex--
+  // The auto-advance setting decides which surviving neighbour is preferred
+  // (F3: next / previous); the opposite side stays the fallback so triaging
+  // the first or last row still lands somewhere.
+  const scanDown = (from: number): number => {
+    let index = from
+    while (index < threads.length && targets.has(threads[index].id)) index++
+    return index
+  }
+  const scanUp = (from: number): number => {
+    let index = from
+    while (index >= 0 && targets.has(threads[index].id)) index--
+    return index
+  }
+  let nextIndex: number
+  if (!targets.has(selectedThread.id)) {
+    // The focused row survives (a bulk action elsewhere): the selection stays.
+    nextIndex = selectedIndex
+  } else if (direction === 'previous') {
+    nextIndex = scanUp(selectedIndex - 1)
+    if (nextIndex < 0) nextIndex = scanDown(selectedIndex)
+  } else {
+    nextIndex = scanDown(selectedIndex)
+    if (nextIndex >= threads.length) nextIndex = scanUp(selectedIndex - 1)
   }
   return {
     fromId: selectedThread.id,

@@ -133,13 +133,9 @@ export function planNotifications(
   }))
 }
 
-export function tomorrowStart(now = new Date()): number {
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime()
-}
-
-export function oneHourFrom(now = Date.now()): number {
-  return now + 60 * 60 * 1000
-}
+// The pause deadlines are shared with the renderer's settings surface (F15);
+// the tray and settings must compute identical "1 hour" / "until tomorrow".
+export { oneHourFrom, tomorrowStart } from '../shared/notifications'
 
 /**
  * Resolve a focus target requested by a notification click. A renderer that
@@ -149,6 +145,11 @@ export function oneHourFrom(now = Date.now()): number {
  * inactive account resolves to a `switch` ask — the renderer runs its guarded
  * account switch, and the caller keeps the target pending so the remounted
  * tree for the right account can consume it (F18).
+ *
+ * Resolving is read-only: even a `focus` answer leaves the target pending.
+ * The tree that accepts the click acknowledges `id` explicitly, so a pull
+ * whose delivery dies in a torn-down subscription during an account remount
+ * cannot silently lose the click (T32 notification-focus regression).
  */
 export function takePendingFocus(
   pending: PendingFocus | null,
@@ -156,8 +157,20 @@ export function takePendingFocus(
   now = Date.now()
 ): PendingFocusTarget | null {
   if (!pending || now - pending.at > PENDING_FOCUS_TTL_MS) return null
-  if (pending.accountId === activeAccountId) return { kind: 'focus', threadId: pending.threadId ?? null }
+  if (pending.accountId === activeAccountId) {
+    return { kind: 'focus', accountId: pending.accountId, threadId: pending.threadId ?? null, id: pending.at }
+  }
   return { kind: 'switch', accountId: pending.accountId }
+}
+
+/**
+ * Clear a pending focus target the renderer has accepted. Acknowledgement is
+ * keyed by the target's id (its creation time) so a late acknowledgement from
+ * a superseded click cannot clear a newer one.
+ */
+export function acknowledgePendingFocus(pending: PendingFocus | null, id: number): PendingFocus | null {
+  if (pending && pending.at === id) return null
+  return pending
 }
 
 /**

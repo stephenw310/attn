@@ -40,6 +40,7 @@ import type {
   ReopenOutboxResult
 } from '../shared/outbox'
 import type { SearchResponse, ServerSearchResponse } from '../shared/searchQuery'
+import type { AppSettingKey, AppSettings } from '../shared/settings'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
@@ -68,6 +69,8 @@ function listThreadPage(request: ThreadListRequest): Promise<ThreadPage> {
 
 const api = {
   platform: process.platform,
+  /** True only under the e2e harness (ATTN_TEST_USER_DATA); gates renderer test seams. */
+  testMode: process.argv.includes('--attn-test-mode'),
   auth: {
     getStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authGetStatus),
     signIn: (): Promise<AuthSignInResult> => invoke(IPC_CHANNELS.authSignIn),
@@ -75,6 +78,8 @@ const api = {
       invoke(IPC_CHANNELS.accountsSetActive, accountId),
     removeAccount: (accountId: string, deleteData: boolean): Promise<AuthStatus> =>
       invoke(IPC_CHANNELS.accountsRemove, accountId, deleteData),
+    reorderAccounts: (accountIds: string[]): Promise<AuthStatus> =>
+      invoke(IPC_CHANNELS.accountsReorder, accountIds),
     getAccountStatuses: (): Promise<AccountSyncStatus[]> => invoke(IPC_CHANNELS.accountsGetStatuses),
     onAccountStatuses: (cb: (statuses: AccountSyncStatus[]) => void): (() => void) => {
       const listener = (_event: unknown, statuses: AccountSyncStatus[]): void => cb(statuses)
@@ -90,7 +95,10 @@ const api = {
     getCommandUsage: (accountId: string): Promise<CommandUsage> =>
       invoke(IPC_CHANNELS.settingsGetCommandUsage, accountId),
     setCommandUsage: (accountId: string, usage: CommandUsage): Promise<CommandUsage> =>
-      invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage)
+      invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage),
+    getAll: (): Promise<AppSettings> => invoke(IPC_CHANNELS.settingsGetAll),
+    set: <K extends AppSettingKey>(key: K, value: AppSettings[K]): Promise<AppSettings> =>
+      invoke(IPC_CHANNELS.settingsSet, key, value)
   },
   mail: {
     findThreadInView: (request: ThreadListRequest, threadId: string): Promise<ThreadPage> =>
@@ -209,7 +217,14 @@ const api = {
         active = false
         ipcRenderer.removeListener(IPC_CHANNELS.mailFocusThreadAvailable, listener)
       }
-    }
+    },
+    /**
+     * Clear a delivered focus target after the right account's tree accepted
+     * it. Until this lands, main keeps the target pending so a delivery that
+     * died in a torn-down subscription cannot lose the notification click.
+     */
+    acknowledgeFocusThread: (id: number): Promise<void> =>
+      invoke(IPC_CHANNELS.mailAcknowledgePendingFocus, id)
   },
   splits: {
     getState: (): Promise<SplitState> => invoke(IPC_CHANNELS.splitsGetState),

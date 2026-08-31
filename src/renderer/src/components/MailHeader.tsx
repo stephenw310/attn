@@ -85,6 +85,8 @@ function AccountMenu({
   onSwitchAccount,
   onAddAccount,
   onRemoveAccount,
+  onOpenSettings,
+  onOpenCheatSheet,
   accountActionsBlocked
 }: {
   status: AuthStatus
@@ -95,6 +97,8 @@ function AccountMenu({
   onAddAccount: () => void
   /** Opens the Remove-account confirmation for the active account (F18, D3). */
   onRemoveAccount: () => void
+  onOpenSettings: () => void
+  onOpenCheatSheet: () => void
   /** True while a composer is open: switching would drop unsaved keystrokes. */
   accountActionsBlocked: boolean
 }): React.JSX.Element {
@@ -261,19 +265,25 @@ function AccountMenu({
           </label>
           <button
             type="button"
-            disabled
-            title="Settings surface lands at M4"
-            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim opacity-45"
+            data-testid="account-settings"
+            onClick={() => {
+              closeMenu()
+              onOpenSettings()
+            }}
+            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
           >
-            Settings <Kbd>⌘ ,</Kbd>
+            Settings <Kbd>{`${modKeyLabel()} ,`}</Kbd>
           </button>
           <button
             type="button"
-            disabled
-            title="Cheat sheet lands at M4"
-            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim opacity-45"
+            data-testid="account-cheat-sheet"
+            onClick={() => {
+              closeMenu()
+              onOpenCheatSheet()
+            }}
+            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
           >
-            Keyboard shortcuts <Kbd>⌘ /</Kbd>
+            Keyboard shortcuts <Kbd>{`${modKeyLabel()} /`}</Kbd>
           </button>
           <button
             type="button"
@@ -326,6 +336,8 @@ interface MailHeaderProps {
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
   onRemoveAccount: () => void
+  onOpenSettings: () => void
+  onOpenCheatSheet: () => void
   accountActionsBlocked: boolean
 }
 
@@ -347,6 +359,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     onSwitchAccount,
     onAddAccount,
     onRemoveAccount,
+    onOpenSettings,
+    onOpenCheatSheet,
     accountActionsBlocked
   } = props
   const sidebarAction = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
@@ -400,6 +414,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           onSwitchAccount={onSwitchAccount}
           onAddAccount={onAddAccount}
           onRemoveAccount={onRemoveAccount}
+          onOpenSettings={onOpenSettings}
+          onOpenCheatSheet={onOpenCheatSheet}
           accountActionsBlocked={accountActionsBlocked}
         />
       </div>

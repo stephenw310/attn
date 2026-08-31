@@ -5,15 +5,23 @@ import appIcon from '../../resources/icon.png?asset'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
+import type { AppSettingUpdate } from '../shared/settings'
 import type { ThemePreference } from '../shared/theme'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
-import { accountIdForTokens, type StoredAccount } from './auth/tokenFile'
-import { loadAccounts, removeAccountTokens, saveAccountTokens } from './auth/tokenStore'
+import { accountIdForTokens, reorderIds, type StoredAccount } from './auth/tokenFile'
+import { loadAccounts, removeAccountTokens, reorderAccountTokens, saveAccountTokens } from './auth/tokenStore'
 import { isCurrentTokenUpdate } from './auth/tokenUpdate'
-import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
+import {
+  applyMenuBarIcon,
+  attachBackgroundWindow,
+  type BackgroundEffects,
+  initializeBackground,
+  showMainWindow
+} from './background'
+import { applyLoginItemSetting } from './backgroundSettings'
 import { registerIpc } from './ipc'
-import { MailNotifier, type PendingFocus, takePendingFocus } from './notify'
+import { acknowledgePendingFocus, MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import {
   SERVICE_PROTOCOL_VERSION,
   type ServiceAccountsState,
@@ -75,15 +83,21 @@ function focusInboxThread(accountId: string, threadId: string | null): void {
 }
 
 /**
- * Consume the pending focus target for the account on screen. A `switch` ask
- * leaves the target pending: the renderer runs its guarded account switch and
- * the remounted tree pulls again, now matching. Anything else — consumed,
- * expired, or absent — clears it.
+ * Resolve the pending focus target for the account on screen. Resolving never
+ * consumes: a `switch` ask stays pending for the remounted tree, and even a
+ * `focus` answer stays pending until the tree that accepted it acknowledges —
+ * a pull whose delivery dies in a torn-down subscription during an account
+ * remount must not lose the click (T32 regression). Only an expired or absent
+ * target clears here.
  */
 function takePendingFocusTarget(): ReturnType<typeof takePendingFocus> {
   const target = takePendingFocus(pendingFocus, activeAccountId)
-  if (target?.kind !== 'switch') pendingFocus = null
+  if (target === null) pendingFocus = null
   return target
+}
+
+function acknowledgeFocusTarget(id: number): void {
+  pendingFocus = acknowledgePendingFocus(pendingFocus, id)
 }
 
 /**
@@ -213,6 +227,23 @@ async function removeAccount(accountId: string, deleteData: boolean): Promise<Au
   return authStatus()
 }
 
+/**
+ * Persist a new switcher order (F15). The permutation is validated against
+ * the roster as it exists *now* — a stale request from before an add/remove
+ * rejects, and the stored path re-reads the token file so a token refresh
+ * that raced the reorder keeps its newest tokens. A failed persist throws
+ * before the in-memory roster moves, leaving the old order intact. Sessions
+ * are never restarted and the active account never changes: the utility
+ * receives the same account set in its new order.
+ */
+async function reorderAccounts(accountIds: string[]): Promise<AuthStatus> {
+  if (seedAccountIds.length > 0) seedAccountIds = reorderIds(seedAccountIds, accountIds)
+  else storedAccounts = reorderAccountTokens(app.getPath('userData'), accountIds)
+  await adoptServiceAccounts()
+  console.log(`[auth] reordered accounts: ${rosterAccountIds().join(', ')}`)
+  return authStatus()
+}
+
 async function setActiveAccount(accountId: string): Promise<AuthStatus> {
   if (!rosterAccountIds().includes(accountId)) throw new Error('unknown account')
   // The utility owns the flip: the response guarantees every later read the
@@ -241,7 +272,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      additionalArguments: [`--attn-theme=${themePreference}`]
+      additionalArguments: [`--attn-theme=${themePreference}`, ...(testUserData ? ['--attn-test-mode'] : [])]
     }
   })
   win.webContents.session.webRequest.onHeadersReceived(
@@ -379,13 +410,36 @@ async function initialize(): Promise<void> {
   console.log('[utility] service ready; SQLite ownership transferred')
   themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
   nativeTheme.on('updated', handleNativeThemeUpdated)
+  const backgroundEffects: BackgroundEffects = {
+    markLoginItemRegistered: () =>
+      void service?.internal('mark-login-item-registered').catch((error) => {
+        console.error(`[background] could not save login item state: ${errorMessage(error)}`)
+      }),
+    setNotificationPausedUntil: (pausedUntil) =>
+      void service?.internal('set-notification-pause', pausedUntil).catch((error) => {
+        console.error(`[notifications] could not save pause setting: ${errorMessage(error)}`)
+      })
+  }
+  const applySettingEffects = (update: AppSettingUpdate): void => {
+    // Storage already happened in the utility; these are the OS-side effects
+    // main owns (F15). The login item updates on every change, deliberately
+    // bypassing the one-time boot registration guard.
+    if (update.key === 'launchAtLogin') {
+      applyLoginItemSetting(update.value, process.platform, app, backgroundEffects)
+    } else if (update.key === 'menuBarIcon') {
+      applyMenuBarIcon(update.value, backgroundEffects)
+    }
+  }
   stopIpc = registerIpc({
     service: ownedService,
     authStatus,
     signIn,
     setActiveAccount,
     removeAccount,
+    reorderAccounts,
     takePendingFocus: takePendingFocusTarget,
+    acknowledgePendingFocus: acknowledgeFocusTarget,
+    applySettingEffects,
     setThemePreference: (preference) => {
       themePreference = preference
       refreshTitleBarOverlay()
@@ -393,20 +447,7 @@ async function initialize(): Promise<void> {
     pickAttachmentPaths: testUserData ? async () => testSeams.takeAttachmentPickerPaths() : undefined
   })
   powerMonitor.on('resume', refreshSchedulersAfterResume)
-  const { startHidden } = initializeBackground(
-    ready.background,
-    {
-      markLoginItemRegistered: () =>
-        void service?.internal('mark-login-item-registered').catch((error) => {
-          console.error(`[background] could not save login item state: ${errorMessage(error)}`)
-        }),
-      setNotificationPausedUntil: (pausedUntil) =>
-        void service?.internal('set-notification-pause', pausedUntil).catch((error) => {
-          console.error(`[notifications] could not save pause setting: ${errorMessage(error)}`)
-        })
-    },
-    createWindow
-  )
+  const { startHidden } = initializeBackground(ready.background, backgroundEffects, createWindow)
   createWindow({ show: !startHidden })
   testSeams.register()
   app.on('activate', () => showMainWindow())
