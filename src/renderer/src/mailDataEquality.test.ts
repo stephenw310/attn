@@ -27,6 +27,23 @@ describe('mail data identity reuse', () => {
     expect(reuseThreadRows(current, [row({ unread: true })])).not.toBe(current)
   })
 
+  it('treats a follow-up firing as a change — the chip must not stay hidden on stale rows', () => {
+    const current = [row()]
+    expect(reuseThreadRows(current, [row({ followUpReturned: true })])).not.toBe(current)
+    expect(reuseThreadRows(current, [row({ followUpReturned: true, followUpTierAt: 5 })])).not.toBe(current)
+
+    const snoozed: SnoozedThreadRow[] = [{ ...row(), dueAt: 10, followUpDueAt: 20, followUpAwaiting: null }]
+    expect(
+      reuseSnoozedRows(snoozed, [{ ...row(), dueAt: 10, followUpDueAt: 20, followUpAwaiting: null }])
+    ).toBe(snoozed)
+    expect(
+      reuseSnoozedRows(snoozed, [{ ...row(), dueAt: 10, followUpDueAt: 30, followUpAwaiting: null }])
+    ).not.toBe(snoozed)
+    expect(
+      reuseSnoozedRows(snoozed, [{ ...row(), dueAt: 10, followUpDueAt: 20, followUpAwaiting: 'origin' }])
+    ).not.toBe(snoozed)
+  })
+
   it('includes snooze deadlines and labels in the equality check', () => {
     const currentSnoozed: SnoozedThreadRow[] = [{ ...row(), dueAt: 10 }]
     expect(reuseSnoozedRows(currentSnoozed, [{ ...row(), dueAt: 10 }])).toBe(currentSnoozed)

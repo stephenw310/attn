@@ -680,6 +680,27 @@ describe('follow-up triage matrix (T35/F9)', () => {
     ).toBe('pending')
   })
 
+  it('undo never resurrects a follow-up answered while it was archived or moved', () => {
+    // A qualifying reply cached between the action and its undo answers the
+    // reminder: the restored snapshot must immediately re-settle (returned →
+    // done) instead of putting the chip back on an answered thread.
+    const actions: TriageAction[] = [
+      { kind: 'archive', threadIds: ['t-f'] },
+      { kind: 'trash', threadIds: ['t-f'] }
+    ]
+    for (const action of actions) {
+      const db = followUpDb('returned', 1)
+      performTriage(db, ACCOUNT, action)
+      db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+         VALUES (?, 'm-reply', 't-f', 2, '["INBOX"]')`
+      ).run(ACCOUNT)
+      undoLast(db, ACCOUNT)
+      expect(followUpState(db)).toBe('done')
+      clearUndo(ACCOUNT)
+    }
+  })
+
   it('moving back to the inbox leaves the follow-up alone — un-filing, like restoreInbox', () => {
     for (const verb of [undefined, 'markNotDone' as const]) {
       const db = followUpDb('returned', 1)

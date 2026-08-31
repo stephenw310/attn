@@ -47,11 +47,12 @@ interface SettingsViewProps {
   onUpdateSetting: <K extends AppSettingKey>(key: K, value: AppSettings[K]) => void
   onUpdateAccountSetting: <K extends AccountSettingKey>(key: K, value: AccountSettings[K]) => void
   /**
-   * Delivers a completed reorder's roster. The receiver adopts only the
-   * ordering: a reorder never changes the active account, so a response that
-   * raced a subsequent account switch must not roll that switch back.
+   * Runs the reorder round trip above the keyed account remount (see App):
+   * the owner adopts only the ordering, restricted to the live roster, and
+   * rejects a response a newer reorder has superseded — a reorder never
+   * changes the active account, so a raced switch is never rolled back.
    */
-  onReordered: (status: AuthStatus) => void
+  onReorderAccounts: (ids: string[]) => Promise<void>
   onAddAccount: () => void
   onReconnect: () => void
   onSignOut: () => void
@@ -84,7 +85,7 @@ export function SettingsView({
   accountSettings,
   onUpdateSetting,
   onUpdateAccountSetting,
-  onReordered,
+  onReorderAccounts,
   onAddAccount,
   onReconnect,
   onSignOut,
@@ -138,21 +139,18 @@ export function SettingsView({
 
   const moveAccount = useCallback(
     (index: number, delta: -1 | 1) => {
-      const bridge = window.attn
-      if (!bridge || reorderPending) return
+      if (reorderPending) return
       const ids = status.accounts.map((account) => account.id)
       const target = index + delta
       if (target < 0 || target >= ids.length) return
       const reordered = [...ids]
       ;[reordered[index], reordered[target]] = [reordered[target], reordered[index]]
       setReorderPending(true)
-      bridge.auth
-        .reorderAccounts(reordered)
-        .then(onReordered)
+      onReorderAccounts(reordered)
         .catch(() => onToast('Could not reorder accounts'))
         .finally(() => setReorderPending(false))
     },
-    [onReordered, onToast, reorderPending, status.accounts]
+    [onReorderAccounts, onToast, reorderPending, status.accounts]
   )
 
   const pausedUntil = settings?.notificationsPausedUntil ?? null

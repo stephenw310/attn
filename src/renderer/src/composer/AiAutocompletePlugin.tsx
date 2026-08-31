@@ -110,8 +110,11 @@ export function AiAutocompletePlugin(): React.JSX.Element | null {
   acceptRef.current = accept
 
   // Stream events for the whole app arrive here; the controller keeps only
-  // the ones belonging to its current request.
+  // the ones belonging to its current request. Setup revives the controller:
+  // StrictMode's dev-only setup–cleanup–setup cycle disposed it in the probe
+  // cleanup, which left autocomplete permanently dead (PR #101 review).
   useEffect(() => {
+    controller.revive()
     const unsubscribe = window.attn?.ai.onStreamEvent((event) => controller.handleStreamEvent(event))
     return () => {
       unsubscribe?.()

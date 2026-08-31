@@ -155,6 +155,32 @@ test('Esc mid-stream keeps the partial text; the next Esc closes the composer no
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
 })
 
+test('rapid repeat invocations start exactly one generation — Esc must cancel everything', async ({
+  app,
+  page
+}) => {
+  // Two Mod+J presses during the settings/style preparation previously both
+  // reached generate; Esc canceled only the later request and the first
+  // streamed on, orphaned (PR #101 review). Preparation is single-flight now.
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page)
+  await installFakeAi(app, { chunks: ['Only one stream lands.'], chunkIntervalMs: 400 })
+  await openDesignReader(page)
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+
+  await page.keyboard.press('ControlOrMeta+j')
+  await page.keyboard.press('ControlOrMeta+j')
+  await expect(page.getByTestId('ai-drafting')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('ai-drafting')).toHaveCount(0)
+
+  await page.waitForTimeout(600)
+  const requests = await aiRequests(app)
+  expect(requests).toHaveLength(1)
+  expect(requests[0].canceled).toBe(true)
+})
+
 test('an invocation on a recovered full-window reply never parks for another draft', async ({
   boot,
   page

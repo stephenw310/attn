@@ -16,6 +16,11 @@ function sameThread(left: ThreadRow, right: ThreadRow): boolean {
     left.hasAttachment === right.hasAttachment &&
     left.snoozed === right.snoozed &&
     left.returned === right.returned &&
+    // A follow-up firing can change ONLY these fields; missing them here made
+    // the refresh reuse the stale rows, hiding the chip and heading until a
+    // reload (T35/F9, PR #101 review).
+    left.followUpReturned === right.followUpReturned &&
+    left.followUpTierAt === right.followUpTierAt &&
     left.hasDraft === right.hasDraft &&
     sameStrings(left.labelIds, right.labelIds)
   )
@@ -35,7 +40,14 @@ export function reuseSnoozedRows(
 ): SnoozedThreadRow[] {
   return current !== null &&
     current.length === next.length &&
-    current.every((thread, index) => sameThread(thread, next[index]) && thread.dueAt === next[index].dueAt)
+    current.every(
+      (thread, index) =>
+        sameThread(thread, next[index]) &&
+        thread.dueAt === next[index].dueAt &&
+        thread.snoozeDueAt === next[index].snoozeDueAt &&
+        thread.followUpDueAt === next[index].followUpDueAt &&
+        thread.followUpAwaiting === next[index].followUpAwaiting
+    )
     ? current
     : next
 }

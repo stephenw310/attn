@@ -79,8 +79,8 @@ import { Toast } from './Toast'
 interface InboxProps {
   status: AuthStatus
   onStatus: (status: AuthStatus) => void
-  /** Ordering-only status merge, held above the keyed remount (see App). */
-  onReordered: (status: AuthStatus) => void
+  /** Runs the reorder round trip above the keyed remount, with a supersession ticket (see App). */
+  onReorderAccounts: (ids: string[]) => Promise<void>
   onRemovalError: (message: string) => void
 }
 
@@ -129,7 +129,12 @@ function sidebarStorage(): Storage | null {
   }
 }
 
-export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxProps): React.JSX.Element {
+export function Inbox({
+  status,
+  onStatus,
+  onReorderAccounts,
+  onRemovalError
+}: InboxProps): React.JSX.Element {
   // The previous visit's snapshot for this account, saved by the guarded
   // switch before the tree remounted (F18: a warm switch restores the
   // account's last view, selection, and scroll). Read once per mount.
@@ -2020,6 +2025,12 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
         // then streams into it; in a reply composer it streams in place. New
         // messages and forwards are out of v1's whole-body generation scope.
         createCommand('composer.aiDraft', () => {
+          // The target is what the user is looking at NOW: the settings round
+          // trip yields, and the selection or open composer can change
+          // underneath it — a stale invocation must do nothing rather than
+          // draft for the newly opened conversation (PR #101 review).
+          const open = composerDraftRef.current
+          const target = !open && readerOpenRef.current ? (selectedRef.current ?? null) : null
           void window.attn?.ai
             .getSettings()
             .then((ai) => {
@@ -2027,8 +2038,8 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
                 showToast('Enable AI writing in Settings to draft replies')
                 return
               }
-              const open = composerDraftRef.current
               if (open) {
+                if (composerDraftRef.current?.id !== open.id) return
                 if (open.kind !== 'reply' && open.kind !== 'replyAll') {
                   showToast('AI drafting writes replies — reply to a conversation to use it')
                 } else if (open.id === inlineComposerDraftIdRef.current && open.threadId) {
@@ -2041,8 +2052,9 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
                 }
                 return
               }
-              if (readerOpenRef.current && selectedRef.current) {
-                requestAiDraft(selectedRef.current.id)
+              if (target) {
+                if (!readerOpenRef.current || selectedRef.current?.id !== target.id) return
+                requestAiDraft(target.id)
                 openReplyRef.current('reply')
                 return
               }
@@ -2211,7 +2223,7 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
             accountSettings={accountSettings}
             onUpdateSetting={updateAppSetting}
             onUpdateAccountSetting={updateAccountSetting}
-            onReordered={onReordered}
+            onReorderAccounts={onReorderAccounts}
             onAddAccount={addAccount}
             onReconnect={reconnectActions}
             onSignOut={requestRemoveAccount}

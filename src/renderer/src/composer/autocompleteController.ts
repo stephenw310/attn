@@ -137,6 +137,16 @@ export class AutocompleteController {
     this.disposed = true
   }
 
+  /**
+   * Re-arm a disposed controller. StrictMode's dev-only setup–cleanup–setup
+   * cycle disposes in the probe cleanup; the second setup calls this so the
+   * controller works again (PR #101 review). dispose() already invalidated
+   * every timer, request, and preview, so this only clears the flag.
+   */
+  revive(): void {
+    this.disposed = false
+  }
+
   private invalidate(): void {
     if (this.timer !== null) {
       this.hooks.clearTimer(this.timer)

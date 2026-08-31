@@ -974,6 +974,52 @@ describe('OutboxSender effect layer', () => {
     expect(store.row().state).toBe('sent')
   })
 
+  it('never prunes a sent row that is a live follow-up origin — the replay guard needs it', async () => {
+    // createFollowUpOnSent refuses a replayed OLDER send only by reading the
+    // newer origin's outbox row; startup prunes before recovery drains, so
+    // deleting that row would let the older send overwrite the newer
+    // reminder's origin and deadline (PR #101 review).
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+        'me@example.com',
+        'me@example.com',
+        NOW
+      )
+      const insert = db.prepare(
+        `INSERT INTO outbox (id, account_id, state, thread_id, rfc_message_id, created_at, updated_at)
+         VALUES (?, 'me@example.com', 'sent', 't-1', ?, ?, ?)`
+      )
+      const expired = NOW - SENT_OUTBOX_RETENTION_MS - 1
+      insert.run('origin-newer', '<newer@x>', 200, expired)
+      insert.run('unreferenced', '<other@x>', 100, expired)
+      db.prepare(
+        `INSERT INTO reminders (account_id, thread_id, kind, due_at, state, origin_rfc_message_id)
+         VALUES ('me@example.com', 't-1', 'follow_up', ?, 'pending', '<newer@x>')`
+      ).run(NOW + 60_000)
+      const time = new ManualTime()
+      const sender = new OutboxSender(
+        db,
+        () => 'me@example.com',
+        () => effectProvider(),
+        vi.fn(),
+        { time }
+      )
+
+      sender.start()
+      const remaining = (): string[] =>
+        (db.prepare('SELECT id FROM outbox ORDER BY id').all() as Array<{ id: string }>).map((row) => row.id)
+      expect(remaining()).toEqual(['origin-newer'])
+
+      // Once the reminder settles, the next prune removes the evidence too.
+      db.prepare("UPDATE reminders SET state = 'done' WHERE thread_id = 't-1'").run()
+      sender.start()
+      expect(remaining()).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
+
   it('does not spin on a malformed queued row without a send time', async () => {
     const store = new FakeOutboxDb(fakeRow({ send_at: null }))
     const time = new ManualTime()

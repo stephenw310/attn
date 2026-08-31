@@ -261,6 +261,85 @@ test('a per-sender exception covers the composer quote, and its removal blocks i
   }
 })
 
+test('editable composer images obey blocking, per-sender exceptions, and the toggle', async ({
+  app,
+  page
+}) => {
+  // The editor renders in the TOP frame, which main's frame filter exempts —
+  // an imported remote image previously fired an unfiltered tracking request
+  // with blocking on (PR #101 review). The decision now happens before any
+  // src is set, keyed like the quoted history: the draft's source message for
+  // replies, the global toggle alone for drafts without one.
+  const probe = await startProbeServer()
+  // Distinct paths per pasted image: the reader frame fetches its own pixel,
+  // so the editor assertions must count requests only the editor can make.
+  const pasteImage = (composer: ComposerPage, alt: string, path: string): Promise<void> =>
+    composer.editor.evaluate((editor, value) => {
+      const clipboard = new DataTransfer()
+      clipboard.setData('text/html', value)
+      editor.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard })
+      )
+    }, `<img src="http://127.0.0.1:${probe.port}${path}" alt="${alt}" width="24" height="24">`)
+  try {
+    await expect(page.getByTestId('thread-row')).toHaveCount(8)
+    await setMessageHtml(
+      app,
+      'm-lunch',
+      `<div>Lunch plans<img src="http://127.0.0.1:${probe.port}/pixel.png" alt="pixel" width="24" height="24"></div>`
+    )
+    await runPaletteCommand(page, 'Block remote images')
+    await expectBlockedSetting(page, true)
+
+    // Allow the sender from the reader, then paste a remote image into the
+    // reply: the exception covers the editable image, so it loads.
+    await openLunch(page)
+    await expect(page.getByTestId('remote-images-banner')).toBeVisible()
+    await page.getByTestId('remote-images-always-allow').click()
+    await expect(page.getByTestId('remote-images-banner')).toHaveCount(0)
+    const composer = new ComposerPage(page)
+    await composer.openReply()
+    await composer.editor.click()
+    await pasteImage(composer, 'tracker', '/editor-reply.png')
+    const replyImage = composer.editor.locator('img[alt="tracker"]')
+    await expect(replyImage).toHaveAttribute('src', /editor-reply\.png/)
+    await expect.poll(() => probe.count('/editor-reply.png')).toBeGreaterThan(0)
+
+    // Removing the exception reaches the mounted image live: the src flips to
+    // the placeholder and nothing further reaches the wire.
+    await page.evaluate(() => window.attn.mail.removeRemoteImageOverride('amara@example.com'))
+    await expect(replyImage).toHaveAttribute('data-remote-blocked', 'true')
+    await expect(replyImage).toHaveAttribute('src', /^data:image\/gif/)
+    probe.reset()
+    await page.waitForTimeout(250)
+    expect(probe.count('/editor-reply.png')).toBe(0)
+    await page.keyboard.press('Escape')
+    await expect(composer.root).toHaveCount(0)
+    await closeReader(page)
+
+    // A draft with no source message answers to the global toggle alone:
+    // blocked while it is on, loading once it is turned off.
+    await page.keyboard.press('c')
+    const fresh = new ComposerPage(page)
+    await expect(fresh.root).toBeVisible()
+    await fresh.editor.click()
+    await pasteImage(fresh, 'standalone', '/editor-new.png')
+    const freshImage = fresh.editor.locator('img[alt="standalone"]')
+    await expect(freshImage).toHaveAttribute('data-remote-blocked', 'true')
+    expect(probe.count('/editor-new.png')).toBe(0)
+    // The palette is inert while composing; the bridge toggle broadcasts the
+    // same policy change the palette command would.
+    await page.evaluate(() => window.attn.settings.set('remoteImagesBlocked', false))
+    await expectBlockedSetting(page, false)
+    await expect(freshImage).toHaveAttribute('src', /editor-new\.png/)
+    await expect.poll(() => probe.count('/editor-new.png')).toBeGreaterThan(0)
+  } finally {
+    await new Promise<void>((resolve) => {
+      probe.server.close(() => resolve())
+    })
+  }
+})
+
 test('an SVG image reference is blocked with the banner controls present', async ({ app, page }) => {
   const probe = await startProbeServer()
   try {

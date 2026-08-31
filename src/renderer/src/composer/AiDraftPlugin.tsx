@@ -94,6 +94,8 @@ export function AiDraftPlugin({
   const runRef = useRef<AiRun | null>(null)
   /** Set on unmount so the awaits inside a preparing start() stop cold. */
   const disposedRef = useRef(false)
+  /** One preparation at a time: a second invocation mid-await must not start a second request. */
+  const preparingRef = useRef(false)
   const landedTextRef = useRef('')
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const claimRef = useRef(claim)
@@ -197,14 +199,8 @@ export function AiDraftPlugin({
   const cancelRef = useRef(cancel)
   cancelRef.current = cancel
 
-  const start = useCallback(
-    async (refineInstruction?: string) => {
-      const bridge = window.attn
-      if (!bridge || runRef.current?.active) return
-      if (kind !== 'reply' && kind !== 'replyAll') {
-        onToastRef.current('AI drafting writes replies — open it from a reply composer')
-        return
-      }
+  const startPrepared = useCallback(
+    async (bridge: NonNullable<typeof window.attn>, refineInstruction?: string) => {
       // Capture the conversation before any await: once this turn yields, the
       // composer can close and another conversation can open, and a later read
       // would draft against the newly selected thread (PR #101 review).
@@ -288,7 +284,28 @@ export function AiDraftPlugin({
         finish()
       }
     },
-    [appendChunk, finish, kind]
+    [appendChunk, finish]
+  )
+
+  const start = useCallback(
+    async (refineInstruction?: string) => {
+      const bridge = window.attn
+      // The preparing flag closes startPrepared's awaits to a second
+      // invocation: without it, two rapid commands both reached generate and
+      // Esc could cancel only the later request (PR #101 review).
+      if (!bridge || runRef.current?.active || preparingRef.current) return
+      if (kind !== 'reply' && kind !== 'replyAll') {
+        onToastRef.current('AI drafting writes replies — open it from a reply composer')
+        return
+      }
+      preparingRef.current = true
+      try {
+        await startPrepared(bridge, refineInstruction)
+      } finally {
+        preparingRef.current = false
+      }
+    },
+    [kind, startPrepared]
   )
   const startRef = useRef(start)
   startRef.current = start
@@ -339,9 +356,12 @@ export function AiDraftPlugin({
   // Unmount (draft closed, sent, or switched) cancels silently; late events
   // can never reach another draft because the subscription dies here too. A
   // run whose request id is still in flight is canceled by start() when the
-  // id lands and finds the run deactivated.
-  useEffect(
-    () => () => {
+  // id lands and finds the run deactivated. Setup clears the disposed flag:
+  // StrictMode's dev-only setup–cleanup–setup cycle would otherwise leave the
+  // plugin permanently dead after its probe cleanup (PR #101 review).
+  useEffect(() => {
+    disposedRef.current = false
+    return () => {
       disposedRef.current = true
       unsubscribeRef.current?.()
       unsubscribeRef.current = null
@@ -350,9 +370,8 @@ export function AiDraftPlugin({
         if (typeof run.requestId === 'string') void window.attn?.ai.cancel(run.requestId).catch(() => {})
         run.active = false
       }
-    },
-    []
-  )
+    }
+  }, [])
 
   if (phase === 'streaming') {
     return (

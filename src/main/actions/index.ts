@@ -3,6 +3,7 @@ import type { ActionQueueStatus, TriageAction, TriageResult } from '../../shared
 import { stringArray } from '../../shared/guards'
 import { isMoveDestination } from '../../shared/move'
 import type { Db } from '../db'
+import { evaluateThreadFollowUp } from '../followUps'
 import { applyThreadDelta } from '../store/mutate'
 import {
   type FollowUpReminderSnapshot,
@@ -388,6 +389,10 @@ function applyMoveUndo(db: Db, accountId: string, action: MoveUndoAction): void 
   }
   restoreSnoozeReminder(db, accountId, threadId, action.reminderBefore)
   restoreFollowUpReminder(db, accountId, threadId, action.followUpBefore)
+  // A qualifying reply can arrive between the move and its undo; the restored
+  // snapshot predates it, so re-settle against the cached messages rather
+  // than resurrecting an answered reminder (PR #101 review).
+  evaluateThreadFollowUp(db, accountId, threadId)
 }
 
 function applySnooze(
@@ -512,6 +517,10 @@ export function undoLast(db: Db, accountId: string): TriageResult | null {
       else if (action.kind === 'followUpRestore') {
         for (const threadId of action.threadIds) {
           restoreFollowUpReminder(db, accountId, threadId, action.before)
+          // A reply cached between the archive and this undo answers the
+          // reminder; the restored snapshot must not resurrect it
+          // (PR #101 review).
+          evaluateThreadFollowUp(db, accountId, threadId)
         }
       } else apply(db, accountId, action, 'undo')
     }

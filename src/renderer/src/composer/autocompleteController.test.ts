@@ -253,3 +253,18 @@ describe('staleness and cancellation', () => {
     expect(h.hooks.requests).toHaveLength(1)
   })
 })
+
+it('revive re-arms a disposed controller — StrictMode probe cleanup must not kill it', async () => {
+  const { controller, timers, hooks } = harness()
+  controller.dispose()
+  controller.noteTypingEdit()
+  timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+  await settle()
+  expect(hooks.requests).toHaveLength(0)
+
+  controller.revive()
+  controller.noteTypingEdit()
+  timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+  await settle()
+  expect(hooks.requests).toHaveLength(1)
+})
