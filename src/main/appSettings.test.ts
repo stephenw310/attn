@@ -12,7 +12,8 @@ describe('app settings storage', () => {
       autoAdvanceDirection: 'next',
       launchAtLogin: true,
       menuBarIcon: false,
-      notificationsPausedUntil: null
+      notificationsPausedUntil: null,
+      remoteImagesBlocked: false
     })
   })
 
@@ -28,6 +29,11 @@ describe('app settings storage', () => {
     expect(writeAppSetting(db, 'menuBarIcon', true).menuBarIcon).toBe(true)
     expect(writeAppSetting(db, 'notificationsPausedUntil', 4_000).notificationsPausedUntil).toBe(4_000)
     expect(writeAppSetting(db, 'notificationsPausedUntil', null).notificationsPausedUntil).toBeNull()
+    // T33: the toggle rides the documented `remoteImages` row.
+    expect(writeAppSetting(db, 'remoteImagesBlocked', true).remoteImagesBlocked).toBe(true)
+    expect(readSetting(db, 'remoteImages')).toBe('blocked')
+    expect(writeAppSetting(db, 'remoteImagesBlocked', false).remoteImagesBlocked).toBe(false)
+    expect(readSetting(db, 'remoteImages')).toBeUndefined()
   })
 
   it('rejects values outside the allowlist without touching the store', () => {

@@ -37,6 +37,11 @@ export interface AppSettings {
   menuBarIcon: boolean
   /** Epoch ms all notifications stay paused until; null = not paused (F12). */
   notificationsPausedUntil: number | null
+  /**
+   * Block remote images in mail frames (§9 #5, T33). Default load; stored
+   * per-sender Always-load overrides ride their own typed channels.
+   */
+  remoteImagesBlocked: boolean
 }
 
 export type AppSettingKey = keyof AppSettings
@@ -50,7 +55,8 @@ export const APP_SETTINGS_DEFAULTS: AppSettings = {
   autoAdvanceDirection: 'next',
   launchAtLogin: true,
   menuBarIcon: false,
-  notificationsPausedUntil: null
+  notificationsPausedUntil: null,
+  remoteImagesBlocked: false
 }
 
 /**
@@ -131,7 +137,8 @@ export function validateAppSettingUpdate(key: unknown, value: unknown): AppSetti
       return { key, value }
     }
     case 'launchAtLogin':
-    case 'menuBarIcon': {
+    case 'menuBarIcon':
+    case 'remoteImagesBlocked': {
       if (typeof value !== 'boolean') throw new Error(`invalid ${key} value`)
       return { key, value }
     }

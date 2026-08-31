@@ -1917,6 +1917,9 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         createCommand('compose.attnFooter.disable', () =>
           updateAccountSetting('attnSignatureEnabled', false)
         ),
+        createCommand('privacy.remoteImages.block', () => updateAppSetting('remoteImagesBlocked', true)),
+        createCommand('privacy.remoteImages.load', () => updateAppSetting('remoteImagesBlocked', false)),
+        createCommand('privacy.remoteImages.overrides', () => openSettings('remoteImages')),
         createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
         createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
         createCommand('settings.launchAtLogin', () =>

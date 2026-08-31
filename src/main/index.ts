@@ -23,6 +23,12 @@ import { applyLoginItemSetting } from './backgroundSettings'
 import { registerIpc } from './ipc'
 import { acknowledgePendingFocus, MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import {
+  DEFAULT_REMOTE_IMAGE_POLICY,
+  MailFrameRegistry,
+  type RemoteImagePolicy,
+  shouldBlockMailFrameImage
+} from './remoteImages'
+import {
   SERVICE_PROTOCOL_VERSION,
   type ServiceAccountsState,
   type ServiceEvent,
@@ -60,6 +66,10 @@ const authGenerations = new Map<string, number>()
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 let themePreference: ThemePreference = 'system'
+// T33: the live remote-image policy (pushed by the utility) and the reader's
+// registered mail frames, consulted by the request filter in createWindow.
+let remoteImagePolicy: RemoteImagePolicy = DEFAULT_REMOTE_IMAGE_POLICY
+const mailFrames = new MailFrameRegistry()
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
@@ -98,6 +108,26 @@ function takePendingFocusTarget(): ReturnType<typeof takePendingFocus> {
 
 function acknowledgeFocusTarget(id: number): void {
   pendingFocus = acknowledgePendingFocus(pendingFocus, id)
+}
+
+/**
+ * Register a mounted mail frame (T33). The sender comes from the local store
+ * via the utility — never from markup — and the answer tells the reader
+ * whether this message's images will load, so the banner needs no second
+ * policy source.
+ */
+async function registerMailFrame(
+  nonce: string,
+  messageId: string,
+  allowOnce: boolean
+): Promise<{ blocked: boolean; imagesAllowed: boolean }> {
+  const resolved = await service?.internal('resolve-message-sender', messageId)
+  const frame = { messageId, sender: typeof resolved === 'string' ? resolved : null, allowOnce }
+  mailFrames.register(nonce, frame)
+  return {
+    blocked: remoteImagePolicy.blocked,
+    imagesAllowed: !shouldBlockMailFrameImage(remoteImagePolicy, frame)
+  }
 }
 
 /**
@@ -275,6 +305,22 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       additionalArguments: [`--attn-theme=${themePreference}`, ...(testUserData ? ['--attn-test-mode'] : [])]
     }
   })
+  // T33 enforcement point: the same request layer that strips CORP below.
+  // Only mail frames (about:srcdoc) are filtered — the app shell and other
+  // requests are untouched, and with blocking off the behavior is identical
+  // to today (decision #5's default load stands).
+  win.webContents.session.webRequest.onBeforeRequest(
+    { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
+    (details, callback) => {
+      if (details.frame?.url !== 'about:srcdoc') {
+        callback({})
+        return
+      }
+      callback({
+        cancel: shouldBlockMailFrameImage(remoteImagePolicy, mailFrames.get(details.frame.name))
+      })
+    }
+  )
   win.webContents.session.webRequest.onHeadersReceived(
     { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
     (details, callback) => {
@@ -342,6 +388,8 @@ function handleServiceEvent(event: ServiceEvent): void {
     })
   } else if (event.kind === 'actions-reverted') {
     broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
+  } else if (event.kind === 'remote-images') {
+    remoteImagePolicy = { blocked: event.blocked, allowedSenders: new Set(event.allowedSenders) }
   } else if (event.kind === 'badge') mailNotifier?.updateBadge(event.unreadCount)
   else if (event.kind === 'accounts-status') broadcast(IPC_CHANNELS.accountsStatusChanged, event.statuses)
   else if (event.kind === 'notification-candidates') {
@@ -440,6 +488,8 @@ async function initialize(): Promise<void> {
     takePendingFocus: takePendingFocusTarget,
     acknowledgePendingFocus: acknowledgeFocusTarget,
     applySettingEffects,
+    registerMailFrame,
+    unregisterMailFrame: (nonce) => mailFrames.unregister(nonce),
     setThemePreference: (preference) => {
       themePreference = preference
       refreshTitleBarOverlay()

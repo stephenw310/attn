@@ -28,6 +28,7 @@ import { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { cachePrimarySendAs } from '../outbox/sendAs'
 import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, deleteOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
+import { resolveMessageSender, storedRemoteImagePolicy } from '../remoteImageStore'
 import { SnoozeScheduler } from '../scheduler'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from '../settings'
 import { getSplitState, hasSplitSetup } from '../splits'
@@ -244,6 +245,7 @@ export class ServiceRuntime {
       syncController: () => this.activeSession()?.syncController ?? null,
       broadcastMailChanged: (serverSearchRequestId) =>
         this.broadcastMailChanged(this.activeAccountId, serverSearchRequestId),
+      publishRemoteImagePolicy: () => this.emitRemoteImagePolicy(),
       broadcastOutboxChanged: (payload) => this.emit({ kind: 'outbox-changed', payload }),
       broadcastBodyHydrationFailed: (accountId, threadId) =>
         this.emit({ kind: 'body-hydration-failed', accountId, threadId }),
@@ -364,6 +366,13 @@ export class ServiceRuntime {
       writeSetting(this.db, 'loginItemRegistered', 'true')
       return undefined
     }
+    if (operation === 'resolve-message-sender') {
+      // The remote-image filter's sender lookup (T33): resolved from the
+      // active account's store at frame registration, never from markup.
+      const messageId = args[0]
+      if (typeof messageId !== 'string' || !this.activeAccountId) return null
+      return resolveMessageSender(this.db, this.activeAccountId, messageId)
+    }
     if (operation === 'set-notification-pause') {
       const pausedUntil = args[0]
       if (pausedUntil !== null && (typeof pausedUntil !== 'number' || !Number.isFinite(pausedUntil))) {
@@ -431,7 +440,14 @@ export class ServiceRuntime {
       session.outboxSender.start()
     }
     this.broadcastBadge()
+    // Seed main's request filter with the stored policy before any window
+    // can mount a mail frame (T33).
+    this.emitRemoteImagePolicy()
     for (const session of this.sessions.values()) void session.syncController.resumeOnlineWork()
+  }
+
+  private emitRemoteImagePolicy(): void {
+    this.emit({ kind: 'remote-images', ...storedRemoteImagePolicy(this.db) })
   }
 
   private activeSession(): AccountSession | null {
@@ -945,14 +961,17 @@ export class ServiceRuntime {
       return undefined
     }
     if (channel === TEST_CHANNELS.updateMessageBody) {
-      const [messageId, bodyText] = args
+      const [messageId, bodyText, bodyHtml] = args
       if (!accountId || typeof messageId !== 'string' || typeof bodyText !== 'string') {
         throw new Error('invalid message update')
       }
+      if (bodyHtml !== undefined && typeof bodyHtml !== 'string') throw new Error('invalid message html')
       this.db.transaction(() => {
         this.db
-          .prepare('UPDATE messages SET body_text = ? WHERE account_id = ? AND id = ?')
-          .run(bodyText, accountId, messageId)
+          .prepare(
+            'UPDATE messages SET body_text = ?, body_html = COALESCE(?, body_html) WHERE account_id = ? AND id = ?'
+          )
+          .run(bodyText, bodyHtml ?? null, accountId, messageId)
         // Keep the seam on the production invariant: body and index move together.
         refreshMessageBodyFromStore(this.db, accountId, messageId)
       })()

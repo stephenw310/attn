@@ -31,6 +31,13 @@ export interface IpcContext {
   reorderAccounts: (accountIds: string[]) => Promise<AuthStatus>
   takePendingFocus: () => PendingFocusTarget | null
   acknowledgePendingFocus: (id: number) => void
+  /** T33: register/unregister a mounted mail frame with the request filter. */
+  registerMailFrame: (
+    nonce: string,
+    messageId: string,
+    allowOnce: boolean
+  ) => Promise<{ blocked: boolean; imagesAllowed: boolean }>
+  unregisterMailFrame: (nonce: string) => void
   /** OS-side effects of a persisted settings write (login item, menu bar). */
   applySettingEffects: (update: AppSettingUpdate) => void
   setThemePreference: (preference: ThemePreference) => void
@@ -48,6 +55,8 @@ export function registerIpc(context: IpcContext): () => void {
     IPC_CHANNELS.mailDownloadAttachment,
     IPC_CHANNELS.mailTakePendingFocus,
     IPC_CHANNELS.mailAcknowledgePendingFocus,
+    IPC_CHANNELS.mailRegisterMessageFrame,
+    IPC_CHANNELS.mailUnregisterMessageFrame,
     IPC_CHANNELS.settingsSetTheme,
     IPC_CHANNELS.settingsSet,
     IPC_CHANNELS.syncGetState
@@ -88,6 +97,21 @@ export function registerIpc(context: IpcContext): () => void {
   handle(IPC_CHANNELS.mailAcknowledgePendingFocus, (_event, id) => {
     if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('invalid focus id')
     context.acknowledgePendingFocus(id)
+    return undefined
+  })
+  const isFrameNonce = (value: unknown): value is string =>
+    typeof value === 'string' && /^[a-z0-9-]{8,64}$/i.test(value)
+  handle(IPC_CHANNELS.mailRegisterMessageFrame, (_event, nonce, messageId, allowOnce) => {
+    if (!isFrameNonce(nonce)) throw new Error('invalid frame nonce')
+    if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 256) {
+      throw new Error('invalid message id')
+    }
+    if (typeof allowOnce !== 'boolean') throw new Error('invalid allow-once flag')
+    return context.registerMailFrame(nonce, messageId, allowOnce)
+  })
+  handle(IPC_CHANNELS.mailUnregisterMessageFrame, (_event, nonce) => {
+    if (!isFrameNonce(nonce)) throw new Error('invalid frame nonce')
+    context.unregisterMailFrame(nonce)
     return undefined
   })
   handle(IPC_CHANNELS.draftPickAttachments, async (event, id) => {

@@ -16,6 +16,7 @@ import type { Db } from './db'
 import { undoSendDelayMs } from './outbox/queue'
 import { notificationPausedUntil, setNotificationPausedUntil } from './service/notificationQueries'
 import { attnSignatureEnabled } from './outbox/sendAs'
+import { remoteImagesBlocked, setRemoteImagesBlocked } from './remoteImageStore'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from './settings'
 import { storedLifetimeThreadCap } from './sync/lifetimeCap'
 
@@ -38,7 +39,8 @@ export function readAppSettings(db: Db): AppSettings {
       : APP_SETTINGS_DEFAULTS.autoAdvanceDirection,
     launchAtLogin: settingEnabled(db, 'launchAtLogin', APP_SETTINGS_DEFAULTS.launchAtLogin),
     menuBarIcon: settingEnabled(db, 'menuBarIcon', APP_SETTINGS_DEFAULTS.menuBarIcon),
-    notificationsPausedUntil: notificationPausedUntil(db)
+    notificationsPausedUntil: notificationPausedUntil(db),
+    remoteImagesBlocked: remoteImagesBlocked(db)
   }
 }
 
@@ -46,6 +48,7 @@ export function readAppSettings(db: Db): AppSettings {
 export function writeAppSetting(db: Db, key: unknown, value: unknown): AppSettings {
   const update: AppSettingUpdate = validateAppSettingUpdate(key, value)
   if (update.key === 'notificationsPausedUntil') setNotificationPausedUntil(db, update.value)
+  else if (update.key === 'remoteImagesBlocked') setRemoteImagesBlocked(db, update.value)
   else if (update.value === APP_SETTINGS_DEFAULTS[update.key]) deleteSetting(db, update.key)
   else writeSetting(db, update.key, String(update.value))
   return readAppSettings(db)

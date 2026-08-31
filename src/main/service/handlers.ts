@@ -84,6 +84,12 @@ import { ATTN_SIGNATURE_SETTING, prepareDraftWithCachedPrimarySignature } from '
 import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
+import {
+  addRemoteImageOverride,
+  listRemoteImageOverrides,
+  removeRemoteImageOverride,
+  resolveMessageSender
+} from '../remoteImageStore'
 import type { SnoozeScheduler } from '../scheduler'
 import {
   deleteAccountSetting,
@@ -140,6 +146,8 @@ export interface ServiceHandlerContext {
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
   broadcastMailChanged: (serverSearchRequestId?: string) => void
+  /** Push the stored remote-image policy to main's request filter (T33). */
+  publishRemoteImagePolicy: () => void
   mailboxCounts: (accountId: string) => SystemMailboxCounts
   splitState: (accountId: string) => import('../../shared/splits').SplitState
   broadcastOutboxChanged: (change: import('../../shared/outbox').OutboxChanged) => void
@@ -423,7 +431,11 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     return preference
   })
   handle(IPC_CHANNELS.settingsGetAll, () => readAppSettings(context.db))
-  handle(IPC_CHANNELS.settingsSet, (_event, key, value) => writeAppSetting(context.db, key, value))
+  handle(IPC_CHANNELS.settingsSet, (_event, key, value) => {
+    const settings = writeAppSetting(context.db, key, value)
+    if (key === 'remoteImagesBlocked') context.publishRemoteImagePolicy()
+    return settings
+  })
   handle(IPC_CHANNELS.settingsGetAccount, (_event, accountId) => {
     const account = requireAccount(context)
     if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
@@ -974,6 +986,24 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       console.error(`[attachment] inline image failed: ${errorMessage(error)}`)
       return { error: 'Could not load inline image' } satisfies InlineImageResult
     }
+  })
+  handle(IPC_CHANNELS.mailListRemoteImageOverrides, () => listRemoteImageOverrides(context.db))
+  handle(IPC_CHANNELS.mailRemoveRemoteImageOverride, (_event, address) => {
+    if (!nonEmptyString(address)) throw new Error('invalid sender address')
+    removeRemoteImageOverride(context.db, address)
+    context.publishRemoteImagePolicy()
+    return listRemoteImageOverrides(context.db)
+  })
+  handle(IPC_CHANNELS.mailAllowRemoteImagesFromSender, (_event, messageId) => {
+    if (!nonEmptyString(messageId)) throw new Error('invalid message id')
+    // The override's subject is the sender the *store* holds for this message
+    // — the frame's markup and the renderer's display text never decide (T33).
+    const account = requireAccount(context)
+    const sender = resolveMessageSender(context.db, account, messageId)
+    if (!sender) throw new Error('unknown message sender')
+    addRemoteImageOverride(context.db, sender)
+    context.publishRemoteImagePolicy()
+    return { sender, overrides: listRemoteImageOverrides(context.db) }
   })
   handle(IPC_CHANNELS.mailRepairInlineImages, async (_event, request) => {
     if (!isInlineImageRepairRequest(request)) return false

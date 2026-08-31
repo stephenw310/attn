@@ -27,6 +27,7 @@ export type SettingsControl =
   | 'undoSendDelay'
   | 'autoAdvance'
   | 'attnFooter'
+  | 'remoteImages'
   | 'launchAtLogin'
   | 'menuBarIcon'
 
@@ -147,6 +148,32 @@ export function SettingsView({
 
   const pausedUntil = settings?.notificationsPausedUntil ?? null
   const paused = pausedUntil !== null && pausedUntil > Date.now()
+
+  // Remote-image overrides (T33): app-global rows the section lists and can
+  // remove. Loaded on open; each removal returns the fresh list.
+  const [remoteOverrides, setRemoteOverrides] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (!window.attn) return
+    let stale = false
+    window.attn.mail
+      .listRemoteImageOverrides()
+      .then((overrides) => {
+        if (!stale) setRemoteOverrides(overrides)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [])
+  const removeRemoteOverride = useCallback(
+    (address: string) => {
+      void window.attn?.mail
+        .removeRemoteImageOverride(address)
+        .then(setRemoteOverrides)
+        .catch(() => onToast('Override could not be removed'))
+    },
+    [onToast]
+  )
 
   // Historical sync limit (T32A). The stored override decides the resting
   // mode; a draft carries an in-progress choice (custom typing, the All-mail
@@ -525,6 +552,52 @@ export function SettingsView({
                 Split rules…
               </button>
             </div>
+          </section>
+
+          <section data-testid="settings-privacy" aria-label="Privacy">
+            <h2 className={SECTION_TITLE}>Privacy</h2>
+            <label className={`mt-2 ${ROW}`}>
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[13px] text-ink">Block remote images</span>
+                <span className={NOTE}>
+                  Remote images can reveal your address and read time to a sender. Blocking cancels their
+                  requests in mail you open; each message offers Load once or a per-sender exception.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                data-testid="settings-remote-images"
+                data-settings-control="remoteImages"
+                aria-label="Block remote images"
+                disabled={!settings}
+                checked={settings?.remoteImagesBlocked ?? false}
+                onChange={(event) => onUpdateSetting('remoteImagesBlocked', event.target.checked)}
+                className="size-4 cursor-pointer accent-accent"
+              />
+            </label>
+            {remoteOverrides !== null && remoteOverrides.length > 0 && (
+              <div className="mt-1 flex flex-col">
+                <p className={`px-3 ${NOTE}`}>Senders whose images always load:</p>
+                {remoteOverrides.map((address) => (
+                  <div
+                    key={address}
+                    data-testid="settings-remote-image-override"
+                    data-address={address}
+                    className={`${ROW} border-b border-edge/60 last:border-b-0`}
+                  >
+                    <span className="truncate text-[13px] text-ink-dim">{address}</span>
+                    <button
+                      type="button"
+                      data-testid="settings-remote-image-override-remove"
+                      onClick={() => removeRemoteOverride(address)}
+                      className={ACTION_BUTTON}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section data-testid="settings-background" aria-label="Background">

@@ -99,6 +99,11 @@ export const IPC_CHANNELS = {
   mailDownloadAttachment: 'mail:downloadAttachment',
   mailGetInlineImage: 'mail:getInlineImage',
   mailRepairInlineImages: 'mail:repairInlineImages',
+  mailRegisterMessageFrame: 'mail:registerMessageFrame',
+  mailUnregisterMessageFrame: 'mail:unregisterMessageFrame',
+  mailAllowRemoteImagesFromSender: 'mail:allowRemoteImagesFromSender',
+  mailListRemoteImageOverrides: 'mail:listRemoteImageOverrides',
+  mailRemoveRemoteImageOverride: 'mail:removeRemoteImageOverride',
   mailTriage: 'mail:triage',
   mailSnooze: 'mail:snooze',
   mailMarkReadOnOpen: 'mail:markReadOnOpen',
@@ -269,6 +274,20 @@ export interface InvokeChannels {
     args: [request: InlineImageRepairRequest]
     result: boolean
   }
+  // T33 remote images: the reader registers each mounted mail frame under the
+  // nonce it set as the iframe's name; main answers whether that message's
+  // images load so the banner needs no second policy source.
+  [IPC_CHANNELS.mailRegisterMessageFrame]: {
+    args: [nonce: string, messageId: string, allowOnce: boolean]
+    result: { blocked: boolean; imagesAllowed: boolean }
+  }
+  [IPC_CHANNELS.mailUnregisterMessageFrame]: { args: [nonce: string]; result: undefined }
+  [IPC_CHANNELS.mailAllowRemoteImagesFromSender]: {
+    args: [messageId: string]
+    result: { sender: string; overrides: string[] }
+  }
+  [IPC_CHANNELS.mailListRemoteImageOverrides]: { args: []; result: string[] }
+  [IPC_CHANNELS.mailRemoveRemoteImageOverride]: { args: [address: string]; result: string[] }
   [IPC_CHANNELS.mailTriage]: { args: [action: TriageAction]; result: TriageResult }
   [IPC_CHANNELS.mailSnooze]: {
     args: [input: { threadIds: string[]; dueAt: number }]
