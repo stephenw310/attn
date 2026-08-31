@@ -696,10 +696,13 @@ export function countSystemMailboxes(db: Db, accountId: string): SystemMailboxCo
     snoozed: (
       db
         .prepare(
-          `SELECT COUNT(*) AS count
+          // Mirrors listSnoozedThreads' membership: one row per thread with a
+          // pending reminder of either kind — DISTINCT because a thread can
+          // hold both a snooze and a follow-up (T35/F9, PR #101 review).
+          `SELECT COUNT(DISTINCT r.thread_id) AS count
            FROM reminders r
            JOIN threads t ON t.account_id = r.account_id AND t.id = r.thread_id
-           WHERE r.account_id = ? AND r.kind = 'snooze' AND r.state = 'pending'`
+           WHERE r.account_id = ? AND r.kind IN ('snooze', 'follow_up') AND r.state = 'pending'`
         )
         .get(accountId) as { count: number }
     ).count,

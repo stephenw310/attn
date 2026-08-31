@@ -188,7 +188,11 @@ function virtualLayout(
   return threads.map((thread, index) => {
     const dividerHeight = index === dividerBeforeIndex ? VIRTUAL_SECTION_DIVIDER_HEIGHT : 0
     if (dividerHeight > 0) previousGroup = undefined
-    const group = dateGroup(thread)
+    // Only the inbox hoists returned follow-ups into a leading tier; every
+    // other view sorts them by date, where the 'Follow up' heading would
+    // split a date group mid-list at each occurrence (PR #101 review). The
+    // chip on the row still marks them everywhere.
+    const group = dateGroup(view === 'inbox' ? thread : { lastMsgAt: thread.lastMsgAt })
     // Snoozed sorts by due time, so relative-date groups would mislead there.
     const showGroup = view !== 'snoozed' && group !== previousGroup
     if (showGroup) {

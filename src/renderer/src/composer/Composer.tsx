@@ -50,7 +50,7 @@ import { modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { AiAutocompletePlugin } from './AiAutocompletePlugin'
 import { AiDraftPlugin } from './AiDraftPlugin'
-import { DraftContentIdContext } from './DraftContentContext'
+import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
 import { COLLAPSED_GMAIL_SIGNATURE_SELECTOR, revealGmailSignature } from './nodes/GmailSignatureNode'
@@ -1251,160 +1251,162 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         )}
 
         <DraftContentIdContext.Provider value={draft.id}>
-          <LexicalComposer initialConfig={editorConfig}>
-            <div
-              className={`relative min-h-48 flex-1 ${
-                mode === 'inline' ? '' : 'overflow-y-auto [scrollbar-gutter:stable]'
-              }`}
-            >
-              <RichTextPlugin
-                contentEditable={
-                  <ContentEditable
-                    className="min-h-full px-5 py-5 text-[13px] leading-5 text-ink outline-none"
-                    data-testid="composer-editor"
-                    aria-label="Message body"
-                  />
-                }
-                placeholder={
-                  <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
-                    Write a message…
-                  </div>
-                }
-                ErrorBoundary={LexicalErrorBoundary}
-              />
-              <HistoryPlugin />
-              <ListPlugin />
-              <TablePlugin />
-              <LinkPlugin validateUrl={validateComposerUrl} />
-              <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
-              <CollapsedSignaturePlugin
-                includesQuote={unifiedSignatureAndQuote}
-                onReveal={revealUnifiedContent}
-              />
-              {mode === 'inline' && draft.kind !== 'forward' && <AutoFocusPlugin />}
-              <OnChangePlugin ignoreSelectionChange onChange={captureEditor} />
-              <ComposerCommandPlugin
-                onAttach={pickAttachments}
-                onRemoveAttachment={removeLastAttachment}
-                onClose={mode === 'inline' ? closeAndExit : closeAndSave}
-                onDiscard={discard}
-                onSend={send}
-                onFollowUp={() => setFollowUpOpen(true)}
-              />
-              <PasteContentPlugin
-                draftId={draft.id}
-                onAttachment={addAttachment}
-                onError={onToast}
-                onPreservedContent={notePreservedContent}
-              />
-              <SnippetsPlugin onInserted={handleSnippetInserted} />
-              <AiAutocompletePlugin />
-              {aiDraft && (
-                <AiDraftPlugin
-                  kind={draft.kind}
-                  request={aiDraft.request}
-                  claim={aiDraft.claim}
-                  getThreadContext={aiDraft.getThreadContext}
-                  onToast={onToast}
-                />
-              )}
-              <InlineQuote
-                draftId={draft.id}
-                html={draft.quoteHtml}
-                sourceMessageId={draft.sourceMessageId}
-                expanded={unifiedSignatureAndQuote ? unifiedContentExpanded : undefined}
-                showToggle={!unifiedSignatureAndQuote}
-              />
-            </div>
-            {visibleAttachments.length > 0 && (
+          <DraftSourceMessageIdContext.Provider value={draft.sourceMessageId}>
+            <LexicalComposer initialConfig={editorConfig}>
               <div
-                className="flex shrink-0 flex-wrap gap-2 border-t border-edge px-4 py-2.5"
-                data-testid="composer-attachment-chips"
+                className={`relative min-h-48 flex-1 ${
+                  mode === 'inline' ? '' : 'overflow-y-auto [scrollbar-gutter:stable]'
+                }`}
               >
-                {visibleAttachments.map((attachment) => (
-                  <div
-                    key={attachment.id}
-                    className="flex min-w-0 max-w-72 items-center gap-2 rounded-lg border border-edge bg-active/60 px-2.5 py-1.5 text-xs"
-                    data-testid="composer-attachment-chip"
-                    data-attachment-id={attachment.id}
+                <RichTextPlugin
+                  contentEditable={
+                    <ContentEditable
+                      className="min-h-full px-5 py-5 text-[13px] leading-5 text-ink outline-none"
+                      data-testid="composer-editor"
+                      aria-label="Message body"
+                    />
+                  }
+                  placeholder={
+                    <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
+                      Write a message…
+                    </div>
+                  }
+                  ErrorBoundary={LexicalErrorBoundary}
+                />
+                <HistoryPlugin />
+                <ListPlugin />
+                <TablePlugin />
+                <LinkPlugin validateUrl={validateComposerUrl} />
+                <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
+                <CollapsedSignaturePlugin
+                  includesQuote={unifiedSignatureAndQuote}
+                  onReveal={revealUnifiedContent}
+                />
+                {mode === 'inline' && draft.kind !== 'forward' && <AutoFocusPlugin />}
+                <OnChangePlugin ignoreSelectionChange onChange={captureEditor} />
+                <ComposerCommandPlugin
+                  onAttach={pickAttachments}
+                  onRemoveAttachment={removeLastAttachment}
+                  onClose={mode === 'inline' ? closeAndExit : closeAndSave}
+                  onDiscard={discard}
+                  onSend={send}
+                  onFollowUp={() => setFollowUpOpen(true)}
+                />
+                <PasteContentPlugin
+                  draftId={draft.id}
+                  onAttachment={addAttachment}
+                  onError={onToast}
+                  onPreservedContent={notePreservedContent}
+                />
+                <SnippetsPlugin onInserted={handleSnippetInserted} />
+                <AiAutocompletePlugin />
+                {aiDraft && (
+                  <AiDraftPlugin
+                    kind={draft.kind}
+                    request={aiDraft.request}
+                    claim={aiDraft.claim}
+                    getThreadContext={aiDraft.getThreadContext}
+                    onToast={onToast}
+                  />
+                )}
+                <InlineQuote
+                  draftId={draft.id}
+                  html={draft.quoteHtml}
+                  sourceMessageId={draft.sourceMessageId}
+                  expanded={unifiedSignatureAndQuote ? unifiedContentExpanded : undefined}
+                  showToggle={!unifiedSignatureAndQuote}
+                />
+              </div>
+              {visibleAttachments.length > 0 && (
+                <div
+                  className="flex shrink-0 flex-wrap gap-2 border-t border-edge px-4 py-2.5"
+                  data-testid="composer-attachment-chips"
+                >
+                  {visibleAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex min-w-0 max-w-72 items-center gap-2 rounded-lg border border-edge bg-active/60 px-2.5 py-1.5 text-xs"
+                      data-testid="composer-attachment-chip"
+                      data-attachment-id={attachment.id}
+                    >
+                      <PaperclipIcon />
+                      <span className="min-w-0 truncate font-medium text-ink">{attachment.filename}</span>
+                      <span className="shrink-0 text-ink-faint">{formatBytes(attachment.sizeBytes)}</span>
+                      <button
+                        type="button"
+                        className="flex size-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-edge hover:text-ink"
+                        aria-label={`Remove ${attachment.filename}`}
+                        data-testid="composer-attachment-remove"
+                        disabled={attaching || closing}
+                        onClick={() => removeAttachment(attachment.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <footer
+                data-testid="composer-footer"
+                className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4"
+              >
+                <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+                  <EditorToolbar />
+                  <button
+                    type="button"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
+                    data-testid="composer-attach"
+                    aria-label="Attach files"
+                    title="Attach files"
+                    disabled={attaching || closing}
+                    onClick={pickAttachments}
                   >
                     <PaperclipIcon />
-                    <span className="min-w-0 truncate font-medium text-ink">{attachment.filename}</span>
-                    <span className="shrink-0 text-ink-faint">{formatBytes(attachment.sizeBytes)}</span>
-                    <button
-                      type="button"
-                      className="flex size-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-edge hover:text-ink"
-                      aria-label={`Remove ${attachment.filename}`}
-                      data-testid="composer-attachment-remove"
-                      disabled={attaching || closing}
-                      onClick={() => removeAttachment(attachment.id)}
+                  </button>
+                  {visibleAttachments.length > 0 && (
+                    <div
+                      className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
+                      data-testid="composer-attachments"
                     >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <footer
-              data-testid="composer-footer"
-              className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4"
-            >
-              <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
-                <EditorToolbar />
-                <button
-                  type="button"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
-                  data-testid="composer-attach"
-                  aria-label="Attach files"
-                  title="Attach files"
-                  disabled={attaching || closing}
-                  onClick={pickAttachments}
-                >
-                  <PaperclipIcon />
-                </button>
-                {visibleAttachments.length > 0 && (
-                  <div
-                    className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
-                    data-testid="composer-attachments"
+                      {visibleAttachments.length} attachment{visibleAttachments.length === 1 ? '' : 's'}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <FollowUpControl
+                    followUpAt={followUpAt}
+                    open={followUpOpen}
+                    onOpenChange={setFollowUpOpen}
+                    onChange={(value) => {
+                      setFollowUpAt(value)
+                      updateFields({ followUpAt: value })
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
+                    data-testid="composer-discard"
+                    aria-label="Discard draft"
+                    title={`Discard draft (${modKeyLabel()}⇧D)`}
+                    disabled={attaching || closing}
+                    onClick={discard}
                   >
-                    {visibleAttachments.length} attachment{visibleAttachments.length === 1 ? '' : 's'}
-                  </div>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <FollowUpControl
-                  followUpAt={followUpAt}
-                  open={followUpOpen}
-                  onOpenChange={setFollowUpOpen}
-                  onChange={(value) => {
-                    setFollowUpAt(value)
-                    updateFields({ followUpAt: value })
-                  }}
-                />
-                <button
-                  type="button"
-                  className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
-                  data-testid="composer-discard"
-                  aria-label="Discard draft"
-                  title={`Discard draft (${modKeyLabel()}⇧D)`}
-                  disabled={attaching || closing}
-                  onClick={discard}
-                >
-                  <TrashIcon />
-                </button>
-                <button
-                  type="button"
-                  data-testid="composer-send"
-                  disabled={attaching || closing}
-                  className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
-                  title="Send message"
-                  onClick={send}
-                >
-                  Send <span className="ml-1 opacity-65">{modKeyLabel()}↵</span>
-                </button>
-              </div>
-            </footer>
-          </LexicalComposer>
+                    <TrashIcon />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="composer-send"
+                    disabled={attaching || closing}
+                    className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
+                    title="Send message"
+                    onClick={send}
+                  >
+                    Send <span className="ml-1 opacity-65">{modKeyLabel()}↵</span>
+                  </button>
+                </div>
+              </footer>
+            </LexicalComposer>
+          </DraftSourceMessageIdContext.Provider>
         </DraftContentIdContext.Provider>
       </div>
     </section>

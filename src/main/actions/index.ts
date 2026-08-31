@@ -26,7 +26,17 @@ interface MoveUndoAction {
   revertsQueueId?: number
 }
 
-type UndoAction = TriageAction | MoveUndoAction | { kind: 'snoozeAt'; threadIds: string[]; dueAt: number }
+interface FollowUpRestoreAction {
+  kind: 'followUpRestore'
+  threadIds: string[]
+  before: FollowUpReminderSnapshot
+}
+
+type UndoAction =
+  | TriageAction
+  | MoveUndoAction
+  | FollowUpRestoreAction
+  | { kind: 'snoozeAt'; threadIds: string[]; dueAt: number }
 
 interface TriageUndoEntry {
   kind: 'triage'
@@ -118,12 +128,14 @@ function moveChangesReminder(reminder: SnoozeReminderSnapshot | null): boolean {
 
 /**
  * The deliberate follow-up triage matrix (T35/F9). Spam and Trash cancel the
- * reminder outright. Archive and Move complete a returned one and cancel an
- * overdue pending one — otherwise the scheduler would resurface the thread
- * right after the user filed it — while a future deadline survives an
- * ordinary archive. No other verb touches it: unlike a returned snooze, the
- * Follow up chip holds until the thread is actually filed (opening marks the
- * thread read through this same path, and reading is not answering).
+ * reminder outright. Archive and a filing Move complete a returned one and
+ * cancel an overdue pending one — otherwise the scheduler would resurface the
+ * thread right after the user filed it — while a future deadline survives an
+ * ordinary archive. A move BACK to the inbox is un-filing, not filing, so it
+ * leaves the reminder alone exactly like restoreInbox (PR #101 review). No
+ * other verb touches it: unlike a returned snooze, the Follow up chip holds
+ * until the thread is actually filed (opening marks the thread read through
+ * this same path, and reading is not answering).
  */
 function settleFollowUpForTriage(
   db: Db,
@@ -141,7 +153,7 @@ function settleFollowUpForTriage(
     ).run(accountId, threadId)
     return
   }
-  if (action.kind === 'archive' || action.kind === 'move') {
+  if (action.kind === 'archive' || (action.kind === 'move' && action.destination.kind !== 'inbox')) {
     db.prepare(
       `UPDATE reminders SET state = 'done'
        WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up' AND state = 'returned'`
@@ -152,6 +164,16 @@ function settleFollowUpForTriage(
          AND due_at <= ?`
     ).run(accountId, threadId, now)
   }
+}
+
+/** True when {@link settleFollowUpForTriage} will change this snapshot, so an undo must restore it. */
+function followUpSettledBy(
+  action: TriageAction,
+  snapshot: FollowUpReminderSnapshot | null,
+  now: number
+): snapshot is FollowUpReminderSnapshot {
+  if (action.kind !== 'archive' || snapshot === null) return false
+  return snapshot.state === 'returned' || (snapshot.state === 'pending' && snapshot.dueAt <= now)
 }
 
 function movesToMailbox(action: TriageAction): boolean {
@@ -204,12 +226,22 @@ function apply(
   const now = Date.now()
   const undo: UndoAction[] = movesToMailbox(action)
     ? []
-    : action.threadIds.map((id): UndoAction => {
-        if (action.kind === 'unsnooze' || action.kind === 'archive') {
-          const reminder = pendingSnoozeFor(db, accountId, id)
-          if (reminder) return { kind: 'snoozeAt', threadIds: [id], dueAt: reminder.dueAt }
-        }
-        return inverseForThread(action, labelsBefore.get(id) ?? new Set(), id)
+    : action.threadIds.flatMap((id): UndoAction[] => {
+        const primary = ((): UndoAction => {
+          if (action.kind === 'unsnooze' || action.kind === 'archive') {
+            const reminder = pendingSnoozeFor(db, accountId, id)
+            if (reminder) return { kind: 'snoozeAt', threadIds: [id], dueAt: reminder.dueAt }
+          }
+          return inverseForThread(action, labelsBefore.get(id) ?? new Set(), id)
+        })()
+        // Archive settles the follow-up below, and its label inverse
+        // (restoreInbox) replays through apply(), which never restores
+        // reminders — so the undo entry itself must carry the snapshot back
+        // (PR #101 review), exactly as applyMoveUndo does for moves.
+        const followUpBefore = followUpsBefore.get(id) ?? null
+        return followUpSettledBy(action, followUpBefore, now)
+          ? [primary, { kind: 'followUpRestore', threadIds: [id], before: followUpBefore }]
+          : [primary]
       })
   const enqueue = db.prepare(
     `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
@@ -477,7 +509,11 @@ export function undoLast(db: Db, accountId: string): TriageResult | null {
     for (const action of entry.undo) {
       if (action.kind === 'snoozeAt') applySnooze(db, accountId, action.threadIds, action.dueAt, 'undo')
       else if (action.kind === 'moveUndo') applyMoveUndo(db, accountId, action)
-      else apply(db, accountId, action, 'undo')
+      else if (action.kind === 'followUpRestore') {
+        for (const threadId of action.threadIds) {
+          restoreFollowUpReminder(db, accountId, threadId, action.before)
+        }
+      } else apply(db, accountId, action, 'undo')
     }
   })()
   return { label: `Undid ${entry.label.toLowerCase()}` }

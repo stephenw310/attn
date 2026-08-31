@@ -219,6 +219,19 @@ describe('thread list queries', () => {
     })
   })
 
+  it('counts follow-up-only threads in Snoozed without double-counting a thread holding both kinds', () => {
+    // The Reminders list shows one row per thread with a pending reminder of
+    // either kind; the sidebar count must match it (PR #101 review).
+    const insertReminder = db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+       VALUES ('account', ?, 'follow_up', ?, 'pending')`
+    )
+    insertReminder.run('older', 900)
+    insertReminder.run('snoozed', 950)
+    expect(listSnoozedThreads(db, 'account')).toHaveLength(2)
+    expect(countSystemMailboxes(db, 'account').snoozed).toBe(2)
+  })
+
   it('keeps derived mailbox membership identical to the label rules it replaces', async () => {
     // Parity is the whole risk of materializing membership: a count that drifts
     // from its list is worse than a slow one. Compare the stored rows against the

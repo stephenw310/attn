@@ -1551,6 +1551,26 @@ test('preserves unsupported foreign HTML pasted into a new draft', async ({ page
   expect(savedHtml).toContain(opaque)
 })
 
+test('a preserved region in a reply registers its preview frame under the source message', async ({
+  page
+}) => {
+  // T33 (PR #101 review): the opaque preview renders the same untrusted mail
+  // HTML as the quoted history, so a reply's preserved content joins main's
+  // remote-image filter under the replied-to message — the mounted frame
+  // carries its registration nonce as its name, which is what per-sender
+  // exceptions key on. A draft with no source message stays unnamed and
+  // fails closed (asserted in the Gmail-import test below).
+  await page.getByTestId('thread-row').filter({ hasText: 'Design notes' }).click()
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await composer.editor.click()
+  await pasteHtml(composer, '<aside data-layout="callout"><mark>Preserved reply region</mark></aside>')
+  const frame = composer.editor.locator('iframe[title="Preserved draft content"]')
+  await expect(frame).toHaveCount(1)
+  await expect(frame).toHaveAttribute('name', /^[0-9a-f-]{36}$/)
+})
+
 test('spools data images pasted through HTML and saves them as CID parts', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
@@ -1799,6 +1819,12 @@ test('hydrates bracketed percent-encoded CID images inside preserved HTML', asyn
       .frameLocator('iframe[title="Preserved draft content"]')
       .locator('img[alt="Opaque Gmail inline image"]')
   ).toHaveAttribute('src', /^data:image\/png;base64,/)
+  // No source message on a standalone Gmail draft: the preview frame stays
+  // unnamed and fails closed while blocking is on (T33, PR #101 review).
+  await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).not.toHaveAttribute(
+    'name',
+    /.+/
+  )
 })
 
 test('opens and edits a remote plain-text-only draft without losing its body', async ({ app, page }) => {

@@ -616,7 +616,7 @@ describe('follow-up triage matrix (T35/F9)', () => {
     expect(followUpState(db)).toBe('pending')
   })
 
-  it('undoing an archive restores the follow-up snapshot with the labels', () => {
+  it('undoing a trash restores the follow-up snapshot with the labels', () => {
     const db = followUpDb('returned', 1)
     performTriage(db, ACCOUNT, { kind: 'trash', threadIds: ['t-f'] })
     expect(followUpState(db)).toBe('done')
@@ -629,6 +629,86 @@ describe('follow-up triage matrix (T35/F9)', () => {
         )
         .get(ACCOUNT)
     ).toBeDefined()
+  })
+
+  it('undoing an archive restores the follow-up snapshot with the labels', () => {
+    // Archive undoes through apply(restoreInbox), not applyMoveUndo, so the
+    // undo entry itself must carry the settled snapshot back (PR #101 review).
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('done')
+    undoLast(db, ACCOUNT)
+    expect(followUpState(db)).toBe('returned')
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM thread_labels WHERE account_id = ? AND thread_id = 't-f' AND label_id = 'INBOX'"
+        )
+        .get(ACCOUNT)
+    ).toBeDefined()
+  })
+
+  it('undoing an archive revives an overdue pending follow-up it canceled', () => {
+    const dueAt = Date.now() - 1_000
+    const db = followUpDb('pending', dueAt)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('canceled')
+    undoLast(db, ACCOUNT)
+    expect(followUpState(db)).toBe('pending')
+  })
+
+  it('undoing an archive that also canceled a pending snooze restores both reminders', () => {
+    const db = followUpDb('returned', 1)
+    db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+       VALUES (?, 't-f', 'snooze', ?, 'pending')`
+    ).run(ACCOUNT, Date.now() + 60_000)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('done')
+    undoLast(db, ACCOUNT)
+    // The snoozeAt undo re-snoozes; the follow-up restore then lands the
+    // exact pre-archive snapshot on top of the re-snooze's postpone rule.
+    expect(followUpState(db)).toBe('returned')
+    expect(
+      (
+        db
+          .prepare(
+            "SELECT state FROM reminders WHERE account_id = ? AND thread_id = 't-f' AND kind = 'snooze'"
+          )
+          .get(ACCOUNT) as { state: string } | undefined
+      )?.state
+    ).toBe('pending')
+  })
+
+  it('moving back to the inbox leaves the follow-up alone — un-filing, like restoreInbox', () => {
+    for (const verb of [undefined, 'markNotDone' as const]) {
+      const db = followUpDb('returned', 1)
+      db.prepare("DELETE FROM thread_labels WHERE account_id = ? AND thread_id = 't-f'").run(ACCOUNT)
+      performTriage(
+        db,
+        ACCOUNT,
+        {
+          kind: 'move',
+          threadIds: ['t-f'],
+          destination: { kind: 'inbox' },
+          sourceLabelId: null,
+          ...(verb ? { verb } : {})
+        },
+        false
+      )
+      expect(followUpState(db)).toBe('returned')
+    }
+  })
+
+  it('a filing move still completes a returned follow-up', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(
+      db,
+      ACCOUNT,
+      { kind: 'move', threadIds: ['t-f'], destination: { kind: 'done' }, sourceLabelId: null },
+      false
+    )
+    expect(followUpState(db)).toBe('done')
   })
 
   it('the queued payload carries the follow-up snapshot for Gmail-rejection recovery', () => {

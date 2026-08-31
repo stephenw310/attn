@@ -539,3 +539,72 @@ it('measures the sizer against the list when scrolling a selection into view', a
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
   }
 })
+
+it("shows the 'Follow up' heading only in the inbox, which hoists the tier", async () => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const thread = (id: string, followUpReturned: boolean): DisplayThread => ({
+    id,
+    from: `Sender ${id}`,
+    subject: `Subject ${id}`,
+    snippet: '',
+    at: '9:30 AM',
+    unread: false,
+    starred: true,
+    hasAttachment: false,
+    snoozed: false,
+    returned: false,
+    followUpReturned,
+    hasDraft: false,
+    labelIds: [],
+    lastMsgAt: Date.now()
+  })
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  const baseProps = {
+    syncing: false,
+    readerOpen: false,
+    selectedIndex: 0,
+    selectedIds: new Set<string>(),
+    exitingThreadIds: new Set<string>(),
+    labelsById: new Map(),
+    selectedRowRef: { current: null },
+    listRef: { current: null },
+    onExtendSelection: (): void => {},
+    onOpenLabel: (): void => {},
+    onOpen: (): void => {}
+  }
+  const groups = (): string[] =>
+    [...container.querySelectorAll('[data-testid="thread-date-group"]')].map((node) => node.textContent ?? '')
+
+  try {
+    // Every non-inbox view sorts follow-up threads by date; the heading would
+    // split a same-day group mid-list at the row's position (PR #101 review).
+    await act(async () =>
+      root.render(
+        createElement(ThreadList, {
+          ...baseProps,
+          view: 'starred' as const,
+          threads: [thread('a', false), thread('b', true), thread('c', false)]
+        })
+      )
+    )
+    expect(groups()).toEqual(['Today'])
+
+    // The inbox leads with the hoisted tier under its own heading.
+    await act(async () =>
+      root.render(
+        createElement(ThreadList, {
+          ...baseProps,
+          view: 'inbox' as const,
+          threads: [thread('b', true), thread('a', false), thread('c', false)]
+        })
+      )
+    )
+    expect(groups()).toEqual(['Follow up', 'Today'])
+  } finally {
+    await act(async () => root.unmount())
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+  }
+})
