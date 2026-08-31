@@ -4,16 +4,17 @@
 and [M3-PLAN.md](M3-PLAN.md). Every task is one PR. Nothing is done until `npm run verify` is green. "Spec F8"
 means a section of [SPEC.md](SPEC.md) (v0.17). Read the section before starting the task.
 
-**Basis:** SPEC §8 M4, F8 (snippets), F9 (follow-up reminders), F12 (badge polish), F15 (settings), F17
-(AI reply drafting and inline autocomplete), §6 Packaging (auto-update, signing, notarization), §9 #5
+**Basis:** SPEC §8 M4, F6 (Attn signature footer), F8 (snippets), F9 (follow-up reminders), F12 (badge polish),
+F15 (settings), F17 (AI reply drafting and inline autocomplete), §6 Packaging (auto-update, signing, notarization), §9 #5
 (remote images), and the deferrals the earlier plans parked here: the settings surface (M1-PLAN T9/T8 notes), the remote-image block
 toggle (M1-PLAN, T11 notes), the Windows numeric badge overlay (M1-PLAN accepted deviations), and the
 `Mod+/` cheat sheet (the two "lands at M4" stubs in `MailHeader.tsx`). The 2026-08-30 refresh against
 `main` at `15e13b4` also carries PR #98's historical sync limit into T32A and incorporates the account
 management shipped in PRs #96 and #99.
 
-**Goal:** M4 turns a daily-drivable triage client into a finished v1. Snippets, follow-up reminders, AI reply
-drafting, and inline autocomplete land, every deferred toggle gets its settings home, and the packaged app
+**Goal:** M4 turns a daily-drivable triage client into a finished v1. Snippets, follow-up reminders, an
+optional Attn signature footer, AI reply drafting, and inline autocomplete land. Every deferred toggle
+gets its settings home, and the packaged app
 learns to update itself with real signatures. M4 is the last milestone before the v1 tag, so it ends with a
 sign-off task that rolls up every outstanding manual check.
 
@@ -21,8 +22,9 @@ sign-off task that rolls up every outstanding manual check.
 
 | Task | State | Blocks |
 |---|---|---|
-| T32 settings surface and cheat sheet (F15) | planned | T32A, T33, T34's manager, T36's enable pane |
+| T32 settings surface and cheat sheet (F15) | planned | T32A, T32B, T33, T34's manager, T36's enable pane |
 | T32A per-account historical sync limit (F2, F15) | planned | nothing |
+| T32B optional "Sent with Attn" signature footer (F6, F15) | planned | T37 |
 | T33 remote-image control (§9 #5) | planned | nothing |
 | T34 snippets (F8) | planned | nothing |
 | T35 follow-up reminders (F9) | planned | nothing |
@@ -33,9 +35,10 @@ sign-off task that rolls up every outstanding manual check.
 | T39 auto-update, signing, notarization (§6) | planned | T40's update-in-place check |
 | T40 M4 exit and v1 sign-off | planned | the v1 tag |
 
-**Why this order.** T32 goes first because T32A's sync control, T33's toggle, T34's manager, and T36's enable
-screen need it. T32A is separate because changing a running account's sync limit needs its own lifecycle
-and persistence tests. F17 has three tasks: shared provider and consent controls, explicit reply drafting,
+**Why this order.** T32 goes first because T32A's sync control, T32B's footer preference, T33's toggle,
+T34's manager, and T36's enable screen need it. T32A is separate because changing a running account's sync limit needs its own lifecycle
+and persistence tests. T32B covers footer insertion and draft durability before T37 integrates AI writing
+with the signature. F17 has three tasks: shared provider and consent controls, explicit reply drafting,
 then autocomplete with its separate opt-in and typing lifecycle. T37A follows T37 so their cancellation
 and keyboard handling can be tested together. The suffix preserves the existing T38–T40 task references,
 following M2's T14A through T14E precedent. T39 is independent of everything else but
@@ -82,8 +85,8 @@ follow-up below, and T40 requires its resolution before sign-off.
    `account_id`; app-global state uses the settings sentinel (`APP_SETTINGS_ACCOUNT_ID`). F18 already
    decides for M4's features: snippets, the F17 provider key, model, voice profile and enable toggles, the
    undo-send delay, auto-advance, and remote-image preferences are app-global; reminders, drafts, and
-   outbox rows and T32A's `lifetimeThreadCap` are per-account. Account ordering belongs to main's
-   encrypted token roster, not a new SQLite column or duplicate settings list.
+   outbox rows, T32A's `lifetimeThreadCap`, and T32B's `attnSignatureEnabled` are per-account. Account
+   ordering belongs to main's encrypted token roster, not a new SQLite column or duplicate settings list.
 10. **If your task changes the verify pipeline, harness behavior, or the screenshot-artifact list, update
     AGENTS.md in the same PR.**
 
@@ -93,7 +96,7 @@ follow-up below, and T40 requires its resolution before sign-off.
 
 **Status: planned.**
 
-**Depends on:** nothing · **Unblocks:** T32A, T33, T34, T36 · **Spec:** F15, F16, F18, D6, §5
+**Depends on:** nothing · **Unblocks:** T32A, T32B, T33, T34, T36 · **Spec:** F15, F16, F18, D6, §5
 
 ### Why
 
@@ -114,8 +117,8 @@ those controls a home and connects them to the existing account and notification
 - **Sections at ship time:** Accounts (live roster, status, add, reconnect, Sign out, and `Mod+1..9` reorder),
   Triage (undo-send delay; auto-advance next, previous, or back to list), Notifications (global pause and
   resume; per-account split controls), Background (launch at login; macOS menu-bar icon, default off),
-  and Appearance (the four F14 themes). T32A adds Sync & storage for the active account; T33, T34, and T36
-  add their own sections. Label account-specific settings with the owning email and distinguish them
+  and Appearance (the four F14 themes). T32A adds Sync & storage and T32B adds Compose for the active
+  account. T33, T34, and T36 add their own sections. Label account-specific settings with the owning email and distinguish them
   from app-wide preferences.
 - **Reuse shipped account behavior.** Use the same guarded add, switch, reconnect, and Sign out flows as
   the account menu. Sign out retains Delete/Keep local data, removal-in-progress guards, survivor order,
@@ -278,6 +281,84 @@ applies without rebuilding or signing out, independently for work and personal a
 
 A user can change an account's historical limit without a rebuild or sign-out. Sync resumes durably,
 coverage is accurate, existing local data remains intact, and other accounts keep working.
+
+---
+
+## T32B: optional "Sent with Attn" signature footer
+
+**Status: planned.**
+
+**Depends on:** T32 · **Unblocks:** T37 · **Spec:** F6, F15, F18
+
+### Why
+
+Users can add a short Attn attribution to outgoing mail without editing their Gmail signature. It must
+be visible and removable in the composer, and preserve the existing draft lifecycle.
+
+### Design (decided)
+
+- Add **Include "Sent with Attn"** under **Compose**, labeled with the active account's email. Default
+  off. Show the exact line and explain that the preference affects new drafts only. Add matching palette
+  enable/disable commands, with no new shortcut. Persist the boolean as `attnSignatureEnabled` through
+  T32's typed, account-scoped settings allowlist and `readAccountSetting`/`writeAccountSetting`.
+  An absent value means off. Delete-local-data removes it; Keep-local-data retains it. No schema bump.
+- Insert the plain `Sent with Attn` line when creating a local new-message, reply, reply-all, or forward
+  draft. Place it after the cached Gmail signature, or after the writing area if none exists, and before
+  the quote. Keep the caret in the writing area. The footer is an editable signature paragraph with
+  readable secondary styling in all four themes, no hyperlink, remote image, tracking, or network lookup.
+- Keep the Gmail signature's content intact and never write branding back to Gmail settings. If that
+  signature already contains the same standalone line, reuse it without adding another. Do not inspect
+  quoted history for this deduplication or remove any quoted attribution.
+- Apply defaults only at local draft creation. Do not append a footer while reopening, importing,
+  autosaving, mirroring, sending, retrying, or undoing a send. Setting changes leave open, saved, and queued
+  drafts unchanged. A footer already present in a Gmail draft remains ordinary editable content. Its
+  removal must survive Gmail normalization and must never cause automatic reinsertion.
+- Treat the applied Gmail signature and footer as one initial signature baseline for untouched-draft
+  detection. A draft with only planned fields and these defaults is discarded on close and skipped by
+  the mirror. Compare against that draft's stored baseline, not current settings or the signature cache.
+  Changes the user makes to the footer follow the normal edit and undo rules.
+- Once the draft has user content, persist the footer in its normal body. Autosave, Gmail checkpoints,
+  both MIME alternatives, queued-message previews, undo send, and crash recovery use that saved content.
+  The sender must never append branding based on the account's current preference.
+- T37 generation/refine inserts above the signature without replacing or duplicating either signature
+  content or the footer; undoing AI insertion preserves them. T37A excludes both from autocomplete
+  context and suppresses suggestions inside them. Neither AI path restores a deleted footer.
+
+### Implementation guide
+
+Extend `prepareDraftWithCachedPrimarySignature` in `src/main/outbox/sendAs.ts` and its local-creation
+callers in `src/main/service/handlers.ts`. Compose the optional footer with the cached signature without
+mutating the cache. Reuse the existing `default_signature_fingerprint` storage and signature envelope;
+extend `hasOnlyDefaultPrimarySignature` as needed for footer-only defaults. Existing signature-only
+fingerprints must still work unchanged. Do not reclassify imported or already-authored drafts as untouched.
+
+Keep the footer on the editable path through `GmailSignatureNode`, composer sanitization, import, and
+serialization. Do not add a send-time body rewrite or weaken the zero-formatting-loss contract. Bind
+settings reads to the draft's owning account, including delayed responses during an account switch.
+
+### Testing
+
+- Unit: default off; each composer kind with and without a Gmail signature; exact-line deduplication;
+  placement before quotes; HTML/plain-text parity; and unchanged cached Gmail signature. Cover footer
+  edits and deletion through serialization and Gmail import without reinsertion or formatting loss.
+- Unit with the real temporary SQLite store: footer-only and signature-plus-footer drafts are untouched,
+  including planned replies/forwards. They are not mirrored or retained on close. Change the account's
+  preference and cached signature after creation and prove the stored baseline still governs. Preserve
+  old signature-only drafts and imported drafts. Extend account-isolation and Delete/Keep coverage.
+- E2e against the seeded provider: enable for one account and leave another off; relaunch and exercise
+  settings and palette commands. Inspect footer placement in all composer kinds. Save, reopen, mirror,
+  import the echoed draft, queue, undo send, and send again; captured HTML and plain text each contain
+  exactly the visible footer. Repeat after editing/removing it and after changing the preference with a
+  saved or queued draft present. No real Gmail calls.
+- T37 and T37A add their footer-preservation and context-exclusion regressions when those tasks land.
+- Inspect `composer-attn-signature.png` and `composer-attn-signature-light.png`, including a Gmail
+  signature and collapsed quote, and the affected settings artifact. Check all four themes and keyboard
+  editing. Add the new artifacts to AGENTS.md when implemented.
+
+### Done when
+
+F6's footer acceptance criteria pass through the real composer and outbox. Each account controls its own
+default, and the saved draft determines exactly what the recipient receives.
 
 ---
 
@@ -608,7 +689,7 @@ the disclosure text; with the feature off, no code path reaches a provider.
 
 **Status: planned.**
 
-**Depends on:** T36 · **Unblocks:** T37A · **Spec:** F17, §5
+**Depends on:** T36, T32B (signature integration) · **Unblocks:** T37A · **Spec:** F17, F6, §5
 
 ### Why
 
@@ -626,6 +707,8 @@ it with a one-line instruction, and never auto-send.
 - **Streaming is editable and one undo step.** Chunks append into Lexical as normal editable content, with
   history coalesced so a single `Mod+Z` removes the whole draft (F17: insertion is undoable like any other
   edit). The insert passes the composer sanitize path (rule 3).
+  Insert above the Gmail signature and T32B footer. Generation, refine, and undo preserve those regions,
+  including user edits or removal; generated output must not add another automatic signature/footer.
 - **`Esc` cancels cleanly:** it aborts the stream via `ai:cancel` and keeps the text already inserted,
   still as one undoable step. A second `Esc` behaves like any composer `Esc`.
 - **Inline refine:** after a draft lands, a one-line instruction field ("shorter", "more formal")
@@ -649,6 +732,8 @@ it with a one-line instruction, and never auto-send.
   no recorded payload contains extra sent-mail style examples; with the feature disabled, `Mod+J` shows
   the disabled hint and the seam records zero requests.
 - Unit: sent-reply selection for style examples (recency, own-reply filter, count cap).
+- E2e: generation, refine, and undo preserve the Gmail signature and optional Attn footer, including
+  footer edits and deletion. Inspect the captured send body for duplication.
 - New screenshot artifact `ai-draft.png`, added to the AGENTS.md list.
 
 ### Done when
@@ -693,8 +778,8 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   prefix, a collapsed selection in ordinary editable text, and a focused foreground composer. Mount,
   draft restore, focus alone, AI chunks, snippet insertion, undo/redo, and suggestion acceptance/dismissal
   do not trigger requests. Suppress requests during IME composition, selections, T37 generation/refine,
-  open pickers/dialogs, and inside quotes, signatures, tables, or opaque preserved regions. A subsequent
-  deliberate typing edit can trigger another request.
+  open pickers/dialogs, and inside quotes, signatures, T32B's footer, tables, or opaque preserved regions.
+  A subsequent deliberate typing edit can trigger another request.
 - **Minimal context:** build a separate autocomplete payload from the authored body, up to 2,000 plain-text
   characters before the caret and 500 after. Exclude protected quote/signature/opaque nodes from extraction,
   not just from display, and preserve the cursor boundary when truncating. Do not include thread messages,
@@ -722,7 +807,8 @@ Repeated transmission of an unfinished draft requires its own consent and reques
 - Unit with injected time and the fake provider: 300ms debounce, one-in-flight and both rate caps, 1,500ms
   deadline, no retry loop, and disabling or editing while a response is queued. Assert late results fail
   every identity check, including a remounted composer with the same draft id. Pin bounded payloads with
-  quote/signature/opaque regions and cross-account sent mail present; none may leak into the request.
+  quote/signature/opaque regions, T32B's footer, and cross-account sent mail present. None may leak into
+  the request.
 - E2e: first enable reply drafting and type; autocomplete records zero requests. Opt in separately and
   cover new mail, reply, reply-all, and forward; accept with Tab, edit, undo, dismiss with Esc, and continue
   typing. Assert caret restoration, normal Tab/Shift+Tab/arrow/Enter behavior, and recipient/snippet/palette
@@ -887,6 +973,9 @@ Feature evidence (this milestone):
 - [ ] Historical sync limit: independently change an account's cap, resume after relaunch, lower without
       deleting mail, and verify capped coverage plus Gmail search. Expanded history includes attachment
       flags, and the other account keeps polling and sending. Record disk/time expectations for All mail.
+- [ ] Optional Attn footer: per-account opt-in, correct placement with and without a Gmail signature,
+      editable/removable in every composer mode, and unchanged through relaunch, Gmail round trips, and
+      undo send. Untouched drafts remain unmirrored; AI writing preserves the footer and its removal.
 - [ ] Real-Gmail follow-up run: send with a 3-day follow-up from a dogfood profile, reply from another
       account, confirm cancellation; let a second one expire and confirm resurfacing. Confirm the sent
       message's own history event does not cancel either reminder, and exercise a coexisting snooze.
@@ -901,7 +990,8 @@ Feature evidence (this milestone):
       or missing schema metadata is rejected without changing the installation or local data (from T39).
 - [ ] Credential-free personal packaging on both OSes, with no updater traffic or cached installation.
 - [ ] Every new screenshot artifact inspected: `settings.png`, `settings-sync.png`, `cheat-sheet.png`,
-      `remote-images-blocked.png`, `snippet-manager.png`, `ai-draft.png`, `ai-autocomplete.png`,
+      `composer-attn-signature.png`, `composer-attn-signature-light.png`, `remote-images-blocked.png`,
+      `snippet-manager.png`, `ai-draft.png`, `ai-autocomplete.png`,
       `ai-autocomplete-light.png`.
 
 Inherited manual items (owed by earlier milestones, still open as of 2026-08-30; verify against their plan
@@ -909,8 +999,8 @@ docs and tick or strike with evidence):
 
 - [ ] M1's real-OS notification click-through smoke (M1-PLAN exit checklist).
 - [ ] M2's real-Gmail bootstrap, exactly-once, and hydration observations (M2-PLAN T20).
-- [ ] M2's one-week sole-client dogfood run, extended to exercise snippets, follow-ups, AI drafting, and
-      autocomplete.
+- [ ] M2's one-week sole-client dogfood run, extended to exercise snippets, follow-ups, the Attn footer,
+      AI drafting, and autocomplete.
 - [ ] M5's remaining A7 real-Gmail two-account dogfood observation is recorded: add an account during
       indexing, observe preemption, notification routing, and the badge sum. Its implementation and
       executable isolation audit have shipped; preserve those checks for every new M4 account-scoped read.
