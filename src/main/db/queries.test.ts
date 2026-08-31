@@ -445,6 +445,42 @@ describe('thread list queries', () => {
     expect(listMailboxThreads(db, 'other-account', 'allMail').map((row) => row.id)).toEqual(['other-mixed'])
   })
 
+  it('uses a thread-key lookup for saved All Mail selections and the date index for pages', () => {
+    db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+       SELECT account_id, id || '-message', id, last_msg_at, '[]' FROM threads`
+    ).run()
+    fillMembership(db)
+    const explain = (threadId?: string): { rows: ReturnType<typeof listMailboxThreads>; plan: string[] } => {
+      let plan: string[] = []
+      const queryDb = {
+        prepare: (sql: string) => {
+          const statement = db.prepare(sql)
+          return {
+            all: (...params: unknown[]) => {
+              plan = (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map(
+                (row) => row.detail
+              )
+              return statement.all(...params)
+            }
+          }
+        }
+      } as unknown as Db
+      return { rows: listMailboxThreads(queryDb, 'account', 'allMail', 1, null, threadId), plan }
+    }
+    const ids = mailboxIds('allMail')
+    const oldest = ids[ids.length - 1]
+    expect(oldest).toBeDefined()
+    for (const id of [oldest, 'missing-thread']) {
+      const { rows, plan } = explain(id)
+      expect(rows.map((row) => row.id)).toEqual(id === oldest ? [oldest] : [])
+      const membership = plan.find((detail) => detail.startsWith('SEARCH mailbox '))
+      expect(membership).toContain('(account_id=? AND thread_id=? AND view=?)')
+      expect(membership).not.toContain('idx_thread_mailboxes_recent')
+    }
+    expect(explain().plan.some((detail) => detail.includes('idx_thread_mailboxes_recent'))).toBe(true)
+  })
+
   it('uses SQLite indexes for sparse label-driven mailbox membership', () => {
     const explain = (mailbox: LabelMailboxView): string[] => {
       let details: string[] = []
