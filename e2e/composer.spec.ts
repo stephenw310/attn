@@ -380,6 +380,54 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
   expect(saved?.bodyHtml).not.toContain('iframe')
 })
 
+test('keeps automatic font direction when editing and reopening a Gmail draft', async ({ app, page }) => {
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-auto-font',
+        'Automatic font direction',
+        '<div dir="ltr"><font face="Arial" dir="auto">שלום Alex</font></div>'
+      )
+    }
+  )
+  if (error) throw new Error(error)
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Automatic font direction' }).click()
+  const composer = new ComposerPage(page)
+  const font = composer.editor.locator('font')
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+  await expect(font).toHaveAttribute('dir', 'auto')
+  await expect(font).toHaveCSS('direction', 'rtl')
+  await font.click()
+  await font.evaluate((element) => {
+    const text = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode()
+    if (!text) throw new Error('font text missing')
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.collapse(true)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+  })
+  await page.keyboard.insertText('Alex ')
+  await expect(font).toHaveText('Alex שלום Alex')
+  await expect(font).toHaveCSS('direction', 'ltr')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  const savedDirection = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((row) => row.subject === 'Automatic font direction')
+    const document = new DOMParser().parseFromString(draft?.bodyHtml ?? '', 'text/html')
+    return document.querySelector('font')?.getAttribute('dir')
+  })
+  expect(savedDirection).toBe('auto')
+  await page.getByTestId('draft-row').filter({ hasText: 'Automatic font direction' }).click()
+  await expect(font).toHaveAttribute('dir', 'auto')
+  await expect(font).toHaveText('Alex שלום Alex')
+  await expect(font).toHaveCSS('direction', 'ltr')
+})
+
 test('keeps formatting edits made inside the saved Gmail signature', async ({ app, page }) => {
   await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
@@ -1685,6 +1733,7 @@ test('groups the Gmail signature separator without changing its saved position o
     return {
       text: draft.bodyText,
       prefixText: prefix?.textContent,
+      prefixStyle: prefix?.getAttribute('style'),
       prefixOutside: prefix?.parentElement === signature?.parentElement,
       singleLineBreak:
         prefix?.nextElementSibling?.tagName === 'BR' &&
@@ -1695,6 +1744,7 @@ test('groups the Gmail signature separator without changing its saved position o
   expect(saved.text).toContain('Draft from Gmail edited\n\n-- \nBest,\nAlex Rivera\nNorthstar')
   expect(saved).toMatchObject({
     prefixText: '-- ',
+    prefixStyle: null,
     prefixOutside: true,
     singleLineBreak: true,
     prefixCount: 1

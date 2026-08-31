@@ -8,6 +8,7 @@ import { editorConfig } from '../editorConfig'
 import { prepareHtmlForEditor, restoreOpaqueHtml } from '../preserve'
 import { rootLevelNodes } from '../rootNodes'
 import { serializeEditorState } from '../serialize'
+import { LegacyFontNode } from './LegacyFontNode'
 
 describe('legacy Gmail font import', () => {
   it('keeps nested font attributes, links, and text editable through HTML and JSON round trips', () => {
@@ -55,4 +56,47 @@ describe('legacy Gmail font import', () => {
     expect(prepared.issues).toContain('font[data-layout]')
     expect(restoreOpaqueHtml(prepared.html)).toBe(html)
   })
+
+  it.each(['auto', 'ltr', 'rtl', null])(
+    'preserves font direction %j through edits and repeated saves',
+    (direction) => {
+      let html = `<div dir="ltr"><font face="Arial"${direction ? ` dir="${direction}"` : ''}>שלום Alex</font></div>`
+      for (let roundTrip = 0; roundTrip < 3; roundTrip += 1) {
+        const prepared = prepareHtmlForEditor(html)
+        expect(prepared.issues).toEqual([])
+        const editor = createHeadlessEditor({
+          nodes: editorConfig.nodes,
+          onError(error) {
+            throw error
+          }
+        })
+        editor.update(
+          () => {
+            const document = new DOMParser().parseFromString(prepared.html, 'text/html')
+            $getRoot().append(...rootLevelNodes($generateNodesFromDOM(editor, document)))
+          },
+          { discrete: true }
+        )
+        // A later update clones the font node; both that clone and JSON must retain auto direction.
+        editor.update(
+          () => {
+            const font = $getRoot().getAllTextNodes()[0].getParentOrThrow()
+            expect(font).toBeInstanceOf(LegacyFontNode)
+            font.setStyle('margin-left: 2px')
+            const element = font.createDOM(editor._config, editor)
+            expect(font.getDOMSlot(element).element.getAttribute('dir')).toBe(direction)
+          },
+          { discrete: true }
+        )
+        const json = JSON.stringify(editor.getEditorState().toJSON())
+        expect(json).not.toContain('opaque-html')
+        editor.setEditorState(editor.parseEditorState(json))
+        const saved = serializeEditorState(editor.getEditorState(), editor)
+        const document = new DOMParser().parseFromString(saved.bodyHtml, 'text/html')
+        expect(document.querySelector('font')?.getAttribute('dir')).toBe(direction)
+        expect(saved.bodyText).toBe('שלום Alex')
+        html = saved.bodyHtml
+      }
+    }
+  )
 })

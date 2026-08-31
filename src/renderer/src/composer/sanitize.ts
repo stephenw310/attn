@@ -172,7 +172,7 @@ function purifier(): DOMPurify {
     outgoingDataHooked.add(outgoingPurifier)
     outgoingPurifier.addHook('uponSanitizeAttribute', (_node, data) => {
       const name = data.attrName.toLowerCase()
-      if (name === 'dir' && /^(?:ltr|rtl)$/i.test(data.attrValue)) data.forceKeepAttr = true
+      if (name === 'dir' && /^(?:ltr|rtl|auto)$/i.test(data.attrValue)) data.forceKeepAttr = true
       if (name === 'target' && (data.attrValue === '_blank' || data.attrValue === '_self')) {
         data.forceKeepAttr = true
       }
@@ -195,7 +195,7 @@ function purifier(): DOMPurify {
       }
       if (!isGmailSignature) element.removeAttribute('data-smartmail')
       const direction = element.getAttribute('dir')
-      if (direction && !/^(?:ltr|rtl)$/i.test(direction)) element.removeAttribute('dir')
+      if (direction && !/^(?:ltr|rtl|auto)$/i.test(direction)) element.removeAttribute('dir')
       const target = element.getAttribute('target')
       if (element.tagName.toLowerCase() !== 'a') {
         element.removeAttribute('rel')

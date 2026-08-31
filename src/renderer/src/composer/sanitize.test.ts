@@ -105,7 +105,7 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
 
   it('keeps legacy font typography without allowing handlers, resource styles, or attributes on other tags', () => {
     const html =
-      '<font face="Arial, sans-serif" color="#123456" size="+2" onclick="steal()" style="background-image:url(https://tracker.test/pixel)">Type</font>' +
+      '<font face="Arial, sans-serif" color="#123456" size="+2" dir="auto" onclick="steal()" style="background-image:url(https://tracker.test/pixel)">Type</font>' +
       '<span face="Arial" color="red" size="5">Plain</span><a href="javascript:steal()">Link</a>'
     for (const sanitized of [sanitizeDraftHtmlForImport(html), sanitizeOutgoingHtml(html)]) {
       const document = new DOMParser().parseFromString(sanitized, 'text/html')
@@ -113,6 +113,7 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
       expect(font?.getAttribute('face')).toBe('Arial, sans-serif')
       expect(font?.getAttribute('color')).toBe('#123456')
       expect(font?.getAttribute('size')).toBe('+2')
+      expect(font?.getAttribute('dir')).toBe('auto')
       expect(document.querySelector('span')?.attributes.length).toBe(0)
       expect(sanitized).not.toMatch(/onclick|javascript:|tracker\.test|background-image/)
     }

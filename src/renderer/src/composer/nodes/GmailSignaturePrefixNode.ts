@@ -33,11 +33,21 @@ export class GmailSignaturePrefixNode extends ElementNode {
         if (!isGmailSignaturePrefixClass(element.getAttribute('class'))) return null
         return {
           conversion: (source) => {
-            const node = new GmailSignaturePrefixNode().setStyle(
-              sanitizeComposerStyle(source.getAttribute('style'))
-            )
-            $setDirectionFromDOM(node, source as HTMLElement)
-            return { node }
+            const element = source as HTMLElement
+            const authoredStyle = element.getAttribute('style')
+            const node = new GmailSignaturePrefixNode().setStyle(sanitizeComposerStyle(authoredStyle))
+            $setDirectionFromDOM(node, element)
+            // Preserve the delimiter's trailing space while Lexical imports children.
+            // Capture the authored style first, then restore it after the temporary hint.
+            element.style.whiteSpace = 'pre-wrap'
+            return {
+              node,
+              after: (children) => {
+                if (authoredStyle === null) element.removeAttribute('style')
+                else element.setAttribute('style', authoredStyle)
+                return children
+              }
+            }
           },
           priority: 3
         }

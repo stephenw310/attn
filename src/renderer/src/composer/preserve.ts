@@ -409,11 +409,6 @@ function groupGmailSignaturePrefixes(document: Document): void {
     signature.prepend(prefix)
     lineBreak.remove()
   }
-  for (const prefix of document.querySelectorAll<HTMLElement>('span.gmail_signature_prefix')) {
-    // The trailing space in Gmail's "-- " delimiter is meaningful in plain-text mail.
-    // This hint is for Lexical's import whitespace walker, not an authored style.
-    prefix.style.whiteSpace = 'pre-wrap'
-  }
 }
 
 /** Replace only top-most unsupported regions so nested source survives as one exact unit. */
