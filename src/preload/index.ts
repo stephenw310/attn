@@ -41,6 +41,7 @@ import type {
 } from '../shared/outbox'
 import type { SearchResponse, ServerSearchResponse } from '../shared/searchQuery'
 import type { AccountSettingKey, AccountSettings, AppSettingKey, AppSettings } from '../shared/settings'
+import type { Snippet, SnippetSaveInput } from '../shared/snippets'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
@@ -106,6 +107,11 @@ const api = {
       key: K,
       value: AccountSettings[K]
     ): Promise<AccountSettings> => invoke(IPC_CHANNELS.settingsSetAccount, accountId, key, value)
+  },
+  snippets: {
+    list: (): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsList),
+    save: (input: SnippetSaveInput): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsSave, input),
+    remove: (id: string): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsDelete, id)
   },
   mail: {
     findThreadInView: (request: ThreadListRequest, threadId: string): Promise<ThreadPage> =>

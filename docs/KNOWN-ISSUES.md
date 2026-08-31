@@ -113,11 +113,3 @@ RFC 2047 encoding separately. The two encoders must agree, and no test asserts t
 
 `outbox/drafts.ts`, `outbox/mirror.ts`, `outbox/queue.ts`, `outbox/sender.ts`, and `outbox/draftSync.ts` all
 parse rows inline, and `draftSync.ts` alone does it four times. No shared row-to-object helper exists.
-
-### REF-5: `outbox.remote_updated_at` is written and never read *(review R10)*
-
-**Verified:** 2026-08-21
-
-Written in five places, read in none. Conflict resolution uses the freshly parsed `remote.updatedAt` and
-`remote_fingerprint` instead. Drop the column at the next schema bump rather than bumping the version for it
-alone.

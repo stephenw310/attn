@@ -131,6 +131,7 @@ export const COMMAND_SPECS = {
   'privacy.remoteImages.block': { title: 'Block remote images', context: 'global' },
   'privacy.remoteImages.load': { title: 'Load remote images', context: 'global' },
   'privacy.remoteImages.overrides': { title: 'Manage remote-image overrides…', context: 'global' },
+  'snippets.manage': { title: 'Manage snippets…', context: 'global' },
   'settings.undoSendDelay': { title: 'Set undo send delay…', context: 'global' },
   'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
   'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },
@@ -307,6 +308,7 @@ export const COMMAND_SPECS = {
   'composer.numbering': { title: 'Numbered list', context: 'composer' },
   'composer.quote': { title: 'Block quote', context: 'composer' },
   'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
+  'composer.snippets': { title: 'Insert snippet…', shortcut: 'Mod+;', context: 'composer' },
   'triage.archive': {
     title: 'Mark done',
     shortcut: 'e',
@@ -356,6 +358,7 @@ export type CommandId =
   | StaticCommandId
   | `split.goto:${string}`
   | `account.switch:${string}`
+  | `snippet.insert:${string}`
   // The e2e-only registration seam (cheat-sheet coverage); see installTestSeam.
   | `test:${string}`
 
@@ -438,6 +441,16 @@ export function createAccountSwitchCommand(
     title,
     ...(shortcut ? { shortcut } : {}),
     context: 'global',
+    run
+  }
+}
+
+/** Palette insertion for one snippet ("Snippet: intro", F8); composer-scoped. */
+export function createSnippetInsertCommand(snippetId: string, name: string, run: () => void): Command {
+  return {
+    id: `snippet.insert:${snippetId}`,
+    title: `Snippet: ${name}`,
+    context: 'composer',
     run
   }
 }

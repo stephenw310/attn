@@ -36,6 +36,7 @@ import type { MailAddress } from '../../../shared/address'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import { escapeHtmlText as escapeHtml } from '../../../shared/html'
+import { type Snippet, subjectAfterSnippetInsert } from '../../../shared/snippets'
 import type { ThemeAppearance } from '../../../shared/theme'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
@@ -53,6 +54,7 @@ import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
 import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
+import { SnippetsPlugin } from './SnippetsPlugin'
 import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
@@ -614,6 +616,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     prepareSnapshot
   )
   const notePendingRecipientChange = useCallback(() => updateFields({}), [updateFields])
+  // F8: a snippet's subject fills only an empty subject, never overwrites.
+  const subjectRef = useRef(subject)
+  subjectRef.current = subject
+  const handleSnippetInserted = useCallback(
+    (snippet: Snippet) => {
+      const next = subjectAfterSnippetInsert(subjectRef.current, snippet.subject)
+      if (next === subjectRef.current) return
+      setSubject(next)
+      updateFields({ subject: next })
+    },
+    [updateFields]
+  )
   const addAttachment = useCallback(
     (attachment: Draft['attachments'][number]) => {
       setAttachments((current) => {
@@ -1088,6 +1102,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 onError={onToast}
                 onPreservedContent={notePreservedContent}
               />
+              <SnippetsPlugin onInserted={handleSnippetInserted} />
               <InlineQuote
                 draftId={draft.id}
                 html={draft.quoteHtml}

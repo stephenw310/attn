@@ -1918,6 +1918,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         createCommand('privacy.remoteImages.block', () => updateAppSetting('remoteImagesBlocked', true)),
         createCommand('privacy.remoteImages.load', () => updateAppSetting('remoteImagesBlocked', false)),
         createCommand('privacy.remoteImages.overrides', () => openSettings('remoteImages')),
+        createCommand('snippets.manage', () => openSettings('snippets')),
         createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
         createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
         createCommand('settings.launchAtLogin', () =>

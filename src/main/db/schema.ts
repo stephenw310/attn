@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 22
+export const CURRENT_SCHEMA_VERSION = 23
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -212,6 +212,21 @@ CREATE TABLE contacts (
 );
 CREATE INDEX idx_contacts_name_folded ON contacts (account_id, name_folded);
 
+-- App-global reusable text blocks (F8). account_id keeps the D4 shape; v1
+-- writes the app sentinel so one snippet set serves every signed-in account.
+CREATE TABLE snippets (
+  account_id TEXT NOT NULL,
+  id         TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  trigger    TEXT,
+  subject    TEXT,
+  body_html  TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, id)
+);
+CREATE UNIQUE INDEX idx_snippets_trigger
+  ON snippets (account_id, trigger) WHERE trigger IS NOT NULL;
+
 CREATE TABLE outbox (
   id                TEXT PRIMARY KEY,
   account_id        TEXT NOT NULL,
@@ -237,7 +252,6 @@ CREATE TABLE outbox (
   local_revision    INTEGER NOT NULL DEFAULT 0,
   mirror_revision   INTEGER NOT NULL DEFAULT 0,
   default_signature_fingerprint TEXT,
-  remote_updated_at INTEGER,
   remote_fingerprint TEXT,
   rfc_message_id   TEXT,
   send_at          INTEGER,

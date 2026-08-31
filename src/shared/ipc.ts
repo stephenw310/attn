@@ -29,6 +29,7 @@ import type { PendingFocusTarget } from './notifications'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
 import type { SearchResponse, ServerSearchResponse } from './searchQuery'
 import type { AccountSettingKey, AccountSettings, AppSettingKey, AppSettings } from './settings'
+import type { Snippet, SnippetSaveInput } from './snippets'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
@@ -53,6 +54,9 @@ export const IPC_CHANNELS = {
   settingsSetAccount: 'settings:setAccount',
   settingsGetCommandUsage: 'settings:getCommandUsage',
   settingsSetCommandUsage: 'settings:setCommandUsage',
+  snippetsList: 'snippets:list',
+  snippetsSave: 'snippets:save',
+  snippetsDelete: 'snippets:delete',
   contactsSearch: 'contacts:search',
   draftSave: 'draft:save',
   draftGet: 'draft:get',
@@ -180,6 +184,11 @@ export interface InvokeChannels {
     args: [accountId: string, usage: CommandUsage]
     result: CommandUsage
   }
+  // F8 snippets are app-global: no account id rides these calls, and each
+  // mutation returns the fresh list so callers never hold a stale catalog.
+  [IPC_CHANNELS.snippetsList]: { args: []; result: Snippet[] }
+  [IPC_CHANNELS.snippetsSave]: { args: [input: SnippetSaveInput]; result: Snippet[] }
+  [IPC_CHANNELS.snippetsDelete]: { args: [id: string]; result: Snippet[] }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {
     args: [draft: DraftSaveInput]

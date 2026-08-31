@@ -54,3 +54,41 @@ it('applies the documented v21 upgrade with the current mailbox keys and preserv
     fresh.close()
   }
 })
+
+it('applies the documented T34 v22 → 23 upgrade: snippets added, outbox.remote_updated_at dropped', () => {
+  const db = new Database(':memory:')
+  const fresh = openDatabase(':memory:')
+  try {
+    // Only the v22 table the procedure touches; the row proves the drop keeps
+    // every other column's data.
+    db.exec(`
+      CREATE TABLE outbox (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+        remote_updated_at INTEGER, remote_fingerprint TEXT
+      );
+      INSERT INTO outbox VALUES ('o1', 'account', 99, 'fp');
+      PRAGMA user_version = 22;
+    `)
+    const notes = readFileSync(new URL('../../../docs/M4-PLAN.md', import.meta.url), 'utf8')
+    const section = notes.split('## T34: snippets')[1]
+    const ddl = section?.match(/```sql\n([\s\S]*?)```/)?.[1]
+    expect(ddl).toBeDefined()
+    // The documented block carries its own BEGIN IMMEDIATE … COMMIT.
+    db.exec(ddl as string)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('quick_check', { simple: true })).toBe('ok')
+    expect(db.pragma('table_info(snippets)')).toEqual(fresh.pragma('table_info(snippets)'))
+    expect(db.pragma('index_xinfo(idx_snippets_trigger)')).toEqual(
+      fresh.pragma('index_xinfo(idx_snippets_trigger)')
+    )
+    const outboxColumns = (db.pragma('table_info(outbox)') as { name: string }[]).map((row) => row.name)
+    expect(outboxColumns).not.toContain('remote_updated_at')
+    expect(db.prepare('SELECT * FROM outbox').all()).toEqual([
+      { id: 'o1', account_id: 'account', remote_fingerprint: 'fp' }
+    ])
+  } finally {
+    db.close()
+    fresh.close()
+  }
+})

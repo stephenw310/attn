@@ -98,6 +98,7 @@ import {
   writeAccountSetting,
   writeSetting
 } from '../settings'
+import { deleteSnippet, isSnippetSaveInput, listSnippets, saveSnippet } from '../snippets'
 import {
   deleteSplit,
   hasSplitSetup,
@@ -468,6 +469,15 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const sanitized = sanitizeCommandUsage(usage)
     writeAccountSetting(context.db, account, 'commandPaletteUsage', JSON.stringify(sanitized))
     return sanitized
+  })
+  handle(IPC_CHANNELS.snippetsList, () => listSnippets(context.db))
+  handle(IPC_CHANNELS.snippetsSave, (_event, input) => {
+    if (!isSnippetSaveInput(input)) throw new Error('invalid snippet')
+    return saveSnippet(context.db, input)
+  })
+  handle(IPC_CHANNELS.snippetsDelete, (_event, id) => {
+    if (!nonEmptyString(id)) throw new Error('invalid snippet id')
+    return deleteSnippet(context.db, id)
   })
   handle(IPC_CHANNELS.draftSave, (_event, draft) => {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')

@@ -368,8 +368,8 @@ function writeRemoteDraft(
        id, account_id, gmail_draft_id, gmail_message_id, state, kind, to_json, cc_json, bcc_json,
        subject, body_html, body_text, attachments_json, thread_id, source_message_id, in_reply_to,
        references_json, quote_html, quote_text, created_at, updated_at, local_revision, mirror_revision,
-       remote_updated_at, remote_fingerprint
-     ) VALUES (?, ?, ?, ?, 'drafted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       remote_fingerprint
+     ) VALUES (?, ?, ?, ?, 'drafted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        gmail_draft_id = excluded.gmail_draft_id,
        gmail_message_id = excluded.gmail_message_id,
@@ -380,8 +380,7 @@ function writeRemoteDraft(
        in_reply_to = excluded.in_reply_to, references_json = excluded.references_json,
        quote_html = excluded.quote_html, quote_text = excluded.quote_text,
        updated_at = excluded.updated_at, local_revision = excluded.local_revision,
-       mirror_revision = excluded.mirror_revision, remote_updated_at = excluded.remote_updated_at,
-       remote_fingerprint = excluded.remote_fingerprint`
+       mirror_revision = excluded.mirror_revision, remote_fingerprint = excluded.remote_fingerprint`
   ).run(
     id,
     accountId,
@@ -405,7 +404,6 @@ function writeRemoteDraft(
     remote.updatedAt,
     revision,
     revision,
-    remote.updatedAt,
     remote.fingerprint
   )
 }
@@ -512,17 +510,9 @@ export async function reconcileRemoteDraft(
     const attachments = refreshRemoteAttachmentLocators(local.attachments_json, remote.storedAttachments)
     db.prepare(
       `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?, mirror_revision = local_revision,
-       attachments_json = ?, remote_updated_at = ?, remote_fingerprint = ?
+       attachments_json = ?, remote_fingerprint = ?
        WHERE account_id = ? AND id = ?`
-    ).run(
-      remote.gmailDraftId,
-      remote.gmailMessageId,
-      attachments,
-      remote.updatedAt,
-      remote.fingerprint,
-      accountId,
-      local.id
-    )
+    ).run(remote.gmailDraftId, remote.gmailMessageId, attachments, remote.fingerprint, accountId, local.id)
     return 'local'
   }
   const decision = planDraftConflict({
@@ -537,9 +527,9 @@ export async function reconcileRemoteDraft(
   else if (decision === 'local' && local.remote_fingerprint === remote.fingerprint) {
     const attachments = refreshRemoteAttachmentLocators(local.attachments_json, remote.storedAttachments)
     db.prepare(
-      `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?, attachments_json = ?, remote_updated_at = ?
+      `UPDATE outbox SET gmail_draft_id = ?, gmail_message_id = ?, attachments_json = ?
        WHERE account_id = ? AND id = ?`
-    ).run(remote.gmailDraftId, remote.gmailMessageId, attachments, remote.updatedAt, accountId, local.id)
+    ).run(remote.gmailDraftId, remote.gmailMessageId, attachments, accountId, local.id)
   }
   return decision
 }
@@ -626,7 +616,7 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
     if (row.state === 'composing' || row.local_revision > row.mirror_revision) {
       db.prepare(
         `UPDATE outbox SET gmail_draft_id = NULL, gmail_message_id = NULL, mirror_revision = 0,
-         remote_fingerprint = NULL, remote_updated_at = NULL WHERE account_id = ? AND id = ?`
+         remote_fingerprint = NULL WHERE account_id = ? AND id = ?`
       ).run(accountId, row.id)
     } else {
       db.prepare('DELETE FROM outbox WHERE account_id = ? AND id = ?').run(accountId, row.id)

@@ -19,6 +19,7 @@ import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { Kbd } from './Kbd'
+import { SnippetManager } from './SnippetManager'
 
 /** A control the palette can deep-link to (`Set undo send delay…` etc.). */
 export type SettingsControl =
@@ -27,6 +28,7 @@ export type SettingsControl =
   | 'undoSendDelay'
   | 'autoAdvance'
   | 'attnFooter'
+  | 'snippets'
   | 'remoteImages'
   | 'launchAtLogin'
   | 'menuBarIcon'
@@ -493,6 +495,13 @@ export function SettingsView({
                 className="size-4 cursor-pointer accent-accent"
               />
             </label>
+          </section>
+
+          <section data-testid="settings-snippets" aria-label="Snippets">
+            <h2 className={SECTION_TITLE}>Snippets</h2>
+            <div className="mt-2">
+              <SnippetManager onToast={onToast} />
+            </div>
           </section>
 
           <section data-testid="settings-notifications" aria-label="Notifications">
