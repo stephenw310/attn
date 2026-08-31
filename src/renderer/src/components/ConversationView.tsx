@@ -249,7 +249,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         <span
           data-testid="message-cursor"
           aria-hidden
-          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-[3px] rounded-full bg-accent"
+          className={`pointer-events-none absolute left-0 z-10 w-0.5 bg-accent/40 ${inlineComposer && inlineComposerSourceMessageId === message.id ? 'top-1.5 bottom-0 rounded-t-full' : 'inset-y-1.5 rounded-full'}`}
         />
       )}
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
@@ -276,7 +276,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           message={message}
           account={account}
           onToast={onToast}
-          onReply={onReply ? replyToMessage : undefined}
           active={activeMessageId === message.id}
           hasInlineComposer={Boolean(inlineComposer && inlineComposerSourceMessageId === message.id)}
           bodyHydrationMessage={bodyHydrationStatusMessage(
@@ -309,7 +308,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         {sourceIndex >= 0 && (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 left-0 z-10 w-[3px] rounded-b-full bg-accent"
+            className="pointer-events-none absolute top-0 bottom-1.5 left-0 z-10 w-0.5 rounded-b-full bg-accent/40"
           />
         )}
         {inlineComposer}

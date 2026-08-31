@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
 import { normalizeEmailKey } from '../../../shared/address'
-import type { DraftKind } from '../../../shared/drafts'
 import type { MailAddress, MessageAttachment, MessageRecipients } from '../../../shared/mail'
 import { formatBytes } from '../formatBytes'
 import { MessageBody } from '../MessageBody'
@@ -90,7 +89,6 @@ interface MessageCardProps {
   trimExpanded?: boolean
   onToggleTrim: () => void
   bodyHydrationMessage?: string
-  onReply?: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
 export function MessageCard(props: MessageCardProps): React.JSX.Element {
@@ -105,8 +103,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     onToggleCollapsed,
     trimExpanded = false,
     onToggleTrim,
-    bodyHydrationMessage,
-    onReply
+    bodyHydrationMessage
   } = props
   const { appearance } = useTheme()
   const [viewOriginal, setViewOriginal] = useState(false)
@@ -148,7 +145,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className={`border ${hasInlineComposer ? 'rounded-t-[10px] border-accent/40 border-b-0 bg-raised' : active ? 'rounded-sm border-accent/40 bg-active' : 'rounded-sm border-edge bg-ground'}`}
+        className={`border border-edge ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-sm bg-active' : 'rounded-sm bg-ground'}`}
       >
         <button
           type="button"
@@ -180,7 +177,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className={`border px-5 py-4 ${hasInlineComposer ? 'rounded-t-[10px] border-accent/40 border-b-0 bg-raised' : active ? 'rounded-[10px] border-accent/40 bg-active/50' : 'rounded-[10px] border-edge bg-ground'}`}
+      className={`border border-edge px-5 py-4 ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-[10px] bg-active/50' : 'rounded-[10px] bg-ground'}`}
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
@@ -297,35 +294,6 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           </div>
         )}
       </div>
-      {!message.pending && !hasInlineComposer && (
-        <div data-testid="message-actions" className="mt-4 flex items-center gap-1 border-t border-edge pt-2">
-          {(
-            [
-              ['reply', 'Reply'],
-              ['replyAll', 'Reply all'],
-              ['forward', 'Forward']
-            ] as const
-          ).map(([kind, label]) => (
-            <button
-              key={kind}
-              type="button"
-              data-testid={`message-${kind}`}
-              disabled={!onReply}
-              title={
-                onReply
-                  ? kind === 'forward'
-                    ? 'Forward this message'
-                    : `${label} to this message`
-                  : 'Close the current draft to respond to another message'
-              }
-              onClick={() => onReply?.(kind, message.id)}
-              className="cursor-pointer rounded px-2.5 py-1 text-xs font-medium text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-40"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
     </article>
   )
 }

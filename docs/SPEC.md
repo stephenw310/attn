@@ -374,14 +374,14 @@ Quoted history sits behind a compact inline
 `...` control. Text-like source mail inherits the composer surface instead of introducing a separate panel,
 normalizing sender-supplied dark foreground colours for contrast, while presentation HTML retains the same
 light document canvas and safe HTML structure used by the reader.
-Each expanded message offers **Reply**, **Reply all**, and **Forward** for that message. The palette exposes
-the same actions as **Reply to this message**, **Reply all to this message**, and **Forward this message**,
+Message cards have no reply-action footer. A muted, rounded cursor marks the selection without an accent outline.
+The palette exposes **Reply to this message**, **Reply all to this message**, and **Forward this message**,
 using the same selected message as the reader shortcuts. From the list, reply and forward keep their default source selection.
 An explicit message action uses that message's recipients, quote, attachments, and threading headers, even
 after a forward and a colleague's response. Replying to a sent message addresses its original recipients.
 Draft reuse matches the source message as well as the thread and reply/forward kind. Upgrading an existing
 reply to Reply all keeps its original source. Close the current composer before starting another message's
-draft; those actions are disabled while composing, so unsaved content cannot be replaced.
+draft; those commands are unavailable while composing, so unsaved content cannot be replaced.
 Opening a conversation with an existing thread-bound draft reopens its newest draft beneath its saved source,
 selecting and expanding that message. If the source is no longer available, the draft appears at the end of
 the conversation. Loading or refreshing the conversation never remounts the composer or loses unsaved edits.

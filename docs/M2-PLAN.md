@@ -1057,8 +1057,9 @@ it cannot be inferred reliably from old messages or another account's signature.
 
 ## Individual-message responses and reply formatting follow-up
 
-Expanded messages expose Reply, Reply all, and Forward. Matching palette commands target the active message
-selected by pointer or `N`/`P`. Explicit source ids cross the typed draft IPC boundary and scope draft reuse,
+Message cards omit repeated reply footers and use a muted, rounded selection cursor with neutral borders.
+Reply, Reply all, and Forward palette commands target the message selected by pointer or `N`/`P`.
+Explicit source ids cross the typed draft IPC boundary and scope draft reuse,
 recipients, quote content, attachment selection, and reply headers. Reply all upgrades keep the draft's
 original source. Reader shortcuts `R`/`A`/`Enter`/`F` use the visible message cursor, which moves with `N`/`P`
 or a click. Replying expands that message and attaches the composer directly beneath it, before any later
@@ -1071,7 +1072,7 @@ into the editable body. It preserves those lines and leaves authored content bel
 `e2e/message-replies.spec.ts` covers a customer exchange followed by an internal forward, separate drafts,
 recipient and header isolation, source attachments, and palette targeting. The composer regression covers
 signature and quote collapse after importing, editing, and reopening a Gmail reply with trailing empty lines.
-Screenshots are `message-reply-actions.png`, `message-cursor.png`, `message-inline-reply.png`,
+Screenshots are `message-selected-expanded.png`, `message-cursor.png`, `message-inline-reply.png`,
 `message-inline-reply-light.png`, and `composer-reply-empty-lines.png`.
 
 ## Accepted-risk register (decisions made by this plan — don't relitigate ad hoc)

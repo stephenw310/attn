@@ -24,6 +24,7 @@ test('the visible message cursor targets reply, reply all, and forward shortcuts
   await page.getByTestId('thread-row').first().click()
   const messages = page.getByTestId('conversation-message')
   await expect(messages.last().getByTestId('message-cursor')).toBeVisible()
+  await expect(page.getByTestId('message-actions')).toHaveCount(0)
   await page.keyboard.press('p')
   await page.keyboard.press('p')
   await expect(messages.first().getByTestId('message-cursor')).toBeVisible()
@@ -126,10 +127,13 @@ test('replies to an earlier message without reusing a colleague draft or quoting
   await customer.getByTestId('older-message-toggle').click()
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
-  const path = join(dir, 'message-reply-actions.png')
+  const path = join(dir, 'message-selected-expanded.png')
   await page.screenshot({ path })
-  await testInfo.attach('message reply actions', { path, contentType: 'image/png' })
-  await customer.getByTestId('message-reply').click()
+  await testInfo.attach('selected expanded message without a reply footer', {
+    path,
+    contentType: 'image/png'
+  })
+  await page.keyboard.press('r')
   composer = new ComposerPage(page)
   await composer.expectRecipients(['jordan+support@example.com'])
   await expectComposerAfter(page, 'm-customer')
@@ -137,8 +141,7 @@ test('replies to an earlier message without reusing a colleague draft or quoting
   expect(customerDraftId).not.toBe(colleagueDraftId)
   await composer.typeBody('Public answer to Jordan')
   await composer.expectSaved()
-  await expect(customer.getByTestId('message-actions')).toHaveCount(0)
-  await expect(page.getByTestId('message-card').last().getByTestId('message-forward')).toBeDisabled()
+  await expect(page.getByTestId('message-actions')).toHaveCount(0)
   const saved = await page.evaluate(async (id) => window.attn.draft.get(id ?? ''), customerDraftId)
   expect(saved?.sourceMessageId).toBe('m-customer')
   expect(saved?.inReplyTo).toBe('<customer@example.com>')
@@ -166,7 +169,7 @@ test('replies to an earlier message without reusing a colleague draft or quoting
   await page.getByTestId('composer-close').click()
   await expect(composer.root).toHaveCount(0)
 
-  await customer.getByTestId('message-forward').click()
+  await page.keyboard.press('f')
   await expect(composer.root).toHaveAttribute('data-draft-kind', 'forward')
   await composer.expectRecipients([])
   await expect(composer.attachmentChips).toHaveCount(1)
@@ -247,10 +250,7 @@ test.describe('revealed Trash messages', () => {
   test('can reply to a revealed message without changing its Trash label', async ({ page }) => {
     await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
     await page.getByTestId('trashed-message-reveal').click()
-    const trashed = page
-      .getByTestId('message-card')
-      .filter({ hasText: 'This deleted reply belongs only in Trash.' })
-    await trashed.getByTestId('message-reply').click()
+    await page.keyboard.press('r')
     const composer = new ComposerPage(page)
     await composer.expectRecipients(['maya@example.com'])
     const draft = await page.evaluate(
