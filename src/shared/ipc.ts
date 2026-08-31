@@ -39,6 +39,7 @@ import type {
   SplitThreadLocation
 } from './splits'
 import type { ThemePreference } from './theme'
+import type { UpdateState } from './update'
 
 export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',
@@ -87,6 +88,9 @@ export const IPC_CHANNELS = {
   outboxListPending: 'outbox:listPending',
   outboxChanged: 'outbox:changed',
   outboxProgress: 'outbox:progress',
+  updateGetState: 'update:getState',
+  updateRestart: 'update:restart',
+  updateState: 'update:state',
   syncGetState: 'sync:getState',
   syncGetInboxReady: 'sync:getInboxReady',
   syncRetry: 'sync:retry',
@@ -261,6 +265,10 @@ export interface InvokeChannels {
   [IPC_CHANNELS.outboxUndoSend]: { args: [outboxId: string]; result: ReopenOutboxResult }
   [IPC_CHANNELS.outboxReopen]: { args: [outboxId: string]; result: ReopenOutboxResult }
   [IPC_CHANNELS.outboxListPending]: { args: []; result: OutboxItem[] }
+  // T39 auto-update: main-owned; a personal, dev, or seeded build answers
+  // idle and restart resolves false — there is no updater to talk to.
+  [IPC_CHANNELS.updateGetState]: { args: []; result: UpdateState }
+  [IPC_CHANNELS.updateRestart]: { args: []; result: boolean }
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncGetInboxReady]: { args: []; result: boolean }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
@@ -349,6 +357,7 @@ export interface BroadcastChannels {
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
   [IPC_CHANNELS.accountsStatusChanged]: AccountSyncStatus[]
+  [IPC_CHANNELS.updateState]: UpdateState
   [IPC_CHANNELS.syncState]: SyncState
 }
 
@@ -365,6 +374,7 @@ const BROADCAST_CHANNELS = {
   [IPC_CHANNELS.mailBodyHydrationFailed]: true,
   [IPC_CHANNELS.mailFocusThreadAvailable]: true,
   [IPC_CHANNELS.accountsStatusChanged]: true,
+  [IPC_CHANNELS.updateState]: true,
   [IPC_CHANNELS.syncState]: true
 } satisfies Record<BroadcastChannel, true>
 

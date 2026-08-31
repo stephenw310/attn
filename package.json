@@ -2,7 +2,7 @@
   "name": "attn",
   "productName": "Attn",
   "version": "0.0.1",
-  "description": "Attn \u2014 keyboard-first, local-first desktop email client for macOS and Windows",
+  "description": "Attn — keyboard-first, local-first desktop email client for macOS and Windows",
   "author": "Attn contributors",
   "homepage": "https://github.com/stephenw310/attn",
   "repository": {
@@ -25,10 +25,11 @@
     "e2e:perf": "npm run build && node scripts/generate-perf-seed.mjs && node scripts/generate-perf-seed.mjs --messages=50000 --second-account=0 --output=e2e/.artifacts/perf-search-seed.json && node scripts/run-e2e.mjs --perf --grep @perf --grep-invert @perfscale",
     "e2e:perf:only": "node scripts/generate-perf-seed.mjs && node scripts/generate-perf-seed.mjs --messages=50000 --second-account=0 --output=e2e/.artifacts/perf-search-seed.json && node scripts/run-e2e.mjs --perf --grep @perf --grep-invert @perfscale",
     "verify": "npm run typecheck && npx biome ci . && npm run test:unit && npm run e2e",
-    "package:dir": "npm run package:clean && npm run build && electron-builder --dir && npm run package:verify",
-    "package:mac": "npm run package:clean && npm run build && electron-builder --mac && npm run package:verify",
-    "package:mac:all": "npm run package:clean && npm run build && electron-builder --mac --arm64 --x64 && npm run package:verify",
-    "package:win": "npm run package:clean && npm run build && electron-builder --win && npm run package:verify",
+    "package:dir": "npm run package:clean && npm run package:metadata && npm run build && electron-builder --dir && npm run package:verify",
+    "package:mac": "npm run package:clean && npm run package:metadata && npm run build && electron-builder --mac && npm run package:verify",
+    "package:mac:all": "npm run package:clean && npm run package:metadata && npm run build && electron-builder --mac --arm64 --x64 && npm run package:verify",
+    "package:win": "npm run package:clean && npm run package:metadata && npm run build && electron-builder --win && npm run package:verify",
+    "package:metadata": "node scripts/write-distribution-metadata.mjs",
     "package:clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "package:verify": "node scripts/verify-package.mjs",
     "lint:fix": "biome check --write .",
@@ -79,6 +80,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "better-sqlite3": "^13.0.3",
+    "electron-updater": "^6.8.9",
     "jsdom": "^28.1.0",
     "parse5": "^8.0.1"
   }

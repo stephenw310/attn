@@ -51,6 +51,7 @@ import type {
   SplitThreadLocation
 } from '../shared/splits'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
+import type { UpdateState } from '../shared/update'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
 const THEME_ARGUMENT_PREFIX = '--attn-theme='
@@ -334,6 +335,15 @@ const api = {
       const listener = (_event: unknown, progress: OutboxProgress | null): void => cb(progress)
       ipcRenderer.on(IPC_CHANNELS.outboxProgress, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.outboxProgress, listener)
+    }
+  },
+  update: {
+    getState: (): Promise<UpdateState> => invoke(IPC_CHANNELS.updateGetState),
+    restart: (): Promise<boolean> => invoke(IPC_CHANNELS.updateRestart),
+    onState: (cb: (state: UpdateState) => void): (() => void) => {
+      const listener = (_event: unknown, state: UpdateState): void => cb(state)
+      ipcRenderer.on(IPC_CHANNELS.updateState, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.updateState, listener)
     }
   },
   sync: {

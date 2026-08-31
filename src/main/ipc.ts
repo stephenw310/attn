@@ -12,6 +12,7 @@ import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHAN
 import type { PendingFocusTarget } from '../shared/notifications'
 import { type AppSettingUpdate, validateAppSettingUpdate } from '../shared/settings'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
+import type { UpdateState } from '../shared/update'
 import type { ServiceSupervisor } from './service/supervisor'
 
 type Handler<K extends InvokeChannel> = (
@@ -41,6 +42,11 @@ export interface IpcContext {
   unregisterMailFrame: (nonce: string) => void
   /** OS-side effects of a persisted settings write (login item, menu bar). */
   applySettingEffects: (update: AppSettingUpdate) => void
+  /** T39 auto-update: absent updater answers idle / false. */
+  update: {
+    getState: () => UpdateState
+    restart: () => Promise<boolean>
+  }
   /** T36 AI writing: key custody, gating, and streaming live in main. */
   ai: {
     getSettings: () => Promise<AiSettings>
@@ -75,8 +81,12 @@ export function registerIpc(context: IpcContext): () => void {
     IPC_CHANNELS.aiSetKey,
     IPC_CHANNELS.aiDeleteKey,
     IPC_CHANNELS.aiGenerate,
-    IPC_CHANNELS.aiCancel
+    IPC_CHANNELS.aiCancel,
+    IPC_CHANNELS.updateGetState,
+    IPC_CHANNELS.updateRestart
   ])
+  handle(IPC_CHANNELS.updateGetState, () => context.update.getState())
+  handle(IPC_CHANNELS.updateRestart, () => context.update.restart())
   handle(IPC_CHANNELS.aiGetSettings, () => context.ai.getSettings())
   handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => context.ai.setSetting(key, value))
   handle(IPC_CHANNELS.aiSetKey, (_event, key) => {

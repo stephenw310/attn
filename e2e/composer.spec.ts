@@ -713,15 +713,19 @@ test('renders coarse attachment upload progress in the global toast', async ({ a
     )
 
   // A real upload re-broadcasts progress continuously; this synthetic single
-  // push can land in a renderer re-subscribe gap while splits settle, so the
-  // idempotent push retries until the subscription has it.
+  // push can land in a renderer re-subscribe gap while splits settle, or be
+  // wiped by the boot-time account remount right after rendering. Both
+  // assertions ride the same retry so a push must survive into a settled
+  // tree before the test moves on.
   await expect(async () => {
     await sendProgress()
     await expect(page.getByTestId('toast')).toContainText('Sending attachments… 1 of 2', {
       timeout: 1_000
     })
+    await expect(page.getByTestId('outbox-progress')).toHaveAttribute('data-completed-attachments', '1', {
+      timeout: 500
+    })
   }).toPass({ timeout: 15_000 })
-  await expect(page.getByTestId('outbox-progress')).toHaveAttribute('data-completed-attachments', '1')
   await app.evaluate(
     ({ BrowserWindow }, payload) => {
       for (const window of BrowserWindow.getAllWindows()) {

@@ -525,6 +525,20 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
     activeComposerDraftIdRef.current = composerDraft?.id ?? null
   }, [composerDraft?.id])
 
+  // T39: a ready update surfaces once as a quiet toast; the palette command
+  // applies it through the awaited shutdown, and nothing forces a restart.
+  const updateToastedRef = useRef<string | null>(null)
+  useEffect(
+    () =>
+      window.attn?.update.onState((state) => {
+        if (state.phase !== 'ready' || state.readyVersion === null) return
+        if (updateToastedRef.current === state.readyVersion) return
+        updateToastedRef.current = state.readyVersion
+        showToast(`Update ${state.readyVersion} ready — it applies on quit, or Restart to update`)
+      }),
+    [showToast]
+  )
+
   // T37 AI reply drafting: one Inbox-owned command serves the reader and the
   // composer. An invocation parks in the pending ref until the (possibly just
   // opened) reply composer's plugin claims it — claiming is one-shot, so a
@@ -2008,7 +2022,15 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
           updateAppSetting('notificationsPausedUntil', tomorrowStart())
         ),
         createCommand('notifications.resume', () => updateAppSetting('notificationsPausedUntil', null)),
-        createCommand('cheatsheet.open', openCheatSheet)
+        createCommand('cheatsheet.open', openCheatSheet),
+        createCommand('update.restart', () => {
+          void window.attn?.update
+            .restart()
+            .then((applying) => {
+              if (!applying) showToast('No update is ready yet')
+            })
+            .catch(() => {})
+        })
       ]),
     [openCheatSheet, openSettings, requestAiDraft, showToast, updateAccountSetting, updateAppSetting]
   )

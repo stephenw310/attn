@@ -92,6 +92,7 @@ describe('command catalog', () => {
       'notifications.pauseHour',
       'notifications.pauseTomorrow',
       'notifications.resume',
+      'update.restart',
       'cheatsheet.open',
       'theme.system',
       'theme.dispatch-dark',

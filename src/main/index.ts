@@ -4,10 +4,12 @@ import { app, BrowserWindow, nativeTheme, powerMonitor, safeStorage, shell } fro
 import appIcon from '../../resources/icon.png?asset'
 import { type AiSettings, validateAiSettingUpdate } from '../shared/ai'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
+import { shouldConstructUpdater } from '../shared/distribution'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { AppSettingUpdate } from '../shared/settings'
 import type { ThemePreference } from '../shared/theme'
+import { UPDATE_STATE_IDLE } from '../shared/update'
 import { AiKeyStore } from './ai/keyStore'
 import { AiManager } from './ai/manager'
 import { oauthConfigSearchDirs } from './auth/configPaths'
@@ -23,6 +25,7 @@ import {
   showMainWindow
 } from './background'
 import { applyLoginItemSetting } from './backgroundSettings'
+import { CURRENT_SCHEMA_VERSION } from './db/schema'
 import { registerIpc } from './ipc'
 import { acknowledgePendingFocus, MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import {
@@ -39,6 +42,9 @@ import {
 } from './service/protocol'
 import { ServiceSupervisor } from './service/supervisor'
 import { TestSeams } from './testIpc'
+import { readDistributionMetadata } from './update/distribution'
+import { createElectronUpdaterFeed } from './update/electronUpdaterFeed'
+import { AppUpdater } from './update/updater'
 import { titleBarOverlayOptions, windowChromeOptions } from './windowChrome'
 
 const testUserData = process.env.ATTN_TEST_USER_DATA
@@ -75,6 +81,11 @@ let remoteImagePolicy: RemoteImagePolicy = DEFAULT_REMOTE_IMAGE_POLICY
 const mailFrames = new MailFrameRegistry()
 // T36: AI key custody and the streaming LLM transport live in main (F17/D2).
 let aiManager: AiManager | null = null
+// T39: constructed only for packaged release builds outside the test seam.
+let appUpdater: AppUpdater | null = null
+// The opened database's schema, from the utility's ready handshake: updates
+// must match it exactly, and a manual dogfood upgrade would change it.
+let openedSchemaVersion: number | null = null
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
@@ -468,6 +479,7 @@ async function initialize(): Promise<void> {
   activeAccountId = ready.activeAccountId
   ownedService.noteActiveAccount(activeAccountId)
   ownedNotifier.setAccounts(authStatus().accounts)
+  openedSchemaVersion = ready.schemaVersion
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
   themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
@@ -523,6 +535,20 @@ async function initialize(): Promise<void> {
     ...(await ownedService.invoke(IPC_CHANNELS.aiGetSettings)),
     keyPresent: aiKeyStore.present()
   })
+  // T39: only an explicit, packaged release build constructs an updater —
+  // personal, dev, and seeded builds make zero feed requests (§6 Packaging).
+  const distribution = app.isPackaged ? readDistributionMetadata(process.resourcesPath) : null
+  if (shouldConstructUpdater(distribution, app.isPackaged, Boolean(testUserData))) {
+    appUpdater = new AppUpdater({
+      feed: createElectronUpdaterFeed(distribution),
+      currentVersion: app.getVersion(),
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      localSchemaVersion: () => openedSchemaVersion,
+      onStateChange: (state) => broadcast(IPC_CHANNELS.updateState, state),
+      shutdown: teardown
+    })
+    appUpdater.start()
+  }
   stopIpc = registerIpc({
     service: ownedService,
     authStatus,
@@ -533,6 +559,10 @@ async function initialize(): Promise<void> {
     takePendingFocus: takePendingFocusTarget,
     acknowledgePendingFocus: acknowledgeFocusTarget,
     applySettingEffects,
+    update: {
+      getState: () => appUpdater?.state() ?? UPDATE_STATE_IDLE,
+      restart: () => appUpdater?.restartToApply() ?? Promise.resolve(false)
+    },
     ai: {
       getSettings: aiSettingsSnapshot,
       setSetting: async (key, value) => {
@@ -589,6 +619,8 @@ function teardown(): Promise<void> {
 }
 
 async function teardownOwnedResources(): Promise<void> {
+  appUpdater?.stop()
+  appUpdater = null
   stopIpc?.()
   stopIpc = null
   powerMonitor.removeListener('resume', refreshSchedulersAfterResume)
