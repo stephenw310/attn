@@ -1,10 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
-import { openDatabase } from '../db'
-import { readAccountSetting, writeAccountSetting } from '../settings'
-import { closeDraft, listDrafts, requestDraftMirror, saveDraft } from './drafts'
 import { ATTN_SIGNATURE_LINE } from '../../shared/settings'
-import { writeAccountSetting as writeSetting } from '../settings'
+import { openDatabase } from '../db'
+import { readAccountSetting, writeAccountSetting, writeAccountSetting as writeSetting } from '../settings'
+import { closeDraft, listDrafts, requestDraftMirror, saveDraft } from './drafts'
 import {
   ATTN_SIGNATURE_SETTING,
   cachePrimarySendAs,
@@ -355,29 +354,19 @@ describe('optional "Sent with Attn" footer (F6/T32B)', () => {
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
       enable(db)
       const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
-      expect(hasOnlyDefaultPrimarySignature(prepared.draft, prepared.defaultSignatureFingerprint)).toBe(
-        true
-      )
+      expect(hasOnlyDefaultPrimarySignature(prepared.draft, prepared.defaultSignatureFingerprint)).toBe(true)
       // Lexical-shaped normalization (rgb color, span layout) still matches.
       const normalized = {
         ...prepared.draft,
-        bodyHtml: prepared.draft.bodyHtml.replace(
-          'color:#888888',
-          'color: rgb(136, 136, 136)'
-        )
+        bodyHtml: prepared.draft.bodyHtml.replace('color:#888888', 'color: rgb(136, 136, 136)')
       }
       expect(hasOnlyDefaultPrimarySignature(normalized, prepared.defaultSignatureFingerprint)).toBe(true)
 
       // Changing the preference or the cached signature afterwards does not
       // reclassify: the draft's own stored baseline governs.
-      db.prepare('DELETE FROM settings WHERE account_id = ? AND key = ?').run(
-        ACCOUNT,
-        ATTN_SIGNATURE_SETTING
-      )
+      db.prepare('DELETE FROM settings WHERE account_id = ? AND key = ?').run(ACCOUNT, ATTN_SIGNATURE_SETTING)
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Changed</div>' })
-      expect(hasOnlyDefaultPrimarySignature(prepared.draft, prepared.defaultSignatureFingerprint)).toBe(
-        true
-      )
+      expect(hasOnlyDefaultPrimarySignature(prepared.draft, prepared.defaultSignatureFingerprint)).toBe(true)
 
       // Editing or deleting the footer makes the draft authored content.
       expect(

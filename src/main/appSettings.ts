@@ -14,9 +14,9 @@ import {
 } from '../shared/settings'
 import type { Db } from './db'
 import { undoSendDelayMs } from './outbox/queue'
-import { notificationPausedUntil, setNotificationPausedUntil } from './service/notificationQueries'
 import { attnSignatureEnabled } from './outbox/sendAs'
 import { remoteImagesBlocked, setRemoteImagesBlocked } from './remoteImageStore'
+import { notificationPausedUntil, setNotificationPausedUntil } from './service/notificationQueries'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from './settings'
 import { storedLifetimeThreadCap } from './sync/lifetimeCap'
 

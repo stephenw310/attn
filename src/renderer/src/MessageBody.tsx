@@ -440,6 +440,7 @@ export function MessageBody({
     }
   }, [applyInlineImages, attachments, bodyHtml, messageId, threadId])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: frameEpoch deliberately re-registers the frame so "Load once" / "Always load" take effect on the same mount
   useEffect(() => {
     setFrameAccess(null)
     if (srcDoc === null) return
@@ -471,8 +472,7 @@ export function MessageBody({
   }, [frameEpoch, messageId, srcDoc])
 
   const hasRemoteImages = srcDoc !== null && REMOTE_IMAGE_REFERENCE.test(srcDoc)
-  const remoteImagesBanner =
-    frameAccess !== null && frameAccess.blocked && !frameAccess.imagesAllowed && hasRemoteImages
+  const remoteImagesBanner = frameAccess?.blocked === true && !frameAccess.imagesAllowed && hasRemoteImages
   const loadImagesOnce = useCallback(() => {
     allowOnceRef.current = true
     setFrameEpoch((epoch) => epoch + 1)
