@@ -6,14 +6,10 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { type SchedulerTime, systemTime } from '../time'
-import {
-  LIFETIME_FOREGROUND_YIELD_MS,
-  LIFETIME_PAGE_PAUSE_MS,
-  LIFETIME_REQUEST_INTERVAL_MS
-} from './lifetimeSweep'
 import { isExpiredPageTokenError } from './pageToken'
 import { persistThread } from './persist'
 import type { MailProvider, ThreadIdPage } from './provider'
+import { LIFETIME_FOREGROUND_YIELD_MS, LIFETIME_PAGE_PAUSE_MS, LIFETIME_REQUEST_INTERVAL_MS } from './tuning'
 
 const CURSOR_PHASE = 'split-metadata'
 

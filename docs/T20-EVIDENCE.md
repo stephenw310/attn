@@ -106,6 +106,163 @@ This measurement includes the 25 ms typing debounce, renderer-to-utility IPC, th
 operator query, and React rendering. The test waits for both the completed-query marker and the one-row result,
 so an older response or a pending frame cannot satisfy the sample.
 
+## Synthetic large-mailbox probe — 2026-08-29
+
+**Synthetic, not E7.** A throwaway probe generated stores against the current schema and called the production
+`countSystemMailboxes`, `countInboxUnread`, `listMailboxThreads`, and `searchThreads` over them. It answers how
+the query layer scales with store size; it does not replace E7, which measures real Gmail bootstrap timing and
+quota behavior. The probe files were deleted after the run.
+
+Environment: macOS arm64, Node 24.14.0, better-sqlite3 outside Electron, file-backed SQLite reopened before the
+first read of each shape. Corpus: 2.5 messages per thread, ~200-byte plain-text bodies, 2% of threads in Inbox,
+10% Sent, 1% each Starred/Spam/Trash. **Real mail is heavier on every axis that matters here** — bodies are
+kilobytes not hundreds of bytes, and `searchCoverage` reads body columns — so these numbers are optimistic.
+
+| messages | threads | on disk | counts cold / warm | All Mail page 1 | rare term | 1% term | 30% term | every-message term | `is:unread` |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 50,000 | 20,000 | 0.08 GB | 19 / 17 ms | 14 ms | 20 ms | 24 ms | 46 ms | 87 ms | 39 ms |
+| 250,000 | 100,000 | 0.37 GB | 106 / 107 ms | 92 ms | 108 ms | 133 ms | 274 ms | 524 ms | 228 ms |
+| 1,000,000 | 400,000 | 1.48 GB | 1,094 / 484 ms | 395 ms | 884 ms | 512 ms | 1,054 ms | 2,013 ms | 901 ms |
+| 2,000,000 | 800,000 | 2.96 GB | 1,884 / 948 ms | 770 ms | 1,738 ms | 1,317 ms | 4,331 ms | 5,524 ms | 2,622 ms |
+
+Scaling is linear or worse in every column. §7's budgets are met at the 50,000 messages they are written
+against, with roughly 25 ms of headroom on search, and they are gone by 250,000.
+
+**Where the time goes, measured separately at 1,000,000 messages:**
+
+| Component | Cost | Why |
+|---|---:|---|
+| `searchCoverage` (`sync/fts.ts`) | 414 ms | `COUNT(*)` plus `trim()` over both body columns of every message. Ran on **every** search, i.e. after each 25 ms typing debounce. Since removed: the footer's body count is now a flag read from the backfill cursor, because the fraction never reached its denominator anyway (on-demand bodies are the design, not an unfinished stage) and the remedy it hinted at, server search, is advertised on the line directly above it |
+| All Mail count (`countSystemMailboxes`) | 334 ms of the 484 ms warm total | `EXPLAIN QUERY PLAN`: full scan of `threads` with three correlated subqueries per row |
+| Search candidate CTE (`db/search.ts`) | ~100 ms for a 1% term, ~1.6 s for an every-message term | The CTE has no limit: the outer query orders by `last_msg_at`, not rank, so `LIMIT 100` cannot push into the FTS scan and every matching message is visited |
+
+`countSystemMailboxes` runs on initial load and on every `mail:changed` refresh. better-sqlite3 is synchronous
+and the utility process owns one connection, so this is not a slow query queued behind others: it stalls that
+process's event loop and every other renderer read waits it out. The initial load is one `Promise.all` of nine
+store calls that serialize in the same process, so cold start pays their sum.
+
+**Derived sync arithmetic at 10,000,000 messages** (≈4,000,000 threads at 2.5 messages each), from the quota
+constants rather than a run: background work gets 6,000 − 500 reserved = 5,500 units/minute ÷ 40 per
+`threads.get` ≈ **137 threads/minute**, so the lifetime sweep needs ≈20 days of app-open time, realistically one
+to three months of wall clock. `LIFETIME_REQUEST_INTERVAL_MS` (600/minute) never binds; quota does. Stage 1 at
+foreground priority gets ≈140 threads/minute, so a 12-month Inbox of 100–200k threads completes in 12–24 hours,
+with the first readable page in minutes. One expiry recovery listing is ≈40,000 pages × 10 units ≈ 73 minutes,
+and Gmail's roughly week-long history retention means several recoveries during a sweep that long.
+
+**After the 2026-08-29 count/coverage changes**, re-measured on the same 1,000,000-message store:
+
+| Metric | Before | After |
+|---|---:|---:|
+| `countSystemMailboxes`, cold | 1,094 ms | 65 ms |
+| `countSystemMailboxes`, warm | 484 ms | 62 ms |
+| `countInboxUnread` | 124 ms | 12 ms |
+| `countNotificationEnabledUnread` (the production badge) | not measured | 51 ms |
+| Search, rare term | 884 ms | 38 ms |
+| Search, 1% term | 512 ms | 122 ms |
+| Search, 30% term | 1,054 ms | 611 ms |
+| Search, every-message term | 2,013 ms | 1,519 ms |
+| `is:unread` filter only | 901 ms | 435 ms |
+| All Mail list, page 1 | 395 ms | 340 ms |
+
+Three changes produced this: mailbox counts stop at `MAILBOX_COUNT_CAP`, the Inbox counts seek the INBOX label
+index instead of scanning `threads` for the visible flag, and the service layer caches counts and search
+coverage per mail revision so a typing burst or a refresh burst pays once. Repeat calls inside one revision
+now cost nothing, which is the common case: the numbers above are all first calls.
+
+The PR #98 follow-up changes cache invalidation to follow SQLite writes, including background batches that
+do not emit `mail:changed`. Search coverage now reads one `sync_state` row on each request and is not cached.
+The measurements above predate that correction. Runtime and handler regression tests cover silent writes, partial
+membership rebuilds, and cursor-only coverage changes.
+
+The perf suite's `local-mail-refresh` measurement never included `getMailboxCounts`, which is how the count
+grew into the slowest read in the refresh without failing anything. It now measures both waves in the order the
+renderer issues them (10,000-thread profile: 6 ms median, 11 ms p95). A 10,000-thread profile only catches gross
+regressions in a query whose cost scales with the store; catching a size-dependent one needs a larger generated
+profile.
+
+Two residuals are unchanged by design, and each names the fix that would move it. The All Mail page still
+evaluates membership per row, which wants the materialized membership table. Search past a rare term still
+visits every matching message, because the candidate CTE cannot push its limit past an outer sort on
+`last_msg_at`; bounding that set is a separate change with a product decision attached, since a bounded
+candidate set makes a filtered query's result "the most recent matches" rather than exhaustive.
+
+**What this says about the pathological-mailbox question** (M3-PLAN §"Open questions"): the store stays correct
+and eventually complete at any size, and the ceiling is not sync completeness but three query shapes. The
+extrapolated 10M profile is ~5 s mailbox counts, ~4 s for an All Mail page, and tens of seconds for a
+common-word search. Fixing counts, coverage, and the unbounded candidate set is what moves the usable ceiling;
+picking a design target without fixing them sets it near 250,000 messages.
+
+## Large-profile perf job and the write regression it found — 2026-08-29
+
+`npm run e2e:perf:scale` generates a 100,000-thread profile and measures the reads that must not scale with the
+store. It exists because the 10,000-thread job cannot: the account-wide mailbox count that prompted it measured
+584 ms at 800,000 threads and under a millisecond at 10,000, so a budget written against the smaller profile
+passes either way.
+
+Building the profile immediately failed, twice, and the second failure was the point of the exercise.
+
+| Threads stored | Import rate, before | after |
+|---:|---:|---:|
+| 2,000 | 1,055/s | 2,043/s |
+| 10,000 | 184/s | 1,949/s |
+| 20,000 | 84/s | 1,813/s |
+
+Storing a thread was getting slower the more mail the store already held, so a 100,000-thread import never
+finished inside a fifteen-minute timeout. The cause was one query in `removeMissingMessages`
+(`sync/persist.ts`), which collects the contacts a vanished message contributed:
+
+```
+SEARCH cm USING COVERING INDEX idx_contact_messages_email (account_id=?)   ← every contact row in the account
+SEARCH m USING INDEX sqlite_autoindex_messages_1 (account_id=? AND id=?)
+```
+
+Written as `FROM contact_messages cm JOIN messages m`, SQLite drove the join from the account's contact rows —
+48,200 of them at 20,000 threads — on every single thread write. `INDEXED BY` does not fix it, because it
+constrains which index a table uses rather than the order tables are joined; `CROSS JOIN` with `messages` first
+does, and SQLite will not reorder it. A unit test now asserts the plan drives from `messages`
+(`sync/persist.test.ts`), because the defect was a planner choice rather than a visible mistake in the SQL.
+
+**The original job** (`npm run e2e:perf:scale`, 40,000 threads / 80,000 messages, imported in about
+20 seconds, whole run 22 s):
+
+| Read | Healthy, through IPC | Budget | Scanning, measured directly |
+|---|---:|---:|---:|
+| System mailbox counts | 19 ms | 30 ms | 27 ms (3.4 ms indexed) |
+| All Mail first page | 6 ms | 20 ms | 31 ms (0.5 ms indexed) |
+| Common-term search | 133 ms | 300 ms | seconds, unbounded candidates |
+
+The budgets sit between the two costs deliberately. This file's first draft used 150 ms for the first two,
+which every one of those numbers passes — a budget looser than the regression it guards is decoration. The
+profile stops at 40,000 threads because the fixture is parsed whole and the utility process died loading the
+74 MB, 100,000-thread version; streaming the fixture would buy a wider margin and is not worth it yet.
+
+This was live before the scale profile existed and nothing caught it: quota admits roughly 137 threads a minute,
+so 17 ms per write is invisible during real sync. It shows up wherever writes are local and bulk — seeding a
+test profile, and plausibly a long offline catch-up.
+
+## PR #98 rereview measurements, 2026-08-30
+
+The scale job now calls `attn:test:queryPerfStats` to measure production queries inside the utility process.
+The former keypress-based invalidation could measure a cached mailbox count before the action completed or
+after the renderer refreshed it. Raw query timing removes that race. These measurements exclude IPC and
+are not directly comparable to the renderer timings above.
+
+A separate probe imported the same 40,000-thread, 80,000-message seed through `loadSeed` into SQLite and ran
+the indexed queries alongside the previous scanning shapes, with five samples each:
+
+| Read | Indexed median | Scanning median | Raw query budget |
+|---|---:|---:|---:|
+| System mailbox counts | 1.31 ms | 38.26 ms | 15 ms |
+| All Mail first page | 0.24 ms | 29.53 ms | 20 ms |
+
+The probe asserts equal counts and 101-row pages, then asserts the indexed reads pass and the scanning
+reads exceed their budgets. Common-term search retains its 300 ms budget in the Electron scale job.
+
+Explicit snooze searches also received an indexed path because Gmail cannot search local snooze state.
+On a separate synthetic store with 100,000 matching messages and 100 pending snoozes, an account-driven
+message join took 1,057 ms median; the reminder-first join took 89 ms. Query-plan regression assertions
+require indexed pending-reminder and message-thread lookups before rowid-constrained FTS matching.
+
 ## Quota and bootstrap instrumentation
 
 Gmail requests share one per-account weighted scheduler across authentication generations. A short burst bucket

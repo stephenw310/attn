@@ -1,20 +1,14 @@
 import type { EditorState, LexicalEditor } from 'lexical'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Draft, DraftSaveInput } from '../../../shared/drafts'
+import {
+  IDLE_SAVE_MS,
+  MAX_CHECKPOINT_MS,
+  MIRROR_IDLE_MS,
+  MIRROR_PAYLOAD_BYTES,
+  MIRROR_PAYLOAD_IDLE_MS
+} from '../../../shared/outboxTuning'
 import { serializeEditorState } from './serialize'
-
-const IDLE_SAVE_MS = 1_000
-const MAX_CHECKPOINT_MS = 5_000
-export const MIRROR_IDLE_MS = 3_000
-/**
- * Gmail replaces a draft wholesale, so every checkpoint re-uploads all of its
- * attachment bytes. Drafts carrying a real payload therefore wait longer
- * between pushes — a body edit is not worth another few megabytes. Attaching or
- * removing a file still pushes on the short interval, since that is the change
- * the user is waiting to see on the Gmail side.
- */
-export const MIRROR_PAYLOAD_IDLE_MS = 15_000
-export const MIRROR_PAYLOAD_BYTES = 1_000_000
 
 type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments'>
 

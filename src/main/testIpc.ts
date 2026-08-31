@@ -32,6 +32,9 @@ export class TestSeams {
       if (nonEmptyString(threadId)) this.deps.focusInboxThread(threadId, account)
       else if (threadId === null && account) this.deps.focusInboxThread(null, account)
     })
+    ipcMain.on(TEST_CHANNELS.setSearchWindow, (_event, limit: unknown, done?: Done) => {
+      this.forwardDone(TEST_CHANNELS.setSearchWindow, [limit], done)
+    })
     ipcMain.on(TEST_CHANNELS.setAttachmentPickerFiles, (_event, paths: unknown) => {
       this.attachmentPickerPaths = Array.isArray(paths)
         ? paths.filter((path): path is string => typeof path === 'string')
@@ -88,7 +91,11 @@ export class TestSeams {
           .catch((error) => done?.({ error: errorMessage(error) }))
       }
     )
-    for (const channel of [TEST_CHANNELS.runFtsBackfill, TEST_CHANNELS.searchIndexStats]) {
+    for (const channel of [
+      TEST_CHANNELS.runFtsBackfill,
+      TEST_CHANNELS.searchIndexStats,
+      TEST_CHANNELS.queryPerfStats
+    ]) {
       ipcMain.on(channel, (_event, request: unknown, done?: (result: unknown) => void) => {
         void this.forward(channel, [request])
           .then((result) => done?.(result))

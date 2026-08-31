@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 21
+export const CURRENT_SCHEMA_VERSION = 22
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -80,6 +80,26 @@ CREATE TABLE thread_labels (
 );
 CREATE INDEX idx_thread_labels_label ON thread_labels (account_id, label_id);
 
+-- Derived mailbox membership for the views whose rules are thread-level. Counting
+-- and paging All Mail from the label rules costs a scan of every thread in the
+-- account; from this index both are a range read. Spam and Trash stay on
+-- idx_thread_labels_label: their rules are message-level, and Gmail purges both
+-- at about 30 days, so neither can grow into a scan worth materializing.
+-- sort_at is the view's shipped sort expression, COALESCE(threads.last_msg_at, 0).
+CREATE TABLE thread_mailboxes (
+  account_id TEXT NOT NULL,
+  view       TEXT NOT NULL,
+  thread_id  TEXT NOT NULL,
+  sort_at    INTEGER NOT NULL,
+  -- Keyed by thread before view: every write recomputes one thread's rows and
+  -- deletes them first, and that delete has to be a key lookup. With view ahead
+  -- of thread_id it was a full table scan, which made importing mail slower the
+  -- more mail the store already held.
+  PRIMARY KEY (account_id, thread_id, view)
+);
+CREATE INDEX idx_thread_mailboxes_recent
+  ON thread_mailboxes (account_id, view, sort_at DESC, thread_id);
+
 CREATE TABLE sync_state (
   account_id         TEXT PRIMARY KEY,
   last_history_id    TEXT,
@@ -89,7 +109,8 @@ CREATE TABLE sync_state (
   sweep_threads_total INTEGER,
   attachment_cursor  TEXT,
   split_metadata_cursor TEXT NOT NULL DEFAULT 'done',
-  fts_cursor         TEXT
+  fts_cursor         TEXT,
+  mailbox_cursor     TEXT
 );
 
 CREATE TABLE message_fts_map (
@@ -97,10 +118,15 @@ CREATE TABLE message_fts_map (
   message_id TEXT NOT NULL,
   thread_id  TEXT NOT NULL,
   fts_rowid  INTEGER NOT NULL,
+  -- Copied from messages.internal_date so a search can take the most recent
+  -- matches without joining every matching message first.
+  internal_date INTEGER,
   PRIMARY KEY (account_id, message_id)
 );
 CREATE UNIQUE INDEX idx_message_fts_map_rowid ON message_fts_map (fts_rowid);
 CREATE INDEX idx_message_fts_map_thread ON message_fts_map (account_id, thread_id);
+CREATE INDEX idx_message_fts_map_recent
+  ON message_fts_map (account_id, internal_date DESC, fts_rowid);
 
 CREATE VIRTUAL TABLE message_fts USING fts5(
   account_id UNINDEXED,

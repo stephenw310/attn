@@ -222,9 +222,12 @@ export function readSeedRemoteThreadIds(path: string, query: string, accountId?:
   const ids: string[] = []
   for (const fixture of readSeedFixtures(path)) {
     if (accountId !== undefined && fixture.account !== accountId) continue
-    const remoteIds = new Set((fixture.remoteThreads ?? []).map((thread) => thread.id))
+    // Gmail can return a cached thread as well as a remote-only snapshot.
+    const knownIds = new Set(
+      [...fixture.threads, ...(fixture.remoteThreads ?? [])].map((thread) => thread.id)
+    )
     const configured = fixture.remoteSearches?.[query] ?? []
-    ids.push(...configured.filter((threadId) => remoteIds.has(threadId)))
+    ids.push(...configured.filter((threadId) => knownIds.has(threadId)))
   }
   return [...new Set(ids)]
 }

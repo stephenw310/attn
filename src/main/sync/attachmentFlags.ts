@@ -9,9 +9,9 @@
 
 import type { Db } from '../db'
 import { type SchedulerTime, systemTime } from '../time'
-import { LIFETIME_FOREGROUND_YIELD_MS, LIFETIME_PAGE_PAUSE_MS } from './lifetimeSweep'
 import { isExpiredPageTokenError } from './pageToken'
 import type { MailProvider, ThreadIdPage } from './provider'
+import { LIFETIME_FOREGROUND_YIELD_MS, LIFETIME_PAGE_PAUSE_MS } from './tuning'
 
 /** The one Gmail operator this pass depends on. */
 export const ATTACHMENT_FLAG_QUERY = 'has:attachment'

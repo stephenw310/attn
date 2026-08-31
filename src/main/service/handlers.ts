@@ -142,6 +142,8 @@ export interface ServiceHandlerContext {
   draftReopenDelay: () => number
   draftInlineImageDelay: () => number
   consumeTestDraftSaveFailure: () => boolean
+  /** Test-only override of the search recency window; null in production. */
+  searchWindowOverride: () => number | null
   testUserData: boolean
   userDataPath: string
   downloadsPath: string
@@ -726,14 +728,18 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
         drafts: [],
         coverage: {
           headersComplete: false,
+          headersCapped: false,
           indexComplete: false,
           attachmentFlagsComplete: false,
-          messagesTotal: 0,
-          messagesWithBody: 0
-        }
+          bodiesOnDemand: false
+        },
+        partial: false
       }
     }
-    return searchThreads(context.db, account, query.slice(0, 1_000))
+    const searchWindow = context.searchWindowOverride()
+    return searchThreads(context.db, account, query.slice(0, 1_000), {
+      ...(searchWindow === null ? {} : { recentMessageLimit: searchWindow })
+    })
   })
   handle(IPC_CHANNELS.mailSearchAll, async (_event, requestId, query) => {
     const account = context.currentAccountId()
@@ -754,6 +760,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
         searchAllGmail(context.db, account, provider, boundedQuery, {
           shouldContinue: () => context.currentAccountId() === account,
           signal: controller.signal,
+          recentMessageLimit: context.searchWindowOverride() ?? undefined,
           onStoreChanged: () => {
             storeChanged = true
           }

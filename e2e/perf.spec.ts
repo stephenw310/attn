@@ -158,6 +158,13 @@ async function measureListRender(page: Page): Promise<number> {
   })
 }
 
+/**
+ * Both waves of a mail refresh, in the order the renderer issues them: the rows
+ * that the window shows, then the sidebar counts and header chips. Counting was
+ * missing from this measurement, which is how it grew unnoticed into the slowest
+ * read in the refresh. A 10,000-thread profile only catches gross regressions in
+ * it; a size-dependent one needs a larger generated profile.
+ */
 async function measureLocalMailRefresh(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const started = performance.now()
@@ -165,8 +172,11 @@ async function measureLocalMailRefresh(page: Page): Promise<number> {
       window.attn.mail.listThreads('inbox'),
       window.attn.mail.listSnoozed(),
       window.attn.draft.list(),
-      window.attn.outbox.listPending(),
+      window.attn.outbox.listPending()
+    ])
+    await Promise.all([
       window.attn.mail.listLabels(),
+      window.attn.mail.getMailboxCounts(),
       window.attn.mail.getUnreadCount(),
       window.attn.mail.getPendingActionCount(),
       window.attn.mail.getActionQueueStatus()
@@ -318,21 +328,24 @@ async function measureMailboxSwitch(page: Page, chordKey: string, expectedTitle:
 
 async function measureSplitSwitch(
   page: Page,
-  position: number,
+  direction: 'next' | 'previous',
   splitId: string,
   expectedCount: number
 ): Promise<number> {
   return page.evaluate(
-    async ({ digit, expectedSplitId, count }) => {
+    async ({ move, expectedSplitId, count }) => {
       const ready = (): boolean =>
         document
           .querySelector(`[data-testid="split-tab"][data-split-id="${expectedSplitId}"]`)
           ?.getAttribute('aria-selected') === 'true' &&
-        document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') ===
-          String(count)
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }))
+        (count === 0
+          ? document.querySelector('[data-testid="inbox-zero"]') !== null
+          : document.querySelector('[data-testid="thread-list"]')?.getAttribute('data-thread-count') ===
+            String(count))
       const started = performance.now()
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: String(digit), bubbles: true }))
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', shiftKey: move === 'previous', bubbles: true })
+      )
       if (ready()) return performance.now() - started
       return new Promise<number>((resolve, reject) => {
         const timeout = window.setTimeout(() => {
@@ -348,7 +361,7 @@ async function measureSplitSwitch(
         observer.observe(document.body, { childList: true, subtree: true, attributes: true })
       })
     },
-    { digit: position, expectedSplitId: splitId, count: expectedCount }
+    { move: direction, expectedSplitId: splitId, count: expectedCount }
   )
 }
 
@@ -643,12 +656,14 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     )
     await expect(page.getByTestId('split-tab')).toHaveCount(6)
 
-    const coldMs = await measureSplitSwitch(page, 5, mutation.splitId, THREAD_PAGE_SIZE)
+    // New custom splits follow Important. Exercise the supported Tab navigation;
+    // numbered G chords are no longer assigned to split commands.
+    const coldMs = await measureSplitSwitch(page, 'next', mutation.splitId, THREAD_PAGE_SIZE)
     await reportMetric(testInfo, 'split-switch-cold', [coldMs], coldMs)
     const samples: number[] = []
     for (let iteration = 0; iteration < SAMPLE_COUNT; iteration++) {
-      await measureSplitSwitch(page, 4, 'base:important', 0)
-      samples.push(await measureSplitSwitch(page, 5, mutation.splitId, THREAD_PAGE_SIZE))
+      await measureSplitSwitch(page, 'previous', 'base:important', 0)
+      samples.push(await measureSplitSwitch(page, 'next', mutation.splitId, THREAD_PAGE_SIZE))
     }
     await reportMetric(testInfo, 'split-switch', samples, median(samples))
     expect(percentile(samples, 0.95), 'p95 split switch').toBeLessThan(SPLIT_SWITCH_CEILING_MS)

@@ -11,9 +11,10 @@ import {
 } from '../../shared/searchQuery'
 import { listDrafts } from '../outbox/drafts'
 import { searchCoverage } from '../sync/fts'
+import { SEARCH_RECENT_MESSAGE_LIMIT, SEARCH_RESULT_LIMIT } from '../sync/tuning'
 import type { Db } from './index'
 
-export const SEARCH_RESULT_LIMIT = 100
+export { SEARCH_RECENT_MESSAGE_LIMIT, SEARCH_RESULT_LIMIT } from '../sync/tuning'
 
 interface SearchThreadRow {
   id: string
@@ -147,11 +148,35 @@ function messageFilterSql(filter: SearchFilter, messageAlias: string, values: un
   return `COALESCE(${messageAlias}.internal_date, 0) ${filter.kind === 'before' ? '<' : '>='} ?`
 }
 
+interface CandidateOptions {
+  /**
+   * Bound the matched messages to the most recent N before filters and the
+   * projection run. Without it a common word visits every match in the account:
+   * the outer query sorts by recency rather than rank, so its LIMIT cannot push
+   * into the FTS scan.
+   */
+  recentMessageLimit?: number
+  /**
+   * Explicit Snoozed text search must be exact because Gmail cannot apply local
+   * reminder state. Start from the small pending-reminders set so common terms do
+   * not make SQLite scan every message in a large account.
+   */
+  snoozedFirst?: boolean
+  /**
+   * Restrict candidates to these thread ids. The server-search intersection asks
+   * about at most one page of ids and needs an exact answer for each, so it bounds
+   * the query this way instead of by recency, which could drop an older thread it
+   * asked about and cause a needless refetch.
+   */
+  restrictThreadIds?: readonly string[]
+}
+
 function candidateSql(
   parsed: ParsedSearchQuery,
   match: string | null,
   accountId: string,
-  values: unknown[]
+  values: unknown[],
+  options: CandidateOptions = {}
 ): string {
   const messageAlias = 'search_message'
   const hasLocationFilter = parsed.filters.some((filter) => filter.kind === 'in')
@@ -167,17 +192,65 @@ function candidateSql(
   )
   const predicates = [
     ...(!hasLocationFilter ? [normalMessageSql(messageAlias)] : []),
-    ...orderedFilters.map((filter) => messageFilterSql(filter, messageAlias, values))
+    ...orderedFilters.map((filter) => messageFilterSql(filter, messageAlias, values)),
+    ...(options.restrictThreadIds
+      ? [`${messageAlias}.thread_id IN (${options.restrictThreadIds.map(() => '?').join(', ')})`]
+      : [])
   ]
+  if (options.restrictThreadIds) values.push(...options.restrictThreadIds)
   if (match) {
-    values.unshift(match, accountId, accountId)
-    return `SELECT ${messageAlias}.thread_id, MIN(message_fts.rank) AS score
-      FROM message_fts
-      JOIN message_fts_map map ON map.fts_rowid = message_fts.rowid
-      JOIN messages ${messageAlias}
-        ON ${messageAlias}.account_id = map.account_id AND ${messageAlias}.id = map.message_id
+    if (options.snoozedFirst) {
+      values.unshift(match, accountId)
+      return `SELECT ${messageAlias}.thread_id, MIN(message_fts.rank) AS score
+        FROM reminders search_snooze INDEXED BY idx_reminders_due
+        CROSS JOIN messages ${messageAlias} INDEXED BY idx_messages_thread
+          ON ${messageAlias}.account_id = search_snooze.account_id
+         AND ${messageAlias}.thread_id = search_snooze.thread_id
+        CROSS JOIN message_fts_map map
+          ON map.account_id = ${messageAlias}.account_id
+         AND map.message_id = ${messageAlias}.id
+        CROSS JOIN message_fts
+          ON message_fts.rowid = map.fts_rowid
+         AND message_fts MATCH ?
+         AND message_fts.account_id = ${messageAlias}.account_id
+        CROSS JOIN threads t
+          ON t.account_id = ${messageAlias}.account_id
+         AND t.id = ${messageAlias}.thread_id
+        WHERE search_snooze.account_id = ?
+          AND search_snooze.kind = 'snooze'
+          AND search_snooze.state = 'pending'
+          ${predicates.map((predicate) => `AND (${predicate})`).join(' ')}
+        GROUP BY ${messageAlias}.thread_id`
+    }
+
+    const bounded = options.recentMessageLimit !== undefined
+    // Leading binds, in the order the chosen form reads them.
+    values.unshift(
+      ...(bounded
+        ? [match, accountId, accountId, options.recentMessageLimit, accountId]
+        : [match, accountId, accountId])
+    )
+    // The bounded form reads the index alone to pick its window: matching, then
+    // the map's own date, and only then the messages and threads the filters and
+    // projection need. CROSS JOIN keeps that window ahead of messages; otherwise
+    // SQLite scans the account's messages before checking whether they matched.
+    const source = bounded
+      ? `(SELECT map.message_id, map.thread_id, message_fts.rank AS rank
+          FROM message_fts
+          JOIN message_fts_map map ON map.fts_rowid = message_fts.rowid
+          WHERE message_fts MATCH ? AND map.account_id = ? AND message_fts.account_id = ?
+          ORDER BY map.internal_date DESC, map.fts_rowid DESC
+          LIMIT ?) matched
+         CROSS JOIN messages ${messageAlias}
+           ON ${messageAlias}.account_id = ? AND ${messageAlias}.id = matched.message_id`
+      : `message_fts
+         JOIN message_fts_map map ON map.fts_rowid = message_fts.rowid
+         JOIN messages ${messageAlias}
+           ON ${messageAlias}.account_id = map.account_id AND ${messageAlias}.id = map.message_id`
+    return `SELECT ${messageAlias}.thread_id, MIN(${bounded ? 'matched.rank' : 'message_fts.rank'}) AS score
+      FROM ${source}
       JOIN threads t ON t.account_id = ${messageAlias}.account_id AND t.id = ${messageAlias}.thread_id
-      WHERE message_fts MATCH ? AND map.account_id = ? AND message_fts.account_id = ?
+      WHERE ${bounded ? '1 = 1' : 'message_fts MATCH ? AND map.account_id = ? AND message_fts.account_id = ?'}
         ${predicates.map((predicate) => `AND (${predicate})`).join(' ')}
       GROUP BY ${messageAlias}.thread_id`
   }
@@ -210,6 +283,14 @@ function searchesDrafts(parsed: ParsedSearchQuery): boolean {
     if (filter.kind !== 'in') return false
     const mailbox = systemMailboxName(filter.value)
     return mailbox === 'draft' || mailbox === 'drafts'
+  })
+}
+
+function searchesLocalSnoozes(parsed: ParsedSearchQuery): boolean {
+  return parsed.filters.some((filter) => {
+    if (filter.kind === 'is') return filter.value === 'snoozed'
+    if (filter.kind !== 'in') return false
+    return systemMailboxName(filter.value) === 'snoozed'
   })
 }
 
@@ -355,38 +436,70 @@ export function matchingStoredThreadIds(
   if ((!match && parsed.filters.length === 0) || searchesDrafts(parsed)) return new Set()
 
   const values: unknown[] = []
-  const candidates = candidateSql(parsed, match, accountId, values)
-  const requested = requestedIds.map(() => '(?)').join(', ')
-  const rows = db
-    .prepare(
-      `WITH search_candidates AS (${candidates}), requested(id) AS (VALUES ${requested})
-       SELECT candidates.thread_id AS id
-       FROM search_candidates candidates
-       JOIN requested ON requested.id = candidates.thread_id`
-    )
-    .all(...values, ...requestedIds) as Array<{ id: string }>
+  const candidates = candidateSql(parsed, match, accountId, values, { restrictThreadIds: requestedIds })
+  const rows = db.prepare(`SELECT thread_id AS id FROM (${candidates})`).all(...values) as Array<{
+    id: string
+  }>
   return new Set(rows.map((row) => row.id))
 }
 
-/** Run local thread and Drafts search over their authoritative stores. */
+export interface SearchThreadsOptions {
+  limit?: number
+  /** Overrides `SEARCH_RECENT_MESSAGE_LIMIT`; tests use it to reach the partial state. */
+  recentMessageLimit?: number
+}
+
+/**
+ * Run local thread and Drafts search over their authoritative stores. Coverage
+ * is cursor-derived and O(1); text-result candidates are bounded except for
+ * local-only stores such as Drafts and Snoozed.
+ */
 export function searchThreads(
   db: Db,
   accountId: string,
   query: string,
-  limit = SEARCH_RESULT_LIMIT
+  options: SearchThreadsOptions = {}
 ): SearchResponse {
+  const { limit = SEARCH_RESULT_LIMIT } = options
   const parsed = parseSearchQuery(query)
   const match = searchMatchExpression(parsed)
   const coverage = searchCoverage(db, accountId)
   const resultLimit = Math.max(1, Math.min(Math.trunc(limit), SEARCH_RESULT_LIMIT))
-  if (!query.trim() || (!match && parsed.filters.length === 0)) return { rows: [], drafts: [], coverage }
+  if (!query.trim() || (!match && parsed.filters.length === 0)) {
+    return { rows: [], drafts: [], coverage, partial: false }
+  }
 
   if (searchesDrafts(parsed)) {
-    return { rows: [], drafts: searchDraftRows(db, accountId, parsed, resultLimit), coverage }
+    return { rows: [], drafts: searchDraftRows(db, accountId, parsed, resultLimit), coverage, partial: false }
   }
 
   const values: unknown[] = []
-  const candidates = candidateSql(parsed, match, accountId, values)
+  const exactLocalSnoozeSearch = searchesLocalSnoozes(parsed)
+  const recentMessageLimit =
+    match && !exactLocalSnoozeSearch ? (options.recentMessageLimit ?? SEARCH_RECENT_MESSAGE_LIMIT) : undefined
+  // Count one match past the window to distinguish an exact fit from truncation.
+  // This is a bounded read: when filters reject everything
+  // inside it the result set is empty, and an empty result still has to say it
+  // only looked at the newest matches.
+  const matchedMessages =
+    match && recentMessageLimit !== undefined
+      ? (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS count FROM (
+                 SELECT 1 FROM message_fts
+                 JOIN message_fts_map map ON map.fts_rowid = message_fts.rowid
+                 WHERE message_fts MATCH ? AND map.account_id = ? AND message_fts.account_id = ?
+                 LIMIT ?
+               )`
+            )
+            .get(match, accountId, accountId, recentMessageLimit + 1) as { count: number }
+        ).count
+      : 0
+  const candidates = candidateSql(parsed, match, accountId, values, {
+    snoozedFirst: match !== null && exactLocalSnoozeSearch,
+    ...(recentMessageLimit === undefined ? {} : { recentMessageLimit })
+  })
   values.push(accountId, resultLimit)
   const projection = threadProjectionSql(junkProjection(parsed))
   const rows = db
@@ -421,6 +534,7 @@ export function searchThreads(
   return {
     rows: rows.map(toThreadRow),
     drafts: [],
-    coverage
+    coverage,
+    partial: recentMessageLimit !== undefined && matchedMessages > recentMessageLimit
   }
 }

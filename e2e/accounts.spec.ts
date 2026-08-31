@@ -209,6 +209,37 @@ test('composer opens stay inert while an account switch is settling', async ({ a
   await expect(page.getByTestId('composer')).toBeVisible()
 })
 
+test('a pending reply blocks an account switch until its draft owns the current account', async ({
+  app,
+  page
+}) => {
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
+  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.threadId, input.delayMs), {
+    channel: TEST_CHANNELS.delayConversation,
+    threadId: 't-alpha-roadmap',
+    delayMs: 1_500
+  })
+
+  // The reader may already be prefetched. Its shell confirms that `r` ran,
+  // while the hidden composer confirms the delayed reply is still pending.
+  await page.keyboard.press('r')
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await expect(page.getByTestId('composer')).toBeHidden()
+  await page.keyboard.press('ControlOrMeta+2')
+
+  await expect(page.getByTestId('toast')).toContainText('Save and close the draft before switching accounts')
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+
+  const composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await composer.expectFrom(PRIMARY)
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toBeHidden()
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+})
+
 test('a queued send survives an Outbox click made while a switch is settling', async ({ app, page }) => {
   await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()

@@ -1,3 +1,4 @@
+import { RFC_MESSAGE_LOOKUP_LIMIT } from '../../shared/outboxTuning'
 import type {
   DraftPage,
   GetThreadOptions,
@@ -14,6 +15,7 @@ import type {
   RfcMessageMatch,
   ThreadIdPage
 } from '../sync/provider'
+import { GMAIL_DRAFT_PAGE_SIZE, GMAIL_HISTORY_PAGE_SIZE, GMAIL_THREAD_PAGE_SIZE } from '../sync/tuning'
 import { GmailApiError, type GmailClient } from './client'
 import type { GmailThread } from './parse'
 
@@ -119,7 +121,7 @@ export class GmailMailProvider implements MailProvider {
     const result = await this.client.get<{
       drafts?: { id: string; message?: { id?: string; threadId?: string } }[]
       nextPageToken?: string
-    }>('/drafts', { maxResults: '100', ...(pageToken ? { pageToken } : {}) }, options)
+    }>('/drafts', { maxResults: String(GMAIL_DRAFT_PAGE_SIZE), ...(pageToken ? { pageToken } : {}) }, options)
     return {
       drafts: (result.drafts ?? []).map((draft) => ({
         id: draft.id,
@@ -156,10 +158,18 @@ export class GmailMailProvider implements MailProvider {
     const query = `rfc822msgid:${messageId}`
     const drafts = await this.client.get<{
       messages?: { id: string; threadId?: string }[]
-    }>('/messages', { q: `in:drafts ${query}`, maxResults: '10', includeSpamTrash: 'true' }, options)
+    }>(
+      '/messages',
+      { q: `in:drafts ${query}`, maxResults: String(RFC_MESSAGE_LOOKUP_LIMIT), includeSpamTrash: 'true' },
+      options
+    )
     const messages = await this.client.get<{
       messages?: { id: string; threadId?: string }[]
-    }>('/messages', { q: query, maxResults: '10', includeSpamTrash: 'true' }, options)
+    }>(
+      '/messages',
+      { q: query, maxResults: String(RFC_MESSAGE_LOOKUP_LIMIT), includeSpamTrash: 'true' },
+      options
+    )
     const draftCandidates = new Map((drafts.messages ?? []).map((message) => [message.id, message]))
     const searchedDraftMessageIds = new Set<string>()
     const findDraftCandidate = async (): Promise<RfcMessageMatch | null> => {
@@ -233,7 +243,7 @@ export class GmailMailProvider implements MailProvider {
   }
 
   async listThreadIds(options: ListThreadIdsOptions = {}): Promise<ThreadIdPage> {
-    const params: Record<string, string | string[]> = { maxResults: '100' }
+    const params: Record<string, string | string[]> = { maxResults: String(GMAIL_THREAD_PAGE_SIZE) }
     if (options.q) params.q = options.q
     if (options.labelIds?.length) params.labelIds = [...options.labelIds]
     if (options.pageToken) params.pageToken = options.pageToken
@@ -285,7 +295,7 @@ export class GmailMailProvider implements MailProvider {
   async listHistory(startHistoryId: string, pageToken?: string): Promise<HistoryPage> {
     const params: Record<string, string | string[]> = {
       startHistoryId,
-      maxResults: '500',
+      maxResults: String(GMAIL_HISTORY_PAGE_SIZE),
       historyTypes: ['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved']
     }
     if (pageToken) params.pageToken = pageToken

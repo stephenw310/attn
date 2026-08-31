@@ -7,10 +7,13 @@ import { type SchedulerTime, systemTime } from '../time'
 import { isExpiredPageTokenError } from './pageToken'
 import { persistThread } from './persist'
 import type { MailProvider, ThreadIdPage } from './provider'
-
-export const LIFETIME_REQUEST_INTERVAL_MS = 100
-export const LIFETIME_PAGE_PAUSE_MS = 1_000
-export const LIFETIME_FOREGROUND_YIELD_MS = 250
+import {
+  LIFETIME_FOREGROUND_YIELD_MS,
+  LIFETIME_PAGE_PAUSE_MS,
+  LIFETIME_REQUEST_INTERVAL_MS,
+  LIFETIME_THREAD_CAP,
+  LIFETIME_THREAD_CAP_UNLIMITED
+} from './tuning'
 
 export interface LifetimeSweepProgress {
   threadsDone: number
@@ -38,6 +41,8 @@ export interface LifetimeSweepOptions {
   shouldYield?: () => boolean
   /** Cancels future requests and, critically, all writes after an awaited request. */
   shouldContinue?: () => boolean
+  /** Conversations to keep locally, newest first. 0 stores the whole account. */
+  threadCap?: number
 }
 
 export interface LifetimeSweepResult {
@@ -54,6 +59,7 @@ export type LifetimeSweepStartPlan =
 interface StoredSweepState {
   sweep_cursor: string | null
   sweep_threads_done: number
+  sweep_threads_total: number | null
 }
 
 interface IndexedThreadCount {
@@ -62,6 +68,8 @@ interface IndexedThreadCount {
 
 export function planLifetimeSweepStart(rawCursor: string | null | undefined): LifetimeSweepStartPlan {
   if (rawCursor === 'done') return { kind: 'skip' }
+  // A capped walk retains the current page. Only an exhausted listing is done.
+  if (rawCursor?.startsWith('capped:')) rawCursor = rawCursor.slice('capped:'.length)
   if (!rawCursor || rawCursor === 'lifetime') return { kind: 'run', initialize: !rawCursor }
   if (rawCursor.startsWith('lifetime:') && rawCursor.length > 'lifetime:'.length) {
     return {
@@ -91,6 +99,7 @@ export async function runLifetimeSweep(
   const requestIntervalMs = options.requestIntervalMs ?? LIFETIME_REQUEST_INTERVAL_MS
   const pagePauseMs = options.pagePauseMs ?? LIFETIME_PAGE_PAUSE_MS
   const foregroundYieldMs = options.foregroundYieldMs ?? LIFETIME_FOREGROUND_YIELD_MS
+  const threadCap = options.threadCap ?? LIFETIME_THREAD_CAP
   let lastRequestAt: number | null = null
   let threadsIndexedBySweep = 0
   let indexingElapsedMs = 0
@@ -108,7 +117,7 @@ export async function runLifetimeSweep(
   try {
     const state = db
       .prepare(
-        `SELECT sweep_cursor, sweep_threads_done
+        `SELECT sweep_cursor, sweep_threads_done, sweep_threads_total
          FROM sync_state WHERE account_id = ?`
       )
       .get(accountId) as StoredSweepState | undefined
@@ -152,6 +161,21 @@ export async function runLifetimeSweep(
     const indexedThreadCount = db.prepare('SELECT COUNT(*) AS count FROM threads WHERE account_id = ?')
     const countIndexedThreads = (): number => (indexedThreadCount.get(accountId) as IndexedThreadCount).count
     let threadsIndexed = countIndexedThreads()
+    const atCap = (): boolean => threadCap !== LIFETIME_THREAD_CAP_UNLIMITED && threadsIndexed >= threadCap
+    const stopAtCap = (pageToken: string | undefined, pageStartCount: number): LifetimeSweepResult => {
+      // Replay the partial page on resume. Its starting count must accompany
+      // the cursor, or already-stored ids on that page would be counted twice.
+      checkpoint.run(
+        `capped:${pageToken ? `lifetime:${pageToken}` : 'lifetime'}`,
+        pageStartCount,
+        threadsTotal ?? state?.sweep_threads_total ?? null,
+        accountId
+      )
+      console.log(`[sync] lifetime sweep stopped at the ${threadCap}-conversation limit for ${accountId}`)
+      return { threadCount: listedThreadsDone, ...runMetrics() }
+    }
+    // An unchanged or lower cap needs no Gmail requests on the next launch.
+    if (atCap()) return stopAtCap(plan.pageToken, listedThreadsDone)
 
     let messagesTotal: number | undefined
     const progress = (reason: LifetimeSweepProgress['reason'], waitMs?: number): void => {
@@ -159,9 +183,15 @@ export async function runLifetimeSweep(
       // yields, so read the indexed count rather than deriving it from this
       // sweep's listing position.
       threadsIndexed = countIndexedThreads()
+      // The account total describes coverage. ETA describes this sweep, which
+      // stops at the local cap even when Gmail has more conversations.
+      const targetThreads =
+        threadsTotal === undefined || threadCap === LIFETIME_THREAD_CAP_UNLIMITED
+          ? threadsTotal
+          : Math.min(threadsTotal, threadCap)
       const etaMs = estimateRemainingMs(
         threadsIndexed,
-        threadsTotal,
+        targetThreads,
         threadsIndexedBySweep,
         indexingElapsedMs
       )
@@ -231,8 +261,10 @@ export async function runLifetimeSweep(
       }
       if (!shouldContinue()) return null
 
+      const pageStartCount = listedThreadsDone
       for (const threadId of page.threadIds) {
         if (!shouldContinue()) return null
+        if (atCap()) return stopAtCap(pageToken, pageStartCount)
         if (exists.get(accountId, threadId)) {
           listedThreadsDone++
           continue
@@ -254,6 +286,7 @@ export async function runLifetimeSweep(
               inboxVisibility: 'hide'
             })
             if (persisted) {
+              threadsIndexed++
               threadsIndexedBySweep++
               indexingElapsedMs += Math.max(0, time.now() - indexingStartedAt)
             }

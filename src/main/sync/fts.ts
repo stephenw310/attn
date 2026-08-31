@@ -17,6 +17,7 @@ import { textFromRaw } from '../gmail/parse'
 interface StoredMessageRow {
   id: string
   thread_id: string
+  internal_date: number | null
   subject: string | null
   from_name: string | null
   from_email: string | null
@@ -46,13 +47,8 @@ export interface FtsWriteCounts {
 }
 
 const STORED_ROW_COLUMNS = `
-  m.id, m.thread_id, t.subject, m.from_name, m.from_email, m.body_text, m.body_html,
+  m.id, m.thread_id, m.internal_date, t.subject, m.from_name, m.from_email, m.body_text, m.body_html,
   m.recipients_json, m.attachments_json`
-
-// SQLite trim(X, Y) treats Y as a set of code points. This set matches the
-// whitespace and line terminators removed by JavaScript String.prototype.trim.
-const JAVASCRIPT_TRIM_CHARACTERS =
-  '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff'
 
 function parseJson(raw: string | null): unknown {
   if (!raw) return null
@@ -131,7 +127,8 @@ function upsertStoredRows(db: Db, accountId: string, rows: StoredMessageRow[]): 
   const counts: FtsWriteCounts = { inserted: 0, updated: 0, removed: 0, unchanged: 0 }
   if (rows.length === 0) return counts
   const selectMapped = db.prepare(
-    'SELECT fts_rowid, thread_id FROM message_fts_map WHERE account_id = ? AND message_id = ?'
+    `SELECT fts_rowid, thread_id, internal_date FROM message_fts_map
+     WHERE account_id = ? AND message_id = ?`
   )
   const selectIndexed = db.prepare(
     'SELECT account_id, subject, sender, recipients, body, filenames FROM message_fts WHERE rowid = ?'
@@ -150,15 +147,21 @@ function upsertStoredRows(db: Db, accountId: string, rows: StoredMessageRow[]): 
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   )
   const insertMapping = db.prepare(
-    'INSERT INTO message_fts_map (account_id, message_id, thread_id, fts_rowid) VALUES (?, ?, ?, ?)'
+    `INSERT INTO message_fts_map (account_id, message_id, thread_id, fts_rowid, internal_date)
+     VALUES (?, ?, ?, ?, ?)`
   )
+  // The date rides along on every write, so a bounded search can order by it
+  // without joining the messages it is trying to avoid reading.
   const moveMapping = db.prepare(
-    'UPDATE message_fts_map SET thread_id = ? WHERE account_id = ? AND message_id = ?'
+    `UPDATE message_fts_map SET thread_id = ?, internal_date = ?
+     WHERE account_id = ? AND message_id = ?`
   )
 
   for (const row of rows) {
     const next = ftsColumnsFor(row)
-    const mapped = selectMapped.get(accountId, row.id) as { fts_rowid: number; thread_id: string } | undefined
+    const mapped = selectMapped.get(accountId, row.id) as
+      | { fts_rowid: number; thread_id: string; internal_date: number | null }
+      | undefined
     if (!mapped) {
       const inserted = insertIndexed.run(
         accountId,
@@ -168,11 +171,13 @@ function upsertStoredRows(db: Db, accountId: string, rows: StoredMessageRow[]): 
         next.body,
         next.filenames
       )
-      insertMapping.run(accountId, row.id, row.thread_id, inserted.lastInsertRowid)
+      insertMapping.run(accountId, row.id, row.thread_id, inserted.lastInsertRowid, row.internal_date)
       counts.inserted++
       continue
     }
-    if (mapped.thread_id !== row.thread_id) moveMapping.run(row.thread_id, accountId, row.id)
+    if (mapped.thread_id !== row.thread_id || mapped.internal_date !== row.internal_date) {
+      moveMapping.run(row.thread_id, row.internal_date, accountId, row.id)
+    }
     const current = selectIndexed.get(mapped.fts_rowid) as StoredFtsRow | undefined
     if (!current) {
       restoreIndexed.run(
@@ -328,26 +333,28 @@ export function searchMessageIndex(
 /** The store-side coverage state the search UI's disclosure line renders (T24). */
 export function searchCoverage(db: Db, accountId: string): SearchCoverage {
   const cursors = db
-    .prepare('SELECT sweep_cursor, attachment_cursor, fts_cursor FROM sync_state WHERE account_id = ?')
-    .get(accountId) as
-    | { sweep_cursor: string | null; attachment_cursor: string | null; fts_cursor: string | null }
-    | undefined
-  const bodies = db
     .prepare(
-      `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN trim(COALESCE(body_text, ''), ?) != ''
-                         OR trim(COALESCE(body_html, ''), ?) != '' THEN 1 ELSE 0 END) AS with_body
-       FROM messages WHERE account_id = ?`
+      `SELECT backfill_cursor, sweep_cursor, attachment_cursor, fts_cursor
+       FROM sync_state WHERE account_id = ?`
     )
-    .get(JAVASCRIPT_TRIM_CHARACTERS, JAVASCRIPT_TRIM_CHARACTERS, accountId) as {
-    total: number
-    with_body: number | null
-  }
+    .get(accountId) as
+    | {
+        backfill_cursor: string | null
+        sweep_cursor: string | null
+        attachment_cursor: string | null
+        fts_cursor: string | null
+      }
+    | undefined
+  // Every stage after `bodies` stores headers only, so reaching one is proof the
+  // store holds mail whose text is not searchable until it is opened. Reading
+  // the cursor costs nothing; counting the messages cost a scan of the store.
+  const eagerBodyStages = new Set([null, undefined, 'metadata', 'bodies'])
+  const backfillPhase = cursors?.backfill_cursor?.split(':')[0]
   return {
     headersComplete: cursors?.sweep_cursor === 'done',
+    headersCapped: cursors?.sweep_cursor?.startsWith('capped:') ?? false,
     indexComplete: cursors?.fts_cursor === 'done',
     attachmentFlagsComplete: cursors?.attachment_cursor === 'done',
-    messagesTotal: bodies.total,
-    messagesWithBody: bodies.with_body ?? 0
+    bodiesOnDemand: !eagerBodyStages.has(backfillPhase)
   }
 }

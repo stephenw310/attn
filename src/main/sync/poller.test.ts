@@ -4,9 +4,7 @@ import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { fetchAndCacheThread } from './fetchThread'
 import {
-  BACKGROUND_POLL_MS,
   type FetchedHistoryPlan,
-  FOREGROUND_POLL_MS,
   fetchHistoryPlan,
   HistoryPoller,
   type HistoryPollerOptions,
@@ -18,6 +16,7 @@ import {
   runHistoryCycle
 } from './poller'
 import type { HistoryPage, HistoryRecord, MailProvider } from './provider'
+import { BACKGROUND_POLL_MS, FOREGROUND_POLL_MS } from './tuning'
 
 const fixture = JSON.parse(
   readFileSync(new URL('./fixtures/history-cycle.json', import.meta.url), 'utf8')

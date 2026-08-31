@@ -127,6 +127,8 @@
     }
   ],
   "remoteSearches": {
+    "visualsort -in:drafts": ["t-search-origin", "t-search-return", "t-search-acme"],
+    "visualsort label:\"search-fixture\" -in:drafts": ["t-search-acme"],
     "serveronlyneedle -in:drafts": ["t-search-server-only"],
     "serveronlyneedle in:inbox -in:drafts": ["t-search-server-only"],
     "in:inbox -in:drafts": ["t-search-server-only"]

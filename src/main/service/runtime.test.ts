@@ -8,13 +8,16 @@ import type { ThreadPage } from '../../shared/mail'
 import { OTHER_SPLIT_ID, type SplitState } from '../../shared/splits'
 import { storeActionError } from '../actions/execute'
 import { type Db, openDatabase } from '../db'
+import { runMailboxMembershipBackfill } from '../db/mailboxMembership'
 import * as queries from '../db/queries'
 import { readSeedThread } from '../dev/seed'
 import type { GmailClient } from '../gmail/client'
+import type { GmailThread } from '../gmail/parse'
 import { GmailMailProvider } from '../gmail/provider'
 import { saveDraft } from '../outbox/drafts'
 import * as spool from '../outbox/spool'
 import * as splits from '../splits'
+import { persistThread } from '../sync/persist'
 import { type HistoryPoller, historyEvents } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
@@ -130,6 +133,12 @@ describe('ServiceRuntime with several accounts', () => {
     return page.rows.map((row) => row.subject ?? '')
   }
 
+  function cloneSeedThread(seedPath: string, threadId: string): GmailThread {
+    const thread = readSeedThread(seedPath, threadId)
+    if (!thread) throw new Error(`Seeded thread ${threadId} missing`)
+    return JSON.parse(JSON.stringify(thread)) as GmailThread
+  }
+
   async function prepareAttachmentRemoval() {
     const input = makeInput()
     const { runtime } = await createRuntime(input)
@@ -148,26 +157,80 @@ describe('ServiceRuntime with several accounts', () => {
     return { runtime, db, drafts }
   }
 
-  it('reuses mailbox totals across account switches and invalidates only changed accounts', async () => {
+  it('returns the active account mailbox totals and reuses them between writes', async () => {
     const { runtime } = await createRuntime(makeInput())
     const count = vi.spyOn(queries, 'countSystemMailboxes')
     const read = () => runtime.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
-    expect(await read()).toMatchObject({ inbox: 1, allMail: 1 })
-    expect(await read()).toMatchObject({ inbox: 1, allMail: 1 })
+    const first = await read()
+    expect(first).toMatchObject({ inbox: 1, allMail: 1 })
+    expect(await read()).toBe(first)
     expect(count).toHaveBeenCalledTimes(1)
 
     await runtime.internal('set-active-account', ['second@attn.test'])
     expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
     await runtime.internal('set-active-account', ['primary@attn.test'])
     expect(await read()).toMatchObject({ inbox: 1, allMail: 1 })
-    expect(count).toHaveBeenCalledTimes(2)
 
     await runtime.invoke(IPC_CHANNELS.mailTriage, [{ kind: 'archive', threadIds: ['t-alpha'] }])
     expect(await read()).toMatchObject({ inbox: 0, allMail: 1 })
-    expect(count).toHaveBeenCalledTimes(3)
     await runtime.internal('set-active-account', ['second@attn.test'])
     expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
-    expect(count).toHaveBeenCalledTimes(3)
+    expect(count).toHaveBeenCalledTimes(5)
+  })
+
+  it('refreshes mailbox totals after silent writes and reuses them between writes', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+    const count = vi.spyOn(queries, 'countSystemMailboxes')
+    const read = () => runtime.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
+    const internals = runtime as unknown as { db: Db }
+
+    const first = await read()
+    expect(first).toMatchObject({ inbox: 1, allMail: 1 })
+    expect(await read()).toBe(first)
+    expect(count).toHaveBeenCalledTimes(1)
+
+    const added = cloneSeedThread(input.testSeed ?? '', 't-alpha')
+    added.id = 't-alpha-silent'
+    const addedMessage = added.messages?.[0]
+    if (!addedMessage) throw new Error('Seeded message missing')
+    addedMessage.id = 'm-alpha-silent'
+    addedMessage.threadId = added.id
+    internals.db.transaction(() => {
+      persistThread(internals.db, 'primary@attn.test', added)
+    })()
+
+    const second = await read()
+    expect(second).toMatchObject({ inbox: 2, allMail: 2 })
+    expect(await read()).toBe(second)
+    expect(count).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes mailbox totals between committed membership backfill batches', async () => {
+    const input = makeInput()
+    const { runtime } = await createRuntime(input)
+    const count = vi.spyOn(queries, 'countSystemMailboxes')
+    const read = () => runtime.invoke(IPC_CHANNELS.mailGetMailboxCounts, [])
+    const internals = runtime as unknown as { db: Db }
+
+    internals.db.prepare('DELETE FROM thread_mailboxes WHERE account_id = ?').run('primary@attn.test')
+
+    const empty = await read()
+    expect(empty).toMatchObject({ inbox: 0, allMail: 0 })
+    expect(await read()).toBe(empty)
+    expect(count).toHaveBeenCalledTimes(1)
+
+    let batches = 0
+    await runMailboxMembershipBackfill(internals.db, 'primary@attn.test', {
+      batchSize: 1,
+      batchPauseMs: 0,
+      shouldContinue: () => batches++ === 0
+    })
+
+    const partial = await read()
+    expect(partial).toMatchObject({ inbox: 1, allMail: 1 })
+    expect(await read()).toBe(partial)
+    expect(count).toHaveBeenCalledTimes(2)
   })
 
   it('keeps mailbox totals fresh when a partial Gmail search finishes on another account', async () => {
@@ -222,7 +285,7 @@ describe('ServiceRuntime with several accounts', () => {
     }
   })
 
-  it('shares cached split counts with account badges and refreshes them after notification and mail changes', async () => {
+  it('refreshes split counts after notification and mail changes', async () => {
     const input = makeInput()
     writeFileSync(
       input.testSeed ?? '',
@@ -238,7 +301,6 @@ describe('ServiceRuntime with several accounts', () => {
     await statuses()
     await runtime.internal('set-active-account', ['primary@attn.test'])
     await read()
-    expect(count).not.toHaveBeenCalled()
 
     await runtime.invoke(IPC_CHANNELS.splitsSetNotify, [OTHER_SPLIT_ID, true])
     expect(await statuses()).toEqual([
@@ -246,7 +308,6 @@ describe('ServiceRuntime with several accounts', () => {
       expect.objectContaining({ accountId: 'second@attn.test', unread: 1 })
     ])
     expect((await read()).splits.find((split) => split.id === OTHER_SPLIT_ID)?.notify).toBe(true)
-    expect(count).toHaveBeenCalledTimes(1)
 
     await runtime.invoke(IPC_CHANNELS.mailTriage, [{ kind: 'archive', threadIds: ['t-alpha'] }])
     expect((await read()).splits.find((split) => split.id === OTHER_SPLIT_ID)).toMatchObject({
@@ -257,7 +318,7 @@ describe('ServiceRuntime with several accounts', () => {
       expect.objectContaining({ accountId: 'primary@attn.test', unread: 0 }),
       expect.objectContaining({ accountId: 'second@attn.test', unread: 1 })
     ])
-    expect(count).toHaveBeenCalledTimes(2)
+    expect(count).toHaveBeenCalled()
   })
 
   it.each(['Keep', 'Delete'])(

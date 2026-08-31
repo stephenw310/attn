@@ -2,7 +2,12 @@ import type { ThreadRow } from '../../shared/mail'
 import type { ServerSearchResponse } from '../../shared/searchQuery'
 import { parseSearchQuery } from '../../shared/searchQuery'
 import type { Db } from '../db'
-import { matchingStoredThreadIds, SEARCH_RESULT_LIMIT, searchRowsByThreadIds } from '../db/search'
+import {
+  matchingStoredThreadIds,
+  SEARCH_RESULT_LIMIT,
+  searchRowsByThreadIds,
+  searchThreads
+} from '../db/search'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import { toGmailSearchQuery } from '../gmail/searchQuery'
 import { hydrateMissingThreadBodies } from './bodies'
@@ -24,6 +29,8 @@ export interface SearchAllGmailOptions {
   shouldContinue?: () => boolean
   signal?: AbortSignal
   onStoreChanged?: () => void
+  /** Match the local search window when a test overrides its production limit. */
+  recentMessageLimit?: number
 }
 
 /** Keep Gmail order, remove repeated ids, and leave existing local results in their original section. */
@@ -71,12 +78,23 @@ export async function searchAllGmail(
       (filter.kind === 'is' && filter.value === 'snoozed') ||
       (filter.kind === 'in' && filter.value.toLowerCase().replaceAll(/[\s_-]/g, '') === 'snoozed')
   )
-  if ((parsed.terms.length === 0 && parsed.filters.length === 0) || searchesLocalOnlyState) {
+  if (
+    !shouldContinue() ||
+    (parsed.terms.length === 0 && parsed.filters.length === 0) ||
+    searchesLocalOnlyState
+  ) {
     return { rows: [], quotaWaitMs: 0 }
   }
   const gmailQuery = toGmailSearchQuery(parsed, { resolveLabelName: labelResolver(db, accountId) })
   const waitStartedAt = provider.quotaMetrics?.().waitMs ?? 0
-  const excludedIds = new Set<string>()
+  // Only the visible local result set is already represented in the UI. A
+  // cached match can be absent because of either the candidate or result limit.
+  // Snapshot once: caching a Gmail result must not make it exclude itself later.
+  const excludedIds = new Set(
+    searchThreads(db, accountId, query, { recentMessageLimit: options.recentMessageLimit }).rows.map(
+      (row) => row.id
+    )
+  )
   const storedIds: string[] = []
   let pageToken: string | undefined
   do {
@@ -89,12 +107,17 @@ export async function searchAllGmail(
       ...(pageToken ? { pageToken } : {})
     })
     if (!shouldContinue()) return { rows: [], quotaWaitMs: 0 }
-    for (const threadId of matchingStoredThreadIds(db, accountId, query, page.threadIds)) {
-      excludedIds.add(threadId)
-    }
     const candidateIds = newServerThreadIds(excludedIds, page.threadIds)
+    const cachedMatches = matchingStoredThreadIds(db, accountId, query, candidateIds)
     for (const threadId of candidateIds) {
       excludedIds.add(threadId)
+      if (cachedMatches.has(threadId)) {
+        // Gmail confirmed the match, and the local index already has enough
+        // content to show it. Keep its row without refetching headers or bodies.
+        storedIds.push(threadId)
+        if (storedIds.length >= SEARCH_RESULT_LIMIT) break
+        continue
+      }
       try {
         const { thread, persisted } = await fetchAndCacheThread(db, accountId, provider, threadId, {
           format: 'full',

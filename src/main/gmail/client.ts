@@ -4,9 +4,16 @@
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
-import { type SchedulerTime, systemTime } from '../time'
 import {
   DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE,
+  GMAIL_MAX_RETRIES,
+  GMAIL_RETRY_BASE_MS,
+  GMAIL_RETRY_JITTER_MS,
+  GMAIL_RETRY_MAX_MS,
+  GMAIL_TOKEN_REFRESH_MARGIN_MS
+} from '../sync/tuning'
+import { type SchedulerTime, systemTime } from '../time'
+import {
   GMAIL_QUOTA_UNITS,
   type GmailQuotaConfig,
   type GmailQuotaLimiter,
@@ -93,7 +100,8 @@ export class GmailClient {
   }
 
   private async ensureAccessToken(signal?: AbortSignal): Promise<string> {
-    if (this.time.now() < this.tokens.expires_at - 60_000) return this.tokens.access_token
+    if (this.time.now() < this.tokens.expires_at - GMAIL_TOKEN_REFRESH_MARGIN_MS)
+      return this.tokens.access_token
     return this.refresh(signal)
   }
 
@@ -285,10 +293,15 @@ export class GmailClient {
       if (
         options.retryTransient !== false &&
         (res.status === 429 || res.status >= 500 || quotaHit) &&
-        attempt < 7
+        attempt < GMAIL_MAX_RETRIES
       ) {
         attempt++
-        await sleep(Math.min(65_000, 1000 * 2 ** attempt) + this.random() * 1000, this.time, options.signal)
+        await sleep(
+          Math.min(GMAIL_RETRY_MAX_MS, GMAIL_RETRY_BASE_MS * 2 ** attempt) +
+            this.random() * GMAIL_RETRY_JITTER_MS,
+          this.time,
+          options.signal
+        )
         continue
       }
       throw new GmailApiError(

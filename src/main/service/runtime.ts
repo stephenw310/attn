@@ -3,7 +3,13 @@ import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
 import { type AccountSyncStatus, accountSyncPhase } from '../../shared/auth'
 import { type InvokeChannel, type MailChangeReason, TEST_CHANNELS } from '../../shared/ipc'
-import type { MessageMailbox, SyncState, SystemMailboxCounts } from '../../shared/mail'
+import {
+  type MessageMailbox,
+  type SyncState,
+  type SystemMailboxCounts,
+  THREAD_PAGE_SIZE
+} from '../../shared/mail'
+import { ALLOWED_UNDO_SEND_SECONDS } from '../../shared/outboxTuning'
 import type { SplitState } from '../../shared/splits'
 import { actionQueueStatus, clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
@@ -11,11 +17,12 @@ import { ActionRevertNotices } from '../actions/revertNotices'
 import { type Db, openDatabase, schemaVersion } from '../db'
 import { accountKeyedTables, accountOutboxSpoolIds, purgeAccountRows } from '../db/purgeAccount'
 import { countInboxUnread, countSystemMailboxes, listMailboxThreads } from '../db/queries'
+import { searchThreads } from '../db/search'
 import { loadSeed, readSeedRemoteThreadIds, readSeedThread, readSeedThreadAccount } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { GmailMailProvider } from '../gmail/provider'
-import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE, GmailQuotaLimiter } from '../gmail/quota'
+import { GmailQuotaLimiter } from '../gmail/quota'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { cachePrimarySendAs } from '../outbox/sendAs'
@@ -32,6 +39,7 @@ import { deleteThread, type LabelRow } from '../sync/persist'
 import { historyEvents, type NewMail } from '../sync/poller'
 import type { MailProvider } from '../sync/provider'
 import type { ServerSearchProvider } from '../sync/serverSearch'
+import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE } from '../sync/tuning'
 import { SyncController } from '../syncController'
 import { createServiceHandlers, type ServiceHandlers } from './handlers'
 import { candidatesFor, notificationPausedUntil, setNotificationPausedUntil } from './notificationQueries'
@@ -50,6 +58,7 @@ export type ServiceEventSink = (event: ServiceEvent) => void
 const ACTIVE_ACCOUNT_SETTING = 'activeAccountId'
 
 interface AccountMailSummary {
+  revision: number
   mailboxCounts?: SystemMailboxCounts
   splitState?: SplitState
 }
@@ -158,6 +167,7 @@ export class ServiceRuntime {
   private stopped = false
   private schedulersStarted = false
   private mailRevision = 0
+  private searchWindowOverride: number | null = null
   private readonly mailSummaryByAccount = new Map<string, AccountMailSummary>()
   private lastAccountStatuses = ''
   private draftSaveFailures = 0
@@ -241,6 +251,7 @@ export class ServiceRuntime {
       draftReopenDelay: () => this.draftReopenDelayMs,
       draftInlineImageDelay: () => this.draftInlineImageDelayMs,
       consumeTestDraftSaveFailure: () => this.consumeDraftSaveFailure(),
+      searchWindowOverride: () => this.searchWindowOverride,
       testUserData: input.testMode,
       userDataPath: input.userDataPath,
       downloadsPath: input.downloadsPath
@@ -769,12 +780,18 @@ export class ServiceRuntime {
     this.broadcastBadge()
   }
 
-  /** Switching accounts does not change mail. Recount only after mutations or provider reads. */
+  /**
+   * Reuse per-account summaries between writes on this SQLite connection.
+   * Background passes can commit without broadcasting a mail change. Unrelated
+   * writes, including saved account selection, can cause an extra recompute.
+   */
   private mailSummary(accountId: string): AccountMailSummary {
-    if (this.foregroundProviderWork.has(accountId)) return {}
+    if (this.foregroundProviderWork.has(accountId)) return { revision: -1 }
+    const revision = (this.db.prepare('SELECT total_changes() AS revision').get() as { revision: number })
+      .revision
     const cached = this.mailSummaryByAccount.get(accountId)
-    if (cached) return cached
-    const summary: AccountMailSummary = {}
+    if (cached && cached.revision === revision) return cached
+    const summary: AccountMailSummary = { revision }
     this.mailSummaryByAccount.set(accountId, summary)
     return summary
   }
@@ -963,7 +980,7 @@ export class ServiceRuntime {
     }
     if (channel === TEST_CHANNELS.setUndoSendDelay) {
       const seconds = args[0]
-      if (typeof seconds === 'number' && [0, 5, 8, 10, 20, 30].includes(seconds)) {
+      if (typeof seconds === 'number' && ALLOWED_UNDO_SEND_SECONDS.has(seconds)) {
         writeSetting(this.db, 'undoSendDelaySeconds', String(seconds))
       }
       return undefined
@@ -1027,6 +1044,14 @@ export class ServiceRuntime {
     if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])
     if (channel === TEST_CHANNELS.runFtsBackfill) return this.runTestFtsBackfill(args[0])
     if (channel === TEST_CHANNELS.searchIndexStats) return this.testSearchIndexStats(args[0])
+    if (channel === TEST_CHANNELS.queryPerfStats) return this.testQueryPerfStats(args[0])
+    if (channel === TEST_CHANNELS.setSearchWindow) {
+      // The partial marker only appears once a search fills its recency window,
+      // which a seeded store is far too small to do at the production size.
+      const limit = args[0]
+      this.searchWindowOverride = typeof limit === 'number' && limit > 0 ? Math.trunc(limit) : null
+      return undefined
+    }
     if (channel === TEST_CHANNELS.utilityState) {
       const ids = args[0]
       if (!accountId || !Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
@@ -1157,7 +1182,7 @@ export class ServiceRuntime {
           failure = error
         }
       },
-      { requestIntervalMs: 0, pagePauseMs: 0 }
+      { requestIntervalMs: 0, pagePauseMs: 0, threadCap: value.threadCap }
     )
     const state = this.db
       .prepare('SELECT sweep_cursor FROM sync_state WHERE account_id = ?')
@@ -1246,6 +1271,39 @@ export class ServiceRuntime {
     return { indexBytes, queries }
   }
 
+  private testQueryPerfStats(value: unknown): unknown {
+    const accountId = this.activeAccountId
+    if (!accountId || !isQueryPerfStatsRequest(value)) throw new Error('invalid query perf request')
+    const runsPerQuery = value.runsPerQuery ?? 1
+    const threadLimit = value.threadLimit ?? THREAD_PAGE_SIZE + 1
+    const searchQuery = value.searchQuery ?? 'performance'
+
+    const time = <T>(read: () => T): { result: T; samplesUs: number[] } => {
+      const samplesUs: number[] = []
+      let result!: T
+      for (let run = 0; run < runsPerQuery; run++) {
+        const startedAt = process.hrtime.bigint()
+        result = read()
+        samplesUs.push(Number(process.hrtime.bigint() - startedAt) / 1_000)
+      }
+      return { result, samplesUs }
+    }
+
+    const mailboxCounts = time(() => countSystemMailboxes(this.db, accountId))
+    const allMailPage = time(() => listMailboxThreads(this.db, accountId, 'allMail', threadLimit))
+    const search = time(() => searchThreads(this.db, accountId, searchQuery))
+
+    return {
+      mailboxCounts: { samplesUs: mailboxCounts.samplesUs, counts: mailboxCounts.result },
+      allMailPage: { samplesUs: allMailPage.samplesUs, rowCount: allMailPage.result.length },
+      search: {
+        samplesUs: search.samplesUs,
+        rowCount: search.result.rows.length,
+        partial: search.result.partial
+      }
+    }
+  }
+
   private async runTestExistenceSweep(value: unknown): Promise<unknown> {
     const accountId = this.activeAccountId
     if (!accountId || !isExistenceSweepRequest(value)) throw new Error('invalid existence sweep request')
@@ -1273,6 +1331,7 @@ export class ServiceRuntime {
 
 interface LifetimeSweepRequest {
   resetCursor?: string
+  threadCap?: number
   threads: GmailThread[]
   pages: Array<{
     pageToken?: string
@@ -1304,6 +1363,12 @@ interface SearchIndexStatsRequest {
   limit?: number
 }
 
+interface QueryPerfStatsRequest {
+  runsPerQuery?: number
+  threadLimit?: number
+  searchQuery?: string
+}
+
 function optionalPositiveInteger(value: unknown): boolean {
   return value === undefined || (typeof value === 'number' && Number.isInteger(value) && value > 0)
 }
@@ -1327,6 +1392,16 @@ function isSearchIndexStatsRequest(value: unknown): value is SearchIndexStatsReq
     request.queries.every((query) => typeof query === 'string' && query.length > 0) &&
     optionalPositiveInteger(request.runsPerQuery) &&
     optionalPositiveInteger(request.limit)
+  )
+}
+
+function isQueryPerfStatsRequest(value: unknown): value is QueryPerfStatsRequest {
+  if (!value || typeof value !== 'object') return false
+  const request = value as Partial<QueryPerfStatsRequest>
+  return (
+    optionalPositiveInteger(request.runsPerQuery) &&
+    optionalPositiveInteger(request.threadLimit) &&
+    (request.searchQuery === undefined || typeof request.searchQuery === 'string')
   )
 }
 
@@ -1365,7 +1440,11 @@ function isLabelRows(value: unknown): value is LabelRow[] {
 function isLifetimeSweepRequest(value: unknown): value is LifetimeSweepRequest {
   if (!value || typeof value !== 'object') return false
   const request = value as Partial<LifetimeSweepRequest>
-  return Array.isArray(request.threads) && Array.isArray(request.pages)
+  return (
+    Array.isArray(request.threads) &&
+    Array.isArray(request.pages) &&
+    (request.threadCap === undefined || (Number.isSafeInteger(request.threadCap) && request.threadCap >= 0))
+  )
 }
 
 function isExistenceSweepRequest(value: unknown): value is ExistenceSweepRequest {

@@ -6,6 +6,7 @@ import { IMPORTANT_SPLIT_ID } from '../../shared/splits'
 import { loadSeed } from '../dev/seed'
 import { ensureSplitSetup } from '../splits'
 import { runFtsBackfill } from '../sync/ftsBackfill'
+import { THREAD_LIST_LIMIT } from '../sync/tuning'
 import { type Db, openDatabase } from './index'
 import * as queries from './queries'
 import * as search from './search'
@@ -109,7 +110,7 @@ describe('two-account read isolation', () => {
 
     onlyAlpha(queries.listInboxThreads(db, A))
     ensureSplitSetup(db, A)
-    onlyAlpha(queries.listInboxThreads(db, A, queries.THREAD_LIST_LIMIT, null, IMPORTANT_SPLIT_ID))
+    onlyAlpha(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, IMPORTANT_SPLIT_ID))
     for (const view of ['allMail', 'sent', 'starred', 'spam', 'trash'] as const) {
       onlyAlpha(queries.listMailboxThreads(db, A, view))
     }

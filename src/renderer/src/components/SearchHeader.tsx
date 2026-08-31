@@ -72,18 +72,20 @@ export function SearchHeader({
   )
 }
 
-export function searchCoverageText(coverage: SearchCoverage): string {
+/**
+ * What this search did not look at. `partial` leads because it is the one gap
+ * caused by the query rather than by sync still running: the search filled its
+ * recency window, so older matches were never considered.
+ */
+export function searchCoverageText(coverage: SearchCoverage, partial = false): string {
   const gaps: string[] = []
-  if (!coverage.headersComplete) gaps.push('Older headers are still syncing')
+  if (partial) gaps.push('Showing the newest matches only — narrow the search to reach older mail')
+  if (coverage.headersCapped) gaps.push('Older headers are outside the local sync limit')
+  else if (!coverage.headersComplete) gaps.push('Older headers are still syncing')
   if (!coverage.indexComplete) gaps.push('The local index is still filling')
-  if (coverage.messagesWithBody < coverage.messagesTotal) {
-    const number = new Intl.NumberFormat()
-    gaps.push(
-      `Body text and filenames cover ${number.format(coverage.messagesWithBody)} of ${number.format(
-        coverage.messagesTotal
-      )} messages`
-    )
-  }
+  // Not a count: older mail is header-only by design, so a running fraction that
+  // never reaches its denominator told the reader less than the rule does.
+  if (coverage.bodiesOnDemand) gaps.push('Older mail is searched by sender and subject until you open it')
   if (!coverage.attachmentFlagsComplete) gaps.push('Attachment coverage is still filling')
   return gaps.length > 0 ? gaps.join(' · ') : 'Local search coverage is complete'
 }

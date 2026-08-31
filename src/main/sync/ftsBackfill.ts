@@ -8,10 +8,7 @@
 import type { Db } from '../db'
 import { type SchedulerTime, systemTime } from '../time'
 import { type FtsWriteCounts, indexStoredMessages } from './fts'
-import { LIFETIME_FOREGROUND_YIELD_MS } from './lifetimeSweep'
-
-export const FTS_BACKFILL_BATCH_SIZE = 200
-export const FTS_BACKFILL_BATCH_PAUSE_MS = 25
+import { FTS_BACKFILL_BATCH_PAUSE_MS, FTS_BACKFILL_BATCH_SIZE, LIFETIME_FOREGROUND_YIELD_MS } from './tuning'
 
 const CURSOR_PHASE = 'fts'
 

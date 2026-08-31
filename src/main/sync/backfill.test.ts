@@ -4,7 +4,7 @@ import { GmailApiError } from '../gmail/client'
 import type { SchedulerTime, TimerHandle } from '../time'
 import { planBackfillStart, runInboxBackfill } from './backfill'
 import type { MailProvider, ThreadIdPage } from './provider'
-import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './windows'
+import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './tuning'
 
 interface FakeSyncState {
   backfill_cursor: string | null

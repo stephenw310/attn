@@ -743,7 +743,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   const switchAccount = useCallback(
     (accountId: string) => {
       if (!window.attn || accountId === status.activeAccountId) return
-      if (composerOpenRef.current) {
+      if (composerOpenRef.current || composerOpeningRef.current) {
         showToast('Save and close the draft before switching accounts')
         return
       }
@@ -771,13 +771,13 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   // guarded switch here, and a blocked switch leaves the account added but
   // not active rather than dropping unsaved keystrokes.
   const addAccount = useCallback(() => {
-    if (composerOpenRef.current) {
+    if (composerOpenRef.current || composerOpeningRef.current) {
       showToast('Save and close the draft before adding an account')
       return
     }
     void reconnectGoogle().then((result) => {
       if (!result?.accountId || result.accountId === result.status.activeAccountId) return
-      if (composerOpenRef.current) {
+      if (composerOpenRef.current || composerOpeningRef.current) {
         void showToast(`Added ${result.accountId} — save the draft, then switch from the account menu`)
         return
       }
@@ -788,7 +788,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   // decides the local data's fate (F18, D3): Delete purges every local trace,
   // Keep leaves the rows dormant for a future re-add to resume from cursors.
   const requestRemoveAccount = useCallback(() => {
-    if (composerOpenRef.current) {
+    if (composerOpenRef.current || composerOpeningRef.current) {
       showToast('Save and close the draft before removing an account')
       return
     }
@@ -798,7 +798,14 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   const removeActiveAccount = useCallback(
     (deleteData: boolean) => {
       const target = status.activeAccountId
-      if (!window.attn || !target || composerOpenRef.current || accountSwitchPendingRef.current) return
+      if (
+        !window.attn ||
+        !target ||
+        composerOpenRef.current ||
+        composerOpeningRef.current ||
+        accountSwitchPendingRef.current
+      )
+        return
       accountSwitchPendingRef.current = true
       setAccountSwitchPending(true)
       setRemoveAccountConfirm(false)
@@ -2046,12 +2053,15 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
                 data-testid="search-coverage"
                 data-search-query={search.completedQuery ?? undefined}
                 role={search.failed ? 'alert' : 'status'}
-                className="flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] text-ink-faint"
+                data-partial={search.response?.partial || undefined}
+                className={`flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] ${
+                  search.response?.partial ? 'text-accent' : 'text-ink-faint'
+                }`}
               >
                 {search.failed
                   ? 'Local search could not be completed'
                   : search.response
-                    ? searchCoverageText(search.response.coverage)
+                    ? searchCoverageText(search.response.coverage, search.response.partial)
                     : 'Searching cached mail…'}
               </div>
             )}

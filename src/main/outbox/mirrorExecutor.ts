@@ -1,4 +1,5 @@
 import { errorMessage } from '../../shared/error'
+import { MIRROR_STOP_TIMEOUT_MS } from '../../shared/outboxTuning'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
@@ -7,7 +8,6 @@ import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { DraftMirrorRowError, drainDraftMirrors } from './mirror'
 
 type MirrorDrain = typeof drainDraftMirrors
-const STOP_TIMEOUT_MS = 5_000
 
 function waitForAbortable(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
   if (!signal) return promise
@@ -86,7 +86,7 @@ export class DraftMirrorExecutor {
     const timedOut = await Promise.race([
       drain.then(() => false),
       new Promise<boolean>((resolve) => {
-        timeout = this.time.timers.setTimeout(() => resolve(true), STOP_TIMEOUT_MS)
+        timeout = this.time.timers.setTimeout(() => resolve(true), MIRROR_STOP_TIMEOUT_MS)
       })
     ])
     if (timeout) this.time.timers.clearTimeout(timeout)

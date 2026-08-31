@@ -3,6 +3,14 @@ import type { DraftKind } from '../../shared/drafts'
 import { errorMessage } from '../../shared/error'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
+import {
+  MAX_ATTACHMENT_SOURCE_ATTEMPTS,
+  OUTBOX_OFFLINE_RECHECK_MS,
+  OUTBOX_STOP_TIMEOUT_MS,
+  SECONDARY_CHECK_MS,
+  SECONDARY_CHECKS,
+  SENT_OUTBOX_RETENTION_MS
+} from '../../shared/outboxTuning'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
@@ -17,14 +25,6 @@ import { buildMime, mimeByteLength, streamMime } from './mime'
 import { DraftAttachmentSourceError, prepareDraftMimeAttachments } from './mirror'
 import { primarySenderDisplayName, SEND_AS_DISPLAY_NAME_SETTING, syncPrimarySendAs } from './sendAs'
 import { validateAttachmentCap } from './spool'
-
-const SECONDARY_CHECK_MS = 10_000
-const SECONDARY_CHECKS = 6
-/** ~6.5 minutes on the 5s/30s/60s ladder before a dead attachment source fails. */
-const MAX_ATTACHMENT_SOURCE_ATTEMPTS = 8
-const OFFLINE_RECHECK_MS = 30_000
-const STOP_TIMEOUT_MS = 5_000
-export const SENT_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 
 interface SendRow {
   id: string
@@ -296,7 +296,7 @@ export class OutboxSender {
     const timedOut = await Promise.race([
       drain.then(() => false),
       new Promise<boolean>((resolve) => {
-        timeout = this.time.timers.setTimeout(() => resolve(true), STOP_TIMEOUT_MS)
+        timeout = this.time.timers.setTimeout(() => resolve(true), OUTBOX_STOP_TIMEOUT_MS)
       })
     ])
     if (timeout) this.time.timers.clearTimeout(timeout)
@@ -351,7 +351,7 @@ export class OutboxSender {
       this.timer = this.time.timers.setTimeout(() => {
         this.timer = null
         void this.trigger()
-      }, OFFLINE_RECHECK_MS)
+      }, OUTBOX_OFFLINE_RECHECK_MS)
       return
     }
 
