@@ -368,7 +368,8 @@ list or conversation remains mounted but hidden so its selection and scroll are 
 or the visible Back control saves and closes the draft. From a mail list, `R` or `F` opens the selected
 conversation directly into its inline reply or forward composer. In the reader, `N`/`P` moves a visible
 message cursor without expanding the message, and `O` expands or collapses it. Clicking a message also
-selects it. `R`/`A`/`Enter`/`F` replies, replies-all, or forwards the selected message and expands it, with
+selects it. `Enter` opens a selected collapsed message, like `O`; on an already expanded message it opens
+Reply all. `R`/`A`/`F` immediately replies, replies-all, or forwards the selected message and expands it, with
 the inline composer attached directly beneath that message. Later messages stay below the composer.
 Quoted history sits behind a compact inline
 `...` control. Text-like source mail inherits the composer surface instead of introducing a separate panel,
@@ -811,7 +812,8 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
 
 | Keys | Action |
 |---|---|
-| `R` / `A` or `Enter` / `F` | Reply / reply-all / forward |
+| `R` / `A` / `F` | Reply / reply-all / forward |
+| `Enter` | Expand the selected collapsed message; reply all when it is already expanded |
 | `Mod+J` | Draft AI reply (F17; opens the inline reply composer) |
 | `N` / `P` | Next / previous message in thread |
 | `O` | Expand / collapse message |

@@ -88,6 +88,43 @@ test('the visible message cursor targets reply, reply all, and forward shortcuts
   await expect(composer.attachmentChips).toContainText('internal.txt')
 })
 
+test('Enter opens the highlighted message before replying all, while A replies immediately', async ({
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  await page.keyboard.press('Enter')
+  const messages = page.getByTestId('conversation-message')
+  const customer = messages.first().getByTestId('message-card')
+  await expect(messages).toHaveCount(3)
+  await expect(messages.last().getByTestId('message-card')).toHaveAttribute('data-collapsed', 'false')
+  await page.keyboard.press('p')
+  await page.keyboard.press('p')
+  await expect(customer).toHaveAttribute('data-collapsed', 'true')
+
+  await page.keyboard.press('Enter')
+  await expect(customer).toHaveAttribute('data-collapsed', 'false')
+  await expect(customer.getByTestId('plain-text-body')).toContainText('Can you help with my account?')
+  await expect(messages.first().getByTestId('message-cursor')).toBeVisible()
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  expect(await page.evaluate(() => window.attn.draft.list())).toEqual([])
+
+  await page.keyboard.press('Enter')
+  const composer = new ComposerPage(page)
+  await composer.expectRecipients(['jordan+support@example.com'])
+  await composer.expectRecipients(['support@example.com'], 'cc')
+  await expectComposerAfter(page, 'm-customer')
+  await expect(composer.root).toHaveAttribute('data-draft-kind', 'replyAll')
+  await page.getByTestId('composer-close').click()
+  await expect(composer.root).toHaveCount(0)
+
+  await page.keyboard.press('o')
+  await expect(customer).toHaveAttribute('data-collapsed', 'true')
+  await page.keyboard.press('a')
+  await composer.expectRecipients(['jordan+support@example.com'])
+  await composer.expectRecipients(['support@example.com'], 'cc')
+  await expectComposerAfter(page, 'm-customer')
+})
+
 test('undo send returns the draft beneath the earlier source message', async ({ app, page }) => {
   await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 20), TEST_CHANNELS.setUndoSendDelay)
   await page.getByTestId('thread-row').first().click()
@@ -247,10 +284,20 @@ test('targets the active message from the palette and rejects unrelated source i
 test.describe('revealed Trash messages', () => {
   test.use({ seed: 'fixtures/seed-inbox.json' })
 
-  test('can reply to a revealed message without changing its Trash label', async ({ page }) => {
+  test('Enter reveals a trashed message before replying without changing its Trash label', async ({
+    page
+  }) => {
     await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
-    await page.getByTestId('trashed-message-reveal').click()
-    await page.keyboard.press('r')
+    await expect(page.getByTestId('trashed-message-marker')).toHaveCount(1)
+    await page.keyboard.press('n')
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('trashed-message-marker')).toHaveCount(0)
+    await expect(page.getByTestId('message-card').last()).toContainText(
+      'This deleted reply belongs only in Trash.'
+    )
+    await expect(page.getByTestId('composer')).toHaveCount(0)
+    expect(await page.evaluate(() => window.attn.draft.list())).toEqual([])
+    await page.keyboard.press('Enter')
     const composer = new ComposerPage(page)
     await composer.expectRecipients(['maya@example.com'])
     const draft = await page.evaluate(

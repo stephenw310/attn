@@ -1645,6 +1645,16 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     [readerOpen, searchOpen, searchResultQuery, selected, showDraft, showToast, view]
   )
 
+  const openMessageOrReplyAll = useCallback(() => {
+    if (!readerOpen || !selected) return
+    const target = messageReplyTargetRef.current
+    if (target?.threadId === selected.id && target.expand) {
+      target.expand()
+      return
+    }
+    openReply('replyAll')
+  }, [openReply, readerOpen, selected])
+
   const closeComposer = useCallback(() => {
     activeComposerDraftIdRef.current = null
     // Closing is the local handoff from an inline composer back to its
@@ -1808,6 +1818,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
     markNotDone,
     openComposer,
     openReply,
+    openMessageOrReplyAll,
     showToast,
     reopenUndoDraft,
     splitCommands,

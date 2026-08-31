@@ -650,7 +650,8 @@ canvas uses the native composer canvas and normalizes dark sender foreground col
 non-neutral backgrounds and background images retain a light document canvas plus their sanitized structure
 and explicit styling. Typography, media, tables, and layout alone remain native. From Inbox or Snoozed, `r`
 and `f` open the selected row directly into the corresponding inline composer.
-`Enter` is a reader-only Reply-all alias alongside `a` and retains native activation on focused links.
+`Enter` opens the selected collapsed message; when it is already expanded, it opens Reply all.
+`a` always opens Reply all, and `Enter` retains native activation on focused links.
 
 Gmail-imported forwards need one additional identity rule. A draft whose authoritative Gmail `threadId`
 matches a cached thread is thread-bound even though forwards normally lack `In-Reply-To` and `References`.
@@ -664,7 +665,8 @@ thread is not cached, and re-fetch unchanged legacy rows once so an earlier unbo
   opening both Inbox-bound and archived-parent Gmail forward drafts returns to an inline composer; opening
   the conversation row itself restores its draft in the viewport after long HTML settles; quoted history
   reveals inline on the same native or presentation surface as its source; `r`/`f` work from the selected list
-  row; `Enter` opens Reply all; Back and `Esc` exit directly to the originating list without losing it.
+  row; `Enter` expands a collapsed message or opens Reply all for an expanded message; Back and `Esc`
+  exit directly to the originating list without losing it.
 - Visual artifacts: `inline-reply.png` and `draft-chip.png`.
 
 ### Done when
@@ -1061,8 +1063,10 @@ Message cards omit repeated reply footers and use a muted, rounded selection cur
 Reply, Reply all, and Forward palette commands target the message selected by pointer or `N`/`P`.
 Explicit source ids cross the typed draft IPC boundary and scope draft reuse,
 recipients, quote content, attachment selection, and reply headers. Reply all upgrades keep the draft's
-original source. Reader shortcuts `R`/`A`/`Enter`/`F` use the visible message cursor, which moves with `N`/`P`
-or a click. Replying expands that message and attaches the composer directly beneath it, before any later
+original source. Reader shortcuts use the visible message cursor, which moves with `N`/`P` or a click.
+`Enter` first opens a collapsed message, including a hidden Trash marker; on an expanded message it opens
+Reply all. `R`/`A`/`F` immediately replies, replies-all, or forwards. Replying expands that message and
+attaches the composer directly beneath it, before any later
 messages. Reopened drafts return beneath their source; a missing source falls back to the conversation end.
 The keyed composer stays mounted while source messages load or change, preserving unsaved edits. Incoming
 mail does not steal the reader's cursor. List shortcuts keep their default source selection. No schema change is required.

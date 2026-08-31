@@ -48,6 +48,7 @@ interface Options {
   markNotDone: () => void
   openComposer: () => void
   openReply: (kind: Exclude<DraftKind, 'new'>) => void
+  openMessageOrReplyAll: () => void
   showToast: (message: string) => void
   reopenUndoDraft: (id: string) => void
   splitCommands: {
@@ -106,6 +107,7 @@ export function useInboxCommands(options: Options): void {
     markNotDone,
     openComposer,
     openReply,
+    openMessageOrReplyAll,
     showToast,
     reopenUndoDraft,
     splitCommands,
@@ -202,7 +204,12 @@ export function useInboxCommands(options: Options): void {
               createCommand('composer.reply', () => openReply('reply'), {
                 context: readerOpen ? 'reader' : 'list'
               }),
-              ...(readerOpen ? [createCommand('composer.replyAll', () => openReply('replyAll'))] : []),
+              ...(readerOpen
+                ? [
+                    createCommand('composer.replyAll', () => openReply('replyAll')),
+                    createCommand('message.openOrReplyAll', openMessageOrReplyAll)
+                  ]
+                : []),
               createCommand('composer.forward', () => openReply('forward'), {
                 context: readerOpen ? 'reader' : 'list'
               })
@@ -284,6 +291,7 @@ export function useInboxCommands(options: Options): void {
       openComposer,
       openOutbox,
       openReply,
+      openMessageOrReplyAll,
       openSearch,
       openSelected,
       openSnooze,

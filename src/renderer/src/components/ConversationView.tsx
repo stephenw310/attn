@@ -10,6 +10,7 @@ export interface MessageReplyTarget {
   threadId: string
   messageId: string
   canReply: boolean
+  expand: (() => void) | null
 }
 
 interface ConversationMessagesProps {
@@ -199,6 +200,11 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       ? {
           threadId: conversation.threadId,
           messageId: activeMessage.id,
+          expand:
+            !expandedMessageIds.has(activeMessage.id) ||
+            (activeMessage.trashed && !revealedTrashedIds.has(activeMessage.id))
+              ? toggleActiveMessage
+              : null,
           canReply:
             !activeMessage.pending && (!activeMessage.trashed || revealedTrashedIds.has(activeMessage.id))
         }
@@ -207,7 +213,15 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     return () => {
       if (replyTargetRef.current === target) replyTargetRef.current = null
     }
-  }, [activeMessageId, conversation.messages, conversation.threadId, replyTargetRef, revealedTrashedIds])
+  }, [
+    activeMessageId,
+    conversation.messages,
+    conversation.threadId,
+    expandedMessageIds,
+    replyTargetRef,
+    revealedTrashedIds,
+    toggleActiveMessage
+  ])
 
   useLayoutEffect(() => {
     const activeMessage = conversation.messages.find((message) => message.id === activeMessageId)

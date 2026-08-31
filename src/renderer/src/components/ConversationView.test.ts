@@ -178,6 +178,7 @@ it('opens a message appended to the current conversation by default', async () =
     expect(props.replyTargetRef.current).toEqual({
       threadId: 'thread-1',
       messageId: 'message-1',
+      expand: expect.any(Function),
       canReply: true
     })
 
