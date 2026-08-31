@@ -128,8 +128,8 @@ describe('badge effects', () => {
       setMacBadge: (count: number): void => {
         calls.push(`mac:${count}`)
       },
-      setWindowsOverlay: (show: boolean, description: string): void => {
-        calls.push(`windows:${show}:${description}`)
+      setWindowsOverlay: (count: number, description: string): void => {
+        calls.push(`windows:${count}:${description}`)
       }
     }
 
@@ -140,11 +140,14 @@ describe('badge effects', () => {
     applyUnreadBadge('win32', 0, effects)
     applyUnreadBadgeToWindow('linux', 7, effects.setWindowsOverlay)
     applyUnreadBadgeToWindow('win32', 7, effects.setWindowsOverlay)
+    // The tooltip keeps the exact count; the overlay numerals cap at 99+ (T38).
+    applyUnreadBadgeToWindow('win32', 150, effects.setWindowsOverlay)
     expect(calls).toEqual([
       'mac:4',
-      'windows:true:4 unread conversations',
-      'windows:false:',
-      'windows:true:7 unread conversations'
+      'windows:4:4 unread conversations',
+      'windows:0:',
+      'windows:7:7 unread conversations',
+      'windows:150:150 unread conversations'
     ])
   })
 })
