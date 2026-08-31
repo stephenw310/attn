@@ -1,12 +1,15 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, nativeTheme, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, powerMonitor, safeStorage, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
+import { type AiSettings, validateAiSettingUpdate } from '../shared/ai'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { AppSettingUpdate } from '../shared/settings'
 import type { ThemePreference } from '../shared/theme'
+import { AiKeyStore } from './ai/keyStore'
+import { AiManager } from './ai/manager'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { accountIdForTokens, reorderIds, type StoredAccount } from './auth/tokenFile'
@@ -70,9 +73,12 @@ let themePreference: ThemePreference = 'system'
 // registered mail frames, consulted by the request filter in createWindow.
 let remoteImagePolicy: RemoteImagePolicy = DEFAULT_REMOTE_IMAGE_POLICY
 const mailFrames = new MailFrameRegistry()
+// T36: AI key custody and the streaming LLM transport live in main (F17/D2).
+let aiManager: AiManager | null = null
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
+  ai: () => aiManager,
   focusInboxThread: (threadId, accountId) => {
     const owner = accountId ?? activeAccountId
     if (owner) focusInboxThread(owner, threadId)
@@ -486,6 +492,37 @@ async function initialize(): Promise<void> {
       applyMenuBarIcon(update.value, backgroundEffects)
     }
   }
+  // Under the e2e seam the container has no OS keyring, so a reversible
+  // stand-in keeps the key-custody flows testable; production always uses
+  // safeStorage and still refuses plaintext storage when it is unavailable.
+  const aiKeyStore = new AiKeyStore(
+    userDataPath,
+    testUserData
+      ? {
+          isAvailable: () => true,
+          encryptString: (text) => Buffer.from(`test:${Buffer.from(text, 'utf8').toString('base64')}`),
+          decryptString: (data) => {
+            const stored = data.toString('utf8')
+            if (!stored.startsWith('test:')) throw new Error('not test ciphertext')
+            return Buffer.from(stored.slice(5), 'base64').toString('utf8')
+          }
+        }
+      : {
+          isAvailable: () => safeStorage.isEncryptionAvailable(),
+          encryptString: (text) => safeStorage.encryptString(text),
+          decryptString: (data) => safeStorage.decryptString(data)
+        }
+  )
+  const ownedAiManager = new AiManager({
+    keyStore: aiKeyStore,
+    readSettings: () => ownedService.invoke(IPC_CHANNELS.aiGetSettings),
+    emit: (event) => broadcast(IPC_CHANNELS.aiStreamEvent, event)
+  })
+  aiManager = ownedAiManager
+  const aiSettingsSnapshot = async (): Promise<AiSettings> => ({
+    ...(await ownedService.invoke(IPC_CHANNELS.aiGetSettings)),
+    keyPresent: aiKeyStore.present()
+  })
   stopIpc = registerIpc({
     service: ownedService,
     authStatus,
@@ -496,6 +533,36 @@ async function initialize(): Promise<void> {
     takePendingFocus: takePendingFocusTarget,
     acknowledgePendingFocus: acknowledgeFocusTarget,
     applySettingEffects,
+    ai: {
+      getSettings: aiSettingsSnapshot,
+      setSetting: async (key, value) => {
+        const update = validateAiSettingUpdate(key, value)
+        const stored = await ownedService.invoke(IPC_CHANNELS.aiSetSetting, update.key, update.value)
+        // Disabling cancels in-flight work and drops late responses (F17):
+        // the master switch stops everything, the autocomplete switch only
+        // its own requests.
+        if (update.key === 'enabled' && update.value === false) ownedAiManager.cancelAll()
+        else if (update.key === 'autocompleteEnabled' && update.value === false) {
+          ownedAiManager.cancelAll('autocomplete')
+        }
+        return { ...stored, keyPresent: aiKeyStore.present() }
+      },
+      setKey: async (key) => {
+        aiKeyStore.save(key)
+        return aiSettingsSnapshot()
+      },
+      deleteKey: async () => {
+        // Removing the key cancels in-flight work and disables both features
+        // (F17); OAuth credentials are untouched by design.
+        aiKeyStore.delete()
+        ownedAiManager.cancelAll()
+        await ownedService.invoke(IPC_CHANNELS.aiSetSetting, 'enabled', false)
+        await ownedService.invoke(IPC_CHANNELS.aiSetSetting, 'autocompleteEnabled', false)
+        return aiSettingsSnapshot()
+      },
+      generate: (request) => ownedAiManager.generate(request),
+      cancel: (requestId) => ownedAiManager.cancel(requestId)
+    },
     registerMailFrame,
     unregisterMailFrame: (nonce) => mailFrames.unregister(nonce),
     setThemePreference: (preference) => {

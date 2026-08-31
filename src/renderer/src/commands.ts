@@ -132,6 +132,7 @@ export const COMMAND_SPECS = {
   'privacy.remoteImages.load': { title: 'Load remote images', context: 'global' },
   'privacy.remoteImages.overrides': { title: 'Manage remote-image overrides…', context: 'global' },
   'snippets.manage': { title: 'Manage snippets…', context: 'global' },
+  'ai.settings': { title: 'Set up AI writing…', context: 'global' },
   'settings.undoSendDelay': { title: 'Set undo send delay…', context: 'global' },
   'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
   'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },
@@ -308,6 +309,9 @@ export const COMMAND_SPECS = {
   'composer.numbering': { title: 'Numbered list', context: 'composer' },
   'composer.quote': { title: 'Block quote', context: 'composer' },
   'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
+  // F17: available from the reader (T36 lands the command and its disabled
+  // hint; T37 streams into the composer and widens where it runs).
+  'composer.aiDraft': { title: 'Draft AI reply', shortcut: 'Mod+J', context: 'reader' },
   'composer.snippets': { title: 'Insert snippet…', shortcut: 'Mod+;', context: 'composer' },
   'composer.followUp': { title: 'Remind me if no reply…', context: 'composer' },
   'triage.archive': {

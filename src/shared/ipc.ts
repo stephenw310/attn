@@ -1,5 +1,6 @@
 import type { ActionRevertNotice } from './actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from './actions'
+import type { AiGenerateRequest, AiSettingKey, AiSettings, AiStreamEvent } from './ai'
 import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from './auth'
 import type { CommandUsage } from './commandUsage'
 import type { ContactSearchResult } from './contacts'
@@ -57,6 +58,13 @@ export const IPC_CHANNELS = {
   snippetsList: 'snippets:list',
   snippetsSave: 'snippets:save',
   snippetsDelete: 'snippets:delete',
+  aiGetSettings: 'ai:getSettings',
+  aiSetSetting: 'ai:setSetting',
+  aiSetKey: 'ai:setKey',
+  aiDeleteKey: 'ai:deleteKey',
+  aiGenerate: 'ai:generate',
+  aiCancel: 'ai:cancel',
+  aiStreamEvent: 'ai:streamEvent',
   contactsSearch: 'contacts:search',
   draftSave: 'draft:save',
   draftGet: 'draft:get',
@@ -151,6 +159,8 @@ export const TEST_CHANNELS = {
   remoteDraft: 'attn:test:remoteDraft',
   installSendProvider: 'attn:test:installSendProvider',
   runHistoryCycle: 'attn:test:runHistoryCycle',
+  installFakeAiProvider: 'attn:test:installFakeAiProvider',
+  aiProviderRequests: 'attn:test:aiProviderRequests',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
   runExistenceSweep: 'attn:test:runExistenceSweep',
   runFtsBackfill: 'attn:test:runFtsBackfill',
@@ -192,6 +202,17 @@ export interface InvokeChannels {
   [IPC_CHANNELS.snippetsList]: { args: []; result: Snippet[] }
   [IPC_CHANNELS.snippetsSave]: { args: [input: SnippetSaveInput]; result: Snippet[] }
   [IPC_CHANNELS.snippetsDelete]: { args: [id: string]; result: Snippet[] }
+  // T36 AI writing: settings storage rides the utility (keyPresent is main's
+  // to fill in); key custody and generation never leave the main process.
+  [IPC_CHANNELS.aiGetSettings]: { args: []; result: AiSettings }
+  [IPC_CHANNELS.aiSetSetting]: {
+    args: [key: AiSettingKey, value: AiSettings[AiSettingKey]]
+    result: AiSettings
+  }
+  [IPC_CHANNELS.aiSetKey]: { args: [key: string]; result: AiSettings }
+  [IPC_CHANNELS.aiDeleteKey]: { args: []; result: AiSettings }
+  [IPC_CHANNELS.aiGenerate]: { args: [request: AiGenerateRequest]; result: { requestId: string } }
+  [IPC_CHANNELS.aiCancel]: { args: [requestId: string]; result: undefined }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {
     args: [draft: DraftSaveInput]
@@ -318,6 +339,7 @@ export interface BroadcastChannels {
   // T33: the stored remote-image policy moved (toggle or per-sender override);
   // mounted mail frames re-register to pick up their fresh answers.
   [IPC_CHANNELS.mailRemoteImagesChanged]: undefined
+  [IPC_CHANNELS.aiStreamEvent]: AiStreamEvent
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
@@ -333,6 +355,7 @@ const BROADCAST_CHANNELS = {
   [IPC_CHANNELS.outboxProgress]: true,
   [IPC_CHANNELS.mailChanged]: true,
   [IPC_CHANNELS.mailRemoteImagesChanged]: true,
+  [IPC_CHANNELS.aiStreamEvent]: true,
   [IPC_CHANNELS.mailActionsReverted]: true,
   [IPC_CHANNELS.mailBodyHydrationFailed]: true,
   [IPC_CHANNELS.mailFocusThreadAvailable]: true,

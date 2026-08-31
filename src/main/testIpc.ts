@@ -2,10 +2,12 @@ import { ipcMain } from 'electron'
 import { errorMessage } from '../shared/error'
 import { nonEmptyString } from '../shared/guards'
 import { TEST_CHANNELS } from '../shared/ipc'
+import type { AiManager, FakeAiScript } from './ai/manager'
 import type { ServiceSupervisor } from './service/supervisor'
 
 export interface TestSeamDeps {
   service: () => ServiceSupervisor | null
+  ai: () => AiManager | null
   focusInboxThread: (threadId: string | null, accountId?: string) => void
 }
 
@@ -130,6 +132,23 @@ export class TestSeams {
           .catch((error) => done?.([], errorMessage(error)))
       }
     )
+    // T36: the fake AI provider lives in main's AiManager, not the utility —
+    // that is where the real transport (and its gating) runs.
+    ipcMain.on(
+      TEST_CHANNELS.installFakeAiProvider,
+      (_event, script: unknown, done?: (error?: string) => void) => {
+        const manager = this.deps.ai()
+        if (!manager) {
+          done?.('AI manager unavailable')
+          return
+        }
+        manager.installFakeProvider((script ?? {}) as FakeAiScript)
+        done?.()
+      }
+    )
+    ipcMain.on(TEST_CHANNELS.aiProviderRequests, (_event, done?: (result: unknown) => void) => {
+      done?.(this.deps.ai()?.fakeProviderRequests() ?? [])
+    })
     ipcMain.on(TEST_CHANNELS.crashUtility, (_event, done?: (error?: string) => void) => {
       void this.deps
         .service()

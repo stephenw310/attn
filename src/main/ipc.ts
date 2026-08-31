@@ -6,6 +6,7 @@ import {
   type OpenDialogOptions,
   shell
 } from 'electron'
+import type { AiSettings } from '../shared/ai'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { PendingFocusTarget } from '../shared/notifications'
@@ -40,6 +41,15 @@ export interface IpcContext {
   unregisterMailFrame: (nonce: string) => void
   /** OS-side effects of a persisted settings write (login item, menu bar). */
   applySettingEffects: (update: AppSettingUpdate) => void
+  /** T36 AI writing: key custody, gating, and streaming live in main. */
+  ai: {
+    getSettings: () => Promise<AiSettings>
+    setSetting: (key: unknown, value: unknown) => Promise<AiSettings>
+    setKey: (key: string) => Promise<AiSettings>
+    deleteKey: () => Promise<AiSettings>
+    generate: (request: unknown) => Promise<{ requestId: string }>
+    cancel: (requestId: unknown) => void
+  }
   setThemePreference: (preference: ThemePreference) => void
   pickAttachmentPaths?: () => Promise<string[]>
 }
@@ -59,8 +69,28 @@ export function registerIpc(context: IpcContext): () => void {
     IPC_CHANNELS.mailUnregisterMessageFrame,
     IPC_CHANNELS.settingsSetTheme,
     IPC_CHANNELS.settingsSet,
-    IPC_CHANNELS.syncGetState
+    IPC_CHANNELS.syncGetState,
+    IPC_CHANNELS.aiGetSettings,
+    IPC_CHANNELS.aiSetSetting,
+    IPC_CHANNELS.aiSetKey,
+    IPC_CHANNELS.aiDeleteKey,
+    IPC_CHANNELS.aiGenerate,
+    IPC_CHANNELS.aiCancel
   ])
+  handle(IPC_CHANNELS.aiGetSettings, () => context.ai.getSettings())
+  handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => context.ai.setSetting(key, value))
+  handle(IPC_CHANNELS.aiSetKey, (_event, key) => {
+    if (typeof key !== 'string' || key.trim().length === 0 || key.length > 2_048) {
+      throw new Error('invalid AI provider key')
+    }
+    return context.ai.setKey(key.trim())
+  })
+  handle(IPC_CHANNELS.aiDeleteKey, () => context.ai.deleteKey())
+  handle(IPC_CHANNELS.aiGenerate, (_event, request) => context.ai.generate(request))
+  handle(IPC_CHANNELS.aiCancel, (_event, requestId) => {
+    context.ai.cancel(requestId)
+    return undefined
+  })
   handle(IPC_CHANNELS.authGetStatus, () => context.authStatus())
   handle(IPC_CHANNELS.authSignIn, () => context.signIn())
   handle(IPC_CHANNELS.accountsSetActive, (_event, accountId) => {

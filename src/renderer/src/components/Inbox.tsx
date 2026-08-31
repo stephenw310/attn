@@ -1926,6 +1926,21 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
         createCommand('privacy.remoteImages.load', () => updateAppSetting('remoteImagesBlocked', false)),
         createCommand('privacy.remoteImages.overrides', () => openSettings('remoteImages')),
         createCommand('snippets.manage', () => openSettings('snippets')),
+        createCommand('ai.settings', () => openSettings('aiWriting')),
+        // T36 placeholder: the command exists (and its disabled state provably
+        // reaches no provider); T37 streams the draft into the composer.
+        createCommand('composer.aiDraft', () => {
+          void window.attn?.ai
+            .getSettings()
+            .then((ai) => {
+              showToast(
+                ai.enabled
+                  ? 'AI reply drafting is coming in the next update'
+                  : 'Enable AI writing in Settings to draft replies'
+              )
+            })
+            .catch(() => {})
+        }),
         createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
         createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
         createCommand('settings.launchAtLogin', () =>
@@ -1947,7 +1962,7 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
         createCommand('notifications.resume', () => updateAppSetting('notificationsPausedUntil', null)),
         createCommand('cheatsheet.open', openCheatSheet)
       ]),
-    [openCheatSheet, openSettings, updateAccountSetting, updateAppSetting]
+    [openCheatSheet, openSettings, showToast, updateAccountSetting, updateAppSetting]
   )
 
   useKeyboardDispatch({

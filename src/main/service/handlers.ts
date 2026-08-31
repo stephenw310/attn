@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { ActionRevertNotice } from '../../shared/actionRevert'
 import { isValidEmail } from '../../shared/address'
+import { validateAiSettingUpdate } from '../../shared/ai'
 import { parseStoredCommandUsage, sanitizeCommandUsage } from '../../shared/commandUsage'
 import {
   type DraftAttachment,
@@ -43,6 +44,7 @@ import {
   undoLast
 } from '../actions'
 import type { ActionExecutor } from '../actions/executor'
+import { readAiStoredSettings, writeAiStoredSetting } from '../aiSettings'
 import { readAccountSettings, readAppSettings, writeAppSetting } from '../appSettings'
 import { writeAttachment } from '../attachments'
 import type { Db } from '../db'
@@ -469,6 +471,13 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const sanitized = sanitizeCommandUsage(usage)
     writeAccountSetting(context.db, account, 'commandPaletteUsage', JSON.stringify(sanitized))
     return sanitized
+  })
+  // T36 AI settings storage. keyPresent is main-only custody: the utility
+  // reports false and main overwrites it from the encrypted key file.
+  handle(IPC_CHANNELS.aiGetSettings, () => ({ ...readAiStoredSettings(context.db), keyPresent: false }))
+  handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => {
+    const update = validateAiSettingUpdate(key, value)
+    return { ...writeAiStoredSetting(context.db, update), keyPresent: false }
   })
   handle(IPC_CHANNELS.snippetsList, () => listSnippets(context.db))
   handle(IPC_CHANNELS.snippetsSave, (_event, input) => {

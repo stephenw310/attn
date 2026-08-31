@@ -18,6 +18,7 @@ import { formatSnoozeDate } from '../../../shared/snooze'
 import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
+import { AiSettingsSection } from './AiSettingsSection'
 import { Kbd } from './Kbd'
 import { SnippetManager } from './SnippetManager'
 
@@ -29,6 +30,7 @@ export type SettingsControl =
   | 'autoAdvance'
   | 'attnFooter'
   | 'snippets'
+  | 'aiWriting'
   | 'remoteImages'
   | 'launchAtLogin'
   | 'menuBarIcon'
@@ -500,6 +502,11 @@ export function SettingsView({
                 className="size-4 cursor-pointer accent-accent"
               />
             </label>
+          </section>
+
+          <section data-testid="settings-ai" aria-label="AI writing">
+            <h2 className={SECTION_TITLE}>AI writing</h2>
+            <AiSettingsSection onToast={onToast} />
           </section>
 
           <section data-testid="settings-snippets" aria-label="Snippets">

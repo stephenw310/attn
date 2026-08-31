@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { formatActionRevertToast } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
+import type { AiGenerateRequest, AiSettingKey, AiSettings, AiStreamEvent } from '../shared/ai'
 import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from '../shared/auth'
 import type { CommandUsage } from '../shared/commandUsage'
 import type { ContactSearchResult } from '../shared/contacts'
@@ -112,6 +113,21 @@ const api = {
     list: (): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsList),
     save: (input: SnippetSaveInput): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsSave, input),
     remove: (id: string): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsDelete, id)
+  },
+  ai: {
+    getSettings: (): Promise<AiSettings> => invoke(IPC_CHANNELS.aiGetSettings),
+    setSetting: <K extends AiSettingKey>(key: K, value: AiSettings[K]): Promise<AiSettings> =>
+      invoke(IPC_CHANNELS.aiSetSetting, key, value),
+    setKey: (key: string): Promise<AiSettings> => invoke(IPC_CHANNELS.aiSetKey, key),
+    deleteKey: (): Promise<AiSettings> => invoke(IPC_CHANNELS.aiDeleteKey),
+    generate: (request: AiGenerateRequest): Promise<{ requestId: string }> =>
+      invoke(IPC_CHANNELS.aiGenerate, request),
+    cancel: (requestId: string): Promise<void> => invoke(IPC_CHANNELS.aiCancel, requestId),
+    onStreamEvent: (cb: (event: AiStreamEvent) => void): (() => void) => {
+      const listener = (_event: unknown, payload: AiStreamEvent): void => cb(payload)
+      ipcRenderer.on(IPC_CHANNELS.aiStreamEvent, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.aiStreamEvent, listener)
+    }
   },
   mail: {
     findThreadInView: (request: ThreadListRequest, threadId: string): Promise<ThreadPage> =>
