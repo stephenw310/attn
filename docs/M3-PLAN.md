@@ -1381,7 +1381,7 @@ T25 registered `search.allGmail`, and T26 shipped the palette and its inventory 
 
 | Question | Why it matters | Decide by |
 |---|---|---|
-| ~~Pathological-mailbox posture~~ | **Decided 2026-08-29 (SPEC §9 #22):** smooth to about one million messages, degraded but not broken beyond it, with server search serving the tail. The 2026-08-29 synthetic probe in [T20-EVIDENCE.md](T20-EVIDENCE.md) showed the ceiling was three query shapes, not sync completeness; the counts, coverage-caching, membership and bounded-search changes shipped with that entry. A perf profile larger than 10,000 threads is the enforcement it still lacks | done |
+| ~~Pathological-mailbox posture~~ | **Decided 2026-08-29 (SPEC §9 #22):** smooth to about one million messages, degraded but not broken beyond it, with server search serving the tail. The 2026-08-29 synthetic probe in [T20-EVIDENCE.md](T20-EVIDENCE.md) showed the ceiling was three query shapes, not sync completeness; the counts, coverage-caching, membership and bounded-search changes shipped with that entry. The opt-in 40,000-thread `e2e:perf:scale` profile now checks those bounded reads; the user-facing historical cap control remains M4 T32A | done |
 
 Open defects and coverage gaps live in [KNOWN-ISSUES.md](KNOWN-ISSUES.md). Manual sign-off evidence is ticked
 in [T20-EVIDENCE.md](T20-EVIDENCE.md).
