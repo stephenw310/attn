@@ -10,9 +10,10 @@ import { AiManager } from './manager'
 class ManualTimers {
   private next = 1
   private pending = new Map<number, { callback: () => void; delayMs: number }>()
+  nowMs = 0
 
   readonly time: SchedulerTime = {
-    now: () => 0,
+    now: () => this.nowMs,
     timers: {
       setTimeout: (callback, delayMs) => {
         const id = this.next++
@@ -214,6 +215,53 @@ describe('fake provider streaming', () => {
     const { requestId } = await manager.generate(replyRequest)
     timers.fire(0)
     expect(events).toEqual([{ requestId, kind: 'error', message: 'provider exploded' }])
+  })
+})
+
+describe('autocomplete rate limits', () => {
+  const autocomplete = { purpose: 'autocomplete' as const, prefix: 'Hi', suffix: '' }
+  const enabled = { enabled: true, autocompleteEnabled: true }
+
+  it('allows only one request in flight app-wide', async () => {
+    const { manager, timers } = harness(enabled)
+    manager.installFakeProvider({ hang: true })
+    await manager.generate(autocomplete)
+    timers.nowMs = 5_000
+    await expect(manager.generate(autocomplete)).rejects.toThrow(/in flight/)
+  })
+
+  it('spaces starts one second apart and skips rather than queues', async () => {
+    const { manager, timers } = harness(enabled)
+    manager.installFakeProvider({ chunks: ['ok'] })
+    await manager.generate(autocomplete)
+    timers.fire(0)
+    timers.nowMs = 400
+    await expect(manager.generate(autocomplete)).rejects.toThrow(/rate limited/)
+    timers.nowMs = 1_000
+    await expect(manager.generate(autocomplete)).resolves.toBeTruthy()
+  })
+
+  it('caps starts per rolling minute and recovers as the window slides', async () => {
+    const { manager, timers } = harness(enabled)
+    manager.installFakeProvider({ chunks: ['ok'] })
+    for (let index = 0; index < 20; index++) {
+      timers.nowMs = index * 2_000
+      await manager.generate(autocomplete)
+      timers.fire(0)
+    }
+    timers.nowMs = 20 * 2_000
+    await expect(manager.generate(autocomplete)).rejects.toThrow(/rate limited/)
+    // The oldest start leaves the rolling window; capacity returns.
+    timers.nowMs = 61_000
+    await expect(manager.generate(autocomplete)).resolves.toBeTruthy()
+  })
+
+  it('reply generation is never rate limited by autocomplete traffic', async () => {
+    const { manager, timers } = harness(enabled)
+    manager.installFakeProvider({ hang: true })
+    await manager.generate(autocomplete)
+    timers.nowMs = 100
+    await expect(manager.generate(replyRequest)).resolves.toBeTruthy()
   })
 })
 

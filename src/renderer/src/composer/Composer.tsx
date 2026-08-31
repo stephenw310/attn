@@ -48,6 +48,7 @@ import { forceLightMailCss } from '../mailCss'
 import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
+import { AiAutocompletePlugin } from './AiAutocompletePlugin'
 import { AiDraftPlugin } from './AiDraftPlugin'
 import { DraftContentIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
@@ -1282,6 +1283,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 onPreservedContent={notePreservedContent}
               />
               <SnippetsPlugin onInserted={handleSnippetInserted} />
+              <AiAutocompletePlugin />
               {aiDraft && (
                 <AiDraftPlugin
                   kind={draft.kind}

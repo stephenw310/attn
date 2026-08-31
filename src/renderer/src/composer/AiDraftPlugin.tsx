@@ -287,6 +287,17 @@ export function AiDraftPlugin({
     if (!runRef.current?.active) void startRef.current()
   }, [request])
 
+  // T37A reads this flag to suppress autocomplete during generation/refine.
+  useEffect(() => {
+    const rootElement = editor.getRootElement()
+    if (!rootElement) return
+    if (phase === 'streaming') rootElement.dataset.aiStreaming = 'true'
+    else delete rootElement.dataset.aiStreaming
+    return () => {
+      delete rootElement.dataset.aiStreaming
+    }
+  }, [editor, phase])
+
   // Esc during streaming cancels the request and keeps the partial text; the
   // capture phase claims the key before the composer's own close handling.
   useEffect(() => {

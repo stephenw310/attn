@@ -15,6 +15,8 @@ import {
   type AiPurpose,
   type AiStoredSettings,
   type AiStreamEvent,
+  AUTOCOMPLETE_MAX_STARTS_PER_MINUTE,
+  AUTOCOMPLETE_MIN_START_INTERVAL_MS,
   parseAiGenerateRequest
 } from '../../shared/ai'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
@@ -74,6 +76,8 @@ export class AiManager {
   private readonly active = new Map<string, ActiveRequest>()
   private fake: { script: FakeAiScript; requests: RecordedAiRequest[] } | null = null
   private nextId = 1
+  /** Start times of recent autocomplete requests (the rolling-minute cap). */
+  private autocompleteStarts: number[] = []
 
   constructor(private readonly options: AiManagerOptions) {
     this.time = options.time ?? systemTime
@@ -95,6 +99,24 @@ export class AiManager {
     const key = this.options.keyStore.load()
     if (key === null && AI_PROVIDER_PRESETS[settings.provider].keyRequired) {
       throw new Error('No AI provider key is saved')
+    }
+    // Bounded autocomplete work (F17): one in flight app-wide, one start per
+    // second, twenty per rolling minute. A limited request is skipped — the
+    // caller shows no suggestion, and nothing queues or retries.
+    if (request.purpose === 'autocomplete') {
+      if ([...this.active.values()].some((entry) => entry.purpose === 'autocomplete')) {
+        throw new Error('An autocomplete request is already in flight')
+      }
+      const now = this.time.now()
+      this.autocompleteStarts = this.autocompleteStarts.filter((at) => now - at < 60_000)
+      const last = this.autocompleteStarts.at(-1)
+      if (
+        this.autocompleteStarts.length >= AUTOCOMPLETE_MAX_STARTS_PER_MINUTE ||
+        (last !== undefined && now - last < AUTOCOMPLETE_MIN_START_INTERVAL_MS)
+      ) {
+        throw new Error('Autocomplete requests are rate limited')
+      }
+      this.autocompleteStarts.push(now)
     }
     // Voice matching off strips style examples before any request exists —
     // reply requests then provably carry none (F17 acceptance).

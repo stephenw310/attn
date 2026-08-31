@@ -83,6 +83,8 @@ describe('command catalog', () => {
       'privacy.remoteImages.overrides',
       'snippets.manage',
       'ai.settings',
+      'autocomplete.enable',
+      'autocomplete.disable',
       'settings.undoSendDelay',
       'settings.autoAdvance',
       'settings.launchAtLogin',

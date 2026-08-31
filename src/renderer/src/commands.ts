@@ -133,6 +133,10 @@ export const COMMAND_SPECS = {
   'privacy.remoteImages.overrides': { title: 'Manage remote-image overrides…', context: 'global' },
   'snippets.manage': { title: 'Manage snippets…', context: 'global' },
   'ai.settings': { title: 'Set up AI writing…', context: 'global' },
+  // T37A: enabling routes through the settings consent flow (the disclosure
+  // must precede the traffic); disabling is immediate.
+  'autocomplete.enable': { title: 'Enable inline AI autocomplete…', context: 'global' },
+  'autocomplete.disable': { title: 'Disable inline AI autocomplete', context: 'global' },
   'settings.undoSendDelay': { title: 'Set undo send delay…', context: 'global' },
   'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
   'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },

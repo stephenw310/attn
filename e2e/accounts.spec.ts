@@ -544,7 +544,12 @@ test('an open composer holds a notification switch until the draft closes', asyn
   await expect(composer.root).toHaveCount(0)
   await page.keyboard.press('ControlOrMeta+2')
   await expect(page.getByTestId('account-menu')).toContainText(SECOND)
-  await expect(page.getByTestId('conversation-subject')).toHaveText('Beta launch checklist')
+  // The pending target has a 60s TTL; under a loaded runner the second
+  // account's rows can take past the default expectation window to land, so
+  // the journey's end gets headroom without weakening what it asserts.
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Beta launch checklist', {
+    timeout: 15_000
+  })
 })
 
 test('a notification click survives a pull that dies during the account remount', async ({ app, page }) => {

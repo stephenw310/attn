@@ -307,3 +307,13 @@ export type AiStreamEvent =
 export const AI_REPLY_TIMEOUT_MS = 120_000
 /** Autocomplete results older than this are canceled and discarded (F17). */
 export const AI_AUTOCOMPLETE_TIMEOUT_MS = 1_500
+
+/**
+ * Autocomplete request limits, enforced in the main-process transport (F17):
+ * one in flight app-wide, at most one start per second and twenty per rolling
+ * minute. Limited requests are skipped — never queued or retried.
+ */
+export const AUTOCOMPLETE_MIN_START_INTERVAL_MS = 1_000
+export const AUTOCOMPLETE_MAX_STARTS_PER_MINUTE = 20
+/** Debounce after a deliberate body-typing edit before a request may start. */
+export const AUTOCOMPLETE_DEBOUNCE_MS = 300

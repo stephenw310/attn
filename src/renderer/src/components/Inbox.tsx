@@ -1956,6 +1956,13 @@ export function Inbox({ status, onStatus, onReordered, onRemovalError }: InboxPr
         createCommand('privacy.remoteImages.overrides', () => openSettings('remoteImages')),
         createCommand('snippets.manage', () => openSettings('snippets')),
         createCommand('ai.settings', () => openSettings('aiWriting')),
+        createCommand('autocomplete.enable', () => openSettings('aiWriting')),
+        createCommand('autocomplete.disable', () => {
+          void window.attn?.ai
+            .setSetting('autocompleteEnabled', false)
+            .then(() => showToast('Inline autocomplete disabled'))
+            .catch(() => {})
+        }),
         // T37 (F17): from the reader the command opens the inline reply first,
         // then streams into it; in a reply composer it streams in place. New
         // messages and forwards are out of v1's whole-body generation scope.

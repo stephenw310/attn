@@ -77,6 +77,21 @@ than an untested path.
 
 ---
 
+### GAP-7: composer paint-delta metrics are unmeasurable in the current cloud container
+
+**Verified:** 2026-08-31 · **Owed by:** T37A's performance bullet / T40's perf evidence
+
+`composer-keystroke-paint-delta` (`measureComposerKeystroke` in `e2e/perf.spec.ts`) reports alternating
+~900ms samples in the Claude Code cloud container: the hidden Electron window paints at roughly 1Hz there,
+so every other keystroke waits most of a second for its frame. This is environmental, not a regression —
+commit `cbb899e` (T35, before any AI code) measures identically, and keystroke **mutation** medians stay at
+4–5ms throughout, including with autocomplete enabled against a delayed fake provider. The T37A probe
+additions (`composer-keystroke-mutation-autocomplete`, `composer-autocomplete-accept`) are in place but the
+paint-side assertions cannot pass in this container.
+
+**Wanted:** run `npm run e2e:perf -- --grep "opens and types in the composer"` on hardware with real vsync
+(the T20-EVIDENCE convention) and record the paint-delta numbers in T40's exit checklist.
+
 ## Refactors
 
 These are proposals, not defects. Nothing here is required for a milestone. Each one is recorded because

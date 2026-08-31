@@ -147,6 +147,10 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
               </div>
             ))}
           </div>
+          <p data-testid="cheat-sheet-autocomplete-note" className="mt-2 text-[11px] text-ink-faint">
+            With inline AI autocomplete enabled, <Kbd>Tab</Kbd> accepts a visible suggestion in the composer
+            body and <Kbd>Esc</Kbd> dismisses it; without one, both keys keep their normal behavior.
+          </p>
         </div>
       </section>
     </>
