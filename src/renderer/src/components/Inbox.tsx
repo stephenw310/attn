@@ -1592,7 +1592,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
   }, [])
 
   const openReply = useCallback(
-    (kind: Exclude<DraftKind, 'new'>) => {
+    (kind: Exclude<DraftKind, 'new'>, sourceMessageId?: string) => {
       if (
         !window.attn ||
         !selected ||
@@ -1613,19 +1613,23 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
         ? conversationMailboxForSearch(searchResultQuery)
         : conversationMailboxFor(view)
       void window.attn.draft
-        .createReply(selected.id, kind, replyMailbox)
+        .createReply(selected.id, kind, replyMailbox, sourceMessageId)
         .then((draft) => {
           if (draft) {
             setComposerError(null)
             showDraft(draft)
+          } else {
+            showToast(
+              'Could not open this message for a reply or forward. Its body may not be available offline.'
+            )
           }
         })
-        .catch(() => {})
+        .catch(() => showToast('Could not open the reply or forward draft'))
         .finally(() => {
           composerOpeningRef.current = false
         })
     },
-    [readerOpen, searchOpen, searchResultQuery, selected, showDraft, view]
+    [readerOpen, searchOpen, searchResultQuery, selected, showDraft, showToast, view]
   )
 
   const closeComposer = useCallback(() => {
@@ -2092,6 +2096,7 @@ export function Inbox({ status, onStatus, onRemovalError }: InboxProps): React.J
                   ) : null
                 }
                 inlineComposerDraftId={inlineComposerDraft?.id ?? null}
+                onReply={openReply}
                 onClose={closeReader}
                 onToast={showToast}
               />

@@ -125,6 +125,7 @@ export function reopenThreadDraft(
   accountId: string,
   threadId: string,
   kind: Exclude<DraftKind, 'new'>,
+  sourceMessageId?: string,
   now = Date.now()
 ): Draft | null {
   const group = kind === 'forward' ? ['forward'] : ['reply', 'replyAll']
@@ -133,10 +134,13 @@ export function reopenThreadDraft(
     .prepare(
       `SELECT id FROM outbox
        WHERE account_id = ? AND thread_id = ? AND kind IN (${placeholders})
+         ${sourceMessageId === undefined ? '' : 'AND source_message_id = ?'}
          AND state IN ('composing', 'drafted')
        ORDER BY updated_at DESC LIMIT 1`
     )
-    .get(accountId, threadId, ...group) as { id: string } | undefined
+    .get(accountId, threadId, ...group, ...(sourceMessageId === undefined ? [] : [sourceMessageId])) as
+    | { id: string }
+    | undefined
   return row ? reopenDraft(db, accountId, row.id, now) : null
 }
 

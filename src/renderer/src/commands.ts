@@ -235,6 +235,18 @@ export const COMMAND_SPECS = {
     context: 'reader',
     footer: { reader: { id: 'reply', label: 'reply', order: 10 } }
   },
+  'message.reply': {
+    title: 'Reply to this message',
+    context: 'reader'
+  },
+  'message.replyAll': {
+    title: 'Reply all to this message',
+    context: 'reader'
+  },
+  'message.forward': {
+    title: 'Forward this message',
+    context: 'reader'
+  },
   'composer.replyAll': {
     title: 'Reply all',
     shortcut: 'a',

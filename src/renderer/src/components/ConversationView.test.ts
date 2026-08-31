@@ -46,7 +46,8 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     inlineComposer: null,
     inlineComposerDraftId: null,
     onClose,
-    onToast
+    onToast,
+    onReply: (): void => {}
   }
   const container = document.createElement('div')
   document.body.append(container)
@@ -129,7 +130,8 @@ it('opens a message appended to the current conversation by default', async () =
     inlineComposer: null,
     inlineComposerDraftId: null,
     onClose: (): void => {},
-    onToast: (): void => {}
+    onToast: (): void => {},
+    onReply: (): void => {}
   }
   const container = document.createElement('div')
   document.body.append(container)

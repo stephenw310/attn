@@ -2287,3 +2287,54 @@ test('restores the collapsed quote on a reply Gmail merged into one document', a
   await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).toHaveCount(0)
   await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
 })
+
+test('keeps a reply signature and quoted history collapsed after Gmail appends empty lines', async ({
+  app,
+  page
+}, testInfo) => {
+  const signature =
+    '<div class="gmail_signature" data-smartmail="gmail_signature"><div>Bests,</div><div>Alex Rivera</div><a href="https://northstar.test/">Northstar</a></div>'
+  const merged = `<div dir="ltr"><div><br></div>${signature}<div class="gmail_quote"><div class="gmail_attr">On Mon, Christy wrote:</div><blockquote><table width="600"><tr><td>Internal account notes.</td></tr></table></blockquote></div><div><br></div></div>`
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteReplyDraft('reply-empty-lines', 'Re: Q3 roadmap review', merged)
+    }
+  )
+  if (error) throw new Error(error)
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  const composer = new ComposerPage(page)
+  await composer.expectSignatureAndQuoteCollapsed()
+  await expect(composer.editor.locator('iframe')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'composer-reply-empty-lines.png')
+  await page.screenshot({ path })
+  await testInfo.attach('reply with Gmail trailing empty lines', { path, contentType: 'image/png' })
+  await composer.revealSignatureWithKeyboard()
+  await expect(composer.signature).toContainText('Alex Rivera')
+  await expect(page.frameLocator('[data-testid="composer-quote"]').locator('body')).toContainText(
+    'Internal account notes.'
+  )
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+Home')
+  await composer.typeBody('My reply')
+  await composer.expectSaved()
+  const saved = await page.evaluate(
+    async (id) => window.attn.draft.get(id ?? ''),
+    await composer.root.getAttribute('data-draft-id')
+  )
+  expect(saved?.bodyText).toContain('My reply')
+  expect(saved?.bodyHtml).toContain('gmail_signature')
+  expect(saved?.bodyHtml).not.toContain('gmail_quote')
+  expect(saved?.quoteHtml).toContain('Internal account notes.')
+  await page.getByTestId('composer-close').click()
+  await expect(composer.root).toHaveCount(0)
+  await page.keyboard.press('r')
+  await composer.expectSignatureAndQuoteCollapsed()
+  await expect(composer.editor).toContainText('My reply')
+})

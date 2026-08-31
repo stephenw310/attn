@@ -1,4 +1,5 @@
 import { memo, type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
+import type { DraftKind } from '../../../shared/drafts'
 import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
 import type { DisplayConversation, DisplayThread } from '../mailDisplay'
@@ -12,6 +13,7 @@ interface ConversationMessagesProps {
   markNewest: boolean
   scrollRef: React.RefObject<HTMLDivElement | null>
   onToast: (message: string) => void
+  onReply?: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
 /** The newest message a reader expands: trashed markers stay compact (SPEC F3). */
@@ -23,7 +25,7 @@ function newestReadableIndex(messages: readonly DisplayConversation['messages'][
 }
 
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
-  const { conversation, account, online, markNewest, scrollRef, onToast } = props
+  const { conversation, account, online, markNewest, scrollRef, onToast, onReply } = props
   const newestIndex = newestReadableIndex(conversation.messages)
   const newestMessageId = conversation.messages[newestIndex]?.id
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
@@ -147,6 +149,22 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     ])
   }, [activeMessageId, moveMessage, toggleActiveMessage, toggleTrim])
 
+  useLayoutEffect(() => {
+    const activeMessage = conversation.messages.find((message) => message.id === activeMessageId)
+    if (
+      !onReply ||
+      !activeMessage ||
+      activeMessage.pending ||
+      (activeMessage.trashed && !revealedTrashedIds.has(activeMessage.id))
+    )
+      return
+    return registerCommands([
+      createCommand('message.reply', () => onReply('reply', activeMessage.id)),
+      createCommand('message.replyAll', () => onReply('replyAll', activeMessage.id)),
+      createCommand('message.forward', () => onReply('forward', activeMessage.id))
+    ])
+  }, [activeMessageId, conversation.messages, onReply, revealedTrashedIds])
+
   return (
     <>
       {conversation.messages.map((message, index) => (
@@ -190,6 +208,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
               message={message}
               account={account}
               onToast={onToast}
+              onReply={onReply}
               bodyHydrationMessage={bodyHydrationStatusMessage(
                 message.bodyState,
                 online,
@@ -221,6 +240,7 @@ interface ConversationViewProps {
   inlineComposerDraftId: string | null
   onClose: () => void
   onToast: (message: string) => void
+  onReply: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
 export const ConversationView = memo(function ConversationView(
@@ -239,7 +259,8 @@ export const ConversationView = memo(function ConversationView(
     inlineComposer,
     inlineComposerDraftId,
     onClose,
-    onToast
+    onToast,
+    onReply
   } = props
 
   const conversationThreadId = conversation?.threadId ?? (inlineComposer ? selected.id : null)
@@ -351,6 +372,7 @@ export const ConversationView = memo(function ConversationView(
                 markNewest={inlineComposer === null}
                 scrollRef={scrollRef}
                 onToast={onToast}
+                onReply={inlineComposer === null ? onReply : undefined}
               />
             ) : null}
             {inlineComposer ? (

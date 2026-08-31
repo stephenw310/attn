@@ -84,6 +84,25 @@ describe('recovering a quoted trail from a round-tripped draft', () => {
     expect(split.quoteHtml).toContain('<blockquote>')
   })
 
+  it('splits past Gmail trailing empty lines while preserving their markup', () => {
+    const suffix = '<div><br></div><p>\u00a0</p>'
+    const split = splitQuotedTrail(`<div dir="ltr">${ATTN_REPLY}${suffix}</div>`, '')
+    expect(split.bodyHtml).toBe('<div dir="ltr"><div>my answer</div></div>')
+    expect(split.quoteHtml).toContain('<blockquote>')
+    expect(split.quoteHtml.endsWith(suffix)).toBe(true)
+    const reassembled = draftHtmlBody({ bodyHtml: split.bodyHtml, bodyText: '', quoteHtml: split.quoteHtml })
+    expect(splitQuotedTrail(reassembled, '')).toEqual(split)
+  })
+
+  it.each(['<div><img src="cid:authored-image"></div>', '<div style="border-top:1px solid red"><br></div>'])(
+    'does not move visible content following a quote: %s',
+    (suffix) => {
+      const html = `${ATTN_REPLY}${suffix}`
+      expect(splitQuotedTrail(html, '').bodyHtml).toBe(html)
+      expect(splitQuotedTrail(html, '').quoteHtml).toBe('')
+    }
+  )
+
   it('leaves a draft that has no quoted trail untouched', () => {
     const html = '<div>just a note</div>'
     expect(splitQuotedTrail(html, 'just a note')).toEqual({

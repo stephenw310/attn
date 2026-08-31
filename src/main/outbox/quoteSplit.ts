@@ -34,6 +34,14 @@ function isBlank(node: Node): boolean {
   return node.nodeName === '#text' && !('value' in node && node.value.trim())
 }
 
+/** Gmail can leave empty editor lines after a quote. Styled blocks and images are authored content. */
+function isEmptyLine(node: Node): boolean {
+  if (isBlank(node)) return true
+  if (!isElement(node) || node.attrs.some((attribute) => attribute.name !== 'dir')) return false
+  if (node.tagName === 'br') return true
+  return ['div', 'p', 'span'].includes(node.tagName) && node.childNodes.every(isEmptyLine)
+}
+
 function classList(element: Element): string[] {
   const value = element.attrs.find((attribute) => attribute.name === 'class')?.value ?? ''
   return value.split(/\s+/)
@@ -47,7 +55,7 @@ function textOf(node: Node): string {
 
 /** The element that starts the quoted trail, or null when there is no clean boundary. */
 function findQuoteStart(children: Node[]): Node | null {
-  const lastMeaningful = [...children].reverse().find((node) => !isBlank(node))
+  const lastMeaningful = [...children].reverse().find((node) => !isEmptyLine(node))
   if (!lastMeaningful || !isElement(lastMeaningful)) return null
 
   // Everything after the quote must be blank. Content below it means the author

@@ -77,7 +77,7 @@ import {
 import { addInlineImage, isSupportedInlineImageMimeType } from '../outbox/inlineImages'
 import type { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from '../outbox/queue'
-import { planReply } from '../outbox/replyPlan'
+import { planReply, replySourceMessage } from '../outbox/replyPlan'
 import { prepareDraftWithCachedPrimarySignature } from '../outbox/sendAs'
 import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
@@ -458,46 +458,85 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     return reopenDraft(context.db, requireAccount(context), id)
   })
-  handle(IPC_CHANNELS.draftCreateReply, async (_event, threadId, kind, mailbox) => {
+  handle(IPC_CHANNELS.draftCreateReply, async (_event, threadId, kind, mailbox, sourceMessageId) => {
     if (
       typeof threadId !== 'string' ||
       threadId.length === 0 ||
-      (kind !== 'reply' && kind !== 'replyAll' && kind !== 'forward')
+      (kind !== 'reply' && kind !== 'replyAll' && kind !== 'forward') ||
+      (sourceMessageId !== undefined && !nonEmptyString(sourceMessageId))
     ) {
       return null
     }
     const replyMailbox = isConversationMailbox(mailbox) ? mailbox : 'normal'
     const account = requireAccount(context)
-    const existing = reopenThreadDraft(context.db, account, threadId, kind)
+    if (sourceMessageId !== undefined) {
+      const cached = getConversation(
+        context.db,
+        account,
+        threadId,
+        'unavailable',
+        replyMailbox,
+        sourceMessageId !== undefined
+      )
+      if (!cached?.messages.some((message) => message.id === sourceMessageId)) return null
+    }
+    const existing = reopenThreadDraft(context.db, account, threadId, kind, sourceMessageId)
     const shouldUpgradeReplyAll = kind === 'replyAll' && existing?.kind === 'reply'
     if (existing && !shouldUpgradeReplyAll) return existing
     await context.waitForConversation(threadId)
-    let conversation = getConversation(context.db, account, threadId, 'unavailable', replyMailbox)
-    if (!conversation || conversation.messages.length === 0) return existing
+    let conversation = getConversation(
+      context.db,
+      account,
+      threadId,
+      'unavailable',
+      replyMailbox,
+      sourceMessageId !== undefined
+    )
+    if (
+      !conversation ||
+      conversation.messages.length === 0 ||
+      (sourceMessageId !== undefined &&
+        !conversation.messages.some((message) => message.id === sourceMessageId))
+    )
+      return existing
     if (existing) {
       // Recipient headers are available even when a message body is not. The
       // reused reply already owns its quote, so Reply-All stays local-first and
       // never waits on body hydration merely to add the planned To/Cc set.
-      const plan = planReply('replyAll', conversation, account)
+      // Upgrade against the draft's original message, even if newer mail arrived.
+      const originalSourceId = existing.sourceMessageId ?? sourceMessageId
+      if (originalSourceId && !conversation.messages.some((message) => message.id === originalSourceId)) {
+        return existing
+      }
+      const plan = planReply('replyAll', conversation, account, originalSourceId)
       const upgraded = upgradeReplyToReplyAll(context.db, account, existing.id, plan.to, plan.cc)
       context.broadcastMailChanged()
       return upgraded
     }
-    if (conversation.messages.some((message) => message.bodyState !== 'complete')) {
+    if (replySourceMessage(kind, conversation, account, sourceMessageId).bodyState !== 'complete') {
       const provider = context.makeProvider()
       if (provider) {
         await bodyHydrator.request(account, threadId, provider)
-        conversation = getConversation(context.db, account, threadId, 'unavailable', replyMailbox)
+        conversation = getConversation(
+          context.db,
+          account,
+          threadId,
+          'unavailable',
+          replyMailbox,
+          sourceMessageId !== undefined
+        )
       }
     }
     if (
       !conversation ||
       conversation.messages.length === 0 ||
-      conversation.messages.some((message) => message.bodyState !== 'complete')
+      (sourceMessageId !== undefined &&
+        !conversation.messages.some((message) => message.id === sourceMessageId)) ||
+      replySourceMessage(kind, conversation, account, sourceMessageId).bodyState !== 'complete'
     ) {
       return null
     }
-    const plan = planReply(kind, conversation, account)
+    const plan = planReply(kind, conversation, account, sourceMessageId)
     const source = conversation.messages.find((message) => message.id === plan.sourceMessageId)
     const quotedAttachments: StoredDraftAttachment[] = (source?.attachments ?? [])
       .filter(

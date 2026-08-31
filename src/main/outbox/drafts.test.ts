@@ -9,6 +9,7 @@ import {
   isEmptyDraft,
   isUntouchedThreadDraft,
   listDrafts,
+  reopenThreadDraft,
   requestDraftMirror,
   saveDraft
 } from './drafts'
@@ -23,6 +24,25 @@ const stored: StoredDraftAttachment = {
   contentId: 'image@attn.local',
   inline: true
 }
+
+describe('message-specific draft reuse', () => {
+  it.each(['reply', 'forward'] as const)('reuses only the matching source and account for %s', (kind) => {
+    const db = openDatabase(':memory:')
+    try {
+      const input = { ...emptyDraftInput(), kind, threadId: 'thread', bodyText: 'Keep my words' }
+      const originalId = saveDraft(db, 'account', { ...input, sourceMessageId: 'original' }, 1)
+      const newestId = saveDraft(db, 'account', { ...input, sourceMessageId: 'colleague' }, 2)
+      saveDraft(db, 'other-account', { ...input, sourceMessageId: 'original' }, 3)
+      const groupKind = kind === 'reply' ? 'replyAll' : kind
+      expect(reopenThreadDraft(db, 'account', 'thread', groupKind, undefined, 4)?.id).toBe(newestId)
+      expect(reopenThreadDraft(db, 'account', 'thread', groupKind, 'original', 5)?.id).toBe(originalId)
+      expect(reopenThreadDraft(db, 'account', 'thread', groupKind, 'missing', 6)).toBeNull()
+      expect(reopenThreadDraft(db, 'account', 'other-thread', groupKind, 'original', 7)).toBeNull()
+    } finally {
+      db.close()
+    }
+  })
+})
 
 describe('draft attachment trust boundary', () => {
   it('never exposes storage locators in renderer-facing drafts', () => {
