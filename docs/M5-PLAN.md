@@ -124,6 +124,15 @@ These are the load-bearing choices from §9 #21(g)(h); every task below assumes 
 A1 → A2 → A3 is a strict sequence; A4, A5, A6 are independent of each other after A3; A7 closes the
 milestone.
 
+**Settings follow-up in M4 T32:** the shipped token file preserves roster order, but the original
+`accounts:reorder` plan below has no implemented bridge or UI as of `main` at `15e13b4`. M4 adds that
+operation and the settings control, reusing the encrypted roster and the shipped account-management
+guards. This is separate from A7's remaining real-Gmail observation.
+
+M4's 2026-08-30 merge verification also reproduced an intermittent A4 notification-focus failure after
+composer close and account switch, in runtime/test code identical to `15e13b4`. M4 T32 records the exact
+test, observed failure, and required regression coverage; M4 T40 requires resolution before v1 sign-off.
+
 ### What the 2026-08-28 switch-account slice shipped, and where it deviated
 
 Add account, switch account (menu / palette / `Mod+1..9`), per-account sign-out with survivor fallback,
