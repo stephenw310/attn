@@ -17,6 +17,7 @@ const ALLOWED_TAGS = [
   'li',
   'blockquote',
   'span',
+  'font',
   'img',
   'table',
   'thead',
@@ -108,6 +109,10 @@ export function isGmailSignatureAttributes(
   return className?.trim() === 'gmail_signature' || smartmail === 'gmail_signature'
 }
 
+export function isGmailSignaturePrefixClass(className: string | null | undefined): boolean {
+  return className?.trim() === 'gmail_signature_prefix'
+}
+
 function installStyleHook(purifier: DOMPurify): void {
   if (hooked.has(purifier)) return
   hooked.add(purifier)
@@ -132,23 +137,36 @@ const SAFE_URI = /^(?:(?:https?|mailto|cid):|data:image\/(?:png|jpeg|gif|webp);b
  * `background` stays out: its value is a URL and belongs to the image policy.
  */
 const LEGACY_TABLE_ATTRIBUTES = ['align', 'valign', 'bgcolor', 'border', 'cellpadding', 'cellspacing']
+export const LEGACY_FONT_ATTRIBUTES = ['face', 'color', 'size'] as const
 const TABLE_ELEMENTS = new Set(['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'])
 // Values like `#eeeeee` or `center` are not URIs, and ALLOWED_URI_REGEXP is
 // applied to every attribute value DOMPurify does not know is URI-free — which
 // is exactly how these were being stripped before #18a.
-const URI_SAFE_ATTRIBUTES = ['width', 'height', 'colspan', 'rowspan', 'start', ...LEGACY_TABLE_ATTRIBUTES]
+const URI_SAFE_ATTRIBUTES = [
+  'width',
+  'height',
+  'colspan',
+  'rowspan',
+  'start',
+  ...LEGACY_TABLE_ATTRIBUTES,
+  ...LEGACY_FONT_ATTRIBUTES
+]
 
 const legacyTableHooked = new WeakSet<DOMPurify>()
 
-/** Keep the legacy attributes scoped to tables; elsewhere they stay dropped. */
+/** Keep presentation attributes on their native elements; none of these values are resource URLs. */
 function installLegacyTableAttributeHook(purifier: DOMPurify): void {
   if (legacyTableHooked.has(purifier)) return
   legacyTableHooked.add(purifier)
   purifier.addHook('afterSanitizeAttributes', (node) => {
     const element = node as Element
     if (typeof element.getAttribute !== 'function') return
-    if (TABLE_ELEMENTS.has(element.tagName.toLowerCase())) return
-    for (const attribute of LEGACY_TABLE_ATTRIBUTES) element.removeAttribute(attribute)
+    if (!TABLE_ELEMENTS.has(element.tagName.toLowerCase())) {
+      for (const attribute of LEGACY_TABLE_ATTRIBUTES) element.removeAttribute(attribute)
+    }
+    if (element.tagName.toLowerCase() !== 'font') {
+      for (const attribute of LEGACY_FONT_ATTRIBUTES) element.removeAttribute(attribute)
+    }
   })
 }
 
@@ -160,7 +178,7 @@ function purifier(): DOMPurify {
     outgoingDataHooked.add(outgoingPurifier)
     outgoingPurifier.addHook('uponSanitizeAttribute', (_node, data) => {
       const name = data.attrName.toLowerCase()
-      if (name === 'dir' && /^(?:ltr|rtl)$/i.test(data.attrValue)) data.forceKeepAttr = true
+      if (name === 'dir' && /^(?:ltr|rtl|auto)$/i.test(data.attrValue)) data.forceKeepAttr = true
       if (name === 'target' && (data.attrValue === '_blank' || data.attrValue === '_self')) {
         data.forceKeepAttr = true
       }
@@ -176,12 +194,14 @@ function purifier(): DOMPurify {
       const isGmailSignature =
         element.tagName.toLowerCase() === 'div' &&
         isGmailSignatureAttributes(element.getAttribute('class'), element.getAttribute('data-smartmail'))
-      if (!isGmailSignature) {
+      const isGmailSignaturePrefix =
+        element.tagName.toLowerCase() === 'span' && isGmailSignaturePrefixClass(element.getAttribute('class'))
+      if (!isGmailSignature && !isGmailSignaturePrefix) {
         element.removeAttribute('class')
-        element.removeAttribute('data-smartmail')
       }
+      if (!isGmailSignature) element.removeAttribute('data-smartmail')
       const direction = element.getAttribute('dir')
-      if (direction && !/^(?:ltr|rtl)$/i.test(direction)) element.removeAttribute('dir')
+      if (direction && !/^(?:ltr|rtl|auto)$/i.test(direction)) element.removeAttribute('dir')
       const target = element.getAttribute('target')
       if (element.tagName.toLowerCase() !== 'a') {
         element.removeAttribute('rel')
@@ -211,6 +231,7 @@ export function sanitizeOutgoingHtml(html: string): string {
       'colspan',
       'rowspan',
       'start',
+      ...LEGACY_FONT_ATTRIBUTES,
       ...LEGACY_TABLE_ATTRIBUTES,
       'style',
       'data-attn-cid',
