@@ -234,8 +234,10 @@ const api = {
     createReply: (
       threadId: string,
       kind: Exclude<DraftKind, 'new'>,
-      mailbox: ConversationMailbox = 'normal'
-    ): Promise<Draft | null> => invoke(IPC_CHANNELS.draftCreateReply, threadId, kind, mailbox),
+      mailbox: ConversationMailbox = 'normal',
+      sourceMessageId?: string
+    ): Promise<Draft | null> =>
+      invoke(IPC_CHANNELS.draftCreateReply, threadId, kind, mailbox, sourceMessageId),
     pickAttachments: (id: string): Promise<DraftAttachmentMutationResult> =>
       invoke(IPC_CHANNELS.draftPickAttachments, id),
     addDroppedFiles: (id: string, files: File[]): Promise<DraftAttachmentMutationResult> =>

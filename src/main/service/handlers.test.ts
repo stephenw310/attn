@@ -4,7 +4,7 @@ import { openDatabase } from '../db'
 import { countSystemMailboxes } from '../db/queries'
 import type { GmailThread } from '../gmail/parse'
 import { getSplitState } from '../splits'
-import { ensureAccount } from '../sync/persist'
+import { ensureAccount, persistThread } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
 import { createServiceHandlers, type ServiceHandlerContext } from './handlers'
@@ -78,6 +78,32 @@ const emptyProvider: ServerSearchProvider = {
   getThread: vi.fn(),
   getAttachmentData: vi.fn(async () => undefined)
 }
+
+describe('message-specific reply service handler', () => {
+  it('returns unavailable if the selected message disappears while waiting for the conversation', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const original = thread('source')
+    const newer = thread('other').messages?.[0]
+    if (!newer) throw new Error('missing fixture message')
+    newer.threadId = 'source'
+    persistThread(db, ACCOUNT, { ...original, messages: [...(original.messages ?? []), newer] })
+    const context = handlerContext(db, emptyProvider)
+    context.waitForConversation = async () => {
+      db.prepare('DELETE FROM messages WHERE account_id = ? AND id = ?').run(ACCOUNT, 'message-source')
+    }
+    const handlers = createServiceHandlers(context)
+    try {
+      await expect(
+        handlers.invoke(IPC_CHANNELS.draftCreateReply, ['source', 'reply', 'normal', 'message-source'])
+      ).resolves.toBeNull()
+      expect(db.prepare('SELECT COUNT(*) AS count FROM outbox').get()).toEqual({ count: 0 })
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+})
 
 describe('Inbox readiness service handler', () => {
   it('waits for both the full-body walk and the split metadata rebuild', async () => {

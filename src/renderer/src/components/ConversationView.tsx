@@ -1,17 +1,28 @@
 import { memo, type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
+import type { DraftKind } from '../../../shared/drafts'
 import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
 import type { DisplayConversation, DisplayThread } from '../mailDisplay'
 import { Kbd } from './Kbd'
 import { MessageCard } from './MessageCard'
 
+export interface MessageReplyTarget {
+  threadId: string
+  messageId: string
+  canReply: boolean
+  expand: (() => void) | null
+}
+
 interface ConversationMessagesProps {
   conversation: DisplayConversation
   account: string | null
   online: boolean
-  markNewest: boolean
+  inlineComposer: ReactNode | null
+  inlineComposerSourceMessageId: string | null
   scrollRef: React.RefObject<HTMLDivElement | null>
+  replyTargetRef: React.RefObject<MessageReplyTarget | null>
   onToast: (message: string) => void
+  onReply?: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
 /** The newest message a reader expands: trashed markers stay compact (SPEC F3). */
@@ -23,7 +34,17 @@ function newestReadableIndex(messages: readonly DisplayConversation['messages'][
 }
 
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
-  const { conversation, account, online, markNewest, scrollRef, onToast } = props
+  const {
+    conversation,
+    account,
+    online,
+    inlineComposer,
+    inlineComposerSourceMessageId,
+    scrollRef,
+    replyTargetRef,
+    onToast,
+    onReply
+  } = props
   const newestIndex = newestReadableIndex(conversation.messages)
   const newestMessageId = conversation.messages[newestIndex]?.id
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
@@ -31,7 +52,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
   })
   const [expandedTrimIds, setExpandedTrimIds] = useState<Set<string>>(() => new Set())
   const [activeMessageId, setActiveMessageId] = useState<string | null>(newestMessageId ?? null)
-  const [readerKeysUsed, setReaderKeysUsed] = useState(false)
   const messageElementsRef = useRef(new Map<string, HTMLDivElement>())
   // Reveal state is reader-local by design (SPEC F3): it lives here so closing
   // the reader unmounts it, and revealing changes no labels and queues nothing.
@@ -42,7 +62,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
   // initial newest message, instead of inheriting the older collapsed default.
   useLayoutEffect(() => {
     if (!newestMessageId) return
-    setActiveMessageId(newestMessageId)
     setExpandedMessageIds((current) => {
       if (current.has(newestMessageId)) return current
       const next = new Set(current)
@@ -50,6 +69,27 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       return next
     })
   }, [newestMessageId])
+
+  useLayoutEffect(() => {
+    setActiveMessageId((current) => {
+      if (conversation.messages.some((message) => message.id === inlineComposerSourceMessageId)) {
+        return inlineComposerSourceMessageId
+      }
+      if (conversation.messages[newestIndex]?.pending) return newestMessageId ?? null
+      return conversation.messages.some((message) => message.id === current)
+        ? current
+        : (newestMessageId ?? null)
+    })
+  }, [conversation.messages, inlineComposerSourceMessageId, newestIndex, newestMessageId])
+
+  // Reopened drafts select and expand their saved source too. Keep the composer
+  // in the same keyed sibling list while its source loads so edits never remount.
+  useLayoutEffect(() => {
+    if (!inlineComposerSourceMessageId) return
+    setActiveMessageId(inlineComposerSourceMessageId)
+    setExpandedMessageIds((current) => new Set(current).add(inlineComposerSourceMessageId))
+    setRevealedTrashedIds((current) => new Set(current).add(inlineComposerSourceMessageId))
+  }, [inlineComposerSourceMessageId])
 
   const toggleMessage = useCallback((messageId: string) => {
     setExpandedMessageIds((current) => {
@@ -106,7 +146,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
 
   const activateMessage = useCallback(
     (messageId: string) => {
-      setReaderKeysUsed(true)
       setActiveMessageId(messageId)
       alignMessage(messageId)
     },
@@ -130,12 +169,20 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
   const toggleActiveMessage = useCallback(() => {
     const activeMessage = conversation.messages.find((message) => message.id === activeMessageId)
     if (!activeMessage) return
-    setReaderKeysUsed(true)
     if (activeMessage.trashed && !revealedTrashedIds.has(activeMessage.id)) {
       revealTrashed(activeMessage.id)
     } else toggleMessage(activeMessage.id)
     alignMessage(activeMessage.id)
   }, [activeMessageId, alignMessage, conversation.messages, revealTrashed, revealedTrashedIds, toggleMessage])
+
+  const replyToMessage = useCallback(
+    (kind: Exclude<DraftKind, 'new'>, messageId: string) => {
+      setActiveMessageId(messageId)
+      setExpandedMessageIds((current) => new Set(current).add(messageId))
+      onReply?.(kind, messageId)
+    },
+    [onReply]
+  )
 
   useLayoutEffect(() => {
     if (!activeMessageId) return
@@ -147,64 +194,142 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     ])
   }, [activeMessageId, moveMessage, toggleActiveMessage, toggleTrim])
 
-  return (
-    <>
-      {conversation.messages.map((message, index) => (
+  useLayoutEffect(() => {
+    const activeMessage = conversation.messages.find((message) => message.id === activeMessageId)
+    const target = activeMessage
+      ? {
+          threadId: conversation.threadId,
+          messageId: activeMessage.id,
+          expand:
+            !expandedMessageIds.has(activeMessage.id) ||
+            (activeMessage.trashed && !revealedTrashedIds.has(activeMessage.id))
+              ? toggleActiveMessage
+              : null,
+          canReply:
+            !activeMessage.pending && (!activeMessage.trashed || revealedTrashedIds.has(activeMessage.id))
+        }
+      : null
+    replyTargetRef.current = target
+    return () => {
+      if (replyTargetRef.current === target) replyTargetRef.current = null
+    }
+  }, [
+    activeMessageId,
+    conversation.messages,
+    conversation.threadId,
+    expandedMessageIds,
+    replyTargetRef,
+    revealedTrashedIds,
+    toggleActiveMessage
+  ])
+
+  useLayoutEffect(() => {
+    const activeMessage = conversation.messages.find((message) => message.id === activeMessageId)
+    if (
+      !onReply ||
+      !activeMessage ||
+      activeMessage.pending ||
+      (activeMessage.trashed && !revealedTrashedIds.has(activeMessage.id))
+    )
+      return
+    return registerCommands([
+      createCommand('message.reply', () => replyToMessage('reply', activeMessage.id)),
+      createCommand('message.replyAll', () => replyToMessage('replyAll', activeMessage.id)),
+      createCommand('message.forward', () => replyToMessage('forward', activeMessage.id))
+    ])
+  }, [activeMessageId, conversation.messages, onReply, replyToMessage, revealedTrashedIds])
+
+  const items = conversation.messages.map((message) => (
+    <div
+      key={`message:${message.id}`}
+      ref={(element) => {
+        if (element) messageElementsRef.current.set(message.id, element)
+        else messageElementsRef.current.delete(message.id)
+      }}
+      data-testid="conversation-message"
+      data-message-id={message.id}
+      data-active-message={activeMessageId === message.id ? 'true' : undefined}
+      aria-current={activeMessageId === message.id ? 'true' : undefined}
+      data-latest-conversation-item={!inlineComposer && activeMessageId === message.id ? '' : undefined}
+      className="relative"
+      onPointerDownCapture={() => {
+        if (!inlineComposer) setActiveMessageId(message.id)
+      }}
+      onFocusCapture={() => {
+        if (!inlineComposer) setActiveMessageId(message.id)
+      }}
+    >
+      {activeMessageId === message.id && (
+        <span
+          data-testid="message-cursor"
+          aria-hidden
+          className={`pointer-events-none absolute left-0 z-10 w-0.5 bg-accent/40 ${inlineComposer && inlineComposerSourceMessageId === message.id ? 'top-1.5 bottom-0 rounded-t-full' : 'inset-y-1.5 rounded-full'}`}
+        />
+      )}
+      {message.trashed && !revealedTrashedIds.has(message.id) ? (
         <div
-          key={message.id}
-          ref={(element) => {
-            if (element) messageElementsRef.current.set(message.id, element)
-            else messageElementsRef.current.delete(message.id)
-          }}
-          data-testid="conversation-message"
-          data-active-message={activeMessageId === message.id ? 'true' : undefined}
-          data-latest-conversation-item={markNewest && index === newestIndex ? '' : undefined}
-          className={
-            readerKeysUsed && activeMessageId === message.id
-              ? 'relative before:pointer-events-none before:absolute before:top-2 before:-left-3 before:h-8 before:w-0.5 before:rounded-full before:bg-accent'
-              : ''
-          }
-          onPointerDownCapture={() => setActiveMessageId(message.id)}
+          data-testid="trashed-message-marker"
+          className="flex items-center gap-2 rounded-lg border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
         >
-          {message.trashed && !revealedTrashedIds.has(message.id) ? (
-            <div
-              data-testid="trashed-message-marker"
-              className="flex items-center gap-2 rounded-lg border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
-            >
-              This message was moved to Trash.
-              <button
-                type="button"
-                data-testid="trashed-message-reveal"
-                onClick={(event) => {
-                  revealTrashed(message.id)
-                  event.currentTarget.blur()
-                }}
-                className="cursor-pointer font-medium text-accent hover:underline"
-              >
-                Show message
-              </button>
-            </div>
-          ) : (
-            <MessageCard
-              threadId={conversation.threadId}
-              message={message}
-              account={account}
-              onToast={onToast}
-              bodyHydrationMessage={bodyHydrationStatusMessage(
-                message.bodyState,
-                online,
-                conversation.bodyHydrationFailed
-              )}
-              collapsed={!expandedMessageIds.has(message.id)}
-              onToggleCollapsed={() => toggleMessage(message.id)}
-              trimExpanded={expandedTrimIds.has(message.id)}
-              onToggleTrim={() => toggleTrim(message.id)}
-            />
-          )}
+          This message was moved to Trash.
+          <button
+            type="button"
+            data-testid="trashed-message-reveal"
+            onClick={(event) => {
+              revealTrashed(message.id)
+              event.currentTarget.blur()
+            }}
+            className="cursor-pointer font-medium text-accent hover:underline"
+          >
+            Show message
+          </button>
         </div>
-      ))}
-    </>
-  )
+      ) : (
+        <MessageCard
+          threadId={conversation.threadId}
+          message={message}
+          account={account}
+          onToast={onToast}
+          active={activeMessageId === message.id}
+          hasInlineComposer={Boolean(inlineComposer && inlineComposerSourceMessageId === message.id)}
+          bodyHydrationMessage={bodyHydrationStatusMessage(
+            message.bodyState,
+            online,
+            conversation.bodyHydrationFailed
+          )}
+          collapsed={!expandedMessageIds.has(message.id)}
+          onToggleCollapsed={() => toggleMessage(message.id)}
+          trimExpanded={expandedTrimIds.has(message.id)}
+          onToggleTrim={() => toggleTrim(message.id)}
+        />
+      )}
+    </div>
+  ))
+  if (inlineComposer) {
+    const sourceIndex = conversation.messages.findIndex(
+      (message) => message.id === inlineComposerSourceMessageId
+    )
+    items.splice(
+      sourceIndex < 0 ? items.length : sourceIndex + 1,
+      0,
+      <div
+        key="composer"
+        data-testid="conversation-latest-item"
+        data-composer-source-message-id={inlineComposerSourceMessageId ?? undefined}
+        data-latest-conversation-item=""
+        className={sourceIndex >= 0 ? 'relative -mt-3.5' : undefined}
+      >
+        {sourceIndex >= 0 && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-0 bottom-1.5 left-0 z-10 w-0.5 rounded-b-full bg-accent/40"
+          />
+        )}
+        {inlineComposer}
+      </div>
+    )
+  }
+  return <>{items}</>
 }
 
 interface ConversationViewProps {
@@ -217,10 +342,13 @@ interface ConversationViewProps {
   account: string | null
   online: boolean
   scrollRef: React.RefObject<HTMLDivElement | null>
+  replyTargetRef: React.RefObject<MessageReplyTarget | null>
   inlineComposer: ReactNode | null
   inlineComposerDraftId: string | null
+  inlineComposerSourceMessageId: string | null
   onClose: () => void
   onToast: (message: string) => void
+  onReply: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
 export const ConversationView = memo(function ConversationView(
@@ -236,19 +364,21 @@ export const ConversationView = memo(function ConversationView(
     account,
     online,
     scrollRef,
+    replyTargetRef,
     inlineComposer,
     inlineComposerDraftId,
+    inlineComposerSourceMessageId,
     onClose,
-    onToast
+    onToast,
+    onReply
   } = props
 
   const conversationThreadId = conversation?.threadId ?? (inlineComposer ? selected.id : null)
   const newestMessageId = conversation?.messages.at(-1)?.id ?? null
   const newestMessagePending = conversation?.messages.at(-1)?.pending === true
   const pendingFocusMessageId = newestMessagePending && inlineComposer === null ? newestMessageId : null
-  const messageCount = conversation?.messages.length ?? 0
   const latestTargetKey = conversationThreadId
-    ? `${conversationThreadId}:${messageCount}:${newestMessageId ?? ''}:${inlineComposerDraftId ?? ''}`
+    ? `${conversationThreadId}:${pendingFocusMessageId ?? ''}:${inlineComposerDraftId ?? ''}`
     : null
 
   useLayoutEffect(() => {
@@ -268,10 +398,25 @@ export const ConversationView = memo(function ConversationView(
         const scrollRect = scroll.getBoundingClientRect()
         const targetRect = target.getBoundingClientRect()
         const paddingTop = Number.parseFloat(getComputedStyle(scroll).paddingTop) || 0
+        const sourceId = target.dataset.composerSourceMessageId
+        const source = sourceId
+          ? [...content.querySelectorAll<HTMLElement>('[data-message-id]')].find(
+              (message) => message.dataset.messageId === sourceId
+            )
+          : null
+        const sourceRect = source?.getBoundingClientRect()
+        // Keep the source visible above a reply when it fits. For long mail,
+        // retain a little context without pushing the editor out of view.
+        const targetTop = sourceRect
+          ? Math.max(
+              sourceRect.top,
+              targetRect.top - Math.max(140, scroll.clientHeight - targetRect.height - paddingTop * 2)
+            )
+          : targetRect.top
         // Move only the conversation pane. `scrollIntoView()` also scrolls the
         // document's root scrolling element, which pulls the app shell above
         // the Electron window and strands both footers mid-window.
-        scroll.scrollTop += targetRect.top - scrollRect.top - paddingTop
+        scroll.scrollTop += targetTop - scrollRect.top - paddingTop
       })
     }
     const observer = new ResizeObserver(alignLatest)
@@ -342,22 +487,25 @@ export const ConversationView = memo(function ConversationView(
             className="mx-auto flex w-full flex-col gap-3.5"
             style={{ maxWidth: 'clamp(576px, 57.6vw, 896px)' }}
           >
-            {conversation ? (
-              <ConversationMessages
-                key={conversation.threadId}
-                conversation={conversation}
-                account={account}
-                online={online}
-                markNewest={inlineComposer === null}
-                scrollRef={scrollRef}
-                onToast={onToast}
-              />
-            ) : null}
-            {inlineComposer ? (
-              <div data-testid="conversation-latest-item" data-latest-conversation-item="">
-                {inlineComposer}
-              </div>
-            ) : null}
+            <ConversationMessages
+              key={selected.id}
+              conversation={
+                conversation ?? {
+                  threadId: selected.id,
+                  subject: selected.subject,
+                  messages: [],
+                  bodyHydrationFailed: false
+                }
+              }
+              account={account}
+              online={online}
+              inlineComposer={inlineComposer}
+              inlineComposerSourceMessageId={inlineComposerSourceMessageId}
+              scrollRef={scrollRef}
+              replyTargetRef={replyTargetRef}
+              onToast={onToast}
+              onReply={inlineComposer === null ? onReply : undefined}
+            />
           </div>
         ) : (
           <div data-testid="conversation-loading" className="py-10 text-center text-ink-faint">

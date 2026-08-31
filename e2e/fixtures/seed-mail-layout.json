@@ -135,6 +135,45 @@
           "bodyHtml": "<style>@media not screen and (prefers-color-scheme:dark){#negated-dark-canvas{background:#fff3d6;color:#202124}}</style><div id=negated-dark-canvas>Negating the complete dark query keeps this light canvas.</div>"
         }
       ]
+    },
+    {
+      "id": "t-layout-apple-backgrounds",
+      "messages": [
+        {
+          "id": "m-layout-apple-backgrounds",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:00",
+          "from": "Alex Rivera <alex@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Apple Mail pasted backgrounds",
+          "bodyHtml": "<html class=\"apple-mail-supports-explicit-dark-mode\"><body><div id=\"apple-greeting\" style=\"-webkit-text-size-adjust: auto; background-color: rgb(58, 58, 60);\"><span style=\"background-color: rgb(255, 255, 255);\">Hi!</span></div><div id=\"apple-spacer\" style=\"-webkit-text-size-adjust: auto; background-color: rgb(58, 58, 60);\"><span style=\"background-color: rgb(255, 255, 255);\"><br></span></div><div id=\"apple-question\" style=\"-webkit-text-size-adjust: auto; background-color: rgb(58, 58, 60);\"><span style=\"background-color: rgb(255, 255, 255);\">Thanks for the update. Can we schedule a call?</span></div><div id=\"apple-close\" style=\"-webkit-text-size-adjust: auto; background-color: rgb(58, 58, 60);\"><span style=\"background-color: rgb(255, 255, 255);\"><strong>Thanks again,</strong><br>Alex</span></div><div class=\"gmail_signature\">Alex Rivera</div></body></html>"
+        }
+      ]
+    },
+    {
+      "id": "t-layout-mixed-reply",
+      "messages": [
+        {
+          "id": "m-layout-mixed-reply",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:30",
+          "from": "Morgan Lee <morgan@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Simple reply with rich history",
+          "bodyHtml": "<div dir=\"ltr\"><div><div id=\"current-answer\" data-attn-trim-start=\"\" onclick=\"alert(1)\">Yes, please include the configuration changes in the next build. The <a id=\"answer-link\" href=\"https://links.attn.test/task\">task details</a> are ready.</div><div><br></div><div class=\"gmail_quote gmail_quote_container\"><div class=\"gmail_attr\">On Monday, Design Team wrote:</div><blockquote style=\"margin:0 0 0 16px;padding-left:12px;border-left:1px solid #ccc\"><table id=\"history-canvas\" width=\"100%\" style=\"background:#e5edf8;border-collapse:collapse\"><tr><td style=\"padding:20px\"><table id=\"history-card\" width=\"100%\" style=\"background:white\"><tr><td id=\"history-heading\" style=\"background:#244c70;color:white;padding:24px\">Build update</td></tr><tr><td style=\"padding:24px;height:360px;vertical-align:top\"><p>This older message has its own layout and colors.</p><a id=\"history-link\" href=\"https://links.attn.test/build\">Read the build notes</a><img id=\"history-cid\" src=\"cid:history-image@attn.test\"><img id=\"history-remote\" src=\"https://mixed.attn.test/tracker.gif\" onload=\"alert(1)\"><script>document.body.dataset.scriptRan=\"true\"</script></td></tr></table></td></tr></table></blockquote></div></div><div><br></div></div>",
+          "attachments": [
+            {
+              "attachmentId": "inline:history-image",
+              "mimeType": "image/gif",
+              "sizeBytes": 35,
+              "contentId": "history-image@attn.test",
+              "dataBase64Url": "R0lGODlhAQABAAD_ACwAAAAAAQABAAACADs"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

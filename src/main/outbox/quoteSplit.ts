@@ -34,6 +34,14 @@ function isBlank(node: Node): boolean {
   return node.nodeName === '#text' && !('value' in node && node.value.trim())
 }
 
+/** Gmail can leave empty editor lines after a quote. Styled blocks and images are authored content. */
+function isEmptyLine(node: Node): boolean {
+  if (isBlank(node)) return true
+  if (!isElement(node) || node.attrs.some((attribute) => attribute.name !== 'dir')) return false
+  if (node.tagName === 'br') return true
+  return ['div', 'p', 'span'].includes(node.tagName) && node.childNodes.every(isEmptyLine)
+}
+
 function classList(element: Element): string[] {
   const value = element.attrs.find((attribute) => attribute.name === 'class')?.value ?? ''
   return value.split(/\s+/)
@@ -47,7 +55,7 @@ function textOf(node: Node): string {
 
 /** The element that starts the quoted trail, or null when there is no clean boundary. */
 function findQuoteStart(children: Node[]): Node | null {
-  const lastMeaningful = [...children].reverse().find((node) => !isBlank(node))
+  const lastMeaningful = [...children].reverse().find((node) => !isEmptyLine(node))
   if (!lastMeaningful || !isElement(lastMeaningful)) return null
 
   // Everything after the quote must be blank. Content below it means the author
@@ -106,20 +114,27 @@ function locateQuote(
       quoteHtml: html.slice(offset, contentEnd).trim()
     }
   }
-  const meaningful = children.filter((node) => !isBlank(node))
+  const meaningful = children.filter((node) => !isEmptyLine(node))
   if (meaningful.length !== 1) return null
   const wrapper = meaningful[0]
   if (!isElement(wrapper)) return null
   const location = wrapper.sourceCodeLocation
   if (!location?.startTag || !location.endTag) return null
-  return locateQuote(
+  const found = locateQuote(
     html,
     wrapper.childNodes,
     location.startTag.endOffset,
     location.endTag.startOffset,
-    `${open}${html.slice(location.startOffset, location.startTag.endOffset)}`,
+    // Keep empty siblings before the wrapper on the authored side.
+    `${open}${html.slice(contentStart, location.startTag.endOffset)}`,
     `${html.slice(location.endTag.startOffset, location.endOffset)}${close}`
   )
+  if (!found) return null
+  // Empty siblings after each wrapper follow the quote, in their original order.
+  return {
+    ...found,
+    quoteHtml: `${found.quoteHtml}${html.slice(location.endOffset, contentEnd)}`.trim()
+  }
 }
 
 /**

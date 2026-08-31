@@ -645,12 +645,13 @@ Opening a conversation row with a bound draft reopens the newest matching draft 
 close button leaves the reader open, while either `Esc` or the reader Back control saves the draft and returns
 to the originating list in one action. Opening or navigating to a conversation keeps the reading viewport
 anchored to the newest message or restored draft while asynchronously sized HTML settles. Quoted history sits
-behind an inline `...` control and shares the reader's surface decision: mail without a non-neutral authored
+behind an inline `...` control and uses the whole-document surface classifier: mail without a non-neutral authored
 canvas uses the native composer canvas and normalizes dark sender foreground colours for contrast, while
 non-neutral backgrounds and background images retain a light document canvas plus their sanitized structure
 and explicit styling. Typography, media, tables, and layout alone remain native. From Inbox or Snoozed, `r`
 and `f` open the selected row directly into the corresponding inline composer.
-`Enter` is a reader-only Reply-all alias alongside `a` and retains native activation on focused links.
+`Enter` opens the selected collapsed message; when it is already expanded, it opens Reply all.
+`a` always opens Reply all, and `Enter` retains native activation on focused links.
 
 Gmail-imported forwards need one additional identity rule. A draft whose authoritative Gmail `threadId`
 matches a cached thread is thread-bound even though forwards normally lack `In-Reply-To` and `References`.
@@ -664,7 +665,8 @@ thread is not cached, and re-fetch unchanged legacy rows once so an earlier unbo
   opening both Inbox-bound and archived-parent Gmail forward drafts returns to an inline composer; opening
   the conversation row itself restores its draft in the viewport after long HTML settles; quoted history
   reveals inline on the same native or presentation surface as its source; `r`/`f` work from the selected list
-  row; `Enter` opens Reply all; Back and `Esc` exit directly to the originating list without losing it.
+  row; `Enter` expands a collapsed message or opens Reply all for an expanded message; Back and `Esc`
+  exit directly to the originating list without losing it.
 - Visual artifacts: `inline-reply.png` and `draft-chip.png`.
 
 ### Done when
@@ -1055,6 +1057,29 @@ it cannot be inferred reliably from old messages or another account's signature.
 
 ---
 
+## Individual-message responses and reply formatting follow-up
+
+Message cards omit repeated reply footers and use a muted, rounded selection cursor with neutral borders.
+Reply, Reply all, and Forward palette commands target the message selected by pointer or `N`/`P`.
+Explicit source ids cross the typed draft IPC boundary and scope draft reuse,
+recipients, quote content, attachment selection, and reply headers. Reply all upgrades keep the draft's
+original source. Reader shortcuts use the visible message cursor, which moves with `N`/`P` or a click.
+`Enter` first opens a collapsed message, including a hidden Trash marker; on an expanded message it opens
+Reply all. `R`/`A`/`F` immediately replies, replies-all, or forwards. Replying expands that message and
+attaches the composer directly beneath it, before any later
+messages. Reopened drafts return beneath their source; a missing source falls back to the conversation end.
+The keyed composer stays mounted while source messages load or change, preserving unsaved edits. Incoming
+mail does not steal the reader's cursor. List shortcuts keep their default source selection. No schema change is required.
+
+The Gmail draft quote splitter accepts empty editor lines after quotes and beside nested wrappers without
+pulling quoted history into the editable body. It preserves leading empty siblings with the body and trailing
+empty siblings with the quote, in order. Authored or styled content below quotes still prevents splitting.
+`e2e/message-replies.spec.ts` covers a customer exchange followed by an internal forward, separate drafts,
+recipient and header isolation, source attachments, and palette targeting. The composer regression covers
+signature and quote collapse after importing, editing, and reopening a Gmail reply with trailing empty lines.
+Screenshots are `message-selected-expanded.png`, `message-cursor.png`, `message-inline-reply.png`,
+`message-inline-reply-light.png`, and `composer-reply-empty-lines.png`.
+
 ## Accepted-risk register (decisions made by this plan — don't relitigate ad hoc)
 
 | Decision | Rationale | Revisit |
@@ -1068,3 +1093,24 @@ it cannot be inferred reliably from old messages or another account's signature.
 | Replies to mail cached before the headers landed may lack `References` (threadId still set) | Server-side threading remains intact; during development, reset and re-sync instead of maintaining a header backfill | Revisit before the app has external users |
 | ~~One live composer at a time~~ **Superseded by T14A (#43):** drafts are unlimited and listed in the M2 Drafts view; only one composer is *mounted* at a time, which is a rendering fact rather than a limit | Single window, single account | M3 absorbs the Drafts view into the unified mailbox shell |
 | Utility-process move deferred to M3 | Don't move the process boundary under the outbox build | M3 first hardening task |
+
+## Apple Mail pasted background cleanup
+
+The reader and composer quote preview clean repeated Apple Mail gray paragraph backgrounds with white
+text wrappers in display copies. Detection also works after quoting removes the original document marker.
+The cleanup requires at least two nonempty sibling lines with the matching text-only styles. Single
+highlights, tables, styled layouts, stylesheet-driven mail, and lines inside a background container stay
+unchanged. View original bypasses the cleanup. Stored messages and outgoing quote HTML retain the original markup. Unit guards and Electron
+coverage exercise the reader and reply preview in both light and dark themes.
+
+## Plain replies above rich history
+
+The reader classifies a simple authored reply separately from its collapsed rich history. The visible reply
+uses the native card background and spacing, while the history retains its light canvas when expanded.
+Both parts use the existing sanitized, scriptless frame renderer. Quote toggles keep both documents mounted
+and preserve inline images and keyboard navigation. View original renders the entire document together.
+
+The split preserves ordinary div wrappers with inherited text styles and keeps signatures with the history.
+Stylesheets, shared padding or sizing, and table, list, or flex/grid layouts stay on the existing single-frame path because splitting can change them.
+Stored mail and composer quotes are unchanged. Unit guards and light/dark Electron coverage exercise the
+split, quote expansion, image loading, keyboard traversal, and original-view fallback.

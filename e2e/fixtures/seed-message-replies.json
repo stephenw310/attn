@@ -1,0 +1,63 @@
+{
+  "account": "seed@attn.test",
+  "threads": [
+    {
+      "id": "t-side-conversation",
+      "historyId": "1000",
+      "messages": [
+        {
+          "id": "m-customer",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 2,
+          "from": "Jordan Young <jordan@example.com>",
+          "to": "seed@attn.test",
+          "cc": "Support <support@example.com>",
+          "replyTo": "Jordan Young <jordan+support@example.com>",
+          "messageId": "<customer@example.com>",
+          "subject": "Account question",
+          "snippet": "Can you help with my account?",
+          "bodyText": "Can you help with my account?",
+          "attachments": [
+            {
+              "attachmentId": "customer-file",
+              "filename": "account.txt",
+              "mimeType": "text/plain",
+              "sizeBytes": 12
+            }
+          ]
+        },
+        {
+          "id": "m-forward",
+          "labelIds": ["SENT"],
+          "receivedDaysAgo": 1,
+          "from": "Me <seed@attn.test>",
+          "to": "Christy Shannon <christy@example.com>",
+          "messageId": "<forward@attn.test>",
+          "subject": "Fwd: Account question",
+          "snippet": "Can you check this?",
+          "bodyText": "Can you check this?"
+        },
+        {
+          "id": "m-colleague",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "from": "Christy Shannon <christy@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<colleague@example.com>",
+          "references": ["<forward@attn.test>"],
+          "subject": "Re: Fwd: Account question",
+          "snippet": "Internal account notes.",
+          "bodyText": "Internal account notes.",
+          "attachments": [
+            {
+              "attachmentId": "internal-file",
+              "filename": "internal.txt",
+              "mimeType": "text/plain",
+              "sizeBytes": 12
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

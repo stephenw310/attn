@@ -60,6 +60,7 @@ describe('command catalog', () => {
       'message.next',
       'message.previous',
       'message.toggle',
+      'message.openOrReplyAll',
       'message.trim.toggle',
       'sync.retry',
       'sync.error.copy',
@@ -93,6 +94,9 @@ describe('command catalog', () => {
       'draft.discard',
       'composer.new',
       'composer.reply',
+      'message.reply',
+      'message.replyAll',
+      'message.forward',
       'composer.replyAll',
       'composer.forward',
       'composer.close',
@@ -271,10 +275,14 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('z'), 'reader')?.id).toBe('triage.undo')
   })
 
-  test('uses Enter as a reader-only alias for reply all while retaining A', () => {
-    useCommands([createCommand('conversation.open', () => {}), createCommand('composer.replyAll', () => {})])
+  test('routes reader Enter separately from immediate reply all while retaining list Enter', () => {
+    useCommands([
+      createCommand('conversation.open', () => {}),
+      createCommand('message.openOrReplyAll', () => {}),
+      createCommand('composer.replyAll', () => {})
+    ])
     expect(matchKey(key('Enter'), 'list')?.id).toBe('conversation.open')
-    expect(matchKey(key('Enter'), 'reader')?.id).toBe('composer.replyAll')
+    expect(matchKey(key('Enter'), 'reader')?.id).toBe('message.openOrReplyAll')
     expect(matchKey(key('a'), 'reader')?.id).toBe('composer.replyAll')
     expect(matchKey(key('a'), 'list')).toBeNull()
   })

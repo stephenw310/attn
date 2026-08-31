@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
+import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
 import {
   mailPresentationForHtml,
   mailSurfaceForHtml,
@@ -8,7 +9,84 @@ import {
   normalizeNativeMailDocument
 } from './mailSurface'
 
+const APPLE_LINES =
+  '<div style="-webkit-text-size-adjust:auto;background-color:rgb(58,58,60)"><span style="background-color:white">Hello <strong>there</strong>.</span></div>' +
+  '<div style="-webkit-text-size-adjust:auto;background-color:rgb(58,58,60)"><span style="background-color:white"><br></span></div>' +
+  '<div style="-webkit-text-size-adjust:auto;background-color:rgb(58,58,60)"><span style="background-color:white;color:#202124;font-size:17px">Thanks for your help.</span></div>'
+
 describe('mail surface classification', () => {
+  it.each([
+    `<html class="apple-mail-supports-explicit-dark-mode"><body>${APPLE_LINES}</body></html>`,
+    APPLE_LINES.replaceAll('-webkit-text-size-adjust', 'text-size-adjust'),
+    `<div class="gmail_quote"><blockquote>${APPLE_LINES}</blockquote></div>`
+  ])('uses native mail for repeated Apple Mail line backgrounds, including quotes', (html) => {
+    expect(mailPresentationForHtml(html)).toEqual({ surface: 'native', layout: 'padded' })
+  })
+
+  it.each([
+    APPLE_LINES.replaceAll('-webkit-text-size-adjust:auto;', ''),
+    APPLE_LINES.replaceAll('rgb(58,58,60)', '#343b5c'),
+    APPLE_LINES.replaceAll('background-color:white', 'background-color:yellow'),
+    APPLE_LINES.replaceAll('-webkit-text-size-adjust:auto;', '-webkit-text-size-adjust:auto;padding:24px;'),
+    `<table><tr><td>${APPLE_LINES}</td></tr></table>`,
+    `<div style="background:#000">${APPLE_LINES}</div>`,
+    `<style>div{border:1px solid red}</style>${APPLE_LINES}`,
+    '<div style="-webkit-text-size-adjust:auto;background-color:rgb(58,58,60)"><span style="background-color:white">A single highlighted line.</span></div>'
+  ])('keeps ambiguous or designed gray backgrounds intact', (html) => {
+    expect(mailSurfaceForHtml(html)).toBe('light')
+  })
+
+  it('still preserves a designed panel beside Apple Mail lines', () => {
+    expect(mailSurfaceForHtml(`${APPLE_LINES}<div style="background:#fff3d6">An important panel</div>`)).toBe(
+      'light'
+    )
+  })
+
+  it('cleans a sanitized display fragment without removing text, spacing, or designed siblings', () => {
+    const template = document.createElement('template')
+    template.innerHTML = `${APPLE_LINES}<div id="panel" style="background:#fff3d6">An important panel</div>`
+    const text = template.content.textContent
+    normalizeAppleMailLineBackgrounds(template.content)
+    expect(template.content.textContent).toBe(text)
+    expect(template.content.querySelectorAll('br')).toHaveLength(1)
+    expect(template.content.querySelector('strong')?.textContent).toBe('there')
+    const lines = [...template.content.querySelectorAll<HTMLElement>('div:not(#panel)')]
+    expect(lines).toHaveLength(3)
+    expect(lines.every((line) => line.style.backgroundColor === '')).toBe(true)
+    const spans = [...template.content.querySelectorAll<HTMLElement>('span')]
+    expect(spans.every((span) => span.style.backgroundColor === '')).toBe(true)
+    expect(spans[2].style.color).toBe('rgb(32, 33, 36)')
+    expect(spans[2].style.fontSize).toBe('17px')
+    expect(template.content.querySelector<HTMLElement>('#panel')?.style.backgroundColor).toBe(
+      'rgb(255, 243, 214)'
+    )
+    const cleaned = template.innerHTML
+    normalizeAppleMailLineBackgrounds(template.content)
+    expect(template.innerHTML).toBe(cleaned)
+  })
+
+  it.each([
+    APPLE_LINES.replaceAll('</span>', '<img src="logo.png"></span>'),
+    APPLE_LINES.replaceAll('</span>', '<span style="background:yellow">Highlight</span></span>'),
+    APPLE_LINES.replaceAll('</span>', '</span>More text'),
+    APPLE_LINES.replaceAll('</span>', '<span style="padding:12px">Designed</span></span>')
+  ])('does not normalize a line with additional design or uncovered text', (html) => {
+    const template = document.createElement('template')
+    template.innerHTML = html
+    const before = template.innerHTML
+    normalizeAppleMailLineBackgrounds(template.content)
+    expect(template.innerHTML).toBe(before)
+    expect(mailSurfaceForHtml(html)).toBe('light')
+  })
+
+  it('preserves white text backgrounds within a designed ancestor', () => {
+    const template = document.createElement('template')
+    template.innerHTML = `<div style="background:#000">${APPLE_LINES}</div>`
+    const before = template.innerHTML
+    normalizeAppleMailLineBackgrounds(template.content)
+    expect(template.innerHTML).toBe(before)
+  })
+
   it('uses the native surface for plain and text-like HTML', () => {
     expect(mailSurfaceForHtml(null)).toBe('native')
     expect(mailSurfaceForHtml('<div>Pls see attached</div>')).toBe('native')
