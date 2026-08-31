@@ -10,19 +10,21 @@ import {
 import type { ThemeAppearance } from '../../shared/theme'
 import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
 import { forceLightMailCss } from './mailCss'
+import { findHtmlTrimStart, hasRenderableContent, hasRenderableContentBefore } from './mailHtmlTrim'
 import {
   type InlineImageReference,
   matchInlineImageReferences,
   normalizedContentId
 } from './mailInlineImages'
 import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
+import type { MailReadingParts } from './mailReading'
 import {
   type MailLayout,
   type MailSurface,
   normalizeNativeMailBackgrounds,
   normalizeNativeMailDocument
 } from './mailSurface'
-import { findSignatureLineIndex, findTrimIndex } from './mailTrim'
+import { findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
   bodyText: string
@@ -31,6 +33,7 @@ interface MessageBodyProps {
   layout: MailLayout
   appearance: ThemeAppearance
   viewOriginal?: boolean
+  parts?: MailReadingParts
   threadId: string
   messageId: string
   attachments: MessageAttachment[]
@@ -42,9 +45,7 @@ const MAIL_VIEWPORT_HEIGHT = 800
 const MAX_SAFE_BODY_HEIGHT = 100_000
 const TRIM_CONTROL_HEIGHT = 28
 const HORIZONTAL_SCROLLBAR_HEIGHT = 16
-const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
-const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
 const TRIM_COLLAPSED_ATTRIBUTE = 'data-attn-trim-collapsed'
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
@@ -145,48 +146,6 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   link.setAttribute('rel', 'noopener noreferrer')
 })
 
-function hasRenderableContent(content: DocumentFragment): boolean {
-  const visibleProbe = content.cloneNode(true) as DocumentFragment
-  visibleProbe.querySelectorAll('style').forEach((style) => {
-    style.remove()
-  })
-  return Boolean(visibleProbe.textContent?.trim()) || Boolean(visibleProbe.querySelector(MEANINGFUL_ELEMENTS))
-}
-
-function hasRenderableContentBefore(content: DocumentFragment, boundary: Node): boolean {
-  const range = document.createRange()
-  range.setStart(content, 0)
-  range.setEndBefore(boundary)
-  return hasRenderableContent(range.cloneContents())
-}
-
-function wholeLineSignatureContainer(text: Text): Node {
-  if (text.data.includes('\n')) return text
-  let boundary: Node = text
-  let parent = text.parentElement
-  while (parent && parent.textContent === text.data) {
-    boundary = parent
-    parent = parent.parentElement
-  }
-  return boundary
-}
-
-function findHtmlTrimStart(content: DocumentFragment): Node | null {
-  const walker = document.createTreeWalker(content, 5)
-  let current = walker.nextNode()
-  while (current) {
-    if (current instanceof Element && current.matches(TRIM_SELECTOR)) return current
-    if (current instanceof Text && !current.parentElement?.closest(`${TRIM_SELECTOR}, a, style, title`)) {
-      const signatureIndex = findSignatureLineIndex(current.data)
-      if (signatureIndex !== null) {
-        return signatureIndex === 0 ? wholeLineSignatureContainer(current) : current.splitText(signatureIndex)
-      }
-    }
-    current = walker.nextNode()
-  }
-  return null
-}
-
 function sanitizeToTemplate(
   html: string,
   surface: MailSurface,
@@ -256,7 +215,8 @@ function makeSrcDoc(
   surface: MailSurface,
   layout: MailLayout,
   appearance: ThemeAppearance,
-  viewOriginal: boolean
+  viewOriginal: boolean,
+  allowTrim: boolean
 ): string | null {
   const template = sanitizeToTemplate(html, surface, appearance, viewOriginal)
   if (!template) return null
@@ -264,7 +224,7 @@ function makeSrcDoc(
   template.content.querySelectorAll('img').forEach((image) => {
     image.setAttribute(IMAGE_PENDING_MARKER, '')
   })
-  const trimMatch = findHtmlTrimStart(template.content)
+  const trimMatch = allowTrim ? findHtmlTrimStart(template.content) : null
   const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
   if (trimStart) {
     const marker = document.createElement('div')
@@ -342,7 +302,51 @@ function TrimToggle({
   )
 }
 
-export function MessageBody({
+export function MessageBody(props: MessageBodyProps): React.JSX.Element {
+  const { parts, expanded = false, onToggleTrim, viewOriginal } = props
+  if (!parts || viewOriginal) return <SingleMessageBody {...props} />
+
+  return (
+    <div data-testid="mixed-mail-body" className="flex min-w-0 flex-col">
+      {/* Keep the reveal control first in the tab order, as in a single mail frame. */}
+      <TrimToggle
+        expanded={expanded}
+        lightSurface={false}
+        onToggle={onToggleTrim}
+        className="order-2 mt-1 h-7 self-start"
+      />
+      <div data-testid="mail-authored-section" className="order-1 min-w-0">
+        <SingleMessageBody
+          {...props}
+          bodyHtml={parts.authoredHtml}
+          bodyText={parts.authoredText}
+          surface="native"
+          layout="padded"
+          expanded
+          allowTrim={false}
+        />
+      </div>
+      <div
+        data-testid="mail-quoted-section"
+        hidden={!expanded}
+        className="order-3 min-w-0 overflow-hidden rounded-[10px] bg-mail-light-ground"
+      >
+        <SingleMessageBody
+          {...props}
+          bodyHtml={parts.quoteHtml}
+          bodyText={parts.quoteText}
+          surface={parts.quotePresentation.surface}
+          layout={parts.quotePresentation.layout}
+          expanded
+          allowTrim={false}
+          hidden={!expanded}
+        />
+      </div>
+    </div>
+  )
+}
+
+function SingleMessageBody({
   bodyText,
   bodyHtml,
   surface,
@@ -353,8 +357,10 @@ export function MessageBody({
   messageId,
   attachments,
   expanded = false,
-  onToggleTrim
-}: MessageBodyProps): React.JSX.Element {
+  onToggleTrim,
+  allowTrim = true,
+  hidden = false
+}: MessageBodyProps & { allowTrim?: boolean; hidden?: boolean }): React.JSX.Element {
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
@@ -366,8 +372,8 @@ export function MessageBody({
     () =>
       bodyHtml === null
         ? null
-        : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface, layout, appearance, viewOriginal),
-    [appearance, bodyHtml, layout, surface, viewOriginal]
+        : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface, layout, appearance, viewOriginal, allowTrim),
+    [allowTrim, appearance, bodyHtml, layout, surface, viewOriginal]
   )
 
   const revealLoadedImages = useCallback((doc: Document) => {
@@ -448,7 +454,8 @@ export function MessageBody({
   const measure = useCallback(
     (frame: HTMLIFrameElement) => {
       const doc = frame.contentDocument
-      if (!doc?.body) return
+      // A collapsed quote has no layout width. Measure only when it is revealed.
+      if (!doc?.body || hidden) return
       const scrollbarHeight =
         doc.documentElement.scrollWidth > doc.documentElement.clientWidth ? HORIZONTAL_SCROLLBAR_HEIGHT : 0
       doc.documentElement.style.setProperty('--attn-trim-scrollbar-height', `${scrollbarHeight}px`)
@@ -479,7 +486,7 @@ export function MessageBody({
         )
       }
     },
-    [expanded, srcDoc]
+    [expanded, hidden, srcDoc]
   )
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
@@ -567,7 +574,7 @@ export function MessageBody({
   if (srcDoc === null || oversized) {
     const lightSurface = surface === 'light'
     const surfaceClass = lightSurface ? 'p-3 text-mail-light-ink' : 'text-ink'
-    const trimIndex = findTrimIndex(bodyText)
+    const trimIndex = allowTrim ? findTrimIndex(bodyText) : null
     if (trimIndex === null) {
       return (
         <div

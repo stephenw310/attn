@@ -645,7 +645,7 @@ Opening a conversation row with a bound draft reopens the newest matching draft 
 close button leaves the reader open, while either `Esc` or the reader Back control saves the draft and returns
 to the originating list in one action. Opening or navigating to a conversation keeps the reading viewport
 anchored to the newest message or restored draft while asynchronously sized HTML settles. Quoted history sits
-behind an inline `...` control and shares the reader's surface decision: mail without a non-neutral authored
+behind an inline `...` control and uses the whole-document surface classifier: mail without a non-neutral authored
 canvas uses the native composer canvas and normalizes dark sender foreground colours for contrast, while
 non-neutral backgrounds and background images retain a light document canvas plus their sanitized structure
 and explicit styling. Typography, media, tables, and layout alone remain native. From Inbox or Snoozed, `r`
@@ -1102,3 +1102,15 @@ The cleanup requires at least two nonempty sibling lines with the matching text-
 highlights, tables, styled layouts, stylesheet-driven mail, and lines inside a background container stay
 unchanged. View original bypasses the cleanup. Stored messages and outgoing quote HTML retain the original markup. Unit guards and Electron
 coverage exercise the reader and reply preview in both light and dark themes.
+
+## Plain replies above rich history
+
+The reader classifies a simple authored reply separately from its collapsed rich history. The visible reply
+uses the native card background and spacing, while the history retains its light canvas when expanded.
+Both parts use the existing sanitized, scriptless frame renderer. Quote toggles keep both documents mounted
+and preserve inline images and keyboard navigation. View original renders the entire document together.
+
+The split preserves ordinary div wrappers with inherited text styles and keeps signatures with the history.
+Stylesheets, shared padding or sizing, and table, list, or flex/grid layouts stay on the existing single-frame path because splitting can change them.
+Stored mail and composer quotes are unchanged. Unit guards and light/dark Electron coverage exercise the
+split, quote expansion, image loading, keyboard traversal, and original-view fallback.

@@ -6,7 +6,7 @@ import { expect, test } from './electron'
 test.use({ seed: 'fixtures/seed-mail-layout.json' })
 
 test('separates native, centered, and full-bleed sender canvases', async ({ page }, testInfo) => {
-  await expect(page.getByTestId('thread-row')).toHaveCount(10)
+  await expect(page.getByTestId('thread-row')).toHaveCount(11)
 
   await page.getByTestId('thread-row').filter({ hasText: 'Plain layout' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)

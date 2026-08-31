@@ -4,7 +4,7 @@ import type { MailAddress, MessageAttachment, MessageRecipients } from '../../..
 import { formatBytes } from '../formatBytes'
 import { MessageBody } from '../MessageBody'
 import type { DisplayMessage } from '../mailDisplay'
-import { mailPresentationForHtml } from '../mailSurface'
+import { mailReadingForHtml } from '../mailReading'
 import { useTheme } from '../theme'
 
 function firstName(address: MailAddress, account: string | null): string {
@@ -107,7 +107,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
   } = props
   const { appearance } = useTheme()
   const [viewOriginal, setViewOriginal] = useState(false)
-  const detectedPresentation = useMemo(() => mailPresentationForHtml(message.html), [message.html])
+  const reading = useMemo(() => mailReadingForHtml(message.html), [message.html])
+  const detectedPresentation = reading.presentation
   const presentation =
     viewOriginal && detectedPresentation.surface === 'native'
       ? { ...detectedPresentation, surface: 'light' as const }
@@ -244,6 +245,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           layout={presentation.layout}
           appearance={appearance}
           viewOriginal={viewOriginal}
+          parts={reading.parts}
           threadId={threadId}
           messageId={message.id}
           attachments={message.attachments}
