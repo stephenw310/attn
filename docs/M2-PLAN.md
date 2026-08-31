@@ -1093,3 +1093,12 @@ Screenshots are `message-selected-expanded.png`, `message-cursor.png`, `message-
 | Replies to mail cached before the headers landed may lack `References` (threadId still set) | Server-side threading remains intact; during development, reset and re-sync instead of maintaining a header backfill | Revisit before the app has external users |
 | ~~One live composer at a time~~ **Superseded by T14A (#43):** drafts are unlimited and listed in the M2 Drafts view; only one composer is *mounted* at a time, which is a rendering fact rather than a limit | Single window, single account | M3 absorbs the Drafts view into the unified mailbox shell |
 | Utility-process move deferred to M3 | Don't move the process boundary under the outbox build | M3 first hardening task |
+
+## Apple Mail pasted background cleanup
+
+The reader and composer quote preview clean repeated Apple Mail gray paragraph backgrounds with white
+text wrappers in display copies. Detection also works after quoting removes the original document marker.
+The cleanup requires at least two nonempty sibling lines with the matching text-only styles. Single
+highlights, tables, styled layouts, stylesheet-driven mail, and lines inside a background container stay
+unchanged. View original bypasses the cleanup. Stored messages and outgoing quote HTML retain the original markup. Unit guards and Electron
+coverage exercise the reader and reply preview in both light and dark themes.

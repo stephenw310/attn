@@ -41,6 +41,7 @@ import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
 import { formatBytes } from '../formatBytes'
 import type { ShowToast } from '../hooks/useToast'
+import { normalizeAppleMailLineBackgrounds } from '../mailAppleBackgrounds'
 import { forceLightMailCss } from '../mailCss'
 import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
@@ -241,7 +242,14 @@ function InlineQuote({
   useEffect(() => {
     if (!html) return
     let cancelled = false
-    const document = new DOMParser().parseFromString(sanitizeOutgoingHtml(html), 'text/html')
+    // Detect the paste artifact before outgoing sanitization drops its CSS marker.
+    // Only the detached display copy changes, and it still passes through the sanitizer.
+    const displayCopy = new DOMParser().parseFromString(html, 'text/html')
+    normalizeAppleMailLineBackgrounds(displayCopy)
+    const document = new DOMParser().parseFromString(
+      sanitizeOutgoingHtml(displayCopy.body.innerHTML),
+      'text/html'
+    )
     if (surface === 'native' && appearance === 'dark') normalizeNativeMailDocument(document.body)
     if (appearance === 'light' || surface === 'light') {
       document.querySelectorAll('style').forEach((style) => {

@@ -135,6 +135,21 @@
           "bodyHtml": "<style>@media not screen and (prefers-color-scheme:dark){#negated-dark-canvas{background:#fff3d6;color:#202124}}</style><div id=negated-dark-canvas>Negating the complete dark query keeps this light canvas.</div>"
         }
       ]
+    },
+    {
+      "id": "t-layout-apple-backgrounds",
+      "messages": [
+        {
+          "id": "m-layout-apple-backgrounds",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:00",
+          "from": "Alex Rivera <alex@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Apple Mail pasted backgrounds",
+          "bodyHtml": "<html class=\"apple-mail-supports-explicit-dark-mode\"><body><div id=\"apple-greeting\" style=\"-webkit-text-size-adjust: auto; background-color: rgb(58, 58, 60);\"><span style=\"background-color: rgb(255, 255, 255);\">Hi!</span></div><div id=\"apple-spacer\" style=\"-webkit-text-size-adjust: auto; background-color: rgb(58, 58, 60);\"><span style=\"background-color: rgb(255, 255, 255);\"><br></span></div><div id=\"apple-question\" style=\"-webkit-text-size-adjust: auto; background-color: rgb(58, 58, 60);\"><span style=\"background-color: rgb(255, 255, 255);\">Thanks for the update. Can we schedule a call?</span></div><div id=\"apple-close\" style=\"-webkit-text-size-adjust: auto; background-color: rgb(58, 58, 60);\"><span style=\"background-color: rgb(255, 255, 255);\"><strong>Thanks again,</strong><br>Alex</span></div><div class=\"gmail_signature\">Alex Rivera</div></body></html>"
+        }
+      ]
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
   MAIL_TRIM_MARKER as TRIM_MARKER
 } from '../../shared/mailSanitizer'
 import type { ThemeAppearance } from '../../shared/theme'
+import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
 import { forceLightMailCss } from './mailCss'
 import {
   type InlineImageReference,
@@ -29,6 +30,7 @@ interface MessageBodyProps {
   surface: MailSurface
   layout: MailLayout
   appearance: ThemeAppearance
+  viewOriginal?: boolean
   threadId: string
   messageId: string
   attachments: MessageAttachment[]
@@ -188,13 +190,15 @@ function findHtmlTrimStart(content: DocumentFragment): Node | null {
 function sanitizeToTemplate(
   html: string,
   surface: MailSurface,
-  appearance: ThemeAppearance
+  appearance: ThemeAppearance,
+  viewOriginal: boolean
 ): HTMLTemplateElement | null {
   if (!html.trim()) return null
   const clean = sanitizeMailHtml(DOMPurify, html)
 
   const template = document.createElement('template')
   template.innerHTML = clean
+  if (!viewOriginal) normalizeAppleMailLineBackgrounds(template.content)
   template.content.querySelectorAll('style').forEach((style) => {
     const frozen = freezeViewportHeightUnits(style.textContent ?? '')
     style.textContent = surface === 'light' || appearance === 'light' ? forceLightMailCss(frozen) : frozen
@@ -251,9 +255,10 @@ function makeSrcDoc(
   inlineImages: ReadonlyMap<string, string>,
   surface: MailSurface,
   layout: MailLayout,
-  appearance: ThemeAppearance
+  appearance: ThemeAppearance,
+  viewOriginal: boolean
 ): string | null {
-  const template = sanitizeToTemplate(html, surface, appearance)
+  const template = sanitizeToTemplate(html, surface, appearance, viewOriginal)
   if (!template) return null
   replaceCidSources(template.content, inlineImages)
   template.content.querySelectorAll('img').forEach((image) => {
@@ -343,6 +348,7 @@ export function MessageBody({
   surface,
   layout,
   appearance,
+  viewOriginal = false,
   threadId,
   messageId,
   attachments,
@@ -357,8 +363,11 @@ export function MessageBody({
   const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
   const watchedImagesRef = useRef(new WeakSet<HTMLImageElement>())
   const srcDoc = useMemo(
-    () => (bodyHtml === null ? null : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface, layout, appearance)),
-    [appearance, bodyHtml, layout, surface]
+    () =>
+      bodyHtml === null
+        ? null
+        : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface, layout, appearance, viewOriginal),
+    [appearance, bodyHtml, layout, surface, viewOriginal]
   )
 
   const revealLoadedImages = useCallback((doc: Document) => {

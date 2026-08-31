@@ -243,6 +243,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           surface={presentation.surface}
           layout={presentation.layout}
           appearance={appearance}
+          viewOriginal={viewOriginal}
           threadId={threadId}
           messageId={message.id}
           attachments={message.attachments}
