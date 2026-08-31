@@ -14,7 +14,16 @@ import { sanitizeComposerImageSource, sanitizeComposerStyle } from '../sanitize'
 const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 
 function isRemoteImageSource(source: string): boolean {
-  return /^https?:/i.test(source)
+  try {
+    // Use the same parser that resolves the value assigned to <img src>.
+    // Chromium ignores ASCII tabs and line breaks inside a URL scheme, so a
+    // raw-prefix check can call a source local immediately before the browser
+    // normalizes and fetches it as HTTP.
+    const protocol = new URL(source, window.location.href).protocol.toLowerCase()
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 /**

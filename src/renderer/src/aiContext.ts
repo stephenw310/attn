@@ -22,14 +22,23 @@ function messageText(message: DisplayMessage): string {
 }
 
 /**
- * The newest messages of the open conversation as AI reply context. Pending
- * outbox projections and trashed markers are skipped — the provider sees only
- * confirmed conversation content the reader shows too.
+ * The newest messages through the message being answered as AI reply context.
+ * Pending outbox projections and trashed markers are skipped — the provider
+ * sees only confirmed conversation content the reader shows too. A missing
+ * requested source returns null instead of falling forward to a later message.
  */
-export function aiThreadContext(conversation: DisplayConversation | null): AiThreadMessage[] | null {
+export function aiThreadContext(
+  conversation: DisplayConversation | null,
+  sourceMessageId: string | null = null
+): AiThreadMessage[] | null {
   if (!conversation) return null
+  const sourceIndex =
+    sourceMessageId === null
+      ? conversation.messages.length - 1
+      : conversation.messages.findIndex((message) => message.id === sourceMessageId)
+  if (sourceIndex < 0) return null
   const messages: AiThreadMessage[] = []
-  for (const message of conversation.messages) {
+  for (const message of conversation.messages.slice(0, sourceIndex + 1)) {
     if (message.pending || message.trashed) continue
     const text = messageText(message)
     if (text.length === 0) continue

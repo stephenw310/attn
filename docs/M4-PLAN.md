@@ -58,9 +58,10 @@ follow-up below, and T40 requires its resolution before sign-off.
 ## Global rules (carried from M3, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single snapshot and
-   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 22 after PR #98. T34 and T35 each bump it
-   (T34 to 23, T35 to 24; if T35 lands first the numbers swap) and publish their dogfood DDL in their
-   sections. A real dogfood profile gets the manual additive upgrade in AGENTS.md. T39 permits automatic updates only
+   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 25 after T35's durable-ordering review
+   fix. T34 and T35 introduced versions 23 and 24; the follow-up ordering fix introduces version 25. Each
+   publishes its dogfood DDL in its section. A real dogfood profile gets the manual additive upgrade in
+   AGENTS.md. T39 permits automatic updates only
    within one schema version; a schema-changing release needs a separate upgrade procedure. The DDL in
    this plan starts from schema 22, preserving `thread_mailboxes`, `mailbox_cursor`, and the current FTS
    indexes. Profiles still on 21 first need the separate manual PR #98 upgrade in M3-PLAN.
@@ -492,7 +493,7 @@ one undo step. The DDL above is in the PR notes.
 
 ## T35: follow-up reminders
 
-**Status: shipped (2026-08-31, `cbb899e`).** Schema v24; the dogfood DDL is in the commit message. Real-Gmail follow-up runs stay in T40.
+**Status: shipped (2026-08-31, `cbb899e`).** Schema v24, with durable send ordering added in v25; the dogfood DDL is below. Real-Gmail follow-up runs stay in T40.
 
 **Depends on:** nothing · **Unblocks:** nothing · **Spec:** F9, F4 (snooze mechanics)
 
@@ -617,6 +618,29 @@ This task also owns GAP-1's wanted assertions, because it modifies exactly that 
 F9's acceptance criteria hold: only a subsequent reply cancels, including one found during history
 recovery; a pending snooze postpones follow-up return without losing it; and returned follow-ups remain
 visible and sort above normal mail until handled. The DDL above is in the PR notes.
+
+### Schema revision 24 → 25: durable follow-up ordering
+
+Follow-up replacement is ordered by the originating outbox row's creation time. That evidence must
+survive the seven-day sent-row retention window, including after a reminder has settled, because startup
+recovers older `sending` rows only after pruning. Version 25 stores the ordering value on the reminder;
+the backfill copies it from retained outbox rows when available. This is additive and eligible for the
+AGENTS.md manual dogfood procedure:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE reminders ADD COLUMN origin_outbox_created_at INTEGER;
+UPDATE reminders
+SET origin_outbox_created_at = (
+  SELECT MAX(outbox.created_at)
+  FROM outbox
+  WHERE outbox.account_id = reminders.account_id
+    AND outbox.rfc_message_id = reminders.origin_rfc_message_id
+)
+WHERE kind = 'follow_up' AND origin_rfc_message_id IS NOT NULL;
+PRAGMA user_version = 25;
+COMMIT;
+```
 
 ---
 

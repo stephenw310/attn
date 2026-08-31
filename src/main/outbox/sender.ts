@@ -832,20 +832,10 @@ export class OutboxSender {
   }
 
   private pruneSent(accountId: string, now = this.time.now()): void {
-    // A sent row that is a live follow-up's origin is the ordering evidence
-    // createFollowUpOnSent uses to refuse a replayed OLDER send — startup
-    // prunes before recovery drains, so deleting it would let that older
-    // send overwrite the newer reminder's origin and deadline (PR #101
-    // review). Keep exactly those rows until their reminder settles; the
-    // next prune then removes them.
+    // Follow-up reminders persist their origin row's creation time, so sent
+    // retention is independent of reminder lifetime and recovery ordering.
     this.db
-      .prepare(
-        `DELETE FROM outbox WHERE account_id = ? AND state = 'sent' AND updated_at < ?
-           AND (rfc_message_id IS NULL OR rfc_message_id NOT IN (
-             SELECT origin_rfc_message_id FROM reminders
-             WHERE account_id = outbox.account_id AND kind = 'follow_up'
-               AND state IN ('pending', 'returned') AND origin_rfc_message_id IS NOT NULL))`
-      )
+      .prepare(`DELETE FROM outbox WHERE account_id = ? AND state = 'sent' AND updated_at < ?`)
       .run(accountId, now - SENT_OUTBOX_RETENTION_MS)
   }
 }

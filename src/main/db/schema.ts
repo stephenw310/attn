@@ -1,7 +1,7 @@
 // Development schema snapshot. Bump the version whenever this SQL changes.
 // Runtime compatibility migrations stay out of the app; AGENTS.md documents the
 // manual additive-upgrade procedure for preserving a local dogfood profile.
-export const CURRENT_SCHEMA_VERSION = 24
+export const CURRENT_SCHEMA_VERSION = 25
 
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
@@ -189,10 +189,12 @@ CREATE TABLE reminders (
   -- Gmail id binds the reminder to its send; the RFC Message-ID breaks
   -- internal-date ties via References/In-Reply-To; internal_date is resolved
   -- from the post-send read (or the store) and a follow-up cannot fire until
-  -- it is. All three stay NULL on snooze rows.
+  -- it is. The outbox creation time durably orders competing sends after their
+  -- retained outbox rows are pruned. All four stay NULL on snooze rows.
   origin_message_id TEXT,
   origin_rfc_message_id TEXT,
   origin_internal_date INTEGER,
+  origin_outbox_created_at INTEGER,
   PRIMARY KEY (account_id, thread_id, kind)
 );
 CREATE INDEX idx_reminders_due ON reminders (account_id, state, due_at);

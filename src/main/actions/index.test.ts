@@ -657,6 +657,74 @@ describe('follow-up triage matrix (T35/F9)', () => {
     expect(followUpState(db)).toBe('pending')
   })
 
+  it('undoing an older move preserves a follow-up created by a later send', () => {
+    const db = openDatabase(':memory:')
+    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+    db.prepare(
+      "INSERT INTO threads (account_id, id, is_inbox_visible) VALUES (?, 't-later-follow-up', 1)"
+    ).run(ACCOUNT)
+    db.prepare(
+      "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, 't-later-follow-up', 'INBOX')"
+    ).run(ACCOUNT)
+    performTriage(db, ACCOUNT, {
+      kind: 'move',
+      threadIds: ['t-later-follow-up'],
+      destination: { kind: 'done' },
+      sourceLabelId: null
+    })
+
+    db.prepare(
+      `INSERT INTO outbox (id, account_id, state, thread_id, created_at, updated_at)
+       VALUES ('sent-later', ?, 'sent', 't-later-follow-up', 200, 200)`
+    ).run(ACCOUNT)
+    recordOutboxSendUndo(ACCOUNT, 'sent-later')
+    db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state,
+         origin_message_id, origin_rfc_message_id, origin_internal_date, origin_outbox_created_at)
+       VALUES (?, 't-later-follow-up', 'follow_up', 9999, 'pending',
+         'm-later', '<later@test>', 200, 200)`
+    ).run(ACCOUNT)
+
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Already sent' })
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid moved' })
+    expect(
+      db
+        .prepare(
+          `SELECT state, origin_message_id AS origin FROM reminders
+           WHERE account_id = ? AND thread_id = 't-later-follow-up' AND kind = 'follow_up'`
+        )
+        .get(ACCOUNT)
+    ).toEqual({ state: 'pending', origin: 'm-later' })
+  })
+
+  it('undoing an older archive preserves a replacement follow-up from a later send', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('done')
+    db.prepare(
+      `INSERT INTO outbox (id, account_id, state, thread_id, created_at, updated_at)
+       VALUES ('sent-replacement', ?, 'sent', 't-f', 200, 200)`
+    ).run(ACCOUNT)
+    recordOutboxSendUndo(ACCOUNT, 'sent-replacement')
+    db.prepare(
+      `UPDATE reminders SET due_at = 9999, state = 'pending',
+         origin_message_id = 'm-replacement', origin_rfc_message_id = '<replacement@test>',
+         origin_internal_date = 200, origin_outbox_created_at = 200
+       WHERE account_id = ? AND thread_id = 't-f' AND kind = 'follow_up'`
+    ).run(ACCOUNT)
+
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Already sent' })
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid archived' })
+    expect(
+      db
+        .prepare(
+          `SELECT state, origin_message_id AS origin FROM reminders
+           WHERE account_id = ? AND thread_id = 't-f' AND kind = 'follow_up'`
+        )
+        .get(ACCOUNT)
+    ).toEqual({ state: 'pending', origin: 'm-replacement' })
+  })
+
   it('undoing an archive that also canceled a pending snooze restores both reminders', () => {
     const db = followUpDb('returned', 1)
     db.prepare(

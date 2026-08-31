@@ -273,14 +273,16 @@ test('editable composer images obey blocking, per-sender exceptions, and the tog
   const probe = await startProbeServer()
   // Distinct paths per pasted image: the reader frame fetches its own pixel,
   // so the editor assertions must count requests only the editor can make.
-  const pasteImage = (composer: ComposerPage, alt: string, path: string): Promise<void> =>
+  const pasteImageSource = (composer: ComposerPage, alt: string, source: string): Promise<void> =>
     composer.editor.evaluate((editor, value) => {
       const clipboard = new DataTransfer()
       clipboard.setData('text/html', value)
       editor.dispatchEvent(
         new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard })
       )
-    }, `<img src="http://127.0.0.1:${probe.port}${path}" alt="${alt}" width="24" height="24">`)
+    }, `<img src="${source}" alt="${alt}" width="24" height="24">`)
+  const pasteImage = (composer: ComposerPage, alt: string, path: string): Promise<void> =>
+    pasteImageSource(composer, alt, `http://127.0.0.1:${probe.port}${path}`)
   try {
     await expect(page.getByTestId('thread-row')).toHaveCount(8)
     await setMessageHtml(
@@ -327,12 +329,20 @@ test('editable composer images obey blocking, per-sender exceptions, and the tog
     const freshImage = fresh.editor.locator('img[alt="standalone"]')
     await expect(freshImage).toHaveAttribute('data-remote-blocked', 'true')
     expect(probe.count('/editor-new.png')).toBe(0)
+    // URL policy uses Chromium's parser too: ASCII whitespace within a scheme
+    // must not turn an HTTP source into an apparent local image.
+    await pasteImageSource(fresh, 'wrapped-scheme', `ht\ntp://127.0.0.1:${probe.port}/editor-wrapped.png`)
+    const wrappedImage = fresh.editor.locator('img[alt="wrapped-scheme"]')
+    await expect(wrappedImage).toHaveAttribute('data-remote-blocked', 'true')
+    expect(probe.count('/editor-wrapped.png')).toBe(0)
     // The palette is inert while composing; the bridge toggle broadcasts the
     // same policy change the palette command would.
     await page.evaluate(() => window.attn.settings.set('remoteImagesBlocked', false))
     await expectBlockedSetting(page, false)
     await expect(freshImage).toHaveAttribute('src', /editor-new\.png/)
     await expect.poll(() => probe.count('/editor-new.png')).toBeGreaterThan(0)
+    await expect(wrappedImage).toHaveAttribute('src', /editor-wrapped\.png/)
+    await expect.poll(() => probe.count('/editor-wrapped.png')).toBeGreaterThan(0)
   } finally {
     await new Promise<void>((resolve) => {
       probe.server.close(() => resolve())

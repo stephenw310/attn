@@ -229,6 +229,8 @@ export function Inbox({
   selectedIndexRef.current = selectedIndex
   const readerOpenRef = useRef(false)
   readerOpenRef.current = readerOpen
+  const settingsOpenRef = useRef(false)
+  settingsOpenRef.current = settingsOpen
   const outboxReturnRef = useRef<{
     view: NavigableMailView
     selectedIndex: number
@@ -562,6 +564,7 @@ export function Inbox({
   // unrelated draft (PR #101 review).
   const [aiDraftRequest, setAiDraftRequest] = useState(0)
   const aiDraftPendingRef = useRef<string | null>(null)
+  const aiCommandPreparingRef = useRef(false)
   const claimAiDraftRequest = useCallback((threadId: string) => {
     if (aiDraftPendingRef.current === null || aiDraftPendingRef.current !== threadId) return false
     aiDraftPendingRef.current = null
@@ -658,12 +661,14 @@ export function Inbox({
         showToast('Save and close the draft before opening Settings')
         return
       }
+      settingsOpenRef.current = true
       setSettingsFocus(control)
       setSettingsOpen(true)
     },
     [showToast]
   )
   const closeSettings = useCallback(() => {
+    settingsOpenRef.current = false
     setSettingsOpen(false)
     setSettingsFocus(null)
   }, [])
@@ -1351,13 +1356,13 @@ export function Inbox({
         handlers.switchAccount(target.accountId)
         return
       }
-      // This is the correct live account view accepting the click: only now
-      // does the pending target clear in main.
-      void bridge.mail.acknowledgeFocusThread(target.id).catch(() => {})
       const threadId = target.threadId
       if (threadId === null) {
         // A summary names no single thread; it lands on this account's inbox.
-        handlers.switchView('inbox', () => handlers.clearSelection())
+        handlers.switchView('inbox', () => {
+          handlers.clearSelection()
+          void bridge.mail.acknowledgeFocusThread(target.id).catch(() => {})
+        })
         return
       }
       // Close the old reader before changing lists so auto-read cannot observe
@@ -1374,6 +1379,10 @@ export function Inbox({
             setDetachedDraftThread(null)
             setSelectedIndex(nextIndex)
             setReaderOpen(true)
+            // Clear the pending notification only after its target is applied.
+            // If this tree is torn down or the targeted read loses a race, a
+            // newly mounted tree can still pull and finish the request.
+            void bridge.mail.acknowledgeFocusThread(target.id).catch(() => {})
           }
           // A rule edit can land between location lookup and page fetch. Retry
           // once with a fresh atomic split id + revision instead of dropping the
@@ -1837,7 +1846,10 @@ export function Inbox({
   openReplyRef.current = openReply
   const conversationRef = useRef(conversation)
   conversationRef.current = conversation
-  const getAiThreadContext = useCallback(() => aiThreadContext(conversationRef.current), [])
+  const getAiThreadContext = useCallback(
+    (sourceMessageId: string | null) => aiThreadContext(conversationRef.current, sourceMessageId),
+    []
+  )
   const requestAiDraft = useCallback((threadId: string) => {
     aiDraftPendingRef.current = threadId
     setAiDraftRequest((count) => count + 1)
@@ -2053,42 +2065,65 @@ export function Inbox({
         // then streams into it; in a reply composer it streams in place. New
         // messages and forwards are out of v1's whole-body generation scope.
         createCommand('composer.aiDraft', () => {
+          const bridge = window.attn?.ai
+          if (!bridge) return
+          const open = composerDraftRef.current
+          if (open) {
+            // The mounted plugin owns settings and style preparation. Claim
+            // synchronously here so a second shortcut cannot queue another
+            // invocation whose async preparation outlives Esc on the first.
+            if (aiDraftPendingRef.current !== null) return
+            if (open.kind !== 'reply' && open.kind !== 'replyAll') {
+              showToast('AI drafting writes replies — reply to a conversation to use it')
+            } else if (open.id === inlineComposerDraftIdRef.current && open.threadId) {
+              requestAiDraft(open.threadId)
+            } else {
+              showToast('Open the reply from its conversation to draft with AI')
+            }
+            return
+          }
+          if (aiCommandPreparingRef.current || aiDraftPendingRef.current !== null) return
+          // Coalesce repeated shortcuts before either the existing composer or
+          // reader-opened composer can claim the request.
+          aiCommandPreparingRef.current = true
           // The target is what the user is looking at NOW: the settings round
           // trip yields, and the selection or open composer can change
           // underneath it — a stale invocation must do nothing rather than
           // draft for the newly opened conversation (PR #101 review).
-          const open = composerDraftRef.current
-          const target = !open && readerOpenRef.current ? (selectedRef.current ?? null) : null
-          void window.attn?.ai
+          const target = readerOpenRef.current ? (selectedRef.current ?? null) : null
+          const messageTarget = target ? messageReplyTargetRef.current : null
+          const targetMessageId =
+            target !== null && messageTarget?.threadId === target.id ? messageTarget.messageId : null
+          void bridge
             .getSettings()
             .then((ai) => {
               if (!ai.enabled) {
                 showToast('Enable AI writing in Settings to draft replies')
                 return
               }
-              if (open) {
-                if (composerDraftRef.current?.id !== open.id) return
-                if (open.kind !== 'reply' && open.kind !== 'replyAll') {
-                  showToast('AI drafting writes replies — reply to a conversation to use it')
-                } else if (open.id === inlineComposerDraftIdRef.current && open.threadId) {
-                  requestAiDraft(open.threadId)
-                } else {
-                  // A detached reply (say, recovered after a relaunch) mounts
-                  // no drafting plugin; parking an invocation here would fire
-                  // in whatever reply opens next (PR #101 review).
-                  showToast('Open the reply from its conversation to draft with AI')
-                }
-                return
-              }
               if (target) {
                 if (!readerOpenRef.current || selectedRef.current?.id !== target.id) return
+                if (
+                  settingsOpenRef.current ||
+                  composerDraftRef.current !== null ||
+                  composerOpeningRef.current
+                ) {
+                  return
+                }
+                const currentMessageTarget = messageReplyTargetRef.current
+                const currentMessageId =
+                  currentMessageTarget?.threadId === target.id ? currentMessageTarget.messageId : null
+                if (currentMessageId !== targetMessageId) return
                 requestAiDraft(target.id)
-                openReplyRef.current('reply')
+                openReplyRef.current('reply', targetMessageId ?? undefined)
                 return
               }
               showToast('Open a conversation to draft an AI reply')
             })
             .catch(() => {})
+            .finally(() => {
+              aiCommandPreparingRef.current = false
+            })
         }),
         createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
         createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
@@ -2449,7 +2484,7 @@ export function Inbox({
                         claim: () =>
                           inlineComposerDraft.threadId !== null &&
                           claimAiDraftRequest(inlineComposerDraft.threadId),
-                        getThreadContext: getAiThreadContext
+                        getThreadContext: () => getAiThreadContext(inlineComposerDraft.sourceMessageId)
                       }}
                     />
                   ) : null

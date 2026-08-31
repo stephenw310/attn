@@ -1,8 +1,9 @@
 import type { ElectronApplication, Page } from '@playwright/test'
-import { TEST_CHANNELS } from '../src/shared/ipc'
+import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ATTN_SIGNATURE_LINE } from '../src/shared/settings'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { expectResponseHeld, holdNextResponse } from './holdResponse'
 
 // T37 (F17): AI reply drafting end to end under the fake provider — Mod+J
 // from the reader opening and streaming into the inline reply composer, the
@@ -257,4 +258,67 @@ test('refine replaces the unedited draft as one undo step and hides after hand e
   await expect(editor(page)).toContainText('Original draft text.')
   await expect(editor(page)).not.toContainText('Refined shorter text.')
   await expect(page.getByTestId('ai-refine')).toHaveCount(0)
+})
+
+test('opening Settings cancels an AI reply whose settings read is still pending', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page)
+  await installFakeAi(app, { chunks: ['Must stay canceled.'] })
+  await openDesignReader(page)
+  const release = await holdNextResponse(app, IPC_CHANNELS.aiGetSettings)
+
+  await page.keyboard.press('ControlOrMeta+j')
+  await expectResponseHeld(app)
+  await page.keyboard.press('ControlOrMeta+,')
+  await expect(page.getByTestId('settings-view')).toBeVisible()
+  await release()
+
+  await page.waitForTimeout(300)
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('settings-view')).toBeVisible()
+  expect(await aiRequests(app)).toHaveLength(0)
+})
+
+test.describe('AI replies to an individual message', () => {
+  test.use({ seed: 'fixtures/seed-message-replies.json' })
+
+  async function openOldestMessage(app: ElectronApplication, page: Page): Promise<void> {
+    await expect(page.getByTestId('thread-row')).toHaveCount(1)
+    await enableAi(page)
+    await installFakeAi(app, { chunks: ['Source-bound reply.'] })
+    await page.getByTestId('thread-row').first().click()
+    await expect(page.getByTestId('message-card')).toHaveCount(3)
+    await page.keyboard.press('p')
+    await page.keyboard.press('p')
+    await expect(page.getByTestId('conversation-message').first().getByTestId('message-cursor')).toBeVisible()
+  }
+
+  test('sends context only through the message being answered', async ({ app, page }) => {
+    await openOldestMessage(app, page)
+    await page.keyboard.press('ControlOrMeta+j')
+
+    const composer = new ComposerPage(page)
+    await composer.expectRecipients(['jordan+support@example.com'])
+    await expect(composer.editor).toContainText('Source-bound reply.')
+    const requests = await aiRequests(app)
+    expect(requests).toHaveLength(1)
+    const prompt = requests[0].messages.map((message) => message.content).join('')
+    expect(prompt).toContain('Can you help with my account?')
+    expect(prompt).not.toContain('Internal account notes.')
+  })
+
+  test('a cursor move cancels an AI invocation waiting on settings', async ({ app, page }) => {
+    await openOldestMessage(app, page)
+    const release = await holdNextResponse(app, IPC_CHANNELS.aiGetSettings)
+
+    await page.keyboard.press('ControlOrMeta+j')
+    await expectResponseHeld(app)
+    await page.keyboard.press('n')
+    await expect(page.getByTestId('conversation-message').nth(1).getByTestId('message-cursor')).toBeVisible()
+    await release()
+
+    await page.waitForTimeout(300)
+    await expect(page.getByTestId('composer')).toHaveCount(0)
+    expect(await aiRequests(app)).toHaveLength(0)
+  })
 })

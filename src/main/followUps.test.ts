@@ -72,7 +72,8 @@ describe('createFollowUpOnSent', () => {
       due_at: 5_000,
       origin_message_id: 'm-origin',
       origin_rfc_message_id: '<origin@attn.test>',
-      origin_internal_date: null
+      origin_internal_date: null,
+      origin_outbox_created_at: 100
     })
   })
 
@@ -109,6 +110,29 @@ describe('createFollowUpOnSent', () => {
     // The crash-recovered older send completes afterwards.
     createFollowUpOnSent(db, ACCOUNT, sentInput)
     expect(reminder(db)).toMatchObject({ due_at: 9_000, origin_message_id: 'm-newer' })
+  })
+
+  it('rejects an earlier recovered send after the newer sent row was pruned', () => {
+    const db = store()
+    createFollowUpOnSent(db, ACCOUNT, {
+      ...sentInput,
+      dueAt: 9_000,
+      gmailMessageId: 'm-newer',
+      rfcMessageId: '<newer@attn.test>',
+      rowCreatedAt: 200
+    })
+    db.prepare(
+      "UPDATE reminders SET state = 'done' WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up'"
+    ).run(ACCOUNT, THREAD)
+
+    createFollowUpOnSent(db, ACCOUNT, sentInput)
+
+    expect(reminder(db)).toMatchObject({
+      due_at: 9_000,
+      state: 'done',
+      origin_message_id: 'm-newer',
+      origin_outbox_created_at: 200
+    })
   })
 
   it('re-completing the same send is idempotent', () => {

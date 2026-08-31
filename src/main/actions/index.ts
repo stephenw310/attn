@@ -23,7 +23,9 @@ interface MoveUndoAction {
   add: string[]
   remove: string[]
   reminderBefore: SnoozeReminderSnapshot | null
+  reminderAfter: SnoozeReminderSnapshot | null
   followUpBefore: FollowUpReminderSnapshot | null
+  followUpAfter: FollowUpReminderSnapshot | null
   revertsQueueId?: number
 }
 
@@ -31,6 +33,7 @@ interface FollowUpRestoreAction {
   kind: 'followUpRestore'
   threadIds: string[]
   before: FollowUpReminderSnapshot
+  after: FollowUpReminderSnapshot
 }
 
 type UndoAction =
@@ -125,6 +128,52 @@ function effectiveLabelDelta(
 
 function moveChangesReminder(reminder: SnoozeReminderSnapshot | null): boolean {
   return reminder?.state === 'pending' || reminder?.state === 'returned'
+}
+
+function sameSnoozeReminder(
+  left: SnoozeReminderSnapshot | null,
+  right: SnoozeReminderSnapshot | null
+): boolean {
+  if (left === null || right === null) return left === right
+  return left.dueAt === right.dueAt && left.state === right.state
+}
+
+function sameFollowUpReminder(
+  left: FollowUpReminderSnapshot | null,
+  right: FollowUpReminderSnapshot | null
+): boolean {
+  if (left === null || right === null) return left === right
+  return (
+    sameSnoozeReminder(left, right) &&
+    left.originMessageId === right.originMessageId &&
+    left.originRfcMessageId === right.originRfcMessageId &&
+    left.originInternalDate === right.originInternalDate &&
+    left.originOutboxCreatedAt === right.originOutboxCreatedAt
+  )
+}
+
+function restoreSnoozeIfUnchanged(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  expected: SnoozeReminderSnapshot | null,
+  before: SnoozeReminderSnapshot | null
+): boolean {
+  if (!sameSnoozeReminder(snoozeReminderSnapshot(db, accountId, threadId), expected)) return false
+  restoreSnoozeReminder(db, accountId, threadId, before)
+  return true
+}
+
+function restoreFollowUpIfUnchanged(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  expected: FollowUpReminderSnapshot | null,
+  before: FollowUpReminderSnapshot | null
+): boolean {
+  if (!sameFollowUpReminder(followUpReminderSnapshot(db, accountId, threadId), expected)) return false
+  restoreFollowUpReminder(db, accountId, threadId, before)
+  return true
 }
 
 /**
@@ -241,7 +290,18 @@ function apply(
         // (PR #101 review), exactly as applyMoveUndo does for moves.
         const followUpBefore = followUpsBefore.get(id) ?? null
         return followUpSettledBy(action, followUpBefore, now)
-          ? [primary, { kind: 'followUpRestore', threadIds: [id], before: followUpBefore }]
+          ? [
+              primary,
+              {
+                kind: 'followUpRestore',
+                threadIds: [id],
+                before: followUpBefore,
+                after: {
+                  ...followUpBefore,
+                  state: followUpBefore.state === 'returned' ? 'done' : 'canceled'
+                }
+              }
+            ]
           : [primary]
       })
   const enqueue = db.prepare(
@@ -274,7 +334,9 @@ function apply(
           // would leave the destination applied to the whole thread.
           remove: [...delta.add],
           reminderBefore,
-          followUpBefore
+          reminderAfter: reminderBefore,
+          followUpBefore,
+          followUpAfter: followUpBefore
         }
         db.prepare(
           `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
@@ -282,6 +344,8 @@ function apply(
              AND state IN ('pending', 'returned')`
         ).run(accountId, threadId)
         settleFollowUpForTriage(db, accountId, threadId, action, now)
+        moveUndo.reminderAfter = snoozeReminderSnapshot(db, accountId, threadId)
+        moveUndo.followUpAfter = followUpReminderSnapshot(db, accountId, threadId)
         applyThreadDelta(db, accountId, { threadId, ...delta })
         if (delta.add.length === 0 && delta.remove.length === 0) {
           undo.push(moveUndo)
@@ -387,12 +451,18 @@ function applyMoveUndo(db: Db, accountId: string, action: MoveUndoAction): void 
       })
     )
   }
-  restoreSnoozeReminder(db, accountId, threadId, action.reminderBefore)
-  restoreFollowUpReminder(db, accountId, threadId, action.followUpBefore)
+  restoreSnoozeIfUnchanged(db, accountId, threadId, action.reminderAfter, action.reminderBefore)
+  const restoredFollowUp = restoreFollowUpIfUnchanged(
+    db,
+    accountId,
+    threadId,
+    action.followUpAfter,
+    action.followUpBefore
+  )
   // A qualifying reply can arrive between the move and its undo; the restored
   // snapshot predates it, so re-settle against the cached messages rather
   // than resurrecting an answered reminder (PR #101 review).
-  evaluateThreadFollowUp(db, accountId, threadId)
+  if (restoredFollowUp) evaluateThreadFollowUp(db, accountId, threadId)
 }
 
 function applySnooze(
@@ -516,11 +586,11 @@ export function undoLast(db: Db, accountId: string): TriageResult | null {
       else if (action.kind === 'moveUndo') applyMoveUndo(db, accountId, action)
       else if (action.kind === 'followUpRestore') {
         for (const threadId of action.threadIds) {
-          restoreFollowUpReminder(db, accountId, threadId, action.before)
+          const restored = restoreFollowUpIfUnchanged(db, accountId, threadId, action.after, action.before)
           // A reply cached between the archive and this undo answers the
           // reminder; the restored snapshot must not resurrect it
           // (PR #101 review).
-          evaluateThreadFollowUp(db, accountId, threadId)
+          if (restored) evaluateThreadFollowUp(db, accountId, threadId)
         }
       } else apply(db, accountId, action, 'undo')
     }

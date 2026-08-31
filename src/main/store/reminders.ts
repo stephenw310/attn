@@ -52,6 +52,7 @@ export interface FollowUpReminderSnapshot extends SnoozeReminderSnapshot {
   originMessageId: string | null
   originRfcMessageId: string | null
   originInternalDate: number | null
+  originOutboxCreatedAt: number | null
 }
 
 export function followUpReminderSnapshot(
@@ -62,7 +63,8 @@ export function followUpReminderSnapshot(
   const row = db
     .prepare(
       `SELECT due_at AS dueAt, state, origin_message_id AS originMessageId,
-              origin_rfc_message_id AS originRfcMessageId, origin_internal_date AS originInternalDate
+              origin_rfc_message_id AS originRfcMessageId, origin_internal_date AS originInternalDate,
+              origin_outbox_created_at AS originOutboxCreatedAt
        FROM reminders WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up'`
     )
     .get(accountId, threadId) as FollowUpReminderSnapshot | undefined
@@ -84,13 +86,14 @@ export function restoreFollowUpReminder(
   }
   db.prepare(
     `INSERT INTO reminders (account_id, thread_id, kind, due_at, state,
-       origin_message_id, origin_rfc_message_id, origin_internal_date)
-     VALUES (?, ?, 'follow_up', ?, ?, ?, ?, ?)
+       origin_message_id, origin_rfc_message_id, origin_internal_date, origin_outbox_created_at)
+     VALUES (?, ?, 'follow_up', ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, thread_id, kind) DO UPDATE SET
        due_at = excluded.due_at, state = excluded.state,
        origin_message_id = excluded.origin_message_id,
        origin_rfc_message_id = excluded.origin_rfc_message_id,
-       origin_internal_date = excluded.origin_internal_date`
+       origin_internal_date = excluded.origin_internal_date,
+       origin_outbox_created_at = excluded.origin_outbox_created_at`
   ).run(
     accountId,
     threadId,
@@ -98,7 +101,8 @@ export function restoreFollowUpReminder(
     snapshot.state,
     snapshot.originMessageId,
     snapshot.originRfcMessageId,
-    snapshot.originInternalDate
+    snapshot.originInternalDate,
+    snapshot.originOutboxCreatedAt
   )
 }
 

@@ -66,6 +66,19 @@ describe('aiThreadContext', () => {
     expect(context?.some((entry) => entry.text.includes('Unconfirmed'))).toBe(false)
   })
 
+  it('stops at the individual message being answered', () => {
+    const thread = conversation([
+      message({ id: 'm-customer', text: 'Can you help with my account?' }),
+      message({ id: 'm-me', text: 'I will check.' }),
+      message({ id: 'm-colleague', text: 'Internal account notes.' })
+    ])
+
+    expect(aiThreadContext(thread, 'm-customer')).toEqual([
+      { author: 'Maya Lin', text: 'Can you help with my account?' }
+    ])
+    expect(aiThreadContext(thread, 'missing')).toBeNull()
+  })
+
   it('bounds each message to the per-message excerpt limit', () => {
     const context = aiThreadContext(conversation([message({ id: 'm-1', text: 'x'.repeat(10_000) })]))
     expect(context?.[0]?.text).toHaveLength(4_000)

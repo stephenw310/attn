@@ -48,26 +48,35 @@ export interface SentFollowUpInput {
 export function createFollowUpOnSent(db: Db, accountId: string, input: SentFollowUpInput): void {
   const existing = db
     .prepare(
-      `SELECT origin_rfc_message_id AS originRfc FROM reminders
+      `SELECT origin_rfc_message_id AS originRfc,
+              origin_outbox_created_at AS originOutboxCreatedAt
+       FROM reminders
        WHERE account_id = ? AND thread_id = ? AND kind = '${FOLLOW_UP_KIND}'`
     )
-    .get(accountId, input.threadId) as { originRfc: string | null } | undefined
+    .get(accountId, input.threadId) as
+    | { originRfc: string | null; originOutboxCreatedAt: number | null }
+    | undefined
   if (existing && existing.originRfc !== null && existing.originRfc !== input.rfcMessageId) {
-    const other = db
-      .prepare('SELECT created_at AS createdAt FROM outbox WHERE account_id = ? AND rfc_message_id = ?')
-      .get(accountId, existing.originRfc) as { createdAt: number } | undefined
-    if (other && other.createdAt > input.rowCreatedAt) return
+    const retained =
+      existing.originOutboxCreatedAt ??
+      (
+        db
+          .prepare('SELECT created_at AS createdAt FROM outbox WHERE account_id = ? AND rfc_message_id = ?')
+          .get(accountId, existing.originRfc) as { createdAt: number } | undefined
+      )?.createdAt
+    if (retained !== undefined && retained > input.rowCreatedAt) return
   }
   db.prepare(
     `INSERT INTO reminders (account_id, thread_id, kind, due_at, state,
-       origin_message_id, origin_rfc_message_id, origin_internal_date)
-     VALUES (?, ?, '${FOLLOW_UP_KIND}', ?, 'pending', ?, ?, NULL)
+       origin_message_id, origin_rfc_message_id, origin_internal_date, origin_outbox_created_at)
+     VALUES (?, ?, '${FOLLOW_UP_KIND}', ?, 'pending', ?, ?, NULL, ?)
      ON CONFLICT(account_id, thread_id, kind) DO UPDATE SET
        due_at = excluded.due_at, state = 'pending',
        origin_message_id = excluded.origin_message_id,
        origin_rfc_message_id = excluded.origin_rfc_message_id,
-       origin_internal_date = NULL`
-  ).run(accountId, input.threadId, input.dueAt, input.gmailMessageId, input.rfcMessageId)
+       origin_internal_date = NULL,
+       origin_outbox_created_at = excluded.origin_outbox_created_at`
+  ).run(accountId, input.threadId, input.dueAt, input.gmailMessageId, input.rfcMessageId, input.rowCreatedAt)
 }
 
 interface FollowUpRow {

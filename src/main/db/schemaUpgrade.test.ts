@@ -95,7 +95,6 @@ it('applies the documented T34 v22 → 23 upgrade: snippets added, outbox.remote
 
 it('applies the documented T35 v23 → 24 upgrade: follow-up deadline and reminder origin columns', () => {
   const db = new Database(':memory:')
-  const fresh = openDatabase(':memory:')
   try {
     // Only the v23 tables the additive procedure touches; the rows prove
     // existing snoozes and drafts survive with the new columns NULL.
@@ -141,7 +140,55 @@ it('applies the documented T35 v23 → 24 upgrade: follow-up deadline and remind
         origin_internal_date: null
       }
     ])
+  } finally {
+    db.close()
+  }
+})
+
+it('applies the documented v24 → 25 upgrade and backfills durable follow-up ordering', () => {
+  const db = new Database(':memory:')
+  const fresh = openDatabase(':memory:')
+  try {
+    db.exec(`
+      CREATE TABLE outbox (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        rfc_message_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE reminders (
+        account_id TEXT NOT NULL,
+        thread_id  TEXT NOT NULL,
+        kind       TEXT NOT NULL DEFAULT 'snooze',
+        due_at     INTEGER NOT NULL,
+        state      TEXT NOT NULL DEFAULT 'pending',
+        origin_message_id TEXT,
+        origin_rfc_message_id TEXT,
+        origin_internal_date INTEGER,
+        PRIMARY KEY (account_id, thread_id, kind)
+      );
+      INSERT INTO outbox VALUES ('o1', 'account', '<origin@example.test>', 456);
+      INSERT INTO reminders VALUES (
+        'account', 't1', 'follow_up', 123, 'done', 'm1', '<origin@example.test>', 321
+      );
+      INSERT INTO reminders VALUES ('account', 't2', 'snooze', 789, 'pending', NULL, NULL, NULL);
+      PRAGMA user_version = 24;
+    `)
+    const notes = readFileSync(new URL('../../../docs/M4-PLAN.md', import.meta.url), 'utf8')
+    const section = notes.split('### Schema revision 24 → 25:')[1]
+    const ddl = section?.match(/```sql\n([\s\S]*?)```/)?.[1]
+    expect(ddl).toBeDefined()
+    db.exec(ddl as string)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
+    expect(db.pragma('quick_check', { simple: true })).toBe('ok')
     expect(db.pragma('table_info(reminders)')).toEqual(fresh.pragma('table_info(reminders)'))
+    expect(
+      db.prepare('SELECT thread_id, origin_outbox_created_at FROM reminders ORDER BY thread_id').all()
+    ).toEqual([
+      { thread_id: 't1', origin_outbox_created_at: 456 },
+      { thread_id: 't2', origin_outbox_created_at: null }
+    ])
   } finally {
     db.close()
     fresh.close()

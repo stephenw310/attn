@@ -41,7 +41,17 @@ export function decodeLabelDelta(payload: string): LabelDeltaPayload {
     remove,
     ...(candidate.actionKind ? { actionKind: candidate.actionKind } : {}),
     ...(candidate.reminderBefore !== undefined ? { reminderBefore: candidate.reminderBefore } : {}),
-    ...(candidate.followUpBefore !== undefined ? { followUpBefore: candidate.followUpBefore } : {}),
+    ...(candidate.followUpBefore !== undefined
+      ? {
+          followUpBefore:
+            candidate.followUpBefore === null
+              ? null
+              : {
+                  ...candidate.followUpBefore,
+                  originOutboxCreatedAt: candidate.followUpBefore.originOutboxCreatedAt ?? null
+                }
+        }
+      : {}),
     ...(candidate.revertsQueueId !== undefined ? { revertsQueueId: candidate.revertsQueueId } : {})
   }
 }
@@ -86,6 +96,9 @@ function validFollowUp(value: unknown): value is FollowUpReminderSnapshot | null
   return (
     (candidate.originMessageId === null || typeof candidate.originMessageId === 'string') &&
     (candidate.originRfcMessageId === null || typeof candidate.originRfcMessageId === 'string') &&
-    (candidate.originInternalDate === null || typeof candidate.originInternalDate === 'number')
+    (candidate.originInternalDate === null || typeof candidate.originInternalDate === 'number') &&
+    (candidate.originOutboxCreatedAt === undefined ||
+      candidate.originOutboxCreatedAt === null ||
+      typeof candidate.originOutboxCreatedAt === 'number')
   )
 }
