@@ -9,7 +9,9 @@ import { TableCellNode, TableNode, TableRowNode } from '@lexical/table'
 import { $getRoot, TextNode } from 'lexical'
 import { describe, expect, it } from 'vitest'
 import { GmailSignatureNode } from './nodes/GmailSignatureNode'
+import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { ImageNode } from './nodes/ImageNode'
+import { LegacyFontNode } from './nodes/LegacyFontNode'
 import { OpaqueHtmlNode } from './nodes/OpaqueHtmlNode'
 import { StyledTextNode } from './nodes/StyledTextNode'
 import { prepareHtmlForEditor } from './preserve'
@@ -31,6 +33,8 @@ function editor() {
       TableCellNode,
       ImageNode,
       GmailSignatureNode,
+      GmailSignaturePrefixNode,
+      LegacyFontNode,
       OpaqueHtmlNode,
       StyledTextNode,
       {
