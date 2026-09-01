@@ -31,6 +31,19 @@ describe('buildPrompt', () => {
     expect(prompt.messages[0].content).toContain('From Maya Lin:')
   })
 
+  it('uses an existing authored draft as the full-reply replacement source', () => {
+    const prompt = buildPrompt(
+      {
+        ...replyRequest,
+        existingDraft: 'Hi Maya,\n\nI can review the roadmap by Tuesday.'
+      },
+      voice
+    )
+    expect(prompt.messages[0].content).toContain('I can review the roadmap by Tuesday.')
+    expect(prompt.messages[0].content).toContain('Preserve every fact, commitment, name, number, and intent')
+    expect(prompt.messages[0].content).toContain('Return the full replacement reply body')
+  })
+
   it('refine prompts carry the prior draft and instruction', () => {
     const prompt = buildPrompt(
       { ...replyRequest, purpose: 'refine', instruction: 'shorter', priorDraft: 'A long draft.' },
@@ -109,7 +122,22 @@ describe('parseAiGenerateRequest', () => {
   })
 
   it('accepts a well-formed reply request and unknown purposes fail', () => {
-    expect(parseAiGenerateRequest(replyRequest)).toMatchObject({ purpose: 'reply' })
+    expect(parseAiGenerateRequest({ ...replyRequest, existingDraft: 'My current reply.' })).toMatchObject({
+      purpose: 'reply',
+      existingDraft: 'My current reply.'
+    })
+    expect(() => parseAiGenerateRequest({ ...replyRequest, priorDraft: 'wrong purpose' })).toThrow(
+      /disallowed context/
+    )
+    expect(() =>
+      parseAiGenerateRequest({
+        ...replyRequest,
+        purpose: 'refine',
+        instruction: 'shorter',
+        priorDraft: 'A draft.',
+        existingDraft: 'wrong purpose'
+      })
+    ).toThrow(/disallowed context/)
     expect(() => parseAiGenerateRequest({ purpose: 'summarize', thread: [] })).toThrow(/purpose/)
   })
 })

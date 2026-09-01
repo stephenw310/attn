@@ -89,6 +89,7 @@ test('enabling shows the disclosure, a key round-trips, and a scripted generatio
   await page.getByTestId('settings-ai-enabled').click()
   const disclosure = page.getByTestId('settings-ai-enable-confirm')
   await expect(disclosure).toBeVisible()
+  await expect(disclosure).toContainText('reply text you have already written')
   await expect(disclosure).toContainText('using your own key')
   await expect(disclosure).toContainText('cannot be recalled')
   await expect(page.getByTestId('settings-ai-enabled')).not.toBeChecked()

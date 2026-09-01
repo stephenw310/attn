@@ -95,6 +95,46 @@ test('Mod+J from the reader streams an editable draft that sends through the out
   await expect(composer.root).toHaveCount(0)
 })
 
+test('Mod+J completes and replaces authored text, and one undo restores it', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page)
+  await installFakeAi(app, {
+    chunks: ['Hi Maya,\n\nI can review the roadmap by Tuesday and will send comments by end of day.']
+  })
+  await openDesignReader(page)
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  const original = 'Hi Maya,\n\nI can review the roadmap by Tuesday.'
+  // Put the text in the authored paragraph above the protected Attn footer.
+  // A bare page-level key press can inherit the footer's selection in WebKit.
+  await editor(page).locator('p').first().click()
+  await page.keyboard.type(original)
+
+  await page.keyboard.press('ControlOrMeta+j')
+  await expect(editor(page)).toContainText('will send comments by end of day')
+  const generatedText = await editor(page).innerText()
+  expect(generatedText.match(/Hi Maya,/g)).toHaveLength(1)
+
+  const requests = await aiRequests(app)
+  expect(requests).toHaveLength(1)
+  const payload = requests[0].messages.map((message) => message.content).join('')
+  expect(payload).toContain(original)
+  expect(payload).toContain('Return the full replacement reply body')
+
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(editor(page)).not.toContainText('will send comments by end of day')
+  const restoredText = await editor(page).innerText()
+  expect(restoredText.replace(/\s/g, '')).toContain(original.replace(/\s/g, ''))
+
+  // A provider failure before the first chunk must leave that restored user
+  // text in place; replacement begins only when output actually arrives.
+  await installFakeAi(app, { error: 'provider unavailable' })
+  await page.keyboard.press('ControlOrMeta+j')
+  await expect(page.getByTestId('toast')).toContainText('provider unavailable')
+  const afterFailure = await editor(page).innerText()
+  expect(afterFailure.replace(/\s/g, '')).toContain(original.replace(/\s/g, ''))
+})
+
 test('one undo removes the whole streamed draft and never touches the Attn footer', async ({ app, page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await enableAi(page)

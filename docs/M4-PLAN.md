@@ -731,6 +731,8 @@ it with a one-line instruction, and never auto-send.
 - **Streaming is editable and one undo step.** Chunks append into Lexical as normal editable content, with
   history coalesced so a single `Mod+Z` removes the whole draft (F17: insertion is undoable like any other
   edit). The insert passes the composer sanitize path (rule 3).
+  If the authored region already contains text, send that text as the current draft and replace the region
+  with the completed reply; one undo restores the user's original text.
   Insert above the Gmail signature and T32B footer. Generation, refine, and undo preserve those regions,
   including user edits or removal; generated output must not add another automatic signature/footer.
 - **`Esc` cancels cleanly:** it aborts the stream via `ai:cancel` and keeps the text already inserted,

@@ -189,6 +189,8 @@ export interface AiReplyRequest {
   purpose: 'reply' | 'refine'
   /** Oldest-first conversation context for the reply. */
   thread: AiThreadMessage[]
+  /** Reply only: authored text that the generated reply should replace and complete. */
+  existingDraft?: string
   /** Refine only: the one-line instruction ("shorter", "more formal"). */
   instruction?: string
   /** Refine only: the prior AI draft being regenerated. */
@@ -226,7 +228,7 @@ const MAX_THREAD_MESSAGE_CHARS = 20_000
 const MAX_STYLE_EXAMPLES = 5
 const MAX_STYLE_EXAMPLE_CHARS = 10_000
 const MAX_INSTRUCTION_CHARS = 1_000
-const MAX_PRIOR_DRAFT_CHARS = 40_000
+const MAX_DRAFT_CHARS = 40_000
 
 function isThreadMessage(value: unknown): value is AiThreadMessage {
   if (!value || typeof value !== 'object') return false
@@ -280,21 +282,31 @@ export function parseAiGenerateRequest(value: unknown): AiGenerateRequest {
     }
   }
   if (request.purpose === 'reply' || request.purpose === 'refine') {
-    const { thread, instruction, priorDraft, styleExamples } = request
+    const allowed =
+      request.purpose === 'reply'
+        ? new Set(['purpose', 'thread', 'existingDraft', 'styleExamples'])
+        : new Set(['purpose', 'thread', 'instruction', 'priorDraft', 'styleExamples'])
+    for (const key of Object.keys(request)) {
+      if (!allowed.has(key)) throw new Error(`${request.purpose} request carries disallowed context`)
+    }
+    const { thread, existingDraft, instruction, priorDraft, styleExamples } = request
     if (!Array.isArray(thread) || thread.length === 0 || thread.length > MAX_THREAD_MESSAGES) {
       throw new Error('invalid AI thread context')
     }
     if (!thread.every(isThreadMessage)) throw new Error('invalid AI thread context')
+    if (
+      existingDraft !== undefined &&
+      (typeof existingDraft !== 'string' || existingDraft.length > MAX_DRAFT_CHARS)
+    ) {
+      throw new Error('invalid existing draft')
+    }
     if (
       instruction !== undefined &&
       (typeof instruction !== 'string' || instruction.length > MAX_INSTRUCTION_CHARS)
     ) {
       throw new Error('invalid refine instruction')
     }
-    if (
-      priorDraft !== undefined &&
-      (typeof priorDraft !== 'string' || priorDraft.length > MAX_PRIOR_DRAFT_CHARS)
-    ) {
+    if (priorDraft !== undefined && (typeof priorDraft !== 'string' || priorDraft.length > MAX_DRAFT_CHARS)) {
       throw new Error('invalid prior draft')
     }
     if (styleExamples !== undefined) {
@@ -311,6 +323,7 @@ export function parseAiGenerateRequest(value: unknown): AiGenerateRequest {
     return {
       purpose: request.purpose,
       thread: thread as AiThreadMessage[],
+      ...(existingDraft !== undefined ? { existingDraft } : {}),
       ...(instruction !== undefined ? { instruction } : {}),
       ...(priorDraft !== undefined ? { priorDraft } : {}),
       ...(styleExamples !== undefined ? { styleExamples: styleExamples as string[] } : {})

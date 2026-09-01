@@ -24,13 +24,12 @@ import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 // AI reply drafting inside the composer (T37, F17). Chunks stream into
 // Lexical as ordinary editable text committed as ONE history entry — the
 // first chunk pushes, every later change merges — so a single Mod+Z removes
-// the whole draft (refine included, whose removal of the prior region rides
-// the same entry as its first new chunk). Esc mid-stream cancels the request
-// and keeps the partial text. Everything inserts above the Gmail signature
-// and Attn footer, which generation, refine, and undo never touch. Streamed
-// text enters as plain text nodes — never markup — so rule 3 holds by
-// construction, and nothing here can send: output lands behind the normal
-// send flow.
+// the whole draft or restores authored text that generation/refine replaced.
+// Esc mid-stream cancels the request and keeps the partial text. Everything
+// inserts above the Gmail signature and Attn footer, which generation, refine,
+// and undo never touch. Streamed text enters as plain text nodes — never
+// markup — so rule 3 holds by construction, and nothing here can send: output
+// lands behind the normal send flow.
 
 interface AiRun {
   requestId: string | null
@@ -79,6 +78,30 @@ function $isBlankParagraph(node: LexicalNode): boolean {
     node.getTextContent().trim() === '' &&
     !node.getChildren().some((child) => $isDecoratorNode(child))
   )
+}
+
+interface AuthoredSnapshot {
+  keys: string[]
+  text: string
+}
+
+/** The replaceable reply region above the protected signature/footer boundary. */
+function $authoredSnapshot(): AuthoredSnapshot {
+  const keys: string[] = []
+  const parts: string[] = []
+  for (const child of $getRoot().getChildren()) {
+    if (
+      child instanceof GmailSignaturePrefixNode ||
+      child instanceof GmailSignatureNode ||
+      child instanceof AttnFooterNode
+    ) {
+      break
+    }
+    keys.push(child.getKey())
+    parts.push(child.getTextContent())
+  }
+  const text = parts.join('\n')
+  return { keys, text }
 }
 
 export function AiDraftPlugin({
@@ -211,6 +234,7 @@ export function AiDraftPlugin({
       // composer can close and another conversation can open, and a later read
       // would draft against the newly selected thread (PR #101 review).
       const thread = getThreadContextRef.current()
+      const authoredBeforePrepare = editor.getEditorState().read(() => $authoredSnapshot())
       let settings: Awaited<ReturnType<typeof bridge.ai.getSettings>>
       try {
         settings = await bridge.ai.getSettings()
@@ -236,13 +260,19 @@ export function AiDraftPlugin({
         }
         if (disposedRef.current) return
       }
+      const authored = editor.getEditorState().read(() => $authoredSnapshot())
+      if (authored.text !== authoredBeforePrepare.text) {
+        onToastRef.current('The draft changed while AI was preparing — run it again')
+        return
+      }
       const refine = refineInstruction !== undefined
+      const existingDraft = refine ? undefined : authored.text.trim() || undefined
       const run: AiRun = {
         requestId: null,
         active: true,
         started: false,
         refine,
-        removeKeys: refine ? [...(runRef.current?.keys ?? [])] : [],
+        removeKeys: refine ? [...(runRef.current?.keys ?? [])] : existingDraft ? [...authored.keys] : [],
         keys: [],
         tailKey: null
       }
@@ -274,6 +304,7 @@ export function AiDraftPlugin({
           purpose: refine ? 'refine' : 'reply',
           thread,
           ...(refine ? { instruction: refineInstruction, priorDraft } : {}),
+          ...(existingDraft ? { existingDraft } : {}),
           ...(styleExamples ? { styleExamples } : {})
         })
         // The unmount cleanup could not cancel a request whose id was still in
@@ -290,7 +321,7 @@ export function AiDraftPlugin({
         finish()
       }
     },
-    [appendChunk, finish]
+    [appendChunk, editor, finish]
   )
 
   const start = useCallback(

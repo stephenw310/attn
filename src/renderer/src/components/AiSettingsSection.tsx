@@ -28,10 +28,10 @@ const CONFIRM_APPLY =
   'cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20'
 
 const REPLY_DISCLOSURE =
-  'When you invoke Draft AI reply, the open conversation, your voice profile, and — only with voice ' +
-  'matching on — a few of your recent sent replies are sent directly to the provider configured below, ' +
-  'using your own key. Requests happen only when you invoke the command; nothing is processed in the ' +
-  'background, and content already sent to a provider cannot be recalled.'
+  'When you invoke Draft AI reply, the open conversation, any reply text you have already written, your ' +
+  'voice profile, and — only with voice matching on — a few of your recent sent replies are sent directly ' +
+  'to the provider configured below, using your own key. Requests happen only when you invoke the command; ' +
+  'nothing is processed in the background, and content already sent to a provider cannot be recalled.'
 
 const AUTOCOMPLETE_DISCLOSURE =
   'While you type, unsent draft text near your cursor repeatedly leaves this machine for your configured ' +

@@ -100,7 +100,12 @@ export function buildPrompt(request: AiGenerateRequest, voice: AiVoiceProfile): 
     request.purpose === 'refine'
       ? `Conversation:\n\n${conversation}\n\nYour previous draft reply:\n\n${request.priorDraft ?? ''}\n\n` +
         `Rewrite the draft following this instruction: ${request.instruction ?? ''}`
-      : `Conversation:\n\n${conversation}\n\nWrite the user's reply to the latest message.`
+      : request.existingDraft?.trim()
+        ? `Conversation:\n\n${conversation}\n\nThe user has already written this draft:\n\n` +
+          `${request.existingDraft.trim()}\n\nRewrite and complete it as one coherent reply to the latest ` +
+          "message. Preserve every fact, commitment, name, number, and intent from the user's draft. " +
+          'Do not repeat the greeting or any part of the draft. Return the full replacement reply body.'
+        : `Conversation:\n\n${conversation}\n\nWrite the user's reply to the latest message.`
   return {
     system: replySystem(request, voice),
     messages: [{ role: 'user', content }],

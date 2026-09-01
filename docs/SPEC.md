@@ -622,7 +622,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 
 **Reply drafting:**
 
-- **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
+- **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. When the authored reply region already contains text, that text accompanies the request and the result replaces it as a completed, coherent reply while preserving its facts and intent. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
 - An empty inline reply or reply-all composer shows `Tip: Hit Mod+J for AI` only when AI writing is enabled
   and its configured provider has the required key. The hint is transient UI outside the saved draft and
   disappears as soon as the authored body contains content. New-mail and forward composers do not advertise
@@ -659,8 +659,8 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 
 - Full reply generation and refine run only on explicit invocation. Separately enabling autocomplete
   permits requests while actively typing; it does not permit background mailbox processing.
-- The reply enable screen discloses the current thread, voice profile, and optional style examples sent
-  on each invocation. The autocomplete opt-in separately discloses that **unsent draft text leaves the
+- The reply enable screen discloses the current thread, any existing authored reply text, voice profile,
+  and optional style examples sent on each invocation. The autocomplete opt-in separately discloses that **unsent draft text leaves the
   machine while typing** when using a cloud endpoint. Its payload contains a bounded plain-text excerpt
   of the authored body around the caret (at most 2,000 characters before and 500 after), the current
   subject, selected tone, and standing rules. For replies, it also contains the current cached thread
@@ -690,7 +690,8 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   cancels reply streaming, retaining partial text; for autocomplete it dismisses the preview first.
 - With voice matching off, reply requests contain no additional sent-mail style examples. Autocomplete
   contains only its bounded authored-body excerpt and current reply thread regardless of that toggle.
-- A generated reply and an accepted suggestion are each undoable as one edit. No unaccepted suggestion
+- A generated reply and an accepted suggestion are each undoable as one edit. When generation replaces
+  existing authored text, one undo restores that text. No unaccepted suggestion
   appears in a saved, reopened, mirrored, or sent draft.
 - Fake-provider tests prove debounce, request caps, timeout, IME suppression, keyboard precedence, and
   rejection of stale results after editing, switching drafts/accounts, closing, sending, or disabling.
