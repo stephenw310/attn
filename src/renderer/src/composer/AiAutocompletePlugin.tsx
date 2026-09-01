@@ -60,6 +60,11 @@ function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement
   const rootStyle = getComputedStyle(rootElement)
   const rootPaddingLeft = Number.parseFloat(rootStyle.paddingLeft) || 0
   const rootPaddingRight = Number.parseFloat(rootStyle.paddingRight) || 0
+  const lineHeight = Number.parseFloat(rootStyle.lineHeight) || 20
+  // A collapsed Chromium range is the height of the caret glyph, not the
+  // editor's full line box. Positioning a new 20 px line box at rect.top
+  // therefore puts its text a few pixels below the authored text.
+  const lineBoxTop = rect.top - Math.max(0, (lineHeight - rect.height) / 2)
   const caretLeft = rect.right - containerRect.left + container.scrollLeft
   const remaining = containerRect.width - (rect.right - containerRect.left) - 28
   const textLeft = rootRect.left - containerRect.left + container.scrollLeft + rootPaddingLeft
@@ -67,18 +72,17 @@ function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement
   const caretIsPastLineStart = caretLeft - textLeft > 4
   const suggestionWidth = previewTextWidth(container, text)
   if (caretIsPastLineStart && (remaining < 160 || suggestionWidth > remaining)) {
-    const lineHeight = Number.parseFloat(rootStyle.lineHeight) || 20
     return {
       text,
       left: textLeft,
-      top: rect.top - containerRect.top + container.scrollTop + lineHeight,
+      top: lineBoxTop - containerRect.top + container.scrollTop + lineHeight,
       maxWidth: textWidth
     }
   }
   return {
     text,
     left: caretLeft,
-    top: rect.top - containerRect.top + container.scrollTop,
+    top: lineBoxTop - containerRect.top + container.scrollTop,
     maxWidth: remaining
   }
 }

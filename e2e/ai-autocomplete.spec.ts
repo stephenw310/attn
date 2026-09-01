@@ -50,6 +50,20 @@ async function enableAi(page: Page, autocomplete: boolean): Promise<void> {
 const editor = (page: Page) => page.getByTestId('composer-editor')
 const preview = (page: Page) => page.getByTestId('ai-autocomplete-preview')
 
+async function expectPreviewBaselineAligned(page: Page): Promise<void> {
+  const delta = await page.evaluate(() => {
+    const authoredLine = document.querySelector<HTMLElement>('[data-testid="composer-editor"] > p')
+    const suggestion = document.querySelector<HTMLElement>('[data-testid="ai-autocomplete-preview"]')
+    if (!authoredLine || !suggestion) return Number.POSITIVE_INFINITY
+    const authoredRange = document.createRange()
+    authoredRange.selectNodeContents(authoredLine)
+    const suggestionRange = document.createRange()
+    suggestionRange.selectNodeContents(suggestion)
+    return Math.abs(authoredRange.getBoundingClientRect().top - suggestionRange.getBoundingClientRect().top)
+  })
+  expect(delta).toBeLessThan(1)
+}
+
 async function openDesignReply(page: Page): Promise<ComposerPage> {
   await page.getByTestId('thread-row').filter({ hasText: 'Design notes' }).click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
@@ -243,6 +257,7 @@ test('suggestions render legibly at the caret in dark and light themes (artifact
   await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Dear team, I wanted')
   await expect(preview(page)).toBeVisible()
+  await expectPreviewBaselineAligned(page)
   await page.screenshot({ path: 'e2e/.artifacts/ai-autocomplete.png' })
 
   // Light theme via the real theme picker; a fresh pause re-suggests there.
@@ -259,6 +274,7 @@ test('suggestions render legibly at the caret in dark and light themes (artifact
   await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Dear team, I wanted')
   await expect(preview(page)).toBeVisible()
+  await expectPreviewBaselineAligned(page)
   await page.screenshot({ path: 'e2e/.artifacts/ai-autocomplete-light.png' })
 })
 

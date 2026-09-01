@@ -1319,6 +1319,8 @@ test('body undo and select-all stay inside authored text above the signature and
   await expect(composer.editor).not.toContainText('Undo this whole edit')
 
   await page.keyboard.type('Select only this new reply')
+  await expect(page.getByTestId('composer-attn-signature')).not.toContainText('Select only this new reply')
+  await expect(composer.editor.locator(':scope > *').first()).toContainText('Select only this new reply')
   await page.keyboard.press('ControlOrMeta+a')
   const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '')
   expect(selected).toContain('Select only this new reply')

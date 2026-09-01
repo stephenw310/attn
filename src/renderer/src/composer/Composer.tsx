@@ -24,6 +24,7 @@ import {
   $nodesOfType,
   FORMAT_TEXT_COMMAND,
   HISTORY_PUSH_TAG,
+  type LexicalNode,
   REDO_COMMAND,
   UNDO_COMMAND
 } from 'lexical'
@@ -818,6 +819,47 @@ function ComposerCommandPlugin({
  * only the user's body above the signature/footer; quoted history lives
  * outside this editor and is therefore never pulled into the range.
  */
+function $isProtectedComposerNode(node: LexicalNode): boolean {
+  return (
+    node instanceof GmailSignaturePrefixNode ||
+    node instanceof GmailSignatureNode ||
+    node instanceof AttnFooterNode
+  )
+}
+
+function $topLevelComposerNode(node: LexicalNode): LexicalNode {
+  const root = $getRoot()
+  let current = node
+  let parent = current.getParent()
+  while (parent && parent !== root) {
+    current = parent
+    parent = current.getParent()
+  }
+  return current
+}
+
+function $selectionAnchorIsAuthored(): boolean {
+  const selection = $getSelection()
+  if (!$isRangeSelection(selection)) return false
+  const node = $topLevelComposerNode(selection.anchor.getNode())
+  return node !== $getRoot() && !$isProtectedComposerNode(node)
+}
+
+function $restoreAuthoredCaretFromProtectedNode(): void {
+  const selection = $getSelection()
+  if (!$isRangeSelection(selection)) return
+  const node = $topLevelComposerNode(selection.anchor.getNode())
+  if (!$isProtectedComposerNode(node)) return
+  const previous = node.getPreviousSibling()
+  if (previous && !$isProtectedComposerNode(previous)) {
+    previous.selectEnd()
+    return
+  }
+  const paragraph = $createParagraphNode()
+  node.insertBefore(paragraph)
+  paragraph.selectStart()
+}
+
 function BodyEditingShortcutsPlugin(): null {
   const [editor] = useLexicalComposerContext()
   useEffect(() => {
@@ -833,13 +875,7 @@ function BodyEditingShortcutsPlugin(): null {
           const root = $getRoot()
           let authoredCount = 0
           for (const child of root.getChildren()) {
-            if (
-              child instanceof GmailSignaturePrefixNode ||
-              child instanceof GmailSignatureNode ||
-              child instanceof AttnFooterNode
-            ) {
-              break
-            }
+            if ($isProtectedComposerNode(child)) break
             authoredCount++
           }
           const rootKey = root.getKey()
@@ -857,12 +893,7 @@ function BodyEditingShortcutsPlugin(): null {
           $addUpdateTag(HISTORY_PUSH_TAG)
           const root = $getRoot()
           let firstProtectedNode = root.getFirstChild()
-          while (
-            firstProtectedNode &&
-            !(firstProtectedNode instanceof GmailSignaturePrefixNode) &&
-            !(firstProtectedNode instanceof GmailSignatureNode) &&
-            !(firstProtectedNode instanceof AttnFooterNode)
-          ) {
+          while (firstProtectedNode && !$isProtectedComposerNode(firstProtectedNode)) {
             const next = firstProtectedNode.getNextSibling()
             firstProtectedNode.remove()
             firstProtectedNode = next
@@ -879,7 +910,9 @@ function BodyEditingShortcutsPlugin(): null {
       if (key === 'z') {
         event.preventDefault()
         event.stopPropagation()
+        const keepAuthoredCaret = editor.getEditorState().read(() => $selectionAnchorIsAuthored())
         editor.dispatchCommand(event.shiftKey ? REDO_COMMAND : UNDO_COMMAND, undefined)
+        if (keepAuthoredCaret) editor.update(() => $restoreAuthoredCaretFromProtectedNode())
         return
       }
       if (key !== 'a' || event.shiftKey) return
@@ -888,13 +921,7 @@ function BodyEditingShortcutsPlugin(): null {
       editor.update(() => {
         let authoredCount = 0
         for (const child of $getRoot().getChildren()) {
-          if (
-            child instanceof GmailSignaturePrefixNode ||
-            child instanceof GmailSignatureNode ||
-            child instanceof AttnFooterNode
-          ) {
-            break
-          }
+          if ($isProtectedComposerNode(child)) break
           authoredCount++
         }
         $getRoot().select(0, authoredCount)
