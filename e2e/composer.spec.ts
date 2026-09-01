@@ -638,7 +638,7 @@ test('spools picked and dropped attachments through queue and relaunch, then cle
   await setAttachmentPickerFiles(app, [source])
   let composer = new ComposerPage(page)
   await composer.openNew()
-  await composer.pickAttachments()
+  await page.keyboard.press('ControlOrMeta+Shift+A')
 
   const chip = composer.attachmentChips
   await expect(chip).toContainText('t17-attachment.txt')
@@ -866,9 +866,29 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(showCopies).toBeVisible()
   await expect(showCopies).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByTestId('composer-discard')).toHaveAccessibleName('Discard draft')
+  await expect(page.getByTestId('composer-discard')).toHaveAttribute('title', /Discard draft \(.+⇧D\)/)
+  await expect(page.getByTestId('composer-attach')).toHaveAttribute('title', /Attach files \(.+⇧A\)/)
 
   const toInput = composer.recipientField().locator('input')
   await expect.poll(() => toInput.evaluate((input) => document.activeElement === input)).toBe(true)
+
+  const formattingToolbar = page.getByRole('toolbar', { name: 'Formatting toolbar' })
+  await expect(formattingToolbar).toBeVisible()
+  await expect
+    .poll(() => formattingToolbar.evaluate((toolbar) => getComputedStyle(toolbar).flexWrap))
+    .toBe('nowrap')
+  await page.getByTestId('composer-format-more').click()
+  await expect(page.getByTestId('composer-format-menu')).toBeVisible()
+  await expect(page.getByTestId('composer-format-menu')).toContainText('Strikethrough')
+  await expect(page.getByTestId('composer-format-menu')).toContainText('Bulleted list')
+  const formattingArtifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(formattingArtifactDirectory, { recursive: true })
+  const formattingPath = join(formattingArtifactDirectory, 'composer-formatting.png')
+  await page.screenshot({ path: formattingPath })
+  await testInfo.attach('composer formatting', { path: formattingPath, contentType: 'image/png' })
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer-format-menu')).toHaveCount(0)
+  await expect(composer.root).toBeVisible()
 
   await toInput.fill('may')
   await expect(page.getByTestId('autocomplete-option').first()).toContainText('Maya Lin')

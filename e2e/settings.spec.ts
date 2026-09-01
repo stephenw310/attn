@@ -47,14 +47,21 @@ test.describe('settings surface', () => {
     await expect(page.getByTestId('thread-list')).toBeHidden()
     await expect(settings.getByTestId('settings-account-row')).toHaveCount(1)
     await expect(settings.getByTestId('settings-account-row')).toContainText('seed@attn.test')
-    await expect(settings.getByTestId('settings-scope-note')).toContainText(
-      '“All accounts” apply to every signed-in account and mailbox'
-    )
-    await expect(settings.getByTestId('settings-sync')).toContainText('This account')
+    const accountScope = settings.getByTestId('settings-account-scope')
+    const allAccountsScope = settings.getByTestId('settings-all-accounts-scope')
+    await expect(accountScope).toContainText('This account')
+    await expect(accountScope).toContainText('seed@attn.test')
+    await expect(accountScope.getByTestId('settings-sync')).toBeVisible()
+    await expect(accountScope.getByTestId('settings-compose')).toBeVisible()
+    await expect(accountScope.getByTestId('settings-account-notifications')).toBeVisible()
+    await expect(allAccountsScope).toContainText('All accounts')
+    await expect(allAccountsScope).toContainText('every signed-in account and mailbox')
+    await expect(allAccountsScope.getByTestId('settings-triage')).toBeVisible()
+    await expect(allAccountsScope.getByTestId('settings-security')).toBeVisible()
     await expect(settings.getByTestId('settings-sync-limit-mode')).toContainText(
       'Recommended — 400,000 email threads'
     )
-    await expect(settings.getByTestId('settings-privacy')).toContainText('All accounts')
+    await expect(settings.getByTestId('settings-security')).toContainText('Security')
     await expect(settings.getByTestId('settings-remote-images-description')).toContainText(
       'every mailbox and signed-in account'
     )
@@ -66,9 +73,13 @@ test.describe('settings surface', () => {
       const splitButton = root.querySelector<HTMLElement>('[data-testid="settings-split-rules"]')
       const rules = root.querySelector<HTMLTextAreaElement>('[data-testid="settings-ai-voice-rules"]')
       const style = syncDescription ? getComputedStyle(syncDescription) : null
+      const headings = [...root.querySelectorAll<HTMLElement>('h2, h3')]
       return {
         noHorizontalOverflow: root.scrollWidth <= root.clientWidth,
         descriptionFontSize: style?.fontSize,
+        headingsUseNormalCase: headings.every(
+          (heading) => getComputedStyle(heading).textTransform === 'none'
+        ),
         splitWhiteSpace: splitButton ? getComputedStyle(splitButton).whiteSpace : null,
         rulesResize: rules ? getComputedStyle(rules).resize : null,
         rulesRows: rules?.rows
@@ -77,6 +88,7 @@ test.describe('settings surface', () => {
     expect(layout).toEqual({
       noHorizontalOverflow: true,
       descriptionFontSize: '13px',
+      headingsUseNormalCase: true,
       splitWhiteSpace: 'nowrap',
       rulesResize: 'none',
       rulesRows: 10
@@ -86,6 +98,11 @@ test.describe('settings surface', () => {
     const path = join(artifactDirectory, 'settings.png')
     await page.screenshot({ path })
     await testInfo.attach('settings', { path, contentType: 'image/png' })
+
+    await allAccountsScope.evaluate((section) => section.scrollIntoView({ block: 'start' }))
+    const scopesPath = join(artifactDirectory, 'settings-scopes.png')
+    await page.screenshot({ path: scopesPath })
+    await testInfo.attach('settings scopes', { path: scopesPath, contentType: 'image/png' })
 
     await settings
       .getByTestId('settings-ai')

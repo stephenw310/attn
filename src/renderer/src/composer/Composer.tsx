@@ -94,13 +94,13 @@ function TrashIcon(): React.JSX.Element {
       stroke="currentColor"
       strokeWidth="1.75"
     >
-      <title>Discard draft</title>
+      <title>{`Discard draft (${modKeyLabel()}⇧D)`}</title>
       <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" strokeLinecap="round" />
     </svg>
   )
 }
 
-function PaperclipIcon(): React.JSX.Element {
+function PaperclipIcon({ title = 'Attachment' }: { title?: string }): React.JSX.Element {
   return (
     <svg
       aria-hidden
@@ -110,7 +110,7 @@ function PaperclipIcon(): React.JSX.Element {
       stroke="currentColor"
       strokeWidth="1.75"
     >
-      <title>Attach files</title>
+      <title>{title}</title>
       <path
         d="m8.5 12.5 6.2-6.2a3 3 0 0 1 4.2 4.2l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5"
         strokeLinecap="round"
@@ -655,8 +655,8 @@ function FollowUpControl({
       <button
         ref={triggerRef}
         type="button"
-        className={`flex h-8 max-w-72 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs ${
-          followUpAt !== null ? 'text-accent' : 'text-ink-faint hover:bg-active hover:text-ink'
+        className={`flex h-8 max-w-72 shrink-0 items-center px-1 text-xs underline decoration-current/45 underline-offset-4 ${
+          followUpAt !== null ? 'text-accent' : 'text-ink-dim hover:text-ink'
         }`}
         data-testid="composer-follow-up"
         data-follow-up-at={followUpAt ?? undefined}
@@ -665,7 +665,6 @@ function FollowUpControl({
         title={`Remind me if no reply (${modKeyLabel()}⇧H)`}
         onClick={() => onOpenChange(!open)}
       >
-        <span aria-hidden>⏰</span>
         <span className="truncate">
           {followUpAt !== null ? `Follow up ${formatSnoozeDate(followUpAt)}` : 'Remind me'}
         </span>
@@ -1392,11 +1391,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
                     data-testid="composer-attach"
                     aria-label="Attach files"
-                    title="Attach files"
+                    title={`Attach files (${modKeyLabel()}⇧A)`}
                     disabled={attaching || closing}
                     onClick={pickAttachments}
                   >
-                    <PaperclipIcon />
+                    <PaperclipIcon title={`Attach files (${modKeyLabel()}⇧A)`} />
                   </button>
                   {visibleAttachments.length > 0 && (
                     <div

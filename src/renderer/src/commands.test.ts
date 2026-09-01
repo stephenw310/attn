@@ -267,6 +267,7 @@ describe('keyboard dispatch', () => {
       createCommand('composer.close', () => {}),
       createCommand('composer.discard', () => {}),
       createCommand('composer.send', () => {}),
+      createCommand('composer.attach', () => {}),
       createCommand('composer.link', () => {}),
       createCommand('composer.aiDraft', () => {}),
       createCommand('triage.archive', () => {})
@@ -281,6 +282,8 @@ describe('keyboard dispatch', () => {
     expect(matchComposerKey(key('d', { metaKey: true, shiftKey: true }))?.id).toBe('composer.discard')
     expect(matchComposerKey(key('d', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.discard')
     expect(matchComposerKey(key('Enter', { metaKey: true }))?.id).toBe('composer.send')
+    expect(matchComposerKey(key('a', { metaKey: true, shiftKey: true }))?.id).toBe('composer.attach')
+    expect(matchComposerKey(key('a', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.attach')
     expect(matchComposerKey(key('k', { ctrlKey: true, shiftKey: true }))?.id).toBe('composer.link')
     expect(matchComposerKey(key('k', { ctrlKey: true }))).toBeNull()
     expect(matchComposerKey(key('k', { ctrlKey: true, shiftKey: true, altKey: true }))).toBeNull()

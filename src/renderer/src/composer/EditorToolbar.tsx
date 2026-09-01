@@ -12,6 +12,7 @@ import {
 } from 'lexical'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createCommand, registerCommands } from '../commands'
+import { modKeyLabel } from '../platform'
 
 function isSafeLink(value: string): boolean {
   return /^(?:https?:|mailto:)/i.test(value)
@@ -29,7 +30,10 @@ export function EditorToolbar(): React.JSX.Element {
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkValue, setLinkValue] = useState('')
   const [linkInvalid, setLinkInvalid] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const linkInputRef = useRef<HTMLInputElement | null>(null)
+  const moreRootRef = useRef<HTMLDivElement | null>(null)
+  const morePanelRef = useRef<HTMLDivElement | null>(null)
   const format = useCallback(
     (value: TextFormatType): void => {
       editor.dispatchCommand(FORMAT_TEXT_COMMAND, value)
@@ -45,7 +49,14 @@ export function EditorToolbar(): React.JSX.Element {
     },
     [editor]
   )
+  const quote = useCallback(() => {
+    editor.update(() => {
+      const selection = $getSelection()
+      if ($isRangeSelection(selection)) $setBlocksType(selection, () => $createQuoteNode())
+    })
+  }, [editor])
   const openLink = useCallback((): void => {
+    setMoreOpen(false)
     setLinkInvalid(false)
     setLinkOpen(true)
   }, [])
@@ -64,10 +75,28 @@ export function EditorToolbar(): React.JSX.Element {
     editor.dispatchCommand(TOGGLE_LINK_COMMAND, url)
     closeLink()
   }
+  const runMoreAction = (action: () => void): void => {
+    action()
+    setMoreOpen(false)
+    editor.focus()
+  }
 
   useEffect(() => {
     if (linkOpen) linkInputRef.current?.focus()
   }, [linkOpen])
+
+  useEffect(() => {
+    if (moreOpen) morePanelRef.current?.focus()
+  }, [moreOpen])
+
+  useEffect(() => {
+    if (!moreOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent): void => {
+      if (!moreRootRef.current?.contains(event.target as Node)) setMoreOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+  }, [moreOpen])
 
   useLayoutEffect(
     () =>
@@ -85,21 +114,30 @@ export function EditorToolbar(): React.JSX.Element {
     [editor, format, openLink, patchStyle]
   )
 
-  const button = 'rounded px-2 py-1 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink'
+  const button =
+    'cursor-pointer rounded px-2 py-1 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink'
+  const menuButton = `${button} text-left`
 
   return (
     <div
-      className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5"
+      className="flex min-w-0 flex-1 flex-nowrap items-center gap-0.5"
       role="toolbar"
       aria-label="Formatting toolbar"
     >
-      <button type="button" className={button} aria-label="Bold" onClick={() => format('bold')}>
+      <button
+        type="button"
+        className={button}
+        aria-label="Bold"
+        title={`Bold (${modKeyLabel()}B)`}
+        onClick={() => format('bold')}
+      >
         B
       </button>
       <button
         type="button"
         className={`${button} italic`}
         aria-label="Italic"
+        title={`Italic (${modKeyLabel()}I)`}
         onClick={() => format('italic')}
       >
         I
@@ -108,122 +146,10 @@ export function EditorToolbar(): React.JSX.Element {
         type="button"
         className={`${button} underline`}
         aria-label="Underline"
+        title={`Underline (${modKeyLabel()}U)`}
         onClick={() => format('underline')}
       >
         U
-      </button>
-      <button
-        type="button"
-        className={`${button} line-through`}
-        aria-label="Strikethrough"
-        onClick={() => format('strikethrough')}
-      >
-        S
-      </button>
-      <select
-        data-testid="composer-font-family"
-        aria-label="Font family"
-        className="rounded bg-transparent px-1 py-1 text-xs text-ink-dim"
-        defaultValue=""
-        onChange={(event) => patchStyle('font-family', event.target.value)}
-      >
-        <option value="" disabled>
-          Font
-        </option>
-        <option value="Arial, sans-serif">Arial</option>
-        <option value="Georgia, serif">Serif</option>
-        <option value="monospace">Monospace</option>
-      </select>
-      <select
-        data-testid="composer-font-size"
-        aria-label="Font size"
-        className="rounded bg-transparent px-1 py-1 text-xs text-ink-dim"
-        defaultValue=""
-        onChange={(event) => patchStyle('font-size', event.target.value)}
-      >
-        <option value="" disabled>
-          Size
-        </option>
-        <option value="12px">Small</option>
-        <option value="14px">Normal</option>
-        <option value="18px">Large</option>
-        <option value="24px">Huge</option>
-      </select>
-      <label className="flex items-center" title="Text colour">
-        <span className="sr-only">Text colour</span>
-        <input
-          type="color"
-          data-testid="composer-text-color"
-          aria-label="Text colour"
-          className="size-6 border-0 bg-transparent p-0"
-          defaultValue="#202124"
-          onChange={(event) => patchStyle('color', event.target.value)}
-        />
-      </label>
-      <label className="flex items-center" title="Background colour">
-        <span className="sr-only">Background colour</span>
-        <input
-          type="color"
-          data-testid="composer-background-color"
-          aria-label="Background colour"
-          className="size-6 border-0 bg-transparent p-0"
-          defaultValue="#fff2cc"
-          onChange={(event) => patchStyle('background-color', event.target.value)}
-        />
-      </label>
-      <span className="mx-1 h-4 w-px bg-edge" />
-      <button
-        type="button"
-        className={button}
-        aria-label="Align left"
-        onClick={() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'left')}
-      >
-        ≡
-      </button>
-      <button
-        type="button"
-        className={button}
-        aria-label="Align center"
-        onClick={() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'center')}
-      >
-        ≣
-      </button>
-      <button
-        type="button"
-        className={button}
-        aria-label="Align right"
-        onClick={() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'right')}
-      >
-        ≡
-      </button>
-      <button
-        type="button"
-        className={button}
-        aria-label="Bulleted list"
-        onClick={() => editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)}
-      >
-        • List
-      </button>
-      <button
-        type="button"
-        className={button}
-        aria-label="Numbered list"
-        onClick={() => editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)}
-      >
-        1. List
-      </button>
-      <button
-        type="button"
-        className={button}
-        aria-label="Block quote"
-        onClick={() =>
-          editor.update(() => {
-            const selection = $getSelection()
-            if ($isRangeSelection(selection)) $setBlocksType(selection, () => $createQuoteNode())
-          })
-        }
-      >
-        “ Quote
       </button>
       <div className="relative">
         <button
@@ -232,6 +158,7 @@ export function EditorToolbar(): React.JSX.Element {
           data-testid="composer-link"
           aria-label="Add link"
           aria-expanded={linkOpen}
+          title={`Add link (${modKeyLabel()}⇧K)`}
           onClick={openLink}
         >
           Link
@@ -274,6 +201,160 @@ export function EditorToolbar(): React.JSX.Element {
               Apply
             </button>
           </form>
+        )}
+      </div>
+      <div ref={moreRootRef} className="relative">
+        <button
+          type="button"
+          className={button}
+          data-testid="composer-format-more"
+          aria-label="More formatting"
+          aria-expanded={moreOpen}
+          onClick={() => {
+            setLinkOpen(false)
+            setMoreOpen((current) => !current)
+          }}
+        >
+          More <span aria-hidden>⌄</span>
+        </button>
+        {moreOpen && (
+          <div
+            ref={morePanelRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-label="More formatting"
+            className="absolute bottom-full left-0 z-30 mb-2 w-64 rounded-lg border border-edge bg-raised p-2 shadow-2xl"
+            data-composer-transient
+            data-testid="composer-format-menu"
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return
+              event.preventDefault()
+              event.stopPropagation()
+              setMoreOpen(false)
+              editor.focus()
+            }}
+          >
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                className={`${menuButton} line-through`}
+                onClick={() => runMoreAction(() => format('strikethrough'))}
+              >
+                Strikethrough
+              </button>
+              <button type="button" className={menuButton} onClick={() => runMoreAction(quote)}>
+                Block quote
+              </button>
+              <button
+                type="button"
+                className={menuButton}
+                onClick={() =>
+                  runMoreAction(() => editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined))
+                }
+              >
+                Bulleted list
+              </button>
+              <button
+                type="button"
+                className={menuButton}
+                onClick={() =>
+                  runMoreAction(() => editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined))
+                }
+              >
+                Numbered list
+              </button>
+            </div>
+            <div className="my-2 h-px bg-edge" />
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-[11px] text-ink-faint">
+                Font
+                <select
+                  data-testid="composer-font-family"
+                  aria-label="Font family"
+                  className="mt-1 h-8 w-full rounded-md border border-edge bg-canvas px-2 text-xs text-ink-dim"
+                  defaultValue=""
+                  onChange={(event) => patchStyle('font-family', event.target.value)}
+                >
+                  <option value="" disabled>
+                    Choose…
+                  </option>
+                  <option value="Arial, sans-serif">Arial</option>
+                  <option value="Georgia, serif">Serif</option>
+                  <option value="monospace">Monospace</option>
+                </select>
+              </label>
+              <label className="text-[11px] text-ink-faint">
+                Size
+                <select
+                  data-testid="composer-font-size"
+                  aria-label="Font size"
+                  className="mt-1 h-8 w-full rounded-md border border-edge bg-canvas px-2 text-xs text-ink-dim"
+                  defaultValue=""
+                  onChange={(event) => patchStyle('font-size', event.target.value)}
+                >
+                  <option value="" disabled>
+                    Choose…
+                  </option>
+                  <option value="12px">Small</option>
+                  <option value="14px">Normal</option>
+                  <option value="18px">Large</option>
+                  <option value="24px">Huge</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-ink-faint">Colour</span>
+              <label className="flex items-center gap-1 text-[11px] text-ink-dim" title="Text colour">
+                Text
+                <input
+                  type="color"
+                  data-testid="composer-text-color"
+                  aria-label="Text colour"
+                  className="size-6 border-0 bg-transparent p-0"
+                  defaultValue="#202124"
+                  onChange={(event) => patchStyle('color', event.target.value)}
+                />
+              </label>
+              <label className="flex items-center gap-1 text-[11px] text-ink-dim" title="Background colour">
+                Highlight
+                <input
+                  type="color"
+                  data-testid="composer-background-color"
+                  aria-label="Background colour"
+                  className="size-6 border-0 bg-transparent p-0"
+                  defaultValue="#fff2cc"
+                  onChange={(event) => patchStyle('background-color', event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="mt-2 flex items-center gap-1 border-t border-edge pt-2">
+              <span className="mr-auto text-[11px] text-ink-faint">Alignment</span>
+              <button
+                type="button"
+                className={button}
+                aria-label="Align left"
+                onClick={() => runMoreAction(() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'left'))}
+              >
+                Left
+              </button>
+              <button
+                type="button"
+                className={button}
+                aria-label="Align center"
+                onClick={() => runMoreAction(() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'center'))}
+              >
+                Center
+              </button>
+              <button
+                type="button"
+                className={button}
+                aria-label="Align right"
+                onClick={() => runMoreAction(() => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'right'))}
+              >
+                Right
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -311,7 +311,7 @@ export const COMMAND_SPECS = {
     context: 'composer',
     footer: { composer: { id: 'send', label: 'send', order: 10 } }
   },
-  'composer.attach': { title: 'Attach files', context: 'composer' },
+  'composer.attach': { title: 'Attach files', shortcut: 'Mod+Shift+A', context: 'composer' },
   'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },
   'composer.bold': { title: 'Bold', shortcut: 'Mod+B', context: 'composer' },
   'composer.italic': { title: 'Italic', shortcut: 'Mod+I', context: 'composer' },
