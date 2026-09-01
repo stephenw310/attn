@@ -165,6 +165,22 @@ describe('mail surface classification', () => {
     for (const html of designedMessages) expect(mailSurfaceForHtml(html)).toBe('light')
   })
 
+  it('keeps framed white transactional templates on their sender-owned light canvas', () => {
+    const googleTransactional = `<table width="100%" bgcolor="#ffffff"><tr><td>
+      <table bgcolor="#ffffff" style="max-width:600px;background-color:#ffffff;
+        border-top:25px solid #e5e5e5;border-right:25px solid #e5e5e5;
+        border-bottom:25px solid #e5e5e5;border-left:25px solid #e5e5e5">
+        <tr><td style="color:#808080">Action required</td></tr>
+      </table>
+    </td></tr></table>`
+
+    expect(mailSurfaceForHtml(googleTransactional)).toBe('light')
+    expect(mailSurfaceForHtml('<div style="border:1px solid #ddd">Ordinary note</div>')).toBe('native')
+    expect(mailSurfaceForHtml('<blockquote style="border-left:25px solid #ddd">Quote</blockquote>')).toBe(
+      'native'
+    )
+  })
+
   it('ignores stylesheet background rules that cannot match the message', () => {
     expect(mailSurfaceForHtml('<style>.unused{background:#123456}</style><p>Hello</p>')).toBe('native')
     expect(
