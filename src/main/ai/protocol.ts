@@ -25,6 +25,8 @@ export interface AiPrompt {
   system: string
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
   maxTokens: number
+  /** Autocomplete is latency-sensitive and does not need model reasoning. */
+  reasoning: 'default' | 'disabled'
 }
 
 const TONE_INSTRUCTIONS: Record<AiVoiceTone, string> = {
@@ -79,7 +81,8 @@ export function buildPrompt(request: AiGenerateRequest, voice: AiVoiceProfile): 
             `Text before the caret:\n${prefix}\n\nText after the caret:\n${suffix}`
         }
       ],
-      maxTokens: AUTOCOMPLETE_MAX_TOKENS
+      maxTokens: AUTOCOMPLETE_MAX_TOKENS,
+      reasoning: 'disabled'
     }
   }
   const conversation = request.thread
@@ -93,7 +96,8 @@ export function buildPrompt(request: AiGenerateRequest, voice: AiVoiceProfile): 
   return {
     system: replySystem(request, voice),
     messages: [{ role: 'user', content }],
-    maxTokens: REPLY_MAX_TOKENS
+    maxTokens: REPLY_MAX_TOKENS,
+    reasoning: 'default'
   }
 }
 
@@ -143,6 +147,7 @@ export function buildWireRequest(target: AiProviderTarget, prompt: AiPrompt): Ai
         max_tokens: prompt.maxTokens,
         system: prompt.system,
         messages: prompt.messages,
+        ...(prompt.reasoning === 'disabled' ? { thinking: { type: 'disabled' } } : {}),
         stream: true
       })
     }

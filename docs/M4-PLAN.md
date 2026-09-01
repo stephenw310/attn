@@ -814,7 +814,8 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   and 20 starts per rolling minute. Enforce size caps and purpose-specific consent at the IPC boundary too.
   The renderer coalesces the latest replacement until a one-second cooldown expires; the rolling cap and
   provider failures still skip without automatic retries. Abort and discard work after five seconds from
-  dispatch. T36 handles aborts; injected clocks exercise debounce, rate limits, and deadlines.
+  dispatch. Anthropic autocomplete explicitly disables model thinking while reply and refine retain the
+  provider default. T36 handles aborts; injected clocks exercise debounce, rate limits, and deadlines.
   A slow/offline provider or rate limit simply yields no suggestion. Report persistent configuration
   errors in settings without recurring composer toasts. Explicit reply generation takes priority.
 - **Reject stale results:** bind each request to the account generation, composer instance, draft id,

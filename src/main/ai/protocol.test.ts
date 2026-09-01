@@ -110,6 +110,17 @@ describe('buildWireRequest', () => {
     expect(body.system).toBe(prompt.system)
     expect(body.messages).toEqual(prompt.messages)
     expect(typeof body.model).toBe('string')
+    expect(body.thinking).toBeUndefined()
+  })
+
+  it('disables Anthropic thinking for latency-sensitive autocomplete', () => {
+    const target = resolveProviderTarget('anthropic', null, null, 'sk-ant-test')
+    const autocompletePrompt = buildPrompt(
+      { purpose: 'autocomplete', prefix: 'Thanks for', suffix: '', thread: replyRequest.thread },
+      voice
+    )
+    const body = JSON.parse(buildWireRequest(target, autocompletePrompt).body)
+    expect(body.thinking).toEqual({ type: 'disabled' })
   })
 
   it('anthropic without a key is an error, never a keyless request', () => {
