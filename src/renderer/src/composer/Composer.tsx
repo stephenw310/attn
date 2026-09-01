@@ -15,6 +15,7 @@ import { TablePlugin } from '@lexical/react/LexicalTablePlugin'
 import { $createQuoteNode } from '@lexical/rich-text'
 import { $setBlocksType } from '@lexical/selection'
 import {
+  $addUpdateTag,
   $createParagraphNode,
   $getRoot,
   $getSelection,
@@ -22,6 +23,7 @@ import {
   $isRangeSelection,
   $nodesOfType,
   FORMAT_TEXT_COMMAND,
+  HISTORY_PUSH_TAG,
   REDO_COMMAND,
   UNDO_COMMAND
 } from 'lexical'
@@ -822,8 +824,58 @@ function BodyEditingShortcutsPlugin(): null {
     const rootElement = editor.getRootElement()
     if (!rootElement) return
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
       const key = event.key.toLowerCase()
+      if ((key === 'backspace' || key === 'delete') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        let deletesAuthoredRegion = false
+        editor.getEditorState().read(() => {
+          const selection = $getSelection()
+          if (!$isRangeSelection(selection) || selection.isCollapsed()) return
+          const root = $getRoot()
+          let authoredCount = 0
+          for (const child of root.getChildren()) {
+            if (
+              child instanceof GmailSignaturePrefixNode ||
+              child instanceof GmailSignatureNode ||
+              child instanceof AttnFooterNode
+            ) {
+              break
+            }
+            authoredCount++
+          }
+          const rootKey = root.getKey()
+          deletesAuthoredRegion =
+            selection.anchor.key === rootKey &&
+            selection.focus.key === rootKey &&
+            ((selection.anchor.offset === 0 && selection.focus.offset === authoredCount) ||
+              (selection.focus.offset === 0 && selection.anchor.offset === authoredCount))
+        })
+        if (!deletesAuthoredRegion) return
+
+        event.preventDefault()
+        event.stopPropagation()
+        editor.update(() => {
+          $addUpdateTag(HISTORY_PUSH_TAG)
+          const root = $getRoot()
+          let firstProtectedNode = root.getFirstChild()
+          while (
+            firstProtectedNode &&
+            !(firstProtectedNode instanceof GmailSignaturePrefixNode) &&
+            !(firstProtectedNode instanceof GmailSignatureNode) &&
+            !(firstProtectedNode instanceof AttnFooterNode)
+          ) {
+            const next = firstProtectedNode.getNextSibling()
+            firstProtectedNode.remove()
+            firstProtectedNode = next
+          }
+          const paragraph = $createParagraphNode()
+          if (firstProtectedNode) firstProtectedNode.insertBefore(paragraph)
+          else root.append(paragraph)
+          paragraph.selectStart()
+        })
+        return
+      }
+
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
       if (key === 'z') {
         event.preventDefault()
         event.stopPropagation()

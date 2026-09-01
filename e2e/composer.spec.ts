@@ -1330,6 +1330,14 @@ test('body undo and select-all stay inside authored text above the signature and
   await expect(composer.editor).not.toContainText('Select only this new reply')
   await expect(composer.signature).toContainText('Chao Wu')
   await expect(page.getByTestId('composer-attn-signature')).toContainText('Sent with Attn')
+
+  // Deleting the whole authored selection must leave an editable paragraph
+  // before the protected signature instead of parking the caret inside it.
+  await page.keyboard.type('Starting this reply over')
+  await expect(composer.editor).toContainText('Starting this reply over')
+  await expect(composer.signature).not.toContainText('Starting this reply over')
+  await expect(composer.editor.locator(':scope > *').first()).toContainText('Starting this reply over')
+
   await composer.revealSignature()
   await expect(composer.quote).toBeVisible()
 })
