@@ -54,6 +54,7 @@ export interface RecordedAiRequest {
 interface ActiveRequest {
   id: string
   purpose: AiPurpose
+  startedAt: number
   /** Once true, no further events for this request may be emitted. */
   settled: boolean
   abort: AbortController
@@ -105,6 +106,7 @@ export class AiManager {
     // caller shows no suggestion, and nothing queues or retries.
     if (request.purpose === 'autocomplete') {
       if ([...this.active.values()].some((entry) => entry.purpose === 'autocomplete')) {
+        this.logAutocomplete('skipped: another request is still in flight')
         throw new Error('An autocomplete request is already in flight')
       }
       const now = this.time.now()
@@ -114,6 +116,11 @@ export class AiManager {
         this.autocompleteStarts.length >= AUTOCOMPLETE_MAX_STARTS_PER_MINUTE ||
         (last !== undefined && now - last < AUTOCOMPLETE_MIN_START_INTERVAL_MS)
       ) {
+        const reason =
+          this.autocompleteStarts.length >= AUTOCOMPLETE_MAX_STARTS_PER_MINUTE
+            ? 'rolling-minute limit'
+            : 'minimum start interval'
+        this.logAutocomplete(`skipped: ${reason}`)
         throw new Error('Autocomplete requests are rate limited')
       }
       this.autocompleteStarts.push(now)
@@ -129,12 +136,17 @@ export class AiManager {
     const entry: ActiveRequest = {
       id: requestId,
       purpose: request.purpose,
+      startedAt: this.time.now(),
       settled: false,
       abort: new AbortController(),
       deadline: null,
       record: null
     }
     this.active.set(requestId, entry)
+    if (request.purpose === 'autocomplete') {
+      const preset = AI_PROVIDER_PRESETS[settings.provider]
+      this.logAutocomplete(`${requestId} started (${settings.model ?? preset.defaultModel})`)
+    }
     const timeoutMs = request.purpose === 'autocomplete' ? AI_AUTOCOMPLETE_TIMEOUT_MS : AI_REPLY_TIMEOUT_MS
     entry.deadline = this.time.timers.setTimeout(() => {
       this.fail(entry, 'The AI request timed out')
@@ -178,6 +190,10 @@ export class AiManager {
     this.active.delete(entry.id)
     if (entry.deadline !== null) this.time.timers.clearTimeout(entry.deadline)
     entry.abort.abort()
+    if (entry.purpose === 'autocomplete') {
+      const result = outcome.error !== undefined ? outcome.error : outcome.canceled ? 'canceled' : 'completed'
+      this.logAutocomplete(`${entry.id} ${result} after ${this.time.now() - entry.startedAt}ms`)
+    }
     if (entry.record && outcome.canceled) entry.record.canceled = true
     if (outcome.error !== undefined) {
       this.options.emit({ requestId: entry.id, kind: 'error', message: outcome.error })
@@ -188,6 +204,11 @@ export class AiManager {
 
   private fail(entry: ActiveRequest, message: string): void {
     this.settle(entry, { error: message })
+  }
+
+  /** Development diagnostics for real providers; never log prompts, text, or keys. */
+  private logAutocomplete(message: string): void {
+    if (this.fake === null) console.info(`[ai:autocomplete] ${message}`)
   }
 
   private chunk(entry: ActiveRequest, text: string): void {

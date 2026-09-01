@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { AUTOCOMPLETE_DEBOUNCE_MS, AUTOCOMPLETE_MAX_SUGGESTION_CHARS } from '../../../shared/ai'
+import {
+  AUTOCOMPLETE_DEBOUNCE_MS,
+  AUTOCOMPLETE_MAX_SUGGESTION_CHARS,
+  AUTOCOMPLETE_MIN_START_INTERVAL_MS
+} from '../../../shared/ai'
 import {
   AutocompleteController,
   type AutocompleteExcerpt,
@@ -48,6 +52,7 @@ interface Harness {
     canceled: string[]
     previews: Array<string | null>
     failRequests: boolean
+    nowMs: number
   }
 }
 
@@ -60,11 +65,12 @@ function harness(): Harness {
     requests: [],
     canceled: [],
     previews: [],
-    failRequests: false
+    failRequests: false,
+    nowMs: 0
   }
   let nextId = 1
   const hooks: AutocompleteHooks = {
-    now: () => 0,
+    now: () => state.nowMs,
     setTimer: timers.set,
     clearTimer: timers.clear,
     isEnabled: async () => state.enabled,
@@ -133,6 +139,28 @@ describe('debounce', () => {
     h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
     await settle()
     expect(h.hooks.requests).toHaveLength(0)
+  })
+
+  it('coalesces a replacement until the one-second start interval expires', async () => {
+    const h = harness()
+    h.controller.noteTypingEdit()
+    h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+    await settle()
+    expect(h.hooks.requests).toHaveLength(1)
+
+    h.hooks.nowMs = 600
+    h.controller.noteTypingEdit()
+    expect(h.hooks.canceled).toEqual(['ac-1'])
+    h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+    await settle()
+    expect(h.hooks.requests).toHaveLength(1)
+    expect(h.timers.count()).toBe(1)
+
+    h.hooks.nowMs = AUTOCOMPLETE_MIN_START_INTERVAL_MS
+    h.timers.fire(AUTOCOMPLETE_MIN_START_INTERVAL_MS)
+    await settle()
+    expect(h.hooks.requests).toHaveLength(2)
+    expect(h.timers.count()).toBe(0)
   })
 })
 

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { AI_SETTINGS_DEFAULTS, type AiStoredSettings, type AiStreamEvent } from '../../shared/ai'
+import {
+  AI_AUTOCOMPLETE_TIMEOUT_MS,
+  AI_SETTINGS_DEFAULTS,
+  type AiStoredSettings,
+  type AiStreamEvent
+} from '../../shared/ai'
 import type { SchedulerTime, TimerHandle } from '../time'
 import type { AiKeyStore } from './keyStore'
 import { AiManager } from './manager'
@@ -233,6 +238,16 @@ describe('autocomplete rate limits', () => {
     await manager.generate(autocomplete)
     timers.nowMs = 5_000
     await expect(manager.generate(autocomplete)).rejects.toThrow(/in flight/)
+  })
+
+  it('allows the autocomplete-specific response window before timing out', async () => {
+    const { manager, timers, events } = harness(enabled)
+    manager.installFakeProvider({ hang: true })
+    const { requestId } = await manager.generate(autocomplete)
+    timers.fire(AI_AUTOCOMPLETE_TIMEOUT_MS - 1)
+    expect(events).toEqual([])
+    timers.fire(AI_AUTOCOMPLETE_TIMEOUT_MS)
+    expect(events).toEqual([{ requestId, kind: 'error', message: expect.stringMatching(/timed out/) }])
   })
 
   it('spaces starts one second apart and skips rather than queues', async () => {

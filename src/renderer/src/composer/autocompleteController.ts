@@ -7,7 +7,11 @@
 // stale request simply yields no suggestion.
 
 import type { AiStreamEvent } from '../../../shared/ai'
-import { AUTOCOMPLETE_DEBOUNCE_MS, AUTOCOMPLETE_MAX_SUGGESTION_CHARS } from '../../../shared/ai'
+import {
+  AUTOCOMPLETE_DEBOUNCE_MS,
+  AUTOCOMPLETE_MAX_SUGGESTION_CHARS,
+  AUTOCOMPLETE_MIN_START_INTERVAL_MS
+} from '../../../shared/ai'
 
 export interface AutocompleteExcerpt {
   prefix: string
@@ -53,6 +57,8 @@ export class AutocompleteController {
   private sequence = 0
   private pending: PendingRequest | null = null
   private suggestion: { text: string; anchor: string } | null = null
+  /** Last transport start accepted by main, used to coalesce replacements. */
+  private lastStartAt: number | null = null
   private disposed = false
 
   constructor(private readonly hooks: AutocompleteHooks) {}
@@ -61,10 +67,7 @@ export class AutocompleteController {
   noteTypingEdit(): void {
     if (this.disposed) return
     this.invalidate()
-    this.timer = this.hooks.setTimer(() => {
-      this.timer = null
-      void this.dispatch()
-    }, AUTOCOMPLETE_DEBOUNCE_MS)
+    this.scheduleDispatch(AUTOCOMPLETE_DEBOUNCE_MS)
   }
 
   /** Caret/selection movement without typing: clear, do not re-arm. */
@@ -179,8 +182,22 @@ export class AutocompleteController {
     }
   }
 
+  private scheduleDispatch(delayMs: number): void {
+    this.timer = this.hooks.setTimer(() => {
+      this.timer = null
+      void this.dispatch()
+    }, delayMs)
+  }
+
   private async dispatch(): Promise<void> {
     if (this.disposed || this.pending !== null) return
+    if (this.lastStartAt !== null) {
+      const cooldownRemaining = AUTOCOMPLETE_MIN_START_INTERVAL_MS - (this.hooks.now() - this.lastStartAt)
+      if (cooldownRemaining > 0) {
+        this.scheduleDispatch(cooldownRemaining)
+        return
+      }
+    }
     let enabled: boolean
     try {
       enabled = await this.hooks.isEnabled()
@@ -199,8 +216,12 @@ export class AutocompleteController {
       early: []
     }
     this.pending = pending
+    const startedAt = this.hooks.now()
     try {
       const { requestId } = await this.hooks.request(excerpt)
+      // Main accepted this start. Preserve its cooldown even if an edit raced
+      // the IPC response and already invalidated the pending request.
+      this.lastStartAt = startedAt
       if (this.pending !== pending) {
         // Invalidated while the id was in flight: the request must die too.
         this.hooks.cancelRequest(requestId)

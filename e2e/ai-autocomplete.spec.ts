@@ -135,6 +135,23 @@ test('Esc dismisses without closing, and an unaccepted preview never reaches the
   expect(await editor(page).innerText()).not.toContain('phantom')
 })
 
+test('stop-and-start typing coalesces the latest request through the cooldown', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page, true)
+  await installFakeAi(app, { chunks: [' latest suggestion'], delayMs: 700 })
+  await page.keyboard.press('c')
+  await editor(page).click({ position: { x: 24, y: 24 } })
+
+  await page.keyboard.type('Hello')
+  await expect.poll(() => aiRequests(app).then((requests) => requests.length)).toBe(1)
+  await page.keyboard.type(' again')
+
+  await expect.poll(() => aiRequests(app).then((requests) => requests.length)).toBe(2)
+  await expect.poll(() => aiRequests(app).then((requests) => requests[0]?.canceled)).toBe(true)
+  await expect(preview(page)).toContainText('latest suggestion')
+  await expect(editor(page)).toContainText('Hello again')
+})
+
 test('a caret in the Attn footer never requests; provider failure yields silence, not toasts', async ({
   app,
   page

@@ -659,9 +659,11 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   draft, signatures, recipients, subject, attachments, voice instructions, and unrelated sent-mail
   examples. Do not fetch mail solely to enrich autocomplete context.
 - Debounce autocomplete by 300ms; allow at most one autocomplete request in flight app-wide, no more than
-  one start per second and 20 per rolling minute. Skip requests when limited; do not queue or retry them
-  automatically. Cancel and discard results more than 1,500ms after dispatch. Slow, offline, or failed
-  providers leave typing usable without recurring error toasts. Settings still expose configuration errors.
+  one start per second and 20 per rolling minute. When typing replaces a canceled request inside the
+  one-second cooldown, coalesce the latest eligible request until the cooldown expires; the rolling-minute
+  cap and provider failures still skip without automatic retries. Cancel and discard results more than five
+  seconds after dispatch. Slow, offline, or failed providers leave typing usable without recurring error
+  toasts. Settings still expose configuration errors.
 - Disabling autocomplete cancels its timers and requests and clears previews without disabling explicit
   reply drafting. The master AI switch stops both features; removing the key also disables both. Cancel
   in-flight work and ignore late responses. Content already sent to a provider cannot be recalled.
