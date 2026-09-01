@@ -280,9 +280,11 @@ test('a long suggestion moves to the next line instead of wrapping from the care
   await page.keyboard.type('We are planning to meet on Tuesday')
   await expect(preview(page)).toBeVisible()
 
-  const editorBox = await editor(page).boundingBox()
+  const editorTextLeft = await editor(page).evaluate((root) => {
+    const box = root.getBoundingClientRect()
+    return box.left + Number.parseFloat(getComputedStyle(root).paddingLeft)
+  })
   const previewBox = await preview(page).boundingBox()
-  expect(editorBox).not.toBeNull()
   expect(previewBox).not.toBeNull()
-  expect(Math.abs((previewBox?.x ?? 0) - (editorBox?.x ?? 0))).toBeLessThan(3)
+  expect(Math.abs((previewBox?.x ?? 0) - editorTextLeft)).toBeLessThan(3)
 })

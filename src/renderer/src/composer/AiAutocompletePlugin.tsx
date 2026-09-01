@@ -57,18 +57,22 @@ function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement
   }
   const containerRect = container.getBoundingClientRect()
   const rootRect = rootElement.getBoundingClientRect()
+  const rootStyle = getComputedStyle(rootElement)
+  const rootPaddingLeft = Number.parseFloat(rootStyle.paddingLeft) || 0
+  const rootPaddingRight = Number.parseFloat(rootStyle.paddingRight) || 0
   const caretLeft = rect.right - containerRect.left + container.scrollLeft
   const remaining = containerRect.width - (rect.right - containerRect.left) - 28
-  const rootLeft = rootRect.left - containerRect.left + container.scrollLeft
-  const caretIsPastLineStart = caretLeft - rootLeft > 4
+  const textLeft = rootRect.left - containerRect.left + container.scrollLeft + rootPaddingLeft
+  const textWidth = Math.max(rootRect.width - rootPaddingLeft - rootPaddingRight, 160)
+  const caretIsPastLineStart = caretLeft - textLeft > 4
   const suggestionWidth = previewTextWidth(container, text)
   if (caretIsPastLineStart && (remaining < 160 || suggestionWidth > remaining)) {
-    const lineHeight = Number.parseFloat(getComputedStyle(rootElement).lineHeight) || 20
+    const lineHeight = Number.parseFloat(rootStyle.lineHeight) || 20
     return {
       text,
-      left: rootLeft,
+      left: textLeft,
       top: rect.top - containerRect.top + container.scrollTop + lineHeight,
-      maxWidth: Math.max(rootRect.width, 160)
+      maxWidth: textWidth
     }
   }
   return {
