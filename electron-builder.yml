@@ -9,6 +9,7 @@ files:
   - out/**/*
   - package.json
   - resources/icon.png
+  - resources/menuBarTemplate.png
   - resources/tray.png
   - '!node_modules/better-sqlite3/{build,deps,src}/**/*'
 

@@ -25,11 +25,11 @@ interface SnippetManagerProps {
   onToast: (message: string) => void
 }
 
-const NOTE = 'text-[11px] leading-relaxed text-ink-faint'
+const NOTE = 'text-[13px] leading-[1.55] text-ink-dim'
 const ACTION_BUTTON =
-  'cursor-pointer rounded-md border border-edge px-2.5 py-1 text-xs text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent'
+  'cursor-pointer whitespace-nowrap rounded-md border border-edge px-2.5 py-1.5 text-sm text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent'
 const FIELD =
-  'h-8 w-full rounded-md border border-edge bg-ground px-2 text-xs text-ink outline-none focus:border-accent'
+  'h-9 w-full rounded-md border border-edge bg-ground px-2.5 text-sm text-ink outline-none focus:border-accent'
 
 function validateSnippetLinkUrl(url: string): boolean {
   return /^(?:https?:|mailto:)/i.test(url)
@@ -176,7 +176,7 @@ export function SnippetManager({ onToast }: SnippetManagerProps): React.JSX.Elem
           data-snippet-name={snippet.name}
         >
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[13px] text-ink">{snippet.name}</span>
+            <span className="truncate text-sm text-ink">{snippet.name}</span>
             {snippet.trigger && (
               <span className="shrink-0 rounded bg-active px-1.5 py-0.5 font-mono text-[11px] text-ink-dim">
                 ;{snippet.trigger}

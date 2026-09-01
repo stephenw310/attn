@@ -46,6 +46,7 @@ import { formatBytes } from '../formatBytes'
 import type { ShowToast } from '../hooks/useToast'
 import { normalizeAppleMailLineBackgrounds } from '../mailAppleBackgrounds'
 import { forceLightMailCss } from '../mailCss'
+import { suppressBlockedRemoteImages } from '../mailRemoteContent'
 import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
@@ -173,7 +174,7 @@ function quoteSrcDoc(body: string, surface: MailSurface, appearance: ThemeAppear
   const nativeContrast = light
     ? ''
     : 'body,body :where(*){color:inherit!important;background-color:transparent!important;background-image:none!important}body a{color:#60a5fa!important}'
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${senderCanvas ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${senderCanvas ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${senderCanvas ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${senderCanvas ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}img[data-remote-blocked="true"]{visibility:hidden}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
 }
 
 function InlineQuote({
@@ -206,6 +207,7 @@ function InlineQuote({
   // (PR #101 review). Without a source id the frame stays unnamed and fails
   // closed while blocking is on, exactly as before.
   const [frameNonce, setFrameNonce] = useState<string | null>(null)
+  const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(false)
   const [frameEpoch, setFrameEpoch] = useState(0)
   useEffect(() => {
     const bridge = window.attn
@@ -216,17 +218,38 @@ function InlineQuote({
   useEffect(() => {
     const bridge = window.attn
     setFrameNonce(null)
+    setRemoteImagesAllowed(false)
     if (!expanded || !html) return
-    if (!bridge || sourceMessageId === null) {
+    if (!bridge) {
       setFrameNonce('')
       return
+    }
+    if (sourceMessageId === null) {
+      let stale = false
+      void bridge.settings
+        .getAll()
+        .then((settings) => {
+          if (!stale) {
+            setRemoteImagesAllowed(!settings.remoteImagesBlocked)
+            setFrameNonce('')
+          }
+        })
+        .catch(() => {
+          if (!stale) setFrameNonce('')
+        })
+      return () => {
+        stale = true
+      }
     }
     const nonce = crypto.randomUUID()
     let stale = false
     bridge.mail
       .registerMessageFrame(nonce, sourceMessageId, false)
-      .then(() => {
-        if (!stale) setFrameNonce(nonce)
+      .then(({ imagesAllowed }) => {
+        if (!stale) {
+          setRemoteImagesAllowed(imagesAllowed)
+          setFrameNonce(nonce)
+        }
       })
       .catch(() => {
         if (!stale) setFrameNonce('')
@@ -308,6 +331,7 @@ function InlineQuote({
         style.textContent = forceLightMailCss(style.textContent ?? '')
       })
     }
+    if (!remoteImagesAllowed) suppressBlockedRemoteImages(document.body, TRANSPARENT_IMAGE)
     const pending = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
       const source = image.getAttribute('src') ?? ''
       if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
@@ -327,7 +351,7 @@ function InlineQuote({
     return () => {
       cancelled = true
     }
-  }, [appearance, draftId, html, surface])
+  }, [appearance, draftId, html, remoteImagesAllowed, surface])
 
   const renderedQuote = expanded ? srcDoc : null
   useLayoutEffect(() => {
@@ -631,18 +655,20 @@ function FollowUpControl({
       <button
         ref={triggerRef}
         type="button"
-        className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs ${
+        className={`flex h-8 max-w-72 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs ${
           followUpAt !== null ? 'text-accent' : 'text-ink-faint hover:bg-active hover:text-ink'
         }`}
         data-testid="composer-follow-up"
         data-follow-up-at={followUpAt ?? undefined}
         aria-expanded={open}
         aria-label="Remind me if no reply"
-        title="Remind me if no reply"
+        title={`Remind me if no reply (${modKeyLabel()}⇧H)`}
         onClick={() => onOpenChange(!open)}
       >
         <span aria-hidden>⏰</span>
-        {followUpAt !== null ? `Follow up ${formatSnoozeDate(followUpAt)}` : 'Remind me'}
+        <span className="truncate">
+          {followUpAt !== null ? `Follow up ${formatSnoozeDate(followUpAt)}` : 'Remind me'}
+        </span>
       </button>
       {open && (
         // biome-ignore lint/a11y/noStaticElementInteractions: Escape containment for the transient popover; its buttons and input carry the interactions
@@ -1359,7 +1385,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 data-testid="composer-footer"
                 className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4"
               >
-                <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible">
                   <EditorToolbar />
                   <button
                     type="button"

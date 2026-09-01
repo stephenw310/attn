@@ -116,7 +116,7 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
         aria-modal="true"
         aria-label="Keyboard shortcuts"
         data-testid="cheat-sheet"
-        className="fixed top-[8vh] left-1/2 z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="fixed top-1/2 left-1/2 z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
       >
         <div className="flex flex-none items-center gap-3 border-b border-edge px-5 py-3">
           <h2 className="text-sm font-semibold text-ink">Keyboard shortcuts</h2>

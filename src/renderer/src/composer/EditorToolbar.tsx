@@ -88,7 +88,11 @@ export function EditorToolbar(): React.JSX.Element {
   const button = 'rounded px-2 py-1 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink'
 
   return (
-    <div className="flex items-center gap-0.5" role="toolbar" aria-label="Formatting toolbar">
+    <div
+      className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5"
+      role="toolbar"
+      aria-label="Formatting toolbar"
+    >
       <button type="button" className={button} aria-label="Bold" onClick={() => format('bold')}>
         B
       </button>

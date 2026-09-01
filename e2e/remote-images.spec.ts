@@ -252,8 +252,14 @@ test('a per-sender exception covers the composer quote, and its removal blocks i
     await page.getByTestId('composer-quote-toggle').click()
     await expect(page.getByTestId('composer-quote')).toBeVisible()
     // The frame mounts only after its registration answered, so by the time
-    // it is visible a blocked quote has already made its zero requests.
+    // it is visible a blocked quote has already made its zero requests. Its
+    // display copy uses an invisible placeholder rather than a broken-image
+    // glyph; the saved and outgoing quote still keep the original source.
     expect(probe.hits.length).toBe(0)
+    const blockedImage = page.getByTestId('composer-quote').contentFrame().locator('img')
+    await expect(blockedImage).toHaveAttribute('data-remote-blocked', 'true')
+    await expect(blockedImage).toHaveAttribute('src', /^data:image\/gif/)
+    await expect(blockedImage).toBeHidden()
   } finally {
     await new Promise<void>((resolve) => {
       probe.server.close(() => resolve())

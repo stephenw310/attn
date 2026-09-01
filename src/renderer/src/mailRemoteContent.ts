@@ -13,6 +13,35 @@ const FETCH_ATTRIBUTES = ['src', 'poster', 'background'] as const
 /** href fetches only on SVG image/use; anchors merely navigate. */
 const SVG_HREF_TAGS = new Set(['image', 'use'])
 
+export function isRemoteMailUrl(value: string): boolean {
+  try {
+    // Chromium's URL parser ignores ASCII whitespace inside a scheme. Use
+    // that parser instead of a raw prefix so `ht\ntp:` cannot evade policy.
+    const protocol = new URL(value, window.location.href).protocol.toLowerCase()
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Replace blocked remote image sources in a detached display document. The
+ * original draft/quote HTML stays untouched; the transparent source prevents
+ * Chromium's broken-image glyph while preserving any explicit dimensions.
+ */
+export function suppressBlockedRemoteImages(root: ParentNode, placeholder: string): void {
+  for (const image of root.querySelectorAll<HTMLImageElement>('img')) {
+    const source = image.getAttribute('src') ?? ''
+    if (isRemoteMailUrl(source)) {
+      image.setAttribute('src', placeholder)
+      image.setAttribute('alt', '')
+      image.setAttribute('data-remote-blocked', 'true')
+    }
+    const srcset = image.getAttribute('srcset') ?? ''
+    if (CONTAINS_REMOTE_URL.test(srcset)) image.removeAttribute('srcset')
+  }
+}
+
 export function containsRemoteMailContent(html: string): boolean {
   const doc = new DOMParser().parseFromString(html, 'text/html')
   for (const element of doc.querySelectorAll('*')) {

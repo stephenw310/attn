@@ -1328,17 +1328,18 @@ export function Inbox({
     setReaderOpen(previous.readerOpen)
   }, [])
 
-  // The focus subscription is stable per account: helper identity changes
-  // route through this ref instead of re-subscribing, so effect churn (a
-  // composer closing, a switch settling) cannot tear down a subscription
-  // while a pull is in flight. Combined with main's acknowledge contract —
-  // a pull never consumes; only the accepting tree clears — a notification
-  // click survives any remount interleaving (T32 regression).
+  // The focus subscription is stable per account after split bootstrap:
+  // helper identity changes route through this ref instead of re-subscribing.
+  // Waiting for bootstrap avoids pulling a target before the active split has
+  // propagated to useMailData, where the targeted read would correctly
+  // decline it. Main keeps the target pending until this ready tree accepts
+  // and acknowledges it (T32).
   const focusHandlersRef = useRef({ clearSelection, focusInboxThread, switchAccount, switchView })
   focusHandlersRef.current = { clearSelection, focusInboxThread, switchAccount, switchView }
+  const focusSplitsReady = splits.state !== null
   useEffect(() => {
     const bridge = window.attn
-    if (!bridge || !activeAccount) return
+    if (!bridge || !activeAccount || !focusSplitsReady) return
     return bridge.mail.onFocusThread((target) => {
       const handlers = focusHandlersRef.current
       // A notification for an inactive account switches there first (F12/F18).
@@ -1409,7 +1410,7 @@ export function Inbox({
         })().catch(() => {})
       })
     })
-  }, [activeAccount])
+  }, [activeAccount, focusSplitsReady])
 
   const updateSearchRows = useCallback(
     (updater: Parameters<typeof search.updateRows>[0]) => {
@@ -2113,9 +2114,16 @@ export function Inbox({
                 const currentMessageTarget = messageReplyTargetRef.current
                 const currentMessageId =
                   currentMessageTarget?.threadId === target.id ? currentMessageTarget.messageId : null
-                if (currentMessageId !== targetMessageId) return
+                // The reader shell can render just before ConversationView
+                // publishes its initial latest-message cursor. That null → id
+                // transition is initialization, not a user moving the cursor,
+                // so let the command bind to the now-known source. Once a
+                // source existed at invocation time, any change still cancels
+                // the stale request.
+                if (targetMessageId !== null && currentMessageId !== targetMessageId) return
+                const sourceMessageId = targetMessageId ?? currentMessageId
                 requestAiDraft(target.id)
-                openReplyRef.current('reply', targetMessageId ?? undefined)
+                openReplyRef.current('reply', sourceMessageId ?? undefined)
                 return
               }
               showToast('Open a conversation to draft an AI reply')

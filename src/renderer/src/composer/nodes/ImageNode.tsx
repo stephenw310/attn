@@ -8,23 +8,11 @@ import {
   type Spread
 } from 'lexical'
 import { useContext, useEffect, useState } from 'react'
+import { isRemoteMailUrl } from '../../mailRemoteContent'
 import { DraftSourceMessageIdContext } from '../DraftContentContext'
 import { sanitizeComposerImageSource, sanitizeComposerStyle } from '../sanitize'
 
 const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
-
-function isRemoteImageSource(source: string): boolean {
-  try {
-    // Use the same parser that resolves the value assigned to <img src>.
-    // Chromium ignores ASCII tabs and line breaks inside a URL scheme, so a
-    // raw-prefix check can call a source local immediately before the browser
-    // normalizes and fetches it as HTTP.
-    const protocol = new URL(source, window.location.href).protocol.toLowerCase()
-    return protocol === 'http:' || protocol === 'https:'
-  } catch {
-    return false
-  }
-}
 
 /**
  * T33 (PR #101 review): the editor renders in the TOP frame, which main's
@@ -52,7 +40,7 @@ function ComposerImage({
   style: string
 }): React.JSX.Element {
   const sourceMessageId = useContext(DraftSourceMessageIdContext)
-  const remote = isRemoteImageSource(src)
+  const remote = isRemoteMailUrl(src)
   const [allowed, setAllowed] = useState(!remote)
   const [policyEpoch, setPolicyEpoch] = useState(0)
   useEffect(() => {
@@ -234,7 +222,7 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
     // error, and a REMOTE URL on this live-document element would fire a real
     // request on every serialization, before any policy ran (PR #101 review).
     // Both ride data attributes and swap in after the DOM became a string.
-    const remote = isRemoteImageSource(this.__src)
+    const remote = isRemoteMailUrl(this.__src)
     image.setAttribute('src', remote ? TRANSPARENT_IMAGE : this.__src)
     if (remote) image.setAttribute('data-attn-remote-src', this.__src)
     if (this.__contentId) image.setAttribute('data-attn-cid', this.__contentId)

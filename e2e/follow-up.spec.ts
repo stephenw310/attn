@@ -152,7 +152,7 @@ test('the originating send never cancels; a real reply does, before the deadline
   await expect(designRow(page).getByTestId('chip-follow-up')).toHaveCount(0)
 })
 
-test('Escape closes the follow-up popover and returns focus before closing the composer', async ({
+test('the shortcut opens follow-up without overflowing the toolbar, and Escape restores focus', async ({
   page
 }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
@@ -161,14 +161,26 @@ test('Escape closes the follow-up popover and returns focus before closing the c
   const composer = new ComposerPage(page)
   await composer.openReply()
 
-  // Opening moves focus into the popover, so its Escape containment sees the
-  // key instead of the composer's close handling (PR #101 review).
-  await page.getByTestId('composer-follow-up').click()
+  // The command has a discoverable shortcut and moves focus into the
+  // popover, so its Escape containment sees the key.
+  await page.keyboard.press('ControlOrMeta+Shift+H')
   const popover = page.getByTestId('follow-up-popover')
   await expect(popover).toBeVisible()
   await expect
     .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? null))
     .toBe('follow-up-popover')
+
+  await page.getByTestId('follow-up-preset-3d').click()
+  await expect(popover).toHaveCount(0)
+  await expect(page.getByTestId('composer-follow-up')).toContainText('Follow up')
+  await expect
+    .poll(() =>
+      page.getByTestId('composer-footer').evaluate((footer) => footer.scrollWidth <= footer.clientWidth)
+    )
+    .toBe(true)
+
+  await page.keyboard.press('ControlOrMeta+Shift+H')
+  await expect(popover).toBeVisible()
 
   await page.keyboard.press('Escape')
   await expect(popover).toHaveCount(0)

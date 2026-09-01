@@ -15,14 +15,14 @@ import {
 // shows its disclosure first, and only the confirm button writes. The key is
 // write-only — it is never echoed back into the UI after saving.
 
-const ROW = 'flex items-center justify-between gap-4 rounded-md px-3 py-2'
-const NOTE = 'text-[11px] leading-relaxed text-ink-faint'
+const ROW = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 rounded-md px-3 py-2.5'
+const NOTE = 'text-[13px] leading-[1.55] text-ink-dim'
 const SELECT =
-  'min-w-0 cursor-pointer rounded-md border border-edge bg-ground px-2 py-1 text-xs text-ink outline-none focus:border-accent'
+  'min-w-0 max-w-[min(21rem,45vw)] cursor-pointer rounded-md border border-edge bg-ground px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent'
 const INPUT =
-  'rounded-md border border-edge bg-ground px-2 py-1 text-xs text-ink outline-none focus:border-accent'
+  'rounded-md border border-edge bg-ground px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent'
 const ACTION_BUTTON =
-  'cursor-pointer rounded-md border border-edge px-2.5 py-1 text-xs text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent'
+  'cursor-pointer whitespace-nowrap rounded-md border border-edge px-2.5 py-1.5 text-sm text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent'
 const CONFIRM_PANEL = 'mx-3 mt-1 rounded-md border border-accent/40 bg-accent/10 px-3 py-2'
 const CONFIRM_APPLY =
   'cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20'
@@ -99,7 +99,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
     <div data-testid="settings-ai-controls">
       <label className={`mt-2 ${ROW}`}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13px] text-ink">AI reply drafting</span>
+          <span className="text-sm text-ink">AI reply drafting</span>
           <span className={NOTE}>
             Draft replies with your own AI provider and key. Off by default; turning it on shows exactly what
             each invocation sends.
@@ -151,7 +151,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
 
       <div className={ROW}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13px] text-ink">Provider</span>
+          <span className="text-sm text-ink">Provider</span>
           <span className={NOTE}>
             Anthropic, or any OpenAI-compatible endpoint — including fully local models via Ollama or LM
             Studio for a zero-cloud setup.
@@ -182,7 +182,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
       {preset.baseUrlEditable && (
         <div className={ROW}>
           <span className="flex min-w-0 flex-col">
-            <span className="text-[13px] text-ink">Endpoint URL</span>
+            <span className="text-sm text-ink">Endpoint URL</span>
             <span className={NOTE}>The chat-completions base URL, e.g. {preset.defaultBaseUrl}.</span>
           </span>
           <span className="flex flex-none items-center gap-1.5">
@@ -213,7 +213,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
 
       <div className={ROW}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13px] text-ink">Model</span>
+          <span className="text-sm text-ink">Model</span>
           <span className={NOTE}>Leave empty for the provider default ({preset.defaultModel}).</span>
         </span>
         <span className="flex flex-none items-center gap-1.5">
@@ -243,7 +243,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
 
       <div className={ROW}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13px] text-ink">API key</span>
+          <span className="text-sm text-ink">API key</span>
           <span className={NOTE}>
             Stored encrypted by the OS, separate from your Google sign-in; removing it disables both AI
             features and never touches your accounts. Local endpoints may not need one.
@@ -290,7 +290,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
 
       <div className={ROW}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13px] text-ink">Voice</span>
+          <span className="text-sm text-ink">Voice</span>
           <span className={NOTE}>The tone drafts aim for, plus standing rules every draft follows.</span>
         </span>
         <select
@@ -311,18 +311,18 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
         </select>
       </div>
 
-      <div className={ROW}>
+      <div className={`${ROW} items-start`}>
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span className="text-[13px] text-ink">Standing rules</span>
+          <span className="text-sm text-ink">Standing rules</span>
           <textarea
             data-testid="settings-ai-voice-rules"
             aria-label="AI standing rules"
-            rows={2}
+            rows={10}
             placeholder={'e.g. sign off with "Best, Chao"; never use exclamation marks'}
             disabled={!settings}
             value={rulesValue}
             onChange={(event) => setRulesDraft(event.target.value)}
-            className={`w-full resize-y ${INPUT}`}
+            className={`w-full resize-none ${INPUT}`}
           />
         </span>
         <button
@@ -333,7 +333,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
             setRulesDraft(null)
             write('voiceRules', rulesValue)
           }}
-          className={ACTION_BUTTON}
+          className={`${ACTION_BUTTON} self-end`}
         >
           Apply
         </button>
@@ -341,7 +341,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
 
       <label className={ROW}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13px] text-ink">Match my writing voice</span>
+          <span className="text-sm text-ink">Match my writing voice</span>
           <span className={NOTE}>
             Sends a few of your recent sent replies with each explicit draft request as style examples. Never
             used for autocomplete.
@@ -360,7 +360,7 @@ export function AiSettingsSection({ onToast }: { onToast: (message: string) => v
 
       <label className={ROW}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13px] text-ink">Inline autocomplete</span>
+          <span className="text-sm text-ink">Inline autocomplete</span>
           <span className={NOTE}>
             A separate opt-in: short gray suggestions while you type. Enabling reply drafting alone never
             turns this on.

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
-import { ATTN_SIGNATURE_LINE } from '../../shared/settings'
+import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL } from '../../shared/settings'
 import { openDatabase } from '../db'
 import { readAccountSetting, writeAccountSetting, writeAccountSetting as writeSetting } from '../settings'
 import { closeDraft, listDrafts, requestDraftMirror, saveDraft } from './drafts'
@@ -304,10 +304,10 @@ describe('optional "Sent with Attn" footer (F6/T32B)', () => {
         const footerAt = draft.bodyHtml.indexOf('data-attn-signature="footer"')
         expect(signatureAt).toBeGreaterThanOrEqual(0)
         expect(footerAt).toBeGreaterThan(signatureAt)
-        expect(draft.bodyHtml).toContain(`>${ATTN_SIGNATURE_LINE}</span>`)
-        // No hyperlink, image, or tracking in the footer itself.
-        expect(draft.bodyHtml.slice(footerAt)).not.toMatch(/<a\b|<img\b|http/)
-        expect(draft.bodyText.endsWith(`\n${ATTN_SIGNATURE_LINE}`)).toBe(true)
+        expect(draft.bodyHtml.slice(footerAt)).toContain(`href="${ATTN_SIGNATURE_URL}"`)
+        expect(draft.bodyHtml.slice(footerAt)).toContain('>Attn:</a>')
+        expect(draft.bodyHtml.slice(footerAt)).not.toMatch(/<img\b/)
+        expect(draft.bodyText.endsWith(`\n\n${ATTN_SIGNATURE_LINE}`)).toBe(true)
       }
       // The cached signature settings were not mutated by composition.
       expect(readAccountSetting(db, ACCOUNT, SEND_AS_SIGNATURE_HTML_SETTING)).not.toContain(
@@ -325,7 +325,7 @@ describe('optional "Sent with Attn" footer (F6/T32B)', () => {
       const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
       expect(prepared.draft.bodyHtml).toContain('data-attn-signature="footer"')
       expect(prepared.draft.bodyHtml.startsWith('<div dir="ltr"><div><br></div>')).toBe(true)
-      expect(prepared.draft.bodyText).toBe(`\n${ATTN_SIGNATURE_LINE}`)
+      expect(prepared.draft.bodyText).toBe(`\n\n${ATTN_SIGNATURE_LINE}`)
       expect(prepared.defaultSignatureFingerprint).not.toBeNull()
     } finally {
       db.close()
@@ -373,7 +373,7 @@ describe('optional "Sent with Attn" footer (F6/T32B)', () => {
         hasOnlyDefaultPrimarySignature(
           {
             ...prepared.draft,
-            bodyHtml: prepared.draft.bodyHtml.replace(ATTN_SIGNATURE_LINE, 'Sent with love')
+            bodyHtml: prepared.draft.bodyHtml.replace('Attn:</a>', 'love</a>')
           },
           prepared.defaultSignatureFingerprint
         )

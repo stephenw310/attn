@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { DraftSaveInput } from '../../shared/drafts'
-import { ATTN_SIGNATURE_LINE } from '../../shared/settings'
+import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL } from '../../shared/settings'
 import type { Db } from '../db'
 import { textFromRaw } from '../gmail/parse'
 import { readAccountSetting, writeAccountSetting } from '../settings'
@@ -16,7 +16,9 @@ export const ATTN_SIGNATURE_SETTING = 'attnSignatureEnabled'
 /** The footer element the composer's AttnFooterNode round-trips (F6/T32B).
     The gray is a fixed mid tone so recipients and all four themes read it as
     secondary; the marker attribute is what identity survives on. */
-const ATTN_FOOTER_HTML = `<div data-attn-signature="footer"><span style="color:#888888">${ATTN_SIGNATURE_LINE}</span></div>`
+const ATTN_FOOTER_HTML =
+  '<div data-attn-signature="footer"><br><span style="color:#888888">Sent with ' +
+  `<a href="${ATTN_SIGNATURE_URL}" style="color:#888888;text-decoration:underline">Attn:</a></span></div>`
 const ATTN_FOOTER_SELECTOR = '[data-attn-signature="footer"]'
 
 export function attnSignatureEnabled(db: Db, accountId: string): boolean {
@@ -146,12 +148,12 @@ function signatureContainsFooterLine(signatureHtml: string): boolean {
     .some((line) => line.trim() === ATTN_SIGNATURE_LINE)
 }
 
-/** Append the footer after the signature wrapper, inside the body envelope. */
+/** Append a visibly separated footer after the signature wrapper, inside the body envelope. */
 function withAttnFooter(signature: DraftSignature | null): DraftSignature {
   if (!signature) {
     return {
       bodyHtml: `<div dir="ltr"><div><br></div>${ATTN_FOOTER_HTML}</div>`,
-      bodyText: `\n${ATTN_SIGNATURE_LINE}`
+      bodyText: `\n\n${ATTN_SIGNATURE_LINE}`
     }
   }
   const { JSDOM } = require('jsdom') as typeof import('jsdom')
@@ -161,7 +163,7 @@ function withAttnFooter(signature: DraftSignature | null): DraftSignature {
   else document.body.insertAdjacentHTML('beforeend', ATTN_FOOTER_HTML)
   return {
     bodyHtml: document.body.innerHTML,
-    bodyText: `${signature.bodyText}\n${ATTN_SIGNATURE_LINE}`
+    bodyText: `${signature.bodyText}\n\n${ATTN_SIGNATURE_LINE}`
   }
 }
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
-import { containsRemoteMailContent } from './mailRemoteContent'
+import { containsRemoteMailContent, isRemoteMailUrl, suppressBlockedRemoteImages } from './mailRemoteContent'
 
 describe('containsRemoteMailContent', () => {
   it('detects the classic fetch attributes', () => {
@@ -36,5 +36,29 @@ describe('containsRemoteMailContent', () => {
     expect(containsRemoteMailContent('<img src="data:image/gif;base64,R0l=">')).toBe(false)
     expect(containsRemoteMailContent('<p>see https://x.test/page for details</p>')).toBe(false)
     expect(containsRemoteMailContent('<style>body{color:#111}</style>')).toBe(false)
+  })
+})
+
+describe('blocked remote image display', () => {
+  it('replaces remote sources without touching CID or data images', () => {
+    const document = new DOMParser().parseFromString(
+      '<img id="remote" src="https://x.test/p.png" alt="Logo" srcset="https://x.test/2x.png 2x">' +
+        '<img id="cid" src="cid:logo"><img id="data" src="data:image/gif;base64,R0l=">',
+      'text/html'
+    )
+    suppressBlockedRemoteImages(document.body, 'data:image/gif;base64,placeholder')
+
+    const remote = document.querySelector('#remote')
+    expect(remote?.getAttribute('src')).toBe('data:image/gif;base64,placeholder')
+    expect(remote?.getAttribute('alt')).toBe('')
+    expect(remote?.getAttribute('srcset')).toBeNull()
+    expect(remote?.getAttribute('data-remote-blocked')).toBe('true')
+    expect(document.querySelector('#cid')?.getAttribute('src')).toBe('cid:logo')
+    expect(document.querySelector('#data')?.getAttribute('src')).toBe('data:image/gif;base64,R0l=')
+  })
+
+  it('uses browser URL parsing for whitespace-obscured HTTP schemes', () => {
+    expect(isRemoteMailUrl('ht\ntp://x.test/p.png')).toBe(true)
+    expect(isRemoteMailUrl('cid:logo')).toBe(false)
   })
 })

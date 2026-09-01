@@ -47,11 +47,52 @@ test.describe('settings surface', () => {
     await expect(page.getByTestId('thread-list')).toBeHidden()
     await expect(settings.getByTestId('settings-account-row')).toHaveCount(1)
     await expect(settings.getByTestId('settings-account-row')).toContainText('seed@attn.test')
+    await expect(settings.getByTestId('settings-scope-note')).toContainText(
+      '“All accounts” apply to every signed-in account and mailbox'
+    )
+    await expect(settings.getByTestId('settings-sync')).toContainText('This account')
+    await expect(settings.getByTestId('settings-sync-limit-mode')).toContainText(
+      'Recommended — 400,000 email threads'
+    )
+    await expect(settings.getByTestId('settings-privacy')).toContainText('All accounts')
+    await expect(settings.getByTestId('settings-remote-images-description')).toContainText(
+      'every mailbox and signed-in account'
+    )
+
+    // Settings remain readable and every control fits its row at the default
+    // app size. The AI rules field is deliberately fixed at ten lines.
+    const layout = await settings.evaluate((root) => {
+      const syncDescription = root.querySelector<HTMLElement>('[data-testid="settings-sync-description"]')
+      const splitButton = root.querySelector<HTMLElement>('[data-testid="settings-split-rules"]')
+      const rules = root.querySelector<HTMLTextAreaElement>('[data-testid="settings-ai-voice-rules"]')
+      const style = syncDescription ? getComputedStyle(syncDescription) : null
+      return {
+        noHorizontalOverflow: root.scrollWidth <= root.clientWidth,
+        descriptionFontSize: style?.fontSize,
+        splitWhiteSpace: splitButton ? getComputedStyle(splitButton).whiteSpace : null,
+        rulesResize: rules ? getComputedStyle(rules).resize : null,
+        rulesRows: rules?.rows
+      }
+    })
+    expect(layout).toEqual({
+      noHorizontalOverflow: true,
+      descriptionFontSize: '13px',
+      splitWhiteSpace: 'nowrap',
+      rulesResize: 'none',
+      rulesRows: 10
+    })
 
     mkdirSync(artifactDirectory, { recursive: true })
     const path = join(artifactDirectory, 'settings.png')
     await page.screenshot({ path })
     await testInfo.attach('settings', { path, contentType: 'image/png' })
+
+    await settings
+      .getByTestId('settings-ai')
+      .evaluate((section) => section.scrollIntoView({ block: 'start' }))
+    const aiPath = join(artifactDirectory, 'settings-ai.png')
+    await page.screenshot({ path: aiPath })
+    await testInfo.attach('settings-ai', { path: aiPath, contentType: 'image/png' })
 
     await page.keyboard.press('Escape')
     await expect(settings).toHaveCount(0)
@@ -180,6 +221,15 @@ test.describe('settings surface', () => {
     await page.keyboard.press('ControlOrMeta+/')
     const sheet = page.getByTestId('cheat-sheet')
     await expect(sheet).toBeVisible()
+    const centered = await sheet.evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return {
+        x: Math.abs(box.left + box.width / 2 - window.innerWidth / 2),
+        y: Math.abs(box.top + box.height / 2 - window.innerHeight / 2)
+      }
+    })
+    expect(centered.x).toBeLessThanOrEqual(1)
+    expect(centered.y).toBeLessThanOrEqual(1)
     // The G chords come straight from the registry, grouped by category.
     await expect(sheet.getByTestId('cheat-sheet-command').filter({ hasText: 'Go to Inbox' })).toContainText(
       'G I'
@@ -589,7 +639,11 @@ test.describe('"Sent with Attn" footer', () => {
     await composer.openNew()
     await expect(composer.signature).toHaveCount(1)
     await composer.expectSignatureCollapsed()
-    await expect(footer(page)).toHaveText('Sent with Attn')
+    await expect(footer(page)).toHaveText('Sent with Attn:')
+    await expect(footer(page).getByRole('link', { name: 'Attn:' })).toHaveAttribute(
+      'href',
+      'https://github.com/stephenw310/attn'
+    )
     await expect(footer(page)).toBeVisible()
 
     // Untouched footer-and-signature drafts are discarded on close.

@@ -74,8 +74,9 @@ export const LIFETIME_THREAD_CAP_ALL_MAIL = 0
  * longer active, so a late completion cannot land on a newly selected
  * account's controls.
  */
-/** The exact optional footer line (F6). Plain text — no link, image, or tracking. */
-export const ATTN_SIGNATURE_LINE = 'Sent with Attn'
+/** The exact optional footer line and its only link target (F6). */
+export const ATTN_SIGNATURE_LINE = 'Sent with Attn:'
+export const ATTN_SIGNATURE_URL = 'https://github.com/stephenw310/attn'
 
 export interface AccountSettings {
   /**
@@ -87,7 +88,7 @@ export interface AccountSettings {
    */
   lifetimeThreadCap: number | null
   /**
-   * Include the "Sent with Attn" footer when creating a local draft (F6).
+   * Include the "Sent with Attn:" footer when creating a local draft (F6).
    * Default off; the preference affects new drafts only — open, saved, and
    * queued drafts keep exactly the body the user last saw.
    */

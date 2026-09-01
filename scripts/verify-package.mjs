@@ -18,6 +18,7 @@ const requiredEntries = [
   '/node_modules/jsdom/lib/api.js',
   '/package.json',
   '/resources/icon.png',
+  '/resources/menuBarTemplate.png',
   '/resources/tray.png'
 ]
 

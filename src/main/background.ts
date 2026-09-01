@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, Tray } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, Tray } from 'electron'
+import menuBarTemplate from '../../resources/menuBarTemplate.png?asset'
 import trayIcon from '../../resources/tray.png?asset'
 import { loginItemSettingsFor } from './backgroundSettings'
 import { oneHourFrom, tomorrowStart } from './notify'
@@ -41,7 +42,6 @@ function installLoginItem(settings: BackgroundSettings, effects: BackgroundEffec
 function trayMenu(effects: BackgroundEffects): Menu {
   return Menu.buildFromTemplate([
     { label: 'Open Inbox', click: () => showMainWindow() },
-    { label: 'Compose (M2)', enabled: false },
     { type: 'separator' },
     {
       label: 'Pause notifications',
@@ -85,7 +85,9 @@ export function applyMenuBarIcon(visible: boolean, effects: BackgroundEffects): 
     return
   }
   if (macMenuBarTray) return
-  macMenuBarTray = new Tray(trayIcon)
+  const icon = nativeImage.createFromPath(menuBarTemplate).resize({ width: 16, height: 16 })
+  icon.setTemplateImage(true)
+  macMenuBarTray = new Tray(icon)
   macMenuBarTray.setToolTip('Attn')
   macMenuBarTray.setContextMenu(trayMenu(effects))
 }
