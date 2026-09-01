@@ -117,7 +117,7 @@ those controls a home and connects them to the existing account and notification
   `Open settings`.
 - **Sections at ship time:** Accounts (live roster, status, add, reconnect, Sign out, and `Mod+1..9` reorder),
   Triage (undo-send delay; auto-advance next, previous, or back to list), Notifications (global pause and
-  resume; per-account split controls), Background (launch at login; macOS menu-bar icon, default off),
+  resume), Background (launch at login; macOS menu-bar icon, default off),
   and Appearance (the four F14 themes). T32A adds Sync & storage and T32B adds Compose for the active
   account. T33, T34, and T36 add their own sections. Label account-specific settings with the owning email and distinguish them
   from app-wide preferences.
@@ -135,8 +135,8 @@ those controls a home and connects them to the existing account and notification
 - **Notification pause:** expose the existing one-hour, until-tomorrow, and resume actions on both OSes,
   with the paused-until time visible. Reuse `notificationsPausedUntil`, `notificationQueries.ts`, and the
   existing deadline helpers; the pause spans every account while split `notify` flags remain per-account.
-  Link to `SplitRuleManager.tsx` for those flags. Do not add separate per-account pause state or a second
-  notification scheduler.
+  The Inbox split-strip gear opens `SplitRuleManager.tsx` for those flags; Settings does not duplicate it.
+  Do not add separate per-account pause state or a second notification scheduler.
 - **Pending notification delivery must survive composer close and account switch.** Resolve the
   intermittent failure recorded below while integrating account and notification settings. Preserve a
   target until the correct live account view accepts it; a subscription cleanup or saved-view restore

@@ -53,7 +53,7 @@ test.describe('settings surface', () => {
     await expect(accountScope).toContainText('seed@attn.test')
     await expect(accountScope.getByTestId('settings-sync')).toBeVisible()
     await expect(accountScope.getByTestId('settings-compose')).toBeVisible()
-    await expect(accountScope.getByTestId('settings-account-notifications')).toBeVisible()
+    await expect(accountScope.getByTestId('settings-split-rules')).toHaveCount(0)
     await expect(allAccountsScope).toContainText('All accounts')
     await expect(allAccountsScope).toContainText('every signed-in account and mailbox')
     await expect(allAccountsScope.getByTestId('settings-triage')).toBeVisible()
@@ -70,7 +70,6 @@ test.describe('settings surface', () => {
     // app size. The AI rules field is deliberately fixed at ten lines.
     const layout = await settings.evaluate((root) => {
       const syncDescription = root.querySelector<HTMLElement>('[data-testid="settings-sync-description"]')
-      const splitButton = root.querySelector<HTMLElement>('[data-testid="settings-split-rules"]')
       const rules = root.querySelector<HTMLTextAreaElement>('[data-testid="settings-ai-voice-rules"]')
       const style = syncDescription ? getComputedStyle(syncDescription) : null
       const headings = [...root.querySelectorAll<HTMLElement>('h2, h3')]
@@ -80,7 +79,6 @@ test.describe('settings surface', () => {
         headingsUseNormalCase: headings.every(
           (heading) => getComputedStyle(heading).textTransform === 'none'
         ),
-        splitWhiteSpace: splitButton ? getComputedStyle(splitButton).whiteSpace : null,
         rulesResize: rules ? getComputedStyle(rules).resize : null,
         rulesRows: rules?.rows
       }
@@ -89,7 +87,6 @@ test.describe('settings surface', () => {
       noHorizontalOverflow: true,
       descriptionFontSize: '13px',
       headingsUseNormalCase: true,
-      splitWhiteSpace: 'nowrap',
       rulesResize: 'none',
       rulesRows: 10
     })

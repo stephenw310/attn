@@ -304,6 +304,12 @@ export const COMMAND_SPECS = {
     context: 'composer',
     footer: { composer: { id: 'back', label: 'save and close', order: 20 } }
   },
+  'composer.undo': {
+    title: 'Undo body text',
+    shortcut: 'Mod+Z',
+    context: 'composer',
+    footer: { composer: { id: 'undo-text', label: 'undo', order: 15 } }
+  },
   'composer.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'composer' },
   'composer.send': {
     title: 'Send message',

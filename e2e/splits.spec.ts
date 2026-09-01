@@ -7,12 +7,7 @@ import { expect, test } from './electron'
 test.use({ seed: 'fixtures/seed-splits.json' })
 
 async function openSplitRules(page: Page): Promise<void> {
-  await page.getByTestId('account-menu').getByRole('button').first().click()
-  await page.getByTestId('account-settings').click()
-  await expect(page.getByTestId('settings-view')).toBeVisible()
-  const entry = page.getByTestId('settings-split-rules')
-  await entry.scrollIntoViewIfNeeded()
-  await entry.click()
+  await page.getByTestId('split-rules-settings').click()
   await expect(page.getByTestId('split-rules')).toBeVisible()
 }
 
@@ -54,8 +49,9 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(strip).toBeVisible()
   await expect(tabs).toHaveCount(5)
   await expect(tabs).toHaveText([/Calendar1/, /GitHub1/, /Newsletters1/, /Important1/, /Other1/])
-  // Rules have one visible home in Settings. The strip adds an ellipsis only
-  // when there are genuinely hidden splits to navigate to.
+  // Rules have one visible home in the Inbox header. The ellipsis appears
+  // only when there are genuinely hidden splits to navigate to.
+  await expect(page.getByTestId('split-rules-settings')).toHaveAttribute('title', 'Split Inbox settings')
   await expect(page.getByTestId('split-strip-overflow')).toHaveCount(0)
 
   await expect(page.locator('[data-testid="split-tab"][data-split-id="base:important"]')).toHaveAttribute(

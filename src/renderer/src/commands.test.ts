@@ -121,6 +121,7 @@ describe('command catalog', () => {
       'composer.replyAll',
       'composer.forward',
       'composer.close',
+      'composer.undo',
       'composer.discard',
       'composer.send',
       'composer.attach',
@@ -265,6 +266,7 @@ describe('keyboard dispatch', () => {
     useCommands([
       createCommand('draft.discard', () => {}),
       createCommand('composer.close', () => {}),
+      createCommand('composer.undo', () => {}),
       createCommand('composer.discard', () => {}),
       createCommand('composer.send', () => {}),
       createCommand('composer.attach', () => {}),
@@ -275,6 +277,8 @@ describe('keyboard dispatch', () => {
     expect(matchKey(key('d', { metaKey: true, shiftKey: true }), 'list')?.id).toBe('draft.discard')
     expect(matchKey(key('d', { ctrlKey: true, shiftKey: true }), 'reader')).toBeNull()
     expect(matchComposerKey(key('Escape'))?.id).toBe('composer.close')
+    expect(matchComposerKey(key('z', { metaKey: true }))?.id).toBe('composer.undo')
+    expect(matchComposerKey(key('z', { ctrlKey: true }))?.id).toBe('composer.undo')
     // Global allowInComposer commands dispatch in the composer too (T37);
     // plain mail commands never do.
     expect(matchComposerKey(key('j', { ctrlKey: true }))?.id).toBe('composer.aiDraft')
@@ -422,6 +426,19 @@ describe('keyboard dispatch', () => {
       { id: 'snooze', label: 'snooze', order: 60, shortcuts: ['h'] },
       { id: 'move', label: 'move', order: 70, shortcuts: ['v'] },
       { id: 'palette', label: 'command palette', order: 80, shortcuts: ['Mod+K'] }
+    ])
+  })
+
+  test('shows body undo in the composer footer', () => {
+    useCommands([
+      createCommand('composer.send', () => {}),
+      createCommand('composer.undo', () => {}),
+      createCommand('composer.close', () => {})
+    ])
+    expect(listFooterHints('composer')).toEqual([
+      { id: 'send', label: 'send', order: 10, shortcuts: ['Mod+Enter'] },
+      { id: 'undo-text', label: 'undo', order: 15, shortcuts: ['Mod+Z'] },
+      { id: 'back', label: 'save and close', order: 20, shortcuts: ['Escape'] }
     ])
   })
 

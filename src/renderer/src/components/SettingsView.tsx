@@ -56,7 +56,6 @@ interface SettingsViewProps {
   onAddAccount: () => void
   onReconnect: () => void
   onSignOut: () => void
-  onManageSplits: () => void
   onClose: () => void
   onToast: (message: string) => void
   focusControl: SettingsControl | null
@@ -93,7 +92,6 @@ export function SettingsView({
   onAddAccount,
   onReconnect,
   onSignOut,
-  onManageSplits,
   onClose,
   onToast,
   focusControl
@@ -461,26 +459,6 @@ export function SettingsView({
                     className="size-4 cursor-pointer accent-accent"
                   />
                 </label>
-              </section>
-
-              <section data-testid="settings-account-notifications" aria-label="Inbox notifications">
-                <SectionTitle>Inbox notifications</SectionTitle>
-                <div className={`mt-2 ${ROW}`}>
-                  <span className="flex min-w-0 flex-col">
-                    <span className="text-sm text-ink">Per-split new-mail alerts</span>
-                    <span className={NOTE}>
-                      Choose which Inbox splits notify for this account in the split rules.
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    data-testid="settings-split-rules"
-                    onClick={onManageSplits}
-                    className={`${ACTION_BUTTON} flex-none`}
-                  >
-                    Split rules…
-                  </button>
-                </div>
               </section>
             </div>
           </section>

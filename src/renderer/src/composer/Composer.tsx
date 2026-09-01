@@ -785,6 +785,7 @@ function ComposerCommandPlugin({
     () =>
       registerCommands([
         createCommand('composer.close', onClose),
+        createCommand('composer.undo', () => editor.dispatchCommand(UNDO_COMMAND, undefined)),
         createCommand('composer.discard', onDiscard),
         createCommand('composer.send', onSend),
         createCommand('composer.attach', onAttach),
@@ -1200,8 +1201,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
         <div className="ml-auto flex items-center gap-2">
           {mode === 'full' ? (
-            <span className="flex items-center gap-1.5 text-[11px] text-ink-faint">
-              save &amp; close <Kbd>Esc</Kbd>
+            <span className="flex items-center gap-2 text-[11px] text-ink-faint">
+              <span className="flex items-center gap-1.5" data-testid="composer-undo-hint">
+                undo <Kbd>{modKeyLabel()}Z</Kbd>
+              </span>
+              <span aria-hidden>·</span>
+              <span className="flex items-center gap-1.5">
+                save &amp; close <Kbd>Esc</Kbd>
+              </span>
             </span>
           ) : (
             <button

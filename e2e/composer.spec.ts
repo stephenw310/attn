@@ -343,7 +343,6 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
       line(`Made by ${link('Northstar', 'https://northstar.test/')} | Planning software for busy teams`)
     ].join('')}</div>`
   )
-  await page.emulateMedia({ colorScheme: 'light' })
   const composer = new ComposerPage(page)
   await composer.openNew()
   await composer.expectSignatureCollapsed()
@@ -354,6 +353,14 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
   await expect(composer.signature.getByText('Alex Rivera', { exact: true })).toHaveCSS(
     'font-family',
     'arial, sans-serif'
+  )
+  await expect(composer.signature.getByText('Alex Rivera', { exact: true })).toHaveCSS(
+    'color',
+    'rgb(157, 162, 172)'
+  )
+  await expect(composer.signature.getByRole('link', { name: 'northstar.test', exact: true })).toHaveCSS(
+    'color',
+    'rgb(255, 178, 36)'
   )
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
@@ -376,6 +383,7 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
   const saved = await page.evaluate(async () => (await window.attn.draft.list())[0])
   expect(saved?.bodyText).toContain('Alex Rivera edited')
   expect(saved?.bodyHtml.match(/<font face="arial, sans-serif"/g)).toHaveLength(5)
+  expect(saved?.bodyHtml).toContain('color: rgb(34, 34, 34)')
   expect(saved?.bodyHtml).toContain('https://northstar.test/team')
   expect(saved?.bodyHtml).not.toContain('iframe')
 })

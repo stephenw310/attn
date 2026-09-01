@@ -2297,10 +2297,6 @@ export function Inbox({
             onAddAccount={addAccount}
             onReconnect={reconnectActions}
             onSignOut={requestRemoveAccount}
-            onManageSplits={() => {
-              closeSettings()
-              setSplitRulesOpen(true)
-            }}
             onClose={closeSettings}
             onToast={showToast}
             focusControl={settingsFocus}
@@ -2351,6 +2347,7 @@ export function Inbox({
               splits={splits.state.splits}
               activeSplitId={splits.activeSplitId}
               onSelect={switchSplit}
+              onManage={() => setSplitRulesOpen(true)}
             />
           )}
           <div className={`flex min-h-0 flex-1 ${searchOpen && !readerOpen ? 'flex-col' : ''}`}>

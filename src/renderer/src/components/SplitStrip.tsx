@@ -5,9 +5,15 @@ interface SplitStripProps {
   splits: readonly SplitSummary[]
   activeSplitId: string | null
   onSelect: (id: string) => void
+  onManage: () => void
 }
 
-export function SplitStrip({ splits, activeSplitId, onSelect }: SplitStripProps): React.JSX.Element | null {
+export function SplitStrip({
+  splits,
+  activeSplitId,
+  onSelect,
+  onManage
+}: SplitStripProps): React.JSX.Element | null {
   const [overflowOpen, setOverflowOpen] = useState(false)
   const overflowRef = useRef<HTMLDivElement>(null)
   const { visibleSplits, overflowSplits } = useMemo(() => {
@@ -122,6 +128,27 @@ export function SplitStrip({ splits, activeSplitId, onSelect }: SplitStripProps)
           )}
         </div>
       )}
+      <button
+        type="button"
+        data-testid="split-rules-settings"
+        aria-label="Split Inbox settings"
+        title="Split Inbox settings"
+        onClick={onManage}
+        className="app-no-drag flex h-full w-11 flex-none cursor-pointer items-center justify-center border-l border-edge text-ink-faint hover:bg-active hover:text-ink"
+      >
+        <svg
+          aria-hidden
+          viewBox="0 0 24 24"
+          className="size-4 fill-none stroke-current"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <title>Split Inbox settings</title>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3V9.55h.09A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.56 3.7l.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3h4.05v.09A1.7 1.7 0 0 0 15 4.1a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.5a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.09v4.05h-.09A1.7 1.7 0 0 0 19.4 15Z" />
+        </svg>
+      </button>
     </div>
   )
 }
