@@ -45,16 +45,38 @@ interface PendingRequest {
   sequence: number
   requestId: string | null
   anchor: string
+  prefix: string
   buffered: string
   previewed: string
   /** Events that raced ahead of the request-id round trip. */
   early: AiStreamEvent[]
 }
 
-/** Collapse a streamed completion into one short single-line suggestion. */
-export function normalizeSuggestion(raw: string): string {
+/**
+ * Collapse a streamed completion into one short single-line suggestion.
+ * Providers occasionally restart the draft instead of continuing it. Strip
+ * an echo of the current line, and suppress a second greeting once an earlier
+ * authored line already contains one. Prefix checks happen on every streamed
+ * chunk so a bad restart never flickers in the gray preview.
+ */
+export function normalizeSuggestion(raw: string, prefix = ''): string {
   const firstLine = raw.split('\n', 1)[0] ?? ''
-  return firstLine.trimEnd().slice(0, AUTOCOMPLETE_MAX_SUGGESTION_CHARS)
+  let suggestion = firstLine.trimEnd()
+  if (suggestion.length === 0) return ''
+
+  const prefixLines = prefix.split('\n')
+  const currentLine = prefixLines.at(-1)?.trim() ?? ''
+  const candidate = suggestion.trimStart()
+  if (currentLine && candidate.toLocaleLowerCase().startsWith(currentLine.toLocaleLowerCase())) {
+    suggestion = candidate.slice(currentLine.length)
+  }
+
+  const hasEarlierGreeting = prefixLines
+    .slice(0, -1)
+    .some((line) => /^(?:hi|hello|hey)\b/iu.test(line.trim()))
+  if (hasEarlierGreeting && /^(?:hi|hello|hey)\b/iu.test(suggestion.trimStart())) return ''
+
+  return suggestion.slice(0, AUTOCOMPLETE_MAX_SUGGESTION_CHARS)
 }
 
 export class AutocompleteController {
@@ -137,7 +159,7 @@ export class AutocompleteController {
     if (pending.requestId !== event.requestId) return
     if (event.kind === 'chunk') {
       pending.buffered += event.text
-      const text = normalizeSuggestion(pending.buffered)
+      const text = normalizeSuggestion(pending.buffered, pending.prefix)
       if (text.length > 0 && text !== pending.previewed && this.hooks.currentAnchor() === pending.anchor) {
         pending.previewed = text
         this.suggestion = { text, anchor: pending.anchor }
@@ -155,7 +177,7 @@ export class AutocompleteController {
     }
     // Completion settles the last preview only if the caret never moved
     // since dispatch and the text survives the single-line bound.
-    const text = normalizeSuggestion(pending.buffered)
+    const text = normalizeSuggestion(pending.buffered, pending.prefix)
     if (text.length === 0 || this.hooks.currentAnchor() !== pending.anchor) return
     this.suggestion = { text, anchor: pending.anchor }
     // Retry placement at completion even when the same text was previewed on
@@ -224,6 +246,7 @@ export class AutocompleteController {
       sequence: ++this.sequence,
       requestId: null,
       anchor: excerpt.anchor,
+      prefix: excerpt.prefix,
       buffered: '',
       previewed: '',
       early: []

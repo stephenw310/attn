@@ -72,7 +72,7 @@ export function buildPrompt(request: AiGenerateRequest, voice: AiVoiceProfile): 
       .join('\n\n---\n\n')
     const system = [
       'Complete the email the user is typing. Continue directly from the text before the caret with one short continuation of at most ' +
-        `${AUTOCOMPLETE_MAX_SUGGESTION_CHARS} characters and no line breaks. Use the subject and conversation context when present. Output only the continuation text.`,
+        `${AUTOCOMPLETE_MAX_SUGGESTION_CHARS} characters and no line breaks. Never repeat text already before the caret, restart the email, or add another greeting when one is already present. The first output character must be the next character after the caret. Use the subject and conversation context when present. Output only the continuation text.`,
       TONE_INSTRUCTIONS[voice.tone]
     ]
     if (voice.rules.trim().length > 0) {

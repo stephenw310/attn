@@ -80,6 +80,20 @@ test('an AI-ready reply shows its shortcut tip, then completes the recipient nam
   await page.keyboard.press('ControlOrMeta+z')
   await expect(editor(page)).toContainText('Hi')
   await expect(editor(page)).not.toContainText('Theo')
+
+  // Accepting the local greeting must not poison later provider completion.
+  // Rebuild the greeting after proving its one-step undo, then pause after a
+  // sentence fragment on the next paragraph.
+  await page.keyboard.type(' Theo,')
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Enter')
+  await page.evaluate(async () => window.attn.ai.setSetting('autocompleteEnabled', true))
+  await installFakeAi(app, { chunks: [' hiring next week.'] })
+  await page.keyboard.type('We are')
+  await expect.poll(() => aiRequests(app).then((requests) => requests.length)).toBe(1)
+  const requests = await aiRequests(app)
+  expect(requests[0].messages.at(-1)?.content).toContain('Hi Theo,\n\nWe are')
+  await expect(preview(page)).toContainText('hiring next week.')
 })
 
 test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab accepts as one undo', async ({

@@ -199,6 +199,25 @@ describe('suggestion lifecycle', () => {
     expect(normalizeSuggestion('\nleading newline')).toBe('')
   })
 
+  it('strips a current-line echo and suppresses a restarted greeting', () => {
+    expect(normalizeSuggestion('We are hiring next week.', 'Hi Amit,\n\nWe are')).toBe(' hiring next week.')
+    expect(normalizeSuggestion('Hi', 'Hi Amit,\n\nWe are')).toBe('')
+    expect(normalizeSuggestion('Hi Amit,', 'Hi Amit,\n\nWe are')).toBe('')
+  })
+
+  it('never previews a streamed greeting restart after a completed greeting', async () => {
+    const h = harness()
+    h.hooks.excerpt = { prefix: 'Hi Amit,\n\nWe are', suffix: '', anchor: 'a-1' }
+    h.controller.noteTypingEdit()
+    h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+    await settle()
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'chunk', text: 'Hi' })
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'chunk', text: ' Amit,' })
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'done' })
+    expect(h.hooks.previews).toEqual([])
+    expect(h.controller.hasSuggestion()).toBe(false)
+  })
+
   it('acceptance returns the text once and clears the preview', async () => {
     const h = harness()
     await completedSuggestion(h, 'ld!')
