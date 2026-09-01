@@ -33,6 +33,16 @@ interface PreviewPlacement {
   maxWidth: number
 }
 
+function previewTextWidth(container: HTMLElement, text: string): number {
+  const probe = document.createElement('span')
+  probe.className = 'pointer-events-none absolute invisible whitespace-pre text-[13px] leading-5'
+  probe.textContent = text
+  container.append(probe)
+  const width = probe.getBoundingClientRect().width
+  probe.remove()
+  return width
+}
+
 function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement | null {
   const rootElement = editor.getRootElement()
   const container = rootElement?.parentElement
@@ -49,11 +59,14 @@ function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement
   const rootRect = rootElement.getBoundingClientRect()
   const caretLeft = rect.right - containerRect.left + container.scrollLeft
   const remaining = containerRect.width - (rect.right - containerRect.left) - 28
-  if (remaining < 160) {
+  const rootLeft = rootRect.left - containerRect.left + container.scrollLeft
+  const caretIsPastLineStart = caretLeft - rootLeft > 4
+  const suggestionWidth = previewTextWidth(container, text)
+  if (caretIsPastLineStart && (remaining < 160 || suggestionWidth > remaining)) {
     const lineHeight = Number.parseFloat(getComputedStyle(rootElement).lineHeight) || 20
     return {
       text,
-      left: rootRect.left - containerRect.left + container.scrollLeft,
+      left: rootLeft,
       top: rect.top - containerRect.top + container.scrollTop + lineHeight,
       maxWidth: Math.max(rootRect.width, 160)
     }

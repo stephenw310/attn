@@ -261,3 +261,28 @@ test('suggestions render legibly at the caret in dark and light themes (artifact
   await expect(preview(page)).toBeVisible()
   await page.screenshot({ path: 'e2e/.artifacts/ai-autocomplete-light.png' })
 })
+
+test('a long suggestion moves to the next line instead of wrapping from the caret', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page, true)
+  await installFakeAi(app, {
+    chunks: [' and share the agenda in advance so everyone has enough time to prepare for the discussion.']
+  })
+
+  await page.keyboard.press('c')
+  const composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await editor(page).evaluate((root) => {
+    const container = root.parentElement
+    if (container) container.style.width = '520px'
+  })
+  await editor(page).click({ position: { x: 24, y: 24 } })
+  await page.keyboard.type('We are planning to meet on Tuesday')
+  await expect(preview(page)).toBeVisible()
+
+  const editorBox = await editor(page).boundingBox()
+  const previewBox = await preview(page).boundingBox()
+  expect(editorBox).not.toBeNull()
+  expect(previewBox).not.toBeNull()
+  expect(Math.abs((previewBox?.x ?? 0) - (editorBox?.x ?? 0))).toBeLessThan(3)
+})
