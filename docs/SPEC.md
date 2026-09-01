@@ -431,6 +431,10 @@ footer is absent and the composer owns its action footer, so editing controls ca
   send behavior. AI reply generation and refinement preserve it outside the generated region;
   autocomplete excludes the signature and footer from requests and suggestions.
 - **Recipient autocomplete** ranked by interaction frequency + recency, built locally from synced sent mail. First suggestion accepted with `Tab`/`Enter`.
+- At the start of an otherwise empty body, typing `Hi`, `Hello`, or `Hey` immediately offers the primary
+  recipient's first display name as a gray continuation. This greeting completion is deterministic and
+  local: it never calls an AI provider, needs no AI consent, and accepts or dismisses with the same
+  body-owned `Tab`/`Esc` behavior as inline AI autocomplete.
 - **Rich text (widened 2026-08-15, §9 #16):** bold/italic/underline/strikethrough, bulleted & numbered lists, links, blockquote, **inline images, tables, font family and size, text and background colour, and alignment** — Gmail's own authoring surface. Composer links, including links imported with a Gmail signature, open externally on click without navigating the Attn window. Pasting an image into the body is supported and travels as a `cid:` inline part. Heading levels are deliberately out: Gmail's composer has none, so they would be a superset rather than parity.
 - **Zero formatting loss is an invariant, not an aspiration.** Content Attn's editor cannot represent is preserved byte-for-byte rather than dropped: it renders in place, is not editable inline, and round-trips unchanged through save, Gmail Drafts sync, and send. No draft ever loses formatting by being opened in Attn.
 - **Attachments:** drag-and-drop or picker, up to Gmail's 25MB limit, with progress indication. Attached files are copied into a local spool immediately, so a draft is self-contained even if the original file moves or the app force-quits, and that spool remains the source of the bytes for the rest of the draft's life. A forward starts with the source message's file attachments as well as its quoted inline images; the user may remove forwarded files before sending.
@@ -619,6 +623,10 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 **Reply drafting:**
 
 - **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
+- An empty inline reply or reply-all composer shows `Tip: Hit Mod+J for AI` only when AI writing is enabled
+  and its configured provider has the required key. The hint is transient UI outside the saved draft and
+  disappears as soon as the authored body contains content. New-mail and forward composers do not advertise
+  the reply-only command.
   Generation, refinement, and undo affect the authored reply region above the signature. Preserve the
   Gmail signature and optional Attn footer, including user edits or removal (F6).
 - **Voice profile:** tone preset (concise / friendly / formal) plus free-text standing rules ("sign off with 'Best, Chao'", "never use exclamation marks").

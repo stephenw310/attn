@@ -745,6 +745,10 @@ it with a one-line instruction, and never auto-send.
   payloads are the proof. These examples are never passed to T37A.
 - Starting reply generation or refine cancels pending autocomplete and clears its preview. Autocomplete
   stays suspended until generation ends and the user resumes typing; AI-inserted chunks cannot trigger it.
+- In an empty inline reply/reply-all composer, show a transient `Tip: Hit Mod+J for AI` placeholder only
+  when AI writing is enabled and the configured provider's required key is present. Keep it outside the
+  editor document and hide it after the first authored content. Do not advertise the reply-only command in
+  new-mail or forward composers.
 - **Never auto-sends.** Output lands behind the normal send flow, undo send included. Generation must not
   block the UI (F17 acceptance), and it yields to interactive work (rule 7).
 
@@ -804,6 +808,10 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   do not trigger requests. Suppress requests during IME composition, selections, T37 generation/refine,
   open pickers/dialogs, and inside quotes, signatures, T32B's footer, tables, or opaque preserved regions.
   A subsequent deliberate typing edit can trigger another request.
+- **Local greeting:** before the provider trigger, recognize `Hi`, `Hello`, or `Hey` at the start of an
+  otherwise empty body and immediately offer the primary recipient's first display name. This path is
+  deterministic, makes no provider request, requires no AI consent, consumes no rate-limit budget, and uses
+  the same transient preview plus body-owned `Tab`/`Esc` handling.
 - **Bounded context:** build a separate autocomplete payload from the authored body, up to 2,000 plain-text
   characters before the caret and 500 after. Exclude protected quote/signature/opaque nodes from extraction,
   not just from display, and preserve the cursor boundary when truncating. Add the current subject, selected

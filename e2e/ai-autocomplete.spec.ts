@@ -58,6 +58,30 @@ async function openDesignReply(page: Page): Promise<ComposerPage> {
   return composer
 }
 
+test('an AI-ready reply shows its shortcut tip, then completes the recipient name locally', async ({
+  app,
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page, false)
+  await openDesignReply(page)
+
+  const tip = page.getByTestId('composer-ai-tip')
+  await expect(tip).toContainText(/Tip: Hit (⌘|Ctrl)J for AI/)
+  await editor(page).click({ position: { x: 24, y: 24 } })
+  await page.keyboard.type('Hi')
+
+  await expect(tip).toHaveCount(0)
+  await expect(preview(page)).toContainText('Theo,')
+  expect(await aiRequests(app)).toHaveLength(0)
+
+  await page.keyboard.press('Tab')
+  await expect(editor(page)).toContainText('Hi Theo,')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(editor(page)).toContainText('Hi')
+  await expect(editor(page)).not.toContainText('Theo')
+})
+
 test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab accepts as one undo', async ({
   app,
   page

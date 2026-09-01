@@ -165,6 +165,15 @@ describe('debounce', () => {
 })
 
 describe('suggestion lifecycle', () => {
+  it('shows and accepts a local suggestion immediately without a provider request', () => {
+    const h = harness()
+    h.controller.noteTypingEdit({ text: ' Theo,', anchor: 'a-1' })
+    expect(h.hooks.previews).toEqual([' Theo,'])
+    expect(h.hooks.requests).toHaveLength(0)
+    expect(h.timers.count()).toBe(0)
+    expect(h.controller.takeAcceptedText()).toBe(' Theo,')
+  })
+
   it('buffers chunks and shows the completed single-line suggestion', async () => {
     const h = harness()
     await completedSuggestion(h, 'ld, how are you?')

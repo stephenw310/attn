@@ -36,7 +36,7 @@ import {
   useState
 } from 'react'
 import type { MailAddress } from '../../../shared/address'
-import type { AiThreadMessage } from '../../../shared/ai'
+import { AI_PROVIDER_PRESETS, type AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import { escapeHtmlText as escapeHtml } from '../../../shared/html'
@@ -55,6 +55,7 @@ import { modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { AiAutocompletePlugin } from './AiAutocompletePlugin'
 import { AiDraftPlugin } from './AiDraftPlugin'
+import { ComposerBodyHintPlugin } from './ComposerBodyHintPlugin'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
@@ -68,6 +69,7 @@ import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
+import { recipientGreetingName } from './recipientGreeting'
 import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
 import { SnippetsPlugin } from './SnippetsPlugin'
 import { sanitizeOutgoingHtml } from './sanitize'
@@ -868,6 +870,23 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [showCopies, setShowCopies] = useState(draft.cc.length > 0 || draft.bcc.length > 0)
   const [closing, setClosing] = useState(false)
   const [sendError, setSendError] = useState<string | null>(initialError)
+  const supportsAiDraft = Boolean(aiDraft) && (draft.kind === 'reply' || draft.kind === 'replyAll')
+  const [aiTipReady, setAiTipReady] = useState(false)
+  useEffect(() => {
+    setAiTipReady(false)
+    if (!supportsAiDraft || !window.attn) return
+    let stale = false
+    void window.attn.ai
+      .getSettings()
+      .then((settings) => {
+        const keyReady = settings.keyPresent || !AI_PROVIDER_PRESETS[settings.provider].keyRequired
+        if (!stale) setAiTipReady(settings.enabled && keyReady)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [supportsAiDraft])
   const initialHtml = draft.bodyHtml || plainTextForEditor(draft.bodyText)
   const preparedHtml = useMemo(() => prepareHtmlForEditor(initialHtml), [initialHtml])
   const unifiedSignatureAndQuote = useMemo(
@@ -1362,9 +1381,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     />
                   }
                   placeholder={
-                    <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
-                      Write a message…
-                    </div>
+                    aiTipReady ? null : (
+                      <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
+                        Write a message…
+                      </div>
+                    )
                   }
                   ErrorBoundary={LexicalErrorBoundary}
                 />
@@ -1396,7 +1417,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   onPreservedContent={notePreservedContent}
                 />
                 <SnippetsPlugin onInserted={handleSnippetInserted} />
-                <AiAutocompletePlugin subject={subject} getThreadContext={aiDraft?.getThreadContext} />
+                <ComposerBodyHintPlugin showAiTip={aiTipReady} />
+                <AiAutocompletePlugin
+                  subject={subject}
+                  recipientName={recipientGreetingName(to[0])}
+                  getThreadContext={aiDraft?.getThreadContext}
+                />
                 {aiDraft && (
                   <AiDraftPlugin
                     kind={draft.kind}

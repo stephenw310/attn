@@ -11,16 +11,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { type AiThreadMessage, AUTOCOMPLETE_MAX_SUBJECT_CHARS } from '../../../shared/ai'
 import { AutocompleteController } from './autocompleteController'
 import { $autocompleteExcerpt, $caretAnchor } from './autocompleteExcerpt'
+import { recipientGreetingSuggestion } from './recipientGreeting'
 
-// Inline AI autocomplete (T37A, F17): a transient gray suggestion at the
-// caret, rendered OUTSIDE the persisted Lexical document — it can never enter
-// autosave, mirroring, copies, or a send until Tab accepts it as one undoable
-// plain-text insertion. Requests start only after a deliberate typing pause;
-// the controller owns debounce/staleness and the main-process transport owns
-// consent and rate limits. Tab and Esc act only while a preview is visible
+// Composer autocomplete: a transient gray suggestion at the caret, rendered
+// OUTSIDE the persisted Lexical document — it can never enter autosave,
+// mirroring, copies, or a send until Tab accepts it as one undoable plain-text
+// insertion. A deterministic recipient greeting can appear immediately and
+// never reaches a provider; AI requests start only after a deliberate typing
+// pause. The controller owns debounce/staleness and the main-process transport
+// owns consent and rate limits. Tab and Esc act only while a preview is visible
 // and focus is in this body editor — pickers, the palette, and dialogs keep
-// their keys because focus (and therefore this plugin's guard) leaves with
-// them.
+// their keys because focus (and therefore this plugin's guard) leaves with them.
 
 /** Tags an acceptance insert so the trigger listener never re-requests. */
 export const AUTOCOMPLETE_ACCEPT_TAG = 'attn-autocomplete-accept'
@@ -67,15 +68,18 @@ function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement
 
 export function AiAutocompletePlugin({
   subject,
+  recipientName,
   getThreadContext
 }: {
   subject: string
+  recipientName: string | null
   getThreadContext?: () => AiThreadMessage[] | null
 }): React.JSX.Element | null {
   const [editor] = useLexicalComposerContext()
   const [preview, setPreview] = useState<PreviewPlacement | null>(null)
   const typedRef = useRef(false)
   const subjectRef = useRef(subject)
+  const recipientNameRef = useRef(recipientName)
   const getThreadContextRef = useRef(getThreadContext)
   getThreadContextRef.current = getThreadContext
 
@@ -121,12 +125,13 @@ export function AiAutocompletePlugin({
   }
   const controller = controllerRef.current
 
-  // A subject edit changes the completion context. Discard any request or
-  // preview built from the previous subject before the next body keystroke.
+  // Subject and primary-recipient edits change completion context. Discard
+  // any request or preview built from their previous values.
   useEffect(() => {
     subjectRef.current = subject
+    recipientNameRef.current = recipientName
     controller.noteInvalidated()
-  }, [controller, subject])
+  }, [controller, recipientName, subject])
 
   const accept = useCallback(() => {
     const text = controller.takeAcceptedText()
@@ -191,7 +196,17 @@ export function AiAutocompletePlugin({
         if (contentChanged) {
           if (!foreign && typedRef.current && !editor.isComposing()) {
             typedRef.current = false
-            controller.noteTypingEdit()
+            const immediate = editorState.read(() => {
+              const excerpt = $autocompleteExcerpt()
+              if (!excerpt) return null
+              const text = recipientGreetingSuggestion(
+                excerpt.prefix,
+                excerpt.suffix,
+                recipientNameRef.current
+              )
+              return text ? { text, anchor: excerpt.anchor } : null
+            })
+            controller.noteTypingEdit(immediate)
           } else {
             typedRef.current = false
             controller.noteInvalidated()

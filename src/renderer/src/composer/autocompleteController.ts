@@ -1,10 +1,10 @@
 // The inline-autocomplete state machine (T37A, F17), free of Lexical and the
 // DOM so its debounce, staleness, and dismissal rules are unit-testable with
 // injected time. The plugin adapts editor events into the note* methods and
-// supplies the hooks; this class owns when a request may start, which stream
-// events still matter, and what a Tab may accept. Suggestion state lives only
-// here — never in the persisted document — and a limited, failed, slow, or
-// stale request simply yields no suggestion.
+// supplies the hooks; this class owns immediate local suggestions, when an AI
+// request may start, which stream events still matter, and what a Tab may
+// accept. Suggestion state lives only here — never in the persisted document —
+// and a limited, failed, slow, or stale request simply yields no suggestion.
 
 import type { AiStreamEvent } from '../../../shared/ai'
 import {
@@ -36,6 +36,11 @@ export interface AutocompleteHooks {
   clearPreview(): void
 }
 
+export interface ImmediateSuggestion {
+  text: string
+  anchor: string
+}
+
 interface PendingRequest {
   sequence: number
   requestId: string | null
@@ -63,10 +68,18 @@ export class AutocompleteController {
 
   constructor(private readonly hooks: AutocompleteHooks) {}
 
-  /** A deliberate body-typing edit: reset everything and re-debounce. */
-  noteTypingEdit(): void {
+  /** A deliberate body-typing edit: show a local result or re-debounce AI. */
+  noteTypingEdit(immediate?: ImmediateSuggestion | null): void {
     if (this.disposed) return
     this.invalidate()
+    if (immediate) {
+      const text = normalizeSuggestion(immediate.text)
+      if (text.length > 0) {
+        this.suggestion = { text, anchor: immediate.anchor }
+        this.hooks.showPreview(text)
+        return
+      }
+    }
     this.scheduleDispatch(AUTOCOMPLETE_DEBOUNCE_MS)
   }
 
