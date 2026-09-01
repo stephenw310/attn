@@ -358,10 +358,25 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
     'color',
     'rgb(157, 162, 172)'
   )
-  await expect(composer.signature.getByRole('link', { name: 'northstar.test', exact: true })).toHaveCSS(
-    'color',
-    'rgb(255, 178, 36)'
-  )
+  const signatureLink = composer.signature.getByRole('link', { name: 'northstar.test', exact: true })
+  await expect(signatureLink).toHaveCSS('color', 'rgb(255, 178, 36)')
+  await page.evaluate(() => {
+    window.open = (url, target) => {
+      document.body.dataset.openedSignatureLink = String(url)
+      document.body.dataset.openedSignatureLinkTarget = String(target)
+      return null
+    }
+  })
+  await signatureLink.click()
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        target: document.body.dataset.openedSignatureLinkTarget,
+        url: document.body.dataset.openedSignatureLink
+      }))
+    )
+    .toEqual({ target: '_blank', url: 'https://northstar.test/' })
+  await expect(composer.root).toBeVisible()
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
   const path = join(dir, 'composer-signature-font.png')
@@ -976,7 +991,29 @@ test('adds links from the toolbar and the registered composer shortcut', async (
   await page.getByTestId('composer-link').click()
   await page.getByTestId('composer-link-url').fill('attn.test')
   await page.getByTestId('composer-link-url').press('Enter')
-  await expect(composer.editor.locator('a').first()).toHaveAttribute('href', 'https://attn.test')
+  const link = composer.editor.locator('a').first()
+  await expect(link).toHaveAttribute('href', 'https://attn.test')
+
+  // Applying a link leaves its text selected so it can still be formatted.
+  // Collapse that selection before exercising an ordinary link click.
+  await page.keyboard.press('ArrowRight')
+  await page.evaluate(() => {
+    window.open = (url, target) => {
+      document.body.dataset.openedComposerLink = String(url)
+      document.body.dataset.openedComposerLinkTarget = String(target)
+      return null
+    }
+  })
+  await link.click()
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        target: document.body.dataset.openedComposerLinkTarget,
+        url: document.body.dataset.openedComposerLink
+      }))
+    )
+    .toEqual({ target: '_blank', url: 'https://attn.test' })
+  await expect(composer.root).toBeVisible()
 
   await page.keyboard.press('ControlOrMeta+Shift+k')
   await expect(page.getByTestId('composer-link-popover')).toBeVisible()

@@ -1,6 +1,7 @@
 import { $generateNodesFromDOM } from '@lexical/html'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
 import { AutoFocusPlugin } from '@lexical/react/LexicalAutoFocusPlugin'
+import { ClickableLinkPlugin } from '@lexical/react/LexicalClickableLinkPlugin'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
@@ -1372,6 +1373,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <ListPlugin />
                 <TablePlugin />
                 <LinkPlugin validateUrl={validateComposerUrl} />
+                <ClickableLinkPlugin newTab />
                 <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
                 <CollapsedSignaturePlugin
                   includesQuote={unifiedSignatureAndQuote}
