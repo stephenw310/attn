@@ -8,6 +8,7 @@ import {
   $isDecoratorNode,
   $isElementNode,
   $isParagraphNode,
+  $isTextNode,
   HISTORY_MERGE_TAG,
   HISTORY_PUSH_TAG,
   type LexicalNode
@@ -24,7 +25,7 @@ import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 // AI reply drafting inside the composer (T37, F17). Chunks stream into
 // Lexical as ordinary editable text committed as ONE history entry — the
 // first chunk pushes, every later change merges — so a single Mod+Z removes
-// the whole draft or restores authored text that generation/refine replaced.
+// the whole draft or only the continuation appended after authored text.
 // Esc mid-stream cancels the request and keeps the partial text. Everything
 // inserts above the Gmail signature and Attn footer, which generation, refine,
 // and undo never touch. Streamed text enters as plain text nodes — never
@@ -37,11 +38,20 @@ interface AiRun {
   /** True once the first chunk landed (the history entry exists). */
   started: boolean
   refine: boolean
+  /** Existing authored text that generation/refine must leave byte-for-byte intact. */
+  authoredPrefix: string | undefined
+  /** Last authored top-level element; continuations append here before adding paragraphs. */
+  appendToKey: string | null
   /** Prior AI region, removed inside the first new chunk's history entry. */
   removeKeys: string[]
-  /** Top-level node keys of the streamed region, in document order. */
+  /** Generated node keys; an inline first key may be a TextNode inside appendToKey. */
   keys: string[]
+  /** Last top-level element receiving streamed text. */
   tailKey: string | null
+  /** Generated TextNode receiving later chunks on the current line. */
+  inlineTailKey: string | null
+  /** Exact provider output, including a leading paragraph break. */
+  streamedText: string
 }
 
 interface AiDraftPluginProps {
@@ -123,6 +133,7 @@ export function AiDraftPlugin({
   /** One preparation at a time: a second invocation mid-await must not start a second request. */
   const preparingRef = useRef(false)
   const landedTextRef = useRef('')
+  const landedAuthoredTextRef = useRef('')
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const claimRef = useRef(claim)
   claimRef.current = claim
@@ -133,25 +144,20 @@ export function AiDraftPlugin({
   const onContentSettledRef = useRef(onContentSettled)
   onContentSettledRef.current = onContentSettled
 
-  const regionText = useCallback(
-    (keys: readonly string[]): string =>
-      editor
-        .getEditorState()
-        .read(() => keys.map((key) => $getNodeByKey(key)?.getTextContent() ?? '').join('\n')),
-    [editor]
-  )
-
   const appendChunk = useCallback(
     (text: string) => {
       editor.update(() => {
         const run = runRef.current
         if (!run?.active) return
+        run.streamedText += text
         if (!run.started) {
           run.started = true
           $addUpdateTag(HISTORY_PUSH_TAG)
           for (const key of run.removeKeys) $getNodeByKey(key)?.remove()
           const boundary = $signatureBoundary()
-          if (!run.refine) {
+          let tail = run.appendToKey === null ? null : $getNodeByKey(run.appendToKey)
+          if (tail !== null && !$isElementNode(tail)) tail = null
+          if (!run.refine && tail === null) {
             // A fresh reply's lead-in is usually one empty paragraph; clear a
             // fully blank authored region so the draft starts at the top, but
             // never touch real user content above the signature.
@@ -164,11 +170,15 @@ export function AiDraftPlugin({
               for (const node of lead) node.remove()
             }
           }
-          const paragraph = $createParagraphNode()
-          if (boundary) boundary.insertBefore(paragraph)
-          else $getRoot().append(paragraph)
-          run.keys = [paragraph.getKey()]
-          run.tailKey = paragraph.getKey()
+          if (tail === null) {
+            const paragraph = $createParagraphNode()
+            if (boundary) boundary.insertBefore(paragraph)
+            else $getRoot().append(paragraph)
+            run.keys = [paragraph.getKey()]
+            run.tailKey = paragraph.getKey()
+          } else {
+            run.tailKey = tail.getKey()
+          }
         } else {
           $addUpdateTag(HISTORY_MERGE_TAG)
         }
@@ -182,9 +192,23 @@ export function AiDraftPlugin({
             tail = paragraph
             run.keys.push(paragraph.getKey())
             run.tailKey = paragraph.getKey()
+            run.inlineTailKey = null
           }
           if (segment.length > 0 && tail !== null && $isElementNode(tail)) {
-            tail.append($createTextNode(segment))
+            const inlineTail = run.inlineTailKey === null ? null : $getNodeByKey(run.inlineTailKey)
+            if ($isTextNode(inlineTail) && inlineTail.getParent()?.getKey() === tail.getKey()) {
+              inlineTail.setTextContent(inlineTail.getTextContent() + segment)
+            } else {
+              const generated = $createTextNode(segment)
+              if (tail.getKey() === run.appendToKey) {
+                // Keep the generated continuation separately addressable for
+                // refine without making it a token or otherwise restricting edits.
+                generated.toggleUnmergeable()
+                run.keys.push(generated.getKey())
+              }
+              tail.append(generated)
+              run.inlineTailKey = generated.getKey()
+            }
           }
         })
       })
@@ -200,7 +224,8 @@ export function AiDraftPlugin({
     unsubscribeRef.current?.()
     unsubscribeRef.current = null
     if (run.started) {
-      landedTextRef.current = regionText(run.keys)
+      landedTextRef.current = run.streamedText
+      landedAuthoredTextRef.current = editor.getEditorState().read(() => $authoredSnapshot().text)
       editor.update(() => {
         $addUpdateTag(HISTORY_MERGE_TAG)
         const tail = run.tailKey === null ? null : $getNodeByKey(run.tailKey)
@@ -211,14 +236,13 @@ export function AiDraftPlugin({
     } else if (run.refine && run.removeKeys.length > 0) {
       // The refine failed before its first chunk: the prior draft is intact.
       run.keys = run.removeKeys
-      landedTextRef.current = regionText(run.keys)
       setPhase('landed')
     } else {
       setPhase('idle')
     }
     setEdited(false)
     setRefineDismissed(false)
-  }, [editor, regionText])
+  }, [editor])
 
   const cancel = useCallback(() => {
     const requestId = runRef.current?.requestId
@@ -266,15 +290,28 @@ export function AiDraftPlugin({
         return
       }
       const refine = refineInstruction !== undefined
-      const existingDraft = refine ? undefined : authored.text.trim() || undefined
+      const priorRun = runRef.current
+      const existingDraft = refine
+        ? priorRun?.authoredPrefix
+        : authored.text.trim().length > 0
+          ? authored.text
+          : undefined
       const run: AiRun = {
         requestId: null,
         active: true,
         started: false,
         refine,
-        removeKeys: refine ? [...(runRef.current?.keys ?? [])] : existingDraft ? [...authored.keys] : [],
+        authoredPrefix: existingDraft,
+        appendToKey: refine
+          ? (priorRun?.appendToKey ?? null)
+          : existingDraft
+            ? (authored.keys.at(-1) ?? null)
+            : null,
+        removeKeys: refine ? [...(priorRun?.keys ?? [])] : [],
         keys: [],
-        tailKey: null
+        tailKey: null,
+        inlineTailKey: null,
+        streamedText: ''
       }
       const priorDraft = refine ? landedTextRef.current : undefined
       runRef.current = run
@@ -408,15 +445,15 @@ export function AiDraftPlugin({
     return () => document.removeEventListener('keydown', onKeyDown, true)
   }, [dismissRefine, editor, showRefine])
 
-  // Refine is offered only while the AI region is unedited — text the user
-  // touched is theirs (F17).
+  // Refine is offered only while the authored region is unchanged — text the
+  // user touched after generation is theirs (F17).
   useEffect(() => {
     if (phase !== 'landed' || edited) return
-    return editor.registerUpdateListener(() => {
-      const keys = runRef.current?.keys ?? []
-      if (regionText(keys) !== landedTextRef.current) setEdited(true)
+    return editor.registerUpdateListener(({ editorState }) => {
+      const authoredText = editorState.read(() => $authoredSnapshot().text)
+      if (authoredText !== landedAuthoredTextRef.current) setEdited(true)
     })
-  }, [edited, editor, phase, regionText])
+  }, [edited, editor, phase])
 
   // Unmount (draft closed, sent, or switched) cancels silently; late events
   // can never reach another draft because the subscription dies here too. A

@@ -31,7 +31,7 @@ describe('buildPrompt', () => {
     expect(prompt.messages[0].content).toContain('From Maya Lin:')
   })
 
-  it('uses an existing authored draft as the full-reply replacement source', () => {
+  it('uses existing authored text as the immutable prefix for a continuation', () => {
     const prompt = buildPrompt(
       {
         ...replyRequest,
@@ -40,8 +40,8 @@ describe('buildPrompt', () => {
       voice
     )
     expect(prompt.messages[0].content).toContain('I can review the roadmap by Tuesday.')
-    expect(prompt.messages[0].content).toContain('Preserve every fact, commitment, name, number, and intent')
-    expect(prompt.messages[0].content).toContain('Return the full replacement reply body')
+    expect(prompt.messages[0].content).toContain('Return only the new text to append')
+    expect(prompt.messages[0].content).toContain('Never repeat, replace, or rewrite any existing text')
   })
 
   it('refine prompts carry the prior draft and instruction', () => {
@@ -51,6 +51,22 @@ describe('buildPrompt', () => {
     )
     expect(prompt.messages[0].content).toContain('A long draft.')
     expect(prompt.messages[0].content).toContain('shorter')
+  })
+
+  it('refines only the AI continuation when authored text precedes it', () => {
+    const prompt = buildPrompt(
+      {
+        ...replyRequest,
+        purpose: 'refine',
+        existingDraft: 'Hi Maya,',
+        instruction: 'shorter',
+        priorDraft: '\n\nI can review the roadmap by Tuesday.'
+      },
+      voice
+    )
+    expect(prompt.messages[0].content).toContain('Text the user wrote before the AI continuation')
+    expect(prompt.messages[0].content).toContain('Return only the replacement continuation')
+    expect(prompt.messages[0].content).toContain('Never repeat or rewrite the text the user wrote')
   })
 
   it('autocomplete prompts contain subject, thread, voice rules, and the bounded excerpt', () => {
@@ -135,7 +151,16 @@ describe('parseAiGenerateRequest', () => {
         purpose: 'refine',
         instruction: 'shorter',
         priorDraft: 'A draft.',
-        existingDraft: 'wrong purpose'
+        existingDraft: 'Authored prefix.'
+      })
+    ).not.toThrow()
+    expect(() =>
+      parseAiGenerateRequest({
+        ...replyRequest,
+        purpose: 'refine',
+        instruction: 'shorter',
+        priorDraft: 'A draft.',
+        prefix: 'wrong purpose'
       })
     ).toThrow(/disallowed context/)
     expect(() => parseAiGenerateRequest({ purpose: 'summarize', thread: [] })).toThrow(/purpose/)

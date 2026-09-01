@@ -622,7 +622,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 
 **Reply drafting:**
 
-- **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. When the authored reply region already contains text, that text accompanies the request and the result replaces it as a completed, coherent reply while preserving its facts and intent. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
+- **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. When the authored reply region already contains text, that text accompanies the request as an immutable prefix and the generated continuation appends after it. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
 - An empty inline reply or reply-all composer shows `Tip: Hit Mod+J for AI` only when AI writing is enabled
   and its configured provider has the required key. The hint is transient UI outside the saved draft and
   disappears as soon as the authored body contains content. New-mail and forward composers do not advertise
@@ -690,8 +690,8 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   cancels reply streaming, retaining partial text; for autocomplete it dismisses the preview first.
 - With voice matching off, reply requests contain no additional sent-mail style examples. Autocomplete
   contains only its bounded authored-body excerpt and current reply thread regardless of that toggle.
-- A generated reply and an accepted suggestion are each undoable as one edit. When generation replaces
-  existing authored text, one undo restores that text. No unaccepted suggestion
+- A generated reply and an accepted suggestion are each undoable as one edit. When generation continues
+  existing authored text, one undo removes only the AI continuation and preserves that text. No unaccepted suggestion
   appears in a saved, reopened, mirrored, or sent draft.
 - Fake-provider tests prove debounce, request caps, timeout, IME suppression, keyboard precedence, and
   rejection of stale results after editing, switching drafts/accounts, closing, sending, or disabling.

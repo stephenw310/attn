@@ -40,7 +40,7 @@ const AUTOCOMPLETE_MAX_TOKENS = 60
 
 function replySystem(request: AiReplyRequest, voice: AiVoiceProfile): string {
   const parts = [
-    'You draft email replies for the user. Write only the reply body as plain text — no subject line, no commentary, and no signature block (the composer adds the signature separately).',
+    'You draft email replies for the user. Follow the output boundary in the request exactly. Write plain text only — no subject line, no commentary, and no signature block (the composer adds the signature separately).',
     TONE_INSTRUCTIONS[voice.tone]
   ]
   if (voice.rules.trim().length > 0) {
@@ -98,13 +98,18 @@ export function buildPrompt(request: AiGenerateRequest, voice: AiVoiceProfile): 
     .join('\n\n---\n\n')
   const content =
     request.purpose === 'refine'
-      ? `Conversation:\n\n${conversation}\n\nYour previous draft reply:\n\n${request.priorDraft ?? ''}\n\n` +
-        `Rewrite the draft following this instruction: ${request.instruction ?? ''}`
+      ? request.existingDraft?.trim()
+        ? `Conversation:\n\n${conversation}\n\nText the user wrote before the AI continuation:\n\n` +
+          `${request.existingDraft}\n\nPrevious AI continuation:\n\n${request.priorDraft ?? ''}\n\n` +
+          `Rewrite only the AI continuation following this instruction: ${request.instruction ?? ''}. ` +
+          'Return only the replacement continuation. Never repeat or rewrite the text the user wrote.'
+        : `Conversation:\n\n${conversation}\n\nYour previous draft reply:\n\n${request.priorDraft ?? ''}\n\n` +
+          `Rewrite the draft following this instruction: ${request.instruction ?? ''}`
       : request.existingDraft?.trim()
-        ? `Conversation:\n\n${conversation}\n\nThe user has already written this draft:\n\n` +
-          `${request.existingDraft.trim()}\n\nRewrite and complete it as one coherent reply to the latest ` +
-          "message. Preserve every fact, commitment, name, number, and intent from the user's draft. " +
-          'Do not repeat the greeting or any part of the draft. Return the full replacement reply body.'
+        ? `Conversation:\n\n${conversation}\n\nThe user has already written the beginning of the reply:\n\n` +
+          `${request.existingDraft}\n\nContinue directly after its final character and complete the reply. ` +
+          'Return only the new text to append. Never repeat, replace, or rewrite any existing text. ' +
+          'The first output character must be the next character after the existing text.'
         : `Conversation:\n\n${conversation}\n\nWrite the user's reply to the latest message.`
   return {
     system: replySystem(request, voice),

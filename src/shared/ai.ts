@@ -189,7 +189,7 @@ export interface AiReplyRequest {
   purpose: 'reply' | 'refine'
   /** Oldest-first conversation context for the reply. */
   thread: AiThreadMessage[]
-  /** Reply only: authored text that the generated reply should replace and complete. */
+  /** Authored text that precedes the generated continuation. */
   existingDraft?: string
   /** Refine only: the one-line instruction ("shorter", "more formal"). */
   instruction?: string
@@ -285,7 +285,7 @@ export function parseAiGenerateRequest(value: unknown): AiGenerateRequest {
     const allowed =
       request.purpose === 'reply'
         ? new Set(['purpose', 'thread', 'existingDraft', 'styleExamples'])
-        : new Set(['purpose', 'thread', 'instruction', 'priorDraft', 'styleExamples'])
+        : new Set(['purpose', 'thread', 'existingDraft', 'instruction', 'priorDraft', 'styleExamples'])
     for (const key of Object.keys(request)) {
       if (!allowed.has(key)) throw new Error(`${request.purpose} request carries disallowed context`)
     }

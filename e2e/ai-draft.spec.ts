@@ -95,11 +95,14 @@ test('Mod+J from the reader streams an editable draft that sends through the out
   await expect(composer.root).toHaveCount(0)
 })
 
-test('Mod+J completes and replaces authored text, and one undo restores it', async ({ app, page }) => {
+test('Mod+J appends after authored text, and one undo removes only the continuation', async ({
+  app,
+  page
+}) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await enableAi(page)
   await installFakeAi(app, {
-    chunks: ['Hi Maya,\n\nI can review the roadmap by Tuesday and will send comments by end of day.']
+    chunks: ['\n\nI will send comments by end of day.']
   })
   await openDesignReader(page)
   const composer = new ComposerPage(page)
@@ -114,20 +117,20 @@ test('Mod+J completes and replaces authored text, and one undo restores it', asy
   await expect(editor(page)).toContainText('will send comments by end of day')
   const generatedText = await editor(page).innerText()
   expect(generatedText.match(/Hi Maya,/g)).toHaveLength(1)
+  expect(generatedText).toContain('I can review the roadmap by Tuesday.')
 
   const requests = await aiRequests(app)
   expect(requests).toHaveLength(1)
   const payload = requests[0].messages.map((message) => message.content).join('')
   expect(payload).toContain(original)
-  expect(payload).toContain('Return the full replacement reply body')
+  expect(payload).toContain('Return only the new text to append')
 
   await page.keyboard.press('ControlOrMeta+z')
   await expect(editor(page)).not.toContainText('will send comments by end of day')
   const restoredText = await editor(page).innerText()
   expect(restoredText.replace(/\s/g, '')).toContain(original.replace(/\s/g, ''))
 
-  // A provider failure before the first chunk must leave that restored user
-  // text in place; replacement begins only when output actually arrives.
+  // A provider failure before the first chunk must leave the user text in place.
   await installFakeAi(app, { error: 'provider unavailable' })
   await page.keyboard.press('ControlOrMeta+j')
   await expect(page.getByTestId('toast')).toContainText('provider unavailable')
