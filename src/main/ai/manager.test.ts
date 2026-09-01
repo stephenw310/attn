@@ -186,13 +186,19 @@ describe('fake provider streaming', () => {
     expect(manager.fakeProviderRequests()[0].system).toContain('My style example text')
   })
 
-  it('autocomplete receives its current thread context', async () => {
-    const { manager, timers } = harness({ enabled: true, autocompleteEnabled: true })
+  it('autocomplete receives its subject, current thread, tone, and standing rules', async () => {
+    const { manager, timers } = harness({
+      enabled: true,
+      autocompleteEnabled: true,
+      voiceTone: 'formal',
+      voiceRules: 'Avoid exclamation marks.'
+    })
     manager.installFakeProvider({ chunks: ['ok'] })
     await manager.generate({
       purpose: 'autocomplete',
       prefix: 'Dear team',
       suffix: '',
+      subject: 'Q4 planning',
       thread: [{ author: 'Maya', text: 'Ping?' }]
     })
     timers.fire(0)
@@ -200,7 +206,10 @@ describe('fake provider streaming', () => {
     expect(recorded.purpose).toBe('autocomplete')
     const payload = recorded.system + recorded.messages.map((message) => message.content).join('')
     expect(payload).toContain('Dear team')
+    expect(payload).toContain('Q4 planning')
     expect(payload).toContain('Ping?')
+    expect(payload).toContain('formal')
+    expect(payload).toContain('Avoid exclamation marks.')
   })
 
   it('a paced script delivers chunk by chunk, so a mid-stream cancel keeps a true partial', async () => {

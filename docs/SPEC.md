@@ -654,10 +654,11 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - The reply enable screen discloses the current thread, voice profile, and optional style examples sent
   on each invocation. The autocomplete opt-in separately discloses that **unsent draft text leaves the
   machine while typing** when using a cloud endpoint. Its payload contains a bounded plain-text excerpt
-  of the authored body around the caret (at most 2,000 characters before and 500 after) and, for replies,
-  the current cached thread through the message being answered. Exclude quoted content embedded in the
-  draft, signatures, recipients, subject, attachments, voice instructions, and unrelated sent-mail
-  examples. Do not fetch mail solely to enrich autocomplete context.
+  of the authored body around the caret (at most 2,000 characters before and 500 after), the current
+  subject, selected tone, and standing rules. For replies, it also contains the current cached thread
+  through the message being answered. Exclude quoted content embedded in the draft, signatures,
+  recipients, attachments, and unrelated sent-mail style examples. Do not fetch mail solely to enrich
+  autocomplete context.
 - Debounce autocomplete by 300ms; allow at most one autocomplete request in flight app-wide, no more than
   one start per second and 20 per rolling minute. When typing replaces a canceled request inside the
   one-second cooldown, coalesce the latest eligible request until the cooldown expires; the rolling-minute

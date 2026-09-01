@@ -75,7 +75,11 @@ test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab acc
   await expect(preview(page)).toHaveCount(0)
 
   // The separate opt-in turns typing pauses into bounded requests.
-  await page.evaluate(() => window.attn.ai.setSetting('autocompleteEnabled', true))
+  await page.evaluate(async () => {
+    await window.attn.ai.setSetting('voiceTone', 'formal')
+    await window.attn.ai.setSetting('voiceRules', 'Avoid exclamation marks.')
+    await window.attn.ai.setSetting('autocompleteEnabled', true)
+  })
   await installFakeAi(app, { chunks: [' notes — the overlay reads well.'] })
   await page.keyboard.type(' d')
   await expect.poll(() => aiRequests(app).then((requests) => requests.length)).toBe(1)
@@ -87,8 +91,11 @@ test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab acc
   expect(requests[0].purpose).toBe('autocomplete')
   const payload = requests[0].system + requests[0].messages.map((message) => message.content).join('')
   expect(payload).toContain('Thanks for the d')
-  // Reply suggestions consider the current conversation but never unrelated
-  // sent-mail style examples.
+  // Reply suggestions use the live subject, voice profile, and current
+  // conversation, but never unrelated sent-mail style examples.
+  expect(payload).toContain('Design notes')
+  expect(payload).toContain('formal')
+  expect(payload).toContain('Avoid exclamation marks.')
   expect(payload).toContain('The conversation overlay direction feels focused.')
   expect(payload).not.toContain('Recent replies the user wrote')
 

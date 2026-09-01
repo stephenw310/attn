@@ -1396,7 +1396,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   onPreservedContent={notePreservedContent}
                 />
                 <SnippetsPlugin onInserted={handleSnippetInserted} />
-                <AiAutocompletePlugin getThreadContext={aiDraft?.getThreadContext} />
+                <AiAutocompletePlugin subject={subject} getThreadContext={aiDraft?.getThreadContext} />
                 {aiDraft && (
                   <AiDraftPlugin
                     kind={draft.kind}

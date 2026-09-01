@@ -173,8 +173,8 @@ export function validateAiSettingUpdate(key: unknown, value: unknown): AiSetting
 /**
  * Request purposes (F17). Reply and refine are explicit invocations carrying
  * thread context. Autocomplete is typing-triggered and carries the bounded
- * authored-body excerpt plus the current reply thread when one exists; it
- * never carries voice-matching examples.
+ * authored-body excerpt, current subject, and current reply thread when one
+ * exists; it never carries voice-matching examples.
  */
 export type AiPurpose = 'reply' | 'refine' | 'autocomplete'
 
@@ -203,6 +203,7 @@ export interface AiReplyRequest {
 /** Bounds for the authored autocomplete excerpt around the caret. */
 export const AUTOCOMPLETE_MAX_PREFIX_CHARS = 2_000
 export const AUTOCOMPLETE_MAX_SUFFIX_CHARS = 500
+export const AUTOCOMPLETE_MAX_SUBJECT_CHARS = 500
 /** Suggestions are one short continuation: no line breaks, at most this long. */
 export const AUTOCOMPLETE_MAX_SUGGESTION_CHARS = 120
 
@@ -212,6 +213,8 @@ export interface AiAutocompleteRequest {
   prefix: string
   /** Authored body text after the caret. */
   suffix: string
+  /** Current subject, when present. */
+  subject?: string
   /** Current reply thread, absent for new mail and forwards without context. */
   thread?: AiThreadMessage[]
 }
@@ -238,23 +241,29 @@ function isThreadMessage(value: unknown): value is AiThreadMessage {
 
 /**
  * Validate a renderer generate request at the IPC boundary. Purpose decides
- * the allowed fields exactly: autocomplete may carry its disclosed thread,
- * but style examples and refine-only fields are rejected.
+ * the allowed fields exactly: autocomplete may carry its disclosed subject
+ * and thread, but style examples and refine-only fields are rejected.
  */
 export function parseAiGenerateRequest(value: unknown): AiGenerateRequest {
   if (!value || typeof value !== 'object') throw new Error('invalid AI request')
   const request = value as Record<string, unknown>
   if (request.purpose === 'autocomplete') {
-    const allowed = new Set(['purpose', 'prefix', 'suffix', 'thread'])
+    const allowed = new Set(['purpose', 'prefix', 'suffix', 'subject', 'thread'])
     for (const key of Object.keys(request)) {
       if (!allowed.has(key)) throw new Error('autocomplete request carries disallowed context')
     }
-    const { prefix, suffix, thread } = request
+    const { prefix, suffix, subject, thread } = request
     if (typeof prefix !== 'string' || prefix.length > AUTOCOMPLETE_MAX_PREFIX_CHARS) {
       throw new Error('invalid autocomplete prefix')
     }
     if (typeof suffix !== 'string' || suffix.length > AUTOCOMPLETE_MAX_SUFFIX_CHARS) {
       throw new Error('invalid autocomplete suffix')
+    }
+    if (
+      subject !== undefined &&
+      (typeof subject !== 'string' || subject.length > AUTOCOMPLETE_MAX_SUBJECT_CHARS)
+    ) {
+      throw new Error('invalid autocomplete subject')
     }
     if (
       thread !== undefined &&
@@ -266,6 +275,7 @@ export function parseAiGenerateRequest(value: unknown): AiGenerateRequest {
       purpose: 'autocomplete',
       prefix,
       suffix,
+      ...(subject !== undefined ? { subject } : {}),
       ...(thread !== undefined ? { thread: thread as AiThreadMessage[] } : {})
     }
   }

@@ -164,6 +164,8 @@ test('autocomplete consent is separate, gates its own requests, and survives rel
   const disclosure = page.getByTestId('settings-ai-autocomplete-confirm')
   await expect(disclosure).toBeVisible()
   await expect(disclosure).toContainText('While you type')
+  await expect(disclosure).toContainText('current subject')
+  await expect(disclosure).toContainText('selected tone and standing rules')
   await page.getByTestId('settings-ai-autocomplete-cancel').click()
   await expect(page.getByTestId('settings-ai-autocomplete')).not.toBeChecked()
 

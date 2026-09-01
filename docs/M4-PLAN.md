@@ -806,10 +806,11 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   A subsequent deliberate typing edit can trigger another request.
 - **Bounded context:** build a separate autocomplete payload from the authored body, up to 2,000 plain-text
   characters before the caret and 500 after. Exclude protected quote/signature/opaque nodes from extraction,
-  not just from display, and preserve the cursor boundary when truncating. For replies, add the current
-  cached thread through the message being answered. Do not include subject, recipients, attachment content
-  or metadata, voice profile, or unrelated sent-mail examples, and do not fetch mail to fill the context.
-  Ambiguous imported regions are excluded, even at the cost of fewer suggestions.
+  not just from display, and preserve the cursor boundary when truncating. Add the current subject, selected
+  tone, and standing rules; for replies, also add the current cached thread through the message being
+  answered. Do not include recipients, attachment content or metadata, signatures, or unrelated sent-mail
+  style examples, and do not fetch mail to fill the context. Ambiguous imported regions are excluded, even
+  at the cost of fewer suggestions.
 - **Bounded work:** main enforces one autocomplete request in flight app-wide, at most one start per second
   and 20 starts per rolling minute. Enforce size caps and purpose-specific consent at the IPC boundary too.
   The renderer coalesces the latest replacement until a one-second cooldown expires; the rolling cap and

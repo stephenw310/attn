@@ -8,7 +8,7 @@ import {
   type LexicalEditor
 } from 'lexical'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AiThreadMessage } from '../../../shared/ai'
+import { type AiThreadMessage, AUTOCOMPLETE_MAX_SUBJECT_CHARS } from '../../../shared/ai'
 import { AutocompleteController } from './autocompleteController'
 import { $autocompleteExcerpt, $caretAnchor } from './autocompleteExcerpt'
 
@@ -66,13 +66,16 @@ function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement
 }
 
 export function AiAutocompletePlugin({
+  subject,
   getThreadContext
 }: {
+  subject: string
   getThreadContext?: () => AiThreadMessage[] | null
 }): React.JSX.Element | null {
   const [editor] = useLexicalComposerContext()
   const [preview, setPreview] = useState<PreviewPlacement | null>(null)
   const typedRef = useRef(false)
+  const subjectRef = useRef(subject)
   const getThreadContextRef = useRef(getThreadContext)
   getThreadContextRef.current = getThreadContext
 
@@ -102,10 +105,12 @@ export function AiAutocompletePlugin({
         const bridge = window.attn
         if (!bridge) return Promise.reject(new Error('bridge unavailable'))
         const thread = getThreadContextRef.current?.() ?? null
+        const currentSubject = subjectRef.current.slice(0, AUTOCOMPLETE_MAX_SUBJECT_CHARS)
         return bridge.ai.generate({
           purpose: 'autocomplete',
           prefix: excerpt.prefix,
           suffix: excerpt.suffix,
+          ...(currentSubject.trim().length > 0 ? { subject: currentSubject } : {}),
           ...(thread && thread.length > 0 ? { thread } : {})
         })
       },
@@ -115,6 +120,13 @@ export function AiAutocompletePlugin({
     })
   }
   const controller = controllerRef.current
+
+  // A subject edit changes the completion context. Discard any request or
+  // preview built from the previous subject before the next body keystroke.
+  useEffect(() => {
+    subjectRef.current = subject
+    controller.noteInvalidated()
+  }, [controller, subject])
 
   const accept = useCallback(() => {
     const text = controller.takeAcceptedText()

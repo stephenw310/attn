@@ -3,6 +3,7 @@ import {
   type AiAutocompleteRequest,
   type AiReplyRequest,
   AUTOCOMPLETE_MAX_PREFIX_CHARS,
+  AUTOCOMPLETE_MAX_SUBJECT_CHARS,
   AUTOCOMPLETE_MAX_SUFFIX_CHARS,
   parseAiGenerateRequest
 } from '../../shared/ai'
@@ -39,17 +40,19 @@ describe('buildPrompt', () => {
     expect(prompt.messages[0].content).toContain('shorter')
   })
 
-  it('autocomplete prompts contain the current thread and bounded excerpt — never voice or examples', () => {
+  it('autocomplete prompts contain subject, thread, voice rules, and the bounded excerpt', () => {
     const request: AiAutocompleteRequest = {
       purpose: 'autocomplete',
       prefix: `${'x'.repeat(AUTOCOMPLETE_MAX_PREFIX_CHARS + 500)}BEFORE`,
       suffix: `AFTER${'y'.repeat(AUTOCOMPLETE_MAX_SUFFIX_CHARS + 500)}`,
+      subject: 'Revised launch plan',
       thread: [{ author: 'Maya Lin', text: 'Can you send the revised launch plan?' }]
     }
     const prompt = buildPrompt(request, voice)
     const payload = prompt.system + prompt.messages.map((message) => message.content).join('')
-    expect(payload).not.toContain('Best, Chao')
-    expect(payload).not.toContain('formal')
+    expect(payload).toContain("sign off with 'Best, Chao'")
+    expect(payload).toContain('formal')
+    expect(payload).toContain('Revised launch plan')
     expect(payload).toContain('Can you send the revised launch plan?')
     expect(payload).toContain('BEFORE')
     expect(payload).toContain('AFTER')
@@ -66,15 +69,20 @@ describe('buildPrompt', () => {
 })
 
 describe('parseAiGenerateRequest', () => {
-  it('allows disclosed thread context but rejects reply-only fields', () => {
+  it('allows disclosed subject and thread context but rejects reply-only fields', () => {
     expect(
       parseAiGenerateRequest({
         purpose: 'autocomplete',
         prefix: 'Hi',
         suffix: '',
+        subject: 'Planning',
         thread: [{ author: 'a', text: 'b' }]
       })
-    ).toMatchObject({ purpose: 'autocomplete', thread: [{ author: 'a', text: 'b' }] })
+    ).toMatchObject({
+      purpose: 'autocomplete',
+      subject: 'Planning',
+      thread: [{ author: 'a', text: 'b' }]
+    })
     expect(() =>
       parseAiGenerateRequest({ purpose: 'autocomplete', prefix: 'Hi', suffix: '', styleExamples: ['x'] })
     ).toThrow(/disallowed context/)
@@ -88,6 +96,14 @@ describe('parseAiGenerateRequest', () => {
         suffix: ''
       })
     ).toThrow(/prefix/)
+    expect(() =>
+      parseAiGenerateRequest({
+        purpose: 'autocomplete',
+        prefix: 'Hi',
+        suffix: '',
+        subject: 'x'.repeat(AUTOCOMPLETE_MAX_SUBJECT_CHARS + 1)
+      })
+    ).toThrow(/subject/)
   })
 
   it('accepts a well-formed reply request and unknown purposes fail', () => {
