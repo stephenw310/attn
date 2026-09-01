@@ -89,7 +89,7 @@ export interface AccountSettings {
   lifetimeThreadCap: number | null
   /**
    * Include the "Sent with Attn:" footer when creating a local draft (F6).
-   * Default off; the preference affects new drafts only — open, saved, and
+   * Default on; the preference affects new drafts only — open, saved, and
    * queued drafts keep exactly the body the user last saw.
    */
   attnSignatureEnabled: boolean

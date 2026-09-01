@@ -42,7 +42,7 @@ describe('primary Gmail send-as settings', () => {
       expect(draft.bodyHtml).toContain('Best,')
       expect(draft.bodyHtml).toContain('color:#123456')
       expect(draft.bodyHtml).not.toMatch(/position|script|alert/i)
-      expect(draft.bodyText).toBe('\nBest,\nChao')
+      expect(draft.bodyText).toBe(`\nBest,\nChao\n\n${ATTN_SIGNATURE_LINE}`)
     } finally {
       db.close()
     }
@@ -150,6 +150,7 @@ describe('primary Gmail send-as settings', () => {
   it('recognizes the untouched signature after editor normalization', () => {
     const db = openDatabase(':memory:')
     try {
+      writeSetting(db, ACCOUNT, ATTN_SIGNATURE_SETTING, 'false')
       cachePrimarySendAs(db, ACCOUNT, {
         sendAsEmail: ACCOUNT,
         signature: '<div style="color:#123456">Best,</div><div><a href="https://attn.test">Chao</a></div>'
@@ -216,7 +217,10 @@ describe('primary Gmail send-as settings', () => {
     try {
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Old</div>' })
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '' })
-      expect(prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).draft.bodyHtml).toBe('')
+      const cleared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).draft
+      expect(cleared.bodyHtml).not.toContain('Old')
+      expect(cleared.bodyHtml).toContain('data-attn-signature="footer"')
+      expect(cleared.bodyText).toBe(`\n\n${ATTN_SIGNATURE_LINE}`)
     } finally {
       db.close()
     }
@@ -275,16 +279,21 @@ describe('optional "Sent with Attn" footer (F6/T32B)', () => {
     writeSetting(db, ACCOUNT, ATTN_SIGNATURE_SETTING, 'true')
   }
 
-  it('is off by default and per-account', () => {
+  it('is on by default and each account can turn it off independently', () => {
     const db = openDatabase(':memory:')
     try {
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
       const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
-      expect(prepared.draft.bodyHtml).not.toContain(ATTN_SIGNATURE_LINE)
+      expect(prepared.draft.bodyHtml).toContain('data-attn-signature="footer"')
+      expect(prepared.draft.bodyText).toContain(ATTN_SIGNATURE_LINE)
 
-      writeSetting(db, 'other@example.com', ATTN_SIGNATURE_SETTING, 'true')
-      const stillOff = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
-      expect(stillOff.draft.bodyHtml).not.toContain(ATTN_SIGNATURE_LINE)
+      writeSetting(db, 'other@example.com', ATTN_SIGNATURE_SETTING, 'false')
+      const stillOn = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(stillOn.draft.bodyHtml).toContain('data-attn-signature="footer"')
+
+      writeSetting(db, ACCOUNT, ATTN_SIGNATURE_SETTING, 'false')
+      const disabled = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(disabled.draft.bodyHtml).not.toContain(ATTN_SIGNATURE_LINE)
     } finally {
       db.close()
     }

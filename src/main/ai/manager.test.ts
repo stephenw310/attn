@@ -181,16 +181,21 @@ describe('fake provider streaming', () => {
     expect(manager.fakeProviderRequests()[0].system).toContain('My style example text')
   })
 
-  it('reply context can never enter an autocomplete request payload', async () => {
+  it('autocomplete receives its current thread context', async () => {
     const { manager, timers } = harness({ enabled: true, autocompleteEnabled: true })
     manager.installFakeProvider({ chunks: ['ok'] })
-    await manager.generate({ purpose: 'autocomplete', prefix: 'Dear team', suffix: '' })
+    await manager.generate({
+      purpose: 'autocomplete',
+      prefix: 'Dear team',
+      suffix: '',
+      thread: [{ author: 'Maya', text: 'Ping?' }]
+    })
     timers.fire(0)
     const recorded = manager.fakeProviderRequests()[0]
     expect(recorded.purpose).toBe('autocomplete')
     const payload = recorded.system + recorded.messages.map((message) => message.content).join('')
     expect(payload).toContain('Dear team')
-    expect(payload).not.toContain('Ping?')
+    expect(payload).toContain('Ping?')
   })
 
   it('a paced script delivers chunk by chunk, so a mid-stream cancel keeps a true partial', async () => {

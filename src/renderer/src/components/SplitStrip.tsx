@@ -5,15 +5,9 @@ interface SplitStripProps {
   splits: readonly SplitSummary[]
   activeSplitId: string | null
   onSelect: (id: string) => void
-  onManage: () => void
 }
 
-export function SplitStrip({
-  splits,
-  activeSplitId,
-  onSelect,
-  onManage
-}: SplitStripProps): React.JSX.Element | null {
+export function SplitStrip({ splits, activeSplitId, onSelect }: SplitStripProps): React.JSX.Element | null {
   const [overflowOpen, setOverflowOpen] = useState(false)
   const overflowRef = useRef<HTMLDivElement>(null)
   const { visibleSplits, overflowSplits } = useMemo(() => {
@@ -88,58 +82,46 @@ export function SplitStrip({
           )
         })}
       </div>
-      <div ref={overflowRef} className="relative flex-none">
-        <button
-          type="button"
-          data-testid="split-strip-overflow"
-          aria-label={overflowSplits.length > 0 ? 'More inbox splits' : 'Manage splits'}
-          aria-expanded={overflowSplits.length > 0 ? overflowOpen : undefined}
-          title={overflowSplits.length > 0 ? 'More inbox splits' : 'Manage splits'}
-          onClick={() => {
-            if (overflowSplits.length > 0) setOverflowOpen((open) => !open)
-            else onManage()
-          }}
-          className="app-no-drag flex h-full w-11 cursor-pointer items-center justify-center border-l border-edge text-base tracking-widest text-ink-faint hover:bg-active hover:text-ink"
-        >
-          ···
-        </button>
-        {overflowOpen && overflowSplits.length > 0 && (
-          <div
-            data-testid="split-overflow-menu"
-            className="absolute top-full right-1 z-50 mt-1 min-w-48 rounded-lg border border-edge bg-raised p-1.5 shadow-menu"
+      {overflowSplits.length > 0 && (
+        <div ref={overflowRef} className="relative flex-none">
+          <button
+            type="button"
+            data-testid="split-strip-overflow"
+            aria-label="More inbox splits"
+            aria-expanded={overflowOpen}
+            title="More inbox splits"
+            onClick={() => setOverflowOpen((open) => !open)}
+            className="app-no-drag flex h-full w-11 cursor-pointer items-center justify-center border-l border-edge text-base tracking-widest text-ink-faint hover:bg-active hover:text-ink"
           >
-            {overflowSplits.map((split) => (
-              <button
-                key={split.id}
-                type="button"
-                role="tab"
-                data-testid="split-overflow-tab"
-                data-split-id={split.id}
-                aria-selected={split.id === activeSplitId}
-                onClick={() => {
-                  setOverflowOpen(false)
-                  onSelect(split.id)
-                }}
-                className="flex w-full cursor-pointer items-center justify-between gap-4 rounded-md px-2.5 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
-              >
-                <span>{split.name}</span>
-                {split.unread > 0 && <span className="tabular-nums text-accent">{split.unread}</span>}
-              </button>
-            ))}
-            <div className="my-1 border-t border-edge" />
-            <button
-              type="button"
-              onClick={() => {
-                setOverflowOpen(false)
-                onManage()
-              }}
-              className="w-full cursor-pointer rounded-md px-2.5 py-1.5 text-left text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+            ···
+          </button>
+          {overflowOpen && (
+            <div
+              data-testid="split-overflow-menu"
+              className="absolute top-full right-1 z-50 mt-1 min-w-48 rounded-lg border border-edge bg-raised p-1.5 shadow-menu"
             >
-              Manage splits…
-            </button>
-          </div>
-        )}
-      </div>
+              {overflowSplits.map((split) => (
+                <button
+                  key={split.id}
+                  type="button"
+                  role="tab"
+                  data-testid="split-overflow-tab"
+                  data-split-id={split.id}
+                  aria-selected={split.id === activeSplitId}
+                  onClick={() => {
+                    setOverflowOpen(false)
+                    onSelect(split.id)
+                  }}
+                  className="flex w-full cursor-pointer items-center justify-between gap-4 rounded-md px-2.5 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+                >
+                  <span>{split.name}</span>
+                  {split.unread > 0 && <span className="tabular-nums text-accent">{split.unread}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

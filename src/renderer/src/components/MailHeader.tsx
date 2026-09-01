@@ -81,7 +81,6 @@ function QueueReadout({
 function AccountMenu({
   status,
   accountStatuses,
-  onManageSplits,
   onSwitchAccount,
   onAddAccount,
   onRemoveAccount,
@@ -92,7 +91,6 @@ function AccountMenu({
   status: AuthStatus
   /** Live per-account health, pushed by the utility (F18). */
   accountStatuses: readonly AccountSyncStatus[] | null
-  onManageSplits: () => void
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
   /** Opens the Remove-account confirmation for the active account (F18, D3). */
@@ -291,17 +289,6 @@ function AccountMenu({
           >
             Keyboard shortcuts <Kbd>{`${modKeyLabel()} /`}</Kbd>
           </button>
-          <button
-            type="button"
-            data-testid="account-split-rules"
-            onClick={() => {
-              closeMenu()
-              onManageSplits()
-            }}
-            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
-          >
-            Split rules…
-          </button>
           <hr className="my-1.5 border-edge" />
           <button
             type="button"
@@ -338,7 +325,6 @@ interface MailHeaderProps {
   onReconnectActions: () => void
   onOpenOutbox: () => void
   onToggleSidebar: () => void
-  onManageSplits: () => void
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
   onRemoveAccount: () => void
@@ -361,7 +347,6 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     onReconnectActions,
     onOpenOutbox,
     onToggleSidebar,
-    onManageSplits,
     onSwitchAccount,
     onAddAccount,
     onRemoveAccount,
@@ -416,7 +401,6 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         <AccountMenu
           status={status}
           accountStatuses={accountStatuses}
-          onManageSplits={onManageSplits}
           onSwitchAccount={onSwitchAccount}
           onAddAccount={onAddAccount}
           onRemoveAccount={onRemoveAccount}

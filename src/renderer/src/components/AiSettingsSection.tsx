@@ -36,7 +36,8 @@ const REPLY_DISCLOSURE =
 const AUTOCOMPLETE_DISCLOSURE =
   'While you type, unsent draft text near your cursor repeatedly leaves this machine for your configured ' +
   'provider; a cloud endpoint can charge for every suggestion. Each request carries only a bounded ' +
-  'excerpt of the text you typed — never the rest of the thread, recipients, or your sent mail — and ' +
+  'excerpt of the text you typed and, for replies, the current email thread. It never includes recipients ' +
+  'or unrelated sent mail, and ' +
   'content already sent to a provider cannot be recalled.'
 
 export function AiSettingsSection({ onToast }: { onToast: (message: string) => void }): React.JSX.Element {

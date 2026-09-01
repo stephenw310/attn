@@ -456,7 +456,7 @@ export function SettingsView({
                     data-settings-control="attnFooter"
                     aria-label="Include Sent with Attn"
                     disabled={!accountSettings}
-                    checked={accountSettings?.attnSignatureEnabled ?? false}
+                    checked={accountSettings?.attnSignatureEnabled ?? true}
                     onChange={(event) => onUpdateAccountSetting('attnSignatureEnabled', event.target.checked)}
                     className="size-4 cursor-pointer accent-accent"
                   />

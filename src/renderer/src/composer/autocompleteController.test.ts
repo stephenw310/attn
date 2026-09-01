@@ -140,8 +140,20 @@ describe('suggestion lifecycle', () => {
   it('buffers chunks and shows the completed single-line suggestion', async () => {
     const h = harness()
     await completedSuggestion(h, 'ld, how are you?')
-    expect(h.hooks.previews).toEqual(['ld, how are you?'])
+    expect(h.hooks.previews).toEqual(['ld, how are you?', 'ld, how are you?'])
     expect(h.controller.hasSuggestion()).toBe(true)
+  })
+
+  it('updates the gray preview as chunks arrive instead of waiting for completion', async () => {
+    const h = harness()
+    h.controller.noteTypingEdit()
+    h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+    await settle()
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'chunk', text: 'ld, how' })
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'chunk', text: ' are you?' })
+    expect(h.hooks.previews).toEqual(['ld, how', 'ld, how are you?'])
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'done' })
+    expect(h.hooks.previews).toEqual(['ld, how', 'ld, how are you?', 'ld, how are you?'])
   })
 
   it('normalizes to one line and the character cap', () => {
@@ -237,7 +249,7 @@ describe('staleness and cancellation', () => {
     h.controller.handleStreamEvent({ requestId: 'ac-9', kind: 'done' })
     gate.release?.({ requestId: 'ac-9' })
     await settle()
-    expect(h.hooks.previews).toEqual(['early'])
+    expect(h.hooks.previews).toEqual(['early', 'early'])
   })
 
   it('dispose cancels everything and refuses further work', async () => {

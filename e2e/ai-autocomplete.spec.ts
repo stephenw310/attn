@@ -66,7 +66,9 @@ test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab acc
   await enableAi(page, false)
   await installFakeAi(app, { chunks: ['never delivered'] })
   await openDesignReply(page)
-  await editor(page).click()
+  // Click the authored first line. The default attribution stays editable,
+  // but autocomplete intentionally ignores that protected footer region.
+  await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Thanks for the')
   await page.waitForTimeout(800)
   expect(await aiRequests(app)).toHaveLength(0)
@@ -76,6 +78,7 @@ test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab acc
   await page.evaluate(() => window.attn.ai.setSetting('autocompleteEnabled', true))
   await installFakeAi(app, { chunks: [' notes — the overlay reads well.'] })
   await page.keyboard.type(' d')
+  await expect.poll(() => aiRequests(app).then((requests) => requests.length)).toBe(1)
   await expect(preview(page)).toBeVisible()
   await expect(preview(page)).toContainText('the overlay reads well.')
 
@@ -84,8 +87,9 @@ test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab acc
   expect(requests[0].purpose).toBe('autocomplete')
   const payload = requests[0].system + requests[0].messages.map((message) => message.content).join('')
   expect(payload).toContain('Thanks for the d')
-  // Only the authored excerpt travels: never the thread, never sent mail.
-  expect(payload).not.toContain('The conversation overlay direction feels focused.')
+  // Reply suggestions consider the current conversation but never unrelated
+  // sent-mail style examples.
+  expect(payload).toContain('The conversation overlay direction feels focused.')
   expect(payload).not.toContain('Recent replies the user wrote')
 
   // Tab inserts the suggestion as editable text, one undo step.
@@ -105,7 +109,7 @@ test('Esc dismisses without closing, and an unaccepted preview never reaches the
   await enableAi(page, true)
   await installFakeAi(app, { chunks: [' phantom suggestion text'] })
   const composer = await openDesignReply(page)
-  await editor(page).click()
+  await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Hello ther')
   await expect(preview(page)).toBeVisible()
 
@@ -174,7 +178,7 @@ test('suggestions render legibly at the caret in dark and light themes (artifact
   await page.keyboard.press('c')
   const composer = new ComposerPage(page)
   await expect(composer.root).toBeVisible()
-  await editor(page).click()
+  await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Dear team, I wanted')
   await expect(preview(page)).toBeVisible()
   await page.screenshot({ path: 'e2e/.artifacts/ai-autocomplete.png' })
@@ -190,7 +194,7 @@ test('suggestions render legibly at the caret in dark and light themes (artifact
   await page.waitForTimeout(1_100)
   await page.keyboard.press('c')
   await expect(composer.root).toBeVisible()
-  await editor(page).click()
+  await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Dear team, I wanted')
   await expect(preview(page)).toBeVisible()
   await page.screenshot({ path: 'e2e/.artifacts/ai-autocomplete-light.png' })

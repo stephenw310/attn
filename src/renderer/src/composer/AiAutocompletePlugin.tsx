@@ -8,6 +8,7 @@ import {
   type LexicalEditor
 } from 'lexical'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AiThreadMessage } from '../../../shared/ai'
 import { AutocompleteController } from './autocompleteController'
 import { $autocompleteExcerpt, $caretAnchor } from './autocompleteExcerpt'
 
@@ -44,18 +45,36 @@ function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement
     rect = element.getBoundingClientRect()
   }
   const containerRect = container.getBoundingClientRect()
+  const rootRect = rootElement.getBoundingClientRect()
+  const caretLeft = rect.right - containerRect.left + container.scrollLeft
+  const remaining = containerRect.width - (rect.right - containerRect.left) - 28
+  if (remaining < 160) {
+    const lineHeight = Number.parseFloat(getComputedStyle(rootElement).lineHeight) || 20
+    return {
+      text,
+      left: rootRect.left - containerRect.left + container.scrollLeft,
+      top: rect.top - containerRect.top + container.scrollTop + lineHeight,
+      maxWidth: Math.max(rootRect.width, 160)
+    }
+  }
   return {
     text,
-    left: rect.right - containerRect.left + container.scrollLeft,
+    left: caretLeft,
     top: rect.top - containerRect.top + container.scrollTop,
-    maxWidth: Math.max(containerRect.width - (rect.right - containerRect.left) - 28, 160)
+    maxWidth: remaining
   }
 }
 
-export function AiAutocompletePlugin(): React.JSX.Element | null {
+export function AiAutocompletePlugin({
+  getThreadContext
+}: {
+  getThreadContext?: () => AiThreadMessage[] | null
+}): React.JSX.Element | null {
   const [editor] = useLexicalComposerContext()
   const [preview, setPreview] = useState<PreviewPlacement | null>(null)
   const typedRef = useRef(false)
+  const getThreadContextRef = useRef(getThreadContext)
+  getThreadContextRef.current = getThreadContext
 
   const controllerRef = useRef<AutocompleteController | null>(null)
   if (controllerRef.current === null) {
@@ -82,10 +101,12 @@ export function AiAutocompletePlugin(): React.JSX.Element | null {
       request: (excerpt) => {
         const bridge = window.attn
         if (!bridge) return Promise.reject(new Error('bridge unavailable'))
+        const thread = getThreadContextRef.current?.() ?? null
         return bridge.ai.generate({
           purpose: 'autocomplete',
           prefix: excerpt.prefix,
-          suffix: excerpt.suffix
+          suffix: excerpt.suffix,
+          ...(thread && thread.length > 0 ? { thread } : {})
         })
       },
       cancelRequest: (requestId) => void window.attn?.ai.cancel(requestId).catch(() => {}),

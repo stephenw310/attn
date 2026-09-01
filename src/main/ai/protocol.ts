@@ -1,10 +1,9 @@
 // Pure request shaping and stream parsing for the two supported wire
 // protocols (F17): the Anthropic Messages API and OpenAI-compatible chat
 // completions. No network, no Electron — everything here is unit-testable
-// data-in/data-out, and the prompt builders are the privacy boundary in code:
-// the autocomplete builder reads ONLY the bounded excerpt fields, so thread
-// context and style examples cannot reach an autocomplete request even if a
-// caller smuggled them past the IPC guard.
+// data-in/data-out. The prompt builders are the privacy boundary in code:
+// autocomplete receives the disclosed current thread and bounded authored
+// excerpt, while voice rules and sent-mail style examples stay excluded.
 
 import {
   AI_PROVIDER_PRESETS,
@@ -58,22 +57,26 @@ function replySystem(request: AiReplyRequest, voice: AiVoiceProfile): string {
 
 /**
  * Build the provider-neutral prompt. Reply and refine consume the thread and
- * voice profile; autocomplete consumes prefix/suffix and nothing else — it
- * destructures exactly those two fields, truncates them to the disclosed
- * bounds, and never reads the voice profile.
+ * voice profile. Autocomplete consumes its current-thread context and bounded
+ * prefix/suffix, but never reads the voice profile or sent-mail examples.
  */
 export function buildPrompt(request: AiGenerateRequest, voice: AiVoiceProfile): AiPrompt {
   if (request.purpose === 'autocomplete') {
     const prefix = request.prefix.slice(-AUTOCOMPLETE_MAX_PREFIX_CHARS)
     const suffix = request.suffix.slice(0, AUTOCOMPLETE_MAX_SUFFIX_CHARS)
+    const conversation = (request.thread ?? [])
+      .map((message) => `From ${message.author}:\n${message.text}`)
+      .join('\n\n---\n\n')
     return {
       system:
         'Complete the email the user is typing. Continue directly from the text before the caret with one short continuation of at most ' +
-        `${AUTOCOMPLETE_MAX_SUGGESTION_CHARS} characters and no line breaks. Output only the continuation text.`,
+        `${AUTOCOMPLETE_MAX_SUGGESTION_CHARS} characters and no line breaks. Use the conversation context when present. Output only the continuation text.`,
       messages: [
         {
           role: 'user',
-          content: `Text before the caret:\n${prefix}\n\nText after the caret:\n${suffix}`
+          content:
+            (conversation ? `Conversation being answered:\n\n${conversation}\n\n` : '') +
+            `Text before the caret:\n${prefix}\n\nText after the caret:\n${suffix}`
         }
       ],
       maxTokens: AUTOCOMPLETE_MAX_TOKENS

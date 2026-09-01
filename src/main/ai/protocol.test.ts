@@ -39,37 +39,42 @@ describe('buildPrompt', () => {
     expect(prompt.messages[0].content).toContain('shorter')
   })
 
-  it('autocomplete prompts contain only the bounded excerpt — never voice or examples', () => {
+  it('autocomplete prompts contain the current thread and bounded excerpt — never voice or examples', () => {
     const request: AiAutocompleteRequest = {
       purpose: 'autocomplete',
       prefix: `${'x'.repeat(AUTOCOMPLETE_MAX_PREFIX_CHARS + 500)}BEFORE`,
-      suffix: `AFTER${'y'.repeat(AUTOCOMPLETE_MAX_SUFFIX_CHARS + 500)}`
+      suffix: `AFTER${'y'.repeat(AUTOCOMPLETE_MAX_SUFFIX_CHARS + 500)}`,
+      thread: [{ author: 'Maya Lin', text: 'Can you send the revised launch plan?' }]
     }
     const prompt = buildPrompt(request, voice)
     const payload = prompt.system + prompt.messages.map((message) => message.content).join('')
     expect(payload).not.toContain('Best, Chao')
     expect(payload).not.toContain('formal')
+    expect(payload).toContain('Can you send the revised launch plan?')
     expect(payload).toContain('BEFORE')
     expect(payload).toContain('AFTER')
     // The excerpt is truncated to the disclosed bounds: prefix keeps its tail
     // (the text at the caret), suffix its head.
     const content = prompt.messages[0].content
-    const beforeSection = content.slice(0, content.indexOf('Text after the caret:'))
+    const beforeSection = content.slice(
+      content.indexOf('Text before the caret:'),
+      content.indexOf('Text after the caret:')
+    )
     expect(beforeSection.length).toBeLessThan(AUTOCOMPLETE_MAX_PREFIX_CHARS + 100)
     expect(content.endsWith(`AFTER${'y'.repeat(AUTOCOMPLETE_MAX_SUFFIX_CHARS - 5)}`)).toBe(true)
   })
 })
 
 describe('parseAiGenerateRequest', () => {
-  it('rejects an autocomplete request smuggling reply context', () => {
-    expect(() =>
+  it('allows disclosed thread context but rejects reply-only fields', () => {
+    expect(
       parseAiGenerateRequest({
         purpose: 'autocomplete',
         prefix: 'Hi',
         suffix: '',
         thread: [{ author: 'a', text: 'b' }]
       })
-    ).toThrow(/disallowed context/)
+    ).toMatchObject({ purpose: 'autocomplete', thread: [{ author: 'a', text: 'b' }] })
     expect(() =>
       parseAiGenerateRequest({ purpose: 'autocomplete', prefix: 'Hi', suffix: '', styleExamples: ['x'] })
     ).toThrow(/disallowed context/)

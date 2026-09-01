@@ -22,7 +22,8 @@ const ATTN_FOOTER_HTML =
 const ATTN_FOOTER_SELECTOR = '[data-attn-signature="footer"]'
 
 export function attnSignatureEnabled(db: Db, accountId: string): boolean {
-  return readAccountSetting(db, accountId, ATTN_SIGNATURE_SETTING) === 'true'
+  const stored = readAccountSetting(db, accountId, ATTN_SIGNATURE_SETTING)
+  return stored === undefined || stored === 'true'
 }
 
 export interface DraftSignature {

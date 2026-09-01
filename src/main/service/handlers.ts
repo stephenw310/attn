@@ -466,10 +466,10 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (update.key === 'lifetimeThreadCap') {
       applyLifetimeCapChange(context.db, context.syncController(), account, update.value)
     } else if (update.key === 'attnSignatureEnabled') {
-      // Absent means off (F6): disabling removes the row so a re-added
-      // account starts from the documented default.
-      if (update.value) writeAccountSetting(context.db, account, ATTN_SIGNATURE_SETTING, 'true')
-      else deleteAccountSetting(context.db, account, ATTN_SIGNATURE_SETTING)
+      // Absent means on (F6). Keep an explicit false row for an opt-out; when
+      // enabled again, remove the override so the account follows the default.
+      if (update.value) deleteAccountSetting(context.db, account, ATTN_SIGNATURE_SETTING)
+      else writeAccountSetting(context.db, account, ATTN_SIGNATURE_SETTING, 'false')
     }
     return readAccountSettings(context.db, account)
   })

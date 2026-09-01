@@ -299,10 +299,10 @@ be visible and removable in the composer, and preserve the existing draft lifecy
 ### Design (decided)
 
 - Add **Include "Sent with Attn"** under **Compose**, labeled with the active account's email. Default
-  off. Show the exact line and explain that the preference affects new drafts only. Add matching palette
+  on. Show the exact line and explain that the preference affects new drafts only. Add matching palette
   enable/disable commands, with no new shortcut. Persist the boolean as `attnSignatureEnabled` through
   T32's typed, account-scoped settings allowlist and `readAccountSetting`/`writeAccountSetting`.
-  An absent value means off. Delete-local-data removes it; Keep-local-data retains it. No schema bump.
+  An absent value means on. Delete-local-data removes it; Keep-local-data retains it. No schema bump.
 - Insert the plain `Sent with Attn` line when creating a local new-message, reply, reply-all, or forward
   draft. Place it after the cached Gmail signature, or after the writing area if none exists, and before
   the quote. Keep the caret in the writing area. The footer is an editable signature paragraph with
@@ -339,7 +339,7 @@ settings reads to the draft's owning account, including delayed responses during
 
 ### Testing
 
-- Unit: default off; each composer kind with and without a Gmail signature; exact-line deduplication;
+- Unit: default on and per-account opt-out; each composer kind with and without a Gmail signature; exact-line deduplication;
   placement before quotes; HTML/plain-text parity; and unchanged cached Gmail signature. Cover footer
   edits and deletion through serialization and Gmail import without reinsertion or formatting loss.
 - Unit with the real temporary SQLite store: footer-only and signature-plus-footer drafts are untouched,
@@ -677,7 +677,7 @@ diff.
 - **Separate consent for separate traffic.** The master AI control is off by default. Its reply-drafting
   disclosure covers the current thread, voice profile, and optional style examples sent on invocation.
   Autocomplete has its own default-off opt-in, disclosing repeated requests containing unsent authored
-  body text while typing and possible provider charges. T37A connects that control to the composer;
+  body text plus the current reply thread while typing and possible provider charges. T37A connects that control to the composer;
   enabling reply drafting alone never enables it. The settings UI and palette use the same consent flow.
   Disabling autocomplete cancels only its work; disabling master AI or removing the key cancels both,
   drops late responses, and prevents further requests. Explain that already-transmitted content cannot
@@ -686,7 +686,7 @@ diff.
   the `settings` table. It contains no mail content, so plaintext storage is fine. F18 scopes the provider
   key, model choice, voice profile, and enable toggles app-global (rule 9): one configuration serves every
   signed-in account. Style examples are drawn only for explicit replies from the owning account's sent
-  mail (T37). Autocomplete uses the current draft's authored-body excerpt only, never style examples.
+  mail (T37). Autocomplete uses the current draft's authored-body excerpt and current reply thread, never style examples.
 - **Test seam:** `attn:test:installFakeAiProvider` in `src/main/testIpc.ts`, disabled outside the env seam
   like every other seam. It scripts chunks, delayed completions, errors, and late responses after cancel;
   records request purpose, payload, and cancellation; and is the only way e2e exercises F17. Payload
@@ -694,8 +694,8 @@ diff.
 
 ### Testing
 
-- Unit: request shaping for both protocols and purposes; reply/refine context cannot enter an autocomplete
-  request; key round-trip and deletion against a fake `safeStorage`; disabled state short-circuits before
+- Unit: request shaping for both protocols and purposes; autocomplete accepts current-thread context but
+  rejects reply-only style examples; key round-trip and deletion against a fake `safeStorage`; disabled state short-circuits before
   any network object is constructed; disabling during a request aborts it and ignores late chunks.
 - E2e: enable flow through the settings pane with the fake provider; disable and assert the seam records
   zero requests when T37's command is invoked (this assertion lands here as a placeholder command and is
@@ -785,9 +785,9 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   Connect T36's separate default-off autocomplete control to the editor, with enable/disable commands and the
   F17 privacy/cost disclosure. Both master AI and autocomplete must be enabled. Use the configured
   provider/model; no new service or mailbox index. Persist only the preference, never suggestion state.
-- **Preview, then insertion:** show one completed plain-text suggestion in gray at a collapsed caret,
-  with no line breaks and a 120-character cap. Buffer provider chunks until the suggestion is complete;
-  do not stream partial words into the document. Render a transient preview outside the persisted Lexical
+- **Preview, then insertion:** stream one plain-text suggestion in gray at a collapsed caret,
+  with no line breaks and a 120-character cap. Update the transient preview as provider chunks arrive;
+  never stream those partial words into the document. Render the preview outside the persisted Lexical
   document, anchored to the caret through wrapping and scrolling. It must not affect selection, copying,
   exported HTML, autosave revisions, Gmail mirroring, or sending. Acceptance inserts plain text in the
   current editable text context as one undoable transaction; undo restores the prior text and caret.
@@ -804,11 +804,12 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   do not trigger requests. Suppress requests during IME composition, selections, T37 generation/refine,
   open pickers/dialogs, and inside quotes, signatures, T32B's footer, tables, or opaque preserved regions.
   A subsequent deliberate typing edit can trigger another request.
-- **Minimal context:** build a separate autocomplete payload from the authored body, up to 2,000 plain-text
+- **Bounded context:** build a separate autocomplete payload from the authored body, up to 2,000 plain-text
   characters before the caret and 500 after. Exclude protected quote/signature/opaque nodes from extraction,
-  not just from display, and preserve the cursor boundary when truncating. Do not include thread messages,
-  subject, recipients, attachment content or metadata, voice profile, or sent-mail examples. Do not fetch
-  mail to fill the context. Ambiguous imported regions are excluded, even at the cost of fewer suggestions.
+  not just from display, and preserve the cursor boundary when truncating. For replies, add the current
+  cached thread through the message being answered. Do not include subject, recipients, attachment content
+  or metadata, voice profile, or unrelated sent-mail examples, and do not fetch mail to fill the context.
+  Ambiguous imported regions are excluded, even at the cost of fewer suggestions.
 - **Bounded work:** main enforces one autocomplete request in flight app-wide, at most one start per second
   and 20 starts per rolling minute. Enforce size caps and purpose-specific consent at the IPC boundary too.
   Skip rate-limited requests without a deferred queue; no automatic retries. Abort and discard work after
@@ -831,8 +832,8 @@ Repeated transmission of an unfinished draft requires its own consent and reques
 - Unit with injected time and the fake provider: 300ms debounce, one-in-flight and both rate caps, 1,500ms
   deadline, no retry loop, and disabling or editing while a response is queued. Assert late results fail
   every identity check, including a remounted composer with the same draft id. Pin bounded payloads with
-  quote/signature/opaque regions, T32B's footer, and cross-account sent mail present. None may leak into
-  the request.
+  quote/signature/opaque regions, T32B's footer, current-thread mail, and cross-account sent mail present.
+  Only the current thread may accompany the excerpt.
 - E2e: first enable reply drafting and type; autocomplete records zero requests. Opt in separately and
   cover new mail, reply, reply-all, and forward; accept with Tab, edit, undo, dismiss with Esc, and continue
   typing. Assert caret restoration, normal Tab/Shift+Tab/arrow/Enter behavior, and recipient/snippet/palette
@@ -851,7 +852,7 @@ Repeated transmission of an unfinished draft requires its own consent and reques
 
 ### Done when
 
-F17's autocomplete acceptance criteria pass: separate consent, bounded authored-body context, fresh
+F17's autocomplete acceptance criteria pass: separate consent, bounded authored-body plus reply-thread context, fresh
 suggestions only, correct Tab/Esc/undo behavior, no persistence before acceptance, and no typing slowdown.
 
 ---

@@ -55,6 +55,8 @@ interface AiDraftPluginProps {
    */
   claim: () => boolean
   getThreadContext: () => AiThreadMessage[] | null
+  /** Makes an immediately-following save observe the completed stream. */
+  onContentSettled: () => void
   onToast: ShowToast
 }
 
@@ -84,6 +86,7 @@ export function AiDraftPlugin({
   request,
   claim,
   getThreadContext,
+  onContentSettled,
   onToast
 }: AiDraftPluginProps): React.JSX.Element | null {
   const [editor] = useLexicalComposerContext()
@@ -104,6 +107,8 @@ export function AiDraftPlugin({
   onToastRef.current = onToast
   const getThreadContextRef = useRef(getThreadContext)
   getThreadContextRef.current = getThreadContext
+  const onContentSettledRef = useRef(onContentSettled)
+  onContentSettledRef.current = onContentSettled
 
   const regionText = useCallback(
     (keys: readonly string[]): string =>
@@ -179,6 +184,7 @@ export function AiDraftPlugin({
         if (tail !== null && $isElementNode(tail)) tail.selectEnd()
       })
       setPhase('landed')
+      onContentSettledRef.current()
     } else if (run.refine && run.removeKeys.length > 0) {
       // The refine failed before its first chunk: the prior draft is intact.
       run.keys = run.removeKeys
@@ -343,6 +349,34 @@ export function AiDraftPlugin({
     return () => document.removeEventListener('keydown', onKeyDown, true)
   }, [phase])
 
+  const showRefine = phase === 'landed' && !edited && !refineDismissed
+  const dismissRefine = useCallback(() => {
+    setRefineDismissed(true)
+    editor.focus()
+  }, [editor])
+
+  // A landed draft leaves focus in the body, not in the pill. Claim the
+  // first unmodified Esc from either surface so it dismisses Refine; only the
+  // next Esc reaches the composer's save-and-close command.
+  useEffect(() => {
+    if (!showRefine) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return
+      }
+      const root = editor.getRootElement()
+      const target = event.target as Element | null
+      if (!root?.contains(document.activeElement) && !target?.closest('[data-testid="ai-refine"]')) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      dismissRefine()
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [dismissRefine, editor, showRefine])
+
   // Refine is offered only while the AI region is unedited — text the user
   // touched is theirs (F17).
   useEffect(() => {
@@ -385,7 +419,7 @@ export function AiDraftPlugin({
       </div>
     )
   }
-  if (phase !== 'landed' || edited || refineDismissed) return null
+  if (!showRefine) return null
   const runRefine = (): void => {
     const instruction = refineText.trim()
     if (instruction.length === 0) return
@@ -411,8 +445,7 @@ export function AiDraftPlugin({
             } else if (event.key === 'Escape') {
               event.preventDefault()
               event.stopPropagation()
-              setRefineDismissed(true)
-              editor.focus()
+              dismissRefine()
             }
           }}
           className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-faint"
@@ -431,8 +464,7 @@ export function AiDraftPlugin({
           data-testid="ai-refine-close"
           aria-label="Dismiss refine"
           onClick={() => {
-            setRefineDismissed(true)
-            editor.focus()
+            dismissRefine()
           }}
           className="cursor-pointer rounded-full px-2 py-0.5 text-[11px] text-ink-faint hover:bg-active hover:text-ink"
         >

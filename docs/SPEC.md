@@ -79,7 +79,7 @@ Serverless roadmap: **v1** pure client → **v1.5** optional *companion Apps Scr
 
 **D5 — SQLite + FTS5 as the local store.** Message headers for the account's whole lifetime (staged: interactive windows first, then a low-priority background sweep — §9 #17), full bodies for the last 90 days of Inbox mail, older bodies fetched on demand and cached permanently. Attachment bytes are never bulk-synced: metadata rides with full-format fetches, content downloads on demand. Search runs entirely locally against FTS5.
 
-**D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. That 44 px React top bar occupies the native title-bar area while macOS traffic lights and Windows controls remain native and unobstructed. Layout (revised 2026-08-12 after M1 dogfood, 2026-08-14 for the new-message composer, 2026-08-15 for thread drafting, and 2026-08-24 for navigation, §9 #7/#9/#11/#13): a 216 px left sidebar owns the wordmark plus mailbox and user-label navigation while the content region switches between the list and a focused conversation. A persistent top-bar control collapses the sidebar completely and restores it; `Mod+B` invokes the same command. The choice persists in the local profile. The sidebar stays in the chosen state while reading; a full-window new-message composer hides it so writing owns the window. `Esc` or the visible Back/List control restores the prior list at the same selection and scroll position. Reply, reply-all, and forward are the deliberate exception: their composer is the final inline card beneath the conversation so the source mail remains visible while writing. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing competing panes. This supersedes the centered overlay, the interim reading split, and the docked new-message composer; simultaneous list/reader variants are rejected. All Mail rows show a green checkmark after the timestamp when the thread is done and no longer carries the `INBOX` label. The leading unread dot remains independent because a done thread can still be unread. A compact title-only row identifies the active mailbox or label without repeating a count. An Inbox split strip appears only when at least one split exists and never moves into the sidebar (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Settings live behind the account-chip menu (Settings, keyboard shortcuts, split rules, sign out); there is no hamburger. Built-in themes share the same semantic tokens (F14).
+**D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. That 44 px React top bar occupies the native title-bar area while macOS traffic lights and Windows controls remain native and unobstructed. Layout (revised 2026-08-12 after M1 dogfood, 2026-08-14 for the new-message composer, 2026-08-15 for thread drafting, and 2026-08-24 for navigation, §9 #7/#9/#11/#13): a 216 px left sidebar owns the wordmark plus mailbox and user-label navigation while the content region switches between the list and a focused conversation. A persistent top-bar control collapses the sidebar completely and restores it; `Mod+B` invokes the same command. The choice persists in the local profile. The sidebar stays in the chosen state while reading; a full-window new-message composer hides it so writing owns the window. `Esc` or the visible Back/List control restores the prior list at the same selection and scroll position. Reply, reply-all, and forward are the deliberate exception: their composer is the final inline card beneath the conversation so the source mail remains visible while writing. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing competing panes. This supersedes the centered overlay, the interim reading split, and the docked new-message composer; simultaneous list/reader variants are rejected. All Mail rows show a green checkmark after the timestamp when the thread is done and no longer carries the `INBOX` label. The leading unread dot remains independent because a done thread can still be unread. A compact title-only row identifies the active mailbox or label without repeating a count. An Inbox split strip appears only when at least one split exists and never moves into the sidebar (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Settings live behind the account-chip menu (Settings, keyboard shortcuts, sign out); split-rule configuration has one visible home in Settings. There is no hamburger. Built-in themes share the same semantic tokens (F14).
 
 **Modifier convention:** `Mod` = `Cmd` on macOS, `Ctrl` on Windows. All shortcuts in this spec are written platform-neutrally.
 
@@ -415,7 +415,7 @@ footer is absent and the composer owns its action footer, so editing controls ca
   styled blocks below a quote stay in their original position.
 - **Attn signature footer (M4 T32B):** an optional `Sent with Attn` line follows the account's Gmail
   signature, or the authored body when no signature exists, before any quoted history. The setting is
-  off by default and applies per account to newly created local drafts in every composer mode. Show the
+  on by default and applies per account to newly created local drafts in every composer mode. Show the
   line as editable content before sending, with no link, image, or tracking. Users can edit or delete it
   for an individual message without changing the account preference.
   Insert it once when creating the draft, never during send or retry. Reopening a local draft, importing
@@ -581,7 +581,7 @@ Settings and the palette expose:
 - Sync & storage: the active account's historical conversation limit, with default, custom, and All mail
   choices (F2). This control does not evict cached mail or change body windows and search limits.
 - Triage: undo-send delay and auto-advance direction.
-- Compose: per-account **Include "Sent with Attn"**, off by default, with a preview and a note that the
+- Compose: per-account **Include "Sent with Attn"**, on by default, with a preview and a note that the
   choice affects new drafts only (F6). The palette offers the same enable/disable action.
 - Notifications: one app-wide pause/resume deadline and per-account split notification controls.
 - Snippet manager, split-rule manager, and theme.
@@ -593,7 +593,7 @@ Label account-specific controls with the owning email; other preferences apply a
 the existing default constants and typed APIs. Internal polling, quota, paging, retry, search-window, and
 editor-timing constants remain development tuning rather than user controls.
 
-**Entry point (D6):** the account chip in the top bar is the menu — the signed-in accounts with the active one marked (F18), Add account…, Settings (`Mod+,`), Keyboard shortcuts (`Mod+/`), Split rules, Sign out. No hamburger icon; every item is also a palette command.
+**Entry point (D6):** the account chip in the top bar is the menu — the signed-in accounts with the active one marked (F18), Add account…, Settings (`Mod+,`), Keyboard shortcuts (`Mod+/`), Sign out. Split-rule configuration lives in Settings; the Inbox-strip ellipsis appears only to navigate genuinely hidden splits. No hamburger icon; every item is also a palette command.
 
 ### F16 — Background & tray behavior
 
@@ -627,7 +627,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - A **separate, default-off setting** enables short suggestions while typing in new messages, replies,
   reply-all, and forwards. Enabling reply drafting does not enable autocomplete. It uses the configured
   provider and model; cloud suggestions can incur repeated API charges. Local endpoints remain supported.
-- After a pause in typing, show one short continuation in gray at the caret, with no line breaks and at
+- After a pause in typing, stream one short continuation in gray at the caret, with no line breaks and at
   most 120 characters. This suggestion is a preview outside the saved editor document; it never enters
   autosave, Gmail draft mirroring, copied mail text, or the outbox until accepted.
 - `Tab` accepts a visible, current suggestion only while the body editor has focus. The accepted text is
@@ -650,10 +650,11 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   permits requests while actively typing; it does not permit background mailbox processing.
 - The reply enable screen discloses the current thread, voice profile, and optional style examples sent
   on each invocation. The autocomplete opt-in separately discloses that **unsent draft text leaves the
-  machine while typing** when using a cloud endpoint. Its payload contains only a bounded plain-text
-  excerpt of the authored body around the caret: at most 2,000 characters before and 500 after. Exclude
-  thread history, quoted mail, signatures, recipients, subject, attachments, and sent-mail examples. Do not
-  read other messages to enrich autocomplete context, even with voice matching on.
+  machine while typing** when using a cloud endpoint. Its payload contains a bounded plain-text excerpt
+  of the authored body around the caret (at most 2,000 characters before and 500 after) and, for replies,
+  the current cached thread through the message being answered. Exclude quoted content embedded in the
+  draft, signatures, recipients, subject, attachments, voice instructions, and unrelated sent-mail
+  examples. Do not fetch mail solely to enrich autocomplete context.
 - Debounce autocomplete by 300ms; allow at most one autocomplete request in flight app-wide, no more than
   one start per second and 20 per rolling minute. Skip requests when limited; do not queue or retry them
   automatically. Cancel and discard results more than 1,500ms after dispatch. Slow, offline, or failed
@@ -673,7 +674,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - UI never blocks during either feature; composer keystroke and suggestion acceptance meet §7. `Esc`
   cancels reply streaming, retaining partial text; for autocomplete it dismisses the preview first.
 - With voice matching off, reply requests contain no additional sent-mail style examples. Autocomplete
-  contains only the bounded authored-body excerpt regardless of that toggle.
+  contains only its bounded authored-body excerpt and current reply thread regardless of that toggle.
 - A generated reply and an accepted suggestion are each undoable as one edit. No unaccepted suggestion
   appears in a saved, reopened, mirrored, or sent draft.
 - Fake-provider tests prove debounce, request caps, timeout, IME suppression, keyboard precedence, and
@@ -829,8 +830,10 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
 | `Mod+Shift+K` | Insert link (`Mod+K` stays reserved for the palette everywhere) |
 | `Mod+;` | Insert snippet |
 | `Mod+J` | Draft AI reply (reply/reply-all only, F17) |
+| `Mod+Z` | Undo body text; one press removes a whole AI draft or accepted autocomplete, or restores a `;trigger` after snippet expansion |
+| `Mod+A` | Select only the authored body, excluding the Gmail signature, Attn footer, and quoted history |
 | `Tab` | Accept a visible autocomplete suggestion in the focused body; otherwise normal focus behavior |
-| `Esc` | Dismiss an autocomplete suggestion or cancel AI streaming first; otherwise close (draft saved) |
+| `Esc` | Dismiss autocomplete, cancel AI streaming, or close Refine first; otherwise close (draft saved) |
 
 ---
 

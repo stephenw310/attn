@@ -157,7 +157,7 @@ test('opens from the composer quoted-history iframe after a fast forward while t
 test('protects an active draft and restores its editor focus after palette dismissal', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
-  await composer.editor.click()
+  await composer.editor.click({ position: { x: 24, y: 24 } })
   await composer.typeBody('Keep this draft')
 
   await openPalette(page)

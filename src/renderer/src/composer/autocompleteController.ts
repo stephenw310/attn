@@ -37,11 +37,12 @@ interface PendingRequest {
   requestId: string | null
   anchor: string
   buffered: string
+  previewed: string
   /** Events that raced ahead of the request-id round trip. */
   early: AiStreamEvent[]
 }
 
-/** Collapse a raw completion into one short single-line suggestion. */
+/** Collapse a streamed completion into one short single-line suggestion. */
 export function normalizeSuggestion(raw: string): string {
   const firstLine = raw.split('\n', 1)[0] ?? ''
   return firstLine.trimEnd().slice(0, AUTOCOMPLETE_MAX_SUGGESTION_CHARS)
@@ -120,15 +121,30 @@ export class AutocompleteController {
     if (pending.requestId !== event.requestId) return
     if (event.kind === 'chunk') {
       pending.buffered += event.text
+      const text = normalizeSuggestion(pending.buffered)
+      if (text.length > 0 && text !== pending.previewed && this.hooks.currentAnchor() === pending.anchor) {
+        pending.previewed = text
+        this.suggestion = { text, anchor: pending.anchor }
+        this.hooks.showPreview(text)
+      }
       return
     }
     this.pending = null
-    if (event.kind === 'error') return
-    // Completion: the suggestion shows only if the caret never moved since
-    // dispatch and the text survives the single-line bound.
+    if (event.kind === 'error') {
+      if (pending.previewed) {
+        this.suggestion = null
+        this.hooks.clearPreview()
+      }
+      return
+    }
+    // Completion settles the last preview only if the caret never moved
+    // since dispatch and the text survives the single-line bound.
     const text = normalizeSuggestion(pending.buffered)
     if (text.length === 0 || this.hooks.currentAnchor() !== pending.anchor) return
     this.suggestion = { text, anchor: pending.anchor }
+    // Retry placement at completion even when the same text was previewed on
+    // the last chunk. An early chunk can beat the browser's caret geometry;
+    // the completed stream runs after layout has caught up.
     this.hooks.showPreview(text)
   }
 
@@ -179,6 +195,7 @@ export class AutocompleteController {
       requestId: null,
       anchor: excerpt.anchor,
       buffered: '',
+      previewed: '',
       early: []
     }
     this.pending = pending

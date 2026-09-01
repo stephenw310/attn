@@ -2209,7 +2209,6 @@ export function Inbox({
         onReconnectActions={reconnectActions}
         onOpenOutbox={openOutbox}
         onToggleSidebar={toggleSidebar}
-        onManageSplits={() => setSplitRulesOpen(true)}
         onSwitchAccount={switchAccount}
         onAddAccount={addAccount}
         onRemoveAccount={requestRemoveAccount}
@@ -2298,7 +2297,10 @@ export function Inbox({
             onAddAccount={addAccount}
             onReconnect={reconnectActions}
             onSignOut={requestRemoveAccount}
-            onManageSplits={() => setSplitRulesOpen(true)}
+            onManageSplits={() => {
+              closeSettings()
+              setSplitRulesOpen(true)
+            }}
             onClose={closeSettings}
             onToast={showToast}
             focusControl={settingsFocus}
@@ -2349,7 +2351,6 @@ export function Inbox({
               splits={splits.state.splits}
               activeSplitId={splits.activeSplitId}
               onSelect={switchSplit}
-              onManage={() => setSplitRulesOpen(true)}
             />
           )}
           <div className={`flex min-h-0 flex-1 ${searchOpen && !readerOpen ? 'flex-col' : ''}`}>

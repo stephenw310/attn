@@ -20,7 +20,9 @@ import {
   $insertNodes,
   $isRangeSelection,
   $nodesOfType,
-  FORMAT_TEXT_COMMAND
+  FORMAT_TEXT_COMMAND,
+  REDO_COMMAND,
+  UNDO_COMMAND
 } from 'lexical'
 import {
   forwardRef,
@@ -55,7 +57,13 @@ import { AiDraftPlugin } from './AiDraftPlugin'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
-import { COLLAPSED_GMAIL_SIGNATURE_SELECTOR, revealGmailSignature } from './nodes/GmailSignatureNode'
+import { AttnFooterNode } from './nodes/AttnFooterNode'
+import {
+  COLLAPSED_GMAIL_SIGNATURE_SELECTOR,
+  GmailSignatureNode,
+  revealGmailSignature
+} from './nodes/GmailSignatureNode'
+import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
@@ -798,6 +806,50 @@ function ComposerCommandPlugin({
   return null
 }
 
+/**
+ * Keep native editing shortcuts inside the authored region. Explicit undo
+ * avoids depending on Electron's contenteditable routing, while Mod+A selects
+ * only the user's body above the signature/footer; quoted history lives
+ * outside this editor and is therefore never pulled into the range.
+ */
+function BodyEditingShortcutsPlugin(): null {
+  const [editor] = useLexicalComposerContext()
+  useEffect(() => {
+    const rootElement = editor.getRootElement()
+    if (!rootElement) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'z') {
+        event.preventDefault()
+        event.stopPropagation()
+        editor.dispatchCommand(event.shiftKey ? REDO_COMMAND : UNDO_COMMAND, undefined)
+        return
+      }
+      if (key !== 'a' || event.shiftKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      editor.update(() => {
+        let authoredCount = 0
+        for (const child of $getRoot().getChildren()) {
+          if (
+            child instanceof GmailSignaturePrefixNode ||
+            child instanceof GmailSignatureNode ||
+            child instanceof AttnFooterNode
+          ) {
+            break
+          }
+          authoredCount++
+        }
+        $getRoot().select(0, authoredCount)
+      })
+    }
+    rootElement.addEventListener('keydown', onKeyDown, true)
+    return () => rootElement.removeEventListener('keydown', onKeyDown, true)
+  }, [editor])
+  return null
+}
+
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
   { draft, mode = 'full', attachedToMessage = false, initialError = null, onClose, onExit, onToast, aiDraft },
   ref
@@ -844,6 +896,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     prepareSnapshot
   )
   const notePendingRecipientChange = useCallback(() => updateFields({}), [updateFields])
+  const noteAiContentSettled = useCallback(() => updateFields({}), [updateFields])
   // F8: a snippet's subject fills only an empty subject, never overwrites.
   const subjectRef = useRef(subject)
   subjectRef.current = subject
@@ -1308,6 +1361,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   ErrorBoundary={LexicalErrorBoundary}
                 />
                 <HistoryPlugin />
+                <BodyEditingShortcutsPlugin />
                 <ListPlugin />
                 <TablePlugin />
                 <LinkPlugin validateUrl={validateComposerUrl} />
@@ -1333,13 +1387,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   onPreservedContent={notePreservedContent}
                 />
                 <SnippetsPlugin onInserted={handleSnippetInserted} />
-                <AiAutocompletePlugin />
+                <AiAutocompletePlugin getThreadContext={aiDraft?.getThreadContext} />
                 {aiDraft && (
                   <AiDraftPlugin
                     kind={draft.kind}
                     request={aiDraft.request}
                     claim={aiDraft.claim}
                     getThreadContext={aiDraft.getThreadContext}
+                    onContentSettled={noteAiContentSettled}
                     onToast={onToast}
                   />
                 )}

@@ -647,7 +647,8 @@ test.describe('"Sent with Attn" footer', () => {
   }) => {
     await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
     await setSendAsSignature(app, '<div>Best,</div><div>Chao</div>')
-    await runPaletteCommand(page, 'Enable "Sent with Attn" footer')
+    // An absent preference is enabled: attribution is the default for every
+    // newly added account.
     await expectStoredFooter(page, 'primary@attn.test', true)
 
     // The footer lands after the (collapsed) Gmail signature, visible and
@@ -673,9 +674,13 @@ test.describe('"Sent with Attn" footer', () => {
     await page.keyboard.press('g')
     await page.keyboard.press('i')
 
-    // The other account keeps its own default (off).
+    // The other account can independently opt out.
     await page.keyboard.press('ControlOrMeta+2')
     await expect(page.getByTestId('account-menu')).toContainText('second@attn.test')
+    await page.evaluate(() =>
+      window.attn.settings.setAccount('second@attn.test', 'attnSignatureEnabled', false)
+    )
+    await expectStoredFooter(page, 'second@attn.test', false)
     await composer.openNew()
     await expect(footer(page)).toHaveCount(0)
     await page.keyboard.press('Escape')

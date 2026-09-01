@@ -122,7 +122,7 @@ test('one undo removes the whole streamed draft and never touches the Attn foote
   expect(regenerated.split(ATTN_SIGNATURE_LINE)).toHaveLength(2)
 })
 
-test('Esc mid-stream keeps the partial text; the next Esc closes the composer normally', async ({
+test('Esc mid-stream keeps partial text, then dismisses Refine before closing normally', async ({
   app,
   page
 }) => {
@@ -149,8 +149,12 @@ test('Esc mid-stream keeps the partial text; the next Esc closes the composer no
   const requests = await aiRequests(app)
   expect(requests[0].canceled).toBe(true)
 
-  // A second Esc is the composer's ordinary close (inline: save and exit).
+  // The landed partial draft owns the next Esc through its Refine affordance;
+  // only the following Esc is the composer's ordinary save-and-exit.
   await editor(page).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('ai-refine')).toHaveCount(0)
+  await expect(composer.root).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
@@ -258,6 +262,35 @@ test('refine replaces the unedited draft as one undo step and hides after hand e
   await expect(editor(page)).toContainText('Original draft text.')
   await expect(editor(page)).not.toContainText('Refined shorter text.')
   await expect(page.getByTestId('ai-refine')).toHaveCount(0)
+})
+
+test('the first Esc dismisses Refine and the next saves every generated chunk', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page)
+  await installFakeAi(app, {
+    chunks: ['First generated sentence.', '\nSecond generated sentence.', '\nFinal generated sentence.']
+  })
+  await openDesignReader(page)
+
+  await page.keyboard.press('ControlOrMeta+j')
+  const composer = new ComposerPage(page)
+  await expect(editor(page)).toContainText('Final generated sentence.')
+  await expect(page.getByTestId('ai-refine')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('ai-refine')).toHaveCount(0)
+  await expect(composer.root).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('g')
+  await page.keyboard.press('d')
+  await page.getByTestId('draft-row').filter({ hasText: 'Design notes' }).click()
+  await expect(composer.root).toBeVisible()
+  await expect(editor(page)).toContainText('First generated sentence.')
+  await expect(editor(page)).toContainText('Second generated sentence.')
+  await expect(editor(page)).toContainText('Final generated sentence.')
 })
 
 test('opening Settings cancels an AI reply whose settings read is still pending', async ({ app, page }) => {

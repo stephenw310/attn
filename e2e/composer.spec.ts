@@ -1259,6 +1259,36 @@ test('uses one control for the signature and quote, then discards an untouched r
   await expect(design.getByTestId('chip-draft')).toBeVisible()
 })
 
+test('body undo and select-all stay inside authored text above the signature and quote', async ({
+  app,
+  page
+}) => {
+  await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
+  const composer = new ComposerPage(page)
+  await page.getByTestId('thread-row').filter({ hasText: 'Design notes' }).click()
+  await composer.openReply()
+  await composer.editor.click({ position: { x: 42, y: 18 } })
+
+  await page.keyboard.type('Undo this whole edit')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(composer.editor).not.toContainText('Undo this whole edit')
+
+  await page.keyboard.type('Select only this new reply')
+  await page.keyboard.press('ControlOrMeta+a')
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '')
+  expect(selected).toContain('Select only this new reply')
+  expect(selected).not.toContain('Chao Wu')
+  expect(selected).not.toContain('Sent with Attn')
+  expect(selected).not.toContain('conversation overlay direction')
+
+  await page.keyboard.press('Backspace')
+  await expect(composer.editor).not.toContainText('Select only this new reply')
+  await expect(composer.signature).toContainText('Chao Wu')
+  await expect(page.getByTestId('composer-attn-signature')).toContainText('Sent with Attn')
+  await composer.revealSignature()
+  await expect(composer.quote).toBeVisible()
+})
+
 test('keeps the signature discardable when a reply becomes reply-all', async ({ app, page }) => {
   await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
