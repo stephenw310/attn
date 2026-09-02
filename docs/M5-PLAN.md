@@ -2,7 +2,7 @@
 
 **Audience:** the engineers building M5. Same contract as [M3-PLAN.md](M3-PLAN.md): every task is one PR,
 nothing is done until `npm run verify` is green, and "spec F18" means a section of [SPEC.md](SPEC.md)
-(v0.17). Read the section before starting the task.
+(v0.18). Read the section before starting the task.
 
 **Basis:** SPEC F18 (multiple accounts), D4 as revised, §9 #21 (the decision and its recorded shape),
 F1 (per-account auth), F2 (per-account sync sessions), F6 (draft account binding), F12 (cross-account
@@ -17,20 +17,21 @@ passing with a second account signed in.
 
 ---
 
-## Open decisions awaiting product sign-off
+## Product decisions — all resolved
 
-The spec records a default for each so work can start; flipping one later is a bounded edit to the named
-task. Do not silently deviate from the default — a reversal goes through SPEC §9 first.
+The spec recorded a default for each so work could start. All seven are now closed: D2, D3, and D4 by an
+owner call on 2026-08-28, and D1, D5, D6, and D7 by shipping their default. Reversing any of them still
+goes through SPEC §9 first.
 
 | # | Decision | Default in spec | Alternative | Flip cost lands in |
 |---|---|---|---|---|
-| D1 | Unified inbox | Out of v1: switched accounts only (F18, §2) | A merged cross-account inbox view | New milestone — not an M5 edit; reopens splits, counts, search, From identity |
+| D1 | Unified inbox | **Resolved by ship 2026-08-30: default held** — v1 renders one active account at a time; no merged view exists in code (F18, §2) | ~~A merged cross-account inbox view~~ — post-v1 | New milestone — not an M5 edit; reopens splits, counts, search, From identity |
 | D2 | Inactive-account liveness | **Resolved 2026-08-28 (owner): confirmed** — fully live: poll 60s, drain queues, notify, snooze returns (F18) | ~~Frozen until switched to~~ | A2, A4 |
 | D3 | Remove-account semantics | **Resolved 2026-08-28 (owner): remove always drops tokens; the confirmation asks Delete local data (default) or Keep** — kept rows stay dormant and re-adding the same address resumes from stored cursors (F18) | ~~Silent purge with no choice~~ | A6 |
 | D4 | Composer From picker | **Resolved 2026-08-28 (owner): none** — the composer uses the active account: new mail binds to the account active at open, replies/forwards to the source thread's owner, which is the active account in every reachable flow (F6) | ~~From dropdown on new mail~~ | A5 |
-| D5 | Badge & notification aggregation | All accounts notify; badge sums across accounts (F12) | Active-account-only badge/notifications | A4 |
-| D6 | Milestone order | M5 after M4 in sequence, may interleave (§8) | Land M5 before M4's feature work | scheduling only |
-| D7 | Snippets (F8) / AI key (F17) scope | Global, stored under `__app__` when those M4 features ship | Per-account | the M4 tasks that build them |
+| D5 | Badge & notification aggregation | **Resolved by ship 2026-08-30 in A4: default held** — every signed-in account notifies and the badge sums across accounts, with clicks routing through an account switch (F12) | ~~Active-account-only badge/notifications~~ | A4 |
+| D6 | Milestone order | **Resolved by ship: the interleave clause applied** — M5's implementation merged 2026-08-30 (#94, #96) ahead of M4's feature work on 2026-09-01 (#101). Neither milestone is signed off; v1 still waits on both (§8) | ~~Strict M4-then-M5 sequence~~ | scheduling only |
+| D7 | Snippets (F8) / AI key (F17) scope | **Resolved by ship 2026-08-31: default held** — T34 and T36 both store under `APP_SETTINGS_ACCOUNT_ID` (`__app__`), which `purgeAccount` deliberately excludes from a per-account purge | ~~Per-account~~ | the M4 tasks that build them |
 
 ---
 

@@ -15,6 +15,12 @@ stamp the date. IDs are never reused.
 #65 landed, one day after they were written, while every defect they described was untouched. Read the line
 as a hint and the symbol as the truth, and re-stamp the date when you correct a drifted anchor.
 
+**Read the empty defect list carefully.** This file currently records coverage gaps and refactor proposals
+and no product defects. That means none have been *recorded*, not that none exist: the only systematic
+sweep of `main` remains the 2026-08-16 review at #52, and roughly fifty PRs have merged since — all of M3's
+feature half, M4, and M5 — with no comparable re-review. A fresh sweep before the v1 tag is worth more than
+this file's current silence suggests.
+
 Sources so far: the 2026-08-16 review of `main` @ #52 ([REVIEW-2026-08-16.md](REVIEW-2026-08-16.md)) and its
 coverage map ([REVIEW-2026-08-16-coverage.md](REVIEW-2026-08-16-coverage.md)). Both are frozen snapshots kept
 for their reasoning. This file is the part that stays current. Each entry cross-references its original review

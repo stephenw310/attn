@@ -2,7 +2,7 @@
 
 **Audience:** the engineers building M4. Same contract as [M1-PLAN.md](M1-PLAN.md), [M2-PLAN.md](M2-PLAN.md),
 and [M3-PLAN.md](M3-PLAN.md). Every task is one PR. Nothing is done until `npm run verify` is green. "Spec F8"
-means a section of [SPEC.md](SPEC.md) (v0.17). Read the section before starting the task.
+means a section of [SPEC.md](SPEC.md) (v0.18). Read the section before starting the task.
 
 **Basis:** SPEC §8 M4, F6 (Attn signature footer), F8 (snippets), F9 (follow-up reminders), F12 (badge polish),
 F15 (settings), F17 (AI reply drafting and inline autocomplete), §6 Packaging (auto-update, signing, notarization), §9 #5
@@ -20,20 +20,24 @@ sign-off task that rolls up every outstanding manual check.
 
 ## Task list
 
+Every row below carries the same state its task section carries. The whole milestone is merged on `main`
+(#101, with the Windows badge revision in #104); what is left is T39's operator half and T40's manual
+evidence.
+
 | Task | State | Blocks |
 |---|---|---|
-| T32 settings surface and cheat sheet (F15) | planned | T32A, T32B, T33, T34's manager, T36's enable pane |
-| T32A per-account historical sync limit (F2, F15) | planned | nothing |
-| T32B optional "Sent with Attn" signature footer (F6, F15) | planned | T37 |
-| T33 remote-image control (§9 #5) | planned | nothing |
-| T34 snippets (F8) | planned | nothing |
-| T35 follow-up reminders (F9) | planned | nothing |
-| T36 AI writing foundation (F17) | planned | T37, T37A |
-| T37 AI reply drafting in the composer (F17) | planned | T37A |
-| T37A inline AI autocomplete (F17) | planned | nothing |
-| T38 Windows unread badge overlay (F12) | shipped; revised after Windows dogfood | nothing |
-| T39 auto-update, signing, notarization (§6) | planned | T40's update-in-place check |
-| T40 M4 exit and v1 sign-off | planned | the v1 tag |
+| T32 settings surface and cheat sheet (F15) | **shipped** 2026-08-31 (`2eda759`) | nothing |
+| T32A per-account historical sync limit (F2, F15) | **shipped** 2026-08-31 (`64f8e87`) | nothing |
+| T32B optional "Sent with Attn" signature footer (F6, F15) | **shipped** 2026-08-31 (`80a9cad`) | nothing |
+| T33 remote-image control (§9 #5) | **shipped** 2026-08-31 (`df70c80`) | nothing |
+| T34 snippets (F8) | **shipped** 2026-08-31 (`e4d428e`) | nothing |
+| T35 follow-up reminders (F9) | **shipped** 2026-08-31 (`cbb899e`) | nothing |
+| T36 AI writing foundation (F17) | **shipped** 2026-08-31 (`b87a3ec`) | nothing |
+| T37 AI reply drafting in the composer (F17) | **shipped** 2026-08-31 (`12be729`) | nothing |
+| T37A inline AI autocomplete (F17) | **shipped** 2026-08-31 (`2a50fda`) | nothing |
+| T38 Windows unread badge overlay (F12) | **shipped** 2026-08-31 (`1ed0d80`); revised after Windows dogfood 2026-09-01 (`583f273`) | nothing |
+| T39 auto-update, signing, notarization (§6) | **code shipped** 2026-08-31 (`8ace1ab`); operator credentials and the release-feed decision open | T40's update-in-place check |
+| T40 M4 exit and v1 sign-off | **in progress** — see [T40-EVIDENCE.md](T40-EVIDENCE.md) | the v1 tag |
 
 **Why this order.** T32 goes first because T32A's sync control, T32B's footer preference, T33's toggle,
 T34's manager, and T36's enable screen need it. T32A is separate because changing a running account's sync limit needs its own lifecycle
@@ -95,7 +99,7 @@ follow-up below, and T40 requires its resolution before sign-off.
 
 ## T32: settings surface and keyboard cheat sheet
 
-**Status: shipped (2026-08-30, `2eda759`; review follow-ups in `1e3d082`).** Real-OS login/menu-bar evidence stays in T40.
+**Status: shipped (2026-08-31, `2eda759`; review follow-ups in `1e3d082`).** Real-OS login/menu-bar evidence stays in T40.
 
 **Depends on:** nothing · **Unblocks:** T32A, T32B, T33, T34, T36 · **Spec:** F15, F16, F18, D6, §5
 
@@ -212,7 +216,7 @@ source edit to stay current.
 
 ## T32A: per-account historical sync limit
 
-**Status: shipped (2026-08-30, `64f8e87`; review follow-ups in `1e3d082`).** Real-Gmail cap observations stay in T40.
+**Status: shipped (2026-08-31, `64f8e87`; review follow-ups in `1e3d082`).** Real-Gmail cap observations stay in T40.
 
 **Depends on:** T32 · **Unblocks:** nothing · **Spec:** F2, F10, F15, F18, §9 #22
 
@@ -287,7 +291,7 @@ coverage is accurate, existing local data remains intact, and other accounts kee
 
 ## T32B: optional "Sent with Attn" signature footer
 
-**Status: shipped (2026-08-30, `80a9cad`; Gmail signature-font interplay merged in `9aa2d61`).**
+**Status: shipped (2026-08-31, `80a9cad`; Gmail signature-font interplay merged in `9aa2d61`).**
 
 **Depends on:** T32 · **Unblocks:** T37 · **Spec:** F6, F15, F18
 
@@ -365,7 +369,7 @@ default, and the saved draft determines exactly what the recipient receives.
 
 ## T33: remote-image control
 
-**Status: shipped (2026-08-30, `df70c80`; review follow-ups incl. the CSP-layer e2e in `1e3d082`).**
+**Status: shipped (2026-08-31, `df70c80`; review follow-ups incl. the CSP-layer e2e in `1e3d082`).**
 
 **Depends on:** T32 · **Unblocks:** nothing · **Spec:** §6 Security, §9 #5
 
@@ -882,7 +886,7 @@ suggestions only, correct Tab/Esc/undo behavior, no persistence before acceptanc
 
 ## T38: Windows unread badge overlay
 
-**Status: shipped (2026-08-30, `1ed0d80`); revised after Windows dogfood (2026-09-02).** The Windows
+**Status: shipped (2026-08-31, `1ed0d80`); revised after Windows dogfood (2026-09-01, `583f273`, #104).** The Windows
 visual check stays in T40.
 
 **Depends on:** nothing · **Unblocks:** nothing · **Spec:** F12
