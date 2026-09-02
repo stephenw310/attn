@@ -1,0 +1,82 @@
+{
+  "account": "seed@attn.test",
+  "threads": [
+    {
+      "id": "t-context",
+      "historyId": "1000",
+      "messages": [
+        {
+          "id": "m-earlier",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 4,
+          "from": "Jordan Young <jordan@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Account question",
+          "messageId": "<earlier@example.com>",
+          "bodyText": "Earlier account question."
+        },
+        {
+          "id": "m-target",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 3,
+          "from": "Jordan Young <jordan@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Account question",
+          "messageId": "<target@example.com>",
+          "references": ["<earlier@example.com>"],
+          "bodyText": "Selected message asking for help."
+        },
+        {
+          "id": "m-later",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 2,
+          "from": "Christy Shannon <christy@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Account question",
+          "messageId": "<later@example.com>",
+          "bodyText": "Later internal account notes."
+        },
+        {
+          "id": "m-later-sent",
+          "labelIds": ["SENT"],
+          "receivedDaysAgo": 0,
+          "from": "Me <seed@attn.test>",
+          "to": "christy@example.com",
+          "subject": "Account question",
+          "messageId": "<later-sent@attn.test>",
+          "references": ["<later@example.com>"],
+          "bodyText": "Later private sent reply.\n\nOn Monday, Christy wrote:\n> Later internal account notes."
+        }
+      ]
+    },
+    {
+      "id": "t-style",
+      "historyId": "1001",
+      "messages": [
+        {
+          "id": "m-style",
+          "labelIds": ["SENT"],
+          "receivedDaysAgo": 1,
+          "from": "Me <seed@attn.test>",
+          "to": "maya@example.com",
+          "subject": "Design feedback",
+          "messageId": "<style@attn.test>",
+          "references": ["<design@example.com>"],
+          "bodyText": "Unrelated writing style example.\nStyle signature company.\nQuoted colleague style text.",
+          "bodyHtml": "<div dir=\"ltr\"><p>Unrelated writing style example.</p><div class=\"gmail_signature\">Style signature company.</div><div class=\"gmail_quote\"><div class=\"gmail_attr\">On Tuesday, Maya wrote:</div><blockquote>Quoted colleague style text.</blockquote></div></div>"
+        },
+        {
+          "id": "m-style-plain",
+          "labelIds": ["SENT"],
+          "receivedDaysAgo": 2,
+          "from": "Me <seed@attn.test>",
+          "to": "maya@example.com",
+          "subject": "Design feedback",
+          "messageId": "<style-plain@attn.test>",
+          "references": ["<design@example.com>"],
+          "bodyText": "Another authored style example.\n\n-- \nPlain style signature.\n\nOn Monday, Maya wrote:\n> Plain quoted colleague text."
+        }
+      ]
+    }
+  ]
+}

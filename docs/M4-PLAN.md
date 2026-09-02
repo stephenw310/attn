@@ -742,9 +742,15 @@ it with a one-line instruction, and never auto-send.
   user edited by hand is theirs, so refine is offered only while the AI region is unedited.
 - **Voice matching:** when the toggle is on, a handful of the user's recent sent replies are selected
   locally from the store of the account that owns the draft (F18: replies bind to the thread's owning
-  account) and sent as style examples. When it is off, no additional sent-mail style examples may appear
-  in the request; existing messages in the current thread remain valid reply context. The seam's recorded
-  payloads are the proof. These examples are never passed to T37A.
+  account) and sent as style examples. Exclude the conversation being answered from style examples so
+  later sent replies and their quotes cannot bypass the selected-message cutoff. When the toggle is off,
+  no additional sent-mail style examples may appear in the request. Current-thread messages through the
+  reply's source remain valid context. The recorded payloads in `e2e/ai-context.spec.ts` cover reply,
+  reply-all, refine, and autocomplete after reopening a middle-message draft. These examples are never
+  passed to T37A.
+  Examples contain authored text after removing recognized HTML and plain-text quotes, forwarded trails,
+  and signatures. Empty results are skipped before counting examples; HTML cleanup never falls back to
+  the original text alternative. The same recorded payload tests cover both HTML and plain-text examples.
 - Starting reply generation or refine cancels pending autocomplete and clears its preview. Autocomplete
   stays suspended until generation ends and the user resumes typing; AI-inserted chunks cannot trigger it.
 - In an empty inline reply/reply-all composer, show a transient `Tip: Hit Mod+J for AI` placeholder only

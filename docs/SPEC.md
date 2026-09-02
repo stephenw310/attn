@@ -637,7 +637,11 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   Generation, refinement, and undo affect the authored reply region above the signature. Preserve the
   Gmail signature and optional Attn footer, including user edits or removal (F6).
 - **Voice profile:** tone preset (concise / friendly / formal) plus free-text standing rules ("sign off with 'Best, Chao'", "never use exclamation marks").
-- **Voice matching:** a handful of the user's recent sent replies from the draft's owning account, selected locally, accompany the reply request as style examples (toggleable). Autocomplete never includes these examples.
+- Reply, refinement, and autocomplete context stop at the message being answered. Earlier cached messages remain context; later messages are excluded, including after reopening a saved reply.
+- **Voice matching:** a handful of the user's recent sent replies from other conversations in the draft's owning account, selected locally, accompany the reply request as style examples (toggleable). Exclude the current conversation so later replies and their quoted history cannot enter through style examples. Autocomplete never includes these examples.
+  Strip recognized quoted history, forwarded content, and signatures from each example before applying
+  the excerpt limit. Prefer HTML quote and signature boundaries when available. Skip examples with no
+  remaining authored text without falling back to the original body.
 - **Inline refine:** after a draft lands, a one-line instruction ("shorter", "more formal") regenerates it.
 
 **Inline autocomplete:**

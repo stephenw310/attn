@@ -56,6 +56,7 @@ interface AiRun {
 
 interface AiDraftPluginProps {
   kind: Draft['kind']
+  threadId: Draft['threadId']
   /** Monotonic invocation counter from the Inbox-owned command. */
   request: number
   /**
@@ -116,6 +117,7 @@ function $authoredSnapshot(): AuthoredSnapshot {
 
 export function AiDraftPlugin({
   kind,
+  threadId,
   request,
   claim,
   getThreadContext,
@@ -275,9 +277,9 @@ export function AiDraftPlugin({
         return
       }
       let styleExamples: string[] | undefined
-      if (settings.voiceMatchingEnabled) {
+      if (settings.voiceMatchingEnabled && threadId !== null) {
         try {
-          const examples = await bridge.ai.styleExamples()
+          const examples = await bridge.ai.styleExamples(threadId)
           if (examples.length > 0) styleExamples = examples
         } catch {
           // Voice matching is best effort; the draft proceeds without it.
@@ -358,7 +360,7 @@ export function AiDraftPlugin({
         finish()
       }
     },
-    [appendChunk, editor, finish]
+    [appendChunk, editor, finish, threadId]
   )
 
   const start = useCallback(

@@ -222,7 +222,7 @@ export interface InvokeChannels {
   // T37 voice matching: the active account's recent sent replies, selected
   // locally in the utility; the renderer attaches them only when the voice
   // toggle is on, and the transport strips them again when it is off.
-  [IPC_CHANNELS.aiStyleExamples]: { args: []; result: string[] }
+  [IPC_CHANNELS.aiStyleExamples]: { args: [excludeThreadId: string]; result: string[] }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {
     args: [draft: DraftSaveInput]
