@@ -108,7 +108,7 @@ describe('ServiceRuntime with several accounts', () => {
     const seedPath = join(dir, 'seed.json')
     writeFileSync(seedPath, JSON.stringify(TWO_ACCOUNTS))
     return {
-      protocolVersion: 3,
+      protocolVersion: 4,
       dbPath: join(dir, 'attn.db'),
       userDataPath: dir,
       downloadsPath: dir,

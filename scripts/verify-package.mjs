@@ -68,7 +68,8 @@ async function verifyArchive(archive) {
   }
 
   const { platform, arch } = targetForArchive(archive)
-  const nativeEntry = `/node_modules/better-sqlite3/prebuilds/${platform}-${arch}.node`
+  const nativeRelativePath = join('node_modules', 'better-sqlite3', 'prebuilds', `${platform}-${arch}.node`)
+  const nativeEntry = `/${nativeRelativePath.split(sep).join('/')}`
   const nativeEntries = entries.filter((entry) => entry.endsWith('.node'))
 
   if (nativeEntries.length !== 1 || nativeEntries[0] !== nativeEntry) {
@@ -77,12 +78,15 @@ async function verifyArchive(archive) {
     )
   }
 
-  const nativeMetadata = statFile(archive, nativeEntry.slice(1))
+  // @electron/asar traverses archive metadata with the host platform's path
+  // separator. Keep the canonical slash form above for portable comparisons,
+  // but use the native relative path for metadata lookup on Windows.
+  const nativeMetadata = statFile(archive, nativeRelativePath)
   if (!nativeMetadata.unpacked) {
     throw new Error(`${nativeEntry} must be unpacked for Electron to load it`)
   }
 
-  await access(join(dirname(archive), 'app.asar.unpacked', nativeEntry.slice(1)))
+  await access(join(dirname(archive), 'app.asar.unpacked', nativeRelativePath))
   await verifyDistributionMetadata(archive)
   if (releaseMode) verifyReleaseSignature(archive, platform)
 

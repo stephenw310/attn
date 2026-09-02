@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BADGE_OVERLAY_SIZE, badgeOverlayBitmap, badgeOverlayText } from './badgeOverlay'
+import { BADGE_OVERLAY_SIZE, badgeOverlayBitmap, badgeOverlayPng, badgeOverlayText } from './badgeOverlay'
 
 function colorCounts(pixels: Buffer): { red: number; white: number; transparent: number } {
   let red = 0
@@ -14,12 +14,11 @@ function colorCounts(pixels: Buffer): { red: number; white: number; transparent:
 }
 
 describe('badgeOverlayText', () => {
-  it('shows exact counts to 99 and caps beyond', () => {
+  it('keeps one-digit labels large and caps higher counts at 9+', () => {
     expect(badgeOverlayText(1)).toBe('1')
-    expect(badgeOverlayText(42)).toBe('42')
-    expect(badgeOverlayText(99)).toBe('99')
-    expect(badgeOverlayText(100)).toBe('99+')
-    expect(badgeOverlayText(150)).toBe('99+')
+    expect(badgeOverlayText(9)).toBe('9')
+    expect(badgeOverlayText(10)).toBe('9+')
+    expect(badgeOverlayText(1_500)).toBe('9+')
   })
 })
 
@@ -30,39 +29,41 @@ describe('badgeOverlayBitmap', () => {
     expect(badgeOverlayBitmap(Number.NaN)).toBeNull()
   })
 
-  it('renders a fixed-size RGBA bitmap with pill and numerals', () => {
-    for (const count of [1, 42, 150]) {
+  it('fills the overlay with a large red circle and readable white label', () => {
+    for (const count of [1, 9, 10]) {
       const bitmap = badgeOverlayBitmap(count)
-      expect(bitmap).not.toBeNull()
       expect(bitmap?.width).toBe(BADGE_OVERLAY_SIZE)
       expect(bitmap?.height).toBe(BADGE_OVERLAY_SIZE)
       expect(bitmap?.pixels.length).toBe(BADGE_OVERLAY_SIZE * BADGE_OVERLAY_SIZE * 4)
       const colors = colorCounts(bitmap?.pixels as Buffer)
-      // The pill dominates, the numerals sit on it, and the corners stay
-      // transparent so the overlay reads as a badge rather than a square.
-      expect(colors.red).toBeGreaterThan(colors.white)
-      expect(colors.white).toBeGreaterThan(10)
+      expect(colors.red).toBeGreaterThan(500)
+      expect(colors.white).toBeGreaterThan(20)
       expect(colors.transparent).toBeGreaterThan(0)
     }
   })
 
-  it('draws different numerals for different counts and widens for the cap', () => {
+  it('draws different numerals while reusing the capped label', () => {
     const one = badgeOverlayBitmap(1)
     const eight = badgeOverlayBitmap(8)
     const capped = badgeOverlayBitmap(150)
     expect(one?.pixels.equals(eight?.pixels as Buffer)).toBe(false)
-    expect(capped?.text).toBe('99+')
-    // Three glyphs paint more foreground than one.
+    expect(capped?.text).toBe('9+')
     expect(colorCounts(capped?.pixels as Buffer).white).toBeGreaterThan(
       colorCounts(one?.pixels as Buffer).white
     )
   })
+})
 
-  it('keeps every painted pixel inside the canvas at the cap width', () => {
-    const bitmap = badgeOverlayBitmap(999)
-    expect(bitmap?.pixels.length).toBe(BADGE_OVERLAY_SIZE * BADGE_OVERLAY_SIZE * 4)
-    // The first and last rows are outside the pill: fully transparent.
-    const firstRow = bitmap?.pixels.subarray(0, BADGE_OVERLAY_SIZE * 4) as Buffer
-    expect(colorCounts(firstRow).transparent).toBe(BADGE_OVERLAY_SIZE)
+describe('badgeOverlayPng', () => {
+  it('encodes valid 32px PNGs and caches each visible label', () => {
+    const one = badgeOverlayPng(1)
+    const eight = badgeOverlayPng(8)
+    const ten = badgeOverlayPng(10)
+    const many = badgeOverlayPng(1_500)
+    expect(one?.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    expect(one?.readUInt32BE(16)).toBe(BADGE_OVERLAY_SIZE)
+    expect(one?.readUInt32BE(20)).toBe(BADGE_OVERLAY_SIZE)
+    expect(one?.equals(eight as Buffer)).toBe(false)
+    expect(ten).toBe(many)
   })
 })

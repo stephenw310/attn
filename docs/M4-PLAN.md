@@ -7,7 +7,7 @@ means a section of [SPEC.md](SPEC.md) (v0.17). Read the section before starting 
 **Basis:** SPEC §8 M4, F6 (Attn signature footer), F8 (snippets), F9 (follow-up reminders), F12 (badge polish),
 F15 (settings), F17 (AI reply drafting and inline autocomplete), §6 Packaging (auto-update, signing, notarization), §9 #5
 (remote images), and the deferrals the earlier plans parked here: the settings surface (M1-PLAN T9/T8 notes), the remote-image block
-toggle (M1-PLAN, T11 notes), the Windows numeric badge overlay (M1-PLAN accepted deviations), and the
+toggle (M1-PLAN, T11 notes), the Windows unread badge overlay (M1-PLAN accepted deviations), and the
 `Mod+/` cheat sheet (the two "lands at M4" stubs in `MailHeader.tsx`). The 2026-08-30 refresh against
 `main` at `15e13b4` also carries PR #98's historical sync limit into T32A and incorporates the account
 management shipped in PRs #96 and #99.
@@ -31,7 +31,7 @@ sign-off task that rolls up every outstanding manual check.
 | T36 AI writing foundation (F17) | planned | T37, T37A |
 | T37 AI reply drafting in the composer (F17) | planned | T37A |
 | T37A inline AI autocomplete (F17) | planned | nothing |
-| T38 Windows numeric badge overlay (F12) | planned | nothing |
+| T38 Windows unread badge overlay (F12) | shipped; revised after Windows dogfood | nothing |
 | T39 auto-update, signing, notarization (§6) | planned | T40's update-in-place check |
 | T40 M4 exit and v1 sign-off | planned | the v1 tag |
 
@@ -870,31 +870,39 @@ suggestions only, correct Tab/Esc/undo behavior, no persistence before acceptanc
 
 ---
 
-## T38: Windows numeric badge overlay
+## T38: Windows unread badge overlay
 
-**Status: shipped (2026-08-30, `1ed0d80`).** The Windows visual check stays in T40.
+**Status: shipped (2026-08-30, `1ed0d80`); revised after Windows dogfood (2026-09-02).** The Windows
+visual check stays in T40.
 
 **Depends on:** nothing · **Unblocks:** nothing · **Spec:** F12
 
 ### Why
 
-M1 shipped the Windows badge as a static dot with the count in its tooltip and recorded the rendered
-numeric overlay as M4 packaging polish (M1-PLAN accepted deviations). This is that task.
+M1 shipped the Windows badge as a static icon with the count in its tooltip and recorded a rendered
+numeric overlay as M4 packaging polish. Real Windows dogfood showed that the first `99+` treatment squeezed
+three glyphs into too little of the fixed 16px overlay and that feeding an assumed RGBA buffer through
+Electron's platform-dependent bitmap decoder swapped the intended red to blue. Slack demonstrates the
+more legible Windows convention: fill nearly the entire overlay with a red circle, keep single digits large,
+and use a short cap instead of shrinking the type.
 
 ### Design (decided)
 
-- A pure function renders the count into an overlay bitmap (nativeImage): centered numerals, `99+` cap,
-  legible at 16px. The existing badge update path in `notify.ts`/`index.ts` swaps the static dot for the
-  rendered image; the tooltip keeps the exact count. macOS `setBadgeCount` is untouched.
+- Positive Windows counts render a high-contrast red numeric circle at 2x of the fixed 16px overlay slot;
+  zero clears it. Counts `1`–`9` use one large glyph and higher values show `9+`. The generated PNG avoids
+  platform-dependent raw bitmap channel order, while the accessible overlay description keeps the exact
+  count. macOS keeps the native numeric `setBadgeCount` treatment.
 - The count itself is not this task's business: M5's A2/A4 already sum it across signed-in accounts
-  and cover notification routing (F12/F18). T38 changes only how Windows renders the number it is handed.
+  and cover notification routing (F12/F18).
+- A default-on, app-wide `unreadBadgeEnabled` setting clears/restores the Windows overlay or macOS Dock
+  badge immediately, persists across relaunch, and has a palette command. It does not pause notifications.
 
 ### Testing
 
-- Unit: the bitmap generator is pure and platform-independent; assert dimensions, the `99+` cap, and that
-  0 clears the overlay. These run on any OS.
+- Unit: validate the 32px circle and labels, the `9+` visual cap, PNG caching, zero-clears behavior, exact
+  Windows description, and disabled clearing on both macOS and Windows. These run on any OS.
 - The e2e suite runs on macOS and cannot see a Windows overlay. Manual evidence on a Windows machine
-  (counts 1, 42, 150, then 0) is recorded in T40's exit checklist, following the T20-EVIDENCE convention.
+  confirms the numeric badge at positive/zero counts; e2e covers setting persistence and its palette command.
 
 ### Done when
 
@@ -1023,7 +1031,7 @@ Feature evidence (this milestone):
       and undo, no unaccepted text in saved or sent mail, and zero typing-triggered requests after disable.
       Inspect the bounded payload with synthetic draft text, record suggestion latency and request counts,
       and confirm a slow/offline provider does not delay typing or sending.
-- [ ] Windows numeric badge manual check (from T38).
+- [ ] Windows numeric badge plus cross-platform disable/enable manual check (from T38).
 - [ ] Signed/notarized install and same-schema update of a populated profile on both OSes; incompatible
       or missing schema metadata is rejected without changing the installation or local data (from T39).
 - [ ] Credential-free personal packaging on both OSes, with no updater traffic or cached installation.

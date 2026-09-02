@@ -3,7 +3,7 @@ import type { InvokeChannel, MailChangeReason } from '../../shared/ipc'
 import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
 import type { NotificationCandidate } from './notificationQueries'
 
-export const SERVICE_PROTOCOL_VERSION = 3
+export const SERVICE_PROTOCOL_VERSION = 4
 
 /** One signed-in account's credentials as main relays them to the utility. */
 export interface ServiceAccountAuth {
@@ -72,6 +72,8 @@ export interface ServiceReady {
     loginItemRegistered: boolean
     /** F16: optional macOS menu-bar icon, default off. */
     menuBarIcon: boolean
+    /** F12: app-wide macOS Dock / Windows taskbar unread badge. */
+    unreadBadgeEnabled: boolean
   }
 }
 

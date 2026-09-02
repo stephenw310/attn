@@ -13,12 +13,17 @@ const READY: ServiceReady = {
   activeAccountId: 'user@example.com',
   accountIds: ['user@example.com'],
   schemaVersion: 15,
-  background: { launchAtLogin: true, loginItemRegistered: true, menuBarIcon: false }
+  background: {
+    launchAtLogin: true,
+    loginItemRegistered: true,
+    menuBarIcon: false,
+    unreadBadgeEnabled: true
+  }
 }
 
 function initialization(): ServiceInitialize {
   return {
-    protocolVersion: 3,
+    protocolVersion: 4,
     dbPath: '/tmp/attn-supervisor-test.db',
     userDataPath: '/tmp/attn-supervisor-test',
     downloadsPath: '/tmp',

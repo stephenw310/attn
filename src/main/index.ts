@@ -485,6 +485,7 @@ async function initialize(): Promise<void> {
   activeAccountId = ready.activeAccountId
   ownedService.noteActiveAccount(activeAccountId)
   ownedNotifier.setAccounts(authStatus().accounts)
+  ownedNotifier.setBadgeEnabled(ready.background.unreadBadgeEnabled)
   openedSchemaVersion = ready.schemaVersion
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
@@ -508,6 +509,8 @@ async function initialize(): Promise<void> {
       applyLoginItemSetting(update.value, process.platform, app, backgroundEffects)
     } else if (update.key === 'menuBarIcon') {
       applyMenuBarIcon(update.value, backgroundEffects)
+    } else if (update.key === 'unreadBadgeEnabled') {
+      ownedNotifier.setBadgeEnabled(update.value)
     }
   }
   // Under the e2e seam the container has no OS keyring, so a reversible

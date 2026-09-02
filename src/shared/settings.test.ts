@@ -35,8 +35,15 @@ describe('validateAppSettingUpdate', () => {
   it('requires booleans for the background toggles', () => {
     expect(validateAppSettingUpdate('launchAtLogin', false)).toEqual({ key: 'launchAtLogin', value: false })
     expect(validateAppSettingUpdate('menuBarIcon', true)).toEqual({ key: 'menuBarIcon', value: true })
+    expect(validateAppSettingUpdate('unreadBadgeEnabled', false)).toEqual({
+      key: 'unreadBadgeEnabled',
+      value: false
+    })
     expect(() => validateAppSettingUpdate('launchAtLogin', 'true')).toThrow('invalid launchAtLogin value')
     expect(() => validateAppSettingUpdate('menuBarIcon', 1)).toThrow('invalid menuBarIcon value')
+    expect(() => validateAppSettingUpdate('unreadBadgeEnabled', 1)).toThrow(
+      'invalid unreadBadgeEnabled value'
+    )
   })
 
   it('accepts a finite future deadline or null for the notification pause', () => {

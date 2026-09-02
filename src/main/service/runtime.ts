@@ -10,6 +10,7 @@ import {
   THREAD_PAGE_SIZE
 } from '../../shared/mail'
 import { ALLOWED_UNDO_SEND_SECONDS } from '../../shared/outboxTuning'
+import { APP_SETTINGS_DEFAULTS } from '../../shared/settings'
 import type { SplitState } from '../../shared/splits'
 import { actionQueueStatus, clearUndo } from '../actions'
 import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
@@ -285,7 +286,12 @@ export class ServiceRuntime {
       background: {
         launchAtLogin: settingEnabled(this.db, 'launchAtLogin', true),
         loginItemRegistered: readSetting(this.db, 'loginItemRegistered') !== undefined,
-        menuBarIcon: settingEnabled(this.db, 'menuBarIcon', false)
+        menuBarIcon: settingEnabled(this.db, 'menuBarIcon', false),
+        unreadBadgeEnabled: settingEnabled(
+          this.db,
+          'unreadBadgeEnabled',
+          APP_SETTINGS_DEFAULTS.unreadBadgeEnabled
+        )
       }
     }
   }

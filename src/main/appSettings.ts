@@ -39,6 +39,7 @@ export function readAppSettings(db: Db): AppSettings {
       : APP_SETTINGS_DEFAULTS.autoAdvanceDirection,
     launchAtLogin: settingEnabled(db, 'launchAtLogin', APP_SETTINGS_DEFAULTS.launchAtLogin),
     menuBarIcon: settingEnabled(db, 'menuBarIcon', APP_SETTINGS_DEFAULTS.menuBarIcon),
+    unreadBadgeEnabled: settingEnabled(db, 'unreadBadgeEnabled', APP_SETTINGS_DEFAULTS.unreadBadgeEnabled),
     notificationsPausedUntil: notificationPausedUntil(db),
     remoteImagesBlocked: remoteImagesBlocked(db)
   }

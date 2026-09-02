@@ -40,7 +40,7 @@ export interface IpcContext {
     allowOnce: boolean
   ) => Promise<{ blocked: boolean; imagesAllowed: boolean }>
   unregisterMailFrame: (nonce: string) => void
-  /** OS-side effects of a persisted settings write (login item, menu bar). */
+  /** OS-side effects of a persisted settings write (login item, menu bar, badge). */
   applySettingEffects: (update: AppSettingUpdate) => void
   /** T39 auto-update: absent updater answers idle / false. */
   update: {
