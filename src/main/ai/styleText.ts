@@ -1,6 +1,9 @@
 import { type DefaultTreeAdapterTypes, parseFragment } from 'parse5'
 import { ATTN_SIGNATURE_LINE } from '../../shared/settings'
 
+/** Combined UTF-8 size of both body alternatives, before trimming or parsing. */
+export const STYLE_EXAMPLE_MAX_INPUT_BYTES = 64 * 1024
+
 const EXCLUDED_CLASSES = new Set([
   'gmail_quote',
   'gmail_quote_container',
@@ -102,5 +105,12 @@ function authoredPlainText(text: string): string {
  * fall back to the raw text when removing those boundaries leaves no authored text.
  */
 export function styleExampleText(bodyText: string | null, bodyHtml: string | null): string {
+  // Check code-unit length first so a direct caller with an enormous string
+  // cannot make even the byte count scan unbounded input. Oversized HTML must
+  // never fall back to its plain-text alternative or be parsed as a fragment.
+  if ((bodyText?.length ?? 0) + (bodyHtml?.length ?? 0) > STYLE_EXAMPLE_MAX_INPUT_BYTES) return ''
+  if (Buffer.byteLength(bodyText ?? '') + Buffer.byteLength(bodyHtml ?? '') > STYLE_EXAMPLE_MAX_INPUT_BYTES) {
+    return ''
+  }
   return authoredPlainText(bodyHtml?.trim() ? authoredHtmlText(bodyHtml) : (bodyText ?? ''))
 }

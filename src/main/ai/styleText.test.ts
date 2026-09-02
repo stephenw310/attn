@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { styleExampleText } from './styleText'
+import { STYLE_EXAMPLE_MAX_INPUT_BYTES, styleExampleText } from './styleText'
 
 describe('styleExampleText', () => {
+  it('rejects oversized raw inputs before cleanup, without falling back from HTML to plain text', () => {
+    const largeQuote = `<blockquote>${'q'.repeat(STYLE_EXAMPLE_MAX_INPUT_BYTES)}</blockquote>`
+    expect(styleExampleText('Unsafe alternative', `<p>My answer.</p>${largeQuote}`)).toBe('')
+    expect(styleExampleText(`${' '.repeat(STYLE_EXAMPLE_MAX_INPUT_BYTES)}Answer.`, null)).toBe('')
+    // Count UTF-8 bytes across both alternatives, not characters or each part separately.
+    expect(styleExampleText('é'.repeat(STYLE_EXAMPLE_MAX_INPUT_BYTES / 2), null)).toHaveLength(
+      STYLE_EXAMPLE_MAX_INPUT_BYTES / 2
+    )
+    expect(styleExampleText('é'.repeat(STYLE_EXAMPLE_MAX_INPUT_BYTES / 2), 'x')).toBe('')
+    expect(
+      styleExampleText(
+        'x'.repeat(STYLE_EXAMPLE_MAX_INPUT_BYTES / 2),
+        'x'.repeat(STYLE_EXAMPLE_MAX_INPUT_BYTES / 2 + 1)
+      )
+    ).toBe('')
+  })
+
   it.each([
     'On Tuesday, Maya wrote:\nSomeone else’s words.',
     'On Tuesday, September 1, 2026,\nMaya <maya@example.com>\nwrote:\nSomeone else’s words.',

@@ -642,6 +642,9 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   Strip recognized quoted history, forwarded content, and signatures from each example before applying
   the excerpt limit. Prefer HTML quote and signature boundaries when available. Skip examples with no
   remaining authored text without falling back to the original body.
+  Select candidate metadata before loading bodies. Limit each candidate's combined plain-text and HTML
+  input to 64 KiB and the total loaded input per invocation to 256 KiB. Skip oversized candidates whole
+  so clipping cannot break quote or signature boundaries.
 - **Inline refine:** after a draft lands, a one-line instruction ("shorter", "more formal") regenerates it.
 
 **Inline autocomplete:**

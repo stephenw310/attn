@@ -751,6 +751,10 @@ it with a one-line instruction, and never auto-send.
   Examples contain authored text after removing recognized HTML and plain-text quotes, forwarded trails,
   and signatures. Empty results are skipped before counting examples; HTML cleanup never falls back to
   the original text alternative. The same recorded payload tests cover both HTML and plain-text examples.
+  Candidate selection reads only metadata for the newest 200 nonempty rows within the input size limit.
+  Bodies are loaded individually after byte-size checks, capped at 64 KiB per candidate and 256 KiB
+  per invocation. Oversized examples are
+  skipped whole, and the text extractor applies the same per-candidate guard before trimming or parsing.
 - Starting reply generation or refine cancels pending autocomplete and clears its preview. Autocomplete
   stays suspended until generation ends and the user resumes typing; AI-inserted chunks cannot trigger it.
 - In an empty inline reply/reply-all composer, show a transient `Tip: Hit Mod+J for AI` placeholder only
