@@ -966,7 +966,8 @@ real-OS notification click-through, M2's E1–E7, M4's nine open feature boxes, 
 groups — operator credentials and the release-feed decision, real-world manual runs (real OS, real Gmail,
 a real LLM provider, two real accounts), and frame-timed performance on hardware with real vsync
 (GAP-7). The tightest of these is M2's E1, the one-week sole-client dogfood run, open since M2 and not yet
-started; until it runs, §8's success metrics below are unmeasured. Nothing on that list is a code gap.
+recorded; until it is, §8's success metrics below stay unmeasured against real use. Nothing on that list is
+a code gap.
 
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading view, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
 - **M1 — Triage core.** First items: **apply the Dispatch direction** (D6 — graphite/amber tokens, `attn:` wordmark, layout per D6, split strip, account menu) and **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). The reading work adds recipients, attachments, quote/signature collapse, and—after M1 dogfood—the full-window conversation that supersedes the interim split. Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
