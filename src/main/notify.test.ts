@@ -142,7 +142,7 @@ describe('badge effects', () => {
     applyUnreadBadge('win32', 0, true, effects)
     applyUnreadBadgeToWindow('linux', 7, true, effects.setWindowsOverlay)
     applyUnreadBadgeToWindow('win32', 7, true, effects.setWindowsOverlay)
-    // The dot stays constant; its accessible description keeps the exact count.
+    // The visible badge caps at 9+; its accessible description keeps the exact count.
     applyUnreadBadgeToWindow('win32', 150, true, effects.setWindowsOverlay)
     applyUnreadBadgeToWindow('win32', 150, false, effects.setWindowsOverlay)
     expect(calls).toEqual([

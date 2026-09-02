@@ -872,7 +872,7 @@ suggestions only, correct Tab/Esc/undo behavior, no persistence before acceptanc
 
 ## T38: Windows unread badge overlay
 
-**Status: shipped (2026-08-30, `1ed0d80`); revised after Windows dogfood (2026-09-01).** The Windows
+**Status: shipped (2026-08-30, `1ed0d80`); revised after Windows dogfood (2026-09-02).** The Windows
 visual check stays in T40.
 
 **Depends on:** nothing · **Unblocks:** nothing · **Spec:** F12
@@ -880,16 +880,18 @@ visual check stays in T40.
 ### Why
 
 M1 shipped the Windows badge as a static icon with the count in its tooltip and recorded a rendered
-numeric overlay as M4 packaging polish. Real Windows dogfood showed that three glyphs squeezed into the
-fixed 16px overlay were not legible, and that feeding an assumed RGBA buffer through Electron's
-platform-dependent bitmap decoder swapped the intended red to blue. The familiar Windows treatment is
-one red activity dot; exact triage instrumentation already lives in Attn's queue readout.
+numeric overlay as M4 packaging polish. Real Windows dogfood showed that the first `99+` treatment squeezed
+three glyphs into too little of the fixed 16px overlay and that feeding an assumed RGBA buffer through
+Electron's platform-dependent bitmap decoder swapped the intended red to blue. Slack demonstrates the
+more legible Windows convention: fill nearly the entire overlay with a red circle, keep single digits large,
+and use a short cap instead of shrinking the type.
 
 ### Design (decided)
 
-- Every positive Windows count renders the same high-contrast red-dot PNG at 2x of the fixed 16px overlay
-  slot; zero clears it. PNG avoids platform-dependent raw bitmap channel order. The accessible overlay
-  description keeps the exact count. macOS keeps the native numeric `setBadgeCount` treatment.
+- Positive Windows counts render a high-contrast red numeric circle at 2x of the fixed 16px overlay slot;
+  zero clears it. Counts `1`–`9` use one large glyph and higher values show `9+`. The generated PNG avoids
+  platform-dependent raw bitmap channel order, while the accessible overlay description keeps the exact
+  count. macOS keeps the native numeric `setBadgeCount` treatment.
 - The count itself is not this task's business: M5's A2/A4 already sum it across signed-in accounts
   and cover notification routing (F12/F18).
 - A default-on, app-wide `unreadBadgeEnabled` setting clears/restores the Windows overlay or macOS Dock
@@ -897,10 +899,10 @@ one red activity dot; exact triage instrumentation already lives in Attn's queue
 
 ### Testing
 
-- Unit: validate the reusable 32px PNG, zero-clears behavior, exact Windows description, and disabled
-  clearing on both macOS and Windows. These run on any OS.
+- Unit: validate the 32px circle and labels, the `9+` visual cap, PNG caching, zero-clears behavior, exact
+  Windows description, and disabled clearing on both macOS and Windows. These run on any OS.
 - The e2e suite runs on macOS and cannot see a Windows overlay. Manual evidence on a Windows machine
-  confirms the dot at positive/zero counts; e2e covers setting persistence and its palette command.
+  confirms the numeric badge at positive/zero counts; e2e covers setting persistence and its palette command.
 
 ### Done when
 
@@ -1029,7 +1031,7 @@ Feature evidence (this milestone):
       and undo, no unaccepted text in saved or sent mail, and zero typing-triggered requests after disable.
       Inspect the bounded payload with synthetic draft text, record suggestion latency and request counts,
       and confirm a slow/offline provider does not delay typing or sending.
-- [ ] Windows red-dot badge plus cross-platform disable/enable manual check (from T38).
+- [ ] Windows numeric badge plus cross-platform disable/enable manual check (from T38).
 - [ ] Signed/notarized install and same-schema update of a populated profile on both OSes; incompatible
       or missing schema metadata is rejected without changing the installation or local data (from T39).
 - [ ] Credential-free personal packaging on both OSes, with no updater traffic or cached installation.

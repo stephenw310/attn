@@ -37,8 +37,8 @@ are **open** and say so.
   no-persistence, and silent failure are covered (`ai-autocomplete.spec.ts`,
   `autocompleteController.test.ts`, `autocompleteExcerpt.test.ts`, manager rate-limit tests); the
   real-provider latency/request-count recording is open (operator).
-- [ ] **Windows red-dot badge visual check** — unit coverage pins the PNG, zero-clears behavior, and the
-  cross-platform enable setting; the on-Windows dot/clear look and a macOS disable/enable check are open
+- [ ] **Windows numeric badge visual check** — unit coverage pins the PNG, zero-clears behavior, and the
+  cross-platform enable setting; the on-Windows badge/clear look and a macOS disable/enable check are open
   (operator).
 - [ ] **Signed/notarized install + same-schema update on both OSes** — the schema-gated updater, its
   install-time re-validation, and `package:verify --release` shipped with T39 (21 unit tests;

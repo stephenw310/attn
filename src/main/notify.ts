@@ -2,11 +2,11 @@ import { app, BrowserWindow, type NativeImage, Notification, nativeImage } from 
 import type { AuthAccount } from '../shared/auth'
 import { errorMessage } from '../shared/error'
 import { NOTIFICATION_SUMMARY_THRESHOLD, type PendingFocusTarget } from '../shared/notifications'
-import { badgeOverlayPng } from './badgeOverlay'
+import { badgeOverlayPng, badgeOverlayText } from './badgeOverlay'
 import type { NotificationCandidate } from './service/notificationQueries'
 
-/** Every positive unread count shares one conventional Windows taskbar dot. */
-let windowsBadgeIcon: NativeImage | null = null
+/** One rendered Windows overlay per visible label; exact counts above nine share `9+`. */
+const windowsBadgeIcons = new Map<string, NativeImage>()
 
 /**
  * Above this many new conversations a poll cycle collapses to one summary.
@@ -84,7 +84,7 @@ export interface NotificationContext {
 
 export interface BadgeEffects {
   setMacBadge: (count: number) => void
-  /** 0 clears the overlay; a positive count renders the Windows unread dot. */
+  /** 0 clears the overlay; a positive count renders the Windows numeric badge. */
   setWindowsOverlay: (unreadCount: number, description: string) => void
 }
 
@@ -114,8 +114,8 @@ export function applyUnreadBadgeToWindow(
 ): void {
   if (platform !== 'win32') return
   const shownCount = enabled ? unreadCount : 0
-  // The conventional dot signals unread activity; the accessible description
-  // keeps the exact count without squeezing numerals into Windows' 16px slot.
+  // The visual label caps at 9+ so it stays readable; the accessible
+  // description always carries the exact count.
   setWindowsOverlay(shownCount, shownCount > 0 ? `${shownCount} unread conversations` : '')
 }
 
@@ -200,10 +200,14 @@ export function notificationClickTarget(
 function getWindowsBadgeIcon(unreadCount: number): NativeImage | null {
   const png = badgeOverlayPng(unreadCount)
   if (!png) return null
-  // PNG has stable channel ordering across platforms; the previous raw RGBA
-  // bitmap went through a platform-dependent decoder and appeared blue.
-  windowsBadgeIcon ??= nativeImage.createFromBuffer(png, { scaleFactor: 2 })
-  return windowsBadgeIcon
+  const caption = badgeOverlayText(unreadCount)
+  const cached = windowsBadgeIcons.get(caption)
+  if (cached) return cached
+  // PNG has stable channel ordering across platforms; raw RGBA passed through
+  // Electron's platform-dependent bitmap decoder appeared blue on Windows.
+  const icon = nativeImage.createFromBuffer(png, { scaleFactor: 2 })
+  windowsBadgeIcons.set(caption, icon)
+  return icon
 }
 
 export class MailNotifier {

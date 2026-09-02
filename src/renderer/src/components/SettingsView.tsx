@@ -546,8 +546,8 @@ export function SettingsView({
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm text-ink">Unread app badge</span>
                     <span className={NOTE}>
-                      Shows the unread count on the macOS Dock or a red dot on the Windows taskbar. This does
-                      not change notification delivery.
+                      Shows the unread count on the macOS Dock or Windows taskbar. This does not change
+                      notification delivery.
                     </span>
                   </span>
                   <input
