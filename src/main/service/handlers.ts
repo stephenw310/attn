@@ -492,9 +492,10 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const update = validateAiSettingUpdate(key, value)
     return { ...writeAiStoredSetting(context.db, update), keyPresent: false }
   })
-  handle(IPC_CHANNELS.aiStyleExamples, () => {
+  handle(IPC_CHANNELS.aiStyleExamples, (_event, excludeThreadId) => {
+    if (!nonEmptyString(excludeThreadId)) throw new Error('invalid thread id')
     const account = context.currentAccountId()
-    return account ? listStyleExamples(context.db, account) : []
+    return account ? listStyleExamples(context.db, account, excludeThreadId) : []
   })
   handle(IPC_CHANNELS.snippetsList, () => listSnippets(context.db))
   handle(IPC_CHANNELS.snippetsSave, (_event, input) => {

@@ -1505,6 +1505,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 {aiDraft && (
                   <AiDraftPlugin
                     kind={draft.kind}
+                    threadId={draft.threadId}
                     request={aiDraft.request}
                     claim={aiDraft.claim}
                     getThreadContext={aiDraft.getThreadContext}
