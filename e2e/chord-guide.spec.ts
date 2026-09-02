@@ -61,6 +61,7 @@ test('Escape leaves the reader while the G guide is armed', async ({ page }) => 
 
 test('guides G completions and clears on every dismissal route', async ({ page }, testInfo) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
+  await page.clock.install()
   const guide = page.getByTestId('footer-chord-guide')
 
   await page.keyboard.press('g')
@@ -112,7 +113,7 @@ test('guides G completions and clears on every dismissal route', async ({ page }
   await expect(guide).toHaveCount(0)
 
   await page.keyboard.press('g')
-  await page.waitForTimeout(700)
+  await page.clock.fastForward(700)
   await page.keyboard.press('r')
   await expect(page.getByTestId('view-title')).toHaveText('Trash')
   await expect(page.getByTestId('composer')).toHaveCount(0)
@@ -137,7 +138,7 @@ test('guides G completions and clears on every dismissal route', async ({ page }
 
   await page.keyboard.press('g')
   await expect(guide).toBeVisible()
-  await page.waitForTimeout(3_100)
+  await page.clock.fastForward(3_100)
   await expect(guide).toHaveCount(0)
   await page.keyboard.press('a')
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')

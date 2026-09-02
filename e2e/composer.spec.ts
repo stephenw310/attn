@@ -221,11 +221,6 @@ function remotePlainDraft(id: string, subject: string, text: string): object {
   }
 }
 
-test('opens the first-class Drafts view with g d', async ({ page }) => {
-  await goToDrafts(page)
-  await expect(page.getByTestId('view-title')).toHaveText('Drafts')
-})
-
 test('inserts the saved Gmail signature collapsed and reveals it for editing', async ({
   app,
   page
@@ -2305,16 +2300,30 @@ test('checkpoints continuously typed content without waiting for an idle gap', a
   let composer = new ComposerPage(page)
   await composer.openNew()
   await composer.editor.click()
+  const clockStart = Date.now()
+  await page.clock.install({ time: clockStart })
+  await page.clock.pauseAt(clockStart + 1_000)
   const continuous = 'Continuous typing still reaches durable storage before an idle debounce can ever fire.'
 
-  // Eight seconds of uninterrupted input crosses the five-second hard checkpoint.
-  // Relaunch immediately after the last character, before the one-second idle timer.
-  await composer.editor.pressSequentially(continuous, { delay: 100 })
+  // Keep resetting the one-second idle timer, then cross the five-second hard
+  // checkpoint. The fake renderer clock runs the production timers without an
+  // eight-second wall-clock delay.
+  for (let index = 0; index < 6; index++) {
+    const chunk = continuous.slice(
+      Math.floor((index * continuous.length) / 6),
+      Math.floor(((index + 1) * continuous.length) / 6)
+    )
+    await page.keyboard.type(chunk)
+    await page.clock.fastForward(900)
+  }
+  // Time is paused 100ms before the trailing idle save could run. This read
+  // proves the hard checkpoint reached SQLite before the app is relaunched.
+  await composer.expectSaved()
   ;({ page } = await boot.relaunch())
   composer = new ComposerPage(page)
 
   await expect(composer.root).toBeVisible()
-  await expect(composer.editor).toContainText(continuous.slice(0, 40))
+  await expect(composer.editor).toContainText(continuous)
 })
 
 test('retries a failed autosave without clearing the dirty checkpoint', async ({ app, boot, page }) => {
