@@ -32,6 +32,7 @@ export type SettingsControl =
   | 'snippets'
   | 'aiWriting'
   | 'remoteImages'
+  | 'unreadBadge'
   | 'launchAtLogin'
   | 'menuBarIcon'
 
@@ -541,7 +542,26 @@ export function SettingsView({
 
               <section data-testid="settings-notifications" aria-label="Notifications">
                 <SectionTitle>Notifications</SectionTitle>
-                <div className={`mt-2 ${ROW}`}>
+                <label className={`mt-2 ${ROW}`}>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-sm text-ink">Unread app badge</span>
+                    <span className={NOTE}>
+                      Shows the unread count on the macOS Dock or a red dot on the Windows taskbar. This does
+                      not change notification delivery.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    data-testid="settings-unread-badge"
+                    data-settings-control="unreadBadge"
+                    aria-label="Unread app badge"
+                    disabled={!settings}
+                    checked={settings?.unreadBadgeEnabled ?? true}
+                    onChange={(event) => onUpdateSetting('unreadBadgeEnabled', event.target.checked)}
+                    className="size-4 cursor-pointer accent-accent"
+                  />
+                </label>
+                <div className={ROW}>
                   <span className="flex min-w-0 flex-col">
                     <span data-testid="settings-pause-state" className="text-sm text-ink">
                       {paused ? `Paused until ${formatSnoozeDate(pausedUntil)}` : 'Notifications are on'}

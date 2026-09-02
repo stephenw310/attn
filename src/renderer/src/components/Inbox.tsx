@@ -2135,6 +2135,9 @@ export function Inbox({
         }),
         createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
         createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
+        createCommand('settings.unreadBadge', () =>
+          updateAppSetting('unreadBadgeEnabled', !(appSettingsRef.current?.unreadBadgeEnabled ?? true))
+        ),
         createCommand('settings.launchAtLogin', () =>
           updateAppSetting('launchAtLogin', !(appSettingsRef.current?.launchAtLogin ?? true))
         ),

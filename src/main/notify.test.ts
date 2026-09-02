@@ -133,21 +133,27 @@ describe('badge effects', () => {
       }
     }
 
-    applyUnreadBadge('linux', 4, effects)
+    applyUnreadBadge('linux', 4, true, effects)
     expect(calls).toEqual([])
-    applyUnreadBadge('darwin', 4, effects)
-    applyUnreadBadge('win32', 4, effects)
-    applyUnreadBadge('win32', 0, effects)
-    applyUnreadBadgeToWindow('linux', 7, effects.setWindowsOverlay)
-    applyUnreadBadgeToWindow('win32', 7, effects.setWindowsOverlay)
-    // The tooltip keeps the exact count; the overlay numerals cap at 99+ (T38).
-    applyUnreadBadgeToWindow('win32', 150, effects.setWindowsOverlay)
+    applyUnreadBadge('darwin', 4, true, effects)
+    applyUnreadBadge('darwin', 4, false, effects)
+    applyUnreadBadge('win32', 4, true, effects)
+    applyUnreadBadge('win32', 4, false, effects)
+    applyUnreadBadge('win32', 0, true, effects)
+    applyUnreadBadgeToWindow('linux', 7, true, effects.setWindowsOverlay)
+    applyUnreadBadgeToWindow('win32', 7, true, effects.setWindowsOverlay)
+    // The dot stays constant; its accessible description keeps the exact count.
+    applyUnreadBadgeToWindow('win32', 150, true, effects.setWindowsOverlay)
+    applyUnreadBadgeToWindow('win32', 150, false, effects.setWindowsOverlay)
     expect(calls).toEqual([
       'mac:4',
+      'mac:0',
       'windows:4:4 unread conversations',
       'windows:0:',
+      'windows:0:',
       'windows:7:7 unread conversations',
-      'windows:150:150 unread conversations'
+      'windows:150:150 unread conversations',
+      'windows:0:'
     ])
   })
 })

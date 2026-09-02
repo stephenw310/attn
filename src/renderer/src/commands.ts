@@ -140,6 +140,7 @@ export const COMMAND_SPECS = {
   'autocomplete.disable': { title: 'Disable inline AI autocomplete', context: 'global' },
   'settings.undoSendDelay': { title: 'Set undo send delay…', context: 'global' },
   'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
+  'settings.unreadBadge': { title: 'Toggle unread app badge', context: 'global' },
   'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },
   'settings.menuBarIcon': { title: 'Toggle macOS menu-bar icon', context: 'global' },
   'notifications.pauseHour': {

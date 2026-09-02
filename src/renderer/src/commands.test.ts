@@ -88,6 +88,7 @@ describe('command catalog', () => {
       'autocomplete.disable',
       'settings.undoSendDelay',
       'settings.autoAdvance',
+      'settings.unreadBadge',
       'settings.launchAtLogin',
       'settings.menuBarIcon',
       'notifications.pauseHour',

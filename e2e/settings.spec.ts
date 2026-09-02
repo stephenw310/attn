@@ -201,12 +201,16 @@ test.describe('settings surface', () => {
     await expect(relaunched.getByTestId('settings-auto-advance')).toHaveValue('list')
   })
 
-  test('notification pause is settable from settings and palette and persists across relaunch', async ({
+  test('notification pause and the unread badge setting persist and work from the palette', async ({
     boot,
     page
   }) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(8)
     await page.keyboard.press('ControlOrMeta+,')
+    const unreadBadge = page.getByTestId('settings-unread-badge')
+    await expect(unreadBadge).toBeChecked()
+    await unreadBadge.uncheck()
+    await expect(unreadBadge).not.toBeChecked()
     await expect(page.getByTestId('settings-pause-state')).toHaveText('Notifications are on')
     await page.getByTestId('settings-pause-tomorrow').click()
     await expect(page.getByTestId('settings-pause-state')).toContainText('Paused until')
@@ -215,9 +219,12 @@ test.describe('settings surface', () => {
     const { page: relaunched } = await boot.relaunch()
     await expect(relaunched.getByTestId('thread-row')).toHaveCount(8)
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await expect(relaunched.getByTestId('settings-unread-badge')).not.toBeChecked()
     await expect(relaunched.getByTestId('settings-pause-state')).toContainText('Paused until')
     await relaunched.getByTestId('settings-pause-resume').click()
     await expect(relaunched.getByTestId('settings-pause-state')).toHaveText('Notifications are on')
+    await runPaletteCommand(relaunched, 'Toggle unread app badge')
+    await expect(relaunched.getByTestId('settings-unread-badge')).toBeChecked()
     await relaunched.keyboard.press('Escape')
 
     // The palette exposes the same pause without a tray icon (Linux has none).

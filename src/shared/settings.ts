@@ -35,6 +35,8 @@ export interface AppSettings {
   launchAtLogin: boolean
   /** F16: optional macOS menu-bar icon, default off. */
   menuBarIcon: boolean
+  /** Show unread state on the macOS Dock or Windows taskbar (F12). */
+  unreadBadgeEnabled: boolean
   /** Epoch ms all notifications stay paused until; null = not paused (F12). */
   notificationsPausedUntil: number | null
   /**
@@ -55,6 +57,7 @@ export const APP_SETTINGS_DEFAULTS: AppSettings = {
   autoAdvanceDirection: 'next',
   launchAtLogin: true,
   menuBarIcon: false,
+  unreadBadgeEnabled: true,
   notificationsPausedUntil: null,
   remoteImagesBlocked: false
 }
@@ -139,6 +142,7 @@ export function validateAppSettingUpdate(key: unknown, value: unknown): AppSetti
     }
     case 'launchAtLogin':
     case 'menuBarIcon':
+    case 'unreadBadgeEnabled':
     case 'remoteImagesBlocked': {
       if (typeof value !== 'boolean') throw new Error(`invalid ${key} value`)
       return { key, value }

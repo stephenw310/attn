@@ -2,11 +2,11 @@ import { app, BrowserWindow, type NativeImage, Notification, nativeImage } from 
 import type { AuthAccount } from '../shared/auth'
 import { errorMessage } from '../shared/error'
 import { NOTIFICATION_SUMMARY_THRESHOLD, type PendingFocusTarget } from '../shared/notifications'
-import { badgeOverlayBitmap, badgeOverlayText } from './badgeOverlay'
+import { badgeOverlayPng } from './badgeOverlay'
 import type { NotificationCandidate } from './service/notificationQueries'
 
-/** One rendered numeral overlay per caption; captions repeat, pixels don't change. */
-const windowsBadgeIcons = new Map<string, NativeImage>()
+/** Every positive unread count shares one conventional Windows taskbar dot. */
+let windowsBadgeIcon: NativeImage | null = null
 
 /**
  * Above this many new conversations a poll cycle collapses to one summary.
@@ -84,7 +84,7 @@ export interface NotificationContext {
 
 export interface BadgeEffects {
   setMacBadge: (count: number) => void
-  /** 0 clears the overlay; a positive count renders its numerals (F12/T38). */
+  /** 0 clears the overlay; a positive count renders the Windows unread dot. */
   setWindowsOverlay: (unreadCount: number, description: string) => void
 }
 
@@ -99,20 +99,24 @@ export function isolateNotificationFailure(operation: () => void, report: (messa
 export function applyUnreadBadge(
   platform: NodeJS.Platform,
   unreadCount: number,
+  enabled: boolean,
   effects: BadgeEffects
 ): void {
-  if (platform === 'darwin') effects.setMacBadge(unreadCount)
-  else applyUnreadBadgeToWindow(platform, unreadCount, effects.setWindowsOverlay)
+  if (platform === 'darwin') effects.setMacBadge(enabled ? unreadCount : 0)
+  else applyUnreadBadgeToWindow(platform, unreadCount, enabled, effects.setWindowsOverlay)
 }
 
 export function applyUnreadBadgeToWindow(
   platform: NodeJS.Platform,
   unreadCount: number,
+  enabled: boolean,
   setWindowsOverlay: BadgeEffects['setWindowsOverlay']
 ): void {
   if (platform !== 'win32') return
-  // The tooltip keeps the exact count even when the numerals cap at 99+.
-  setWindowsOverlay(unreadCount, unreadCount > 0 ? `${unreadCount} unread conversations` : '')
+  const shownCount = enabled ? unreadCount : 0
+  // The conventional dot signals unread activity; the accessible description
+  // keeps the exact count without squeezing numerals into Windows' 16px slot.
+  setWindowsOverlay(shownCount, shownCount > 0 ? `${shownCount} unread conversations` : '')
 }
 
 /** Keep batching policy independent from Electron so it can be exhaustively unit tested. */
@@ -194,24 +198,20 @@ export function notificationClickTarget(
 }
 
 function getWindowsBadgeIcon(unreadCount: number): NativeImage | null {
-  const bitmap = badgeOverlayBitmap(unreadCount)
-  if (!bitmap) return null
-  const caption = badgeOverlayText(unreadCount)
-  const cached = windowsBadgeIcons.get(caption)
-  if (cached) return cached
-  // Rendered at 2x of the 16px overlay slot so the numerals survive scaling.
-  const icon = nativeImage.createFromBitmap(bitmap.pixels, {
-    width: bitmap.width,
-    height: bitmap.height,
-    scaleFactor: 2
-  })
-  windowsBadgeIcons.set(caption, icon)
-  return icon
+  const png = badgeOverlayPng(unreadCount)
+  if (!png) return null
+  // PNG has stable channel ordering across platforms; the previous raw RGBA
+  // bitmap went through a platform-dependent decoder and appeared blue.
+  windowsBadgeIcon ??= nativeImage.createFromBuffer(png, { scaleFactor: 2 })
+  return windowsBadgeIcon
 }
 
 export class MailNotifier {
   private accounts: AuthAccount[] = []
   private unreadCount = 0
+  // Stay cleared until the utility returns the persisted preference. This
+  // prevents a disabled badge flashing briefly during startup events.
+  private badgeEnabled = false
   private readonly shown = new BoundedRetainer<Notification>(NOTIFICATION_RETENTION)
 
   constructor(
@@ -236,8 +236,18 @@ export class MailNotifier {
     // change log is what lets tests assert the roster-summed count (F12).
     if (unreadCount !== this.unreadCount) console.log(`[badge] unread ${unreadCount}`)
     this.unreadCount = unreadCount
+    this.renderBadge()
+  }
+
+  setBadgeEnabled(enabled: boolean): void {
+    if (enabled === this.badgeEnabled) return
+    this.badgeEnabled = enabled
+    this.renderBadge()
+  }
+
+  private renderBadge(): void {
     try {
-      applyUnreadBadge(process.platform, unreadCount, {
+      applyUnreadBadge(process.platform, this.unreadCount, this.badgeEnabled, {
         setMacBadge: (count) => app.setBadgeCount(count),
         setWindowsOverlay: (count, description) => {
           const icon = getWindowsBadgeIcon(count)
@@ -251,9 +261,14 @@ export class MailNotifier {
 
   attachWindow(win: BrowserWindow): void {
     try {
-      applyUnreadBadgeToWindow(process.platform, this.unreadCount, (count, description) => {
-        win.setOverlayIcon(getWindowsBadgeIcon(count), description)
-      })
+      applyUnreadBadgeToWindow(
+        process.platform,
+        this.unreadCount,
+        this.badgeEnabled,
+        (count, description) => {
+          win.setOverlayIcon(getWindowsBadgeIcon(count), description)
+        }
+      )
     } catch (error) {
       console.error(`[badge] failed: ${errorMessage(error)}`)
     }

@@ -129,6 +129,7 @@ describe('attachment spool ownership', () => {
     const stored = parseStoredDraftAttachments(row.attachments_json)
     expect(stored.map((attachment) => attachment.filename)).toEqual(['pasted.png', 'dropped.txt'])
     expect(existsSync(stored[1].spoolPath)).toBe(true)
+    db.close()
   })
 
   it('enforces the path-count cap for picker and drop callers in the shared spool boundary', async () => {

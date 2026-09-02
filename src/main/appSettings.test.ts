@@ -12,6 +12,7 @@ describe('app settings storage', () => {
       autoAdvanceDirection: 'next',
       launchAtLogin: true,
       menuBarIcon: false,
+      unreadBadgeEnabled: true,
       notificationsPausedUntil: null,
       remoteImagesBlocked: false
     })
@@ -27,6 +28,7 @@ describe('app settings storage', () => {
     expect(writeAppSetting(db, 'autoAdvanceDirection', 'previous').autoAdvanceDirection).toBe('previous')
     expect(writeAppSetting(db, 'launchAtLogin', false).launchAtLogin).toBe(false)
     expect(writeAppSetting(db, 'menuBarIcon', true).menuBarIcon).toBe(true)
+    expect(writeAppSetting(db, 'unreadBadgeEnabled', false).unreadBadgeEnabled).toBe(false)
     expect(writeAppSetting(db, 'notificationsPausedUntil', 4_000).notificationsPausedUntil).toBe(4_000)
     expect(writeAppSetting(db, 'notificationsPausedUntil', null).notificationsPausedUntil).toBeNull()
     // T33: the toggle rides the documented `remoteImages` row.
