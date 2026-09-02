@@ -71,6 +71,14 @@ function inlineImageSourcesToCid(html: string): string {
     image.removeAttribute('data-attn-cid')
     if (contentId) image.setAttribute('src', `cid:${contentId}`)
   }
+  // Remote sources ride a data attribute through export so no live-document
+  // element ever holds them (PR #101 review); template content is inert, so
+  // restoring them here at string level fetches nothing.
+  for (const image of template.content.querySelectorAll<HTMLImageElement>('img[data-attn-remote-src]')) {
+    const source = image.getAttribute('data-attn-remote-src')
+    image.removeAttribute('data-attn-remote-src')
+    if (source) image.setAttribute('src', source)
+  }
   return template.innerHTML
 }
 

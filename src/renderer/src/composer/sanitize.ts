@@ -90,7 +90,14 @@ let importPurifier: DOMPurify | null = null
 const hooked = new WeakSet<DOMPurify>()
 const outgoingDataHooked = new WeakSet<DOMPurify>()
 const importAttributesHooked = new WeakSet<DOMPurify>()
-const COMPOSER_DATA_ATTRIBUTES = new Set(['data-attn-cid', 'data-attn-opaque', 'data-smartmail', 'data-surl'])
+const COMPOSER_DATA_ATTRIBUTES = new Set([
+  'data-attn-cid',
+  'data-attn-opaque',
+  'data-attn-remote-src',
+  'data-attn-signature',
+  'data-smartmail',
+  'data-surl'
+])
 
 export function isGmailSignatureAttributes(
   className: string | null | undefined,
@@ -230,6 +237,7 @@ export function sanitizeOutgoingHtml(html: string): string {
       'style',
       'data-attn-cid',
       'data-attn-opaque',
+      'data-attn-signature',
       'data-smartmail',
       'data-surl'
     ],
@@ -279,7 +287,12 @@ export function sanitizeDraftHtmlForImport(html: string): string {
 
 export function sanitizeComposerImageSource(source: unknown): string {
   if (typeof source !== 'string') return ''
-  const image = document.createElement('img')
+  // Build the probe in an inert document: an <img> created in the LIVE
+  // document starts fetching the moment src is assigned, even while detached
+  // — a real network request for a remote source before any policy ran
+  // (PR #101 review). Documents without a browsing context never load.
+  const inert = document.implementation.createHTMLDocument('')
+  const image = inert.createElement('img')
   image.setAttribute('src', source)
   const safe = new DOMParser().parseFromString(sanitizeDraftHtmlForImport(image.outerHTML), 'text/html')
   return safe.body.querySelector('img')?.getAttribute('src') ?? ''

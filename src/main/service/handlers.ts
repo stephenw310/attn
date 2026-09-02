@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { ActionRevertNotice } from '../../shared/actionRevert'
 import { isValidEmail } from '../../shared/address'
+import { validateAiSettingUpdate } from '../../shared/ai'
 import { parseStoredCommandUsage, sanitizeCommandUsage } from '../../shared/commandUsage'
 import {
   type DraftAttachment,
@@ -28,6 +29,7 @@ import {
   type ThreadPageCursor,
   type ThreadRow
 } from '../../shared/mail'
+import { validateAccountSettingUpdate } from '../../shared/settings'
 import type { ReorderSplitsInput, SaveSplitInput, SplitCondition, SplitPresetId } from '../../shared/splits'
 import { SPLIT_PRESET_IDS } from '../../shared/splits'
 import { isThemePreference } from '../../shared/theme'
@@ -42,6 +44,9 @@ import {
   undoLast
 } from '../actions'
 import type { ActionExecutor } from '../actions/executor'
+import { listStyleExamples } from '../ai/styleExamples'
+import { readAiStoredSettings, writeAiStoredSetting } from '../aiSettings'
+import { readAccountSettings, readAppSettings, writeAppSetting } from '../appSettings'
 import { writeAttachment } from '../attachments'
 import type { Db } from '../db'
 import {
@@ -78,12 +83,25 @@ import { addInlineImage, isSupportedInlineImageMimeType } from '../outbox/inline
 import type { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from '../outbox/queue'
 import { planReply, replySourceMessage } from '../outbox/replyPlan'
-import { prepareDraftWithCachedPrimarySignature } from '../outbox/sendAs'
+import { ATTN_SIGNATURE_SETTING, prepareDraftWithCachedPrimarySignature } from '../outbox/sendAs'
 import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
+import {
+  addRemoteImageOverride,
+  listRemoteImageOverrides,
+  removeRemoteImageOverride,
+  resolveMessageSender
+} from '../remoteImageStore'
 import type { SnoozeScheduler } from '../scheduler'
-import { readAccountSetting, readSetting, writeAccountSetting, writeSetting } from '../settings'
+import {
+  deleteAccountSetting,
+  readAccountSetting,
+  readSetting,
+  writeAccountSetting,
+  writeSetting
+} from '../settings'
+import { deleteSnippet, isSnippetSaveInput, listSnippets, saveSnippet } from '../snippets'
 import {
   deleteSplit,
   hasSplitSetup,
@@ -98,6 +116,7 @@ import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
 import { fetchAndCacheThread } from '../sync/fetchThread'
 import { inboxBackfillReady } from '../sync/inboxReady'
+import { applyLifetimeCapChange } from '../sync/lifetimeCap'
 import { OnDemandBodyHydrator } from '../sync/onDemandBodies'
 import { type ServerSearchProvider, searchAllGmail, serverSearchFailure } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
@@ -131,6 +150,8 @@ export interface ServiceHandlerContext {
   scheduler: () => SnoozeScheduler | null
   syncController: () => SyncController | null
   broadcastMailChanged: (serverSearchRequestId?: string) => void
+  /** Push the stored remote-image policy to main's request filter (T33). */
+  publishRemoteImagePolicy: () => void
   mailboxCounts: (accountId: string) => SystemMailboxCounts
   splitState: (accountId: string) => import('../../shared/splits').SplitState
   broadcastOutboxChanged: (change: import('../../shared/outbox').OutboxChanged) => void
@@ -209,7 +230,8 @@ function isThreadListRequest(value: unknown): value is ThreadListRequest {
 
 function isThreadPageCursor(value: unknown): value is ThreadPageCursor {
   if (!value || typeof value !== 'object') return false
-  const cursor = value as { at?: unknown; id?: unknown }
+  const cursor = value as { at?: unknown; id?: unknown; tier?: unknown }
+  if (cursor.tier !== undefined && cursor.tier !== 'followUp') return false
   return typeof cursor.at === 'number' && Number.isFinite(cursor.at) && nonEmptyString(cursor.id)
 }
 
@@ -221,11 +243,22 @@ function threadPage<Row extends ThreadRow>(
   const hasMore = rows.length > THREAD_PAGE_SIZE
   const pageRows = hasMore ? rows.slice(0, THREAD_PAGE_SIZE) : rows
   const last = pageRows.at(-1)
+  // A page ending inside the inbox's returned-follow-up tier continues by the
+  // tier's own due_at keyset; every other view pages by its date sort key.
+  const tierAt = last && typeof last.followUpTierAt === 'number' ? last.followUpTierAt : undefined
   const cursorAt =
     snoozed && last && 'dueAt' in last && typeof last.dueAt === 'number' ? last.dueAt : last?.lastMsgAt
+  const nextCursor: ThreadPageCursor | null =
+    hasMore && last
+      ? tierAt !== undefined
+        ? { at: tierAt, id: last.id, tier: 'followUp' }
+        : cursorAt !== undefined
+          ? { at: cursorAt, id: last.id }
+          : null
+      : null
   return {
     rows: pageRows,
-    nextCursor: hasMore && last && cursorAt !== undefined ? { at: cursorAt, id: last.id } : null,
+    nextCursor,
     ...(splitRevisionValue === undefined ? {} : { splitRevision: splitRevisionValue })
   }
 }
@@ -413,6 +446,33 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     writeSetting(context.db, 'theme', preference)
     return preference
   })
+  handle(IPC_CHANNELS.settingsGetAll, () => readAppSettings(context.db))
+  handle(IPC_CHANNELS.settingsSet, (_event, key, value) => {
+    const settings = writeAppSetting(context.db, key, value)
+    if (key === 'remoteImagesBlocked') context.publishRemoteImagePolicy()
+    return settings
+  })
+  handle(IPC_CHANNELS.settingsGetAccount, (_event, accountId) => {
+    const account = requireAccount(context)
+    if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
+    return readAccountSettings(context.db, account)
+  })
+  handle(IPC_CHANNELS.settingsSetAccount, (_event, accountId, key, value) => {
+    // Bind the write to the account named at dispatch: a completion that
+    // lands after a switch must not touch the newly selected account (F18).
+    const account = requireAccount(context)
+    if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
+    const update = validateAccountSettingUpdate(key, value)
+    if (update.key === 'lifetimeThreadCap') {
+      applyLifetimeCapChange(context.db, context.syncController(), account, update.value)
+    } else if (update.key === 'attnSignatureEnabled') {
+      // Absent means on (F6). Keep an explicit false row for an opt-out; when
+      // enabled again, remove the override so the account follows the default.
+      if (update.value) deleteAccountSetting(context.db, account, ATTN_SIGNATURE_SETTING)
+      else writeAccountSetting(context.db, account, ATTN_SIGNATURE_SETTING, 'false')
+    }
+    return readAccountSettings(context.db, account)
+  })
   handle(IPC_CHANNELS.settingsGetCommandUsage, (_event, accountId) => {
     const account = requireAccount(context)
     if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
@@ -424,6 +484,26 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const sanitized = sanitizeCommandUsage(usage)
     writeAccountSetting(context.db, account, 'commandPaletteUsage', JSON.stringify(sanitized))
     return sanitized
+  })
+  // T36 AI settings storage. keyPresent is main-only custody: the utility
+  // reports false and main overwrites it from the encrypted key file.
+  handle(IPC_CHANNELS.aiGetSettings, () => ({ ...readAiStoredSettings(context.db), keyPresent: false }))
+  handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => {
+    const update = validateAiSettingUpdate(key, value)
+    return { ...writeAiStoredSetting(context.db, update), keyPresent: false }
+  })
+  handle(IPC_CHANNELS.aiStyleExamples, () => {
+    const account = context.currentAccountId()
+    return account ? listStyleExamples(context.db, account) : []
+  })
+  handle(IPC_CHANNELS.snippetsList, () => listSnippets(context.db))
+  handle(IPC_CHANNELS.snippetsSave, (_event, input) => {
+    if (!isSnippetSaveInput(input)) throw new Error('invalid snippet')
+    return saveSnippet(context.db, input)
+  })
+  handle(IPC_CHANNELS.snippetsDelete, (_event, id) => {
+    if (!nonEmptyString(id)) throw new Error('invalid snippet id')
+    return deleteSnippet(context.db, id)
   })
   handle(IPC_CHANNELS.draftSave, (_event, draft) => {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')
@@ -981,6 +1061,24 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       console.error(`[attachment] inline image failed: ${errorMessage(error)}`)
       return { error: 'Could not load inline image' } satisfies InlineImageResult
     }
+  })
+  handle(IPC_CHANNELS.mailListRemoteImageOverrides, () => listRemoteImageOverrides(context.db))
+  handle(IPC_CHANNELS.mailRemoveRemoteImageOverride, (_event, address) => {
+    if (!nonEmptyString(address)) throw new Error('invalid sender address')
+    removeRemoteImageOverride(context.db, address)
+    context.publishRemoteImagePolicy()
+    return listRemoteImageOverrides(context.db)
+  })
+  handle(IPC_CHANNELS.mailAllowRemoteImagesFromSender, (_event, messageId) => {
+    if (!nonEmptyString(messageId)) throw new Error('invalid message id')
+    // The override's subject is the sender the *store* holds for this message
+    // — the frame's markup and the renderer's display text never decide (T33).
+    const account = requireAccount(context)
+    const sender = resolveMessageSender(context.db, account, messageId)
+    if (!sender) throw new Error('unknown message sender')
+    addRemoteImageOverride(context.db, sender)
+    context.publishRemoteImagePolicy()
+    return { sender, overrides: listRemoteImageOverrides(context.db) }
   })
   handle(IPC_CHANNELS.mailRepairInlineImages, async (_event, request) => {
     if (!isInlineImageRepairRequest(request)) return false

@@ -52,6 +52,7 @@ export type ServiceOperation =
   | 'remove-account-data'
   | 'mark-login-item-registered'
   | 'set-notification-pause'
+  | 'resolve-message-sender'
   | 'test'
 
 export type MainToServiceMessage =
@@ -69,6 +70,8 @@ export interface ServiceReady {
   background: {
     launchAtLogin: boolean
     loginItemRegistered: boolean
+    /** F16: optional macOS menu-bar icon, default off. */
+    menuBarIcon: boolean
   }
 }
 
@@ -88,6 +91,8 @@ export type ServiceEvent =
       pausedUntil: number | null
     }
   | { kind: 'token-update'; accountId: string; tokens: TokenSet; generation: number }
+  /** T33: the live remote-image policy main's request filter enforces. */
+  | { kind: 'remote-images'; blocked: boolean; allowedSenders: string[] }
   | { kind: 'log'; level: 'log' | 'warn' | 'error'; message: string }
 
 export type ServiceToMainMessage =

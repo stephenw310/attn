@@ -73,7 +73,13 @@ export function useSplits(account: string | null, initialSplitId: string | null 
     })
   }, [account, refresh])
 
-  const setActiveSplitId = useCallback((id: string): void => setActiveSplitIdState(id), [])
+  const setActiveSplitId = useCallback((id: string): void => {
+    // Notification focus selects a split and immediately performs a targeted
+    // read. Keep the validation ref in step with that imperative choice instead
+    // of waiting for React's next render, which can otherwise reject the read.
+    activeSplitIdRef.current = id
+    setActiveSplitIdState(id)
+  }, [])
 
   const moveActive = useCallback(
     (direction: -1 | 1): void => {

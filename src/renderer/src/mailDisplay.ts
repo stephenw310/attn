@@ -69,9 +69,12 @@ export interface DisplayThread {
   hasAttachment: boolean
   snoozed: boolean
   returned: boolean
+  followUpReturned: boolean
   hasDraft: boolean
   dueAt?: number
   dueLabel?: string
+  followUpDueLabel?: string
+  followUpAwaiting?: 'snooze' | 'origin' | null
   labelIds: string[]
   lastMsgAt: number
 }
@@ -137,6 +140,7 @@ export function displayThread(row: ThreadRow): DisplayThread {
     hasAttachment: row.hasAttachment,
     snoozed: row.snoozed,
     returned: row.returned,
+    followUpReturned: row.followUpReturned === true,
     hasDraft: row.hasDraft,
     labelIds: row.labelIds,
     lastMsgAt: row.lastMsgAt
@@ -144,7 +148,19 @@ export function displayThread(row: ThreadRow): DisplayThread {
 }
 
 export function displaySnoozedThread(row: SnoozedThreadRow): DisplayThread {
-  return { ...displayThread(row), dueAt: row.dueAt, dueLabel: formatSnoozeDate(row.dueAt) }
+  // The snooze chip shows the snooze deadline; a follow-up's deadline renders
+  // as its own chip, with why it has not fired yet when applicable (F9).
+  const snoozeDue = row.snoozeDueAt ?? (row.snoozed ? row.dueAt : undefined)
+  return {
+    ...displayThread(row),
+    ...(snoozeDue != null ? { dueAt: snoozeDue, dueLabel: formatSnoozeDate(snoozeDue) } : {}),
+    ...(row.followUpDueAt != null
+      ? {
+          followUpDueLabel: formatSnoozeDate(row.followUpDueAt),
+          followUpAwaiting: row.followUpAwaiting ?? null
+        }
+      : {})
+  }
 }
 
 const EMPTY_DISPLAY_THREADS: DisplayThread[] = []

@@ -7,6 +7,11 @@
 // Gmail's per-method quota costs in `gmail/quota.ts`, and renderer paging in
 // `shared/mail.ts`. Equal values do not imply that two policies should be linked.
 
+// The lifetime-cap default and the All-mail sentinel are declared in
+// `shared/settings.ts` so the settings surface labels the same numbers the
+// sweep enforces; this module remains their documented home for sync policy.
+import { DEFAULT_LIFETIME_THREAD_CAP, LIFETIME_THREAD_CAP_ALL_MAIL } from '../../shared/settings'
+
 // ---------------------------------------------------------------------------
 // How much mail is stored
 // ---------------------------------------------------------------------------
@@ -41,10 +46,10 @@ export const ALL_MAIL_WINDOW = 'newer_than:12m'
  * deletes nothing — a setting that silently discarded stored mail would be a
  * worse surprise than a store slightly larger than the current preference.
  */
-export const LIFETIME_THREAD_CAP = 400_000
+export const LIFETIME_THREAD_CAP = DEFAULT_LIFETIME_THREAD_CAP
 
 /** No cap: store the entire account, whatever it costs. */
-export const LIFETIME_THREAD_CAP_UNLIMITED = 0
+export const LIFETIME_THREAD_CAP_UNLIMITED = LIFETIME_THREAD_CAP_ALL_MAIL
 
 // ---------------------------------------------------------------------------
 // Gmail requests and quota policy

@@ -204,6 +204,8 @@ interface FakeSendRow {
   account_id: string
   state: FakeSendState
   kind: 'new'
+  created_at: number
+  follow_up_at: number | null
   gmail_draft_id: string | null
   gmail_message_id: string | null
   rfc_message_id: string
@@ -249,7 +251,9 @@ function fakeRow(patch: Partial<FakeSendRow> = {}): FakeSendRow {
     references_json: '[]',
     quote_html: '',
     quote_text: '',
+    created_at: NOW,
     updated_at: NOW,
+    follow_up_at: null,
     send_at: NOW,
     attempts: 0,
     verify_attempts: 0,
@@ -260,7 +264,10 @@ function fakeRow(patch: Partial<FakeSendRow> = {}): FakeSendRow {
 
 class FakeOutboxDb {
   readonly rows = new Map<string, FakeSendRow>()
-  readonly db = { prepare: (sql: string) => this.prepare(sql) } as unknown as Db
+  readonly db = {
+    prepare: (sql: string) => this.prepare(sql),
+    transaction: (fn: (...args: unknown[]) => unknown) => fn
+  } as unknown as Db
 
   constructor(...rows: FakeSendRow[]) {
     for (const row of rows) this.rows.set(row.id, row)
@@ -965,6 +972,44 @@ describe('OutboxSender effect layer', () => {
     time.advance(0)
     await sender.trigger()
     expect(store.row().state).toBe('sent')
+  })
+
+  it('prunes sent follow-up origins after their creation order is persisted on the reminder', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+        'me@example.com',
+        'me@example.com',
+        NOW
+      )
+      const insert = db.prepare(
+        `INSERT INTO outbox (id, account_id, state, thread_id, rfc_message_id, created_at, updated_at)
+         VALUES (?, 'me@example.com', 'sent', 't-1', ?, ?, ?)`
+      )
+      const expired = NOW - SENT_OUTBOX_RETENTION_MS - 1
+      insert.run('origin-newer', '<newer@x>', 200, expired)
+      insert.run('unreferenced', '<other@x>', 100, expired)
+      db.prepare(
+        `INSERT INTO reminders (account_id, thread_id, kind, due_at, state,
+           origin_rfc_message_id, origin_outbox_created_at)
+         VALUES ('me@example.com', 't-1', 'follow_up', ?, 'pending', '<newer@x>', 200)`
+      ).run(NOW + 60_000)
+      const time = new ManualTime()
+      const sender = new OutboxSender(
+        db,
+        () => 'me@example.com',
+        () => effectProvider(),
+        vi.fn(),
+        { time }
+      )
+
+      sender.start()
+      const remaining = (): string[] =>
+        (db.prepare('SELECT id FROM outbox ORDER BY id').all() as Array<{ id: string }>).map((row) => row.id)
+      expect(remaining()).toEqual([])
+    } finally {
+      db.close()
+    }
   })
 
   it('does not spin on a malformed queued row without a send time', async () => {

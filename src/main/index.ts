@@ -1,19 +1,39 @@
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, nativeTheme, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, powerMonitor, safeStorage, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
+import { type AiSettings, validateAiSettingUpdate } from '../shared/ai'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
+import { shouldConstructUpdater } from '../shared/distribution'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
+import type { AppSettingUpdate } from '../shared/settings'
 import type { ThemePreference } from '../shared/theme'
+import { UPDATE_STATE_IDLE, type UpdateState } from '../shared/update'
+import { AiKeyStore } from './ai/keyStore'
+import { AiManager } from './ai/manager'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
-import { accountIdForTokens, type StoredAccount } from './auth/tokenFile'
-import { loadAccounts, removeAccountTokens, saveAccountTokens } from './auth/tokenStore'
+import { accountIdForTokens, reorderIds, type StoredAccount } from './auth/tokenFile'
+import { loadAccounts, removeAccountTokens, reorderAccountTokens, saveAccountTokens } from './auth/tokenStore'
 import { isCurrentTokenUpdate } from './auth/tokenUpdate'
-import { attachBackgroundWindow, initializeBackground, showMainWindow } from './background'
+import {
+  applyMenuBarIcon,
+  attachBackgroundWindow,
+  type BackgroundEffects,
+  initializeBackground,
+  showMainWindow
+} from './background'
+import { applyLoginItemSetting } from './backgroundSettings'
+import { CURRENT_SCHEMA_VERSION } from './db/schema'
 import { registerIpc } from './ipc'
-import { MailNotifier, type PendingFocus, takePendingFocus } from './notify'
+import { acknowledgePendingFocus, MailNotifier, type PendingFocus, takePendingFocus } from './notify'
+import {
+  DEFAULT_REMOTE_IMAGE_POLICY,
+  MailFrameRegistry,
+  type RemoteImagePolicy,
+  shouldBlockMailFrameRequest
+} from './remoteImages'
 import {
   SERVICE_PROTOCOL_VERSION,
   type ServiceAccountsState,
@@ -22,6 +42,9 @@ import {
 } from './service/protocol'
 import { ServiceSupervisor } from './service/supervisor'
 import { TestSeams } from './testIpc'
+import { readDistributionMetadata } from './update/distribution'
+import { createElectronUpdaterFeed } from './update/electronUpdaterFeed'
+import { AppUpdater } from './update/updater'
 import { titleBarOverlayOptions, windowChromeOptions } from './windowChrome'
 
 const testUserData = process.env.ATTN_TEST_USER_DATA
@@ -52,12 +75,30 @@ const authGenerations = new Map<string, number>()
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 let themePreference: ThemePreference = 'system'
+// T33: the live remote-image policy (pushed by the utility) and the reader's
+// registered mail frames, consulted by the request filter in createWindow.
+let remoteImagePolicy: RemoteImagePolicy = DEFAULT_REMOTE_IMAGE_POLICY
+const mailFrames = new MailFrameRegistry()
+// T36: AI key custody and the streaming LLM transport live in main (F17/D2).
+let aiManager: AiManager | null = null
+// T39: constructed only for packaged release builds outside the test seam.
+let appUpdater: AppUpdater | null = null
+// The opened database's schema, from the utility's ready handshake: updates
+// must match it exactly, and a manual dogfood upgrade would change it.
+let openedSchemaVersion: number | null = null
+// Test-only: lets the seeded harness stage a stored update state for the
+// renderer's mount-time read; always null outside ATTN_TEST_USER_DATA.
+let updateStateOverride: UpdateState | null = null
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
+  ai: () => aiManager,
   focusInboxThread: (threadId, accountId) => {
     const owner = accountId ?? activeAccountId
     if (owner) focusInboxThread(owner, threadId)
+  },
+  setUpdateStateOverride: (state) => {
+    updateStateOverride = state
   }
 })
 
@@ -75,15 +116,41 @@ function focusInboxThread(accountId: string, threadId: string | null): void {
 }
 
 /**
- * Consume the pending focus target for the account on screen. A `switch` ask
- * leaves the target pending: the renderer runs its guarded account switch and
- * the remounted tree pulls again, now matching. Anything else — consumed,
- * expired, or absent — clears it.
+ * Resolve the pending focus target for the account on screen. Resolving never
+ * consumes: a `switch` ask stays pending for the remounted tree, and even a
+ * `focus` answer stays pending until the tree that accepted it acknowledges —
+ * a pull whose delivery dies in a torn-down subscription during an account
+ * remount must not lose the click (T32 regression). Only an expired or absent
+ * target clears here.
  */
 function takePendingFocusTarget(): ReturnType<typeof takePendingFocus> {
   const target = takePendingFocus(pendingFocus, activeAccountId)
-  if (target?.kind !== 'switch') pendingFocus = null
+  if (target === null) pendingFocus = null
   return target
+}
+
+function acknowledgeFocusTarget(id: number): void {
+  pendingFocus = acknowledgePendingFocus(pendingFocus, id)
+}
+
+/**
+ * Register a mounted mail frame (T33). The sender comes from the local store
+ * via the utility — never from markup — and the answer tells the reader
+ * whether this message's images will load, so the banner needs no second
+ * policy source.
+ */
+async function registerMailFrame(
+  nonce: string,
+  messageId: string,
+  allowOnce: boolean
+): Promise<{ blocked: boolean; imagesAllowed: boolean }> {
+  const resolved = await service?.internal('resolve-message-sender', messageId)
+  const frame = { messageId, sender: typeof resolved === 'string' ? resolved : null, allowOnce }
+  mailFrames.register(nonce, frame)
+  return {
+    blocked: remoteImagePolicy.blocked,
+    imagesAllowed: !shouldBlockMailFrameRequest(remoteImagePolicy, frame)
+  }
 }
 
 /**
@@ -213,6 +280,23 @@ async function removeAccount(accountId: string, deleteData: boolean): Promise<Au
   return authStatus()
 }
 
+/**
+ * Persist a new switcher order (F15). The permutation is validated against
+ * the roster as it exists *now* — a stale request from before an add/remove
+ * rejects, and the stored path re-reads the token file so a token refresh
+ * that raced the reorder keeps its newest tokens. A failed persist throws
+ * before the in-memory roster moves, leaving the old order intact. Sessions
+ * are never restarted and the active account never changes: the utility
+ * receives the same account set in its new order.
+ */
+async function reorderAccounts(accountIds: string[]): Promise<AuthStatus> {
+  if (seedAccountIds.length > 0) seedAccountIds = reorderIds(seedAccountIds, accountIds)
+  else storedAccounts = reorderAccountTokens(app.getPath('userData'), accountIds)
+  await adoptServiceAccounts()
+  console.log(`[auth] reordered accounts: ${rosterAccountIds().join(', ')}`)
+  return authStatus()
+}
+
 async function setActiveAccount(accountId: string): Promise<AuthStatus> {
   if (!rosterAccountIds().includes(accountId)) throw new Error('unknown account')
   // The utility owns the flip: the response guarantees every later read the
@@ -241,9 +325,30 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      additionalArguments: [`--attn-theme=${themePreference}`]
+      additionalArguments: [`--attn-theme=${themePreference}`, ...(testUserData ? ['--attn-test-mode'] : [])]
     }
   })
+  // T33 enforcement point: the same request layer that strips CORP below.
+  // Only mail frames (about:srcdoc) are filtered — the app shell and other
+  // requests are untouched, and with blocking off the behavior is identical
+  // to today (decision #5's default load stands). Every network-capable type
+  // is covered, not just images: sanitized mail keeps its <style>, whose
+  // @import/@font-face/url() would otherwise ping the sender through
+  // stylesheet, font, and media requests (PR #101 review).
+  // No `types` filter: every resource type a frame can request is covered,
+  // including ones Electron's filter enum cannot name ('other').
+  win.webContents.session.webRequest.onBeforeRequest(
+    { urls: ['http://*/*', 'https://*/*'] },
+    (details, callback) => {
+      if (details.frame?.url !== 'about:srcdoc') {
+        callback({})
+        return
+      }
+      callback({
+        cancel: shouldBlockMailFrameRequest(remoteImagePolicy, mailFrames.get(details.frame.name))
+      })
+    }
+  )
   win.webContents.session.webRequest.onHeadersReceived(
     { urls: ['http://*/*', 'https://*/*'], types: ['image'] },
     (details, callback) => {
@@ -311,6 +416,11 @@ function handleServiceEvent(event: ServiceEvent): void {
     })
   } else if (event.kind === 'actions-reverted') {
     broadcast(IPC_CHANNELS.mailActionsReverted, undefined)
+  } else if (event.kind === 'remote-images') {
+    remoteImagePolicy = { blocked: event.blocked, allowedSenders: new Set(event.allowedSenders) }
+    // Mounted mail frames re-register on this signal so a policy change
+    // reaches messages that are already open (PR #101 review).
+    broadcast(IPC_CHANNELS.mailRemoteImagesChanged, undefined)
   } else if (event.kind === 'badge') mailNotifier?.updateBadge(event.unreadCount)
   else if (event.kind === 'accounts-status') broadcast(IPC_CHANNELS.accountsStatusChanged, event.statuses)
   else if (event.kind === 'notification-candidates') {
@@ -375,17 +485,122 @@ async function initialize(): Promise<void> {
   activeAccountId = ready.activeAccountId
   ownedService.noteActiveAccount(activeAccountId)
   ownedNotifier.setAccounts(authStatus().accounts)
+  openedSchemaVersion = ready.schemaVersion
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
   themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
   nativeTheme.on('updated', handleNativeThemeUpdated)
+  const backgroundEffects: BackgroundEffects = {
+    markLoginItemRegistered: () =>
+      void service?.internal('mark-login-item-registered').catch((error) => {
+        console.error(`[background] could not save login item state: ${errorMessage(error)}`)
+      }),
+    setNotificationPausedUntil: (pausedUntil) =>
+      void service?.internal('set-notification-pause', pausedUntil).catch((error) => {
+        console.error(`[notifications] could not save pause setting: ${errorMessage(error)}`)
+      })
+  }
+  const applySettingEffects = (update: AppSettingUpdate): void => {
+    // Storage already happened in the utility; these are the OS-side effects
+    // main owns (F15). The login item updates on every change, deliberately
+    // bypassing the one-time boot registration guard.
+    if (update.key === 'launchAtLogin') {
+      applyLoginItemSetting(update.value, process.platform, app, backgroundEffects)
+    } else if (update.key === 'menuBarIcon') {
+      applyMenuBarIcon(update.value, backgroundEffects)
+    }
+  }
+  // Under the e2e seam the container has no OS keyring, so a reversible
+  // stand-in keeps the key-custody flows testable; production always uses
+  // safeStorage and still refuses plaintext storage when it is unavailable.
+  const aiKeyStore = new AiKeyStore(
+    userDataPath,
+    testUserData
+      ? {
+          isAvailable: () => true,
+          encryptString: (text) => Buffer.from(`test:${Buffer.from(text, 'utf8').toString('base64')}`),
+          decryptString: (data) => {
+            const stored = data.toString('utf8')
+            if (!stored.startsWith('test:')) throw new Error('not test ciphertext')
+            return Buffer.from(stored.slice(5), 'base64').toString('utf8')
+          }
+        }
+      : {
+          isAvailable: () => safeStorage.isEncryptionAvailable(),
+          encryptString: (text) => safeStorage.encryptString(text),
+          decryptString: (data) => safeStorage.decryptString(data)
+        }
+  )
+  const ownedAiManager = new AiManager({
+    keyStore: aiKeyStore,
+    readSettings: () => ownedService.invoke(IPC_CHANNELS.aiGetSettings),
+    emit: (event) => broadcast(IPC_CHANNELS.aiStreamEvent, event)
+  })
+  aiManager = ownedAiManager
+  const aiSettingsSnapshot = async (): Promise<AiSettings> => ({
+    ...(await ownedService.invoke(IPC_CHANNELS.aiGetSettings)),
+    keyPresent: aiKeyStore.present()
+  })
+  // T39: only an explicit, packaged release build constructs an updater —
+  // personal, dev, and seeded builds make zero feed requests (§6 Packaging).
+  const distribution = app.isPackaged ? readDistributionMetadata(process.resourcesPath) : null
+  if (shouldConstructUpdater(distribution, app.isPackaged, Boolean(testUserData))) {
+    appUpdater = new AppUpdater({
+      feed: createElectronUpdaterFeed(distribution),
+      currentVersion: app.getVersion(),
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      localSchemaVersion: () => openedSchemaVersion,
+      onStateChange: (state) => broadcast(IPC_CHANNELS.updateState, state),
+      shutdown: teardown
+    })
+    appUpdater.start()
+  }
   stopIpc = registerIpc({
     service: ownedService,
     authStatus,
     signIn,
     setActiveAccount,
     removeAccount,
+    reorderAccounts,
     takePendingFocus: takePendingFocusTarget,
+    acknowledgePendingFocus: acknowledgeFocusTarget,
+    applySettingEffects,
+    update: {
+      getState: () => updateStateOverride ?? appUpdater?.state() ?? UPDATE_STATE_IDLE,
+      restart: () => appUpdater?.restartToApply() ?? Promise.resolve(false)
+    },
+    ai: {
+      getSettings: aiSettingsSnapshot,
+      setSetting: async (key, value) => {
+        const update = validateAiSettingUpdate(key, value)
+        const stored = await ownedService.invoke(IPC_CHANNELS.aiSetSetting, update.key, update.value)
+        // Disabling cancels in-flight work and drops late responses (F17):
+        // the master switch stops everything, the autocomplete switch only
+        // its own requests.
+        if (update.key === 'enabled' && update.value === false) ownedAiManager.cancelAll()
+        else if (update.key === 'autocompleteEnabled' && update.value === false) {
+          ownedAiManager.cancelAll('autocomplete')
+        }
+        return { ...stored, keyPresent: aiKeyStore.present() }
+      },
+      setKey: async (key) => {
+        aiKeyStore.save(key)
+        return aiSettingsSnapshot()
+      },
+      deleteKey: async () => {
+        // Removing the key cancels in-flight work and disables both features
+        // (F17); OAuth credentials are untouched by design.
+        aiKeyStore.delete()
+        ownedAiManager.cancelAll()
+        await ownedService.invoke(IPC_CHANNELS.aiSetSetting, 'enabled', false)
+        await ownedService.invoke(IPC_CHANNELS.aiSetSetting, 'autocompleteEnabled', false)
+        return aiSettingsSnapshot()
+      },
+      generate: (request) => ownedAiManager.generate(request),
+      cancel: (requestId) => ownedAiManager.cancel(requestId)
+    },
+    registerMailFrame,
+    unregisterMailFrame: (nonce) => mailFrames.unregister(nonce),
     setThemePreference: (preference) => {
       themePreference = preference
       refreshTitleBarOverlay()
@@ -393,20 +608,7 @@ async function initialize(): Promise<void> {
     pickAttachmentPaths: testUserData ? async () => testSeams.takeAttachmentPickerPaths() : undefined
   })
   powerMonitor.on('resume', refreshSchedulersAfterResume)
-  const { startHidden } = initializeBackground(
-    ready.background,
-    {
-      markLoginItemRegistered: () =>
-        void service?.internal('mark-login-item-registered').catch((error) => {
-          console.error(`[background] could not save login item state: ${errorMessage(error)}`)
-        }),
-      setNotificationPausedUntil: (pausedUntil) =>
-        void service?.internal('set-notification-pause', pausedUntil).catch((error) => {
-          console.error(`[notifications] could not save pause setting: ${errorMessage(error)}`)
-        })
-    },
-    createWindow
-  )
+  const { startHidden } = initializeBackground(ready.background, backgroundEffects, createWindow)
   createWindow({ show: !startHidden })
   testSeams.register()
   app.on('activate', () => showMainWindow())
@@ -423,6 +625,8 @@ function teardown(): Promise<void> {
 }
 
 async function teardownOwnedResources(): Promise<void> {
+  appUpdater?.stop()
+  appUpdater = null
   stopIpc?.()
   stopIpc = null
   powerMonitor.removeListener('resume', refreshSchedulersAfterResume)

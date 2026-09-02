@@ -80,6 +80,28 @@ describe('plain-text alternative', () => {
     expect(bodyHtml).not.toContain('data:image')
   })
 
+  it('restores remote image sources at string level without leaking the swap marker', () => {
+    // exportDOM keeps remote URLs off its live-document element (a src there
+    // fires a real request on every serialization — PR #101 review); the
+    // saved body must still carry the real source, marker-free.
+    const editor = createHeadlessEditor({ nodes: [ImageNode] })
+    editor.update(
+      () => {
+        $getRoot().append(
+          $createParagraphNode().append(
+            $createImageNode('https://mail.example.test/pixel.png', '', 'remote pixel', 24, 24)
+          )
+        )
+      },
+      { discrete: true }
+    )
+
+    const { bodyHtml } = serializeEditorState(editor.getEditorState(), editor)
+    expect(bodyHtml).toContain('src="https://mail.example.test/pixel.png"')
+    expect(bodyHtml).not.toContain('data-attn-remote-src')
+    expect(bodyHtml).not.toContain('data:image/gif')
+  })
+
   it('preserves list markers and quote prefixes from the editor model', () => {
     const editor = createHeadlessEditor({ nodes: [ListNode, ListItemNode, QuoteNode] })
     editor.update(

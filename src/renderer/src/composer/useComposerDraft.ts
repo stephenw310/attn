@@ -10,7 +10,7 @@ import {
 } from '../../../shared/outboxTuning'
 import { serializeEditorState } from './serialize'
 
-type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments'>
+type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments' | 'followUpAt'>
 
 export function mirrorIdleMs(attachments: DraftSaveInput['attachments']): number {
   const bytes = (attachments ?? []).reduce((total, attachment) => total + attachment.sizeBytes, 0)
@@ -85,7 +85,12 @@ export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): Com
 
     clearTimers()
     const editor = editorRef.current
-    if (editor) Object.assign(draftRef.current, serializeEditorState(editor.state, editor.editor))
+    // Read the editor at commit time instead of trusting the last OnChange
+    // callback. Lexical may batch that callback behind a streamed AI chunk;
+    // an immediate Esc/save must still include every character already shown.
+    if (editor) {
+      Object.assign(draftRef.current, serializeEditorState(editor.editor.getEditorState(), editor.editor))
+    }
     const revision = localRevisionRef.current
     const snapshot = structuredClone(draftRef.current)
     setSaveStatus('saving')

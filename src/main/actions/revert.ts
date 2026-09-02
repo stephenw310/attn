@@ -37,11 +37,13 @@ export function dropRevertedUndoEntries<T extends UndoEntryWithRefs>(
       (action) => !action.threadIds.some((threadId) => affectedThreads.has(threadId))
     )
     if (undo.length === 0) return []
-    // One undo action per thread, so the survivor count is the new entry size.
+    // A thread can carry a companion undo action (a follow-up restore riding
+    // its archive), so the toast counts surviving threads, not actions.
+    const survivingThreads = new Set(undo.flatMap((action) => action.threadIds))
     return [
       {
         ...entry,
-        label: entry.labelFor(undo.length),
+        label: entry.labelFor(survivingThreads.size),
         undo,
         refs: entry.refs.filter((ref) => !revertedIds.has(ref.queueId))
       } as T

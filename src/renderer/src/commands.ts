@@ -124,6 +124,44 @@ export const COMMAND_SPECS = {
   'split.manage': { title: 'Manage inbox splits', context: 'global' },
   'account.add': { title: 'Add account…', context: 'global' },
   'account.remove': { title: 'Sign out', context: 'global' },
+  'settings.open': { title: 'Open settings', shortcut: 'Mod+,', context: 'global' },
+  'settings.reorderAccounts': { title: 'Reorder accounts…', context: 'global' },
+  'settings.syncLimit': { title: 'Set historical sync limit…', context: 'global' },
+  'compose.attnFooter.enable': { title: 'Enable "Sent with Attn" footer', context: 'global' },
+  'compose.attnFooter.disable': { title: 'Disable "Sent with Attn" footer', context: 'global' },
+  'privacy.remoteImages.block': { title: 'Block remote images', context: 'global' },
+  'privacy.remoteImages.load': { title: 'Load remote images', context: 'global' },
+  'privacy.remoteImages.overrides': { title: 'Manage remote-image overrides…', context: 'global' },
+  'snippets.manage': { title: 'Manage snippets…', context: 'global' },
+  'ai.settings': { title: 'Set up AI writing…', context: 'global' },
+  // T37A: enabling routes through the settings consent flow (the disclosure
+  // must precede the traffic); disabling is immediate.
+  'autocomplete.enable': { title: 'Enable inline AI autocomplete…', context: 'global' },
+  'autocomplete.disable': { title: 'Disable inline AI autocomplete', context: 'global' },
+  'settings.undoSendDelay': { title: 'Set undo send delay…', context: 'global' },
+  'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
+  'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },
+  'settings.menuBarIcon': { title: 'Toggle macOS menu-bar icon', context: 'global' },
+  'notifications.pauseHour': {
+    title: 'Pause notifications for 1 hour',
+    context: 'global',
+    allowInComposer: true
+  },
+  'notifications.pauseTomorrow': {
+    title: 'Pause notifications until tomorrow',
+    context: 'global',
+    allowInComposer: true
+  },
+  'notifications.resume': { title: 'Resume notifications', context: 'global', allowInComposer: true },
+  // T39: applies a downloaded update through the ordinary awaited shutdown;
+  // with nothing ready it explains itself instead of restarting.
+  'update.restart': { title: 'Restart to update', context: 'global', allowInComposer: true },
+  'cheatsheet.open': {
+    title: 'Keyboard shortcuts',
+    shortcut: 'Mod+/',
+    context: 'global',
+    allowInComposer: true
+  },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
     title: 'Use Dark theme',
@@ -266,6 +304,12 @@ export const COMMAND_SPECS = {
     context: 'composer',
     footer: { composer: { id: 'back', label: 'save and close', order: 20 } }
   },
+  'composer.undo': {
+    title: 'Undo body text',
+    shortcut: 'Mod+Z',
+    context: 'composer',
+    footer: { composer: { id: 'undo-text', label: 'undo', order: 15 } }
+  },
   'composer.discard': { title: 'Discard draft', shortcut: 'Mod+Shift+D', context: 'composer' },
   'composer.send': {
     title: 'Send message',
@@ -273,7 +317,7 @@ export const COMMAND_SPECS = {
     context: 'composer',
     footer: { composer: { id: 'send', label: 'send', order: 10 } }
   },
-  'composer.attach': { title: 'Attach files', context: 'composer' },
+  'composer.attach': { title: 'Attach files', shortcut: 'Mod+Shift+A', context: 'composer' },
   'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },
   'composer.bold': { title: 'Bold', shortcut: 'Mod+B', context: 'composer' },
   'composer.italic': { title: 'Italic', shortcut: 'Mod+I', context: 'composer' },
@@ -290,6 +334,21 @@ export const COMMAND_SPECS = {
   'composer.numbering': { title: 'Numbered list', context: 'composer' },
   'composer.quote': { title: 'Block quote', context: 'composer' },
   'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
+  // F17: works from the reader (opening the inline reply first) and inside a
+  // reply/reply-all composer; elsewhere the single Inbox-owned handler explains
+  // itself with a hint instead of registering per-context duplicates.
+  'composer.aiDraft': {
+    title: 'Draft AI reply',
+    shortcut: 'Mod+J',
+    context: 'global',
+    allowInComposer: true
+  },
+  'composer.snippets': { title: 'Insert snippet…', shortcut: 'Mod+;', context: 'composer' },
+  'composer.followUp': {
+    title: 'Remind me if no reply…',
+    shortcut: 'Mod+Shift+H',
+    context: 'composer'
+  },
   'triage.archive': {
     title: 'Mark done',
     shortcut: 'e',
@@ -335,7 +394,28 @@ export const COMMAND_SPECS = {
 } as const satisfies Record<string, CommandSpec>
 
 export type StaticCommandId = keyof typeof COMMAND_SPECS
-export type CommandId = StaticCommandId | `split.goto:${string}` | `account.switch:${string}`
+export type CommandId =
+  | StaticCommandId
+  | `split.goto:${string}`
+  | `account.switch:${string}`
+  | `snippet.insert:${string}`
+  // The e2e-only registration seam (cheat-sheet coverage); see installTestSeam.
+  | `test:${string}`
+
+/**
+ * How the cheat sheet groups the registry (F15): every command context maps to
+ * one §5-style heading, so a new command appears on the sheet without editing
+ * it. Order is the §5 reading order.
+ */
+export const COMMAND_CONTEXT_GROUPS: readonly { context: CommandContext; label: string }[] = [
+  { context: 'global', label: 'Global' },
+  { context: 'navigation', label: 'List & navigation' },
+  { context: 'list', label: 'List & navigation' },
+  { context: 'mail', label: 'Triage' },
+  { context: 'reader', label: 'Conversation' },
+  { context: 'outbox', label: 'Outbox' },
+  { context: 'composer', label: 'Composer' }
+]
 
 export interface CommandArgumentValue {
   label: string
@@ -401,6 +481,16 @@ export function createAccountSwitchCommand(
     title,
     ...(shortcut ? { shortcut } : {}),
     context: 'global',
+    run
+  }
+}
+
+/** Palette insertion for one snippet ("Snippet: intro", F8); composer-scoped. */
+export function createSnippetInsertCommand(snippetId: string, name: string, run: () => void): Command {
+  return {
+    id: `snippet.insert:${snippetId}`,
+    title: `Snippet: ${name}`,
+    context: 'composer',
     run
   }
 }
@@ -590,13 +680,43 @@ export function matchComposerKey(event: KeyboardEvent): Command | null {
     Boolean
   )
   const shortcut = [...modifiers, event.key.toLowerCase()].join('+')
+  // The same context rule the palette applies: composer commands plus the
+  // global allowInComposer set (Mod+J AI drafting, Mod+/ cheat sheet — Mod+K
+  // never reaches here because the palette claims it in the capture phase).
+  // Chord shortcuts contain a space and can never equal a single keystroke.
   return (
     commands.find(
       (command) =>
-        command.context === 'composer' &&
+        commandMatchesContext(command, 'composer') &&
         commandShortcuts(command).some((candidate) => candidate.toLowerCase() === shortcut.toLowerCase())
     ) ?? null
   )
+}
+
+declare global {
+  interface Window {
+    /** E2e-only (ATTN_TEST_USER_DATA): lets a spec register a shortcut command
+        and assert the cheat sheet picked it up from the registry. */
+    attnTest?: {
+      registerCommand: (id: string, title: string, shortcut?: string) => void
+    }
+  }
+}
+
+if (typeof window !== 'undefined' && window.attn?.testMode) {
+  window.attnTest = {
+    registerCommand: (id, title, shortcut) => {
+      registerCommands([
+        {
+          id: `test:${id}`,
+          title,
+          ...(shortcut ? { shortcut } : {}),
+          context: 'global',
+          run: () => {}
+        }
+      ])
+    }
+  }
 }
 
 const ARROW_STEP = 120

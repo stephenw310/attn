@@ -1,6 +1,7 @@
 import { $generateNodesFromDOM } from '@lexical/html'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
 import { AutoFocusPlugin } from '@lexical/react/LexicalAutoFocusPlugin'
+import { ClickableLinkPlugin } from '@lexical/react/LexicalClickableLinkPlugin'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
@@ -14,13 +15,18 @@ import { TablePlugin } from '@lexical/react/LexicalTablePlugin'
 import { $createQuoteNode } from '@lexical/rich-text'
 import { $setBlocksType } from '@lexical/selection'
 import {
+  $addUpdateTag,
   $createParagraphNode,
   $getRoot,
   $getSelection,
   $insertNodes,
   $isRangeSelection,
   $nodesOfType,
-  FORMAT_TEXT_COMMAND
+  FORMAT_TEXT_COMMAND,
+  HISTORY_PUSH_TAG,
+  type LexicalNode,
+  REDO_COMMAND,
+  UNDO_COMMAND
 } from 'lexical'
 import {
   forwardRef,
@@ -33,9 +39,12 @@ import {
   useState
 } from 'react'
 import type { MailAddress } from '../../../shared/address'
+import { AI_PROVIDER_PRESETS, type AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import { escapeHtmlText as escapeHtml } from '../../../shared/html'
+import { type Snippet, subjectAfterSnippetInsert } from '../../../shared/snippets'
+import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
 import type { ThemeAppearance } from '../../../shared/theme'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
@@ -43,17 +52,29 @@ import { formatBytes } from '../formatBytes'
 import type { ShowToast } from '../hooks/useToast'
 import { normalizeAppleMailLineBackgrounds } from '../mailAppleBackgrounds'
 import { forceLightMailCss } from '../mailCss'
+import { suppressBlockedRemoteImages } from '../mailRemoteContent'
 import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
-import { DraftContentIdContext } from './DraftContentContext'
+import { AiAutocompletePlugin } from './AiAutocompletePlugin'
+import { AiDraftPlugin } from './AiDraftPlugin'
+import { ComposerBodyHintPlugin } from './ComposerBodyHintPlugin'
+import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
-import { COLLAPSED_GMAIL_SIGNATURE_SELECTOR, revealGmailSignature } from './nodes/GmailSignatureNode'
+import { AttnFooterNode } from './nodes/AttnFooterNode'
+import {
+  COLLAPSED_GMAIL_SIGNATURE_SELECTOR,
+  GmailSignatureNode,
+  revealGmailSignature
+} from './nodes/GmailSignatureNode'
+import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
+import { recipientGreetingName } from './recipientGreeting'
 import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
+import { SnippetsPlugin } from './SnippetsPlugin'
 import { sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
@@ -65,6 +86,12 @@ interface ComposerProps {
   onClose: () => void
   onExit?: () => void
   onToast: ShowToast
+  /** T37 AI reply drafting: the invocation counter and reply context source. */
+  aiDraft?: {
+    request: number
+    claim: () => boolean
+    getThreadContext: () => AiThreadMessage[] | null
+  }
 }
 
 export interface ComposerHandle {
@@ -81,13 +108,13 @@ function TrashIcon(): React.JSX.Element {
       stroke="currentColor"
       strokeWidth="1.75"
     >
-      <title>Discard draft</title>
+      <title>{`Discard draft (${modKeyLabel()}⇧D)`}</title>
       <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" strokeLinecap="round" />
     </svg>
   )
 }
 
-function PaperclipIcon(): React.JSX.Element {
+function PaperclipIcon({ title = 'Attachment' }: { title?: string }): React.JSX.Element {
   return (
     <svg
       aria-hidden
@@ -97,7 +124,7 @@ function PaperclipIcon(): React.JSX.Element {
       stroke="currentColor"
       strokeWidth="1.75"
     >
-      <title>Attach files</title>
+      <title>{title}</title>
       <path
         d="m8.5 12.5 6.2-6.2a3 3 0 0 1 4.2 4.2l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5"
         strokeLinecap="round"
@@ -161,17 +188,20 @@ function quoteSrcDoc(body: string, surface: MailSurface, appearance: ThemeAppear
   const nativeContrast = light
     ? ''
     : 'body,body :where(*){color:inherit!important;background-color:transparent!important;background-image:none!important}body a{color:#60a5fa!important}'
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${senderCanvas ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${senderCanvas ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${senderCanvas ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${senderCanvas ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}img[data-remote-blocked="true"]{visibility:hidden}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
 }
 
 function InlineQuote({
   draftId,
   html,
+  sourceMessageId,
   expanded: controlledExpanded,
   showToggle = true
 }: {
   draftId: string
   html: string
+  /** The quoted message, so per-sender remote-image exceptions apply (T33). */
+  sourceMessageId: string | null
   expanded?: boolean
   showToggle?: boolean
 }): React.JSX.Element | null {
@@ -184,6 +214,65 @@ function InlineQuote({
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
+
+  // T33: the quote is the same untrusted mail HTML the reader frames render,
+  // so it registers with main's request filter under the quoted message —
+  // an Always-load-from-sender exception covers a reply's quoted history too
+  // (PR #101 review). Without a source id the frame stays unnamed and fails
+  // closed while blocking is on, exactly as before.
+  const [frameNonce, setFrameNonce] = useState<string | null>(null)
+  const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(false)
+  const [frameEpoch, setFrameEpoch] = useState(0)
+  useEffect(() => {
+    const bridge = window.attn
+    if (!bridge) return
+    return bridge.mail.onRemoteImagesChanged(() => setFrameEpoch((epoch) => epoch + 1))
+  }, [])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: frameEpoch deliberately re-registers so policy changes reach a mounted quote
+  useEffect(() => {
+    const bridge = window.attn
+    setFrameNonce(null)
+    setRemoteImagesAllowed(false)
+    if (!expanded || !html) return
+    if (!bridge) {
+      setFrameNonce('')
+      return
+    }
+    if (sourceMessageId === null) {
+      let stale = false
+      void bridge.settings
+        .getAll()
+        .then((settings) => {
+          if (!stale) {
+            setRemoteImagesAllowed(!settings.remoteImagesBlocked)
+            setFrameNonce('')
+          }
+        })
+        .catch(() => {
+          if (!stale) setFrameNonce('')
+        })
+      return () => {
+        stale = true
+      }
+    }
+    const nonce = crypto.randomUUID()
+    let stale = false
+    bridge.mail
+      .registerMessageFrame(nonce, sourceMessageId, false)
+      .then(({ imagesAllowed }) => {
+        if (!stale) {
+          setRemoteImagesAllowed(imagesAllowed)
+          setFrameNonce(nonce)
+        }
+      })
+      .catch(() => {
+        if (!stale) setFrameNonce('')
+      })
+    return () => {
+      stale = true
+      void bridge.mail.unregisterMessageFrame(nonce).catch(() => {})
+    }
+  }, [expanded, frameEpoch, html, sourceMessageId])
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
     const paletteShortcut =
@@ -256,6 +345,7 @@ function InlineQuote({
         style.textContent = forceLightMailCss(style.textContent ?? '')
       })
     }
+    if (!remoteImagesAllowed) suppressBlockedRemoteImages(document.body, TRANSPARENT_IMAGE)
     const pending = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
       const source = image.getAttribute('src') ?? ''
       if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
@@ -275,7 +365,7 @@ function InlineQuote({
     return () => {
       cancelled = true
     }
-  }, [appearance, draftId, html, surface])
+  }, [appearance, draftId, html, remoteImagesAllowed, surface])
 
   const renderedQuote = expanded ? srcDoc : null
   useLayoutEffect(() => {
@@ -304,10 +394,14 @@ function InlineQuote({
   return (
     <div className="mx-5 mb-5 text-sm text-ink-dim" data-testid="composer-quote-container">
       {/* `allow-same-origin` is needed only to measure this scriptless srcdoc,
-          resolve CID images, and forward keyboard events to the app shell. */}
-      {expanded && (
+          resolve CID images, and forward keyboard events to the app shell.
+          The frame mounts only after main has registered its nonce, so an
+          allowed sender's images are never spuriously cancelled by a race. */}
+      {expanded && frameNonce !== null && (
         <iframe
           ref={frameRef}
+          key={frameNonce}
+          name={frameNonce || undefined}
           title="Quoted history"
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
           data-testid="composer-quote"
@@ -533,12 +627,149 @@ function PasteContentPlugin({
   return null
 }
 
+/**
+ * "Remind me if no reply" (T35/F9): the chosen deadline rides the draft's
+ * outbox row; the reminder is created only when the send commits. Shares the
+ * snooze natural-language parser for the custom field.
+ */
+function FollowUpControl({
+  followUpAt,
+  onChange,
+  open,
+  onOpenChange
+}: {
+  followUpAt: number | null
+  onChange: (value: number | null) => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}): React.JSX.Element {
+  const [custom, setCustom] = useState('')
+  const parsedCustom = useMemo(() => (custom.trim() ? parseSnoozeText(custom) : null), [custom])
+  const customValid = parsedCustom !== null && parsedCustom > Date.now()
+  const choose = (value: number | null): void => {
+    onChange(value)
+    onOpenChange(false)
+    setCustom('')
+  }
+  const preset = (days: number): number => Date.now() + days * 24 * 60 * 60 * 1000
+  // Focus follows the popover (PR #101 review): its Escape containment only
+  // sees the key when focus is inside, so opening moves focus onto the
+  // popover and dismissing hands it back to the trigger — from where the
+  // next Escape reaches the composer's ordinary close handling.
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+  const wasOpenRef = useRef(false)
+  useEffect(() => {
+    if (open) popoverRef.current?.focus()
+    else if (wasOpenRef.current) triggerRef.current?.focus()
+    wasOpenRef.current = open
+  }, [open])
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`flex h-8 max-w-72 shrink-0 items-center px-1 text-xs underline decoration-current/45 underline-offset-4 ${
+          followUpAt !== null ? 'text-accent' : 'text-ink-dim hover:text-ink'
+        }`}
+        data-testid="composer-follow-up"
+        data-follow-up-at={followUpAt ?? undefined}
+        aria-expanded={open}
+        aria-label="Remind me if no reply"
+        title={`Remind me if no reply (${modKeyLabel()}⇧H)`}
+        onClick={() => onOpenChange(!open)}
+      >
+        <span className="truncate">
+          {followUpAt !== null ? `Follow up ${formatSnoozeDate(followUpAt)}` : 'Remind me'}
+        </span>
+      </button>
+      {open && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: Escape containment for the transient popover; its buttons and input carry the interactions
+        <div
+          ref={popoverRef}
+          tabIndex={-1}
+          className="absolute bottom-full left-0 z-30 mb-2 flex w-72 flex-col gap-1 rounded-lg border border-edge bg-raised p-2 shadow-2xl outline-none"
+          data-composer-transient
+          data-testid="follow-up-popover"
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return
+            event.preventDefault()
+            event.stopPropagation()
+            onOpenChange(false)
+          }}
+        >
+          <p className="px-1 text-[11px] text-ink-faint">
+            If nobody replies by the deadline, the thread resurfaces in your inbox.
+          </p>
+          <button
+            type="button"
+            className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+            data-testid="follow-up-preset-3d"
+            onClick={() => choose(preset(3))}
+          >
+            In 3 days
+          </button>
+          <button
+            type="button"
+            className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+            data-testid="follow-up-preset-1w"
+            onClick={() => choose(preset(7))}
+          >
+            In 1 week
+          </button>
+          <div className="flex items-center gap-1.5 px-1 pt-1">
+            <input
+              className="h-8 min-w-0 flex-1 rounded-md border border-edge bg-canvas px-2 text-xs text-ink outline-none focus:border-accent"
+              data-testid="follow-up-custom-input"
+              aria-label="Custom follow-up deadline"
+              placeholder="e.g. next Friday"
+              value={custom}
+              onChange={(event) => setCustom(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || !customValid || parsedCustom === null) return
+                event.preventDefault()
+                event.stopPropagation()
+                choose(parsedCustom)
+              }}
+            />
+            <button
+              type="button"
+              className="h-8 rounded-md bg-accent/20 px-2.5 text-xs font-semibold text-accent disabled:opacity-45"
+              data-testid="follow-up-custom-confirm"
+              disabled={!customValid}
+              onClick={() => parsedCustom !== null && choose(parsedCustom)}
+            >
+              Set
+            </button>
+          </div>
+          {custom.trim() !== '' && (
+            <p className="px-1 text-[11px] text-ink-faint" data-testid="follow-up-resolved">
+              {customValid && parsedCustom !== null ? formatSnoozeDate(parsedCustom) : 'Pick a future time'}
+            </p>
+          )}
+          {followUpAt !== null && (
+            <button
+              type="button"
+              className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-faint hover:bg-active hover:text-ink"
+              data-testid="follow-up-clear"
+              onClick={() => choose(null)}
+            >
+              Don't remind me
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface CommandPluginProps {
   onAttach: () => void
   onRemoveAttachment: () => void
   onClose: () => void
   onDiscard: () => void
   onSend: () => void
+  onFollowUp: () => void
 }
 
 function ComposerCommandPlugin({
@@ -546,7 +777,8 @@ function ComposerCommandPlugin({
   onRemoveAttachment,
   onClose,
   onDiscard,
-  onSend
+  onSend,
+  onFollowUp
 }: CommandPluginProps): null {
   const [editor] = useLexicalComposerContext()
   const quote = useCallback(() => {
@@ -559,10 +791,12 @@ function ComposerCommandPlugin({
     () =>
       registerCommands([
         createCommand('composer.close', onClose),
+        createCommand('composer.undo', () => editor.dispatchCommand(UNDO_COMMAND, undefined)),
         createCommand('composer.discard', onDiscard),
         createCommand('composer.send', onSend),
         createCommand('composer.attach', onAttach),
         createCommand('composer.removeAttachment', onRemoveAttachment),
+        createCommand('composer.followUp', onFollowUp),
         createCommand('composer.bold', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')),
         createCommand('composer.italic', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')),
         createCommand('composer.underline', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline')),
@@ -574,13 +808,133 @@ function ComposerCommandPlugin({
         ),
         createCommand('composer.quote', quote)
       ]),
-    [editor, onAttach, onRemoveAttachment, onClose, onDiscard, onSend, quote]
+    [editor, onAttach, onRemoveAttachment, onClose, onDiscard, onSend, onFollowUp, quote]
   )
   return null
 }
 
+/**
+ * Keep native editing shortcuts inside the authored region. Explicit undo
+ * avoids depending on Electron's contenteditable routing, while Mod+A selects
+ * only the user's body above the signature/footer; quoted history lives
+ * outside this editor and is therefore never pulled into the range.
+ */
+function $isProtectedComposerNode(node: LexicalNode): boolean {
+  return (
+    node instanceof GmailSignaturePrefixNode ||
+    node instanceof GmailSignatureNode ||
+    node instanceof AttnFooterNode
+  )
+}
+
+function $topLevelComposerNode(node: LexicalNode): LexicalNode {
+  const root = $getRoot()
+  let current = node
+  let parent = current.getParent()
+  while (parent && parent !== root) {
+    current = parent
+    parent = current.getParent()
+  }
+  return current
+}
+
+function $selectionAnchorIsAuthored(): boolean {
+  const selection = $getSelection()
+  if (!$isRangeSelection(selection)) return false
+  const node = $topLevelComposerNode(selection.anchor.getNode())
+  return node !== $getRoot() && !$isProtectedComposerNode(node)
+}
+
+function $restoreAuthoredCaretFromProtectedNode(): void {
+  const selection = $getSelection()
+  if (!$isRangeSelection(selection)) return
+  const node = $topLevelComposerNode(selection.anchor.getNode())
+  if (!$isProtectedComposerNode(node)) return
+  const previous = node.getPreviousSibling()
+  if (previous && !$isProtectedComposerNode(previous)) {
+    previous.selectEnd()
+    return
+  }
+  const paragraph = $createParagraphNode()
+  node.insertBefore(paragraph)
+  paragraph.selectStart()
+}
+
+function BodyEditingShortcutsPlugin(): null {
+  const [editor] = useLexicalComposerContext()
+  useEffect(() => {
+    const rootElement = editor.getRootElement()
+    if (!rootElement) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const key = event.key.toLowerCase()
+      if ((key === 'backspace' || key === 'delete') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        let deletesAuthoredRegion = false
+        editor.getEditorState().read(() => {
+          const selection = $getSelection()
+          if (!$isRangeSelection(selection) || selection.isCollapsed()) return
+          const root = $getRoot()
+          let authoredCount = 0
+          for (const child of root.getChildren()) {
+            if ($isProtectedComposerNode(child)) break
+            authoredCount++
+          }
+          const rootKey = root.getKey()
+          deletesAuthoredRegion =
+            selection.anchor.key === rootKey &&
+            selection.focus.key === rootKey &&
+            ((selection.anchor.offset === 0 && selection.focus.offset === authoredCount) ||
+              (selection.focus.offset === 0 && selection.anchor.offset === authoredCount))
+        })
+        if (!deletesAuthoredRegion) return
+
+        event.preventDefault()
+        event.stopPropagation()
+        editor.update(() => {
+          $addUpdateTag(HISTORY_PUSH_TAG)
+          const root = $getRoot()
+          let firstProtectedNode = root.getFirstChild()
+          while (firstProtectedNode && !$isProtectedComposerNode(firstProtectedNode)) {
+            const next = firstProtectedNode.getNextSibling()
+            firstProtectedNode.remove()
+            firstProtectedNode = next
+          }
+          const paragraph = $createParagraphNode()
+          if (firstProtectedNode) firstProtectedNode.insertBefore(paragraph)
+          else root.append(paragraph)
+          paragraph.selectStart()
+        })
+        return
+      }
+
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+      if (key === 'z') {
+        event.preventDefault()
+        event.stopPropagation()
+        const keepAuthoredCaret = editor.getEditorState().read(() => $selectionAnchorIsAuthored())
+        editor.dispatchCommand(event.shiftKey ? REDO_COMMAND : UNDO_COMMAND, undefined)
+        if (keepAuthoredCaret) editor.update(() => $restoreAuthoredCaretFromProtectedNode())
+        return
+      }
+      if (key !== 'a' || event.shiftKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      editor.update(() => {
+        let authoredCount = 0
+        for (const child of $getRoot().getChildren()) {
+          if ($isProtectedComposerNode(child)) break
+          authoredCount++
+        }
+        $getRoot().select(0, authoredCount)
+      })
+    }
+    rootElement.addEventListener('keydown', onKeyDown, true)
+    return () => rootElement.removeEventListener('keydown', onKeyDown, true)
+  }, [editor])
+  return null
+}
+
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { draft, mode = 'full', attachedToMessage = false, initialError = null, onClose, onExit, onToast },
+  { draft, mode = 'full', attachedToMessage = false, initialError = null, onClose, onExit, onToast, aiDraft },
   ref
 ): React.JSX.Element {
   const [to, setTo] = useState<MailAddress[]>(draft.to)
@@ -590,9 +944,28 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [attaching, setAttaching] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [subject, setSubject] = useState(draft.subject)
+  const [followUpAt, setFollowUpAt] = useState<number | null>(draft.followUpAt)
+  const [followUpOpen, setFollowUpOpen] = useState(false)
   const [showCopies, setShowCopies] = useState(draft.cc.length > 0 || draft.bcc.length > 0)
   const [closing, setClosing] = useState(false)
   const [sendError, setSendError] = useState<string | null>(initialError)
+  const supportsAiDraft = Boolean(aiDraft) && (draft.kind === 'reply' || draft.kind === 'replyAll')
+  const [aiTipReady, setAiTipReady] = useState(false)
+  useEffect(() => {
+    setAiTipReady(false)
+    if (!supportsAiDraft || !window.attn) return
+    let stale = false
+    void window.attn.ai
+      .getSettings()
+      .then((settings) => {
+        const keyReady = settings.keyPresent || !AI_PROVIDER_PRESETS[settings.provider].keyRequired
+        if (!stale) setAiTipReady(settings.enabled && keyReady)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [supportsAiDraft])
   const initialHtml = draft.bodyHtml || plainTextForEditor(draft.bodyText)
   const preparedHtml = useMemo(() => prepareHtmlForEditor(initialHtml), [initialHtml])
   const unifiedSignatureAndQuote = useMemo(
@@ -623,6 +996,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     prepareSnapshot
   )
   const notePendingRecipientChange = useCallback(() => updateFields({}), [updateFields])
+  const noteAiContentSettled = useCallback(() => updateFields({}), [updateFields])
+  // F8: a snippet's subject fills only an empty subject, never overwrites.
+  const subjectRef = useRef(subject)
+  subjectRef.current = subject
+  const handleSnippetInserted = useCallback(
+    (snippet: Snippet) => {
+      const next = subjectAfterSnippetInsert(subjectRef.current, snippet.subject)
+      if (next === subjectRef.current) return
+      setSubject(next)
+      updateFields({ subject: next })
+    },
+    [updateFields]
+  )
   const addAttachment = useCallback(
     (attachment: Draft['attachments'][number]) => {
       setAttachments((current) => {
@@ -914,8 +1300,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
         <div className="ml-auto flex items-center gap-2">
           {mode === 'full' ? (
-            <span className="flex items-center gap-1.5 text-[11px] text-ink-faint">
-              save &amp; close <Kbd>Esc</Kbd>
+            <span className="flex items-center gap-2 text-[11px] text-ink-faint">
+              <span className="flex items-center gap-1.5" data-testid="composer-undo-hint">
+                undo <Kbd>{modKeyLabel()}Z</Kbd>
+              </span>
+              <span aria-hidden>·</span>
+              <span className="flex items-center gap-1.5">
+                save &amp; close <Kbd>Esc</Kbd>
+              </span>
             </span>
           ) : (
             <button
@@ -1052,138 +1444,172 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         )}
 
         <DraftContentIdContext.Provider value={draft.id}>
-          <LexicalComposer initialConfig={editorConfig}>
-            <div
-              className={`relative min-h-48 flex-1 ${
-                mode === 'inline' ? '' : 'overflow-y-auto [scrollbar-gutter:stable]'
-              }`}
-            >
-              <RichTextPlugin
-                contentEditable={
-                  <ContentEditable
-                    className="min-h-full px-5 py-5 text-[13px] leading-5 text-ink outline-none"
-                    data-testid="composer-editor"
-                    aria-label="Message body"
-                  />
-                }
-                placeholder={
-                  <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
-                    Write a message…
-                  </div>
-                }
-                ErrorBoundary={LexicalErrorBoundary}
-              />
-              <HistoryPlugin />
-              <ListPlugin />
-              <TablePlugin />
-              <LinkPlugin validateUrl={validateComposerUrl} />
-              <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
-              <CollapsedSignaturePlugin
-                includesQuote={unifiedSignatureAndQuote}
-                onReveal={revealUnifiedContent}
-              />
-              {mode === 'inline' && draft.kind !== 'forward' && <AutoFocusPlugin />}
-              <OnChangePlugin ignoreSelectionChange onChange={captureEditor} />
-              <ComposerCommandPlugin
-                onAttach={pickAttachments}
-                onRemoveAttachment={removeLastAttachment}
-                onClose={mode === 'inline' ? closeAndExit : closeAndSave}
-                onDiscard={discard}
-                onSend={send}
-              />
-              <PasteContentPlugin
-                draftId={draft.id}
-                onAttachment={addAttachment}
-                onError={onToast}
-                onPreservedContent={notePreservedContent}
-              />
-              <InlineQuote
-                draftId={draft.id}
-                html={draft.quoteHtml}
-                expanded={unifiedSignatureAndQuote ? unifiedContentExpanded : undefined}
-                showToggle={!unifiedSignatureAndQuote}
-              />
-            </div>
-            {visibleAttachments.length > 0 && (
+          <DraftSourceMessageIdContext.Provider value={draft.sourceMessageId}>
+            <LexicalComposer initialConfig={editorConfig}>
               <div
-                className="flex shrink-0 flex-wrap gap-2 border-t border-edge px-4 py-2.5"
-                data-testid="composer-attachment-chips"
+                className={`relative min-h-48 flex-1 ${
+                  mode === 'inline' ? '' : 'overflow-y-auto [scrollbar-gutter:stable]'
+                }`}
               >
-                {visibleAttachments.map((attachment) => (
-                  <div
-                    key={attachment.id}
-                    className="flex min-w-0 max-w-72 items-center gap-2 rounded-lg border border-edge bg-active/60 px-2.5 py-1.5 text-xs"
-                    data-testid="composer-attachment-chip"
-                    data-attachment-id={attachment.id}
-                  >
-                    <PaperclipIcon />
-                    <span className="min-w-0 truncate font-medium text-ink">{attachment.filename}</span>
-                    <span className="shrink-0 text-ink-faint">{formatBytes(attachment.sizeBytes)}</span>
-                    <button
-                      type="button"
-                      className="flex size-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-edge hover:text-ink"
-                      aria-label={`Remove ${attachment.filename}`}
-                      data-testid="composer-attachment-remove"
-                      disabled={attaching || closing}
-                      onClick={() => removeAttachment(attachment.id)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <footer
-              data-testid="composer-footer"
-              className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4"
-            >
-              <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
-                <EditorToolbar />
-                <button
-                  type="button"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
-                  data-testid="composer-attach"
-                  aria-label="Attach files"
-                  title="Attach files"
-                  disabled={attaching || closing}
-                  onClick={pickAttachments}
-                >
-                  <PaperclipIcon />
-                </button>
-                {visibleAttachments.length > 0 && (
-                  <div
-                    className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
-                    data-testid="composer-attachments"
-                  >
-                    {visibleAttachments.length} attachment{visibleAttachments.length === 1 ? '' : 's'}
-                  </div>
+                <RichTextPlugin
+                  contentEditable={
+                    <ContentEditable
+                      className="min-h-full px-5 py-5 text-[13px] leading-5 text-ink outline-none"
+                      data-testid="composer-editor"
+                      aria-label="Message body"
+                    />
+                  }
+                  placeholder={
+                    aiTipReady ? null : (
+                      <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
+                        Write a message…
+                      </div>
+                    )
+                  }
+                  ErrorBoundary={LexicalErrorBoundary}
+                />
+                <HistoryPlugin />
+                <BodyEditingShortcutsPlugin />
+                <ListPlugin />
+                <TablePlugin />
+                <LinkPlugin validateUrl={validateComposerUrl} />
+                <ClickableLinkPlugin newTab />
+                <InitialHtmlPlugin draftId={draft.id} html={preparedHtml.html} />
+                <CollapsedSignaturePlugin
+                  includesQuote={unifiedSignatureAndQuote}
+                  onReveal={revealUnifiedContent}
+                />
+                {mode === 'inline' && draft.kind !== 'forward' && <AutoFocusPlugin />}
+                <OnChangePlugin ignoreSelectionChange onChange={captureEditor} />
+                <ComposerCommandPlugin
+                  onAttach={pickAttachments}
+                  onRemoveAttachment={removeLastAttachment}
+                  onClose={mode === 'inline' ? closeAndExit : closeAndSave}
+                  onDiscard={discard}
+                  onSend={send}
+                  onFollowUp={() => setFollowUpOpen(true)}
+                />
+                <PasteContentPlugin
+                  draftId={draft.id}
+                  onAttachment={addAttachment}
+                  onError={onToast}
+                  onPreservedContent={notePreservedContent}
+                />
+                <SnippetsPlugin onInserted={handleSnippetInserted} />
+                <ComposerBodyHintPlugin showAiTip={aiTipReady} />
+                <AiAutocompletePlugin
+                  subject={subject}
+                  recipientName={recipientGreetingName(to[0])}
+                  getThreadContext={aiDraft?.getThreadContext}
+                />
+                {aiDraft && (
+                  <AiDraftPlugin
+                    kind={draft.kind}
+                    request={aiDraft.request}
+                    claim={aiDraft.claim}
+                    getThreadContext={aiDraft.getThreadContext}
+                    onContentSettled={noteAiContentSettled}
+                    onToast={onToast}
+                  />
                 )}
+                <InlineQuote
+                  draftId={draft.id}
+                  html={draft.quoteHtml}
+                  sourceMessageId={draft.sourceMessageId}
+                  expanded={unifiedSignatureAndQuote ? unifiedContentExpanded : undefined}
+                  showToggle={!unifiedSignatureAndQuote}
+                />
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <button
-                  type="button"
-                  className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
-                  data-testid="composer-discard"
-                  aria-label="Discard draft"
-                  title={`Discard draft (${modKeyLabel()}⇧D)`}
-                  disabled={attaching || closing}
-                  onClick={discard}
+              {visibleAttachments.length > 0 && (
+                <div
+                  className="flex shrink-0 flex-wrap gap-2 border-t border-edge px-4 py-2.5"
+                  data-testid="composer-attachment-chips"
                 >
-                  <TrashIcon />
-                </button>
-                <button
-                  type="button"
-                  data-testid="composer-send"
-                  disabled={attaching || closing}
-                  className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
-                  title="Send message"
-                  onClick={send}
-                >
-                  Send <span className="ml-1 opacity-65">{modKeyLabel()}↵</span>
-                </button>
-              </div>
-            </footer>
-          </LexicalComposer>
+                  {visibleAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex min-w-0 max-w-72 items-center gap-2 rounded-lg border border-edge bg-active/60 px-2.5 py-1.5 text-xs"
+                      data-testid="composer-attachment-chip"
+                      data-attachment-id={attachment.id}
+                    >
+                      <PaperclipIcon />
+                      <span className="min-w-0 truncate font-medium text-ink">{attachment.filename}</span>
+                      <span className="shrink-0 text-ink-faint">{formatBytes(attachment.sizeBytes)}</span>
+                      <button
+                        type="button"
+                        className="flex size-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-edge hover:text-ink"
+                        aria-label={`Remove ${attachment.filename}`}
+                        data-testid="composer-attachment-remove"
+                        disabled={attaching || closing}
+                        onClick={() => removeAttachment(attachment.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <footer
+                data-testid="composer-footer"
+                className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4"
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible">
+                  <EditorToolbar />
+                  <button
+                    type="button"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
+                    data-testid="composer-attach"
+                    aria-label="Attach files"
+                    title={`Attach files (${modKeyLabel()}⇧A)`}
+                    disabled={attaching || closing}
+                    onClick={pickAttachments}
+                  >
+                    <PaperclipIcon title={`Attach files (${modKeyLabel()}⇧A)`} />
+                  </button>
+                  {visibleAttachments.length > 0 && (
+                    <div
+                      className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
+                      data-testid="composer-attachments"
+                    >
+                      {visibleAttachments.length} attachment{visibleAttachments.length === 1 ? '' : 's'}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <FollowUpControl
+                    followUpAt={followUpAt}
+                    open={followUpOpen}
+                    onOpenChange={setFollowUpOpen}
+                    onChange={(value) => {
+                      setFollowUpAt(value)
+                      updateFields({ followUpAt: value })
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
+                    data-testid="composer-discard"
+                    aria-label="Discard draft"
+                    title={`Discard draft (${modKeyLabel()}⇧D)`}
+                    disabled={attaching || closing}
+                    onClick={discard}
+                  >
+                    <TrashIcon />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="composer-send"
+                    disabled={attaching || closing}
+                    className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
+                    title="Send message"
+                    onClick={send}
+                  >
+                    Send <span className="ml-1 opacity-65">{modKeyLabel()}↵</span>
+                  </button>
+                </div>
+              </footer>
+            </LexicalComposer>
+          </DraftSourceMessageIdContext.Provider>
         </DraftContentIdContext.Provider>
       </div>
     </section>

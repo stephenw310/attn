@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { TokenSet } from './googleAuth'
-import { isLegacyTokenPayload, parseTokenFile, removeAccount, upsertAccount } from './tokenFile'
+import {
+  isLegacyTokenPayload,
+  parseTokenFile,
+  removeAccount,
+  reorderRoster,
+  upsertAccount
+} from './tokenFile'
 
 function tokens(email: string | undefined, accessToken = 'access'): TokenSet {
   return { access_token: accessToken, expires_at: 1, ...(email ? { email } : {}) }
@@ -77,5 +83,45 @@ describe('removeAccount', () => {
       'a@example.com'
     )
     expect(roster.map((account) => account.id)).toEqual(['b@example.com'])
+  })
+})
+
+describe('reorderRoster', () => {
+  const roster = [
+    { id: 'a@example.com', tokens: tokens('a@example.com') },
+    { id: 'b@example.com', tokens: tokens('b@example.com') },
+    { id: 'c@example.com', tokens: tokens('c@example.com') }
+  ]
+
+  it('applies an exact permutation and carries each account tokens along', () => {
+    const reordered = reorderRoster(roster, ['c@example.com', 'a@example.com', 'b@example.com'])
+    expect(reordered.map((account) => account.id)).toEqual([
+      'c@example.com',
+      'a@example.com',
+      'b@example.com'
+    ])
+    expect(reordered[1]?.tokens).toBe(roster[0]?.tokens)
+  })
+
+  it('keeps the newest tokens when a refresh raced the reorder', () => {
+    // The caller snapshot may predate a token refresh; reordering the *current*
+    // roster keeps whatever tokens it now holds.
+    const refreshed = upsertAccount(roster, tokens('B@Example.com', 'newest'))
+    const reordered = reorderRoster(refreshed, ['b@example.com', 'c@example.com', 'a@example.com'])
+    expect(reordered[0]?.tokens.access_token).toBe('newest')
+  })
+
+  it('rejects duplicates, unknown ids, and stale rosters outright', () => {
+    expect(() => reorderRoster(roster, ['a@example.com', 'a@example.com', 'b@example.com'])).toThrow(
+      /duplicate/
+    )
+    expect(() => reorderRoster(roster, ['a@example.com', 'b@example.com', 'x@example.com'])).toThrow(
+      /unknown/
+    )
+    // A request from before an account was added or removed is stale, not partial.
+    expect(() => reorderRoster(roster, ['a@example.com', 'b@example.com'])).toThrow(/stale/)
+    expect(() =>
+      reorderRoster(roster.slice(0, 2), ['a@example.com', 'b@example.com', 'c@example.com'])
+    ).toThrow(/stale/)
   })
 })

@@ -25,6 +25,7 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: Date.now()
@@ -94,6 +95,7 @@ it('opens a message appended to the current conversation by default', async () =
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: false,
     labelIds: [],
     lastMsgAt: Date.now()
@@ -221,6 +223,7 @@ it('keeps unsaved composer state when its source loads, disappears, or moves in 
     hasAttachment: false,
     snoozed: false,
     returned: false,
+    followUpReturned: false,
     hasDraft: true,
     labelIds: [],
     lastMsgAt: 0

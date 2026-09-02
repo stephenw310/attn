@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { formatActionRevertToast } from '../shared/actionRevert'
 import type { TriageAction, TriageResult } from '../shared/actions'
+import type { AiGenerateRequest, AiSettingKey, AiSettings, AiStreamEvent } from '../shared/ai'
 import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from '../shared/auth'
 import type { CommandUsage } from '../shared/commandUsage'
 import type { ContactSearchResult } from '../shared/contacts'
@@ -40,6 +41,8 @@ import type {
   ReopenOutboxResult
 } from '../shared/outbox'
 import type { SearchResponse, ServerSearchResponse } from '../shared/searchQuery'
+import type { AccountSettingKey, AccountSettings, AppSettingKey, AppSettings } from '../shared/settings'
+import type { Snippet, SnippetSaveInput } from '../shared/snippets'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
@@ -48,6 +51,7 @@ import type {
   SplitThreadLocation
 } from '../shared/splits'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
+import type { UpdateState } from '../shared/update'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
 const THEME_ARGUMENT_PREFIX = '--attn-theme='
@@ -68,6 +72,8 @@ function listThreadPage(request: ThreadListRequest): Promise<ThreadPage> {
 
 const api = {
   platform: process.platform,
+  /** True only under the e2e harness (ATTN_TEST_USER_DATA); gates renderer test seams. */
+  testMode: process.argv.includes('--attn-test-mode'),
   auth: {
     getStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.authGetStatus),
     signIn: (): Promise<AuthSignInResult> => invoke(IPC_CHANNELS.authSignIn),
@@ -75,6 +81,8 @@ const api = {
       invoke(IPC_CHANNELS.accountsSetActive, accountId),
     removeAccount: (accountId: string, deleteData: boolean): Promise<AuthStatus> =>
       invoke(IPC_CHANNELS.accountsRemove, accountId, deleteData),
+    reorderAccounts: (accountIds: string[]): Promise<AuthStatus> =>
+      invoke(IPC_CHANNELS.accountsReorder, accountIds),
     getAccountStatuses: (): Promise<AccountSyncStatus[]> => invoke(IPC_CHANNELS.accountsGetStatuses),
     onAccountStatuses: (cb: (statuses: AccountSyncStatus[]) => void): (() => void) => {
       const listener = (_event: unknown, statuses: AccountSyncStatus[]): void => cb(statuses)
@@ -90,7 +98,38 @@ const api = {
     getCommandUsage: (accountId: string): Promise<CommandUsage> =>
       invoke(IPC_CHANNELS.settingsGetCommandUsage, accountId),
     setCommandUsage: (accountId: string, usage: CommandUsage): Promise<CommandUsage> =>
-      invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage)
+      invoke(IPC_CHANNELS.settingsSetCommandUsage, accountId, usage),
+    getAll: (): Promise<AppSettings> => invoke(IPC_CHANNELS.settingsGetAll),
+    set: <K extends AppSettingKey>(key: K, value: AppSettings[K]): Promise<AppSettings> =>
+      invoke(IPC_CHANNELS.settingsSet, key, value),
+    getAccount: (accountId: string): Promise<AccountSettings> =>
+      invoke(IPC_CHANNELS.settingsGetAccount, accountId),
+    setAccount: <K extends AccountSettingKey>(
+      accountId: string,
+      key: K,
+      value: AccountSettings[K]
+    ): Promise<AccountSettings> => invoke(IPC_CHANNELS.settingsSetAccount, accountId, key, value)
+  },
+  snippets: {
+    list: (): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsList),
+    save: (input: SnippetSaveInput): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsSave, input),
+    remove: (id: string): Promise<Snippet[]> => invoke(IPC_CHANNELS.snippetsDelete, id)
+  },
+  ai: {
+    getSettings: (): Promise<AiSettings> => invoke(IPC_CHANNELS.aiGetSettings),
+    setSetting: <K extends AiSettingKey>(key: K, value: AiSettings[K]): Promise<AiSettings> =>
+      invoke(IPC_CHANNELS.aiSetSetting, key, value),
+    setKey: (key: string): Promise<AiSettings> => invoke(IPC_CHANNELS.aiSetKey, key),
+    deleteKey: (): Promise<AiSettings> => invoke(IPC_CHANNELS.aiDeleteKey),
+    generate: (request: AiGenerateRequest): Promise<{ requestId: string }> =>
+      invoke(IPC_CHANNELS.aiGenerate, request),
+    cancel: (requestId: string): Promise<void> => invoke(IPC_CHANNELS.aiCancel, requestId),
+    styleExamples: (): Promise<string[]> => invoke(IPC_CHANNELS.aiStyleExamples),
+    onStreamEvent: (cb: (event: AiStreamEvent) => void): (() => void) => {
+      const listener = (_event: unknown, payload: AiStreamEvent): void => cb(payload)
+      ipcRenderer.on(IPC_CHANNELS.aiStreamEvent, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.aiStreamEvent, listener)
+    }
   },
   mail: {
     findThreadInView: (request: ThreadListRequest, threadId: string): Promise<ThreadPage> =>
@@ -138,6 +177,19 @@ const api = {
       invoke(IPC_CHANNELS.mailGetInlineImage, request),
     repairInlineImages: (request: InlineImageRepairRequest): Promise<boolean> =>
       invoke(IPC_CHANNELS.mailRepairInlineImages, request),
+    registerMessageFrame: (
+      nonce: string,
+      messageId: string,
+      allowOnce: boolean
+    ): Promise<{ blocked: boolean; imagesAllowed: boolean }> =>
+      invoke(IPC_CHANNELS.mailRegisterMessageFrame, nonce, messageId, allowOnce),
+    unregisterMessageFrame: (nonce: string): Promise<void> =>
+      invoke(IPC_CHANNELS.mailUnregisterMessageFrame, nonce),
+    allowRemoteImagesFromSender: (messageId: string): Promise<{ sender: string; overrides: string[] }> =>
+      invoke(IPC_CHANNELS.mailAllowRemoteImagesFromSender, messageId),
+    listRemoteImageOverrides: (): Promise<string[]> => invoke(IPC_CHANNELS.mailListRemoteImageOverrides),
+    removeRemoteImageOverride: (address: string): Promise<string[]> =>
+      invoke(IPC_CHANNELS.mailRemoveRemoteImageOverride, address),
     triage: (action: TriageAction): Promise<TriageResult> => invoke(IPC_CHANNELS.mailTriage, action),
     snooze: (threadIds: string[], dueAt: number): Promise<TriageResult> =>
       invoke(IPC_CHANNELS.mailSnooze, { threadIds, dueAt }),
@@ -158,6 +210,11 @@ const api = {
         )
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
+    },
+    onRemoteImagesChanged: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(IPC_CHANNELS.mailRemoteImagesChanged, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.mailRemoteImagesChanged, listener)
     },
     onActionsReverted: (accountId: string, cb: (message: string) => void | Promise<void>): (() => void) =>
       subscribeToActionReverts(
@@ -209,7 +266,14 @@ const api = {
         active = false
         ipcRenderer.removeListener(IPC_CHANNELS.mailFocusThreadAvailable, listener)
       }
-    }
+    },
+    /**
+     * Clear a delivered focus target after the right account's tree accepted
+     * it. Until this lands, main keeps the target pending so a delivery that
+     * died in a torn-down subscription cannot lose the notification click.
+     */
+    acknowledgeFocusThread: (id: number): Promise<void> =>
+      invoke(IPC_CHANNELS.mailAcknowledgePendingFocus, id)
   },
   splits: {
     getState: (): Promise<SplitState> => invoke(IPC_CHANNELS.splitsGetState),
@@ -273,6 +337,15 @@ const api = {
       const listener = (_event: unknown, progress: OutboxProgress | null): void => cb(progress)
       ipcRenderer.on(IPC_CHANNELS.outboxProgress, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.outboxProgress, listener)
+    }
+  },
+  update: {
+    getState: (): Promise<UpdateState> => invoke(IPC_CHANNELS.updateGetState),
+    restart: (): Promise<boolean> => invoke(IPC_CHANNELS.updateRestart),
+    onState: (cb: (state: UpdateState) => void): (() => void) => {
+      const listener = (_event: unknown, state: UpdateState): void => cb(state)
+      ipcRenderer.on(IPC_CHANNELS.updateState, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.updateState, listener)
     }
   },
   sync: {

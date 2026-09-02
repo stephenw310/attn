@@ -19,6 +19,8 @@ const PSEUDO_ELEMENT = /::[a-z-]+(?:\([^)]*\))?|:(?:before|after|first-letter|fi
 const CONDITIONAL_RULE = new Set(['container', 'document', 'layer', 'scope', 'supports'])
 const BACKGROUND_PROPERTIES = ['background', 'background-color', 'background-image'] as const
 const BACKGROUND_LONGHANDS = ['background-color', 'background-image'] as const
+const FRAME_BORDER_MIN_PX = 8
+const BORDER_SIDES = ['top', 'right', 'bottom', 'left'] as const
 const NATIVE_BACKGROUND = { red: 16, green: 17, blue: 20 }
 const MIN_NATIVE_TEXT_CONTRAST = 4.5
 const NEUTRAL_TEXT_CHROMA = 24
@@ -701,6 +703,28 @@ function hasAuthoredCanvas(winners: Map<Element, BackgroundWinners>): boolean {
   return [...winners.values()].some(winnersCreateCanvas)
 }
 
+function visibleThickBorder(style: CSSStyleDeclaration, side: (typeof BORDER_SIDES)[number]): boolean {
+  const width = style.getPropertyValue(`border-${side}-width`).trim()
+  const match = /^(\d+(?:\.\d+)?)px$/i.exec(width)
+  if (!match || Number(match[1]) < FRAME_BORDER_MIN_PX) return false
+
+  const borderStyle = style.getPropertyValue(`border-${side}-style`).trim().toLowerCase()
+  if (!borderStyle || borderStyle === 'none' || borderStyle === 'hidden') return false
+
+  const color = style.getPropertyValue(`border-${side}-color`).trim()
+  if (!color) return true
+  if (/^transparent$/i.test(color)) return false
+  return resolvedTextColor(color)?.alpha !== 0
+}
+
+/** A thick frame around both axes is a sender-owned canvas even when its fill is pure white. */
+function hasAuthoredFrame(document: Document): boolean {
+  return [...document.querySelectorAll<HTMLElement>('[style]')].some((element) => {
+    const sides = new Set(BORDER_SIDES.filter((side) => visibleThickBorder(element.style, side)))
+    return BORDER_SIDES.every((side) => sides.has(side))
+  })
+}
+
 function applyMatchingStyleDeclarations(
   css: string,
   document: Document,
@@ -905,7 +929,7 @@ export function mailPresentationForHtml(html: string | null): MailPresentation {
   // A real canvas in a forward still belongs to the visible message, even when
   // the matching style block lives outside the quoted wrapper.
   const winners = authoredBackgrounds(document)
-  const surface = hasAuthoredCanvas(winners) ? 'light' : 'native'
+  const surface = hasAuthoredCanvas(winners) || hasAuthoredFrame(document) ? 'light' : 'native'
   const layout =
     surface !== 'light'
       ? 'padded'

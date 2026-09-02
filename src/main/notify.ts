@@ -1,11 +1,12 @@
 import { app, BrowserWindow, type NativeImage, Notification, nativeImage } from 'electron'
-import badgeIcon from '../../resources/tray.png?asset'
 import type { AuthAccount } from '../shared/auth'
 import { errorMessage } from '../shared/error'
 import { NOTIFICATION_SUMMARY_THRESHOLD, type PendingFocusTarget } from '../shared/notifications'
+import { badgeOverlayBitmap, badgeOverlayText } from './badgeOverlay'
 import type { NotificationCandidate } from './service/notificationQueries'
 
-let windowsBadgeIcon: NativeImage | null = null
+/** One rendered numeral overlay per caption; captions repeat, pixels don't change. */
+const windowsBadgeIcons = new Map<string, NativeImage>()
 
 /**
  * Above this many new conversations a poll cycle collapses to one summary.
@@ -83,7 +84,8 @@ export interface NotificationContext {
 
 export interface BadgeEffects {
   setMacBadge: (count: number) => void
-  setWindowsOverlay: (show: boolean, description: string) => void
+  /** 0 clears the overlay; a positive count renders its numerals (F12/T38). */
+  setWindowsOverlay: (unreadCount: number, description: string) => void
 }
 
 export function isolateNotificationFailure(operation: () => void, report: (message: string) => void): void {
@@ -109,7 +111,8 @@ export function applyUnreadBadgeToWindow(
   setWindowsOverlay: BadgeEffects['setWindowsOverlay']
 ): void {
   if (platform !== 'win32') return
-  setWindowsOverlay(unreadCount > 0, unreadCount > 0 ? `${unreadCount} unread conversations` : '')
+  // The tooltip keeps the exact count even when the numerals cap at 99+.
+  setWindowsOverlay(unreadCount, unreadCount > 0 ? `${unreadCount} unread conversations` : '')
 }
 
 /** Keep batching policy independent from Electron so it can be exhaustively unit tested. */
@@ -133,13 +136,9 @@ export function planNotifications(
   }))
 }
 
-export function tomorrowStart(now = new Date()): number {
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime()
-}
-
-export function oneHourFrom(now = Date.now()): number {
-  return now + 60 * 60 * 1000
-}
+// The pause deadlines are shared with the renderer's settings surface (F15);
+// the tray and settings must compute identical "1 hour" / "until tomorrow".
+export { oneHourFrom, tomorrowStart } from '../shared/notifications'
 
 /**
  * Resolve a focus target requested by a notification click. A renderer that
@@ -149,6 +148,11 @@ export function oneHourFrom(now = Date.now()): number {
  * inactive account resolves to a `switch` ask — the renderer runs its guarded
  * account switch, and the caller keeps the target pending so the remounted
  * tree for the right account can consume it (F18).
+ *
+ * Resolving is read-only: even a `focus` answer leaves the target pending.
+ * The tree that accepts the click acknowledges `id` explicitly, so a pull
+ * whose delivery dies in a torn-down subscription during an account remount
+ * cannot silently lose the click (T32 notification-focus regression).
  */
 export function takePendingFocus(
   pending: PendingFocus | null,
@@ -156,8 +160,20 @@ export function takePendingFocus(
   now = Date.now()
 ): PendingFocusTarget | null {
   if (!pending || now - pending.at > PENDING_FOCUS_TTL_MS) return null
-  if (pending.accountId === activeAccountId) return { kind: 'focus', threadId: pending.threadId ?? null }
+  if (pending.accountId === activeAccountId) {
+    return { kind: 'focus', accountId: pending.accountId, threadId: pending.threadId ?? null, id: pending.at }
+  }
   return { kind: 'switch', accountId: pending.accountId }
+}
+
+/**
+ * Clear a pending focus target the renderer has accepted. Acknowledgement is
+ * keyed by the target's id (its creation time) so a late acknowledgement from
+ * a superseded click cannot clear a newer one.
+ */
+export function acknowledgePendingFocus(pending: PendingFocus | null, id: number): PendingFocus | null {
+  if (pending && pending.at === id) return null
+  return pending
 }
 
 /**
@@ -177,9 +193,20 @@ export function notificationClickTarget(
   return { accountId, threadId: threadId ?? null }
 }
 
-function getWindowsBadgeIcon(): NativeImage {
-  windowsBadgeIcon ??= nativeImage.createFromPath(badgeIcon)
-  return windowsBadgeIcon
+function getWindowsBadgeIcon(unreadCount: number): NativeImage | null {
+  const bitmap = badgeOverlayBitmap(unreadCount)
+  if (!bitmap) return null
+  const caption = badgeOverlayText(unreadCount)
+  const cached = windowsBadgeIcons.get(caption)
+  if (cached) return cached
+  // Rendered at 2x of the 16px overlay slot so the numerals survive scaling.
+  const icon = nativeImage.createFromBitmap(bitmap.pixels, {
+    width: bitmap.width,
+    height: bitmap.height,
+    scaleFactor: 2
+  })
+  windowsBadgeIcons.set(caption, icon)
+  return icon
 }
 
 export class MailNotifier {
@@ -212,8 +239,8 @@ export class MailNotifier {
     try {
       applyUnreadBadge(process.platform, unreadCount, {
         setMacBadge: (count) => app.setBadgeCount(count),
-        setWindowsOverlay: (show, description) => {
-          const icon = show ? getWindowsBadgeIcon() : null
+        setWindowsOverlay: (count, description) => {
+          const icon = getWindowsBadgeIcon(count)
           for (const win of BrowserWindow.getAllWindows()) win.setOverlayIcon(icon, description)
         }
       })
@@ -224,8 +251,8 @@ export class MailNotifier {
 
   attachWindow(win: BrowserWindow): void {
     try {
-      applyUnreadBadgeToWindow(process.platform, this.unreadCount, (show, description) => {
-        win.setOverlayIcon(show ? getWindowsBadgeIcon() : null, description)
+      applyUnreadBadgeToWindow(process.platform, this.unreadCount, (count, description) => {
+        win.setOverlayIcon(getWindowsBadgeIcon(count), description)
       })
     } catch (error) {
       console.error(`[badge] failed: ${errorMessage(error)}`)

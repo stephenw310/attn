@@ -8,7 +8,8 @@ import {
   type Spread
 } from 'lexical'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { DraftContentIdContext } from '../DraftContentContext'
+import { suppressBlockedRemoteImages } from '../../mailRemoteContent'
+import { DraftContentIdContext, DraftSourceMessageIdContext } from '../DraftContentContext'
 import { decodeOpaqueHtml, encodeOpaqueHtml, opaqueHtmlText, sanitizedDomMatchesSource } from '../preserve'
 import { sanitizeDraftHtmlForImport } from '../sanitize'
 
@@ -48,24 +49,91 @@ function opaqueContentIds(html: string): string[] {
   ]
 }
 
-function previewSrcDoc(html: string, images: ReadonlyMap<string, string>): string {
+function previewSrcDoc(
+  html: string,
+  images: ReadonlyMap<string, string>,
+  remoteImagesAllowed: boolean
+): string {
   const document = new DOMParser().parseFromString(html, 'text/html')
+  if (!remoteImagesAllowed) suppressBlockedRemoteImages(document.body, TRANSPARENT_IMAGE)
   for (const image of document.querySelectorAll<HTMLImageElement>('img[src]')) {
     const source = image.getAttribute('src')?.trim() ?? ''
     if (!source.toLowerCase().startsWith('cid:')) continue
     image.setAttribute('src', images.get(normalizeContentId(source.slice(4))) ?? TRANSPARENT_IMAGE)
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'"><base target="_blank"><style>html,body{margin:0;padding:0;background:#fff;color:#202124}body{font:14px/1.6 Arial,sans-serif;overflow-wrap:break-word}img{max-width:100%;height:auto}table{max-width:100%}</style></head><body>${document.body.innerHTML}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'"><base target="_blank"><style>html,body{margin:0;padding:0;background:#fff;color:#202124}body{font:14px/1.6 Arial,sans-serif;overflow-wrap:break-word}img{max-width:100%;height:auto}img[data-remote-blocked="true"]{visibility:hidden}table{max-width:100%}</style></head><body>${document.body.innerHTML}</body></html>`
 }
 
 function OpaqueHtmlPreview({ encoded, inline }: { encoded: string; inline: boolean }): React.JSX.Element {
   const draftId = useContext(DraftContentIdContext)
+  const sourceMessageId = useContext(DraftSourceMessageIdContext)
   const html = useMemo(() => decodeOpaqueHtml(encoded), [encoded])
   const contentIds = useMemo(() => opaqueContentIds(html), [html])
   const [images, setImages] = useState<ReadonlyMap<string, string>>(() => new Map())
   const [height, setHeight] = useState<number | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
-  const srcDoc = useMemo(() => previewSrcDoc(html, images), [html, images])
+  const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(false)
+  const srcDoc = useMemo(
+    () => previewSrcDoc(html, images, remoteImagesAllowed),
+    [html, images, remoteImagesAllowed]
+  )
+
+  // T33: the preserved region is the same untrusted about:srcdoc mail HTML as
+  // the quoted history, so it registers with main's request filter under the
+  // draft's source message — a per-sender exception then covers a reply's
+  // preserved content too (PR #101 review). Without a source id the frame
+  // stays unnamed and fails closed while blocking is on, exactly as before.
+  const [frameNonce, setFrameNonce] = useState<string | null>(null)
+  const [frameEpoch, setFrameEpoch] = useState(0)
+  useEffect(() => {
+    const bridge = window.attn
+    if (!bridge) return
+    return bridge.mail.onRemoteImagesChanged(() => setFrameEpoch((epoch) => epoch + 1))
+  }, [])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: frameEpoch deliberately re-registers so policy changes reach a mounted preview
+  useEffect(() => {
+    const bridge = window.attn
+    setFrameNonce(null)
+    setRemoteImagesAllowed(false)
+    if (!bridge) {
+      setFrameNonce('')
+      return
+    }
+    if (sourceMessageId === null) {
+      let stale = false
+      void bridge.settings
+        .getAll()
+        .then((settings) => {
+          if (!stale) {
+            setRemoteImagesAllowed(!settings.remoteImagesBlocked)
+            setFrameNonce('')
+          }
+        })
+        .catch(() => {
+          if (!stale) setFrameNonce('')
+        })
+      return () => {
+        stale = true
+      }
+    }
+    const nonce = crypto.randomUUID()
+    let stale = false
+    bridge.mail
+      .registerMessageFrame(nonce, sourceMessageId, false)
+      .then(({ imagesAllowed }) => {
+        if (!stale) {
+          setRemoteImagesAllowed(imagesAllowed)
+          setFrameNonce(nonce)
+        }
+      })
+      .catch(() => {
+        if (!stale) setFrameNonce('')
+      })
+    return () => {
+      stale = true
+      void bridge.mail.unregisterMessageFrame(nonce).catch(() => {})
+    }
+  }, [frameEpoch, sourceMessageId])
 
   useEffect(() => {
     setImages(new Map())
@@ -107,17 +175,23 @@ function OpaqueHtmlPreview({ encoded, inline }: { encoded: string; inline: boole
     []
   )
 
-  const frame = (
-    <iframe
-      title="Preserved draft content"
-      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      referrerPolicy="no-referrer"
-      className={inline ? 'block w-96 max-w-full border-0 bg-white' : 'block w-full border-0 bg-white'}
-      srcDoc={srcDoc}
-      onLoad={(event) => observe(event.currentTarget)}
-      style={{ height: height ?? 1, visibility: height === null ? 'hidden' : 'visible' }}
-    />
-  )
+  // The frame mounts only after main has answered its registration, so an
+  // allowed sender's images are never spuriously cancelled by a race; a
+  // policy change remounts it (new key) under a fresh registration.
+  const frame =
+    frameNonce === null ? null : (
+      <iframe
+        key={frameNonce}
+        name={frameNonce || undefined}
+        title="Preserved draft content"
+        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        referrerPolicy="no-referrer"
+        className={inline ? 'block w-96 max-w-full border-0 bg-white' : 'block w-full border-0 bg-white'}
+        srcDoc={srcDoc}
+        onLoad={(event) => observe(event.currentTarget)}
+        style={{ height: height ?? 1, visibility: height === null ? 'hidden' : 'visible' }}
+      />
+    )
 
   return inline ? (
     <span className="mx-1 inline-flex max-w-full align-middle" contentEditable={false}>

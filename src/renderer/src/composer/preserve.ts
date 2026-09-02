@@ -46,6 +46,8 @@ const TAG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
 }
 
 const GMAIL_SIGNATURE_ATTRIBUTES = new Set(['class', 'data-smartmail'])
+/** The optional footer's marker (T32B); its element stays fully editable. */
+const ATTN_FOOTER_ATTRIBUTES = new Set(['data-attn-signature'])
 
 /**
  * Classes that carry meaning rather than paint. Attn's trim boundary and
@@ -192,6 +194,7 @@ function unsupportedReason(element: Element, hasStylesheet: boolean): string | n
   )
   const gmailSignature =
     tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
+  const attnFooter = tag === 'div' && attributes.get('data-attn-signature') === 'footer'
   const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(attributes.get('class'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.getAttributeNames()) {
@@ -200,7 +203,8 @@ function unsupportedReason(element: Element, hasStylesheet: boolean): string | n
       !GLOBAL_ATTRIBUTES.has(attribute) &&
       !tagAttributes.has(attribute) &&
       !(gmailSignaturePrefix && attribute === 'class') &&
-      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute))
+      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute)) &&
+      !(attnFooter && ATTN_FOOTER_ATTRIBUTES.has(attribute))
     ) {
       return `${tag}[${attribute}]`
     }
@@ -226,6 +230,7 @@ function sourceUnsupportedReason(
   const attributes = new Map(element.attrs.map((attribute) => [attribute.name, attribute.value]))
   const gmailSignature =
     tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
+  const attnFooter = tag === 'div' && attributes.get('data-attn-signature') === 'footer'
   const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(attributes.get('class'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const attribute of element.attrs) {
@@ -235,7 +240,8 @@ function sourceUnsupportedReason(
       !GLOBAL_ATTRIBUTES.has(attribute.name) &&
       !tagAttributes.has(attribute.name) &&
       !(gmailSignaturePrefix && attribute.name === 'class') &&
-      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute.name))
+      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute.name)) &&
+      !(attnFooter && ATTN_FOOTER_ATTRIBUTES.has(attribute.name))
     ) {
       return `${tag}[${attribute.name}]`
     }

@@ -41,6 +41,25 @@ describe('action queue payloads', () => {
     )
   })
 
+  it('normalizes a pre-v25 follow-up snapshot with no durable ordering field', () => {
+    expect(
+      decodeLabelDelta(
+        '{"add":["INBOX"],"remove":[],"followUpBefore":{"dueAt":1234,"state":"returned","originMessageId":"m1","originRfcMessageId":"<m1@test>","originInternalDate":100}}'
+      )
+    ).toEqual({
+      add: ['INBOX'],
+      remove: [],
+      followUpBefore: {
+        dueAt: 1234,
+        state: 'returned',
+        originMessageId: 'm1',
+        originRfcMessageId: '<m1@test>',
+        originInternalDate: 100,
+        originOutboxCreatedAt: null
+      }
+    })
+  })
+
   it('rejects malformed JSON and non-string label arrays', () => {
     expect(() => decodeLabelDelta('{not-json')).toThrow()
     expect(() => decodeLabelDelta('{"add":"INBOX","remove":[]}')).toThrow('label delta')

@@ -13,6 +13,7 @@ import {
   isLegacyTokenPayload,
   parseTokenFile,
   removeAccount,
+  reorderRoster,
   type StoredAccount,
   upsertAccount
 } from './tokenFile'
@@ -64,6 +65,18 @@ export function removeAccountTokens(userDataDir: string, accountId: string): Sto
   const accounts = removeAccount(loadAccounts(userDataDir), accountId)
   if (accounts.length === 0) rmSync(join(userDataDir, FILE), { force: true })
   else write(userDataDir, accounts)
+  return accounts
+}
+
+/**
+ * Persist a new switcher order (F15). Reordering re-reads the file first so a
+ * token refresh that landed after the caller's snapshot keeps its newest
+ * tokens; validation against that fresh roster is what rejects stale requests.
+ * A failed write throws before anything is returned, leaving the old order.
+ */
+export function reorderAccountTokens(userDataDir: string, ids: readonly string[]): StoredAccount[] {
+  const accounts = reorderRoster(loadAccounts(userDataDir), ids)
+  write(userDataDir, accounts)
   return accounts
 }
 

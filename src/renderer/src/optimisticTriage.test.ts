@@ -279,3 +279,37 @@ test('chooses the next surviving row, then falls back above the removed block', 
     nextIndex: 1
   })
 })
+
+test('advances to the previous surviving row when auto-advance is previous (F3/F15)', () => {
+  const rows = ['one', 'two', 'three', 'four'].map((id) => ({ id }))
+  expect(selectionAfterExit(rows, ['two'], 1, 'previous')).toEqual({
+    fromId: 'two',
+    toId: 'one',
+    nextIndex: 0
+  })
+  expect(selectionAfterExit(rows, ['one', 'two'], 1, 'previous')).toEqual({
+    fromId: 'two',
+    toId: 'three',
+    nextIndex: 2
+  })
+  // At the top the fallback is the next survivor, never a stale row.
+  expect(selectionAfterExit(rows, ['one'], 0, 'previous')).toEqual({
+    fromId: 'one',
+    toId: 'two',
+    nextIndex: 1
+  })
+})
+
+test('leaves the selection alone when the focused row survives a bulk action', () => {
+  const rows = ['one', 'two', 'three'].map((id) => ({ id }))
+  expect(selectionAfterExit(rows, ['three'], 0, 'previous')).toEqual({
+    fromId: 'one',
+    toId: 'one',
+    nextIndex: 0
+  })
+  expect(selectionAfterExit(rows, ['three'], 0, 'next')).toEqual({
+    fromId: 'one',
+    toId: 'one',
+    nextIndex: 0
+  })
+})

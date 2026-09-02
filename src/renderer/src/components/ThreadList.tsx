@@ -87,6 +87,14 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           Returned
         </span>
       )}
+      {thread.followUpReturned && (
+        <span
+          data-testid="chip-follow-up"
+          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
+        >
+          Follow up
+        </span>
+      )}
       {thread.dueAt !== undefined && (
         <span
           data-testid="chip-snooze-due"
@@ -94,6 +102,21 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
         >
           {thread.dueLabel}
+        </span>
+      )}
+      {thread.followUpDueLabel !== undefined && (
+        <span
+          data-testid="chip-follow-up-due"
+          data-follow-up-awaiting={thread.followUpAwaiting ?? undefined}
+          title={`Follow up if no reply — ${thread.followUpDueLabel}`}
+          className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
+        >
+          {`Follow up ${thread.followUpDueLabel}`}
+          {thread.followUpAwaiting === 'origin'
+            ? ' · reply check pending'
+            : thread.followUpAwaiting === 'snooze'
+              ? ' · after snooze'
+              : ''}
         </span>
       )}
     </>
@@ -165,7 +188,11 @@ function virtualLayout(
   return threads.map((thread, index) => {
     const dividerHeight = index === dividerBeforeIndex ? VIRTUAL_SECTION_DIVIDER_HEIGHT : 0
     if (dividerHeight > 0) previousGroup = undefined
-    const group = dateGroup(thread)
+    // Only the inbox hoists returned follow-ups into a leading tier; every
+    // other view sorts them by date, where the 'Follow up' heading would
+    // split a date group mid-list at each occurrence (PR #101 review). The
+    // chip on the row still marks them everywhere.
+    const group = dateGroup(view === 'inbox' ? thread : { lastMsgAt: thread.lastMsgAt })
     // Snoozed sorts by due time, so relative-date groups would mislead there.
     const showGroup = view !== 'snoozed' && group !== previousGroup
     if (showGroup) {

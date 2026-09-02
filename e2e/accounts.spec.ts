@@ -4,6 +4,7 @@ import type { ElectronApplication } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { expectResponseHeld, holdNextResponse } from './holdResponse'
 
 // F18 account switching against a seeded two-account store: the whole surface
 // (chip, list, sidebar labels, unread readout) swaps atomically, every switch
@@ -14,45 +15,6 @@ test.use({ seed: 'fixtures/seed-two-accounts.json' })
 
 const PRIMARY = 'primary@attn.test'
 const SECOND = 'second@attn.test'
-
-/** Hold one real IPC result after main has finished, without a timing-based sleep. */
-async function holdNextAccountResponse(
-  app: ElectronApplication,
-  channel: string
-): Promise<() => Promise<void>> {
-  await app.evaluate(({ ipcMain }, channel) => {
-    type Handler = Parameters<typeof ipcMain.handle>[1]
-    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
-    const original = handlers.get(channel)
-    if (!original) throw new Error(`Missing handler: ${channel}`)
-    ipcMain.removeHandler(channel)
-    ipcMain.handle(channel, async (...args) => {
-      ipcMain.removeHandler(channel)
-      ipcMain.handle(channel, original)
-      const result = await original(...args)
-      await new Promise<void>((resolve) => {
-        Object.assign(globalThis, { releaseAccountResponse: resolve })
-      })
-      return result
-    })
-  }, channel)
-  return async () => {
-    await app.evaluate(() => {
-      const state = globalThis as unknown as { releaseAccountResponse: () => void }
-      state.releaseAccountResponse()
-    })
-  }
-}
-
-async function expectAccountResponseHeld(app: ElectronApplication): Promise<void> {
-  await expect
-    .poll(() =>
-      app.evaluate(
-        () => typeof (globalThis as unknown as { releaseAccountResponse?: () => void }).releaseAccountResponse
-      )
-    )
-    .toBe('function')
-}
 
 interface AccountDataStats {
   rowTotal: number
@@ -304,11 +266,11 @@ for (const holdSnapshot of [false, true]) {
     page
   }) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(2)
-    const release = holdSnapshot ? await holdNextAccountResponse(app, IPC_CHANNELS.accountsGetStatuses) : null
+    const release = holdSnapshot ? await holdNextResponse(app, IPC_CHANNELS.accountsGetStatuses) : null
     const chip = page.getByTestId('account-menu').getByRole('button').first()
     await chip.click()
     await expect(page.getByTestId('account-status').first()).toContainText('Live')
-    if (release) await expectAccountResponseHeld(app)
+    if (release) await expectResponseHeld(app)
     await app.evaluate(({ ipcMain }, channel) => {
       ipcMain.emit(channel, {}, { phase: 'error', message: 'Temporary sync failure' })
     }, TEST_CHANNELS.setSyncState)
@@ -335,9 +297,9 @@ test('account rows render before delayed sidebar totals and ignore totals from t
     .filter({ hasText: /^Inbox/ })
     .getByTestId('sidebar-count')
   await expect(inboxCount).toHaveAttribute('data-count', '2')
-  const release = await holdNextAccountResponse(app, IPC_CHANNELS.mailGetMailboxCounts)
+  const release = await holdNextResponse(app, IPC_CHANNELS.mailGetMailboxCounts)
   await page.keyboard.press('ControlOrMeta+2')
-  await expectAccountResponseHeld(app)
+  await expectResponseHeld(app)
   await expect(page.getByTestId('account-menu')).toContainText(SECOND)
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Beta launch checklist' })).toBeVisible()
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha' })).toHaveCount(0)
@@ -356,7 +318,7 @@ test('account removal blocks shortcuts and composer opens until the response set
   page
 }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(2)
-  const release = await holdNextAccountResponse(app, IPC_CHANNELS.accountsRemove)
+  const release = await holdNextResponse(app, IPC_CHANNELS.accountsRemove)
   await page.getByTestId('account-menu').getByRole('button').first().click()
   await expect(page.getByTestId('account-remove')).toHaveText('Sign out')
   await page.getByTestId('account-remove').click()
@@ -368,7 +330,7 @@ test('account removal blocks shortcuts and composer opens until the response set
   await expect(page.getByTestId('composer')).toHaveCount(0)
 
   await page.getByTestId('remove-account-keep').click()
-  await expectAccountResponseHeld(app)
+  await expectResponseHeld(app)
   expect((await page.evaluate(() => window.attn.auth.getStatus())).activeAccountId).toBe(SECOND)
   await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
   await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
@@ -422,7 +384,7 @@ for (const { choice, lastAccount } of [
       ipcMain.handle(channels.authGetStatus, async (...args) => {
         const result = await status(...args)
         await new Promise<void>((resolve) => {
-          Object.assign(globalThis, { releaseAccountResponse: resolve })
+          Object.assign(globalThis, { releaseHeldResponse: resolve })
         })
         return result
       })
@@ -430,7 +392,7 @@ for (const { choice, lastAccount } of [
     await page.getByTestId('account-menu').getByRole('button').first().click()
     await page.getByTestId('account-remove').click()
     await page.getByTestId(`remove-account-${choice}`).click()
-    await expectAccountResponseHeld(app)
+    await expectResponseHeld(app)
     const warning = page.getByTestId('account-removal-error')
     await expect(warning).toContainText(
       choice === 'delete' ? 'Could not delete all local data' : 'Could not remove the account'
@@ -456,8 +418,8 @@ for (const { choice, lastAccount } of [
     ).toBe(0)
     await expect(page.getByTestId('composer')).toHaveCount(0)
     await app.evaluate(() => {
-      const state = globalThis as unknown as { releaseAccountResponse: () => void }
-      state.releaseAccountResponse()
+      const state = globalThis as unknown as { releaseHeldResponse: () => void }
+      state.releaseHeldResponse()
     })
     if (lastAccount) {
       await expect(page.getByTestId('login-screen')).toBeVisible()
@@ -581,6 +543,51 @@ test('an open composer holds a notification switch until the draft closes', asyn
   await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
   await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+  // The pending target has a 60s TTL; under a loaded runner the second
+  // account's rows can take past the default expectation window to land, so
+  // the journey's end gets headroom without weakening what it asserts.
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Beta launch checklist', {
+    timeout: 15_000
+  })
+})
+
+test('a notification click survives a pull that dies during the account remount', async ({ app, page }) => {
+  // The T32 regression, made deterministic: hold the switch response after
+  // main has already flipped the active account, and while it is held issue a
+  // focus pull whose delivery is discarded — the exact shape of a pull
+  // consumed by a torn-down subscription during composer close and account
+  // remount. Resolving must not consume: the remounted tree's own pull still
+  // has to find the target and open the conversation.
+  await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
+  await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
+
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.typeBody('Held-response notification click')
+  await composer.expectSaved()
+
+  await emitNotificationClick(app, 't-beta-launch', SECOND)
+  await expect(page.getByTestId('toast')).toContainText('Save and close the draft')
+  await composer.editor.click()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+
+  const release = await holdNextResponse(app, IPC_CHANNELS.accountsSetActive)
+  await page.keyboard.press('ControlOrMeta+2')
+  await expectResponseHeld(app)
+
+  // The adversarial pull: main answers `focus` (its active account already
+  // flipped), but nothing delivers or acknowledges the result.
+  await app.evaluate(async ({ ipcMain }, channel) => {
+    type Handler = (...args: unknown[]) => Promise<unknown>
+    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
+    const handler = handlers.get(channel)
+    if (!handler) throw new Error(`Missing handler: ${channel}`)
+    await handler({})
+  }, IPC_CHANNELS.mailTakePendingFocus)
+
+  await release()
   await expect(page.getByTestId('account-menu')).toContainText(SECOND)
   await expect(page.getByTestId('conversation-subject')).toHaveText('Beta launch checklist')
 })

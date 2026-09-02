@@ -559,6 +559,31 @@ async function measureComposerKeystroke(
   return { mutationMs, paintMs, paintDeltaMs: paintMs - mutationMs }
 }
 
+/** Tab acceptance of a visible autocomplete suggestion, input to paint (T37A). */
+async function measureComposerAcceptance(
+  page: Page
+): Promise<{ mutationMs: number; paintMs: number; paintDeltaMs: number }> {
+  const editor = page.getByTestId('composer-editor')
+  await editor.evaluate((element) => {
+    delete element.dataset.keystrokeMutationMs
+    delete element.dataset.keystrokePaintMs
+    const started = performance.now()
+    const observer = new MutationObserver(() => {
+      observer.disconnect()
+      element.dataset.keystrokeMutationMs = String(performance.now() - started)
+      requestAnimationFrame(() => {
+        element.dataset.keystrokePaintMs = String(performance.now() - started)
+      })
+    })
+    observer.observe(element, { characterData: true, childList: true, subtree: true })
+  })
+  await page.keyboard.press('Tab')
+  await expect.poll(() => editor.getAttribute('data-keystroke-paint-ms')).not.toBeNull()
+  const mutationMs = Number(await editor.getAttribute('data-keystroke-mutation-ms'))
+  const paintMs = Number(await editor.getAttribute('data-keystroke-paint-ms'))
+  return { mutationMs, paintMs, paintDeltaMs: paintMs - mutationMs }
+}
+
 async function measureScrollFrames(page: Page): Promise<number[]> {
   return page.getByTestId('thread-list').evaluate(async (list) => {
     const samples: number[] = []
@@ -994,7 +1019,7 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     expect(await page.locator('html').getAttribute('data-perf-react-error')).toBeNull()
   })
 
-  test('opens and types in the composer within CI-safe ceilings', async ({ page }, testInfo) => {
+  test('opens and types in the composer within CI-safe ceilings', async ({ app, page }, testInfo) => {
     await expect(page.getByTestId('thread-list')).toHaveAttribute(
       'data-thread-count',
       String(THREAD_PAGE_SIZE)
@@ -1041,6 +1066,59 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     await reportMetric(testInfo, 'composer-keystroke-paint-delta', paintDeltaSamples, paintDeltaMedianMs)
     expect(mutationMedianMs, 'median key input to editor mutation').toBeLessThan(COMPOSER_MUTATION_CEILING_MS)
     expect(percentile(paintDeltaSamples, 0.95), 'p95 editor mutation to next paint').toBeLessThan(
+      COMPOSER_PAINT_DELTA_P95_CEILING_MS
+    )
+
+    // T37A: autocomplete on with a slow fake provider — requests overlap the
+    // typing pauses, and keystrokes must stay within the same ceilings.
+    await page.evaluate(async () => {
+      await window.attn.ai.setKey('sk-perf-test')
+      await window.attn.ai.setSetting('enabled', true)
+      await window.attn.ai.setSetting('autocompleteEnabled', true)
+    })
+    const installFakeAi = (script: unknown): Promise<string | undefined> =>
+      app.evaluate(
+        ({ ipcMain }, input) =>
+          new Promise<string | undefined>((resolve) =>
+            ipcMain.emit(input.channel, {}, input.script, resolve)
+          ),
+        { channel: TEST_CHANNELS.installFakeAiProvider, script }
+      )
+    await installFakeAi({ chunks: [' and the follow-up plan.'], delayMs: 250 })
+    const acMutationSamples: number[] = []
+    const acPaintDeltaSamples: number[] = []
+    for (const key of ['w', 'e', ' ', 's', 'h', 'o', 'u', 'l', 'd', ' ']) {
+      const sample = await measureComposerKeystroke(page, key)
+      acMutationSamples.push(sample.mutationMs)
+      acPaintDeltaSamples.push(sample.paintDeltaMs)
+    }
+    const acMutationMedianMs = median(acMutationSamples)
+    await reportMetric(
+      testInfo,
+      'composer-keystroke-mutation-autocomplete',
+      acMutationSamples,
+      acMutationMedianMs
+    )
+    expect(acMutationMedianMs, 'median keystroke mutation with autocomplete enabled').toBeLessThan(
+      COMPOSER_MUTATION_CEILING_MS
+    )
+    expect(
+      percentile(acPaintDeltaSamples, 0.95),
+      'p95 mutation to paint with autocomplete enabled'
+    ).toBeLessThan(COMPOSER_PAINT_DELTA_P95_CEILING_MS)
+
+    // Acceptance-to-paint: a visible suggestion accepted with Tab lands in
+    // the editor within the same frame budget as ordinary typing.
+    await installFakeAi({ chunks: [' with the launch checklist attached.'] })
+    await page.waitForTimeout(1_100)
+    await page.keyboard.type('t')
+    await expect(page.getByTestId('ai-autocomplete-preview')).toBeVisible()
+    const acceptance = await measureComposerAcceptance(page)
+    await reportMetric(testInfo, 'composer-autocomplete-accept', [acceptance.paintMs], acceptance.paintMs)
+    expect(acceptance.mutationMs, 'Tab acceptance to editor mutation').toBeLessThan(
+      COMPOSER_MUTATION_CEILING_MS
+    )
+    expect(acceptance.paintDeltaMs, 'Tab acceptance mutation to paint').toBeLessThan(
       COMPOSER_PAINT_DELTA_P95_CEILING_MS
     )
   })

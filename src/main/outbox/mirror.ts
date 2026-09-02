@@ -79,6 +79,7 @@ function nextPending(
         !isEmptyDraft({
           id: row.id,
           kind: 'new',
+          followUpAt: null,
           to: parseJson<MailAddress[]>(row.to_json),
           cc: parseJson<MailAddress[]>(row.cc_json),
           bcc: parseJson<MailAddress[]>(row.bcc_json),

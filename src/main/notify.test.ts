@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from './db'
 import {
+  acknowledgePendingFocus,
   applyUnreadBadge,
   applyUnreadBadgeToWindow,
   BoundedRetainer,
@@ -127,8 +128,8 @@ describe('badge effects', () => {
       setMacBadge: (count: number): void => {
         calls.push(`mac:${count}`)
       },
-      setWindowsOverlay: (show: boolean, description: string): void => {
-        calls.push(`windows:${show}:${description}`)
+      setWindowsOverlay: (count: number, description: string): void => {
+        calls.push(`windows:${count}:${description}`)
       }
     }
 
@@ -139,11 +140,14 @@ describe('badge effects', () => {
     applyUnreadBadge('win32', 0, effects)
     applyUnreadBadgeToWindow('linux', 7, effects.setWindowsOverlay)
     applyUnreadBadgeToWindow('win32', 7, effects.setWindowsOverlay)
+    // The tooltip keeps the exact count; the overlay numerals cap at 99+ (T38).
+    applyUnreadBadgeToWindow('win32', 150, effects.setWindowsOverlay)
     expect(calls).toEqual([
       'mac:4',
-      'windows:true:4 unread conversations',
-      'windows:false:',
-      'windows:true:7 unread conversations'
+      'windows:4:4 unread conversations',
+      'windows:0:',
+      'windows:7:7 unread conversations',
+      'windows:150:150 unread conversations'
     ])
   })
 })
@@ -170,7 +174,9 @@ describe('takePendingFocus', () => {
     expect(takePendingFocus(null, 'a@attn.test')).toBeNull()
     expect(takePendingFocus(pending, 'a@attn.test', 1_000 + PENDING_FOCUS_TTL_MS)).toEqual({
       kind: 'focus',
-      threadId: 't-budget'
+      accountId: 'a@attn.test',
+      threadId: 't-budget',
+      id: 1_000
     })
     expect(takePendingFocus(pending, 'a@attn.test', 1_001 + PENDING_FOCUS_TTL_MS)).toBeNull()
   })
@@ -190,8 +196,29 @@ describe('takePendingFocus', () => {
   it('resolves a summary click to the inbox of its account', () => {
     expect(takePendingFocus({ accountId: 'a@attn.test', at: 1_000 }, 'a@attn.test', 1_500)).toEqual({
       kind: 'focus',
-      threadId: null
+      accountId: 'a@attn.test',
+      threadId: null,
+      id: 1_000
     })
+  })
+
+  it('resolving is read-only: an undelivered pull cannot lose the click', () => {
+    // The T32 regression: a pull whose delivery died in a torn-down
+    // subscription (account remount, effect cleanup) used to consume the
+    // target. Resolving now leaves it pending, so the next live tree for the
+    // right account pulls the identical target again.
+    const first = takePendingFocus(pending, 'a@attn.test', 1_500)
+    const second = takePendingFocus(pending, 'a@attn.test', 1_600)
+    expect(first).toEqual(second)
+    expect(first?.kind).toBe('focus')
+  })
+
+  it('acknowledgement clears exactly the accepted target', () => {
+    // Only the tree that accepted the click clears it, keyed by target id —
+    // a late acknowledgement from a superseded click leaves a newer one alone.
+    expect(acknowledgePendingFocus(pending, 1_000)).toBeNull()
+    expect(acknowledgePendingFocus(pending, 999)).toBe(pending)
+    expect(acknowledgePendingFocus(null, 1_000)).toBeNull()
   })
 })
 

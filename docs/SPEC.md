@@ -79,7 +79,7 @@ Serverless roadmap: **v1** pure client → **v1.5** optional *companion Apps Scr
 
 **D5 — SQLite + FTS5 as the local store.** Message headers for the account's whole lifetime (staged: interactive windows first, then a low-priority background sweep — §9 #17), full bodies for the last 90 days of Inbox mail, older bodies fetched on demand and cached permanently. Attachment bytes are never bulk-synced: metadata rides with full-format fetches, content downloads on demand. Search runs entirely locally against FTS5.
 
-**D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. That 44 px React top bar occupies the native title-bar area while macOS traffic lights and Windows controls remain native and unobstructed. Layout (revised 2026-08-12 after M1 dogfood, 2026-08-14 for the new-message composer, 2026-08-15 for thread drafting, and 2026-08-24 for navigation, §9 #7/#9/#11/#13): a 216 px left sidebar owns the wordmark plus mailbox and user-label navigation while the content region switches between the list and a focused conversation. A persistent top-bar control collapses the sidebar completely and restores it; `Mod+B` invokes the same command. The choice persists in the local profile. The sidebar stays in the chosen state while reading; a full-window new-message composer hides it so writing owns the window. `Esc` or the visible Back/List control restores the prior list at the same selection and scroll position. Reply, reply-all, and forward are the deliberate exception: their composer is the final inline card beneath the conversation so the source mail remains visible while writing. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing competing panes. This supersedes the centered overlay, the interim reading split, and the docked new-message composer; simultaneous list/reader variants are rejected. All Mail rows show a green checkmark after the timestamp when the thread is done and no longer carries the `INBOX` label. The leading unread dot remains independent because a done thread can still be unread. A compact title-only row identifies the active mailbox or label without repeating a count. An Inbox split strip appears only when at least one split exists and never moves into the sidebar (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Settings live behind the account-chip menu (Settings, keyboard shortcuts, split rules, sign out); there is no hamburger. Built-in themes share the same semantic tokens (F14).
+**D6 — Visual direction: "Dispatch" (settled 2026-08-09; mockups in `design/explorations/b2-*.html`).** Cool deep graphite surfaces, one amber signal color, a single sans family with tabular numerals doing the instrument work, and the lowercase `attn:` wordmark with an accent colon. Signature element: the **queue readout** ("● ● ● ○ ○ · 3 to zero") persistent in the top bar. That 44 px React top bar occupies the native title-bar area while macOS traffic lights and Windows controls remain native and unobstructed. Layout (revised 2026-08-12 after M1 dogfood, 2026-08-14 for the new-message composer, 2026-08-15 for thread drafting, and 2026-08-24 for navigation, §9 #7/#9/#11/#13): a 216 px left sidebar owns the wordmark plus mailbox and user-label navigation while the content region switches between the list and a focused conversation. A persistent top-bar control collapses the sidebar completely and restores it; `Mod+B` invokes the same command. The choice persists in the local profile. The sidebar stays in the chosen state while reading; a full-window new-message composer hides it so writing owns the window. `Esc` or the visible Back/List control restores the prior list at the same selection and scroll position. Reply, reply-all, and forward are the deliberate exception: their composer is the final inline card beneath the conversation so the source mail remains visible while writing. Adjacent cached conversations preload in the background so `J`/`K` changes the reader instantly without showing competing panes. This supersedes the centered overlay, the interim reading split, and the docked new-message composer; simultaneous list/reader variants are rejected. All Mail rows show a green checkmark after the timestamp when the thread is done and no longer carries the `INBOX` label. The leading unread dot remains independent because a done thread can still be unread. A compact title-only row identifies the active mailbox or label without repeating a count. An Inbox split strip appears only when at least one split exists and never moves into the sidebar (hot splits carry counts; overflow behind `···`; full jump-list in the palette). Its dedicated gear is the one visible split-rule configuration entry. Settings live behind the account-chip menu (Settings, keyboard shortcuts, sign out). There is no hamburger. Built-in themes share the same semantic tokens (F14).
 
 **Modifier convention:** `Mod` = `Cmd` on macOS, `Ctrl` on Windows. All shortcuts in this spec are written platform-neutrally.
 
@@ -410,12 +410,14 @@ footer is absent and the composer owns its action footer, so editing controls ca
   separator absent from that HTML. A signature already present in an imported Gmail draft remains
   editable and round-trips with that draft. An adjacent Gmail-marked separator collapses with the signature
   in Attn, but exports before it with one line break, retaining its trailing space in plain text.
+  In dark palettes, near-black signature foregrounds are normalized for composer display while authored
+  HTML, font choices, and link colours remain unchanged in the saved and sent draft.
   Empty editor lines following Gmail's quoted history do not move that history into the editable body or
   trigger a read-only formatting warning. The lines remain in the saved quote. Authored text, images, and
   styled blocks below a quote stay in their original position.
 - **Attn signature footer (M4 T32B):** an optional `Sent with Attn` line follows the account's Gmail
   signature, or the authored body when no signature exists, before any quoted history. The setting is
-  off by default and applies per account to newly created local drafts in every composer mode. Show the
+  on by default and applies per account to newly created local drafts in every composer mode. Show the
   line as editable content before sending, with no link, image, or tracking. Users can edit or delete it
   for an individual message without changing the account preference.
   Insert it once when creating the draft, never during send or retry. Reopening a local draft, importing
@@ -429,7 +431,11 @@ footer is absent and the composer owns its action footer, so editing controls ca
   send behavior. AI reply generation and refinement preserve it outside the generated region;
   autocomplete excludes the signature and footer from requests and suggestions.
 - **Recipient autocomplete** ranked by interaction frequency + recency, built locally from synced sent mail. First suggestion accepted with `Tab`/`Enter`.
-- **Rich text (widened 2026-08-15, §9 #16):** bold/italic/underline/strikethrough, bulleted & numbered lists, links, blockquote, **inline images, tables, font family and size, text and background colour, and alignment** — Gmail's own authoring surface. Pasting an image into the body is supported and travels as a `cid:` inline part. Heading levels are deliberately out: Gmail's composer has none, so they would be a superset rather than parity.
+- At the start of an otherwise empty body, typing `Hi`, `Hello`, or `Hey` immediately offers the primary
+  recipient's first display name as a gray continuation. This greeting completion is deterministic and
+  local: it never calls an AI provider, needs no AI consent, and accepts or dismisses with the same
+  body-owned `Tab`/`Esc` behavior as inline AI autocomplete.
+- **Rich text (widened 2026-08-15, §9 #16):** bold/italic/underline/strikethrough, bulleted & numbered lists, links, blockquote, **inline images, tables, font family and size, text and background colour, and alignment** — Gmail's own authoring surface. Composer links, including links imported with a Gmail signature, open externally on click without navigating the Attn window. Pasting an image into the body is supported and travels as a `cid:` inline part. Heading levels are deliberately out: Gmail's composer has none, so they would be a superset rather than parity.
 - **Zero formatting loss is an invariant, not an aspiration.** Content Attn's editor cannot represent is preserved byte-for-byte rather than dropped: it renders in place, is not editable inline, and round-trips unchanged through save, Gmail Drafts sync, and send. No draft ever loses formatting by being opened in Attn.
 - **Attachments:** drag-and-drop or picker, up to Gmail's 25MB limit, with progress indication. Attached files are copied into a local spool immediately, so a draft is self-contained even if the original file moves or the app force-quits, and that spool remains the source of the bytes for the rest of the draft's life. A forward starts with the source message's file attachments as well as its quoted inline images; the user may remove forwarded files before sending.
 - **Drafts:** autosaved to the local store one second after typing stops, and at least every five seconds while typing continues, so a force-quit loses at most five seconds of work. The **Gmail Drafts mirror is a separate, slower schedule** — debounced three seconds after typing stops, skipped entirely when nothing changed since the last push — so a composing session produces a handful of `drafts.update` calls rather than one per second. Drafts are listed in the Drafts view (`G` `D`) and reopenable, and thread-bound drafts are marked on their conversation row. A reply or forward the user never contributed to is **discarded on close, not saved**, matching Gmail: its quote, planned recipients and `Re:`/`Fwd:` subject are Attn's own work, so an untouched one leaves no draft row, no conversation mark, and nothing to mirror. Anything the plan does not write — a body, an attached file, a `Bcc`, a recipient on a forward — makes it the user's and keeps it. Attn's message-specific reply/reply-all entry points share one local reply slot and its forward entry point shares one local forward slot per source message; separately identified Gmail drafts remain distinct even when several belong to the same conversation.
@@ -581,10 +587,11 @@ Settings and the palette expose:
 - Sync & storage: the active account's historical conversation limit, with default, custom, and All mail
   choices (F2). This control does not evict cached mail or change body windows and search limits.
 - Triage: undo-send delay and auto-advance direction.
-- Compose: per-account **Include "Sent with Attn"**, off by default, with a preview and a note that the
+- Compose: per-account **Include "Sent with Attn"**, on by default, with a preview and a note that the
   choice affects new drafts only (F6). The palette offers the same enable/disable action.
-- Notifications: one app-wide pause/resume deadline and per-account split notification controls.
-- Snippet manager, split-rule manager, and theme.
+- Notifications: one app-wide pause/resume deadline. Per-account split notification controls live in the
+  Inbox header's split-rule manager.
+- Snippet manager and theme. The split-rule manager opens from its dedicated Inbox-header gear.
 - Background behavior: launch at login and the optional macOS menu-bar icon (F16).
 - AI writing: enable, provider and key, voice profile, and separate autocomplete opt-in (F17).
 - Keyboard cheat sheet (`Mod+/`).
@@ -593,7 +600,7 @@ Label account-specific controls with the owning email; other preferences apply a
 the existing default constants and typed APIs. Internal polling, quota, paging, retry, search-window, and
 editor-timing constants remain development tuning rather than user controls.
 
-**Entry point (D6):** the account chip in the top bar is the menu — the signed-in accounts with the active one marked (F18), Add account…, Settings (`Mod+,`), Keyboard shortcuts (`Mod+/`), Split rules, Sign out. No hamburger icon; every item is also a palette command.
+**Entry point (D6):** the account chip in the top bar is the menu — the signed-in accounts with the active one marked (F18), Add account…, Settings (`Mod+,`), Keyboard shortcuts (`Mod+/`), Sign out. Split-rule configuration opens from the Inbox strip's dedicated gear; its ellipsis appears only to navigate genuinely hidden splits. No hamburger icon; every item is also a palette command.
 
 ### F16 — Background & tray behavior
 
@@ -615,7 +622,11 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 
 **Reply drafting:**
 
-- **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
+- **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. When the authored reply region already contains text, that text accompanies the request as an immutable prefix and the generated continuation appends after it. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
+- An empty inline reply or reply-all composer shows `Tip: Hit Mod+J for AI` only when AI writing is enabled
+  and its configured provider has the required key. The hint is transient UI outside the saved draft and
+  disappears as soon as the authored body contains content. New-mail and forward composers do not advertise
+  the reply-only command.
   Generation, refinement, and undo affect the authored reply region above the signature. Preserve the
   Gmail signature and optional Attn footer, including user edits or removal (F6).
 - **Voice profile:** tone preset (concise / friendly / formal) plus free-text standing rules ("sign off with 'Best, Chao'", "never use exclamation marks").
@@ -627,7 +638,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - A **separate, default-off setting** enables short suggestions while typing in new messages, replies,
   reply-all, and forwards. Enabling reply drafting does not enable autocomplete. It uses the configured
   provider and model; cloud suggestions can incur repeated API charges. Local endpoints remain supported.
-- After a pause in typing, show one short continuation in gray at the caret, with no line breaks and at
+- After a pause in typing, stream one short continuation in gray at the caret, with no line breaks and at
   most 120 characters. This suggestion is a preview outside the saved editor document; it never enters
   autosave, Gmail draft mirroring, copied mail text, or the outbox until accepted.
 - `Tab` accepts a visible, current suggestion only while the body editor has focus. The accepted text is
@@ -648,16 +659,21 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 
 - Full reply generation and refine run only on explicit invocation. Separately enabling autocomplete
   permits requests while actively typing; it does not permit background mailbox processing.
-- The reply enable screen discloses the current thread, voice profile, and optional style examples sent
-  on each invocation. The autocomplete opt-in separately discloses that **unsent draft text leaves the
-  machine while typing** when using a cloud endpoint. Its payload contains only a bounded plain-text
-  excerpt of the authored body around the caret: at most 2,000 characters before and 500 after. Exclude
-  thread history, quoted mail, signatures, recipients, subject, attachments, and sent-mail examples. Do not
-  read other messages to enrich autocomplete context, even with voice matching on.
+- The reply enable screen discloses the current thread, any existing authored reply text, voice profile,
+  and optional style examples sent on each invocation. The autocomplete opt-in separately discloses that **unsent draft text leaves the
+  machine while typing** when using a cloud endpoint. Its payload contains a bounded plain-text excerpt
+  of the authored body around the caret (at most 2,000 characters before and 500 after), the current
+  subject, selected tone, and standing rules. For replies, it also contains the current cached thread
+  through the message being answered. Exclude quoted content embedded in the draft, signatures,
+  recipients, attachments, and unrelated sent-mail style examples. Do not fetch mail solely to enrich
+  autocomplete context.
 - Debounce autocomplete by 300ms; allow at most one autocomplete request in flight app-wide, no more than
-  one start per second and 20 per rolling minute. Skip requests when limited; do not queue or retry them
-  automatically. Cancel and discard results more than 1,500ms after dispatch. Slow, offline, or failed
-  providers leave typing usable without recurring error toasts. Settings still expose configuration errors.
+  one start per second and 20 per rolling minute. When typing replaces a canceled request inside the
+  one-second cooldown, coalesce the latest eligible request until the cooldown expires; the rolling-minute
+  cap and provider failures still skip without automatic retries. Cancel and discard results more than five
+  seconds after dispatch. Slow, offline, or failed providers leave typing usable without recurring error
+  toasts. Settings still expose configuration errors. Anthropic autocomplete requests explicitly disable
+  model thinking for latency; reply and refine requests retain the provider default.
 - Disabling autocomplete cancels its timers and requests and clears previews without disabling explicit
   reply drafting. The master AI switch stops both features; removing the key also disables both. Cancel
   in-flight work and ignore late responses. Content already sent to a provider cannot be recalled.
@@ -673,8 +689,9 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - UI never blocks during either feature; composer keystroke and suggestion acceptance meet §7. `Esc`
   cancels reply streaming, retaining partial text; for autocomplete it dismisses the preview first.
 - With voice matching off, reply requests contain no additional sent-mail style examples. Autocomplete
-  contains only the bounded authored-body excerpt regardless of that toggle.
-- A generated reply and an accepted suggestion are each undoable as one edit. No unaccepted suggestion
+  contains only its bounded authored-body excerpt and current reply thread regardless of that toggle.
+- A generated reply and an accepted suggestion are each undoable as one edit. When generation continues
+  existing authored text, one undo removes only the AI continuation and preserves that text. No unaccepted suggestion
   appears in a saved, reopened, mirrored, or sent draft.
 - Fake-provider tests prove debounce, request caps, timeout, IME suppression, keyboard precedence, and
   rejection of stale results after editing, switching drafts/accounts, closing, sending, or disabling.
@@ -829,8 +846,10 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
 | `Mod+Shift+K` | Insert link (`Mod+K` stays reserved for the palette everywhere) |
 | `Mod+;` | Insert snippet |
 | `Mod+J` | Draft AI reply (reply/reply-all only, F17) |
+| `Mod+Z` | Undo body text; one press removes a whole AI draft or accepted autocomplete, or restores a `;trigger` after snippet expansion |
+| `Mod+A` | Select only the authored body, excluding the Gmail signature, Attn footer, and quoted history |
 | `Tab` | Accept a visible autocomplete suggestion in the focused body; otherwise normal focus behavior |
-| `Esc` | Dismiss an autocomplete suggestion or cancel AI streaming first; otherwise close (draft saved) |
+| `Esc` | Dismiss autocomplete, cancel AI streaming, or close Refine first; otherwise close (draft saved) |
 
 ---
 
@@ -929,11 +948,13 @@ account-menu statuses current. Regression coverage and implementation notes are 
 Each milestone ends in a usable app; the daily-drivable bar is M2.
 
 **Status (2026-08-28):** all planned M1 feature capabilities are implemented. The engineering exit audit and real-Gmail airplane-mode drain are complete; only the real-OS notification click-through smoke in docs/M1-PLAN.md remains. M2's feature work has shipped: the renderer decomposition (#31), main-process seams (#30), mail-out test scaffolding (#37), sent-mail/contact foundation (#32), full-window composer with crash-safe drafts (#38), MIME builder and reply semantics (#39), on-demand body hydration (#41), drafts as first-class objects with reply/forward entry points, rich content with the zero-loss invariant, and two-way Gmail Drafts sync (#43, #44), outbox send and undo send (#45), self-healing failed actions (#47), outgoing attachments (#48), inline thread drafting (#50), the lifetime header sweep plus the full bounded stage pipeline pulled forward from M3 (#51), and the composer dogfood fixes (#52). T21's poll-cycle label-catalog refresh is implemented with authoritative replacement and change-only UI invalidation. T20's engineering pass ships 10k list windowing and regression budgets; M3 navigation now feeds those lists with 100-row keyset pages instead of transferring the full profile at once. Composer profiling, the weighted Gmail quota limiter, and first-readable/stage/rate/quota-wait telemetry remain recorded in the [T20 evidence](T20-EVIDENCE.md). Still open before M2 sign-off are the real-Gmail bootstrap/exactly-once/hydration observations, real-OS notification click, and the one-week sole-client dogfood run recorded in docs/M2-PLAN.md. Multi-account was pulled into v1 scope on 2026-08-28 (F18, §9 #21) as milestone M5; its switch-account slice (A1–A3: add account, switcher via menu/palette/`Mod+1..9`, per-account sync sessions with background polling for inactive accounts, per-account sign-out) landed the same day, and the remaining feature work (A2 liveness proofs and indexing-slot preemption, A3 per-account view restore and menu status, A4 cross-account notifications and focus routing, A5 per-account composer/outbox/reconnect correctness, A6 remove account with Delete/Keep local data, A7's executable isolation sweeps and the two-account perf profile) landed 2026-08-30 — docs/M5-PLAN.md records each task's as-shipped shape; only A7's real-Gmail two-account dogfood observation remains before M5 sign-off.
+
+**Status (2026-08-31, M4):** M4's feature work has shipped on the M4 branch: the settings surface with the keyboard cheat sheet and the notification-focus fix (T32), the per-account historical sync limit (T32A), the optional "Sent with Attn" footer (T32B), remote-image control with the CSP-layered request filter (T33), snippets (T34), follow-up reminders with durable send ordering on schema v25 (T35), the AI writing foundation with safeStorage key custody and the fake-provider seam (T36), Mod+J reply drafting with streaming, one-step undo, and inline refine (T37), separately consented inline autocomplete with its bounded authored-body excerpt and main-process rate limits (T37A), the Windows numeric badge overlay (T38), and T39's credential-independent auto-update half: the schema-gated update state machine, the personal/release distribution metadata, the construction gate that keeps personal, dev, and seeded builds from ever touching a feed, and `package:verify --release`. docs/M4-PLAN.md carries each task's as-shipped status and [T40-EVIDENCE.md](T40-EVIDENCE.md) the exit checklist: still open for v1 sign-off are the operator-credentialed signing/notarization and release-feed decision, the real-OS and real-Gmail manual runs (M1/M2's inherited items included), real-provider AI observations, on-hardware perf paint metrics (KNOWN-ISSUES GAP-7), and M5's A7 dogfood observation.
 - **M0 — Walking skeleton.** Electron shell (both OSes), Google OAuth, metadata backfill into SQLite, read-only list + reading view, `J/K/Enter/Esc`. *Proves: auth, sync, and the 60fps list.*
 - **M1 — Triage core.** First items: **apply the Dispatch direction** (D6 — graphite/amber tokens, `attn:` wordmark, layout per D6, split strip, account menu) and **sanitized HTML mail rendering** (allowlist sanitizer + sandboxed iframe per §6 — triaging means reading real mail; M0 shipped plain-text bodies only). The reading work adds recipients, attachments, quote/signature collapse, and—after M1 dogfood—the full-window conversation that supersedes the interim split. Then: done/snooze/trash/star/unread/label, selection + bulk, auto-advance, `Z` undo, durable action queue + offline replay, snooze scheduler, tray/background mode + launch at login, basic notifications. *Proves: the core loop and offline correctness.*
 - **M2 — Mail out.** Composer (rich text, attachments, recipient autocomplete), reply/all/forward, crash-safe drafts, send + undo send, exactly-once outbox. **← daily-drivable.**
 - **M3 — Find & focus.** Opens with the sync restructure planned as S1–S4 in docs/M3-PLAN.md. The all-mail and spam-trash backfill stages and per-label membership reconciliation (S3 and half of S4) shipped early, in M2's #51. Per-message label storage followed in S2, the utility-process move landed in S1, and S4 completed expired-history tombstoning. The sync restructure is done. T22 shipped local system mailbox navigation, unconditional list windowing, per-view selection/scroll restore, and trashed-message reader markers. Its 2026-08-24 navigation follow-up replaced the shifting header menu with a persistent mailbox/label sidebar and added local user-label list views. T23 shipped the FTS5 message index with its transactional write paths and resumable backfill cursor, T24 shipped local search UI and operators over that index, T25 shipped Enter-submitted Gmail search with durable on-demand thread caching, T26 shipped the context-filtered command palette and `N`/`P`/`O` reader keys, T27 shipped configurable split Inbox views and per-split notifications, T28 shipped the contextual chord guide with one 3-second dispatch window, T29 shipped the local rotating inbox-zero reward guarded by completed Inbox body and split-metadata checkpoints plus recovery state, T30 shipped the built-in themes, and T31 shipped one-shot Move with mailbox, split, bulk, and snooze-aware undo behavior. The planned M3 feature tasks are complete.
-- **M4 — Power finish.** Snippets, follow-up reminders, the optional "Sent with Attn" signature footer (F6), AI reply drafting and inline autocomplete (F17), settings surface, badge polish, auto-update + signing/notarization (personal-build packaging shipped early, at M1 exit — §6 Packaging). Task plan: docs/M4-PLAN.md.
+- **M4 — Power finish.** Snippets, follow-up reminders, the optional "Sent with Attn" signature footer (F6), AI reply drafting and inline autocomplete (F17), settings surface, badge polish, auto-update + signing/notarization (personal-build packaging shipped early, at M1 exit — §6 Packaging). Task plan: docs/M4-PLAN.md. *Feature work shipped 2026-08-31; the operator-credentialed signing/release half of T39 and T40's manual sign-off evidence remain open (see the M4 status above).*
 - **M5 — Multi-account (F18, added 2026-08-28, §9 #21).** Move the auth/token layer, sync sessions, executors, notifications, and the renderer shell from "the account" to "the active account among N" per docs/M5-PLAN.md: add/switch/reorder/remove accounts, background liveness for inactive accounts, cross-account notification routing, and per-account isolation guarantees. Its tasks touch none of M4's feature surfaces, so the two milestones may interleave, but v1 does not ship before both exit. *Proves: D4's account-keyed store was real.*
 
 **Post-v1 sequence:** v1.1 — global-hotkey quick panel (quick compose + quick search) and custom themes (user token sets over D6's semantic names); multi-account moved into v1 (§9 #21). v1.5 — companion Apps Script: send later + exact-time snooze return (F7). v2 — hosted backend: read statuses, true multi-device state, unified inbox candidate.

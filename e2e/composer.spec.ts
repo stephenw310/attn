@@ -343,7 +343,6 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
       line(`Made by ${link('Northstar', 'https://northstar.test/')} | Planning software for busy teams`)
     ].join('')}</div>`
   )
-  await page.emulateMedia({ colorScheme: 'light' })
   const composer = new ComposerPage(page)
   await composer.openNew()
   await composer.expectSignatureCollapsed()
@@ -355,6 +354,29 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
     'font-family',
     'arial, sans-serif'
   )
+  await expect(composer.signature.getByText('Alex Rivera', { exact: true })).toHaveCSS(
+    'color',
+    'rgb(157, 162, 172)'
+  )
+  const signatureLink = composer.signature.getByRole('link', { name: 'northstar.test', exact: true })
+  await expect(signatureLink).toHaveCSS('color', 'rgb(255, 178, 36)')
+  await page.evaluate(() => {
+    window.open = (url, target) => {
+      document.body.dataset.openedSignatureLink = String(url)
+      document.body.dataset.openedSignatureLinkTarget = String(target)
+      return null
+    }
+  })
+  await signatureLink.click()
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        target: document.body.dataset.openedSignatureLinkTarget,
+        url: document.body.dataset.openedSignatureLink
+      }))
+    )
+    .toEqual({ target: '_blank', url: 'https://northstar.test/' })
+  await expect(composer.root).toBeVisible()
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
   const path = join(dir, 'composer-signature-font.png')
@@ -376,6 +398,7 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
   const saved = await page.evaluate(async () => (await window.attn.draft.list())[0])
   expect(saved?.bodyText).toContain('Alex Rivera edited')
   expect(saved?.bodyHtml.match(/<font face="arial, sans-serif"/g)).toHaveLength(5)
+  expect(saved?.bodyHtml).toContain('color: rgb(34, 34, 34)')
   expect(saved?.bodyHtml).toContain('https://northstar.test/team')
   expect(saved?.bodyHtml).not.toContain('iframe')
 })
@@ -638,7 +661,7 @@ test('spools picked and dropped attachments through queue and relaunch, then cle
   await setAttachmentPickerFiles(app, [source])
   let composer = new ComposerPage(page)
   await composer.openNew()
-  await composer.pickAttachments()
+  await page.keyboard.press('ControlOrMeta+Shift+A')
 
   const chip = composer.attachmentChips
   await expect(chip).toContainText('t17-attachment.txt')
@@ -693,26 +716,39 @@ test('rejects an oversized picked attachment without creating a chip', async ({ 
 
 test('renders coarse attachment upload progress in the global toast', async ({ app, page }) => {
   await page.getByTestId('thread-list').waitFor()
-  await app.evaluate(
-    ({ BrowserWindow }, payload) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        window.webContents.send(payload.channel, payload.progress)
+  const sendProgress = (): Promise<void> =>
+    app.evaluate(
+      ({ BrowserWindow }, payload) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send(payload.channel, payload.progress)
+        }
+      },
+      {
+        channel: IPC_CHANNELS.outboxProgress,
+        progress: {
+          id: 'sending-attachment',
+          completedBytes: 5,
+          totalBytes: 10,
+          completedAttachments: 1,
+          totalAttachments: 2
+        }
       }
-    },
-    {
-      channel: IPC_CHANNELS.outboxProgress,
-      progress: {
-        id: 'sending-attachment',
-        completedBytes: 5,
-        totalBytes: 10,
-        completedAttachments: 1,
-        totalAttachments: 2
-      }
-    }
-  )
+    )
 
-  await expect(page.getByTestId('toast')).toContainText('Sending attachments… 1 of 2')
-  await expect(page.getByTestId('outbox-progress')).toHaveAttribute('data-completed-attachments', '1')
+  // A real upload re-broadcasts progress continuously; this synthetic single
+  // push can land in a renderer re-subscribe gap while splits settle, or be
+  // wiped by the boot-time account remount right after rendering. Both
+  // assertions ride the same retry so a push must survive into a settled
+  // tree before the test moves on.
+  await expect(async () => {
+    await sendProgress()
+    await expect(page.getByTestId('toast')).toContainText('Sending attachments… 1 of 2', {
+      timeout: 1_000
+    })
+    await expect(page.getByTestId('outbox-progress')).toHaveAttribute('data-completed-attachments', '1', {
+      timeout: 500
+    })
+  }).toPass({ timeout: 15_000 })
   await app.evaluate(
     ({ BrowserWindow }, payload) => {
       for (const window of BrowserWindow.getAllWindows()) {
@@ -853,9 +889,29 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(showCopies).toBeVisible()
   await expect(showCopies).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByTestId('composer-discard')).toHaveAccessibleName('Discard draft')
+  await expect(page.getByTestId('composer-discard')).toHaveAttribute('title', /Discard draft \(.+⇧D\)/)
+  await expect(page.getByTestId('composer-attach')).toHaveAttribute('title', /Attach files \(.+⇧A\)/)
 
   const toInput = composer.recipientField().locator('input')
   await expect.poll(() => toInput.evaluate((input) => document.activeElement === input)).toBe(true)
+
+  const formattingToolbar = page.getByRole('toolbar', { name: 'Formatting toolbar' })
+  await expect(formattingToolbar).toBeVisible()
+  await expect
+    .poll(() => formattingToolbar.evaluate((toolbar) => getComputedStyle(toolbar).flexWrap))
+    .toBe('nowrap')
+  await page.getByTestId('composer-format-more').click()
+  await expect(page.getByTestId('composer-format-menu')).toBeVisible()
+  await expect(page.getByTestId('composer-format-menu')).toContainText('Strikethrough')
+  await expect(page.getByTestId('composer-format-menu')).toContainText('Bulleted list')
+  const formattingArtifactDirectory = join(__dirname, '.artifacts')
+  mkdirSync(formattingArtifactDirectory, { recursive: true })
+  const formattingPath = join(formattingArtifactDirectory, 'composer-formatting.png')
+  await page.screenshot({ path: formattingPath })
+  await testInfo.attach('composer formatting', { path: formattingPath, contentType: 'image/png' })
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer-format-menu')).toHaveCount(0)
+  await expect(composer.root).toBeVisible()
 
   await toInput.fill('may')
   await expect(page.getByTestId('autocomplete-option').first()).toContainText('Maya Lin')
@@ -935,7 +991,29 @@ test('adds links from the toolbar and the registered composer shortcut', async (
   await page.getByTestId('composer-link').click()
   await page.getByTestId('composer-link-url').fill('attn.test')
   await page.getByTestId('composer-link-url').press('Enter')
-  await expect(composer.editor.locator('a').first()).toHaveAttribute('href', 'https://attn.test')
+  const link = composer.editor.locator('a').first()
+  await expect(link).toHaveAttribute('href', 'https://attn.test')
+
+  // Applying a link leaves its text selected so it can still be formatted.
+  // Collapse that selection before exercising an ordinary link click.
+  await page.keyboard.press('ArrowRight')
+  await page.evaluate(() => {
+    window.open = (url, target) => {
+      document.body.dataset.openedComposerLink = String(url)
+      document.body.dataset.openedComposerLinkTarget = String(target)
+      return null
+    }
+  })
+  await link.click()
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        target: document.body.dataset.openedComposerLinkTarget,
+        url: document.body.dataset.openedComposerLink
+      }))
+    )
+    .toEqual({ target: '_blank', url: 'https://attn.test' })
+  await expect(composer.root).toBeVisible()
 
   await page.keyboard.press('ControlOrMeta+Shift+k')
   await expect(page.getByTestId('composer-link-popover')).toBeVisible()
@@ -1226,6 +1304,46 @@ test('uses one control for the signature and quote, then discards an untouched r
   await expect(design.getByTestId('chip-draft')).toBeVisible()
 })
 
+test('body undo and select-all stay inside authored text above the signature and quote', async ({
+  app,
+  page
+}) => {
+  await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
+  const composer = new ComposerPage(page)
+  await page.getByTestId('thread-row').filter({ hasText: 'Design notes' }).click()
+  await composer.openReply()
+  await composer.editor.click({ position: { x: 42, y: 18 } })
+
+  await page.keyboard.type('Undo this whole edit')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(composer.editor).not.toContainText('Undo this whole edit')
+
+  await page.keyboard.type('Select only this new reply')
+  await expect(page.getByTestId('composer-attn-signature')).not.toContainText('Select only this new reply')
+  await expect(composer.editor.locator(':scope > *').first()).toContainText('Select only this new reply')
+  await page.keyboard.press('ControlOrMeta+a')
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '')
+  expect(selected).toContain('Select only this new reply')
+  expect(selected).not.toContain('Chao Wu')
+  expect(selected).not.toContain('Sent with Attn')
+  expect(selected).not.toContain('conversation overlay direction')
+
+  await page.keyboard.press('Backspace')
+  await expect(composer.editor).not.toContainText('Select only this new reply')
+  await expect(composer.signature).toContainText('Chao Wu')
+  await expect(page.getByTestId('composer-attn-signature')).toContainText('Sent with Attn')
+
+  // Deleting the whole authored selection must leave an editable paragraph
+  // before the protected signature instead of parking the caret inside it.
+  await page.keyboard.type('Starting this reply over')
+  await expect(composer.editor).toContainText('Starting this reply over')
+  await expect(composer.signature).not.toContainText('Starting this reply over')
+  await expect(composer.editor.locator(':scope > *').first()).toContainText('Starting this reply over')
+
+  await composer.revealSignature()
+  await expect(composer.quote).toBeVisible()
+})
+
 test('keeps the signature discardable when a reply becomes reply-all', async ({ app, page }) => {
   await setSendAsSignature(app, '<div>Best,</div><div>Chao Wu</div>')
   const composer = new ComposerPage(page)
@@ -1490,7 +1608,8 @@ test('preserves rich and opaque draft regions while editing elsewhere', async ({
         inReplyTo: null,
         references: [],
         quoteHtml: '',
-        quoteText: ''
+        quoteText: '',
+        followUpAt: null
       } as const)
     })
     await window.attn.draft.close(id)
@@ -1535,6 +1654,26 @@ test('preserves unsupported foreign HTML pasted into a new draft', async ({ page
     return draft?.bodyHtml ?? ''
   })
   expect(savedHtml).toContain(opaque)
+})
+
+test('a preserved region in a reply registers its preview frame under the source message', async ({
+  page
+}) => {
+  // T33 (PR #101 review): the opaque preview renders the same untrusted mail
+  // HTML as the quoted history, so a reply's preserved content joins main's
+  // remote-image filter under the replied-to message — the mounted frame
+  // carries its registration nonce as its name, which is what per-sender
+  // exceptions key on. A draft with no source message stays unnamed and
+  // fails closed (asserted in the Gmail-import test below).
+  await page.getByTestId('thread-row').filter({ hasText: 'Design notes' }).click()
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await composer.editor.click()
+  await pasteHtml(composer, '<aside data-layout="callout"><mark>Preserved reply region</mark></aside>')
+  const frame = composer.editor.locator('iframe[title="Preserved draft content"]')
+  await expect(frame).toHaveCount(1)
+  await expect(frame).toHaveAttribute('name', /^[0-9a-f-]{36}$/)
 })
 
 test('spools data images pasted through HTML and saves them as CID parts', async ({ page }) => {
@@ -1785,6 +1924,12 @@ test('hydrates bracketed percent-encoded CID images inside preserved HTML', asyn
       .frameLocator('iframe[title="Preserved draft content"]')
       .locator('img[alt="Opaque Gmail inline image"]')
   ).toHaveAttribute('src', /^data:image\/png;base64,/)
+  // No source message on a standalone Gmail draft: the preview frame stays
+  // unnamed and fails closed while blocking is on (T33, PR #101 review).
+  await expect(composer.editor.locator('iframe[title="Preserved draft content"]')).not.toHaveAttribute(
+    'name',
+    /.+/
+  )
 })
 
 test('opens and edits a remote plain-text-only draft without losing its body', async ({ app, page }) => {
@@ -1874,7 +2019,8 @@ test('keeps the selected draft stable when a refresh reorders the list', async (
         inReplyTo: null,
         references: [],
         quoteHtml: '',
-        quoteText: ''
+        quoteText: '',
+        followUpAt: null
       }
     }
   })
@@ -1899,7 +2045,8 @@ test('keeps the selected draft stable when a refresh reorders the list', async (
       inReplyTo: null,
       references: [],
       quoteHtml: '',
-      quoteText: ''
+      quoteText: '',
+      followUpAt: null
     }
     const { id } = await window.attn.draft.save(input)
     await window.attn.draft.close(id)
@@ -2032,7 +2179,8 @@ test('persists content supplied while creating an id-less draft', async ({ page 
       inReplyTo: '<parent@example.com>',
       references: ['<root@example.com>'],
       quoteHtml: '',
-      quoteText: ''
+      quoteText: '',
+      followUpAt: null
     })
     return window.attn.draft.get(id)
   })
@@ -2067,7 +2215,8 @@ test('lists every distinct draft after relaunch in newest-first order', async ({
         inReplyTo: null,
         references: [],
         quoteHtml: '',
-        quoteText: ''
+        quoteText: '',
+        followUpAt: null
       })
       await window.attn.draft.close(id)
       await new Promise((resolve) => window.setTimeout(resolve, 2))
@@ -2227,7 +2376,8 @@ test('keeps the caret in a recipient field while a preserved region sits in the 
       inReplyTo: null,
       references: [],
       quoteHtml: '',
-      quoteText: ''
+      quoteText: '',
+      followUpAt: null
     })
   })
 

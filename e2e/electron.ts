@@ -80,6 +80,11 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       page.on('console', (msg) => {
         if (msg.type() !== 'error') return
         if (isFixtureHostUnreachable(msg.location().url)) return
+        // A remote image cancelled by the T33 request filter logs
+        // ERR_BLOCKED_BY_CLIENT from inside the mail frame. That is the
+        // feature enforcing the block, not the app misbehaving; every other
+        // failed load still fails the test.
+        if (msg.text().includes('ERR_BLOCKED_BY_CLIENT')) return
         rendererErrors.push(msg.text())
       })
       page.on('pageerror', (err) => rendererErrors.push(String(err)))

@@ -11,3 +11,4 @@ e2e/.artifacts/
 
 # Per-user Google OAuth client (see README.md) — never commit
 oauth.config.json
+dist-resources/

@@ -38,7 +38,7 @@ function isPaletteShortcut(event: KeyboardEvent): boolean {
   )
 }
 
-function shortcutLabel(shortcut: string): string {
+export function shortcutLabel(shortcut: string): string {
   return shortcut
     .replace(/Mod/gi, modKeyLabel())
     .split(' ')

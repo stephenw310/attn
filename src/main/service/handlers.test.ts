@@ -21,6 +21,7 @@ function handlerContext(
     db,
     currentAccountId: () => ACCOUNT,
     accountStatuses: () => [],
+    publishRemoteImagePolicy: () => {},
     mailboxCounts: (accountId) => countSystemMailboxes(db, accountId),
     splitState: (accountId) => getSplitState(db, accountId),
     makeClient: () => null,
@@ -266,6 +267,66 @@ describe('search coverage', () => {
         headersComplete: true,
         headersCapped: false
       })
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+})
+
+describe('inbox thread pages', () => {
+  it('pages every returned follow-up out across pages instead of capping at page one', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const insertThread = db.prepare(
+      `INSERT INTO threads
+       (account_id, id, subject, last_msg_at, from_display, is_unread, is_starred, has_attachment)
+       VALUES (?, ?, ?, ?, 'Ana', 0, 0, 0)`
+    )
+    const insertLabel = db.prepare(
+      "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, 'INBOX')"
+    )
+    const insertReminder = db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+       VALUES (?, ?, 'follow_up', ?, 'returned')`
+    )
+    const followUpIds: string[] = []
+    for (let index = 0; index < 102; index++) {
+      const id = `follow-${String(index).padStart(3, '0')}`
+      followUpIds.push(id)
+      insertThread.run(ACCOUNT, id, id, 1_000 + index)
+      insertLabel.run(ACCOUNT, id)
+      insertReminder.run(ACCOUNT, id, 900_000 - index)
+    }
+    insertThread.run(ACCOUNT, 'plain-newer', 'Plain newer', 2_000_000)
+    insertLabel.run(ACCOUNT, 'plain-newer')
+    insertThread.run(ACCOUNT, 'plain-older', 'Plain older', 1_000_000)
+    insertLabel.run(ACCOUNT, 'plain-older')
+    const handlers = createServiceHandlers(handlerContext(db, emptyProvider))
+
+    try {
+      // 102 returned follow-ups: page one is all tier and continues INSIDE the
+      // tier (PR #101 review: the wholesale prepend returned 100 rows and then
+      // an empty page two, silently hiding the overflow).
+      const first = await handlers.invoke(IPC_CHANNELS.mailListThreads, [{ view: 'inbox' }])
+      expect(first.rows).toHaveLength(100)
+      expect(first.rows.every((row) => row.followUpReturned === true)).toBe(true)
+      expect(first.nextCursor).toMatchObject({ tier: 'followUp' })
+
+      const second = await handlers.invoke(IPC_CHANNELS.mailListThreads, [
+        { view: 'inbox', cursor: first.nextCursor }
+      ])
+      expect(second.rows.map((row) => row.id)).toEqual([
+        followUpIds[100],
+        followUpIds[101],
+        'plain-newer',
+        'plain-older'
+      ])
+      expect(second.nextCursor).toBeNull()
+
+      const seen = [...first.rows, ...second.rows].map((row) => row.id)
+      expect(new Set(seen).size).toBe(seen.length)
+      expect(seen).toHaveLength(104)
     } finally {
       handlers.stop()
       db.close()

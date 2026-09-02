@@ -430,6 +430,18 @@
   margin-block-start: 1.25rem;
 }
 
+/* Gmail signatures commonly arrive with an explicit near-black foreground.
+   Keep that authored HTML intact for send/serialization, but make non-link
+   signature text follow the active dark palette while it is edited. */
+:root[data-theme-appearance="dark"]
+[data-testid="composer-gmail-signature"]:not([data-attn-signature-collapsed="true"]),
+:root[data-theme-appearance="dark"]
+  [data-testid="composer-gmail-signature"]:not([data-attn-signature-collapsed="true"])
+  :where(:not(a, a *)) {
+  /* biome-ignore lint/complexity/noImportantStyles: sender inline colors require a display-only override */
+  color: var(--color-ink-dim) !important;
+}
+
 .gmail_signature[data-attn-signature-collapsed="true"] {
   display: block;
   width: fit-content;

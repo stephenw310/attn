@@ -7,7 +7,96 @@ import {
   type SerializedLexicalNode,
   type Spread
 } from 'lexical'
+import { useContext, useEffect, useState } from 'react'
+import { isRemoteMailUrl } from '../../mailRemoteContent'
+import { DraftSourceMessageIdContext } from '../DraftContentContext'
 import { sanitizeComposerImageSource, sanitizeComposerStyle } from '../sanitize'
+
+const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+
+/**
+ * T33 (PR #101 review): the editor renders in the TOP frame, which main's
+ * mail-frame request filter deliberately exempts — so an imported draft's
+ * remote image would fire an unfiltered tracking request even with blocking
+ * on. The decision therefore happens here, before any src is set: a remote
+ * source renders only once policy allows it — through the draft's source
+ * message (so a per-sender exception covers a reply's imported images,
+ * exactly like the quoted history) or, with no source message, through the
+ * global toggle alone. While blocked or still resolving, a same-size
+ * placeholder holds the layout and the draft's own content is untouched:
+ * save, mirror, and send keep the original source.
+ */
+function ComposerImage({
+  src,
+  altText,
+  width,
+  height,
+  style
+}: {
+  src: string
+  altText: string
+  width: number | null
+  height: number | null
+  style: string
+}): React.JSX.Element {
+  const sourceMessageId = useContext(DraftSourceMessageIdContext)
+  const remote = isRemoteMailUrl(src)
+  const [allowed, setAllowed] = useState(!remote)
+  const [policyEpoch, setPolicyEpoch] = useState(0)
+  useEffect(() => {
+    if (!remote) return
+    const bridge = window.attn
+    if (!bridge) return
+    return bridge.mail.onRemoteImagesChanged(() => setPolicyEpoch((epoch) => epoch + 1))
+  }, [remote])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: policyEpoch deliberately re-resolves so policy changes reach a mounted image
+  useEffect(() => {
+    if (!remote) return
+    const bridge = window.attn
+    setAllowed(false)
+    if (!bridge) return
+    let stale = false
+    if (sourceMessageId !== null) {
+      const nonce = crypto.randomUUID()
+      bridge.mail
+        .registerMessageFrame(nonce, sourceMessageId, false)
+        .then(({ imagesAllowed }) => {
+          if (!stale) setAllowed(imagesAllowed)
+        })
+        .catch(() => {})
+      return () => {
+        stale = true
+        void bridge.mail.unregisterMessageFrame(nonce).catch(() => {})
+      }
+    }
+    void bridge.settings
+      .getAll()
+      .then((settings) => {
+        if (!stale) setAllowed(!settings.remoteImagesBlocked)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [remote, sourceMessageId, policyEpoch])
+
+  return (
+    <img
+      src={allowed ? src : TRANSPARENT_IMAGE}
+      data-remote-blocked={remote && !allowed ? 'true' : undefined}
+      alt={altText}
+      title={remote && !allowed ? 'Remote image blocked' : undefined}
+      width={width ?? undefined}
+      height={height ?? undefined}
+      style={style ? undefined : { maxWidth: '100%', height: 'auto' }}
+      className="max-w-full rounded-sm"
+      referrerPolicy="no-referrer"
+      ref={(element) => {
+        if (element && style) element.setAttribute('style', style)
+      }}
+    />
+  )
+}
 
 export type SerializedImageNode = Spread<
   {
@@ -73,7 +162,9 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
       img: () => ({
         conversion: (element) => {
           const image = element as HTMLImageElement
-          const source = image.getAttribute('src') ?? ''
+          // A copied export carries its remote source in the data attribute
+          // (the visible src is the placeholder); prefer it on re-import.
+          const source = image.getAttribute('data-attn-remote-src') ?? image.getAttribute('src') ?? ''
           const contentId =
             image.getAttribute('data-attn-cid') ??
             (source.toLowerCase().startsWith('cid:') ? source.slice(4) : '')
@@ -127,9 +218,13 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
   exportDOM(): DOMExportOutput {
     const image = document.createElement('img')
     // Keep the renderable source while Lexical builds its temporary export DOM.
-    // Writing a cid: URL here makes Chromium try to load it and emit a CSP error;
-    // serialization swaps this source to cid: after the DOM has become a string.
-    image.setAttribute('src', this.__src)
+    // Writing a cid: URL here makes Chromium try to load it and emit a CSP
+    // error, and a REMOTE URL on this live-document element would fire a real
+    // request on every serialization, before any policy ran (PR #101 review).
+    // Both ride data attributes and swap in after the DOM became a string.
+    const remote = isRemoteMailUrl(this.__src)
+    image.setAttribute('src', remote ? TRANSPARENT_IMAGE : this.__src)
+    if (remote) image.setAttribute('data-attn-remote-src', this.__src)
     if (this.__contentId) image.setAttribute('data-attn-cid', this.__contentId)
     if (this.__altText) image.setAttribute('alt', this.__altText)
     if (this.__width) image.setAttribute('width', String(this.__width))
@@ -172,17 +267,12 @@ export class ImageNode extends DecoratorNode<React.JSX.Element> {
 
   decorate(_editor: unknown, _config: EditorConfig): React.JSX.Element {
     return (
-      <img
+      <ComposerImage
         src={this.__src}
-        alt={this.__altText}
-        width={this.__width ?? undefined}
-        height={this.__height ?? undefined}
-        style={this.__style ? undefined : { maxWidth: '100%', height: 'auto' }}
-        className="max-w-full rounded-sm"
-        referrerPolicy="no-referrer"
-        ref={(element) => {
-          if (element && this.__style) element.setAttribute('style', this.__style)
-        }}
+        altText={this.__altText}
+        width={this.__width}
+        height={this.__height}
+        style={this.__style}
       />
     )
   }

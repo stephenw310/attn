@@ -113,6 +113,51 @@ describe('thread list queries', () => {
     ).toEqual(['older'])
   })
 
+  it('pages the returned follow-up tier by its own keyset before the dated flow', () => {
+    // Three returned follow-ups, two tied on due_at, on top of the fixture's
+    // two dated inbox threads. The tier must page out completely — including
+    // across a boundary inside it — before the dated flow starts from its
+    // beginning (PR #101 review: the prepend-once shape lost the overflow).
+    const insertThread = db.prepare(
+      `INSERT INTO threads
+       (account_id, id, subject, last_msg_at, from_display, is_unread, is_starred, has_attachment)
+       VALUES ('account', ?, ?, ?, 'Ana', 0, 0, 0)`
+    )
+    const insertLabel = db.prepare(
+      "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES ('account', ?, 'INBOX')"
+    )
+    const insertReminder = db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+       VALUES ('account', ?, 'follow_up', ?, 'returned')`
+    )
+    for (const [id, dueAt] of [
+      ['follow-a', 900],
+      ['follow-b', 500],
+      ['follow-c', 500]
+    ] as const) {
+      insertThread.run(id, id, 250)
+      insertLabel.run(id)
+      insertReminder.run(id, dueAt)
+    }
+
+    const first = listInboxThreads(db, 'account', 2)
+    expect(first.map((thread) => thread.id)).toEqual(['follow-a', 'follow-b'])
+    expect(first.map((thread) => thread.followUpTierAt)).toEqual([900, 500])
+
+    // A boundary inside the tier continues by (due_at, id) — the tie between
+    // follow-b and follow-c must not skip or repeat a row — and the tier
+    // hands over to the dated flow inside the same page.
+    const second = listInboxThreads(db, 'account', 2, { at: 500, id: 'follow-b', tier: 'followUp' })
+    expect(second.map((thread) => thread.id)).toEqual(['follow-c', 'newest'])
+    expect(second[0].followUpTierAt).toBe(500)
+    expect(second[1].followUpTierAt).toBeUndefined()
+
+    // The dated flow then pages normally, still excluding every tier thread.
+    expect(listInboxThreads(db, 'account', 2, { at: 300, id: 'newest' }).map((thread) => thread.id)).toEqual([
+      'older'
+    ])
+  })
+
   it.each([undefined, 'fallback:other'])(
     'pages across positive, null, zero, and negative dates in %s',
     (splitId) => {
@@ -172,6 +217,19 @@ describe('thread list queries', () => {
       spam: 0,
       trash: 0
     })
+  })
+
+  it('counts follow-up-only threads in Snoozed without double-counting a thread holding both kinds', () => {
+    // The Reminders list shows one row per thread with a pending reminder of
+    // either kind; the sidebar count must match it (PR #101 review).
+    const insertReminder = db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+       VALUES ('account', ?, 'follow_up', ?, 'pending')`
+    )
+    insertReminder.run('older', 900)
+    insertReminder.run('snoozed', 950)
+    expect(listSnoozedThreads(db, 'account')).toHaveLength(2)
+    expect(countSystemMailboxes(db, 'account').snoozed).toBe(2)
   })
 
   it('keeps derived mailbox membership identical to the label rules it replaces', async () => {

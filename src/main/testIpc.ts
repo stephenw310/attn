@@ -2,11 +2,26 @@ import { ipcMain } from 'electron'
 import { errorMessage } from '../shared/error'
 import { nonEmptyString } from '../shared/guards'
 import { TEST_CHANNELS } from '../shared/ipc'
+import type { UpdatePhase, UpdateState } from '../shared/update'
+import type { AiManager, FakeAiScript } from './ai/manager'
 import type { ServiceSupervisor } from './service/supervisor'
 
 export interface TestSeamDeps {
   service: () => ServiceSupervisor | null
+  ai: () => AiManager | null
   focusInboxThread: (threadId: string | null, accountId?: string) => void
+  /** T39: makes update:getState answer a fixed state (null clears the override). */
+  setUpdateStateOverride: (state: UpdateState | null) => void
+}
+
+const UPDATE_PHASES: readonly UpdatePhase[] = ['idle', 'checking', 'downloading', 'ready']
+
+function parseUpdateState(value: unknown): UpdateState | null {
+  if (!value || typeof value !== 'object') return null
+  const state = value as { phase?: unknown; readyVersion?: unknown }
+  if (!UPDATE_PHASES.includes(state.phase as UpdatePhase)) return null
+  if (state.readyVersion !== null && typeof state.readyVersion !== 'string') return null
+  return { phase: state.phase as UpdatePhase, readyVersion: state.readyVersion as string | null }
 }
 
 export class TestSeams {
@@ -75,6 +90,13 @@ export class TestSeams {
         })
       })
     }
+    for (const channel of [TEST_CHANNELS.installSendProvider, TEST_CHANNELS.runHistoryCycle]) {
+      ipcMain.on(channel, (_event, request: unknown, done?: (error?: string) => void) => {
+        void this.forward(channel, [request])
+          .then(() => done?.())
+          .catch((error) => done?.(errorMessage(error)))
+      })
+    }
     ipcMain.on(
       TEST_CHANNELS.runLifetimeSweep,
       (_event, request: unknown, done?: (result: unknown) => void) => {
@@ -123,6 +145,29 @@ export class TestSeams {
           .catch((error) => done?.([], errorMessage(error)))
       }
     )
+    // T36: the fake AI provider lives in main's AiManager, not the utility —
+    // that is where the real transport (and its gating) runs.
+    ipcMain.on(
+      TEST_CHANNELS.installFakeAiProvider,
+      (_event, script: unknown, done?: (error?: string) => void) => {
+        const manager = this.deps.ai()
+        if (!manager) {
+          done?.('AI manager unavailable')
+          return
+        }
+        manager.installFakeProvider((script ?? {}) as FakeAiScript)
+        done?.()
+      }
+    )
+    ipcMain.on(TEST_CHANNELS.aiProviderRequests, (_event, done?: (result: unknown) => void) => {
+      done?.(this.deps.ai()?.fakeProviderRequests() ?? [])
+    })
+    // T39: no updater exists under the harness, so the initial-read path of
+    // the renderer's ready announcement needs a stored state to find.
+    ipcMain.on(TEST_CHANNELS.setUpdateState, (_event, state: unknown, done?: Done) => {
+      this.deps.setUpdateStateOverride(parseUpdateState(state))
+      done?.()
+    })
     ipcMain.on(TEST_CHANNELS.crashUtility, (_event, done?: (error?: string) => void) => {
       void this.deps
         .service()

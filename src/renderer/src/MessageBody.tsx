@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MessageAttachment } from '../../shared/mail'
 import {
   MAIL_CID_SOURCE_MARKER as CID_SOURCE_MARKER,
@@ -18,6 +18,7 @@ import {
 } from './mailInlineImages'
 import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
 import type { MailReadingParts } from './mailReading'
+import { containsRemoteMailContent } from './mailRemoteContent'
 import {
   type MailLayout,
   type MailSurface,
@@ -302,6 +303,13 @@ function TrimToggle({
   )
 }
 
+interface MailFrameAccess {
+  /** The iframe's name; scripts are off in the frame, so markup can't change it. */
+  nonce: string
+  blocked: boolean
+  imagesAllowed: boolean
+}
+
 export function MessageBody(props: MessageBodyProps): React.JSX.Element {
   const { parts, expanded = false, onToggleTrim, viewOriginal } = props
   if (!parts || viewOriginal) return <SingleMessageBody {...props} />
@@ -363,6 +371,12 @@ function SingleMessageBody({
 }: MessageBodyProps & { allowTrim?: boolean; hidden?: boolean }): React.JSX.Element {
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
+  // T33: the frame mounts only after main has registered it with the
+  // request filter, so an allowed sender's images are never spuriously
+  // cancelled by a race, and a blocked one fails closed.
+  const [frameAccess, setFrameAccess] = useState<MailFrameAccess | null>(null)
+  const [frameEpoch, setFrameEpoch] = useState(0)
+  const allowOnceRef = useRef(false)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const keyDocumentRef = useRef<Document | null>(null)
@@ -438,6 +452,59 @@ function SingleMessageBody({
       cancelled = true
     }
   }, [applyInlineImages, attachments, bodyHtml, messageId, threadId])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: frameEpoch deliberately re-registers the frame so "Load once" / "Always load" take effect on the same mount
+  useEffect(() => {
+    setFrameAccess(null)
+    if (srcDoc === null) return
+    if (!attn) {
+      // Unit and browser harnesses have no bridge and no request filter.
+      setFrameAccess({ nonce: '', blocked: false, imagesAllowed: true })
+      return
+    }
+    const nonce = crypto.randomUUID()
+    // `Load once` is spent by exactly one registration (T33): the next mount
+    // of this message is blocked again.
+    const allowOnce = allowOnceRef.current
+    allowOnceRef.current = false
+    let stale = false
+    attn.mail
+      .registerMessageFrame(nonce, messageId, allowOnce)
+      .then((access) => {
+        if (!stale) setFrameAccess({ nonce, ...access })
+      })
+      .catch(() => {
+        // Main's filter fails closed for an unregistered frame; the renderer
+        // only loses the banner, never the protection.
+        if (!stale) setFrameAccess({ nonce, blocked: false, imagesAllowed: true })
+      })
+    return () => {
+      stale = true
+      void attn.mail.unregisterMessageFrame(nonce).catch(() => {})
+    }
+  }, [frameEpoch, messageId, srcDoc])
+
+  // A policy change (toggle or per-sender override, from Settings, the
+  // palette, or another open message) re-registers this frame so an already
+  // open message picks up its fresh answer without being reopened.
+  useEffect(() => {
+    if (!attn) return
+    return attn.mail.onRemoteImagesChanged(() => setFrameEpoch((epoch) => epoch + 1))
+  }, [])
+
+  const hasRemoteContent = useMemo(() => srcDoc !== null && containsRemoteMailContent(srcDoc), [srcDoc])
+  const remoteImagesBanner = frameAccess?.blocked === true && !frameAccess.imagesAllowed && hasRemoteContent
+  const loadImagesOnce = useCallback(() => {
+    allowOnceRef.current = true
+    setFrameEpoch((epoch) => epoch + 1)
+  }, [])
+  const alwaysLoadFromSender = useCallback(() => {
+    // The override's sender is resolved from the store in the utility. The
+    // policy-change broadcast above re-registers this frame (and every other
+    // mounted one) exactly once — no local epoch bump, or the frame would
+    // remount twice and fetch a third time.
+    void attn?.mail.allowRemoteImagesFromSender(messageId).catch(() => {})
+  }, [messageId])
 
   const oversized = srcDoc !== null && oversizedSrcDoc === srcDoc
   const measurement = measuredFrame?.srcDoc === srcDoc ? measuredFrame : null
@@ -616,31 +683,69 @@ function SingleMessageBody({
       data-surface={surface}
       data-layout={layout}
       data-appearance={appearance}
-      className={`relative min-w-0 ${surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'}`}
+      className={`min-w-0 ${surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'}`}
     >
-      {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
-        <TrimToggle
-          expanded={expanded}
-          lightSurface={surface === 'light'}
-          onToggle={onToggleTrim}
-          className="absolute left-0 z-10 h-7"
-          style={{ top: measurement.trimTop }}
-        />
+      {remoteImagesBanner && (
+        <div
+          data-testid="remote-images-banner"
+          className={`mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-1.5 text-xs ${
+            surface === 'light'
+              ? 'border-mail-light-ink-dim/30 text-mail-light-ink-dim'
+              : 'border-edge text-ink-faint'
+          }`}
+        >
+          <span>Remote images blocked</span>
+          <button
+            type="button"
+            data-testid="remote-images-load-once"
+            onClick={loadImagesOnce}
+            className="cursor-pointer font-medium text-accent hover:underline"
+          >
+            Load once
+          </button>
+          <button
+            type="button"
+            data-testid="remote-images-always-allow"
+            onClick={alwaysLoadFromSender}
+            className="cursor-pointer font-medium text-accent hover:underline"
+          >
+            Always load from this sender
+          </button>
+        </div>
       )}
-      <iframe
-        ref={frameRef}
-        data-testid="html-body-frame"
-        title="HTML message body"
-        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-        srcDoc={srcDoc}
-        onLoad={onLoad}
-        className={`block w-full border-0 ${surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'}`}
-        style={{
-          colorScheme: surface === 'light' ? 'light' : appearance,
-          height: height ?? 1,
-          visibility: height === null ? 'hidden' : 'visible'
-        }}
-      />
+      {/* The trim toggle is offset against the frame, so the banner above
+          must stay outside this relative wrapper. */}
+      <div className="relative min-w-0">
+        {measurement?.trimTop !== null && measurement?.trimTop !== undefined && (
+          <TrimToggle
+            expanded={expanded}
+            lightSurface={surface === 'light'}
+            onToggle={onToggleTrim}
+            className="absolute left-0 z-10 h-7"
+            style={{ top: measurement.trimTop }}
+          />
+        )}
+        {frameAccess !== null && (
+          <iframe
+            key={frameAccess.nonce}
+            name={frameAccess.nonce}
+            ref={frameRef}
+            data-testid="html-body-frame"
+            title="HTML message body"
+            sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            srcDoc={srcDoc}
+            onLoad={onLoad}
+            className={`block w-full border-0 ${
+              surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'
+            }`}
+            style={{
+              colorScheme: surface === 'light' ? 'light' : appearance,
+              height: height ?? 1,
+              visibility: height === null ? 'hidden' : 'visible'
+            }}
+          />
+        )}
+      </div>
     </div>
   )
 }

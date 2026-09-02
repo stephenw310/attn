@@ -62,6 +62,14 @@ test('opens in list, reader, and composer contexts and dispatches a command in e
   await runPaletteCommand(page, 'Reply all')
   const composer = new ComposerPage(page)
   await expect(composer.root).toBeVisible()
+  const undoHint = page.getByTestId('footer-shortcut-undo-text')
+  await expect(undoHint).toContainText('undo')
+  await expect(undoHint).toContainText(/Z/)
+
+  await composer.editor.click({ position: { x: 24, y: 24 } })
+  await page.keyboard.type('Undo this from the palette')
+  await runPaletteCommand(page, 'Undo body text')
+  await expect(composer.editor).not.toContainText('Undo this from the palette')
 
   await runPaletteCommand(page, 'Discard draft')
   await expect(composer.root).toHaveCount(0)
@@ -157,7 +165,7 @@ test('opens from the composer quoted-history iframe after a fast forward while t
 test('protects an active draft and restores its editor focus after palette dismissal', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
-  await composer.editor.click()
+  await composer.editor.click({ position: { x: 24, y: 24 } })
   await composer.typeBody('Keep this draft')
 
   await openPalette(page)

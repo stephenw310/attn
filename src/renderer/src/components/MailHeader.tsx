@@ -81,20 +81,22 @@ function QueueReadout({
 function AccountMenu({
   status,
   accountStatuses,
-  onManageSplits,
   onSwitchAccount,
   onAddAccount,
   onRemoveAccount,
+  onOpenSettings,
+  onOpenCheatSheet,
   accountActionsBlocked
 }: {
   status: AuthStatus
   /** Live per-account health, pushed by the utility (F18). */
   accountStatuses: readonly AccountSyncStatus[] | null
-  onManageSplits: () => void
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
   /** Opens the Remove-account confirmation for the active account (F18, D3). */
   onRemoveAccount: () => void
+  onOpenSettings: () => void
+  onOpenCheatSheet: () => void
   /** True while a composer is open: switching would drop unsaved keystrokes. */
   accountActionsBlocked: boolean
 }): React.JSX.Element {
@@ -261,30 +263,31 @@ function AccountMenu({
           </label>
           <button
             type="button"
-            disabled
-            title="Settings surface lands at M4"
-            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim opacity-45"
-          >
-            Settings <Kbd>⌘ ,</Kbd>
-          </button>
-          <button
-            type="button"
-            disabled
-            title="Cheat sheet lands at M4"
-            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim opacity-45"
-          >
-            Keyboard shortcuts <Kbd>⌘ /</Kbd>
-          </button>
-          <button
-            type="button"
-            data-testid="account-split-rules"
+            data-testid="account-settings"
+            // The composer guard other account actions honor: Settings hides
+            // the content column while the composer's global key handlers stay
+            // live, so opening it mid-draft lets keystrokes reach a surface
+            // the user can no longer see (PR #101 review).
+            disabled={accountActionsBlocked}
+            title={blockedTitle}
             onClick={() => {
               closeMenu()
-              onManageSplits()
+              onOpenSettings()
+            }}
+            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
+          >
+            Settings <Kbd>{`${modKeyLabel()} ,`}</Kbd>
+          </button>
+          <button
+            type="button"
+            data-testid="account-cheat-sheet"
+            onClick={() => {
+              closeMenu()
+              onOpenCheatSheet()
             }}
             className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
           >
-            Split rules…
+            Keyboard shortcuts <Kbd>{`${modKeyLabel()} /`}</Kbd>
           </button>
           <hr className="my-1.5 border-edge" />
           <button
@@ -322,10 +325,11 @@ interface MailHeaderProps {
   onReconnectActions: () => void
   onOpenOutbox: () => void
   onToggleSidebar: () => void
-  onManageSplits: () => void
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
   onRemoveAccount: () => void
+  onOpenSettings: () => void
+  onOpenCheatSheet: () => void
   accountActionsBlocked: boolean
 }
 
@@ -343,10 +347,11 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     onReconnectActions,
     onOpenOutbox,
     onToggleSidebar,
-    onManageSplits,
     onSwitchAccount,
     onAddAccount,
     onRemoveAccount,
+    onOpenSettings,
+    onOpenCheatSheet,
     accountActionsBlocked
   } = props
   const sidebarAction = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
@@ -396,10 +401,11 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         <AccountMenu
           status={status}
           accountStatuses={accountStatuses}
-          onManageSplits={onManageSplits}
           onSwitchAccount={onSwitchAccount}
           onAddAccount={onAddAccount}
           onRemoveAccount={onRemoveAccount}
+          onOpenSettings={onOpenSettings}
+          onOpenCheatSheet={onOpenCheatSheet}
           accountActionsBlocked={accountActionsBlocked}
         />
       </div>

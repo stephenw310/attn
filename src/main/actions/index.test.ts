@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { TriageAction } from '../../shared/actions'
 import { type Db, openDatabase } from '../db'
 import { type LabelMailboxView, listMailboxThreads } from '../db/queries'
 import { SnoozeScheduler } from '../scheduler'
@@ -10,6 +11,7 @@ import {
   pendingActionCount,
   performTriage,
   recordOutboxSendUndo,
+  snoozeThreads,
   undoLast
 } from '.'
 import { storeActionError } from './execute'
@@ -541,5 +543,275 @@ describe('outbox undo stack', () => {
     dropOutboxSendUndo(ACCOUNT, 'outbox-1')
 
     expect(undoLast(db, ACCOUNT)).toBeNull()
+  })
+})
+
+describe('follow-up triage matrix (T35/F9)', () => {
+  function followUpDb(state: 'pending' | 'returned', dueAt: number, threadId = 't-f'): Db {
+    const db = openDatabase(':memory:')
+    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+    db.prepare('INSERT INTO threads (account_id, id) VALUES (?, ?)').run(ACCOUNT, threadId)
+    db.prepare('INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)').run(
+      ACCOUNT,
+      threadId,
+      'INBOX'
+    )
+    db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state,
+         origin_message_id, origin_rfc_message_id, origin_internal_date)
+       VALUES (?, ?, 'follow_up', ?, ?, 'm-origin', '<o@x>', 1)`
+    ).run(ACCOUNT, threadId, dueAt, state)
+    return db
+  }
+
+  function followUpState(db: Db, threadId = 't-f'): string | undefined {
+    return (
+      db
+        .prepare("SELECT state FROM reminders WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up'")
+        .get(ACCOUNT, threadId) as { state: string } | undefined
+    )?.state
+  }
+
+  it('archive completes a returned follow-up', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)
+    expect(followUpState(db)).toBe('done')
+  })
+
+  it('archive cancels an overdue pending follow-up so the return cannot reverse it', () => {
+    const db = followUpDb('pending', Date.now() - 1_000)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)
+    expect(followUpState(db)).toBe('canceled')
+  })
+
+  it('a future follow-up survives ordinary archive', () => {
+    const db = followUpDb('pending', Date.now() + 60_000)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)
+    expect(followUpState(db)).toBe('pending')
+  })
+
+  it('trash and spam cancel a follow-up before it is due', () => {
+    for (const kind of ['trash', 'spam'] as const) {
+      const db = followUpDb('pending', Date.now() + 60_000)
+      performTriage(db, ACCOUNT, { kind, threadIds: ['t-f'] }, false)
+      expect(followUpState(db)).toBe('canceled')
+    }
+  })
+
+  it('marking read or starring leaves the returned chip in place — reading is not answering', () => {
+    const actions: TriageAction[] = [
+      { kind: 'markUnread', threadIds: ['t-f'], on: false },
+      { kind: 'star', threadIds: ['t-f'], on: true }
+    ]
+    for (const action of actions) {
+      const db = followUpDb('returned', 1)
+      performTriage(db, ACCOUNT, action, false)
+      expect(followUpState(db)).toBe('returned')
+    }
+  })
+
+  it('snoozing a returned follow-up makes it pending until the snooze returns', () => {
+    const db = followUpDb('returned', 1)
+    snoozeThreads(db, ACCOUNT, ['t-f'], Date.now() + 60_000)
+    expect(followUpState(db)).toBe('pending')
+  })
+
+  it('undoing a trash restores the follow-up snapshot with the labels', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'trash', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('done')
+    undoLast(db, ACCOUNT)
+    expect(followUpState(db)).toBe('returned')
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM thread_labels WHERE account_id = ? AND thread_id = 't-f' AND label_id = 'INBOX'"
+        )
+        .get(ACCOUNT)
+    ).toBeDefined()
+  })
+
+  it('undoing an archive restores the follow-up snapshot with the labels', () => {
+    // Archive undoes through apply(restoreInbox), not applyMoveUndo, so the
+    // undo entry itself must carry the settled snapshot back (PR #101 review).
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('done')
+    undoLast(db, ACCOUNT)
+    expect(followUpState(db)).toBe('returned')
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM thread_labels WHERE account_id = ? AND thread_id = 't-f' AND label_id = 'INBOX'"
+        )
+        .get(ACCOUNT)
+    ).toBeDefined()
+  })
+
+  it('undoing an archive revives an overdue pending follow-up it canceled', () => {
+    const dueAt = Date.now() - 1_000
+    const db = followUpDb('pending', dueAt)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('canceled')
+    undoLast(db, ACCOUNT)
+    expect(followUpState(db)).toBe('pending')
+  })
+
+  it('undoing an older move preserves a follow-up created by a later send', () => {
+    const db = openDatabase(':memory:')
+    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+    db.prepare(
+      "INSERT INTO threads (account_id, id, is_inbox_visible) VALUES (?, 't-later-follow-up', 1)"
+    ).run(ACCOUNT)
+    db.prepare(
+      "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, 't-later-follow-up', 'INBOX')"
+    ).run(ACCOUNT)
+    performTriage(db, ACCOUNT, {
+      kind: 'move',
+      threadIds: ['t-later-follow-up'],
+      destination: { kind: 'done' },
+      sourceLabelId: null
+    })
+
+    db.prepare(
+      `INSERT INTO outbox (id, account_id, state, thread_id, created_at, updated_at)
+       VALUES ('sent-later', ?, 'sent', 't-later-follow-up', 200, 200)`
+    ).run(ACCOUNT)
+    recordOutboxSendUndo(ACCOUNT, 'sent-later')
+    db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state,
+         origin_message_id, origin_rfc_message_id, origin_internal_date, origin_outbox_created_at)
+       VALUES (?, 't-later-follow-up', 'follow_up', 9999, 'pending',
+         'm-later', '<later@test>', 200, 200)`
+    ).run(ACCOUNT)
+
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Already sent' })
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid moved' })
+    expect(
+      db
+        .prepare(
+          `SELECT state, origin_message_id AS origin FROM reminders
+           WHERE account_id = ? AND thread_id = 't-later-follow-up' AND kind = 'follow_up'`
+        )
+        .get(ACCOUNT)
+    ).toEqual({ state: 'pending', origin: 'm-later' })
+  })
+
+  it('undoing an older archive preserves a replacement follow-up from a later send', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('done')
+    db.prepare(
+      `INSERT INTO outbox (id, account_id, state, thread_id, created_at, updated_at)
+       VALUES ('sent-replacement', ?, 'sent', 't-f', 200, 200)`
+    ).run(ACCOUNT)
+    recordOutboxSendUndo(ACCOUNT, 'sent-replacement')
+    db.prepare(
+      `UPDATE reminders SET due_at = 9999, state = 'pending',
+         origin_message_id = 'm-replacement', origin_rfc_message_id = '<replacement@test>',
+         origin_internal_date = 200, origin_outbox_created_at = 200
+       WHERE account_id = ? AND thread_id = 't-f' AND kind = 'follow_up'`
+    ).run(ACCOUNT)
+
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Already sent' })
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid archived' })
+    expect(
+      db
+        .prepare(
+          `SELECT state, origin_message_id AS origin FROM reminders
+           WHERE account_id = ? AND thread_id = 't-f' AND kind = 'follow_up'`
+        )
+        .get(ACCOUNT)
+    ).toEqual({ state: 'pending', origin: 'm-replacement' })
+  })
+
+  it('undoing an archive that also canceled a pending snooze restores both reminders', () => {
+    const db = followUpDb('returned', 1)
+    db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+       VALUES (?, 't-f', 'snooze', ?, 'pending')`
+    ).run(ACCOUNT, Date.now() + 60_000)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('done')
+    undoLast(db, ACCOUNT)
+    // The snoozeAt undo re-snoozes; the follow-up restore then lands the
+    // exact pre-archive snapshot on top of the re-snooze's postpone rule.
+    expect(followUpState(db)).toBe('returned')
+    expect(
+      (
+        db
+          .prepare(
+            "SELECT state FROM reminders WHERE account_id = ? AND thread_id = 't-f' AND kind = 'snooze'"
+          )
+          .get(ACCOUNT) as { state: string } | undefined
+      )?.state
+    ).toBe('pending')
+  })
+
+  it('undo never resurrects a follow-up answered while it was archived or moved', () => {
+    // A qualifying reply cached between the action and its undo answers the
+    // reminder: the restored snapshot must immediately re-settle (returned →
+    // done) instead of putting the chip back on an answered thread.
+    const actions: TriageAction[] = [
+      { kind: 'archive', threadIds: ['t-f'] },
+      { kind: 'trash', threadIds: ['t-f'] }
+    ]
+    for (const action of actions) {
+      const db = followUpDb('returned', 1)
+      performTriage(db, ACCOUNT, action)
+      db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+         VALUES (?, 'm-reply', 't-f', 2, '["INBOX"]')`
+      ).run(ACCOUNT)
+      undoLast(db, ACCOUNT)
+      expect(followUpState(db)).toBe('done')
+      clearUndo(ACCOUNT)
+    }
+  })
+
+  it('moving back to the inbox leaves the follow-up alone — un-filing, like restoreInbox', () => {
+    for (const verb of [undefined, 'markNotDone' as const]) {
+      const db = followUpDb('returned', 1)
+      db.prepare("DELETE FROM thread_labels WHERE account_id = ? AND thread_id = 't-f'").run(ACCOUNT)
+      performTriage(
+        db,
+        ACCOUNT,
+        {
+          kind: 'move',
+          threadIds: ['t-f'],
+          destination: { kind: 'inbox' },
+          sourceLabelId: null,
+          ...(verb ? { verb } : {})
+        },
+        false
+      )
+      expect(followUpState(db)).toBe('returned')
+    }
+  })
+
+  it('a filing move still completes a returned follow-up', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(
+      db,
+      ACCOUNT,
+      { kind: 'move', threadIds: ['t-f'], destination: { kind: 'done' }, sourceLabelId: null },
+      false
+    )
+    expect(followUpState(db)).toBe('done')
+  })
+
+  it('the queued payload carries the follow-up snapshot for Gmail-rejection recovery', () => {
+    const db = followUpDb('returned', 1)
+    performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)
+    const payloads = (db.prepare('SELECT payload FROM action_queue').all() as Array<{ payload: string }>).map(
+      (row) => JSON.parse(row.payload) as Record<string, unknown>
+    )
+    expect(payloads).toHaveLength(1)
+    expect(payloads[0].followUpBefore).toMatchObject({
+      state: 'returned',
+      originMessageId: 'm-origin',
+      originRfcMessageId: '<o@x>',
+      originInternalDate: 1
+    })
   })
 })

@@ -191,7 +191,11 @@ function harness(options: { backfillCursor?: string | null } = {}) {
   const db = {
     prepare: (sql: string) => ({
       get: () =>
-        sql.includes('SELECT backfill_cursor') ? { backfill_cursor: session.backfillCursor } : undefined
+        sql.includes('SELECT backfill_cursor') ? { backfill_cursor: session.backfillCursor } : undefined,
+      // The T35 recovery guard reads/writes a settings row and lists live
+      // follow-ups around the backfill; none exist in this harness.
+      all: () => [],
+      run: () => ({ changes: 0 })
     })
   } as unknown as Db
 
@@ -215,7 +219,7 @@ function harness(options: { backfillCursor?: string | null } = {}) {
       }) as unknown as DraftMirrorExecutor,
     getOutboxSender: () =>
       ({ trigger: outboxTrigger, isRunning: () => foregroundWork.outboxActive }) as unknown as OutboxSender,
-    getSnoozeScheduler: () => ({ wakeThread }) as unknown as SnoozeScheduler
+    getSnoozeScheduler: () => ({ wakeThread, refresh: () => {} }) as unknown as SnoozeScheduler
   })
 
   return {

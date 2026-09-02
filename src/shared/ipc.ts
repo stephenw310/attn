@@ -1,5 +1,6 @@
 import type { ActionRevertNotice } from './actionRevert'
 import type { ActionQueueStatus, TriageAction, TriageResult } from './actions'
+import type { AiGenerateRequest, AiSettingKey, AiSettings, AiStreamEvent } from './ai'
 import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from './auth'
 import type { CommandUsage } from './commandUsage'
 import type { ContactSearchResult } from './contacts'
@@ -28,6 +29,8 @@ import type {
 import type { PendingFocusTarget } from './notifications'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
 import type { SearchResponse, ServerSearchResponse } from './searchQuery'
+import type { AccountSettingKey, AccountSettings, AppSettingKey, AppSettings } from './settings'
+import type { Snippet, SnippetSaveInput } from './snippets'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
@@ -36,6 +39,7 @@ import type {
   SplitThreadLocation
 } from './splits'
 import type { ThemePreference } from './theme'
+import type { UpdateState } from './update'
 
 export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',
@@ -43,10 +47,26 @@ export const IPC_CHANNELS = {
   accountsSetActive: 'accounts:setActive',
   accountsGetStatuses: 'accounts:getStatuses',
   accountsRemove: 'accounts:remove',
+  accountsReorder: 'accounts:reorder',
   settingsGetTheme: 'settings:getTheme',
   settingsSetTheme: 'settings:setTheme',
+  settingsGetAll: 'settings:getAll',
+  settingsSet: 'settings:set',
+  settingsGetAccount: 'settings:getAccount',
+  settingsSetAccount: 'settings:setAccount',
   settingsGetCommandUsage: 'settings:getCommandUsage',
   settingsSetCommandUsage: 'settings:setCommandUsage',
+  snippetsList: 'snippets:list',
+  snippetsSave: 'snippets:save',
+  snippetsDelete: 'snippets:delete',
+  aiGetSettings: 'ai:getSettings',
+  aiSetSetting: 'ai:setSetting',
+  aiSetKey: 'ai:setKey',
+  aiDeleteKey: 'ai:deleteKey',
+  aiGenerate: 'ai:generate',
+  aiCancel: 'ai:cancel',
+  aiStyleExamples: 'ai:styleExamples',
+  aiStreamEvent: 'ai:streamEvent',
   contactsSearch: 'contacts:search',
   draftSave: 'draft:save',
   draftGet: 'draft:get',
@@ -68,10 +88,14 @@ export const IPC_CHANNELS = {
   outboxListPending: 'outbox:listPending',
   outboxChanged: 'outbox:changed',
   outboxProgress: 'outbox:progress',
+  updateGetState: 'update:getState',
+  updateRestart: 'update:restart',
+  updateState: 'update:state',
   syncGetState: 'sync:getState',
   syncGetInboxReady: 'sync:getInboxReady',
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
+  mailAcknowledgePendingFocus: 'mail:acknowledgePendingFocus',
   mailSearch: 'mail:search',
   mailSearchAll: 'mail:searchAll',
   mailCancelSearchAll: 'mail:cancelSearchAll',
@@ -92,6 +116,11 @@ export const IPC_CHANNELS = {
   mailDownloadAttachment: 'mail:downloadAttachment',
   mailGetInlineImage: 'mail:getInlineImage',
   mailRepairInlineImages: 'mail:repairInlineImages',
+  mailRegisterMessageFrame: 'mail:registerMessageFrame',
+  mailUnregisterMessageFrame: 'mail:unregisterMessageFrame',
+  mailAllowRemoteImagesFromSender: 'mail:allowRemoteImagesFromSender',
+  mailListRemoteImageOverrides: 'mail:listRemoteImageOverrides',
+  mailRemoveRemoteImageOverride: 'mail:removeRemoteImageOverride',
   mailTriage: 'mail:triage',
   mailSnooze: 'mail:snooze',
   mailMarkReadOnOpen: 'mail:markReadOnOpen',
@@ -99,6 +128,7 @@ export const IPC_CHANNELS = {
   mailGetPendingActionCount: 'mail:getPendingActionCount',
   mailGetActionQueueStatus: 'mail:getActionQueueStatus',
   mailChanged: 'mail:changed',
+  mailRemoteImagesChanged: 'mail:remoteImagesChanged',
   mailActionsReverted: 'mail:actionsReverted',
   mailBodyHydrationFailed: 'mail:bodyHydrationFailed',
   mailFocusThreadAvailable: 'mail:focusThreadAvailable',
@@ -132,6 +162,10 @@ export const TEST_CHANNELS = {
   setUndoSendDelay: 'attn:test:setUndoSendDelay',
   failOutbox: 'attn:test:failOutbox',
   remoteDraft: 'attn:test:remoteDraft',
+  installSendProvider: 'attn:test:installSendProvider',
+  runHistoryCycle: 'attn:test:runHistoryCycle',
+  installFakeAiProvider: 'attn:test:installFakeAiProvider',
+  aiProviderRequests: 'attn:test:aiProviderRequests',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
   runExistenceSweep: 'attn:test:runExistenceSweep',
   runFtsBackfill: 'attn:test:runFtsBackfill',
@@ -141,7 +175,8 @@ export const TEST_CHANNELS = {
   utilityState: 'attn:test:utilityState',
   crashUtility: 'attn:test:crashUtility',
   accountDataStats: 'attn:test:accountDataStats',
-  listMailboxThreadIds: 'attn:test:listMailboxThreadIds'
+  listMailboxThreadIds: 'attn:test:listMailboxThreadIds',
+  setUpdateState: 'attn:test:setUpdateState'
 } as const
 
 export interface InvokeChannels {
@@ -150,13 +185,44 @@ export interface InvokeChannels {
   [IPC_CHANNELS.accountsSetActive]: { args: [accountId: string]; result: AuthStatus }
   [IPC_CHANNELS.accountsGetStatuses]: { args: []; result: AccountSyncStatus[] }
   [IPC_CHANNELS.accountsRemove]: { args: [accountId: string, deleteData: boolean]; result: AuthStatus }
+  [IPC_CHANNELS.accountsReorder]: { args: [accountIds: string[]]; result: AuthStatus }
   [IPC_CHANNELS.settingsGetTheme]: { args: []; result: ThemePreference }
   [IPC_CHANNELS.settingsSetTheme]: { args: [preference: ThemePreference]; result: ThemePreference }
+  [IPC_CHANNELS.settingsGetAll]: { args: []; result: AppSettings }
+  [IPC_CHANNELS.settingsSet]: {
+    args: [key: AppSettingKey, value: AppSettings[AppSettingKey]]
+    result: AppSettings
+  }
+  [IPC_CHANNELS.settingsGetAccount]: { args: [accountId: string]; result: AccountSettings }
+  [IPC_CHANNELS.settingsSetAccount]: {
+    args: [accountId: string, key: AccountSettingKey, value: AccountSettings[AccountSettingKey]]
+    result: AccountSettings
+  }
   [IPC_CHANNELS.settingsGetCommandUsage]: { args: [accountId: string]; result: CommandUsage }
   [IPC_CHANNELS.settingsSetCommandUsage]: {
     args: [accountId: string, usage: CommandUsage]
     result: CommandUsage
   }
+  // F8 snippets are app-global: no account id rides these calls, and each
+  // mutation returns the fresh list so callers never hold a stale catalog.
+  [IPC_CHANNELS.snippetsList]: { args: []; result: Snippet[] }
+  [IPC_CHANNELS.snippetsSave]: { args: [input: SnippetSaveInput]; result: Snippet[] }
+  [IPC_CHANNELS.snippetsDelete]: { args: [id: string]; result: Snippet[] }
+  // T36 AI writing: settings storage rides the utility (keyPresent is main's
+  // to fill in); key custody and generation never leave the main process.
+  [IPC_CHANNELS.aiGetSettings]: { args: []; result: AiSettings }
+  [IPC_CHANNELS.aiSetSetting]: {
+    args: [key: AiSettingKey, value: AiSettings[AiSettingKey]]
+    result: AiSettings
+  }
+  [IPC_CHANNELS.aiSetKey]: { args: [key: string]; result: AiSettings }
+  [IPC_CHANNELS.aiDeleteKey]: { args: []; result: AiSettings }
+  [IPC_CHANNELS.aiGenerate]: { args: [request: AiGenerateRequest]; result: { requestId: string } }
+  [IPC_CHANNELS.aiCancel]: { args: [requestId: string]; result: undefined }
+  // T37 voice matching: the active account's recent sent replies, selected
+  // locally in the utility; the renderer attaches them only when the voice
+  // toggle is on, and the transport strips them again when it is off.
+  [IPC_CHANNELS.aiStyleExamples]: { args: []; result: string[] }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
   [IPC_CHANNELS.draftSave]: {
     args: [draft: DraftSaveInput]
@@ -205,10 +271,15 @@ export interface InvokeChannels {
   [IPC_CHANNELS.outboxUndoSend]: { args: [outboxId: string]; result: ReopenOutboxResult }
   [IPC_CHANNELS.outboxReopen]: { args: [outboxId: string]; result: ReopenOutboxResult }
   [IPC_CHANNELS.outboxListPending]: { args: []; result: OutboxItem[] }
+  // T39 auto-update: main-owned; a personal, dev, or seeded build answers
+  // idle and restart resolves false — there is no updater to talk to.
+  [IPC_CHANNELS.updateGetState]: { args: []; result: UpdateState }
+  [IPC_CHANNELS.updateRestart]: { args: []; result: boolean }
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncGetInboxReady]: { args: []; result: boolean }
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: PendingFocusTarget | null }
+  [IPC_CHANNELS.mailAcknowledgePendingFocus]: { args: [id: number]; result: undefined }
   [IPC_CHANNELS.mailSearch]: { args: [query: string]; result: SearchResponse }
   [IPC_CHANNELS.mailSearchAll]: {
     args: [requestId: string, query: string]
@@ -255,6 +326,20 @@ export interface InvokeChannels {
     args: [request: InlineImageRepairRequest]
     result: boolean
   }
+  // T33 remote images: the reader registers each mounted mail frame under the
+  // nonce it set as the iframe's name; main answers whether that message's
+  // images load so the banner needs no second policy source.
+  [IPC_CHANNELS.mailRegisterMessageFrame]: {
+    args: [nonce: string, messageId: string, allowOnce: boolean]
+    result: { blocked: boolean; imagesAllowed: boolean }
+  }
+  [IPC_CHANNELS.mailUnregisterMessageFrame]: { args: [nonce: string]; result: undefined }
+  [IPC_CHANNELS.mailAllowRemoteImagesFromSender]: {
+    args: [messageId: string]
+    result: { sender: string; overrides: string[] }
+  }
+  [IPC_CHANNELS.mailListRemoteImageOverrides]: { args: []; result: string[] }
+  [IPC_CHANNELS.mailRemoveRemoteImageOverride]: { args: [address: string]; result: string[] }
   [IPC_CHANNELS.mailTriage]: { args: [action: TriageAction]; result: TriageResult }
   [IPC_CHANNELS.mailSnooze]: {
     args: [input: { threadIds: string[]; dueAt: number }]
@@ -270,10 +355,15 @@ export interface BroadcastChannels {
   [IPC_CHANNELS.outboxChanged]: OutboxChanged
   [IPC_CHANNELS.outboxProgress]: import('./outbox').OutboxProgress | null
   [IPC_CHANNELS.mailChanged]: { serverSearchRequestId?: string; reason?: MailChangeReason }
+  // T33: the stored remote-image policy moved (toggle or per-sender override);
+  // mounted mail frames re-register to pick up their fresh answers.
+  [IPC_CHANNELS.mailRemoteImagesChanged]: undefined
+  [IPC_CHANNELS.aiStreamEvent]: AiStreamEvent
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
   [IPC_CHANNELS.accountsStatusChanged]: AccountSyncStatus[]
+  [IPC_CHANNELS.updateState]: UpdateState
   [IPC_CHANNELS.syncState]: SyncState
 }
 
@@ -284,10 +374,13 @@ const BROADCAST_CHANNELS = {
   [IPC_CHANNELS.outboxChanged]: true,
   [IPC_CHANNELS.outboxProgress]: true,
   [IPC_CHANNELS.mailChanged]: true,
+  [IPC_CHANNELS.mailRemoteImagesChanged]: true,
+  [IPC_CHANNELS.aiStreamEvent]: true,
   [IPC_CHANNELS.mailActionsReverted]: true,
   [IPC_CHANNELS.mailBodyHydrationFailed]: true,
   [IPC_CHANNELS.mailFocusThreadAvailable]: true,
   [IPC_CHANNELS.accountsStatusChanged]: true,
+  [IPC_CHANNELS.updateState]: true,
   [IPC_CHANNELS.syncState]: true
 } satisfies Record<BroadcastChannel, true>
 

@@ -18,6 +18,7 @@ const thread: DisplayThread = {
   hasAttachment: false,
   snoozed: false,
   returned: false,
+  followUpReturned: false,
   hasDraft: false,
   labelIds: [],
   lastMsgAt: 1

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
+import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL } from '../../shared/settings'
 import { openDatabase } from '../db'
-import { readAccountSetting, writeAccountSetting } from '../settings'
+import { readAccountSetting, writeAccountSetting, writeAccountSetting as writeSetting } from '../settings'
 import { closeDraft, listDrafts, requestDraftMirror, saveDraft } from './drafts'
 import {
+  ATTN_SIGNATURE_SETTING,
   cachePrimarySendAs,
   hasOnlyDefaultPrimarySignature,
   prepareDraftWithCachedPrimarySignature,
@@ -40,7 +42,7 @@ describe('primary Gmail send-as settings', () => {
       expect(draft.bodyHtml).toContain('Best,')
       expect(draft.bodyHtml).toContain('color:#123456')
       expect(draft.bodyHtml).not.toMatch(/position|script|alert/i)
-      expect(draft.bodyText).toBe('\nBest,\nChao')
+      expect(draft.bodyText).toBe(`\nBest,\nChao\n\n${ATTN_SIGNATURE_LINE}`)
     } finally {
       db.close()
     }
@@ -148,6 +150,7 @@ describe('primary Gmail send-as settings', () => {
   it('recognizes the untouched signature after editor normalization', () => {
     const db = openDatabase(':memory:')
     try {
+      writeSetting(db, ACCOUNT, ATTN_SIGNATURE_SETTING, 'false')
       cachePrimarySendAs(db, ACCOUNT, {
         sendAsEmail: ACCOUNT,
         signature: '<div style="color:#123456">Best,</div><div><a href="https://attn.test">Chao</a></div>'
@@ -214,7 +217,10 @@ describe('primary Gmail send-as settings', () => {
     try {
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Old</div>' })
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '' })
-      expect(prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).draft.bodyHtml).toBe('')
+      const cleared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput()).draft
+      expect(cleared.bodyHtml).not.toContain('Old')
+      expect(cleared.bodyHtml).toContain('data-attn-signature="footer"')
+      expect(cleared.bodyText).toBe(`\n\n${ATTN_SIGNATURE_LINE}`)
     } finally {
       db.close()
     }
@@ -262,6 +268,181 @@ describe('primary Gmail send-as settings', () => {
         expect(requestDraftMirror(db, ACCOUNT, id)).toBe(false)
         expect(closeDraft(db, ACCOUNT, id, 20)).toBe('discarded')
       }
+    } finally {
+      db.close()
+    }
+  })
+})
+
+describe('optional "Sent with Attn" footer (F6/T32B)', () => {
+  const enable = (db: ReturnType<typeof openDatabase>): void => {
+    writeSetting(db, ACCOUNT, ATTN_SIGNATURE_SETTING, 'true')
+  }
+
+  it('is on by default and each account can turn it off independently', () => {
+    const db = openDatabase(':memory:')
+    try {
+      cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
+      const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(prepared.draft.bodyHtml).toContain('data-attn-signature="footer"')
+      expect(prepared.draft.bodyText).toContain(ATTN_SIGNATURE_LINE)
+
+      writeSetting(db, 'other@example.com', ATTN_SIGNATURE_SETTING, 'false')
+      const stillOn = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(stillOn.draft.bodyHtml).toContain('data-attn-signature="footer"')
+
+      writeSetting(db, ACCOUNT, ATTN_SIGNATURE_SETTING, 'false')
+      const disabled = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(disabled.draft.bodyHtml).not.toContain(ATTN_SIGNATURE_LINE)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('places the footer after the Gmail signature in every composer kind', () => {
+    const db = openDatabase(':memory:')
+    try {
+      cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
+      enable(db)
+      for (const kind of ['new', 'reply', 'replyAll', 'forward'] as const) {
+        const { draft } = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, {
+          ...emptyDraftInput(),
+          kind
+        })
+        const signatureAt = draft.bodyHtml.indexOf('gmail_signature')
+        const footerAt = draft.bodyHtml.indexOf('data-attn-signature="footer"')
+        expect(signatureAt).toBeGreaterThanOrEqual(0)
+        expect(footerAt).toBeGreaterThan(signatureAt)
+        expect(draft.bodyHtml.slice(footerAt)).toContain(`href="${ATTN_SIGNATURE_URL}"`)
+        expect(draft.bodyHtml.slice(footerAt)).toContain('>Attn:</a>')
+        expect(draft.bodyHtml.slice(footerAt)).not.toMatch(/<img\b/)
+        expect(draft.bodyText.endsWith(`\n\n${ATTN_SIGNATURE_LINE}`)).toBe(true)
+      }
+      // The cached signature settings were not mutated by composition.
+      expect(readAccountSetting(db, ACCOUNT, SEND_AS_SIGNATURE_HTML_SETTING)).not.toContain(
+        ATTN_SIGNATURE_LINE
+      )
+    } finally {
+      db.close()
+    }
+  })
+
+  it('composes a footer-only body when no Gmail signature exists', () => {
+    const db = openDatabase(':memory:')
+    try {
+      enable(db)
+      const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(prepared.draft.bodyHtml).toContain('data-attn-signature="footer"')
+      expect(prepared.draft.bodyHtml.startsWith('<div dir="ltr"><div><br></div>')).toBe(true)
+      expect(prepared.draft.bodyText).toBe(`\n\n${ATTN_SIGNATURE_LINE}`)
+      expect(prepared.defaultSignatureFingerprint).not.toBeNull()
+    } finally {
+      db.close()
+    }
+  })
+
+  it('reuses a signature that already carries the standalone line', () => {
+    const db = openDatabase(':memory:')
+    try {
+      cachePrimarySendAs(db, ACCOUNT, {
+        sendAsEmail: ACCOUNT,
+        signature: `<div>Best,</div><div>${ATTN_SIGNATURE_LINE}</div>`
+      })
+      enable(db)
+      const { draft } = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(draft.bodyHtml).not.toContain('data-attn-signature')
+      expect(draft.bodyHtml.split(ATTN_SIGNATURE_LINE)).toHaveLength(2)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('treats signature plus footer as one untouched baseline governed by the stored fingerprint', () => {
+    const db = openDatabase(':memory:')
+    try {
+      cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
+      enable(db)
+      const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      expect(hasOnlyDefaultPrimarySignature(prepared.draft, prepared.defaultSignatureFingerprint)).toBe(true)
+      // Lexical-shaped normalization (rgb color, span layout) still matches.
+      const normalized = {
+        ...prepared.draft,
+        bodyHtml: prepared.draft.bodyHtml.replace('color:#888888', 'color: rgb(136, 136, 136)')
+      }
+      expect(hasOnlyDefaultPrimarySignature(normalized, prepared.defaultSignatureFingerprint)).toBe(true)
+
+      // Changing the preference or the cached signature afterwards does not
+      // reclassify: the draft's own stored baseline governs.
+      db.prepare('DELETE FROM settings WHERE account_id = ? AND key = ?').run(ACCOUNT, ATTN_SIGNATURE_SETTING)
+      cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Changed</div>' })
+      expect(hasOnlyDefaultPrimarySignature(prepared.draft, prepared.defaultSignatureFingerprint)).toBe(true)
+
+      // Editing or deleting the footer makes the draft authored content.
+      expect(
+        hasOnlyDefaultPrimarySignature(
+          {
+            ...prepared.draft,
+            bodyHtml: prepared.draft.bodyHtml.replace('Attn:</a>', 'love</a>')
+          },
+          prepared.defaultSignatureFingerprint
+        )
+      ).toBe(false)
+      const withoutFooter = prepared.draft.bodyHtml.replace(
+        /<div data-attn-signature="footer">.*?<\/div>/,
+        ''
+      )
+      expect(
+        hasOnlyDefaultPrimarySignature(
+          { ...prepared.draft, bodyHtml: withoutFooter },
+          prepared.defaultSignatureFingerprint
+        )
+      ).toBe(false)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('does not mirror or retain untouched footer drafts, with or without a signature', () => {
+    const db = openDatabase(':memory:')
+    try {
+      enable(db)
+      for (const signature of ['', '<div>Best,</div>']) {
+        cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature })
+        const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, {
+          ...emptyDraftInput(),
+          kind: 'reply',
+          to: [{ name: 'Maya', email: 'maya@example.com' }],
+          subject: 'Re: Design notes',
+          threadId: 'thread-1',
+          sourceMessageId: 'message-1',
+          quoteHtml: '<blockquote>Original</blockquote>',
+          quoteText: '> Original'
+        })
+        const id = saveDraft(db, ACCOUNT, prepared.draft, 10, prepared.defaultSignatureFingerprint)
+        expect(requestDraftMirror(db, ACCOUNT, id)).toBe(false)
+        expect(closeDraft(db, ACCOUNT, id, 20)).toBe('discarded')
+      }
+      // A footer-only *new* draft is effectively empty: hidden from Drafts,
+      // never mirrored, discarded on close.
+      const blank = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      const blankId = saveDraft(db, ACCOUNT, blank.draft, 10, blank.defaultSignatureFingerprint)
+      expect(listDrafts(db, ACCOUNT)).toEqual([])
+      expect(requestDraftMirror(db, ACCOUNT, blankId)).toBe(false)
+      expect(closeDraft(db, ACCOUNT, blankId, 20)).toBe('discarded')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('keeps old signature-only fingerprints working after the footer ships', () => {
+    const db = openDatabase(':memory:')
+    try {
+      cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, signature: '<div>Best,</div>' })
+      const before = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
+      // The preference flips on later; the pre-footer draft still reads as
+      // untouched against its own stored fingerprint.
+      enable(db)
+      expect(hasOnlyDefaultPrimarySignature(before.draft, before.defaultSignatureFingerprint)).toBe(true)
     } finally {
       db.close()
     }

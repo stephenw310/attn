@@ -15,12 +15,25 @@ export interface ThreadRow {
   /** The thread has a pending local snooze reminder, even when another view exposes it. */
   snoozed: boolean
   returned: boolean
+  /** A follow-up reminder fired: Follow up chip + above-normal sort (T35/F9). */
+  followUpReturned?: boolean
+  /**
+   * Present only on inbox returned-follow-up tier rows: the reminder's
+   * due_at, the tier's keyset key. A page ending on such a row continues
+   * with a `tier: 'followUp'` cursor instead of the dated mailbox cursor.
+   */
+  followUpTierAt?: number
   hasDraft: boolean
   labelIds: string[]
 }
 
 export interface SnoozedThreadRow extends ThreadRow {
+  /** The earliest pending deadline of either kind — the view's sort key. */
   dueAt: number
+  snoozeDueAt?: number | null
+  followUpDueAt?: number | null
+  /** Why a due follow-up has not fired: snooze return or origin check pending. */
+  followUpAwaiting?: 'snooze' | 'origin' | null
 }
 
 export interface MailLabel {
@@ -99,6 +112,13 @@ export const THREAD_PAGE_SIZE = 100
 export interface ThreadPageCursor {
   at: number
   id: string
+  /**
+   * Present while the inbox's returned-follow-up tier is still paging out;
+   * `at` is then the reminder's due_at rather than a message timestamp. The
+   * tier exhausting mid-page hands over to the dated mailbox flow, whose
+   * exclusion of tier rows keeps the two phases disjoint.
+   */
+  tier?: 'followUp'
 }
 
 export interface ThreadPage<Row extends ThreadRow = ThreadRow> {

@@ -13,7 +13,7 @@ const READY: ServiceReady = {
   activeAccountId: 'user@example.com',
   accountIds: ['user@example.com'],
   schemaVersion: 15,
-  background: { launchAtLogin: true, loginItemRegistered: true }
+  background: { launchAtLogin: true, loginItemRegistered: true, menuBarIcon: false }
 }
 
 function initialization(): ServiceInitialize {

@@ -24,6 +24,7 @@ const draft: Draft = {
   references: [],
   quoteHtml: '',
   quoteText: '',
+  followUpAt: null,
   createdAt: 1,
   updatedAt: 1
 }

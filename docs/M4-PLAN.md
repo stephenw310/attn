@@ -58,9 +58,10 @@ follow-up below, and T40 requires its resolution before sign-off.
 ## Global rules (carried from M3, still binding)
 
 1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single snapshot and
-   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 22 after PR #98. T34 and T35 each bump it
-   (T34 to 23, T35 to 24; if T35 lands first the numbers swap) and publish their dogfood DDL in their
-   sections. A real dogfood profile gets the manual additive upgrade in AGENTS.md. T39 permits automatic updates only
+   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 25 after T35's durable-ordering review
+   fix. T34 and T35 introduced versions 23 and 24; the follow-up ordering fix introduces version 25. Each
+   publishes its dogfood DDL in its section. A real dogfood profile gets the manual additive upgrade in
+   AGENTS.md. T39 permits automatic updates only
    within one schema version; a schema-changing release needs a separate upgrade procedure. The DDL in
    this plan starts from schema 22, preserving `thread_mailboxes`, `mailbox_cursor`, and the current FTS
    indexes. Profiles still on 21 first need the separate manual PR #98 upgrade in M3-PLAN.
@@ -94,7 +95,7 @@ follow-up below, and T40 requires its resolution before sign-off.
 
 ## T32: settings surface and keyboard cheat sheet
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `2eda759`; review follow-ups in `1e3d082`).** Real-OS login/menu-bar evidence stays in T40.
 
 **Depends on:** nothing · **Unblocks:** T32A, T32B, T33, T34, T36 · **Spec:** F15, F16, F18, D6, §5
 
@@ -116,7 +117,7 @@ those controls a home and connects them to the existing account and notification
   `Open settings`.
 - **Sections at ship time:** Accounts (live roster, status, add, reconnect, Sign out, and `Mod+1..9` reorder),
   Triage (undo-send delay; auto-advance next, previous, or back to list), Notifications (global pause and
-  resume; per-account split controls), Background (launch at login; macOS menu-bar icon, default off),
+  resume), Background (launch at login; macOS menu-bar icon, default off),
   and Appearance (the four F14 themes). T32A adds Sync & storage and T32B adds Compose for the active
   account. T33, T34, and T36 add their own sections. Label account-specific settings with the owning email and distinguish them
   from app-wide preferences.
@@ -134,8 +135,8 @@ those controls a home and connects them to the existing account and notification
 - **Notification pause:** expose the existing one-hour, until-tomorrow, and resume actions on both OSes,
   with the paused-until time visible. Reuse `notificationsPausedUntil`, `notificationQueries.ts`, and the
   existing deadline helpers; the pause spans every account while split `notify` flags remain per-account.
-  Link to `SplitRuleManager.tsx` for those flags. Do not add separate per-account pause state or a second
-  notification scheduler.
+  The Inbox split-strip gear opens `SplitRuleManager.tsx` for those flags; Settings does not duplicate it.
+  Do not add separate per-account pause state or a second notification scheduler.
 - **Pending notification delivery must survive composer close and account switch.** Resolve the
   intermittent failure recorded below while integrating account and notification settings. Preserve a
   target until the correct live account view accepts it; a subscription cleanup or saved-view restore
@@ -211,7 +212,7 @@ source edit to stay current.
 
 ## T32A: per-account historical sync limit
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `64f8e87`; review follow-ups in `1e3d082`).** Real-Gmail cap observations stay in T40.
 
 **Depends on:** T32 · **Unblocks:** nothing · **Spec:** F2, F10, F15, F18, §9 #22
 
@@ -286,7 +287,7 @@ coverage is accurate, existing local data remains intact, and other accounts kee
 
 ## T32B: optional "Sent with Attn" signature footer
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `80a9cad`; Gmail signature-font interplay merged in `9aa2d61`).**
 
 **Depends on:** T32 · **Unblocks:** T37 · **Spec:** F6, F15, F18
 
@@ -298,10 +299,10 @@ be visible and removable in the composer, and preserve the existing draft lifecy
 ### Design (decided)
 
 - Add **Include "Sent with Attn"** under **Compose**, labeled with the active account's email. Default
-  off. Show the exact line and explain that the preference affects new drafts only. Add matching palette
+  on. Show the exact line and explain that the preference affects new drafts only. Add matching palette
   enable/disable commands, with no new shortcut. Persist the boolean as `attnSignatureEnabled` through
   T32's typed, account-scoped settings allowlist and `readAccountSetting`/`writeAccountSetting`.
-  An absent value means off. Delete-local-data removes it; Keep-local-data retains it. No schema bump.
+  An absent value means on. Delete-local-data removes it; Keep-local-data retains it. No schema bump.
 - Insert the plain `Sent with Attn` line when creating a local new-message, reply, reply-all, or forward
   draft. Place it after the cached Gmail signature, or after the writing area if none exists, and before
   the quote. Keep the caret in the writing area. The footer is an editable signature paragraph with
@@ -338,7 +339,7 @@ settings reads to the draft's owning account, including delayed responses during
 
 ### Testing
 
-- Unit: default off; each composer kind with and without a Gmail signature; exact-line deduplication;
+- Unit: default on and per-account opt-out; each composer kind with and without a Gmail signature; exact-line deduplication;
   placement before quotes; HTML/plain-text parity; and unchanged cached Gmail signature. Cover footer
   edits and deletion through serialization and Gmail import without reinsertion or formatting loss.
 - Unit with the real temporary SQLite store: footer-only and signature-plus-footer drafts are untouched,
@@ -364,7 +365,7 @@ default, and the saved draft determines exactly what the recipient receives.
 
 ## T33: remote-image control
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `df70c80`; review follow-ups incl. the CSP-layer e2e in `1e3d082`).**
 
 **Depends on:** T32 · **Unblocks:** nothing · **Spec:** §6 Security, §9 #5
 
@@ -418,7 +419,7 @@ default-load behavior is byte-identical to today for users who never touch the t
 
 ## T34: snippets
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `e4d428e`; cursor-marker review follow-ups in `1e3d082`).**
 
 **Depends on:** T32 (manager pane) · **Unblocks:** nothing · **Spec:** F8
 
@@ -492,7 +493,7 @@ one undo step. The DDL above is in the PR notes.
 
 ## T35: follow-up reminders
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `cbb899e`).** Schema v24, with durable send ordering added in v25; the dogfood DDL is below. Real-Gmail follow-up runs stay in T40.
 
 **Depends on:** nothing · **Unblocks:** nothing · **Spec:** F9, F4 (snooze mechanics)
 
@@ -618,11 +619,34 @@ F9's acceptance criteria hold: only a subsequent reply cancels, including one fo
 recovery; a pending snooze postpones follow-up return without losing it; and returned follow-ups remain
 visible and sort above normal mail until handled. The DDL above is in the PR notes.
 
+### Schema revision 24 → 25: durable follow-up ordering
+
+Follow-up replacement is ordered by the originating outbox row's creation time. That evidence must
+survive the seven-day sent-row retention window, including after a reminder has settled, because startup
+recovers older `sending` rows only after pruning. Version 25 stores the ordering value on the reminder;
+the backfill copies it from retained outbox rows when available. This is additive and eligible for the
+AGENTS.md manual dogfood procedure:
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE reminders ADD COLUMN origin_outbox_created_at INTEGER;
+UPDATE reminders
+SET origin_outbox_created_at = (
+  SELECT MAX(outbox.created_at)
+  FROM outbox
+  WHERE outbox.account_id = reminders.account_id
+    AND outbox.rfc_message_id = reminders.origin_rfc_message_id
+)
+WHERE kind = 'follow_up' AND origin_rfc_message_id IS NOT NULL;
+PRAGMA user_version = 25;
+COMMIT;
+```
+
 ---
 
 ## T36: AI writing foundation
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `b87a3ec`).** Default models per provider are recorded in `AI_PROVIDER_PRESETS` (src/shared/ai.ts).
 
 **Depends on:** T32 (enable pane) · **Unblocks:** T37, T37A · **Spec:** F17, D2, §6
 
@@ -653,7 +677,7 @@ diff.
 - **Separate consent for separate traffic.** The master AI control is off by default. Its reply-drafting
   disclosure covers the current thread, voice profile, and optional style examples sent on invocation.
   Autocomplete has its own default-off opt-in, disclosing repeated requests containing unsent authored
-  body text while typing and possible provider charges. T37A connects that control to the composer;
+  body text plus the current reply thread while typing and possible provider charges. T37A connects that control to the composer;
   enabling reply drafting alone never enables it. The settings UI and palette use the same consent flow.
   Disabling autocomplete cancels only its work; disabling master AI or removing the key cancels both,
   drops late responses, and prevents further requests. Explain that already-transmitted content cannot
@@ -662,7 +686,7 @@ diff.
   the `settings` table. It contains no mail content, so plaintext storage is fine. F18 scopes the provider
   key, model choice, voice profile, and enable toggles app-global (rule 9): one configuration serves every
   signed-in account. Style examples are drawn only for explicit replies from the owning account's sent
-  mail (T37). Autocomplete uses the current draft's authored-body excerpt only, never style examples.
+  mail (T37). Autocomplete uses the current draft's authored-body excerpt and current reply thread, never style examples.
 - **Test seam:** `attn:test:installFakeAiProvider` in `src/main/testIpc.ts`, disabled outside the env seam
   like every other seam. It scripts chunks, delayed completions, errors, and late responses after cancel;
   records request purpose, payload, and cancellation; and is the only way e2e exercises F17. Payload
@@ -670,8 +694,8 @@ diff.
 
 ### Testing
 
-- Unit: request shaping for both protocols and purposes; reply/refine context cannot enter an autocomplete
-  request; key round-trip and deletion against a fake `safeStorage`; disabled state short-circuits before
+- Unit: request shaping for both protocols and purposes; autocomplete accepts current-thread context but
+  rejects reply-only style examples; key round-trip and deletion against a fake `safeStorage`; disabled state short-circuits before
   any network object is constructed; disabling during a request aborts it and ignores late chunks.
 - E2e: enable flow through the settings pane with the fake provider; disable and assert the seam records
   zero requests when T37's command is invoked (this assertion lands here as a placeholder command and is
@@ -687,7 +711,7 @@ the disclosure text; with the feature off, no code path reaches a provider.
 
 ## T37: AI reply drafting in the composer
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `12be729`).** Real-provider runs stay in T40.
 
 **Depends on:** T36, T32B (signature integration) · **Unblocks:** T37A · **Spec:** F17, F6, §5
 
@@ -707,6 +731,8 @@ it with a one-line instruction, and never auto-send.
 - **Streaming is editable and one undo step.** Chunks append into Lexical as normal editable content, with
   history coalesced so a single `Mod+Z` removes the whole draft (F17: insertion is undoable like any other
   edit). The insert passes the composer sanitize path (rule 3).
+  If the authored region already contains text, send it as an immutable prefix and append only the generated
+  continuation; one undo removes that continuation while preserving the user's original text.
   Insert above the Gmail signature and T32B footer. Generation, refine, and undo preserve those regions,
   including user edits or removal; generated output must not add another automatic signature/footer.
 - **`Esc` cancels cleanly:** it aborts the stream via `ai:cancel` and keeps the text already inserted,
@@ -721,6 +747,10 @@ it with a one-line instruction, and never auto-send.
   payloads are the proof. These examples are never passed to T37A.
 - Starting reply generation or refine cancels pending autocomplete and clears its preview. Autocomplete
   stays suspended until generation ends and the user resumes typing; AI-inserted chunks cannot trigger it.
+- In an empty inline reply/reply-all composer, show a transient `Tip: Hit Mod+J for AI` placeholder only
+  when AI writing is enabled and the configured provider's required key is present. Keep it outside the
+  editor document and hide it after the first authored content. Do not advertise the reply-only command in
+  new-mail or forward composers.
 - **Never auto-sends.** Output lands behind the normal send flow, undo send included. Generation must not
   block the UI (F17 acceptance), and it yields to interactive work (rule 7).
 
@@ -745,7 +775,7 @@ F17's reply-drafting acceptance criteria hold end to end under the seam: zero tr
 
 ## T37A: inline AI autocomplete
 
-**Status: planned.**
+**Status: shipped (2026-08-31, `2a50fda`).** Real-provider runs and on-hardware paint metrics stay in T40 (KNOWN-ISSUES GAP-7).
 
 **Depends on:** T36 (provider and consent), T37 (composer generation lifecycle) · **Unblocks:** nothing · **Spec:** F17, F15, §5, §7
 
@@ -761,9 +791,9 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   Connect T36's separate default-off autocomplete control to the editor, with enable/disable commands and the
   F17 privacy/cost disclosure. Both master AI and autocomplete must be enabled. Use the configured
   provider/model; no new service or mailbox index. Persist only the preference, never suggestion state.
-- **Preview, then insertion:** show one completed plain-text suggestion in gray at a collapsed caret,
-  with no line breaks and a 120-character cap. Buffer provider chunks until the suggestion is complete;
-  do not stream partial words into the document. Render a transient preview outside the persisted Lexical
+- **Preview, then insertion:** stream one plain-text suggestion in gray at a collapsed caret,
+  with no line breaks and a 120-character cap. Update the transient preview as provider chunks arrive;
+  never stream those partial words into the document. Render the preview outside the persisted Lexical
   document, anchored to the caret through wrapping and scrolling. It must not affect selection, copying,
   exported HTML, autosave revisions, Gmail mirroring, or sending. Acceptance inserts plain text in the
   current editable text context as one undoable transaction; undo restores the prior text and caret.
@@ -780,15 +810,23 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   do not trigger requests. Suppress requests during IME composition, selections, T37 generation/refine,
   open pickers/dialogs, and inside quotes, signatures, T32B's footer, tables, or opaque preserved regions.
   A subsequent deliberate typing edit can trigger another request.
-- **Minimal context:** build a separate autocomplete payload from the authored body, up to 2,000 plain-text
+- **Local greeting:** before the provider trigger, recognize `Hi`, `Hello`, or `Hey` at the start of an
+  otherwise empty body and immediately offer the primary recipient's first display name. This path is
+  deterministic, makes no provider request, requires no AI consent, consumes no rate-limit budget, and uses
+  the same transient preview plus body-owned `Tab`/`Esc` handling.
+- **Bounded context:** build a separate autocomplete payload from the authored body, up to 2,000 plain-text
   characters before the caret and 500 after. Exclude protected quote/signature/opaque nodes from extraction,
-  not just from display, and preserve the cursor boundary when truncating. Do not include thread messages,
-  subject, recipients, attachment content or metadata, voice profile, or sent-mail examples. Do not fetch
-  mail to fill the context. Ambiguous imported regions are excluded, even at the cost of fewer suggestions.
+  not just from display, and preserve the cursor boundary when truncating. Add the current subject, selected
+  tone, and standing rules; for replies, also add the current cached thread through the message being
+  answered. Do not include recipients, attachment content or metadata, signatures, or unrelated sent-mail
+  style examples, and do not fetch mail to fill the context. Ambiguous imported regions are excluded, even
+  at the cost of fewer suggestions.
 - **Bounded work:** main enforces one autocomplete request in flight app-wide, at most one start per second
   and 20 starts per rolling minute. Enforce size caps and purpose-specific consent at the IPC boundary too.
-  Skip rate-limited requests without a deferred queue; no automatic retries. Abort and discard work after
-  1,500ms from dispatch. T36 handles aborts; injected clocks exercise debounce, rate limits, and deadlines.
+  The renderer coalesces the latest replacement until a one-second cooldown expires; the rolling cap and
+  provider failures still skip without automatic retries. Abort and discard work after five seconds from
+  dispatch. Anthropic autocomplete explicitly disables model thinking while reply and refine retain the
+  provider default. T36 handles aborts; injected clocks exercise debounce, rate limits, and deadlines.
   A slow/offline provider or rate limit simply yields no suggestion. Report persistent configuration
   errors in settings without recurring composer toasts. Explicit reply generation takes priority.
 - **Reject stale results:** bind each request to the account generation, composer instance, draft id,
@@ -807,8 +845,8 @@ Repeated transmission of an unfinished draft requires its own consent and reques
 - Unit with injected time and the fake provider: 300ms debounce, one-in-flight and both rate caps, 1,500ms
   deadline, no retry loop, and disabling or editing while a response is queued. Assert late results fail
   every identity check, including a remounted composer with the same draft id. Pin bounded payloads with
-  quote/signature/opaque regions, T32B's footer, and cross-account sent mail present. None may leak into
-  the request.
+  quote/signature/opaque regions, T32B's footer, current-thread mail, and cross-account sent mail present.
+  Only the current thread may accompany the excerpt.
 - E2e: first enable reply drafting and type; autocomplete records zero requests. Opt in separately and
   cover new mail, reply, reply-all, and forward; accept with Tab, edit, undo, dismiss with Esc, and continue
   typing. Assert caret restoration, normal Tab/Shift+Tab/arrow/Enter behavior, and recipient/snippet/palette
@@ -827,14 +865,14 @@ Repeated transmission of an unfinished draft requires its own consent and reques
 
 ### Done when
 
-F17's autocomplete acceptance criteria pass: separate consent, bounded authored-body context, fresh
+F17's autocomplete acceptance criteria pass: separate consent, bounded authored-body plus reply-thread context, fresh
 suggestions only, correct Tab/Esc/undo behavior, no persistence before acceptance, and no typing slowdown.
 
 ---
 
 ## T38: Windows numeric badge overlay
 
-**Status: planned.**
+**Status: shipped (2026-08-30, `1ed0d80`).** The Windows visual check stays in T40.
 
 **Depends on:** nothing · **Unblocks:** nothing · **Spec:** F12
 
@@ -866,7 +904,7 @@ The unit matrix is green and the Windows manual check is ticked in the T40 check
 
 ## T39: auto-update, signing, and notarization
 
-**Status: planned.**
+**Status: code parts shipped (2026-08-31, `8ace1ab`); operator-credential parts open.** The state machine, gating, distribution metadata, and `package:verify --release` are in and tested; Apple/Windows signing credentials, the release-feed repository decision (deferred into `ATTN_RELEASE_FEED`, so no code blocks on it), and the publishing workflow that stamps `requiredSchemaVersion` into the feed remain operator work recorded in T40.
 
 **Depends on:** operator-supplied credentials (below) · **Unblocks:** T40 · **Spec:** §6 Packaging
 
@@ -952,7 +990,7 @@ OSes.
 
 ## T40: M4 exit and v1 sign-off
 
-**Status: planned.**
+**Status: in progress (2026-08-31).** Engineering evidence and open manual items are recorded in [T40-EVIDENCE.md](T40-EVIDENCE.md); the harness-checkable boxes are ticked there, the real-OS/real-Gmail/credentialed ones remain open.
 
 **Depends on:** every task above · **Unblocks:** the v1 tag
 
@@ -1035,8 +1073,8 @@ not an invitation to process the mailbox in the background, which F17 forbids.
 
 | Question | Why it matters | Decide by |
 |---|---|---|
-| Public release repo or private-feed workaround for auto-update? | Gates T39's feed wiring | Before T39's updater lands; record in T39 |
-| Default model per provider | Users see it on the enable screen | T36 review; record in code and F17 if the spec should name it |
+| Public release repo or private-feed workaround for auto-update? | Gates the release workflow, not the code: T39 landed with the feed read from packaged metadata (`ATTN_RELEASE_FEED=owner/repo` at release-package time), so the operator decision is deferred without blocking wiring | Before the first published release; record the chosen repo here |
+| ~~Default model per provider~~ | Resolved at T36: recorded in code as `AI_PROVIDER_PRESETS` (src/shared/ai.ts) and shown on the settings pane; F17 keeps naming no model | — |
 
 The mailbox-size posture is resolved by SPEC §9 #22 and PR #98. T32A supplies its deferred user control;
 T40 retains the performance and real-mailbox evidence requirements.

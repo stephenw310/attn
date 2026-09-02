@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuthStatus } from '../../shared/auth'
 import { Inbox } from './components/Inbox'
 import { LoginScreen } from './components/LoginScreen'
+import { orderRoster } from './roster'
 
 const attn = window.attn
 
@@ -11,6 +12,25 @@ export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
   const [removalError, setRemovalError] = useState<string | null>(null)
+
+  // A reorder response carries a status snapshot computed when the reorder
+  // committed, which can predate an account switch — or a removal, or a
+  // LATER reorder — made while it was in flight, and a switch remounts the
+  // keyed Inbox, so no Inbox-held state survives to judge it. The request
+  // therefore starts here, above the remount: the ticket rejects a response
+  // that a newer reorder has superseded, and what does land adopts only the
+  // ordering, restricted to whatever roster is live at that point
+  // (PR #101 review, twice).
+  const reorderTicketRef = useRef(0)
+  const reorderRoster = useCallback(async (ids: string[]) => {
+    if (!attn) return
+    const ticket = ++reorderTicketRef.current
+    const next = await attn.auth.reorderAccounts(ids)
+    if (ticket !== reorderTicketRef.current) return
+    setStatus((current) =>
+      current ? { ...current, accounts: orderRoster(current.accounts, next.accounts) } : next
+    )
+  }, [])
 
   const loadStatus = useCallback(() => {
     if (!attn) return
@@ -40,6 +60,7 @@ export default function App(): React.JSX.Element {
           key={status.activeAccountId ?? 'account'}
           status={status}
           onStatus={setStatus}
+          onReorderAccounts={reorderRoster}
           onRemovalError={setRemovalError}
         />
       )}
