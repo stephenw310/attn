@@ -290,6 +290,13 @@ because they can persist partial results before a switch. Regression tests cover
 responses from the previous account, triage and split-notification invalidation, and a partial Gmail
 search that finishes after switching accounts.
 
+The 2026-09-02 performance audit found that persisting account selection invalidated those summaries
+through SQLite's `total_changes()` counter. The switch now carries only already-current summaries
+across that synchronous setting write; prior silent mail writes still invalidate old summaries.
+The split-account performance test reopens its seeded database before warmups so fixture-import garbage
+collection is outside the warm-cache measurement. Its 100ms ceiling and sample counts are unchanged.
+Profiling and regression evidence live in [the test-suite audit](TEST-SUITE-AUDIT-2026-09-02.md).
+
 The split-inbox follow-up removes another account-size-dependent delay. `listInboxThreads` reads
 positive timestamps in index order so it can stop once a page is full. A separate tail preserves the
 existing null-as-zero ordering, and targeted thread checks retain their primary-key lookup. The renderer

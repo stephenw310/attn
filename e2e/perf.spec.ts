@@ -429,7 +429,11 @@ test.describe('@perf account switching with split inboxes', () => {
     writeFileSync(join(__dirname, '.artifacts/perf-split-seed.json'), JSON.stringify(fixture))
   })
 
-  test('switches split inboxes within 100ms in each direction', async ({ page }, testInfo) => {
+  test('switches split inboxes within 100ms in each direction', async ({ boot }, testInfo) => {
+    // Measure warm cached mail in a process that did not just import 11,000
+    // threads. Import-time garbage collection otherwise overlaps these samples.
+    // Relaunch preserves the real database and still exercises every switch.
+    const { page } = await boot.relaunch()
     await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '100')
     await expect(page.locator('[data-testid="split-tab"][data-split-id="base:important"]')).toHaveAttribute(
       'data-active',
@@ -1048,7 +1052,9 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     await reportMetric(testInfo, 'composer-open', openSamples, openMedianMs, warmupSamples)
     expect(openMedianMs, 'median c keydown to composer mounted').toBeLessThan(COMPOSER_OPEN_CEILING_MS)
 
-    await page.getByTestId('composer-editor').click()
+    // Target the authored body line. A center click can land in the protected
+    // "Sent with Attn" footer, where autocomplete is intentionally disabled.
+    await page.getByTestId('composer-editor').click({ position: { x: 24, y: 24 } })
     const mutationSamples: number[] = []
     const paintSamples: number[] = []
     const paintDeltaSamples: number[] = []

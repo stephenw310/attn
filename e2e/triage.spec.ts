@@ -378,16 +378,6 @@ test('keeps explicit unread and undo stable while the reader is open', async ({ 
   await expect(first).not.toHaveAttribute('data-unread')
 })
 
-test('does not run destructive shortcuts with command modifiers', async ({ page }) => {
-  const rows = page.getByTestId('thread-row')
-  await expect(rows).toHaveCount(8)
-  await page.keyboard.press('Meta+e')
-  await page.keyboard.press('Control+u')
-  await page.keyboard.press('Alt+e')
-  await expect(rows).toHaveCount(8)
-  await expect(page.getByTestId('pending-count')).toHaveCount(0)
-})
-
 test('keeps a valid selection after navigating an empty inbox', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)

@@ -68,7 +68,7 @@ test('prevents a file drop from navigating the sandboxed renderer', async ({ app
   await expect(page.getByTestId('login-screen')).toBeVisible()
 })
 
-test('shows onboarding instead of mock mail while signed out', async ({ page }) => {
+test('shows onboarding without mounting the mail keyboard loop', async ({ page }, testInfo) => {
   await expect(page.getByTestId('login-screen')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Make space for what matters.' })).toBeVisible()
   await expect(page.getByText('Your inbox, in focus')).toBeVisible()
@@ -79,10 +79,6 @@ test('shows onboarding instead of mock mail while signed out', async ({ page }) 
   await expect(page.getByTestId('thread-list')).toHaveCount(0)
   await expect(page.getByTestId('account-menu')).toHaveCount(0)
   await expect(page.getByTestId('footer-shortcuts')).toHaveCount(0)
-})
-
-test('leaves the inbox keyboard loop unmounted while signed out', async ({ page }) => {
-  await expect(page.getByTestId('login-screen')).toBeVisible()
 
   // The button carries autoFocus so Enter signs in without a Tab first, but it is
   // disabled in a credential-free run and a disabled control cannot take focus.
@@ -110,10 +106,7 @@ test('leaves the inbox keyboard loop unmounted while signed out', async ({ page 
   })
   expect(swallowed).toEqual([])
   await expect(page.getByTestId('composer')).toHaveCount(0)
-})
 
-test('captures signed-out onboarding for visual review', async ({ page }, testInfo) => {
-  await expect(page.getByTestId('login-screen')).toBeVisible()
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
   const path = join(dir, 'login.png')
@@ -124,7 +117,7 @@ test('captures signed-out onboarding for visual review', async ({ page }, testIn
 test.describe('seeded inbox smoke coverage', () => {
   test.use({ seed: 'fixtures/seed-inbox.json' })
 
-  test('groups the list by age and labels the list-context shortcuts', async ({ page }) => {
+  test('groups the list by age and labels the list-context shortcuts', async ({ page }, testInfo) => {
     // The fixture is day-anchored (`receivedDaysAgo`), so these headers hold on
     // any calendar day — the reason absolute stamps were retired from the seed.
     const now = new Date()
@@ -164,27 +157,12 @@ test.describe('seeded inbox smoke coverage', () => {
           )
       )
       .toEqual(['navigate', 'open', 'done', 'compose', 'undo', 'snooze', 'move', 'palette'])
-  })
 
-  test('J/K and arrow keys move list selection without opening a conversation', async ({ page }) => {
-    await expect(page.getByTestId('thread-row')).toHaveCount(seedThreadCount)
-    await expect.poll(() => selectedIndex(page)).toBe(0)
-
-    await page.keyboard.press('j')
-    await page.keyboard.press('j')
-    await expect.poll(() => selectedIndex(page)).toBe(2)
-
-    await page.keyboard.press('ArrowDown')
-    await expect.poll(() => selectedIndex(page)).toBe(3)
-
-    await page.keyboard.press('k')
-    await page.keyboard.press('ArrowUp')
-    await expect.poll(() => selectedIndex(page)).toBe(1)
-
-    await page.keyboard.press('k')
-    await page.keyboard.press('k')
-    await expect.poll(() => selectedIndex(page)).toBe(0)
-    await expect(page.getByTestId('conversation-view')).toHaveCount(0)
+    const dir = join(__dirname, '.artifacts')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, 'inbox.png')
+    await page.screenshot({ path })
+    await testInfo.attach('inbox', { path, contentType: 'image/png' })
   })
 
   test('Enter opens the reader; J/K navigates; boundary K, Back, and Esc restore the list', async ({
@@ -194,6 +172,19 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(rows).toHaveCount(seedThreadCount)
     await expect(rows.first()).toHaveAttribute('data-unread', 'true')
     await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
+
+    await page.keyboard.press('j')
+    await page.keyboard.press('j')
+    await expect.poll(() => selectedIndex(page)).toBe(2)
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(() => selectedIndex(page)).toBe(3)
+    await page.keyboard.press('k')
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(() => selectedIndex(page)).toBe(1)
+    await page.keyboard.press('k')
+    await page.keyboard.press('k')
+    await expect.poll(() => selectedIndex(page)).toBe(0)
+    await expect(page.getByTestId('conversation-view')).toHaveCount(0)
 
     await page.keyboard.press('Enter')
     await expect(page.getByTestId('conversation-view')).toBeVisible()
@@ -329,14 +320,5 @@ test.describe('seeded inbox smoke coverage', () => {
         return row.y >= viewport.y - 1 && row.y + row.height <= viewport.y + viewport.height + 1
       })
       .toBe(true)
-  })
-
-  test('captures the Dispatch inbox for visual review', async ({ page }, testInfo) => {
-    await expect(page.getByTestId('thread-row')).toHaveCount(seedThreadCount)
-    const dir = join(__dirname, '.artifacts')
-    mkdirSync(dir, { recursive: true })
-    const path = join(dir, 'inbox.png')
-    await page.screenshot({ path })
-    await testInfo.attach('inbox', { path, contentType: 'image/png' })
   })
 })

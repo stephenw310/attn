@@ -255,12 +255,20 @@ describe('keyboard dispatch', () => {
   })
 
   test('dispatches the sidebar modifier shortcut without leaking modifiers to bare commands', () => {
-    useCommands([createCommand('layout.sidebar.toggle', () => {}), createCommand('triage.archive', () => {})])
+    useCommands([
+      createCommand('layout.sidebar.toggle', () => {}),
+      createCommand('triage.archive', () => {}),
+      createCommand('triage.unread', () => {})
+    ])
+    expect(matchKey(key('e'), 'list')?.id).toBe('triage.archive')
+    expect(matchKey(key('u'), 'list')?.id).toBe('triage.unread')
     expect(matchKey(key('b', { metaKey: true }), 'list')?.id).toBe('layout.sidebar.toggle')
     expect(matchKey(key('b', { ctrlKey: true }), 'reader')?.id).toBe('layout.sidebar.toggle')
     expect(matchKey(key('b'), 'list')).toBeNull()
     expect(matchKey(key('b', { metaKey: true, shiftKey: true }), 'list')).toBeNull()
     expect(matchKey(key('e', { metaKey: true }), 'list')).toBeNull()
+    expect(matchKey(key('u', { ctrlKey: true }), 'list')).toBeNull()
+    expect(matchKey(key('e', { altKey: true }), 'list')).toBeNull()
   })
 
   test('dispatches only registered composer modifier shortcuts in composer context', () => {

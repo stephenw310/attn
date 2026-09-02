@@ -699,8 +699,16 @@ export class ServiceRuntime {
   }
 
   private persistActiveAccount(): void {
+    // This setting does not change mail membership or split counts. Carry only
+    // summaries that were current before the synchronous write across it;
+    // an earlier silent mail write must still invalidate an older summary.
+    const before = this.databaseRevision()
     if (this.activeAccountId) writeSetting(this.db, ACTIVE_ACCOUNT_SETTING, this.activeAccountId)
     else deleteSetting(this.db, ACTIVE_ACCOUNT_SETTING)
+    const after = this.databaseRevision()
+    for (const summary of this.mailSummaryByAccount.values()) {
+      if (summary.revision === before) summary.revision = after
+    }
   }
 
   private otherAccountWorkBusy(accountId: string): boolean {
@@ -822,18 +830,21 @@ export class ServiceRuntime {
 
   /**
    * Reuse per-account summaries between writes on this SQLite connection.
-   * Background passes can commit without broadcasting a mail change. Unrelated
-   * writes, including saved account selection, can cause an extra recompute.
+   * Background passes can commit without broadcasting a mail change. Only the
+   * known mail-independent account-selection write preserves current summaries.
    */
   private mailSummary(accountId: string): AccountMailSummary {
     if (this.foregroundProviderWork.has(accountId)) return { revision: -1 }
-    const revision = (this.db.prepare('SELECT total_changes() AS revision').get() as { revision: number })
-      .revision
+    const revision = this.databaseRevision()
     const cached = this.mailSummaryByAccount.get(accountId)
     if (cached && cached.revision === revision) return cached
     const summary: AccountMailSummary = { revision }
     this.mailSummaryByAccount.set(accountId, summary)
     return summary
+  }
+
+  private databaseRevision(): number {
+    return (this.db.prepare('SELECT total_changes() AS revision').get() as { revision: number }).revision
   }
 
   private mailboxCounts(accountId: string): SystemMailboxCounts {

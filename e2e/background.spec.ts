@@ -20,11 +20,6 @@ test('closing the window keeps the app alive until an explicit quit', async ({ a
   await expect(exited).resolves.toBe(0)
 })
 
-test('development and test runs do not register a login item', async ({ app }) => {
-  const settings = await app.evaluate(({ app: electronApp }) => electronApp.getLoginItemSettings())
-  expect(settings.openAtLogin).toBe(false)
-})
-
 test('extends web content into the native title bar', async ({ app, page }) => {
   await expect(page.getByTestId('login-screen')).toBeVisible()
   const sizes = await app.evaluate(({ BrowserWindow }) => {

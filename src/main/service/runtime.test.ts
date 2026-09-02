@@ -169,13 +169,14 @@ describe('ServiceRuntime with several accounts', () => {
     await runtime.internal('set-active-account', ['second@attn.test'])
     expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
     await runtime.internal('set-active-account', ['primary@attn.test'])
-    expect(await read()).toMatchObject({ inbox: 1, allMail: 1 })
+    expect(await read()).toBe(first)
+    expect(count).toHaveBeenCalledTimes(2)
 
     await runtime.invoke(IPC_CHANNELS.mailTriage, [{ kind: 'archive', threadIds: ['t-alpha'] }])
     expect(await read()).toMatchObject({ inbox: 0, allMail: 1 })
     await runtime.internal('set-active-account', ['second@attn.test'])
     expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
-    expect(count).toHaveBeenCalledTimes(5)
+    expect(count).toHaveBeenCalledTimes(4)
   })
 
   it('refreshes mailbox totals after silent writes and reuses them between writes', async () => {
@@ -199,6 +200,11 @@ describe('ServiceRuntime with several accounts', () => {
     internals.db.transaction(() => {
       persistThread(internals.db, 'primary@attn.test', added)
     })()
+
+    // Preserving summaries across account-selection writes must not make a
+    // summary from before this unannounced mail change look current again.
+    await runtime.internal('set-active-account', ['second@attn.test'])
+    await runtime.internal('set-active-account', ['primary@attn.test'])
 
     const second = await read()
     expect(second).toMatchObject({ inbox: 2, allMail: 2 })
@@ -301,6 +307,7 @@ describe('ServiceRuntime with several accounts', () => {
     await statuses()
     await runtime.internal('set-active-account', ['primary@attn.test'])
     await read()
+    expect(count).not.toHaveBeenCalled()
 
     await runtime.invoke(IPC_CHANNELS.splitsSetNotify, [OTHER_SPLIT_ID, true])
     expect(await statuses()).toEqual([

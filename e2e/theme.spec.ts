@@ -34,8 +34,17 @@ test('System follows the OS while a named palette persists across relaunch', asy
   await expect(relaunched.page.locator('html')).toHaveAttribute('data-theme-appearance', 'dark')
 })
 
-test('light mail uses sender colors and dark mail offers the original rendering', async ({ page }) => {
+test('light mail uses sender colors and dark mail offers the original rendering', async ({
+  page
+}, testInfo) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await chooseTheme(page, 'dispatch-light')
+  const directory = join(__dirname, '.artifacts')
+  mkdirSync(directory, { recursive: true })
+  const inboxPath = join(directory, 'inbox-light.png')
+  await page.screenshot({ path: inboxPath })
+  await testInfo.attach('Light inbox', { path: inboxPath, contentType: 'image/png' })
+
   await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).click()
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-appearance', 'light')
   await expect(page.getByTestId('mail-original-toggle')).toHaveCount(0)
@@ -51,18 +60,9 @@ test('light mail uses sender colors and dark mail offers the original rendering'
   await page.getByTestId('mail-original-toggle').click()
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'light')
   await expect(page.getByTestId('mail-original-toggle')).toHaveText('Use dark view')
-})
 
-test('captures Light inbox and reading surfaces', async ({ page }, testInfo) => {
-  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await page.keyboard.press('Escape')
   await chooseTheme(page, 'dispatch-light')
-  const directory = join(__dirname, '.artifacts')
-  mkdirSync(directory, { recursive: true })
-
-  const inboxPath = join(directory, 'inbox-light.png')
-  await page.screenshot({ path: inboxPath })
-  await testInfo.attach('Light inbox', { path: inboxPath, contentType: 'image/png' })
-
   await page.getByTestId('thread-row').filter({ hasText: 'This week in focus' }).click()
   await expect(page.getByTestId('html-body-frame')).toBeVisible()
   const readingPath = join(directory, 'reading-light.png')
