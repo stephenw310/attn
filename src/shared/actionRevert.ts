@@ -48,6 +48,13 @@ const actionPhrase: Record<RevertedActionKind, string> = {
   move: 'move'
 }
 
+/**
+ * Every kind, derived from the table above so the two cannot disagree: the
+ * `Record` makes the table exhaustive, and this makes it the only list. The
+ * action-queue payload decoder validates against it.
+ */
+export const REVERTED_ACTION_KINDS = new Set(Object.keys(actionPhrase) as RevertedActionKind[])
+
 export function formatActionRevertToast(actions: readonly RevertedAction[]): string | null {
   if (actions.length === 0) return null
   const unavailable = actions.filter((action) => action.resolution === 'unavailable')

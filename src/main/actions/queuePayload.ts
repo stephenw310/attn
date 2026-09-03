@@ -1,4 +1,4 @@
-import type { RevertedActionKind } from '../../shared/actionRevert'
+import { REVERTED_ACTION_KINDS, type RevertedActionKind } from '../../shared/actionRevert'
 import { stringArray } from '../../shared/guards'
 import type { FollowUpReminderSnapshot, SnoozeReminderSnapshot } from '../store/reminders'
 
@@ -21,7 +21,7 @@ export function decodeLabelDelta(payload: string): LabelDeltaPayload {
   const add = candidate.add ?? []
   const remove = candidate.remove ?? []
   if (!stringArray(add) || !stringArray(remove)) throw new Error('Invalid action queue label delta')
-  if (candidate.actionKind !== undefined && !actionKinds.has(candidate.actionKind)) {
+  if (candidate.actionKind !== undefined && !REVERTED_ACTION_KINDS.has(candidate.actionKind)) {
     throw new Error('Invalid action queue action kind')
   }
   if (candidate.reminderBefore !== undefined && !validReminder(candidate.reminderBefore)) {
@@ -55,25 +55,6 @@ export function decodeLabelDelta(payload: string): LabelDeltaPayload {
     ...(candidate.revertsQueueId !== undefined ? { revertsQueueId: candidate.revertsQueueId } : {})
   }
 }
-
-const actionKinds = new Set<RevertedActionKind>([
-  'archive',
-  'trash',
-  'restoreInbox',
-  'untrash',
-  'snooze',
-  'snoozeReturn',
-  'followUpReturn',
-  'unsnooze',
-  'undo',
-  'spam',
-  'star',
-  'unstar',
-  'markRead',
-  'markUnread',
-  'labels',
-  'move'
-])
 
 function validReminder(value: unknown): value is SnoozeReminderSnapshot | null {
   if (value === null) return true

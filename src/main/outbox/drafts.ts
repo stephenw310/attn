@@ -377,34 +377,32 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
     )
     return 'saved'
   }
-  if (row.gmail_draft_id) {
-    db.prepare(
-      `UPDATE outbox SET state = 'discarding', to_json = '[]', cc_json = '[]', bcc_json = '[]',
-       subject = '', body_html = '', body_text = '', attachments_json = '[]', thread_id = NULL,
-       source_message_id = NULL, in_reply_to = NULL, references_json = '[]', quote_html = '',
-       quote_text = '', updated_at = ? WHERE account_id = ? AND id = ?`
-    ).run(now, accountId, id)
-  } else {
-    db.prepare('DELETE FROM outbox WHERE account_id = ? AND id = ?').run(accountId, id)
-  }
+  // A row Gmail never saw has nothing to tombstone for the mirror to delete.
+  if (row.gmail_draft_id) discardDraft(db, accountId, id, 'composing', now)
+  else db.prepare('DELETE FROM outbox WHERE account_id = ? AND id = ?').run(accountId, id)
   return 'discarded'
 }
 
+/**
+ * Tombstone a draft: the row survives in `discarding` so the mirror can delete
+ * its Gmail counterpart, but it keeps none of the content the user discarded.
+ */
 export function discardDraft(
   db: Db,
   accountId: string,
   id: string,
-  expectedState: 'composing' | 'drafted' = 'composing'
+  expectedState: 'composing' | 'drafted' = 'composing',
+  now = Date.now()
 ): boolean {
   return (
     db
       .prepare(
         `UPDATE outbox SET state = 'discarding', to_json = '[]', cc_json = '[]', bcc_json = '[]',
-       subject = '', body_html = '', body_text = '', attachments_json = '[]', thread_id = NULL,
-       source_message_id = NULL, in_reply_to = NULL, references_json = '[]', quote_html = '',
-       quote_text = '', updated_at = ?
-     WHERE account_id = ? AND id = ? AND state = ?`
+           subject = '', body_html = '', body_text = '', attachments_json = '[]', thread_id = NULL,
+           source_message_id = NULL, in_reply_to = NULL, references_json = '[]', quote_html = '',
+           quote_text = '', updated_at = ?
+         WHERE account_id = ? AND id = ? AND state = ?`
       )
-      .run(Date.now(), accountId, id, expectedState).changes > 0
+      .run(now, accountId, id, expectedState).changes > 0
   )
 }

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { QueueIntent } from './execute'
-import { dropRevertedUndoEntries, queueIntentRef, revertedAction } from './revert'
+import { dropRevertedUndoEntries, queueRowRef, revertedAction } from './revert'
 
 const count = (n: number): string => `${n} affected`
 
 describe('failed-action recovery helpers', () => {
   it('drops an undo entry that references the reverted thread and action only', () => {
-    const archiveA = queueIntentRef({ kind: 'modifyLabels', threadId: 'a', add: [], remove: ['INBOX'] }, 1)
-    const archiveB = queueIntentRef({ kind: 'modifyLabels', threadId: 'b', add: [], remove: ['INBOX'] }, 2)
-    const starA = queueIntentRef({ kind: 'modifyLabels', threadId: 'a', add: ['STARRED'], remove: [] }, 3)
+    const archiveA = queueRowRef(1, 'a')
+    const archiveB = queueRowRef(2, 'b')
+    const starA = queueRowRef(3, 'a')
     const entries = [
       { label: 'Archived', labelFor: count, refs: [archiveA], undo: [{ threadIds: ['a'] }] },
       { label: 'Starred', labelFor: count, refs: [starA], undo: [{ threadIds: ['a'] }] },
@@ -28,8 +28,8 @@ describe('failed-action recovery helpers', () => {
       add: [],
       remove: ['INBOX']
     }
-    const older = queueIntentRef(intent, 10)
-    const newer = queueIntentRef(intent, 11)
+    const older = queueRowRef(10, intent.threadId)
+    const newer = queueRowRef(11, intent.threadId)
     const entries = [
       { label: 'Older archive', labelFor: count, refs: [older], undo: [{ threadIds: ['a'] }] },
       { label: 'Newer archive', labelFor: count, refs: [newer], undo: [{ threadIds: ['a'] }] }
@@ -39,9 +39,9 @@ describe('failed-action recovery helpers', () => {
   })
 
   it('keeps unaffected threads from a bulk action undoable and relabels the survivors', () => {
-    const archiveA = queueIntentRef({ kind: 'modifyLabels', threadId: 'a', add: [], remove: ['INBOX'] }, 1)
-    const archiveB = queueIntentRef({ kind: 'modifyLabels', threadId: 'b', add: [], remove: ['INBOX'] }, 2)
-    const archiveC = queueIntentRef({ kind: 'modifyLabels', threadId: 'c', add: [], remove: ['INBOX'] }, 3)
+    const archiveA = queueRowRef(1, 'a')
+    const archiveB = queueRowRef(2, 'b')
+    const archiveC = queueRowRef(3, 'c')
     const labelFor = (n: number): string => (n === 1 ? 'Archived' : `${n} archived`)
     const entries = [
       {

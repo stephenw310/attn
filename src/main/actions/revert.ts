@@ -14,10 +14,7 @@ export interface UndoEntryWithRefs {
   refs: readonly QueuedActionRef[]
 }
 
-export function queueIntentRef(intent: QueueIntent, queueId: number): QueuedActionRef {
-  return { queueId, threadId: intent.threadId }
-}
-
+/** The pair an undo entry needs to drop itself when Gmail rejects its forward action. */
 export function queueRowRef(queueId: number, threadId: string): QueuedActionRef {
   return { queueId, threadId }
 }

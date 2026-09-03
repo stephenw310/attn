@@ -15,7 +15,7 @@ import {
 } from '../store/reminders'
 import { isStoredAuthActionError } from './execute'
 import { actionLabel, inverseForThread, planAction } from './plan'
-import { dropRevertedUndoEntries, type QueuedActionRef, queueIntentRef } from './revert'
+import { dropRevertedUndoEntries, type QueuedActionRef, queueRowRef } from './revert'
 
 interface MoveUndoAction {
   kind: 'moveUndo'
@@ -272,6 +272,155 @@ function validateMoveLabels(
   }
 }
 
+interface ApplyContext {
+  db: Db
+  accountId: string
+  action: TriageAction
+  plan: ReturnType<typeof planAction>
+  actionKind: RevertedActionKind
+  revertsQueueId?: number
+  now: number
+  labelsBefore: Map<string, Set<string>>
+  labelsOnEveryMessageBefore: Map<string, Set<string>> | null
+  remindersBefore: Map<string, SnoozeReminderSnapshot | null>
+  followUpsBefore: Map<string, FollowUpReminderSnapshot | null>
+  enqueue: (payload: unknown, threadId: string) => number
+  undo: UndoAction[]
+  refs: QueuedActionRef[]
+  changedThreads: Set<string>
+}
+
+/**
+ * Filing a thread into a mailbox — Move, Spam, Trash. The inverse is the label
+ * delta the forward mutation actually applied, because a thread-level Gmail
+ * operation cannot recreate partial per-message membership, and it carries the
+ * reminder snapshots because `apply()` never restores reminders on the way back.
+ */
+function applyMove(context: ApplyContext, threadId: string): void {
+  const { db, accountId, action, plan, now } = context
+  const labels = context.labelsBefore.get(threadId) ?? new Set<string>()
+  const reminderBefore = context.remindersBefore.get(threadId) ?? null
+  const followUpBefore = context.followUpsBefore.get(threadId) ?? null
+  const delta = effectiveLabelDelta(plan, labels, context.labelsOnEveryMessageBefore?.get(threadId) ?? labels)
+  if (
+    delta.add.length === 0 &&
+    delta.remove.length === 0 &&
+    !moveChangesReminder(reminderBefore) &&
+    !moveChangesReminder(followUpBefore)
+  ) {
+    return
+  }
+  const moveUndo: MoveUndoAction = {
+    kind: 'moveUndo',
+    threadIds: [threadId],
+    add: [...delta.remove],
+    remove: [...delta.add],
+    reminderBefore,
+    reminderAfter: reminderBefore,
+    followUpBefore,
+    followUpAfter: followUpBefore
+  }
+  settleReminders(db, accountId, threadId, 'snooze')
+  settleFollowUpForTriage(db, accountId, threadId, action, now)
+  moveUndo.reminderAfter = snoozeReminderSnapshot(db, accountId, threadId)
+  moveUndo.followUpAfter = followUpReminderSnapshot(db, accountId, threadId)
+  applyThreadDelta(db, accountId, { threadId, ...delta })
+  context.changedThreads.add(threadId)
+  if (delta.add.length === 0 && delta.remove.length === 0) {
+    context.undo.push(moveUndo)
+    return
+  }
+  const queueId = context.enqueue(
+    {
+      add: delta.add,
+      remove: delta.remove,
+      actionKind: context.actionKind,
+      ...(moveChangesReminder(reminderBefore) ? { reminderBefore } : {}),
+      ...(moveChangesReminder(followUpBefore) ? { followUpBefore } : {})
+    },
+    threadId
+  )
+  moveUndo.revertsQueueId = queueId
+  context.undo.push(moveUndo)
+  context.refs.push(queueRowRef(queueId, threadId))
+}
+
+/** Every other verb: a label delta, its inverse, and the reminders it settles. */
+function applyLabelAction(context: ApplyContext, threadId: string): void {
+  const { db, accountId, action, plan, now } = context
+  const labels = context.labelsBefore.get(threadId) ?? new Set<string>()
+  const followUpBefore = context.followUpsBefore.get(threadId) ?? null
+  // The inverse reads the pre-state, so it is planned before this thread's
+  // reminders and labels move.
+  const primary = ((): UndoTriageAction | SnoozeAtUndoAction => {
+    if (action.kind === 'unsnooze' || action.kind === 'archive') {
+      const reminder = pendingSnoozeFor(db, accountId, threadId)
+      if (reminder) return { kind: 'snoozeAt', threadIds: [threadId], dueAt: reminder.dueAt }
+    }
+    return inverseForThread(action, labels, threadId)
+  })()
+  let reminderChanges = 0
+  if (action.kind === 'unsnooze') {
+    reminderChanges = db
+      .prepare("DELETE FROM reminders WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'")
+      .run(accountId, threadId).changes
+  } else if (action.kind === 'archive') {
+    reminderChanges = settleReminders(db, accountId, threadId, 'snooze')
+  } else {
+    reminderChanges = db
+      .prepare(
+        `UPDATE reminders SET state = 'done'
+         WHERE account_id = ? AND thread_id = ? AND kind = 'snooze' AND state = 'returned'`
+      )
+      .run(accountId, threadId).changes
+  }
+  reminderChanges += settleFollowUpForTriage(db, accountId, threadId, action, now)
+  applyThreadDelta(db, accountId, { threadId, add: plan.add, remove: plan.remove })
+  // An action the thread already satisfies — archive from a non-inbox view,
+  // a star that is already on — has nothing to send and nothing to undo.
+  const delta = effectiveLabelDelta(plan, labels)
+  const labelsChanged = delta.add.length > 0 || delta.remove.length > 0
+  let queueId: number | null = null
+  if (labelsChanged) {
+    const reminderBefore = recoveryReminderForAction(action, context.remindersBefore.get(threadId) ?? null)
+    queueId = context.enqueue(
+      {
+        add: plan.add,
+        remove: plan.remove,
+        actionKind: context.actionKind,
+        reminderBefore,
+        ...(moveChangesReminder(followUpBefore) ? { followUpBefore } : {}),
+        ...(context.revertsQueueId ? { revertsQueueId: context.revertsQueueId } : {})
+      },
+      threadId
+    )
+    context.refs.push(queueRowRef(queueId, threadId))
+  }
+  if (!labelsChanged && reminderChanges === 0) return
+  context.changedThreads.add(threadId)
+  // The undo carries the queue row it reverts, so a permanent Gmail
+  // rejection of the forward action drops the pending undo with it
+  // (executor dropQueuedReverts), exactly as the move path does.
+  context.undo.push(
+    primary.kind === 'snoozeAt' || queueId === null ? primary : { ...primary, revertsQueueId: queueId }
+  )
+  // Archive settles the follow-up above, and its label inverse replays
+  // through apply(), which never restores reminders — so the undo entry
+  // itself must carry the snapshot back (PR #101 review), exactly as
+  // applyMoveUndo does for moves.
+  if (followUpSettledBy(action, followUpBefore, now)) {
+    context.undo.push({
+      kind: 'followUpRestore',
+      threadIds: [threadId],
+      before: followUpBefore,
+      after: {
+        ...followUpBefore,
+        state: followUpBefore.state === 'returned' ? 'done' : 'canceled'
+      }
+    })
+  }
+}
+
 function apply(
   db: Db,
   accountId: string,
@@ -283,178 +432,51 @@ function apply(
   const labelsBefore = new Map(
     action.threadIds.map((threadId) => [threadId, labelsFor(db, accountId, threadId)] as const)
   )
-  const labelsOnEveryMessageBefore = movesToMailbox(action)
-    ? new Map(
-        action.threadIds.map((threadId) => [
-          threadId,
-          labelsOnEveryMessageFor(db, accountId, threadId, labelsBefore.get(threadId) ?? new Set())
-        ])
-      )
-    : null
-  const remindersBefore = new Map(
-    action.threadIds.map((threadId) => [threadId, snoozeReminderSnapshot(db, accountId, threadId)] as const)
-  )
-  const followUpsBefore = new Map(
-    action.threadIds.map((threadId) => [threadId, followUpReminderSnapshot(db, accountId, threadId)] as const)
-  )
-  const now = Date.now()
-  const undo: UndoAction[] = []
-  const changedThreads = new Set<string>()
-  const enqueue = db.prepare(
+  const insert = db.prepare(
     `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
      VALUES (?, ?, ?, ?, 'pending')`
   )
-  const refs: QueuedActionRef[] = []
+  const context: ApplyContext = {
+    db,
+    accountId,
+    action,
+    plan,
+    actionKind,
+    revertsQueueId,
+    now: Date.now(),
+    labelsBefore,
+    labelsOnEveryMessageBefore: movesToMailbox(action)
+      ? new Map(
+          action.threadIds.map((threadId) => [
+            threadId,
+            labelsOnEveryMessageFor(db, accountId, threadId, labelsBefore.get(threadId) ?? new Set())
+          ])
+        )
+      : null,
+    remindersBefore: new Map(
+      action.threadIds.map((threadId) => [threadId, snoozeReminderSnapshot(db, accountId, threadId)] as const)
+    ),
+    followUpsBefore: new Map(
+      action.threadIds.map(
+        (threadId) => [threadId, followUpReminderSnapshot(db, accountId, threadId)] as const
+      )
+    ),
+    enqueue: (payload, threadId) =>
+      Number(insert.run(accountId, plan.queueKind, threadId, JSON.stringify(payload)).lastInsertRowid),
+    undo: [],
+    refs: [],
+    changedThreads: new Set<string>()
+  }
+  // The two flows share the loop and nothing else: a mailbox move inverts the
+  // delta it actually applied and carries reminder snapshots, while every
+  // other verb inverts against the thread's pre-state.
   db.transaction(() => {
     for (const threadId of action.threadIds) {
-      if (movesToMailbox(action)) {
-        const labels = labelsBefore.get(threadId) ?? new Set<string>()
-        const reminderBefore = remindersBefore.get(threadId) ?? null
-        const followUpBefore = followUpsBefore.get(threadId) ?? null
-        const delta = effectiveLabelDelta(plan, labels, labelsOnEveryMessageBefore?.get(threadId) ?? labels)
-        if (
-          delta.add.length === 0 &&
-          delta.remove.length === 0 &&
-          !moveChangesReminder(reminderBefore) &&
-          !moveChangesReminder(followUpBefore)
-        ) {
-          continue
-        }
-        const moveUndo: MoveUndoAction = {
-          kind: 'moveUndo',
-          threadIds: [threadId],
-          add: [...delta.remove],
-          // Reverse the labels that the forward thread mutation actually
-          // added. Thread-level Gmail operations cannot recreate partial
-          // per-message membership, so checking the thread-label union here
-          // would leave the destination applied to the whole thread.
-          remove: [...delta.add],
-          reminderBefore,
-          reminderAfter: reminderBefore,
-          followUpBefore,
-          followUpAfter: followUpBefore
-        }
-        settleReminders(db, accountId, threadId, 'snooze')
-        settleFollowUpForTriage(db, accountId, threadId, action, now)
-        moveUndo.reminderAfter = snoozeReminderSnapshot(db, accountId, threadId)
-        moveUndo.followUpAfter = followUpReminderSnapshot(db, accountId, threadId)
-        applyThreadDelta(db, accountId, { threadId, ...delta })
-        changedThreads.add(threadId)
-        if (delta.add.length === 0 && delta.remove.length === 0) {
-          undo.push(moveUndo)
-          continue
-        }
-        const queued = enqueue.run(
-          accountId,
-          plan.queueKind,
-          threadId,
-          JSON.stringify({
-            add: delta.add,
-            remove: delta.remove,
-            actionKind,
-            ...(moveChangesReminder(reminderBefore) ? { reminderBefore } : {}),
-            ...(moveChangesReminder(followUpBefore) ? { followUpBefore } : {})
-          })
-        )
-        moveUndo.revertsQueueId = Number(queued.lastInsertRowid)
-        undo.push(moveUndo)
-        refs.push(
-          queueIntentRef(
-            { kind: 'modifyLabels', threadId, add: delta.add, remove: delta.remove },
-            Number(queued.lastInsertRowid)
-          )
-        )
-        continue
-      }
-      const labels = labelsBefore.get(threadId) ?? new Set<string>()
-      const followUpBefore = followUpsBefore.get(threadId) ?? null
-      // The inverse reads the pre-state, so it is planned before this thread's
-      // reminders and labels move.
-      const primary = ((): UndoTriageAction | SnoozeAtUndoAction => {
-        if (action.kind === 'unsnooze' || action.kind === 'archive') {
-          const reminder = pendingSnoozeFor(db, accountId, threadId)
-          if (reminder) return { kind: 'snoozeAt', threadIds: [threadId], dueAt: reminder.dueAt }
-        }
-        return inverseForThread(action, labels, threadId)
-      })()
-      let reminderChanges = 0
-      if (action.kind === 'unsnooze') {
-        reminderChanges = db
-          .prepare("DELETE FROM reminders WHERE account_id = ? AND thread_id = ? AND kind = 'snooze'")
-          .run(accountId, threadId).changes
-      } else if (action.kind === 'archive') {
-        reminderChanges = settleReminders(db, accountId, threadId, 'snooze')
-      } else {
-        reminderChanges = db
-          .prepare(
-            `UPDATE reminders SET state = 'done'
-             WHERE account_id = ? AND thread_id = ? AND kind = 'snooze' AND state = 'returned'`
-          )
-          .run(accountId, threadId).changes
-      }
-      reminderChanges += settleFollowUpForTriage(db, accountId, threadId, action, now)
-      applyThreadDelta(db, accountId, { threadId, add: plan.add, remove: plan.remove })
-      // An action the thread already satisfies — archive from a non-inbox view,
-      // a star that is already on — has nothing to send and nothing to undo.
-      const delta = effectiveLabelDelta(plan, labels)
-      const labelsChanged = delta.add.length > 0 || delta.remove.length > 0
-      let queueId: number | null = null
-      if (labelsChanged) {
-        const reminderBefore = recoveryReminderForAction(action, remindersBefore.get(threadId) ?? null)
-        const queued = enqueue.run(
-          accountId,
-          plan.queueKind,
-          threadId,
-          JSON.stringify({
-            add: plan.add,
-            remove: plan.remove,
-            actionKind,
-            reminderBefore,
-            ...(moveChangesReminder(followUpBefore) ? { followUpBefore } : {}),
-            ...(revertsQueueId ? { revertsQueueId } : {})
-          })
-        )
-        queueId = Number(queued.lastInsertRowid)
-        refs.push(
-          plan.queueKind === 'modifyLabels'
-            ? queueIntentRef(
-                {
-                  kind: plan.queueKind,
-                  threadId,
-                  add: plan.add,
-                  remove: plan.remove
-                },
-                queueId
-              )
-            : queueIntentRef({ kind: plan.queueKind, threadId }, queueId)
-        )
-      }
-      if (!labelsChanged && reminderChanges === 0) continue
-      changedThreads.add(threadId)
-      // The undo carries the queue row it reverts, so a permanent Gmail
-      // rejection of the forward action drops the pending undo with it
-      // (executor dropQueuedReverts), exactly as the move path does.
-      undo.push(
-        primary.kind === 'snoozeAt' || queueId === null ? primary : { ...primary, revertsQueueId: queueId }
-      )
-      // Archive settles the follow-up above, and its label inverse replays
-      // through apply(), which never restores reminders — so the undo entry
-      // itself must carry the snapshot back (PR #101 review), exactly as
-      // applyMoveUndo does for moves.
-      if (followUpSettledBy(action, followUpBefore, now)) {
-        undo.push({
-          kind: 'followUpRestore',
-          threadIds: [threadId],
-          before: followUpBefore,
-          after: {
-            ...followUpBefore,
-            state: followUpBefore.state === 'returned' ? 'done' : 'canceled'
-          }
-        })
-      }
+      if (movesToMailbox(action)) applyMove(context, threadId)
+      else applyLabelAction(context, threadId)
     }
   })()
-  return { undo, refs, changed: changedThreads.size }
+  return { undo: context.undo, refs: context.refs, changed: context.changedThreads.size }
 }
 
 function applyMoveUndo(db: Db, accountId: string, action: MoveUndoAction): void {
@@ -540,12 +562,7 @@ function applySnooze(
           ...(followUpBefore?.state === 'returned' ? { followUpBefore } : {})
         })
       )
-      refs.push(
-        queueIntentRef(
-          { kind: 'modifyLabels', threadId, add: [], remove: ['INBOX'] },
-          Number(queued.lastInsertRowid)
-        )
-      )
+      refs.push(queueRowRef(Number(queued.lastInsertRowid), threadId))
     }
   }
   return refs
