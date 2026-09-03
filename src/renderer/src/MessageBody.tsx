@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MessageAttachment } from '../../shared/mail'
 import { MAIL_TRIM_MARKER as TRIM_MARKER } from '../../shared/mailSanitizer'
 import type { ThemeAppearance } from '../../shared/theme'
@@ -172,10 +172,6 @@ function SingleMessageBody({
 }: MessageBodyProps & { allowTrim?: boolean; hidden?: boolean }): React.JSX.Element {
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
-  // P7: a collapsed quote is registered with main and measured for nothing —
-  // it has no layout width until it is revealed. Build it on the first reveal
-  // and keep it afterwards, so collapsing again costs no re-registration.
-  const [revealed, setRevealed] = useState(!hidden)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
   const srcDoc = useMemo(
@@ -191,13 +187,14 @@ function SingleMessageBody({
     [allowTrim, appearance, bodyHtml, layout, surface, viewOriginal]
   )
 
-  useEffect(() => {
-    if (!hidden) setRevealed(true)
-  }, [hidden])
-
+  // A collapsed quote frame mounts and loads with the message on purpose:
+  // `mixed-mail.spec.ts` pins both documents present, each loaded exactly
+  // once, so revealing the history costs no reload and no second image
+  // request. (Deferring it to the first reveal was proposed as review P7;
+  // it is that spec's contract, not an oversight.)
   const { access: frameAccess, loadOnce: loadImagesOnce } = useMailFrameAccess({
     messageId,
-    enabled: srcDoc !== null && revealed
+    enabled: srcDoc !== null
   })
 
   const applyInlineImages = useCallback(() => {
