@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Page, TestInfo } from '@playwright/test'
+import { AUTOCOMPLETE_MIN_START_INTERVAL_MS } from '../src/shared/ai'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { THREAD_PAGE_SIZE } from '../src/shared/mail'
 import { expect, test } from './electron'
@@ -412,7 +413,9 @@ async function measureAccountSwitch(
 }
 
 test.describe('@perf account switching with split inboxes', () => {
-  test.use({ seed: '.artifacts/perf-split-seed.json' })
+  // Derived from the generated perf seed, so it belongs beside it in the
+  // gitignored `.generated/` directory rather than in the uploaded artifacts.
+  test.use({ seed: '.generated/perf-split-seed.json' })
   test.beforeAll(() => {
     const fixture = JSON.parse(readFileSync(join(__dirname, '.artifacts/perf-seed.json'), 'utf8')) as {
       accounts: Array<{
@@ -426,7 +429,8 @@ test.describe('@perf account switching with split inboxes', () => {
         for (const message of thread.messages) message.labelIds.push('IMPORTANT')
       }
     }
-    writeFileSync(join(__dirname, '.artifacts/perf-split-seed.json'), JSON.stringify(fixture))
+    mkdirSync(join(__dirname, '.generated'), { recursive: true })
+    writeFileSync(join(__dirname, '.generated/perf-split-seed.json'), JSON.stringify(fixture))
   })
 
   test('switches split inboxes within 100ms in each direction', async ({ boot }, testInfo) => {
@@ -1116,7 +1120,11 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     // Acceptance-to-paint: a visible suggestion accepted with Tab lands in
     // the editor within the same frame budget as ordinary typing.
     await installFakeAi({ chunks: [' with the launch checklist attached.'] })
-    await page.waitForTimeout(1_100)
+    // Sit out the controller's one-start-per-second cooldown. A fake clock
+    // would fake `performance.now()` too and corrupt every sample in this
+    // file, so the wait stays real — but derived from the constant it is
+    // keyed to rather than a number that silently rots when that changes.
+    await page.waitForTimeout(AUTOCOMPLETE_MIN_START_INTERVAL_MS + 100)
     await page.keyboard.type('t')
     await expect(page.getByTestId('ai-autocomplete-preview')).toBeVisible()
     const acceptance = await measureComposerAcceptance(page)

@@ -1,63 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
-import type { GmailThread } from '../src/main/gmail/parse'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { runExistenceSweep, runSweep, oldThread as sweepThread } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
-interface SweepRequest {
-  resetCursor?: string
-  threadCap?: number
-  threads: GmailThread[]
-  pages: Array<{
-    pageToken?: string
-    threadIds: string[]
-    nextPageToken?: string
-    resultSizeEstimate?: number
-  }>
-  pauseAtPageToken?: string
-}
-
-interface SweepResult {
-  cursor: string | null
-  error?: string
-  formats: string[]
-  pageTokens: Array<string | undefined>
-}
-
-function oldThread(id: string, year: number): GmailThread {
-  return {
-    id,
-    messages: [
-      {
-        id: `message-${id}`,
-        threadId: id,
-        labelIds: ['SENT'],
-        internalDate: String(Date.UTC(year, 0, 2)),
-        snippet: `Utility crash fixture ${id}`,
-        payload: {
-          mimeType: 'text/plain',
-          headers: [
-            { name: 'From', value: 'Attn Seed <seed@attn.test>' },
-            { name: 'To', value: `${id}@example.com` },
-            { name: 'Subject', value: `Utility crash fixture ${id}` },
-            { name: 'Message-ID', value: `<${id}@attn.test>` }
-          ]
-        }
-      }
-    ]
-  }
-}
-
-function runSweep(app: ElectronApplication, request: SweepRequest): Promise<SweepResult> {
-  return app.evaluate(
-    ({ ipcMain }, { channel, input }) =>
-      new Promise<SweepResult>((resolve) => ipcMain.emit(channel, {}, input, resolve)),
-    { channel: TEST_CHANNELS.runLifetimeSweep, input: request }
-  )
-}
+const oldThread = (id: string, year: number) => sweepThread(id, `${id}@example.com`, year)
 
 function crashUtilityRaw(app: ElectronApplication): Promise<string | undefined> {
   return app.evaluate(
@@ -260,4 +210,45 @@ test('surfaces a crash-looped utility to a window that reads sync state after it
     phase: 'error',
     message: 'Mail service stopped after repeated crashes. Restart Attn.'
   })
+})
+
+// Moved here from a spec of its own (T5): the sibling sweep seams and the same
+// seeded store already boot in this file, so the expiry pass shares that boot.
+test('removes a local ghost only after the account existence listings finish', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  expect(
+    await page.evaluate(() => window.attn.mail.getConversation('t-weekly', false, 'normal'))
+  ).not.toBeNull()
+
+  await expect(
+    runExistenceSweep(app, {
+      // t-weekly is the server-purged fixture. t-roadmap appears in both the
+      // default and Trash listings because only one of its messages is trashed.
+      allMailThreadIds: [
+        't-roadmap',
+        't-receipt',
+        't-design',
+        't-lunch',
+        't-budget',
+        't-travel',
+        't-research',
+        't-sent-history',
+        't-starred-archive'
+      ],
+      spamThreadIds: [],
+      trashThreadIds: ['t-roadmap']
+    })
+  ).resolves.toEqual({
+    listedThreadCount: 9,
+    deletedThreadIds: ['t-weekly']
+  })
+
+  await expect(page.getByTestId('thread-row')).toHaveCount(7)
+  expect(await page.evaluate(() => window.attn.mail.getConversation('t-weekly', false, 'normal'))).toBeNull()
+  expect(
+    await page.evaluate(() => window.attn.mail.getConversation('t-sent-history', false, 'normal'))
+  ).not.toBeNull()
+  expect(
+    await page.evaluate(() => window.attn.mail.getConversation('t-roadmap', false, 'normal'))
+  ).not.toBeNull()
 })
