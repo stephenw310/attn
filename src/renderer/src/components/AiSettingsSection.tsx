@@ -9,6 +9,7 @@ import {
   isAiProviderKind,
   isAiVoiceTone
 } from '../../../shared/ai'
+import { useShowToast } from '../toastContext'
 
 // The AI-writing settings pane (T36, SPEC F17). Everything here is app-global
 // (F18 rule 9). Both enables are deliberate consent flows: turning one on
@@ -41,7 +42,8 @@ const AUTOCOMPLETE_DISCLOSURE =
   'sent mail, and ' +
   'content already sent to a provider cannot be recalled.'
 
-export function AiSettingsSection({ onToast }: { onToast: (message: string) => void }): React.JSX.Element {
+export function AiSettingsSection(): React.JSX.Element {
+  const onToast = useShowToast()
   const [settings, setSettings] = useState<AiSettings | null>(null)
   const [confirming, setConfirming] = useState<'enable' | 'autocomplete' | null>(null)
   const [keyDraft, setKeyDraft] = useState('')

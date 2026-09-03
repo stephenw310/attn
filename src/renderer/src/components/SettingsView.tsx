@@ -18,6 +18,7 @@ import { formatSnoozeDate } from '../../../shared/snooze'
 import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
+import { useShowToast } from '../toastContext'
 import { AiSettingsSection } from './AiSettingsSection'
 import { Kbd } from './Kbd'
 import { SnippetManager } from './SnippetManager'
@@ -58,7 +59,6 @@ interface SettingsViewProps {
   onReconnect: () => void
   onSignOut: () => void
   onClose: () => void
-  onToast: (message: string) => void
   focusControl: SettingsControl | null
 }
 
@@ -94,9 +94,9 @@ export function SettingsView({
   onReconnect,
   onSignOut,
   onClose,
-  onToast,
   focusControl
 }: SettingsViewProps): React.JSX.Element {
+  const onToast = useShowToast()
   const { preference, setPreference } = useTheme()
   const [reorderPending, setReorderPending] = useState(false)
   const [openedStatuses, setOpenedStatuses] = useState<{
@@ -530,13 +530,13 @@ export function SettingsView({
 
               <section data-testid="settings-ai" aria-label="AI writing">
                 <SectionTitle>AI writing</SectionTitle>
-                <AiSettingsSection onToast={onToast} />
+                <AiSettingsSection />
               </section>
 
               <section data-testid="settings-snippets" aria-label="Snippets">
                 <SectionTitle>Snippets</SectionTitle>
                 <div className="mt-2">
-                  <SnippetManager onToast={onToast} />
+                  <SnippetManager />
                 </div>
               </section>
 

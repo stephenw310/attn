@@ -62,6 +62,7 @@ import {
   triageViewForSearch
 } from '../searchView'
 import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
+import { ToastContext } from '../toastContext'
 import { CheatSheet } from './CheatSheet'
 import { CommandPalette } from './CommandPalette'
 import { ConversationView, type MessageReplyTarget } from './ConversationView'
@@ -2235,379 +2236,383 @@ export function Inbox({
   }, [clearOutboxFailure, outboxFailure, showToast])
 
   return (
-    <div className="flex h-full flex-col">
-      <MailHeader
-        unreadCount={realUnreadTotal}
-        pendingActionCount={pendingActionCount}
-        pausedActionCount={pausedActionCount}
-        outboxCount={realOutbox.length}
-        selectionCount={searchOpen || (view !== 'drafts' && view !== 'outbox') ? selectedIds.size : 0}
-        composerOpen={fullWindowComposerDraft !== null}
-        sidebarCollapsed={sidebarCollapsed}
-        status={status}
-        accountStatuses={accountStatuses}
-        onReconnectActions={reconnectActions}
-        onOpenOutbox={openOutbox}
-        onToggleSidebar={toggleSidebar}
-        onSwitchAccount={switchAccount}
-        onAddAccount={addAccount}
-        onRemoveAccount={requestRemoveAccount}
-        onOpenSettings={() => openSettings(null)}
-        onOpenCheatSheet={openCheatSheet}
-        accountActionsBlocked={accountActionsBlocked}
-      />
+    <ToastContext.Provider value={showToast}>
+      <div className="flex h-full flex-col">
+        <MailHeader
+          unreadCount={realUnreadTotal}
+          pendingActionCount={pendingActionCount}
+          pausedActionCount={pausedActionCount}
+          outboxCount={realOutbox.length}
+          selectionCount={searchOpen || (view !== 'drafts' && view !== 'outbox') ? selectedIds.size : 0}
+          composerOpen={fullWindowComposerDraft !== null}
+          sidebarCollapsed={sidebarCollapsed}
+          status={status}
+          accountStatuses={accountStatuses}
+          onReconnectActions={reconnectActions}
+          onOpenOutbox={openOutbox}
+          onToggleSidebar={toggleSidebar}
+          onSwitchAccount={switchAccount}
+          onAddAccount={addAccount}
+          onRemoveAccount={requestRemoveAccount}
+          onOpenSettings={() => openSettings(null)}
+          onOpenCheatSheet={openCheatSheet}
+          accountActionsBlocked={accountActionsBlocked}
+        />
 
-      {removeAccountConfirm && activeAccount && (
-        // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled by the dialog's key capture
-        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is the pointer dismissal path
-        <div
-          data-testid="remove-account-dialog"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => setRemoveAccountConfirm(false)}
-        >
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: the handler only stops backdrop dismissal */}
+        {removeAccountConfirm && activeAccount && (
+          // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled by the dialog's key capture
+          // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is the pointer dismissal path
           <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Sign out of ${activeAccount}?`}
-            className="w-[460px] rounded-lg border border-edge bg-raised p-5 shadow-menu"
-            onClick={(event) => event.stopPropagation()}
+            data-testid="remove-account-dialog"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={() => setRemoveAccountConfirm(false)}
           >
-            <h2 className="text-sm font-semibold text-ink">Sign out of {activeAccount}?</h2>
-            <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
-              This signs the account out and stops its sync. Choose what happens to its mail cached on this
-              device: deleting removes every local trace; keeping leaves it dormant so adding the account
-              again picks up where it left off.
-            </p>
-            <div className="mt-4 flex flex-col gap-1.5">
-              <button
-                type="button"
-                data-testid="remove-account-delete"
-                ref={removeAccountDeleteRef}
-                onClick={() => removeActiveAccount(true)}
-                className="w-full cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
-              >
-                Sign out and delete local data
-              </button>
-              <button
-                type="button"
-                data-testid="remove-account-keep"
-                onClick={() => removeActiveAccount(false)}
-                className="w-full cursor-pointer rounded-md border border-edge px-3 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
-              >
-                Sign out and keep local data
-              </button>
-              <button
-                type="button"
-                data-testid="remove-account-cancel"
-                onClick={() => setRemoveAccountConfirm(false)}
-                className="w-full cursor-pointer rounded-md px-3 py-1.5 text-[13px] text-ink-faint hover:bg-active hover:text-ink"
-              >
-                Cancel
-              </button>
+            {/* biome-ignore lint/a11y/useKeyWithClickEvents: the handler only stops backdrop dismissal */}
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Sign out of ${activeAccount}?`}
+              className="w-[460px] rounded-lg border border-edge bg-raised p-5 shadow-menu"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h2 className="text-sm font-semibold text-ink">Sign out of {activeAccount}?</h2>
+              <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
+                This signs the account out and stops its sync. Choose what happens to its mail cached on this
+                device: deleting removes every local trace; keeping leaves it dormant so adding the account
+                again picks up where it left off.
+              </p>
+              <div className="mt-4 flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  data-testid="remove-account-delete"
+                  ref={removeAccountDeleteRef}
+                  onClick={() => removeActiveAccount(true)}
+                  className="w-full cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
+                >
+                  Sign out and delete local data
+                </button>
+                <button
+                  type="button"
+                  data-testid="remove-account-keep"
+                  onClick={() => removeActiveAccount(false)}
+                  className="w-full cursor-pointer rounded-md border border-edge px-3 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
+                >
+                  Sign out and keep local data
+                </button>
+                <button
+                  type="button"
+                  data-testid="remove-account-cancel"
+                  onClick={() => setRemoveAccountConfirm(false)}
+                  className="w-full cursor-pointer rounded-md px-3 py-1.5 text-[13px] text-ink-faint hover:bg-active hover:text-ink"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div
+          className={`min-h-0 flex-1 ${fullWindowComposerDraft ? 'hidden' : 'flex'}`}
+          aria-hidden={!!fullWindowComposerDraft}
+        >
+          {!sidebarCollapsed && (
+            <MailSidebar
+              view={view}
+              labels={labels}
+              mailboxCounts={realMailboxCounts}
+              draftCount={realDrafts.length}
+              outboxCount={realOutbox.length}
+              onSwitchView={switchView}
+              onOpenOutbox={openOutbox}
+            />
+          )}
+          {settingsOpen && activeAccount && (
+            <SettingsView
+              status={status}
+              accountStatuses={accountStatuses}
+              settings={appSettings}
+              accountSettings={accountSettings}
+              onUpdateSetting={updateAppSetting}
+              onUpdateAccountSetting={updateAccountSetting}
+              onReorderAccounts={onReorderAccounts}
+              onAddAccount={addAccount}
+              onReconnect={reconnectActions}
+              onSignOut={requestRemoveAccount}
+              onClose={closeSettings}
+              focusControl={settingsFocus}
+            />
+          )}
+          <div
+            className={`min-w-0 flex-1 flex-col ${settingsOpen ? 'hidden' : 'flex'}`}
+            aria-hidden={settingsOpen || undefined}
+          >
+            {!readerOpen &&
+              !fullWindowComposerDraft &&
+              (searchOpen ? (
+                <SearchHeader
+                  inputRef={searchInputRef}
+                  query={searchQuery}
+                  pending={search.pending}
+                  onQuery={setSearchQuery}
+                  onClear={clearSearch}
+                  onFocusQuery={focusSearchQuery}
+                  onSubmit={submitSearch}
+                />
+              ) : (
+                <div
+                  data-testid="mail-view-header"
+                  className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
+                >
+                  <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
+                    <span data-testid="view-title">{activeViewTitle}</span>
+                  </h1>
+                  <button
+                    type="button"
+                    data-testid="search-open"
+                    aria-label="Search mail"
+                    title="Search mail (/)"
+                    onClick={openSearch}
+                    className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
+                      <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
+                      <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                    <span>/</span>
+                  </button>
+                </div>
+              ))}
+            {!readerOpen && !fullWindowComposerDraft && !searchOpen && view === 'inbox' && splits.state && (
+              <SplitStrip
+                splits={splits.state.splits}
+                activeSplitId={splits.activeSplitId}
+                onSelect={switchSplit}
+                onManage={() => setSplitRulesOpen(true)}
+              />
+            )}
+            <div className={`flex min-h-0 flex-1 ${searchOpen && !readerOpen ? 'flex-col' : ''}`}>
+              {searchDraftMode ? (
+                <DraftList
+                  drafts={searchDrafts}
+                  readerOpen={false}
+                  selectedIndex={selectedIndex}
+                  selectionVisible={searchKeyboardTarget === 'results'}
+                  selectedRowRef={selectedRowRef}
+                  listRef={listElRef}
+                  onOpen={(index) => {
+                    setSearchKeyboardTarget('results')
+                    setSelectedIndex(index)
+                    const draft = searchDrafts[index]
+                    if (draft) reopenListDraft(draft.id)
+                  }}
+                />
+              ) : !searchOpen && view === 'drafts' ? (
+                <DraftList
+                  drafts={realDrafts}
+                  readerOpen={readerOpen}
+                  selectedIndex={selectedIndex}
+                  selectedRowRef={selectedRowRef}
+                  listRef={listElRef}
+                  onOpen={(index) => {
+                    setSelectedIndex(index)
+                    const draft = realDrafts[index]
+                    if (!draft) return
+                    selectedDraftIdRef.current = draft.id
+                    reopenListDraft(draft.id)
+                  }}
+                />
+              ) : !searchOpen && view === 'outbox' ? (
+                <OutboxList
+                  items={realOutbox}
+                  selectedIndex={selectedIndex}
+                  selectedRowRef={selectedRowRef}
+                  listRef={listElRef}
+                  onOpen={(index) => {
+                    setSelectedIndex(index)
+                    selectedDraftIdRef.current = realOutbox[index]?.id ?? null
+                    openOutboxItem(index)
+                  }}
+                />
+              ) : showInboxZero && splits.state && splits.activeSplitId ? (
+                <InboxZero
+                  activeSplitId={splits.activeSplitId}
+                  splits={splits.state.splits}
+                  listRef={listElRef}
+                  onSelectSplit={switchSplit}
+                />
+              ) : (
+                <ThreadList
+                  threads={threads}
+                  view={searchOpen ? 'search' : threadListKind(view)}
+                  hasMore={
+                    !searchOpen && activePageState?.nextCursor !== null && activePageState !== undefined
+                  }
+                  loadingMore={!searchOpen && (activePageState?.loadingMore ?? false)}
+                  loadingInitial={
+                    !searchOpen &&
+                    view === 'inbox' &&
+                    (!activeInboxRowsResolved || inboxBackfillReady !== true)
+                  }
+                  syncing={!searchOpen && sync.phase === 'syncing'}
+                  readerOpen={readerOpen}
+                  selectedIndex={selectedIndex}
+                  selectionVisible={!searchOpen || searchKeyboardTarget === 'results'}
+                  selectedIds={selectedIds}
+                  exitingThreadIds={exitingThreadIds}
+                  labelsById={userLabelsById}
+                  selectedRowRef={selectedRowRef}
+                  listRef={listElRef}
+                  onExtendSelection={extendSelectionTo}
+                  onLoadMore={loadMoreVisibleThreads}
+                  onOpenLabel={openLabelView}
+                  onOpen={openThreadFromList}
+                  sectionDivider={searchOpen ? searchSectionDivider : undefined}
+                />
+              )}
+
+              {searchOpen && !readerOpen && !searchDraftMode && !searchSnoozeMode && searchQuery.trim() && (
+                <ServerSearchRow
+                  phase={serverSearch.phase}
+                  resultCount={serverSearchThreads.length}
+                  message={serverSearch.message}
+                  quotaWaitMs={serverSearch.quotaWaitMs}
+                  online={online}
+                />
+              )}
+
+              {searchOpen && !readerOpen && searchQuery.trim() && (
+                <div
+                  data-testid="search-coverage"
+                  data-search-query={search.completedQuery ?? undefined}
+                  role={search.failed ? 'alert' : 'status'}
+                  data-partial={search.response?.partial || undefined}
+                  className={`flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] ${
+                    search.response?.partial ? 'text-accent' : 'text-ink-faint'
+                  }`}
+                >
+                  {search.failed
+                    ? 'Local search could not be completed'
+                    : search.response
+                      ? searchCoverageText(search.response.coverage, search.response.partial)
+                      : 'Searching cached mail…'}
+                </div>
+              )}
+
+              {readerOpen && selected && (
+                <ConversationView
+                  selected={selected}
+                  selectedIndex={conversationSelectedIndex}
+                  threadCount={conversationThreadCount}
+                  threadCountExact={conversationThreadCountExact}
+                  mailboxTitle={searchOpen ? 'Search' : activeViewTitle}
+                  conversation={conversation}
+                  account={activeAccount}
+                  online={online}
+                  scrollRef={conversationScrollRef}
+                  replyTargetRef={messageReplyTargetRef}
+                  inlineComposer={inlineComposer}
+                  inlineComposerDraftId={inlineComposerDraft?.id ?? null}
+                  inlineComposerSourceMessageId={inlineComposerDraft?.sourceMessageId ?? null}
+                  onReply={openReply}
+                  onClose={closeReader}
+                />
+              )}
             </div>
           </div>
         </div>
-      )}
 
-      <div
-        className={`min-h-0 flex-1 ${fullWindowComposerDraft ? 'hidden' : 'flex'}`}
-        aria-hidden={!!fullWindowComposerDraft}
-      >
-        {!sidebarCollapsed && (
-          <MailSidebar
-            view={view}
+        {!fullWindowComposerDraft && (
+          <MailFooter
+            context={
+              inlineComposerDraft
+                ? 'composer'
+                : searchOpen && searchKeyboardTarget === 'query' && !readerOpen
+                  ? 'search'
+                  : readerOpen
+                    ? 'reader'
+                    : !searchOpen && view === 'outbox'
+                      ? 'outbox'
+                      : 'list'
+            }
+            pendingChord={pendingChord}
+            sync={sync}
+            networkOnline={networkOnline}
+            onRetry={retrySync}
+            onCopyError={copySyncError}
+          />
+        )}
+
+        {!composerDraft && snoozeOpen && selected && (
+          <SnoozePicker
+            targetCount={targetedThreads.length}
+            onCancel={closeSnooze}
+            onConfirm={snoozeSelected}
+            onUnsnooze={view === 'snoozed' ? unsnoozeSelected : undefined}
+          />
+        )}
+
+        {!composerDraft && labelTargets && (
+          <LabelPicker
             labels={labels}
-            mailboxCounts={realMailboxCounts}
-            draftCount={realDrafts.length}
-            outboxCount={realOutbox.length}
-            onSwitchView={switchView}
-            onOpenOutbox={openOutbox}
+            targets={labelTargets.map((target) => ({ id: target.id, labelIds: target.labelIds }))}
+            onClose={closeLabel}
+            onToggle={toggleLabel}
           />
         )}
-        {settingsOpen && activeAccount && (
-          <SettingsView
-            status={status}
-            accountStatuses={accountStatuses}
-            settings={appSettings}
-            accountSettings={accountSettings}
-            onUpdateSetting={updateAppSetting}
-            onUpdateAccountSetting={updateAccountSetting}
-            onReorderAccounts={onReorderAccounts}
-            onAddAccount={addAccount}
-            onReconnect={reconnectActions}
-            onSignOut={requestRemoveAccount}
-            onClose={closeSettings}
+
+        {!composerDraft && moveRequest && (
+          <MovePicker
+            labels={labels}
+            targets={moveRequest.targets}
+            sourceLabelId={moveRequest.sourceLabelId}
+            showImportanceActions={Boolean(
+              !searchOpen &&
+                view === 'inbox' &&
+                splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
+                splits.state.splits.some((split) => split.id === OTHER_SPLIT_ID)
+            )}
+            onClose={closeMove}
+            onMove={moveSelected}
+          />
+        )}
+
+        {!composerDraft && splitRulesOpen && splits.state && (
+          <SplitRuleManager
+            state={splits.state}
+            onSave={splits.save}
+            onNotify={splits.setNotify}
+            onDelete={splits.remove}
+            onReorder={(ids) => splits.reorder({ ids })}
+            onRestore={splits.restorePreset}
+            onClose={() => setSplitRulesOpen(false)}
+          />
+        )}
+
+        <CommandPalette
+          account={activeAccount}
+          context={composerDraft ? 'composer' : readerOpen ? 'reader' : view === 'outbox' ? 'outbox' : 'list'}
+          onOpenChange={setPaletteOpen}
+        />
+
+        <CheatSheet
+          open={cheatSheetOpen}
+          paletteOpen={paletteOpen}
+          onOpen={openCheatSheet}
+          onClose={closeCheatSheet}
+        />
+
+        {fullWindowComposerDraft && activeAccount && (
+          <Composer
+            draft={fullWindowComposerDraft}
+            initialError={composerError}
+            onClose={closeComposer}
             onToast={showToast}
-            focusControl={settingsFocus}
           />
         )}
-        <div
-          className={`min-w-0 flex-1 flex-col ${settingsOpen ? 'hidden' : 'flex'}`}
-          aria-hidden={settingsOpen || undefined}
-        >
-          {!readerOpen &&
-            !fullWindowComposerDraft &&
-            (searchOpen ? (
-              <SearchHeader
-                inputRef={searchInputRef}
-                query={searchQuery}
-                pending={search.pending}
-                onQuery={setSearchQuery}
-                onClear={clearSearch}
-                onFocusQuery={focusSearchQuery}
-                onSubmit={submitSearch}
-              />
-            ) : (
-              <div
-                data-testid="mail-view-header"
-                className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
-              >
-                <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
-                  <span data-testid="view-title">{activeViewTitle}</span>
-                </h1>
-                <button
-                  type="button"
-                  data-testid="search-open"
-                  aria-label="Search mail"
-                  title="Search mail (/)"
-                  onClick={openSearch}
-                  className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
-                >
-                  <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
-                    <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
-                    <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                  <span>/</span>
-                </button>
-              </div>
-            ))}
-          {!readerOpen && !fullWindowComposerDraft && !searchOpen && view === 'inbox' && splits.state && (
-            <SplitStrip
-              splits={splits.state.splits}
-              activeSplitId={splits.activeSplitId}
-              onSelect={switchSplit}
-              onManage={() => setSplitRulesOpen(true)}
-            />
-          )}
-          <div className={`flex min-h-0 flex-1 ${searchOpen && !readerOpen ? 'flex-col' : ''}`}>
-            {searchDraftMode ? (
-              <DraftList
-                drafts={searchDrafts}
-                readerOpen={false}
-                selectedIndex={selectedIndex}
-                selectionVisible={searchKeyboardTarget === 'results'}
-                selectedRowRef={selectedRowRef}
-                listRef={listElRef}
-                onOpen={(index) => {
-                  setSearchKeyboardTarget('results')
-                  setSelectedIndex(index)
-                  const draft = searchDrafts[index]
-                  if (draft) reopenListDraft(draft.id)
-                }}
-              />
-            ) : !searchOpen && view === 'drafts' ? (
-              <DraftList
-                drafts={realDrafts}
-                readerOpen={readerOpen}
-                selectedIndex={selectedIndex}
-                selectedRowRef={selectedRowRef}
-                listRef={listElRef}
-                onOpen={(index) => {
-                  setSelectedIndex(index)
-                  const draft = realDrafts[index]
-                  if (!draft) return
-                  selectedDraftIdRef.current = draft.id
-                  reopenListDraft(draft.id)
-                }}
-              />
-            ) : !searchOpen && view === 'outbox' ? (
-              <OutboxList
-                items={realOutbox}
-                selectedIndex={selectedIndex}
-                selectedRowRef={selectedRowRef}
-                listRef={listElRef}
-                onOpen={(index) => {
-                  setSelectedIndex(index)
-                  selectedDraftIdRef.current = realOutbox[index]?.id ?? null
-                  openOutboxItem(index)
-                }}
-              />
-            ) : showInboxZero && splits.state && splits.activeSplitId ? (
-              <InboxZero
-                activeSplitId={splits.activeSplitId}
-                splits={splits.state.splits}
-                listRef={listElRef}
-                onSelectSplit={switchSplit}
-              />
-            ) : (
-              <ThreadList
-                threads={threads}
-                view={searchOpen ? 'search' : threadListKind(view)}
-                hasMore={!searchOpen && activePageState?.nextCursor !== null && activePageState !== undefined}
-                loadingMore={!searchOpen && (activePageState?.loadingMore ?? false)}
-                loadingInitial={
-                  !searchOpen && view === 'inbox' && (!activeInboxRowsResolved || inboxBackfillReady !== true)
-                }
-                syncing={!searchOpen && sync.phase === 'syncing'}
-                readerOpen={readerOpen}
-                selectedIndex={selectedIndex}
-                selectionVisible={!searchOpen || searchKeyboardTarget === 'results'}
-                selectedIds={selectedIds}
-                exitingThreadIds={exitingThreadIds}
-                labelsById={userLabelsById}
-                selectedRowRef={selectedRowRef}
-                listRef={listElRef}
-                onExtendSelection={extendSelectionTo}
-                onLoadMore={loadMoreVisibleThreads}
-                onOpenLabel={openLabelView}
-                onOpen={openThreadFromList}
-                sectionDivider={searchOpen ? searchSectionDivider : undefined}
-              />
-            )}
 
-            {searchOpen && !readerOpen && !searchDraftMode && !searchSnoozeMode && searchQuery.trim() && (
-              <ServerSearchRow
-                phase={serverSearch.phase}
-                resultCount={serverSearchThreads.length}
-                message={serverSearch.message}
-                quotaWaitMs={serverSearch.quotaWaitMs}
-                online={online}
-              />
-            )}
-
-            {searchOpen && !readerOpen && searchQuery.trim() && (
-              <div
-                data-testid="search-coverage"
-                data-search-query={search.completedQuery ?? undefined}
-                role={search.failed ? 'alert' : 'status'}
-                data-partial={search.response?.partial || undefined}
-                className={`flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] ${
-                  search.response?.partial ? 'text-accent' : 'text-ink-faint'
-                }`}
-              >
-                {search.failed
-                  ? 'Local search could not be completed'
-                  : search.response
-                    ? searchCoverageText(search.response.coverage, search.response.partial)
-                    : 'Searching cached mail…'}
-              </div>
-            )}
-
-            {readerOpen && selected && (
-              <ConversationView
-                selected={selected}
-                selectedIndex={conversationSelectedIndex}
-                threadCount={conversationThreadCount}
-                threadCountExact={conversationThreadCountExact}
-                mailboxTitle={searchOpen ? 'Search' : activeViewTitle}
-                conversation={conversation}
-                account={activeAccount}
-                online={online}
-                scrollRef={conversationScrollRef}
-                replyTargetRef={messageReplyTargetRef}
-                inlineComposer={inlineComposer}
-                inlineComposerDraftId={inlineComposerDraft?.id ?? null}
-                inlineComposerSourceMessageId={inlineComposerDraft?.sourceMessageId ?? null}
-                onReply={openReply}
-                onClose={closeReader}
-                onToast={showToast}
-              />
-            )}
-          </div>
-        </div>
+        <Toast toast={toast} progress={outboxProgress} />
       </div>
-
-      {!fullWindowComposerDraft && (
-        <MailFooter
-          context={
-            inlineComposerDraft
-              ? 'composer'
-              : searchOpen && searchKeyboardTarget === 'query' && !readerOpen
-                ? 'search'
-                : readerOpen
-                  ? 'reader'
-                  : !searchOpen && view === 'outbox'
-                    ? 'outbox'
-                    : 'list'
-          }
-          pendingChord={pendingChord}
-          sync={sync}
-          networkOnline={networkOnline}
-          onRetry={retrySync}
-          onCopyError={copySyncError}
-        />
-      )}
-
-      {!composerDraft && snoozeOpen && selected && (
-        <SnoozePicker
-          targetCount={targetedThreads.length}
-          onCancel={closeSnooze}
-          onConfirm={snoozeSelected}
-          onUnsnooze={view === 'snoozed' ? unsnoozeSelected : undefined}
-        />
-      )}
-
-      {!composerDraft && labelTargets && (
-        <LabelPicker
-          labels={labels}
-          targets={labelTargets.map((target) => ({ id: target.id, labelIds: target.labelIds }))}
-          onClose={closeLabel}
-          onToggle={toggleLabel}
-        />
-      )}
-
-      {!composerDraft && moveRequest && (
-        <MovePicker
-          labels={labels}
-          targets={moveRequest.targets}
-          sourceLabelId={moveRequest.sourceLabelId}
-          showImportanceActions={Boolean(
-            !searchOpen &&
-              view === 'inbox' &&
-              splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
-              splits.state.splits.some((split) => split.id === OTHER_SPLIT_ID)
-          )}
-          onClose={closeMove}
-          onMove={moveSelected}
-        />
-      )}
-
-      {!composerDraft && splitRulesOpen && splits.state && (
-        <SplitRuleManager
-          state={splits.state}
-          onSave={splits.save}
-          onNotify={splits.setNotify}
-          onDelete={splits.remove}
-          onReorder={(ids) => splits.reorder({ ids })}
-          onRestore={splits.restorePreset}
-          onClose={() => setSplitRulesOpen(false)}
-        />
-      )}
-
-      <CommandPalette
-        account={activeAccount}
-        context={composerDraft ? 'composer' : readerOpen ? 'reader' : view === 'outbox' ? 'outbox' : 'list'}
-        onOpenChange={setPaletteOpen}
-      />
-
-      <CheatSheet
-        open={cheatSheetOpen}
-        paletteOpen={paletteOpen}
-        onOpen={openCheatSheet}
-        onClose={closeCheatSheet}
-      />
-
-      {fullWindowComposerDraft && activeAccount && (
-        <Composer
-          draft={fullWindowComposerDraft}
-          initialError={composerError}
-          onClose={closeComposer}
-          onToast={showToast}
-        />
-      )}
-
-      <Toast toast={toast} progress={outboxProgress} />
-    </div>
+    </ToastContext.Provider>
   )
 }

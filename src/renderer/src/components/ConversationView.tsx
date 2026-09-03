@@ -21,7 +21,6 @@ interface ConversationMessagesProps {
   inlineComposerSourceMessageId: string | null
   scrollRef: React.RefObject<HTMLDivElement | null>
   replyTargetRef: React.RefObject<MessageReplyTarget | null>
-  onToast: (message: string) => void
   onReply?: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
@@ -42,7 +41,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     inlineComposerSourceMessageId,
     scrollRef,
     replyTargetRef,
-    onToast,
     onReply
   } = props
   const newestIndex = newestReadableIndex(conversation.messages)
@@ -289,7 +287,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           threadId={conversation.threadId}
           message={message}
           account={account}
-          onToast={onToast}
           active={activeMessageId === message.id}
           hasInlineComposer={Boolean(inlineComposer && inlineComposerSourceMessageId === message.id)}
           bodyHydrationMessage={bodyHydrationStatusMessage(
@@ -347,7 +344,6 @@ interface ConversationViewProps {
   inlineComposerDraftId: string | null
   inlineComposerSourceMessageId: string | null
   onClose: () => void
-  onToast: (message: string) => void
   onReply: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
@@ -369,7 +365,6 @@ export const ConversationView = memo(function ConversationView(
     inlineComposerDraftId,
     inlineComposerSourceMessageId,
     onClose,
-    onToast,
     onReply
   } = props
 
@@ -503,7 +498,6 @@ export const ConversationView = memo(function ConversationView(
               inlineComposerSourceMessageId={inlineComposerSourceMessageId}
               scrollRef={scrollRef}
               replyTargetRef={replyTargetRef}
-              onToast={onToast}
               onReply={inlineComposer === null ? onReply : undefined}
             />
           </div>
