@@ -18,7 +18,7 @@ function isSafeLink(value: string): boolean {
   return /^(?:https?:|mailto:)/i.test(value)
 }
 
-export function normalizeLink(value: string): string | null {
+function normalizeLink(value: string): string | null {
   const trimmed = value.trim()
   if (!trimmed) return null
   const normalized = /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`

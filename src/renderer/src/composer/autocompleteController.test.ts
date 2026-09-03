@@ -178,7 +178,7 @@ describe('suggestion lifecycle', () => {
     const h = harness()
     await completedSuggestion(h, 'ld, how are you?')
     expect(h.hooks.previews).toEqual(['ld, how are you?', 'ld, how are you?'])
-    expect(h.controller.hasSuggestion()).toBe(true)
+    expect(h.controller.takeAcceptedText()).toBe('ld, how are you?')
   })
 
   it('updates the gray preview as chunks arrive instead of waiting for completion', async () => {
@@ -215,7 +215,7 @@ describe('suggestion lifecycle', () => {
     h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'chunk', text: ' Amit,' })
     h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'done' })
     expect(h.hooks.previews).toEqual([])
-    expect(h.controller.hasSuggestion()).toBe(false)
+    expect(h.controller.dismiss()).toBe(false)
   })
 
   it('acceptance returns the text once and clears the preview', async () => {
@@ -231,7 +231,8 @@ describe('suggestion lifecycle', () => {
     await completedSuggestion(h, 'ld!')
     h.hooks.anchor = 'a-2'
     expect(h.controller.takeAcceptedText()).toBeNull()
-    expect(h.controller.hasSuggestion()).toBe(false)
+    // Refused *and* dropped: nothing is left for a later Tab to accept.
+    expect(h.controller.dismiss()).toBe(false)
   })
 
   it('a dismissed suggestion cannot reappear without fresh typing', async () => {
@@ -240,7 +241,6 @@ describe('suggestion lifecycle', () => {
     expect(h.controller.dismiss()).toBe(true)
     expect(h.controller.dismiss()).toBe(false)
     expect(h.timers.count()).toBe(0)
-    expect(h.controller.hasSuggestion()).toBe(false)
   })
 })
 

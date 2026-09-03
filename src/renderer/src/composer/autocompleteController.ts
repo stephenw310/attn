@@ -142,10 +142,6 @@ export class AutocompleteController {
     return current.text
   }
 
-  hasSuggestion(): boolean {
-    return this.suggestion !== null
-  }
-
   /** Route one broadcast stream event; anything not ours is ignored. */
   handleStreamEvent(event: AiStreamEvent): void {
     const pending = this.pending

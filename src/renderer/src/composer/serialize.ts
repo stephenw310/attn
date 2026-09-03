@@ -18,7 +18,9 @@ function childrenOf(node: SerializedLexicalNode): SerializedLexicalNode[] {
 
 function inlineText(node: SerializedLexicalNode): string {
   const element = node as SerializedElement
-  if (node.type === 'text' || node.type === 'styled-text') return element.text ?? ''
+  // Every text node is a `StyledTextNode`: `editorConfig.ts` replaces Lexical's
+  // `TextNode` globally, and no editor state is persisted as JSON.
+  if (node.type === 'styled-text') return element.text ?? ''
   if (node.type === 'linebreak') return '\n'
   if (node.type === 'composer-image') return element.altText ? `[Image: ${element.altText}]` : '[Image]'
   if (node.type === 'opaque-html') return element.html ? opaqueHtmlText(element.html) : ''
