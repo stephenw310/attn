@@ -55,7 +55,7 @@ describe('badgeOverlayBitmap', () => {
 })
 
 describe('badgeOverlayPng', () => {
-  it('encodes valid 32px PNGs and caches each visible label', () => {
+  it('encodes a valid 32px PNG per visible label', () => {
     const one = badgeOverlayPng(1)
     const eight = badgeOverlayPng(8)
     const ten = badgeOverlayPng(10)
@@ -64,6 +64,7 @@ describe('badgeOverlayPng', () => {
     expect(one?.readUInt32BE(16)).toBe(BADGE_OVERLAY_SIZE)
     expect(one?.readUInt32BE(20)).toBe(BADGE_OVERLAY_SIZE)
     expect(one?.equals(eight as Buffer)).toBe(false)
-    expect(ten).toBe(many)
+    // Everything above nine shares the `9+` label, so it encodes identically.
+    expect(ten?.equals(many as Buffer)).toBe(true)
   })
 })

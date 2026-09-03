@@ -90,17 +90,16 @@ export function badgeOverlayBitmap(unreadCount: number): BadgeBitmap | null {
   return { text, width: size, height: size, pixels }
 }
 
-const pngCache = new Map<string, Buffer>()
-
-/** Encode the badge as PNG to keep its red channel stable in Electron on Windows. */
+/**
+ * Encode the badge as PNG to keep its red channel stable in Electron on
+ * Windows. Uncached on purpose: the only caller caches the decoded
+ * `NativeImage` per visible label, so a second cache of the same keys here
+ * would only hold the intermediate buffers alive.
+ */
 export function badgeOverlayPng(unreadCount: number): Buffer | null {
   const bitmap = badgeOverlayBitmap(unreadCount)
   if (!bitmap) return null
-  const cached = pngCache.get(bitmap.text)
-  if (cached) return cached
-  const png = encodeRgbaPng(bitmap.width, bitmap.height, bitmap.pixels)
-  pngCache.set(bitmap.text, png)
-  return png
+  return encodeRgbaPng(bitmap.width, bitmap.height, bitmap.pixels)
 }
 
 function paint(pixels: Buffer, x: number, y: number, rgba: readonly [number, number, number, number]): void {

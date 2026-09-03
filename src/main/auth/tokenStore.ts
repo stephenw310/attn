@@ -53,9 +53,17 @@ export function loadAccounts(userDataDir: string): StoredAccount[] {
   return file.accounts
 }
 
-/** Add-or-refresh one account's tokens; returns the updated roster. */
-export function saveAccountTokens(userDataDir: string, tokens: TokenSet): StoredAccount[] {
-  const accounts = upsertAccount(loadAccounts(userDataDir), tokens)
+/**
+ * Add-or-refresh one account's tokens; returns the updated roster. `roster`
+ * lets a caller that just decrypted the file pass it in rather than paying
+ * for a second decrypt (the token-refresh path does this on every refresh).
+ */
+export function saveAccountTokens(
+  userDataDir: string,
+  tokens: TokenSet,
+  roster?: readonly StoredAccount[]
+): StoredAccount[] {
+  const accounts = upsertAccount(roster ?? loadAccounts(userDataDir), tokens)
   write(userDataDir, accounts)
   return accounts
 }

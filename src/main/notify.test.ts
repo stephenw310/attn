@@ -55,11 +55,9 @@ describe('planNotifications', () => {
     ])
   })
 
-  it('summarizes more than three new conversations and deduplicates messages by thread', () => {
+  it('summarizes more than three new conversations', () => {
     expect(
-      planNotifications([mail('one'), mail('two'), mail('three'), mail('four'), mail('four')], {
-        focused: false
-      })
+      planNotifications([mail('one'), mail('two'), mail('three'), mail('four')], { focused: false })
     ).toEqual([{ title: 'Attn', body: '4 new conversations' }])
   })
 
@@ -221,6 +219,9 @@ describe('candidatesFor', () => {
     // Four new threads arrive, but 'four' has no persisted message row. Counting
     // it would tip the batch over the threshold and summarize instead of listing.
     const candidates = candidatesFor(db, 'user@attn.test', [
+      { threadId: 'one', messageId: 'message-one' },
+      // A second message on a thread already in this cycle collapses here —
+      // `planNotifications` counts what this returns, one entry per thread.
       { threadId: 'one', messageId: 'message-one' },
       { threadId: 'two', messageId: 'message-two' },
       { threadId: 'three', messageId: 'message-three' },

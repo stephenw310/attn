@@ -13,7 +13,7 @@ import { UPDATE_STATE_IDLE, type UpdateState } from '../shared/update'
 import { AiKeyStore } from './ai/keyStore'
 import { AiManager } from './ai/manager'
 import { oauthConfigSearchDirs } from './auth/configPaths'
-import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
+import { cancelActiveSignIn, loadOAuthConfig, type OAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import { accountIdForTokens, reorderIds, type StoredAccount } from './auth/tokenFile'
 import { loadAccounts, removeAccountTokens, reorderAccountTokens, saveAccountTokens } from './auth/tokenStore'
 import { isCurrentTokenUpdate } from './auth/tokenUpdate'
@@ -80,6 +80,8 @@ const authGenerations = new Map<string, number>()
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 let themePreference: ThemePreference = 'system'
+// The OAuth client from oauth.config.json, loaded at boot and on sign-in.
+let oauthConfig: OAuthConfig | null = null
 // T33: the live remote-image policy (pushed by the utility) and the reader's
 // registered mail frames, consulted by the request filter in createWindow.
 let remoteImagePolicy: RemoteImagePolicy = DEFAULT_REMOTE_IMAGE_POLICY
@@ -172,6 +174,17 @@ function oauthSearchDirs(): string[] {
   return oauthConfigSearchDirs(app.getAppPath(), app.getPath('userData'), Boolean(testUserData))
 }
 
+/**
+ * The OAuth client is read from up to three directories, so it is cached
+ * rather than re-read synchronously by every status read and roster push.
+ * A sign-in reloads it first, which is when an operator who just dropped
+ * `oauth.config.json` in place clicks.
+ */
+function reloadOAuthConfig(): OAuthConfig | null {
+  oauthConfig = loadOAuthConfig(oauthSearchDirs())
+  return oauthConfig
+}
+
 function rosterAccountIds(): string[] {
   return seedAccountIds.length > 0 ? seedAccountIds : storedAccounts.map((account) => account.id)
 }
@@ -180,7 +193,7 @@ function authStatus(): AuthStatus {
   const accounts = rosterAccountIds().map((id) => ({ id, email: emailFor(id) }))
   const active = accounts.find((account) => account.id === activeAccountId) ?? null
   return {
-    configured: seedAccountIds.length === 0 && loadOAuthConfig(oauthSearchDirs()) !== null,
+    configured: seedAccountIds.length === 0 && oauthConfig !== null,
     signedIn: accounts.length > 0,
     ...(active ? { email: active.email } : {}),
     accounts,
@@ -195,7 +208,7 @@ function emailFor(accountId: string): string {
 
 function serviceAccountsState(): ServiceAccountsState {
   return {
-    config: loadOAuthConfig(oauthSearchDirs()),
+    config: oauthConfig,
     accounts: storedAccounts.map((account) => ({
       id: account.id,
       tokens: account.tokens,
@@ -207,7 +220,7 @@ function serviceAccountsState(): ServiceAccountsState {
 }
 
 async function signIn(): Promise<AuthSignInResult> {
-  const config = loadOAuthConfig(oauthSearchDirs())
+  const config = reloadOAuthConfig()
   if (!config) {
     const resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
     return { status: authStatus(), resumedActions }
@@ -468,20 +481,24 @@ function handleServiceEvent(event: ServiceEvent): void {
     mailNotifier?.notify(event.accountId, event.candidates, event.pausedUntil)
   } else if (event.kind === 'token-update') {
     const userDataPath = app.getPath('userData')
-    const stored = loadAccounts(userDataPath).find((account) => account.id === event.accountId)
+    // One decrypt per refresh: the roster read for the staleness check is the
+    // same one the write starts from.
+    const roster = loadAccounts(userDataPath)
+    const stored = roster.find((account) => account.id === event.accountId)
     if (!isCurrentTokenUpdate(authGenerations.get(event.accountId), stored, event)) {
       console.warn(
         `[auth] ignored stale token update for ${event.accountId} (generation ${event.generation})`
       )
       return
     }
-    storedAccounts = saveAccountTokens(userDataPath, event.tokens)
+    storedAccounts = saveAccountTokens(userDataPath, event.tokens, roster)
     service?.cacheTokens(event.accountId, event.tokens)
   } else if (event.kind === 'log') console[event.level](event.message)
 }
 
 async function initialize(): Promise<void> {
   const userDataPath = app.getPath('userData')
+  reloadOAuthConfig()
   storedAccounts = loadAccounts(userDataPath)
   for (const account of storedAccounts) {
     if (!authGenerations.has(account.id)) authGenerations.set(account.id, 0)
@@ -497,7 +514,7 @@ async function initialize(): Promise<void> {
     testMode: Boolean(testUserData),
     ...(testUserData && process.env.ATTN_TEST_SEED ? { testSeed: process.env.ATTN_TEST_SEED } : {}),
     accounts: {
-      config: loadOAuthConfig(oauthSearchDirs()),
+      config: oauthConfig,
       accounts: storedAccounts.map((account) => ({
         id: account.id,
         tokens: account.tokens,
