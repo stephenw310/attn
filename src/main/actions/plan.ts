@@ -83,12 +83,25 @@ export function inverseForThread(
   threadId: string
 ): TriageAction {
   switch (action.kind) {
+    // The INBOX verbs are offered outside the inbox too (search, All Mail), so
+    // their inverses read the pre-state exactly like the move branch below: an
+    // archive of a thread that never carried INBOX undoes to nothing rather
+    // than filing it into the inbox for the first time.
     case 'archive':
-      return { kind: 'restoreInbox', threadIds: [threadId] }
+      return {
+        kind: 'label',
+        threadIds: [threadId],
+        add: labels.has('INBOX') ? ['INBOX'] : [],
+        remove: []
+      }
     case 'restoreInbox':
-      return { kind: 'archive', threadIds: [threadId] }
     case 'unsnooze':
-      return { kind: 'archive', threadIds: [threadId] }
+      return {
+        kind: 'label',
+        threadIds: [threadId],
+        add: [],
+        remove: labels.has('INBOX') ? [] : ['INBOX']
+      }
     case 'trash':
     case 'untrash':
     case 'spam': {
