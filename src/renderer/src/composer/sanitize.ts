@@ -1,4 +1,5 @@
 import createDOMPurify, { type DOMPurify } from 'dompurify'
+import { cssDeclarations } from '../../../shared/css'
 
 const ALLOWED_TAGS = [
   'p',
@@ -70,16 +71,11 @@ const UNSAFE_STYLE_RESOURCE =
 
 export function sanitizeComposerStyle(style: unknown): string {
   if (typeof style !== 'string') return ''
-  return style
-    .split(';')
-    .map((declaration) => declaration.trim())
-    .filter((declaration) => {
-      const separator = declaration.indexOf(':')
-      if (separator <= 0) return false
-      const property = declaration.slice(0, separator).trim().toLowerCase()
-      const value = declaration.slice(separator + 1)
-      return COMPOSER_STYLE_PROPERTIES.has(property) && !UNSAFE_STYLE_RESOURCE.test(value)
-    })
+  return cssDeclarations(style)
+    .filter(
+      ({ property, value }) => COMPOSER_STYLE_PROPERTIES.has(property) && !UNSAFE_STYLE_RESOURCE.test(value)
+    )
+    .map(({ raw }) => raw)
     .join('; ')
 }
 

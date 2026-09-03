@@ -1,4 +1,5 @@
 import type { Config, DOMPurify } from 'dompurify'
+import { cssDeclarations } from './css'
 
 export const MAIL_TRIM_MARKER = 'data-attn-trim-start'
 export const MAIL_CID_SOURCE_MARKER = 'data-attn-cid-source'
@@ -72,59 +73,11 @@ function isUnsafeDeclaration(property: string, value: string): boolean {
   return name.startsWith('margin') && NEGATIVE_LENGTH.test(value)
 }
 
-/**
- * Split on top-level `;` only. jsdom's CSSOM cannot be used here: it silently
- * parses zero declarations out of values it does not fully support (`inset`,
- * `url(data:...;base64,…)`), which would hand the attacker exactly the payload
- * this filter exists to remove.
- */
-function splitCssDeclarations(style: string): string[] {
-  const declarations: string[] = []
-  let current = ''
-  let depth = 0
-  let quote: string | null = null
-  let escaped = false
-
-  for (const character of style) {
-    if (escaped) {
-      current += character
-      escaped = false
-      continue
-    }
-    if (character === '\\') {
-      current += character
-      escaped = true
-      continue
-    }
-    if (quote) {
-      current += character
-      if (character === quote) quote = null
-      continue
-    }
-    if (character === '"' || character === "'") quote = character
-    else if (character === '(') depth += 1
-    else if (character === ')') depth = Math.max(0, depth - 1)
-    else if (character === ';' && depth === 0) {
-      declarations.push(current)
-      current = ''
-      continue
-    }
-    current += character
-  }
-  declarations.push(current)
-  return declarations
-}
-
 /** Drop the inline declarations that would let quoted mail cover authored text. */
 export function stripUnsafeQuoteCss(style: string): string {
-  return splitCssDeclarations(style)
-    .filter((declaration) => {
-      const separator = declaration.indexOf(':')
-      if (separator < 0) return false
-      const property = declaration.slice(0, separator).trim().toLowerCase()
-      return property !== '' && !isUnsafeDeclaration(property, declaration.slice(separator + 1))
-    })
-    .map((declaration) => declaration.trim())
+  return cssDeclarations(style)
+    .filter(({ property, value }) => !isUnsafeDeclaration(property, value))
+    .map(({ raw }) => raw)
     .join('; ')
 }
 

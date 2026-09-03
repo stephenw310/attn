@@ -1,3 +1,4 @@
+import { cssDeclarations, parsedRgbColor, type RgbColor } from '../../shared/css'
 import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
 
 export type MailSurface = 'native' | 'light'
@@ -27,30 +28,6 @@ const NEUTRAL_TEXT_CHROMA = 24
 
 const backgroundProbe = document.createElement('span').style
 const textColorProbe = document.createElement('span').style
-
-interface RgbColor {
-  red: number
-  green: number
-  blue: number
-  alpha: number
-}
-
-function parsedRgbColor(value: string): RgbColor | null {
-  const match = value.match(
-    /^rgba?\(\s*([\d.]+)(%?)[,\s]+([\d.]+)(%?)[,\s]+([\d.]+)(%?)(?:\s*[,/]\s*([\d.]+)(%?))?\s*\)$/i
-  )
-  if (!match) return null
-  const channel = (part: string, percent: string): number => {
-    const numeric = Number(part)
-    return percent ? (numeric / 100) * 255 : numeric
-  }
-  return {
-    red: channel(match[1], match[2]),
-    green: channel(match[3], match[4]),
-    blue: channel(match[5], match[6]),
-    alpha: match[7] ? Number(match[7]) / (match[8] ? 100 : 1) : 1
-  }
-}
 
 function resolvedTextColor(value: string): RgbColor | null {
   const raw = value.replace(CSS_COMMENT, '').replace(IMPORTANT, '').trim()
@@ -154,56 +131,6 @@ function isNeutralCanvas(value: string): boolean {
     return true
   }
   return /^rgba\([^)]*,0(?:\.0+)?\)$/.test(normalized) || /^rgb\([^)]*\/0(?:\.0+)?%?\)$/.test(normalized)
-}
-
-function splitCssDeclarations(style: string): string[] {
-  const declarations: string[] = []
-  let current = ''
-  let depth = 0
-  let quote: string | null = null
-  let escaped = false
-
-  for (const character of style) {
-    if (escaped) {
-      current += character
-      escaped = false
-      continue
-    }
-    if (character === '\\') {
-      current += character
-      escaped = true
-      continue
-    }
-    if (quote) {
-      current += character
-      if (character === quote) quote = null
-      continue
-    }
-    if (character === '"' || character === "'") quote = character
-    else if (character === '(') depth += 1
-    else if (character === ')') depth = Math.max(0, depth - 1)
-    else if (character === ';' && depth === 0) {
-      declarations.push(current)
-      current = ''
-      continue
-    }
-    current += character
-  }
-  declarations.push(current)
-  return declarations
-}
-
-function styleDeclarations(style: string): { property: string; value: string; raw: string }[] {
-  return splitCssDeclarations(style).flatMap((raw) => {
-    const separator = raw.indexOf(':')
-    if (separator <= 0) return []
-    const property = raw
-      .slice(0, separator)
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\s/g, '')
-      .toLowerCase()
-    return [{ property, value: raw.slice(separator + 1).trim(), raw: raw.trim() }]
-  })
 }
 
 function backgroundCreatesCanvas(property: string, rawValue: string): boolean {
@@ -874,7 +801,7 @@ function removeElementBackgrounds(root: ParentNode): void {
   root.querySelectorAll<HTMLElement>('[bgcolor], [background], [style]').forEach((element) => {
     element.removeAttribute('bgcolor')
     element.removeAttribute('background')
-    const style = styleDeclarations(element.getAttribute('style') ?? '')
+    const style = cssDeclarations(element.getAttribute('style') ?? '')
       .filter(({ property }) => !property.startsWith('background'))
       .map(({ raw }) => raw)
       .join('; ')

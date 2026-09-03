@@ -1,4 +1,5 @@
 import { type DefaultTreeAdapterTypes, parseFragment } from 'parse5'
+import { cssDeclarations } from '../../../shared/css'
 import {
   COMPOSER_STYLE_PROPERTIES,
   isGmailSignatureAttributes,
@@ -134,19 +135,6 @@ const INHERITED_TEXT_STYLES = new Set([
   'text-decoration'
 ])
 
-function styleDeclarations(style: string): Map<string, string> {
-  const declarations = new Map<string, string>()
-  for (const declaration of style.split(';')) {
-    const separator = declaration.indexOf(':')
-    if (separator <= 0) continue
-    declarations.set(
-      declaration.slice(0, separator).trim().toLowerCase(),
-      declaration.slice(separator + 1).trim()
-    )
-  }
-  return declarations
-}
-
 /**
  * Lexical imports inline text styles from spans, while Gmail commonly places
  * inherited typography on a paragraph or div. Materialize the computed text
@@ -168,7 +156,7 @@ function materializeInheritedTextStyles(document: Document): void {
     }
     const inherited = new Map<string, string>()
     for (const element of ancestors) {
-      for (const [property, value] of styleDeclarations(element.getAttribute('style') ?? '')) {
+      for (const { property, value } of cssDeclarations(element.getAttribute('style') ?? '')) {
         if (INHERITED_TEXT_STYLES.has(property)) inherited.set(property, value)
       }
     }
@@ -181,12 +169,15 @@ function materializeInheritedTextStyles(document: Document): void {
 
   for (const element of document.body.querySelectorAll<HTMLElement>('[style]')) {
     if (element.tagName.toLowerCase() === 'span') continue
-    const remaining = [...styleDeclarations(element.getAttribute('style') ?? '')].filter(
-      ([property]) => !INHERITED_TEXT_STYLES.has(property)
+    const remaining = cssDeclarations(element.getAttribute('style') ?? '').filter(
+      ({ property }) => !INHERITED_TEXT_STYLES.has(property)
     )
     if (remaining.length === 0) element.removeAttribute('style')
     else {
-      element.setAttribute('style', remaining.map(([property, value]) => `${property}: ${value}`).join('; '))
+      element.setAttribute(
+        'style',
+        remaining.map(({ property, value }) => `${property}: ${value}`).join('; ')
+      )
     }
   }
 }
@@ -216,10 +207,7 @@ function unsupportedReason(element: Element, hasStylesheet: boolean): string | n
   }
   const style = element.getAttribute('style')
   if (style) {
-    for (const declaration of style.split(';')) {
-      const separator = declaration.indexOf(':')
-      if (separator <= 0) continue
-      const property = declaration.slice(0, separator).trim().toLowerCase()
+    for (const { property } of cssDeclarations(style)) {
       if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
     }
   }
@@ -251,10 +239,7 @@ function sourceUnsupportedReason(
       return `${tag}[${attribute.name}]`
     }
     if (attribute.name !== 'style') continue
-    for (const declaration of attribute.value.split(';')) {
-      const separator = declaration.indexOf(':')
-      if (separator <= 0) continue
-      const property = declaration.slice(0, separator).trim().toLowerCase()
+    for (const { property } of cssDeclarations(attribute.value)) {
       if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
     }
   }
