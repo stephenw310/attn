@@ -21,7 +21,7 @@ import { persistThread } from '../sync/persist'
 import type { MailProvider, ProviderMimeUpload } from '../sync/provider'
 import { type SchedulerTime, systemTime } from '../time'
 import { parseStoredDraftAttachments } from './draftAttachments'
-import { planTransition } from './machine'
+import { machineRow, persistPlan, planTransition } from './machine'
 import { buildMime, mimeByteLength, streamMime } from './mime'
 import { DraftAttachmentSourceError, prepareDraftMimeAttachments } from './mirror'
 import { primarySenderDisplayName, SEND_AS_DISPLAY_NAME_SETTING, syncPrimarySendAs } from './sendAs'
@@ -362,30 +362,15 @@ export class OutboxSender {
         }
         checkpointWaited = true
         if (this.drainer.isStopping() || this.accountId() !== accountId) return
-        const plan = planTransition(
-          {
-            state: row.state,
-            gmailDraftId: row.gmail_draft_id,
-            sendAt: row.send_at,
-            attempts: row.attempts,
-            verifyAttempts: row.verify_attempts
-          },
-          { type: 'timer' },
-          this.time.now()
-        )
-        if (plan.next.state !== 'sending') return
         // The wait above can run for tens of seconds while the mirror uploads
         // attachments. An undo and re-send inside that window leaves the row
         // queued with a fresh send_at, so the claim re-checks it: the row was
         // due when it was read, not necessarily when it is claimed.
-        const claimed = this.db
-          .prepare(
-            `UPDATE outbox SET state = 'sending'
-             WHERE account_id = ? AND id = ? AND state = 'queued'
-               AND send_at IS NOT NULL AND send_at <= ?`
-          )
-          .run(accountId, row.id, this.time.now())
-        if (claimed.changes === 0) continue
+        const claimed = persistPlan(this.db, row, { type: 'timer' }, this.time.now(), {
+          requireDueSendAt: this.time.now()
+        })
+        if (claimed.plan.next.state !== 'sending') return
+        if (!claimed.persisted) continue
         row = { ...row, state: 'sending' }
         this.notify({ kind: 'changed' })
       }
@@ -422,17 +407,7 @@ export class OutboxSender {
       const row = this.reloadSending(initial.account_id, initial.id)
       if (!row) return false
       if (recovering) {
-        const recovery = planTransition(
-          {
-            state: row.state,
-            gmailDraftId: row.gmail_draft_id,
-            sendAt: row.send_at,
-            attempts: row.attempts,
-            verifyAttempts: row.verify_attempts
-          },
-          { type: 'recover' },
-          this.time.now()
-        )
+        const recovery = planTransition(machineRow(row), { type: 'recover' }, this.time.now())
         if (recovery.effects.includes('verify-secondary')) {
           return this.verifySecondary(row, provider, controller.signal)
         }
@@ -443,6 +418,10 @@ export class OutboxSender {
             await this.settleConsumedDraft(row, provider, controller.signal)
             return false
           }
+          // The draft is still in Drafts, so the interrupted send never
+          // reached Gmail and this row may resend it.
+          const present = planTransition(machineRow(row), { type: 'draft-present' }, this.time.now())
+          if (!present.effects.includes('send')) return false
         }
       }
 
@@ -475,7 +454,7 @@ export class OutboxSender {
       await this.markSent(row, provider, match.threadId ?? row.thread_id, signal, match.messageId)
       return
     }
-    this.parkNeedsReview(row, true)
+    this.parkNeedsReview(row)
   }
 
   private async verifySecondary(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<boolean> {
@@ -486,12 +465,10 @@ export class OutboxSender {
       return false
     }
     if (match?.kind === 'draft') {
-      this.db
-        .prepare(
-          `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
-           WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-        )
-        .run(match.draftId, row.account_id, row.id)
+      persistPlan(this.db, row, { type: 'draft-id-assigned', gmailDraftId: match.draftId }, this.time.now(), {
+        lastError: null,
+        requireMissingDraftId: true
+      })
       const recovered = this.reloadSending(row.account_id, row.id)
       if (!recovered) return false
       const durableDraftId = recovered.gmail_draft_id
@@ -506,32 +483,17 @@ export class OutboxSender {
 
     const exhausted = row.verify_attempts + 1 >= SECONDARY_CHECKS
     const retryAt = this.time.now() + SECONDARY_CHECK_MS
-    const plan = planTransition(
-      {
-        state: row.state,
-        gmailDraftId: row.gmail_draft_id,
-        sendAt: row.send_at,
-        attempts: row.attempts,
-        verifyAttempts: row.verify_attempts
-      },
+    const { plan, persisted } = persistPlan(
+      this.db,
+      row,
       { type: 'secondary-negative', exhausted, retryAt },
-      this.time.now()
+      this.time.now(),
+      {
+        lastError: exhausted ? NEEDS_REVIEW_EXPLANATION : null,
+        requireMissingDraftId: true
+      }
     )
-    const persisted = this.db
-      .prepare(
-        `UPDATE outbox SET state = ?, send_at = ?, attempts = ?, verify_attempts = ?, last_error = ?
-         WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-      )
-      .run(
-        plan.next.state,
-        plan.next.sendAt,
-        plan.next.attempts,
-        plan.next.verifyAttempts,
-        plan.next.state === 'needs-review' ? NEEDS_REVIEW_EXPLANATION : null,
-        row.account_id,
-        row.id
-      )
-    if (persisted.changes === 0) return false
+    if (!persisted) return false
     if (plan.next.state === 'needs-review') {
       this.notify({ kind: 'failed', id: row.id, error: NEEDS_REVIEW_EXPLANATION })
       return false
@@ -654,13 +616,19 @@ export class OutboxSender {
           raw: prepared.raw,
           updateMime: prepared.updateMime,
           threadId: row.thread_id,
-          persistCreatedId: (gmailDraftId) =>
-            this.db
-              .prepare(
-                `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
-                 WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-              )
-              .run(gmailDraftId, row.account_id, row.id).changes > 0
+          persistCreatedId: (gmailDraftId) => {
+            const assigned = persistPlan(
+              this.db,
+              row,
+              { type: 'draft-id-assigned', gmailDraftId },
+              this.time.now(),
+              { lastError: null, requireMissingDraftId: true }
+            )
+            // Keep the in-memory row in step with what was just committed, so
+            // the sent transition below cannot write the pre-create id back.
+            if (assigned.persisted) row.gmail_draft_id = gmailDraftId
+            return assigned.persisted
+          }
         },
         signal
       )
@@ -669,7 +637,7 @@ export class OutboxSender {
     }
     if (result.kind === 'aborted') return
     if (result.kind === 'missing-before-send') {
-      this.parkNeedsReview(row, true)
+      this.parkNeedsReview(row)
       return
     }
     await this.markSent(
@@ -681,34 +649,11 @@ export class OutboxSender {
     )
   }
 
-  private parkNeedsReview(row: SendRow, clearDraftId: boolean): void {
-    const plan = planTransition(
-      {
-        state: row.state,
-        gmailDraftId: row.gmail_draft_id,
-        sendAt: row.send_at,
-        attempts: row.attempts,
-        verifyAttempts: row.verify_attempts
-      },
-      { type: 'needs-review' },
-      this.time.now()
-    )
-    const parked = this.db
-      .prepare(
-        `UPDATE outbox SET state = ?, gmail_draft_id = CASE WHEN ? THEN NULL ELSE gmail_draft_id END,
-         send_at = NULL, attempts = ?, verify_attempts = ?, last_error = ?
-         WHERE account_id = ? AND id = ? AND state = 'sending'`
-      )
-      .run(
-        plan.next.state,
-        clearDraftId ? 1 : 0,
-        plan.next.attempts,
-        plan.next.verifyAttempts,
-        NEEDS_REVIEW_EXPLANATION,
-        row.account_id,
-        row.id
-      )
-    if (parked.changes === 0) return
+  private parkNeedsReview(row: SendRow): void {
+    const { persisted } = persistPlan(this.db, row, { type: 'needs-review' }, this.time.now(), {
+      lastError: NEEDS_REVIEW_EXPLANATION
+    })
+    if (!persisted) return
     this.notify({ kind: 'failed', id: row.id, error: NEEDS_REVIEW_EXPLANATION })
   }
 
@@ -729,38 +674,18 @@ export class OutboxSender {
       ? 'An attachment is still unavailable — reopen the message and attach it again'
       : userFacingSendError(cause)
     const retryAt = this.time.now() + retryDelayMs(current.attempts)
-    const plan = planTransition(
-      {
-        state: current.state,
-        gmailDraftId: current.gmail_draft_id,
-        sendAt: current.send_at,
-        attempts: current.attempts,
-        verifyAttempts: current.verify_attempts
-      },
+    const { plan, persisted } = persistPlan(
+      this.db,
+      current,
       permanent
         ? { type: 'permanent-error' }
         : noRemoteMutation
           ? { type: 'preflight-retry', exhausted, retryAt }
-          : current.gmail_draft_id === null
-            ? { type: 'verification-error', retryAt }
-            : { type: 'retryable-error', retryAt },
-      this.time.now()
+          : { type: 'retryable-error', retryAt },
+      this.time.now(),
+      { lastError: displayError }
     )
-    const persisted = this.db
-      .prepare(
-        `UPDATE outbox SET state = ?, send_at = ?, attempts = ?, verify_attempts = ?, last_error = ?
-         WHERE account_id = ? AND id = ? AND state = 'sending'`
-      )
-      .run(
-        plan.next.state,
-        plan.next.sendAt,
-        plan.next.attempts,
-        plan.next.verifyAttempts,
-        displayError,
-        current.account_id,
-        current.id
-      )
-    if (persisted.changes === 0) return false
+    if (!persisted) return false
     if (plan.next.state === 'failed') {
       this.notify({ kind: 'failed', id: current.id, error: displayError })
       return false
@@ -781,16 +706,14 @@ export class OutboxSender {
     // undone or failed send can never leave one behind, and a crash between
     // the two can never lose one. Its origin stays unresolved until the
     // post-send read (or the account's sync session) supplies internalDate.
-    let settledChanges = 0
+    let settled = false
     this.db.transaction(() => {
-      settledChanges = this.db
-        .prepare(
-          `UPDATE outbox SET state = 'sent', gmail_message_id = COALESCE(?, gmail_message_id),
-           send_at = NULL, last_error = NULL, updated_at = ?
-           WHERE account_id = ? AND id = ? AND state = 'sending'`
-        )
-        .run(gmailMessageId, now, row.account_id, row.id).changes
-      if (settledChanges === 0 || row.follow_up_at === null) return
+      settled = persistPlan(this.db, row, { type: 'send-confirmed' }, now, {
+        gmailMessageId,
+        lastError: null,
+        updatedAt: now
+      }).persisted
+      if (!settled || row.follow_up_at === null) return
       if (!threadId) {
         console.warn(`[outbox] sent ${row.id} with a follow-up but no thread id — reminder skipped`)
         return
@@ -803,7 +726,7 @@ export class OutboxSender {
         rowCreatedAt: row.created_at
       })
     })()
-    if (settledChanges === 0) return
+    if (!settled) return
     this.cleanSpool(row.id)
     this.pruneSent(row.account_id, now)
     this.notify({ kind: 'changed' })
