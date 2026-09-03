@@ -12,7 +12,7 @@ import { serializeEditorState } from './serialize'
 
 type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments' | 'followUpAt'>
 
-export function mirrorIdleMs(attachments: DraftSaveInput['attachments']): number {
+function mirrorIdleMs(attachments: DraftSaveInput['attachments']): number {
   const bytes = (attachments ?? []).reduce((total, attachment) => total + attachment.sizeBytes, 0)
   return bytes > MIRROR_PAYLOAD_BYTES ? MIRROR_PAYLOAD_IDLE_MS : MIRROR_IDLE_MS
 }
@@ -163,6 +163,19 @@ export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): Com
       if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
     }
   }, [clearTimers])
+
+  useEffect(() => {
+    // Quit tears the renderer down without running React cleanup, and the idle
+    // checkpoint can be a second behind the keyboard. `pagehide` is the last
+    // event this frame is guaranteed to see, so the checkpoint is issued there.
+    // It cannot be awaited — the save is IPC — but the main process holds the
+    // window open long enough for an already-sent request to be handled.
+    const checkpoint = (): void => {
+      void commitRef.current().catch(() => {})
+    }
+    window.addEventListener('pagehide', checkpoint)
+    return () => window.removeEventListener('pagehide', checkpoint)
+  }, [])
 
   const saveNow = useCallback(async () => {
     if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)

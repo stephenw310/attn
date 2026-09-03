@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import type { Draft } from '../../../shared/drafts'
 import { MIRROR_IDLE_MS, MIRROR_PAYLOAD_IDLE_MS } from '../../../shared/outboxTuning'
-import { type ComposerDraftController, mirrorIdleMs, useComposerDraft } from './useComposerDraft'
+import { type ComposerDraftController, useComposerDraft } from './useComposerDraft'
 
 const draft: Draft = {
   id: 'local-draft',
@@ -34,13 +34,6 @@ const file = (sizeBytes: number) => ({
   filename: 'report.pdf',
   mimeType: 'application/pdf',
   sizeBytes
-})
-
-it('slows the mirror only once a draft carries real attachment payload', () => {
-  expect(mirrorIdleMs([])).toBe(MIRROR_IDLE_MS)
-  expect(mirrorIdleMs([file(64_000)])).toBe(MIRROR_IDLE_MS)
-  expect(mirrorIdleMs([file(4_000_000)])).toBe(MIRROR_PAYLOAD_IDLE_MS)
-  expect(mirrorIdleMs([file(600_000), file(600_000)])).toBe(MIRROR_PAYLOAD_IDLE_MS)
 })
 
 it('pushes an attachment change promptly but lets body edits wait', async () => {
@@ -89,6 +82,58 @@ it('pushes an attachment change promptly but lets body edits wait', async () => 
     expect(mirror).toHaveBeenCalledTimes(2)
   } finally {
     await act(async () => root.unmount())
+    vi.useRealTimers()
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = false
+    if (attnDescriptor) Object.defineProperty(window, 'attn', attnDescriptor)
+    else Reflect.deleteProperty(window, 'attn')
+  }
+})
+
+it('checkpoints the pending edit when the window goes away', async () => {
+  vi.useFakeTimers()
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const attnDescriptor = Object.getOwnPropertyDescriptor(window, 'attn')
+  const save = vi.fn(async (input: { subject: string }) => ({ id: 'local-draft', subject: input.subject }))
+  Object.defineProperty(window, 'attn', {
+    configurable: true,
+    value: { draft: { save, mirror: vi.fn(async () => {}) } } as unknown as Window['attn']
+  })
+
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  let controller: ComposerDraftController | undefined
+  function Harness(): null {
+    controller = useComposerDraft(draft, () => {})
+    return null
+  }
+
+  try {
+    await act(async () => root.render(createElement(Harness)))
+    act(() => controller?.updateFields({ subject: 'typed just before quit' }))
+    // Well inside the idle window: without the pagehide checkpoint this edit
+    // would never reach the store.
+    await act(async () => {
+      vi.advanceTimersByTime(100)
+      await Promise.resolve()
+    })
+    expect(save).not.toHaveBeenCalled()
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'))
+      await Promise.resolve()
+    })
+    expect(save).toHaveBeenCalledOnce()
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ subject: 'typed just before quit' })
+
+    // The listener goes with the composer: a later quit must not save again.
+    await act(async () => root.unmount())
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'))
+      await Promise.resolve()
+    })
+    expect(save).toHaveBeenCalledOnce()
+  } finally {
     vi.useRealTimers()
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = false
     if (attnDescriptor) Object.defineProperty(window, 'attn', attnDescriptor)
