@@ -2,6 +2,13 @@ import type { MessageAttachment } from '../../shared/mail'
 
 const SAFE_INLINE_IMAGE_MIME = /^image\/(?:png|jpeg|gif|webp)$/i
 
+/**
+ * The 1x1 GIF every mail surface paints while an inline image is blocked or
+ * still resolving. One declaration so reader, composer and quote frames cannot
+ * drift into showing different placeholders (review R8).
+ */
+export const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+
 export function normalizedContentId(value: string): string {
   const trimmed = value.trim()
   try {

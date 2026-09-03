@@ -23,6 +23,7 @@ import {
   $isRangeSelection,
   $nodesOfType,
   FORMAT_TEXT_COMMAND,
+  HISTORY_MERGE_TAG,
   HISTORY_PUSH_TAG,
   type LexicalNode,
   REDO_COMMAND,
@@ -51,7 +52,7 @@ import { Kbd } from '../components/Kbd'
 import { formatBytes } from '../formatBytes'
 import type { ShowToast } from '../hooks/useToast'
 import { normalizeAppleMailLineBackgrounds } from '../mailAppleBackgrounds'
-import { forceLightMailCss } from '../mailCss'
+import { normalizedContentId, TRANSPARENT_IMAGE } from '../mailInlineImages'
 import { suppressBlockedRemoteImages } from '../mailRemoteContent'
 import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
@@ -157,7 +158,6 @@ function composerTitle(kind: Draft['kind']): string {
   return 'New message'
 }
 
-const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 const QUOTE_MAX_HEIGHT = 720
 
 /**
@@ -340,20 +340,24 @@ function InlineQuote({
       'text/html'
     )
     if (surface === 'native' && appearance === 'dark') normalizeNativeMailDocument(document.body)
-    if (appearance === 'light' || surface === 'light') {
-      document.querySelectorAll('style').forEach((style) => {
-        style.textContent = forceLightMailCss(style.textContent ?? '')
-      })
-    }
+    // No stylesheet reaches here: `sanitizeOutgoingHtml`'s allowlist has no
+    // `style` element, so the quote is inline styles only and the light-mode
+    // CSS rewrite the reader frame runs has nothing to act on.
     if (!remoteImagesAllowed) suppressBlockedRemoteImages(document.body, TRANSPARENT_IMAGE)
     const pending = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
       const source = image.getAttribute('src') ?? ''
       if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
-      const contentId = source.slice(4)
+      const contentId = normalizedContentId(source.slice(4))
       image.setAttribute('src', TRANSPARENT_IMAGE)
       return [{ contentId, image }]
     })
-    setSrcDoc(quoteSrcDoc(document.body.innerHTML, surface, appearance))
+    // One srcDoc, after the CID images resolve. Setting it twice reloads the
+    // frame, and the measuring layout effect drops its height back to 1px in
+    // between, so the quote visibly collapses and re-expands.
+    if (pending.length === 0) {
+      setSrcDoc(quoteSrcDoc(document.body.innerHTML, surface, appearance))
+      return
+    }
     void Promise.all(
       pending.map(async ({ contentId, image }) => {
         const result = await window.attn?.draft.getInlineImage(draftId, contentId)
@@ -440,10 +444,12 @@ function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string })
     const contentIds = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
       const source = image.getAttribute('src') ?? ''
       if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
+      // The node keeps the sender's own `cid` text, so a stored draft still
+      // round-trips byte-for-byte; only the lookup key is normalized.
       const contentId = source.slice(4)
       image.setAttribute('src', TRANSPARENT_IMAGE)
       image.setAttribute('data-attn-cid', contentId)
-      return [contentId]
+      return [normalizedContentId(contentId)]
     })
     editor.update(
       () => {
@@ -465,11 +471,14 @@ function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string })
       editor.update(
         () => {
           for (const image of $nodesOfType(ImageNode)) {
-            const source = sources.get(image.getContentId())
+            const source = sources.get(normalizedContentId(image.getContentId()))
             if (source) image.setSrc(source)
           }
         },
-        { tag: 'attn-inline-image-load' }
+        // Swapping the placeholder for the resolved image is not an edit the
+        // user made, so it merges into the current history entry rather than
+        // becoming the state one Mod+Z restores.
+        { tag: ['attn-inline-image-load', HISTORY_MERGE_TAG] }
       )
     })
     return () => {

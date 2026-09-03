@@ -8,6 +8,7 @@ import {
   type Spread
 } from 'lexical'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { normalizedContentId, TRANSPARENT_IMAGE } from '../../mailInlineImages'
 import { suppressBlockedRemoteImages } from '../../mailRemoteContent'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from '../DraftContentContext'
 import { decodeOpaqueHtml, encodeOpaqueHtml, opaqueHtmlText, sanitizedDomMatchesSource } from '../preserve'
@@ -15,7 +16,6 @@ import { sanitizeDraftHtmlForImport } from '../sanitize'
 
 export type SerializedOpaqueHtmlNode = Spread<{ html: string; inline: boolean }, SerializedLexicalNode>
 
-const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 const MAX_PREVIEW_HEIGHT = 600
 
 function sanitizeEncodedHtml(encoded: unknown): string {
@@ -26,14 +26,6 @@ function sanitizeEncodedHtml(encoded: unknown): string {
     return sanitizedDomMatchesSource(source, sanitized) ? encoded : encodeOpaqueHtml(sanitized)
   } catch {
     return ''
-  }
-}
-
-function normalizeContentId(value: string): string {
-  try {
-    return decodeURIComponent(value).replace(/^<|>$/g, '').toLowerCase()
-  } catch {
-    return value.replace(/^<|>$/g, '').toLowerCase()
   }
 }
 
@@ -59,7 +51,7 @@ function previewSrcDoc(
   for (const image of document.querySelectorAll<HTMLImageElement>('img[src]')) {
     const source = image.getAttribute('src')?.trim() ?? ''
     if (!source.toLowerCase().startsWith('cid:')) continue
-    image.setAttribute('src', images.get(normalizeContentId(source.slice(4))) ?? TRANSPARENT_IMAGE)
+    image.setAttribute('src', images.get(normalizedContentId(source.slice(4))) ?? TRANSPARENT_IMAGE)
   }
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'"><base target="_blank"><style>html,body{margin:0;padding:0;background:#fff;color:#202124}body{font:14px/1.6 Arial,sans-serif;overflow-wrap:break-word}img{max-width:100%;height:auto}img[data-remote-blocked="true"]{visibility:hidden}table{max-width:100%}</style></head><body>${document.body.innerHTML}</body></html>`
 }
@@ -141,9 +133,9 @@ function OpaqueHtmlPreview({ encoded, inline }: { encoded: string; inline: boole
     let cancelled = false
     void Promise.all(
       contentIds.map(async (contentId) => {
-        const normalizedContentId = normalizeContentId(contentId)
-        const result = await window.attn?.draft.getInlineImage(draftId, normalizedContentId)
-        return [normalizedContentId, result && 'dataUrl' in result ? result.dataUrl : null] as const
+        const normalized = normalizedContentId(contentId)
+        const result = await window.attn?.draft.getInlineImage(draftId, normalized)
+        return [normalized, result && 'dataUrl' in result ? result.dataUrl : null] as const
       })
     ).then((entries) => {
       if (cancelled) return

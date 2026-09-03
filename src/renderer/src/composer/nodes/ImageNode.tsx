@@ -8,11 +8,10 @@ import {
   type Spread
 } from 'lexical'
 import { useContext, useEffect, useState } from 'react'
+import { TRANSPARENT_IMAGE } from '../../mailInlineImages'
 import { isRemoteMailUrl } from '../../mailRemoteContent'
 import { DraftSourceMessageIdContext } from '../DraftContentContext'
 import { sanitizeComposerImageSource, sanitizeComposerStyle } from '../sanitize'
-
-const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 
 /**
  * T33 (PR #101 review): the editor renders in the TOP frame, which main's

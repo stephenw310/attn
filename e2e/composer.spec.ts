@@ -2013,6 +2013,36 @@ test('does not overwrite typing when CID image hydration finishes late', async (
   await expect(composer.editor).toContainText('Original body typed before hydration')
 })
 
+test('keeps a resolved inline image through the first undo', async ({ app, page }) => {
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-undo-image',
+        'Undo inline image',
+        '<p>Original body</p><p><img data-surl="cid:remote-inline" src="cid:remote-inline"></p>',
+        '',
+        true
+      )
+    }
+  )
+  if (error) throw new Error(error)
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Undo inline image' }).click()
+  const composer = new ComposerPage(page)
+  const image = composer.editor.locator('img')
+  await expect(image).toHaveAttribute('src', /^data:image\/png;base64,/)
+
+  // Swapping the placeholder for the hydrated image is not an edit the user
+  // made, so the first undo must not restore the transparent placeholder.
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(image).toHaveAttribute('src', /^data:image\/png;base64,/)
+  await expect(composer.editor).toContainText('Original body')
+})
+
 test('keeps the selected draft stable when a refresh reorders the list', async ({ page }) => {
   await page.getByTestId('thread-list').waitFor({ state: 'attached' })
   await page.evaluate(async () => {
