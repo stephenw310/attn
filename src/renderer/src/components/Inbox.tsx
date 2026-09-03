@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthStatus } from '../../../shared/auth'
 import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, ThreadListView } from '../../../shared/mail'
-import type { MoveDestination } from '../../../shared/move'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
 import type { UpdateState } from '../../../shared/update'
 import { readAccountView } from '../accountViewMemory'
@@ -13,6 +12,7 @@ import { useDraftOpening } from '../hooks/useDraftOpening'
 import { useFocusThreadTarget } from '../hooks/useFocusThreadTarget'
 import { useInboxCommands } from '../hooks/useInboxCommands'
 import { isTextEntry, useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
+import { type MoveRequest, useListActions } from '../hooks/useListActions'
 import { useMailData } from '../hooks/useMailData'
 import { useSearchSession } from '../hooks/useSearchSession'
 import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
@@ -25,8 +25,8 @@ import { useToast } from '../hooks/useToast'
 import { useTriage } from '../hooks/useTriage'
 import { useViewNavigation } from '../hooks/useViewNavigation'
 import { useViewRecords } from '../hooks/useViewRecords'
-import { type LabelCheckState, LabelPicker } from '../LabelPicker'
-import { MovePicker, type MoveTarget } from '../MovePicker'
+import { LabelPicker } from '../LabelPicker'
+import { MovePicker } from '../MovePicker'
 import {
   cachedThreadView,
   type DisplayThread,
@@ -38,7 +38,6 @@ import {
   userLabelView,
   VIEW_TITLES
 } from '../mailDisplay'
-import { selectionAfterExit } from '../optimisticTriage'
 import {
   conversationMailboxFor,
   conversationMailboxForSearch,
@@ -73,11 +72,6 @@ interface InboxProps {
   onRemovalError: (message: string) => void
   /** Claims the one announcement of a ready update, above the keyed remount (see App). */
   onClaimUpdateAnnouncement: (version: string) => boolean
-}
-
-interface MoveRequest {
-  targets: readonly MoveTarget[]
-  sourceLabelId: string | null
 }
 
 function threadListKind(view: MailView): ThreadListView | 'label' {
@@ -700,68 +694,59 @@ export function Inbox({
     reopenReader: reopenReaderForAdvance
   })
 
-  const toggleLabel = useCallback(
-    (label: MailLabel, state: LabelCheckState) => {
-      if (!labelTargets) return
-      triage({
-        kind: 'label',
-        threadIds: labelTargets.map((target) => target.id),
-        add: state === 'all' ? [] : [label.id],
-        remove: state === 'all' ? [label.id] : []
-      })
-    },
-    [labelTargets, triage]
-  )
-
-  const openSelected = useCallback(() => {
-    if (searchDraftMode) {
-      const draft = search.drafts[selectedIndex]
-      if (!draft) return
-      reopenListDraft(draft.id)
-      return
-    }
-    if (!searchOpen && view === 'outbox') {
-      openOutboxItem(selectedIndex)
-      return
-    }
-    if (!searchOpen && view === 'drafts') {
-      const draft = realDrafts[selectedIndex]
-      if (!draft) return
-      reopenListDraft(draft.id)
-      return
-    }
-    const thread = threads[selectedIndex]
-    if (!thread) return
-    if (!searchOpen) {
-      records.viewRecords.current.set(view, {
-        rowId: thread.id,
-        index: selectedIndex,
-        scrollTop: listElRef.current?.scrollTop ?? 0
-      })
-    }
-    selectedThreadIdRef.current = thread.id
-    setReaderOpen(true)
-    reopenDraftForThread(thread.id)
-  }, [
-    openOutboxItem,
+  const listActions = useListActions({
+    view,
+    searchOpen,
+    searchDraftMode,
+    searchDrafts: search.drafts,
+    threads,
     realDrafts,
+    realOutbox,
+    selectedIndex,
+    selected,
+    selectedIds,
+    targetedThreads,
+    detachedDraftThread,
+    readerOpen,
+    moveAllowed,
+    autoAdvance,
+    labelTargets,
+    moveRequest,
+    triage,
+    records,
+    inlineComposerRef,
+    listElRef,
+    selectedThreadIdRef,
+    setSelectedIndex,
+    setReaderOpen,
+    setSnoozeOpen,
+    setLabelTargetIds,
+    setMoveRequest,
+    setDetachedDraftThread,
+    finishReaderClose,
+    clearSelection,
     reopenDraftForThread,
     reopenListDraft,
-    searchDraftMode,
-    search.drafts,
-    searchOpen,
-    selectedIndex,
-    threads,
-    view,
-    records.viewRecords.current.set
-  ])
-  const closeReader = useCallback(() => {
-    if (inlineComposerDraft && inlineComposerRef.current) {
-      inlineComposerRef.current.exitConversation()
-      return
-    }
-    finishReaderClose()
-  }, [finishReaderClose, inlineComposerDraft])
+    openOutboxItem,
+    focusSearchResults: search.focusResults,
+    showToast
+  })
+  const {
+    openSelected,
+    openThreadFromList,
+    navigateNext,
+    navigatePrevious,
+    closeReader,
+    openSnooze,
+    openLabel,
+    openMove,
+    moveSelected,
+    markNotDone,
+    snoozeSelected,
+    unsnoozeSelected,
+    toggleLabel
+  } = listActions
+
   // The search session hands the selection back to the list it covered, so
   // clearing it stays with the shell that owns it.
   const focusSearchQuery = useCallback(() => {
@@ -778,176 +763,10 @@ export function Inbox({
   }, [clearSelection, search.clearSearch])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetIds(null), [])
-  const openSnooze = useCallback(() => {
-    if (selected) setSnoozeOpen(true)
-  }, [selected])
-  const openLabel = useCallback(() => {
-    if (!selected) return
-    setLabelTargetIds(selectedIds.size > 0 ? [...selectedIds] : [selected.id])
-  }, [selected, selectedIds])
-  const openMove = useCallback(() => {
-    if (!selected || !moveAllowed) return
-    setMoveRequest({
-      targets: targetedThreads.map((thread) => ({
-        id: thread.id,
-        labelIds: [...thread.labelIds],
-        snoozed: thread.snoozed,
-        returned: thread.returned
-      })),
-      sourceLabelId: searchOpen ? null : userLabelId(view)
-    })
-  }, [moveAllowed, searchOpen, selected, targetedThreads, view])
-  const moveSelected = useCallback(
-    (destination: MoveDestination) => {
-      if (!moveRequest) return
-      setMoveRequest(null)
-      triage({
-        kind: 'move',
-        threadIds: moveRequest.targets.map((target) => target.id),
-        destination,
-        sourceLabelId: moveRequest.sourceLabelId
-      })
-    },
-    [moveRequest, triage]
-  )
-  const markNotDone = useCallback(() => {
-    if (!selected) return
-    triage({
-      kind: 'move',
-      threadIds: selectedIds.size > 0 ? [...selectedIds] : [selected.id],
-      destination: { kind: 'inbox' },
-      sourceLabelId: null,
-      verb: 'markNotDone'
-    })
-  }, [selected, selectedIds, triage])
-  const openThread = useCallback(
-    (index: number) => {
-      const thread = threads[index]
-      if (!thread) return
-      // Opening unread mail can immediately broadcast a mark-read refresh. Pin
-      // the identity before that refresh starts; the effect that mirrors index
-      // changes is deliberately too late for this transition.
-      selectedThreadIdRef.current = thread.id
-      if (!searchOpen) {
-        records.viewRecords.current.set(view, {
-          rowId: thread.id,
-          index,
-          scrollTop: listElRef.current?.scrollTop ?? 0
-        })
-      }
-      setDetachedDraftThread(null)
-      setSelectedIndex(index)
-      setReaderOpen(true)
-      reopenDraftForThread(thread.id)
-    },
-    [reopenDraftForThread, searchOpen, threads, view, records.viewRecords.current.set]
-  )
   // ThreadList and ConversationView are memoized, so every prop they take has
   // to keep its identity across renders they do not care about — a sync push
   // must not re-render a mounted Lexical tree (P3).
   const openLabelView = useCallback((labelId: string) => switchView(userLabelView(labelId)), [switchView])
-  const openThreadFromList = useCallback(
-    (index: number) => {
-      if (searchOpen) search.focusResults()
-      openThread(index)
-    },
-    [openThread, search.focusResults, searchOpen]
-  )
-  const snoozeSelected = useCallback(
-    (dueAt: number) => {
-      if (!window.attn || !selected) return
-      const isBulk = selectedIds.size > 0
-      const threadIds = isBulk ? [...selectedIds] : [selected.id]
-      closeSnooze()
-      if (isBulk) clearSelection()
-      // Snooze removes rows on refresh rather than optimistically, so the
-      // default 'next' advance is free (index preservation). The other two
-      // directions retarget before the refresh lands (F3 auto-advance).
-      if (!searchOpen && view !== 'snoozed') {
-        if (readerOpen && autoAdvance === 'list') finishReaderClose()
-        else if (autoAdvance === 'previous') {
-          const selection = selectionAfterExit(threads, threadIds, selectedIndex, 'previous')
-          if (selection && selection.toId !== null && selection.toId !== selection.fromId) {
-            selectedThreadIdRef.current = selection.toId
-            setSelectedIndex(Math.max(0, selection.nextIndex))
-          }
-        }
-      }
-      void window.attn.mail
-        .snooze(threadIds, dueAt)
-        .then((result) => showToast(result.label))
-        .catch(() => {})
-    },
-    [
-      autoAdvance,
-      clearSelection,
-      closeSnooze,
-      finishReaderClose,
-      readerOpen,
-      searchOpen,
-      selected,
-      selectedIds,
-      selectedIndex,
-      showToast,
-      threads,
-      view
-    ]
-  )
-
-  const unsnoozeSelected = useCallback(() => {
-    if (!selected) return
-    closeSnooze()
-    triage({ kind: 'unsnooze', threadIds: [selected.id] })
-  }, [closeSnooze, selected, triage])
-
-  const visibleRowCount = searchDraftMode
-    ? search.drafts.length
-    : searchOpen
-      ? threads.length
-      : view === 'drafts'
-        ? realDrafts.length
-        : view === 'outbox'
-          ? realOutbox.length
-          : threads.length
-
-  // While reading, J/K opens the next/previous conversation at its newest
-  // message or restored draft (SPEC §5) — the same entry point Enter and a row
-  // click use, so a Draft chip behaves identically however the row is reached.
-  const readNextThread = useCallback(
-    (index: number) => {
-      if (!readerOpen || (!searchOpen && (view === 'drafts' || view === 'outbox'))) return
-      const thread = threads[index]
-      if (!thread) return
-      selectedThreadIdRef.current = thread.id
-      reopenDraftForThread(thread.id)
-    },
-    [readerOpen, reopenDraftForThread, searchOpen, threads, view]
-  )
-
-  const navigateNext = useCallback(() => {
-    if (detachedDraftThread) {
-      finishReaderClose()
-      return
-    }
-    const next = Math.min(selectedIndex + 1, Math.max(visibleRowCount - 1, 0))
-    setSelectedIndex(next)
-    if (next !== selectedIndex) readNextThread(next)
-  }, [detachedDraftThread, finishReaderClose, readNextThread, selectedIndex, visibleRowCount])
-
-  const navigatePrevious = useCallback(() => {
-    if (detachedDraftThread) {
-      finishReaderClose()
-      return
-    }
-    if (readerOpen && selectedIndex === 0) {
-      closeReader()
-      return
-    }
-    const previous = Math.max(selectedIndex - 1, 0)
-    setSelectedIndex(previous)
-    if (previous !== selectedIndex) readNextThread(previous)
-  }, [closeReader, detachedDraftThread, finishReaderClose, readNextThread, readerOpen, selectedIndex])
-
   const splitCommands = useMemo(() => {
     if (!splits.state || splits.state.splits.length === 0) return null
     return {
