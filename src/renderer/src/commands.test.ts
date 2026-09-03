@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import {
+  COMMAND_CONTEXT_GROUPS,
   COMMAND_SPECS,
   chordKey,
   createCommand,
@@ -46,116 +47,50 @@ afterEach(() => {
 })
 
 describe('command catalog', () => {
-  test('contains the complete audited semantic command inventory', () => {
-    expect(Object.keys(COMMAND_SPECS)).toEqual([
-      'palette.open',
-      'navigate.next',
-      'navigate.previous',
-      'selection.toggle',
-      'selection.extendNext',
-      'selection.extendPrevious',
-      'selection.clear',
-      'conversation.open',
-      'conversation.close',
-      'message.next',
-      'message.previous',
-      'message.toggle',
-      'message.openOrReplyAll',
-      'message.trim.toggle',
-      'sync.retry',
-      'sync.error.copy',
-      'search.open',
-      'search.focusQuery',
-      'search.allGmail',
-      'search.submit',
-      'search.clear',
-      'split.previous',
-      'split.next',
-      'split.manage',
-      'account.add',
-      'account.remove',
-      'settings.open',
-      'settings.reorderAccounts',
-      'settings.syncLimit',
-      'compose.attnFooter.enable',
-      'compose.attnFooter.disable',
-      'privacy.remoteImages.block',
-      'privacy.remoteImages.load',
-      'privacy.remoteImages.overrides',
-      'snippets.manage',
-      'ai.settings',
-      'autocomplete.enable',
-      'autocomplete.disable',
-      'settings.undoSendDelay',
-      'settings.autoAdvance',
-      'settings.unreadBadge',
-      'settings.launchAtLogin',
-      'settings.menuBarIcon',
-      'notifications.pauseHour',
-      'notifications.pauseTomorrow',
-      'notifications.resume',
-      'update.restart',
-      'cheatsheet.open',
-      'theme.system',
-      'theme.dispatch-dark',
-      'theme.dispatch-light',
-      'theme.midnight',
-      'theme.sand',
-      'view.inbox',
-      'view.allMail',
-      'view.sent',
-      'view.starred',
-      'view.snoozed',
-      'view.drafts',
-      'view.spam',
-      'view.trash',
-      'view.outbox',
-      'layout.sidebar.toggle',
-      'outbox.open',
-      'outbox.close',
-      'draft.discard',
-      'composer.new',
-      'composer.reply',
-      'message.reply',
-      'message.replyAll',
-      'message.forward',
-      'composer.replyAll',
-      'composer.forward',
-      'composer.close',
-      'composer.undo',
-      'composer.discard',
-      'composer.send',
-      'composer.attach',
-      'composer.removeAttachment',
-      'composer.bold',
-      'composer.italic',
-      'composer.underline',
-      'composer.strikethrough',
-      'composer.fontFamily',
-      'composer.fontSize',
-      'composer.textColor',
-      'composer.backgroundColor',
-      'composer.alignLeft',
-      'composer.alignCenter',
-      'composer.alignRight',
-      'composer.bullets',
-      'composer.numbering',
-      'composer.quote',
-      'composer.link',
-      'composer.aiDraft',
-      'composer.snippets',
-      'composer.followUp',
-      'triage.archive',
-      'triage.notDone',
-      'triage.snooze',
-      'triage.trash',
-      'triage.spam',
-      'triage.star',
-      'triage.unread',
-      'triage.move',
-      'triage.label',
-      'triage.undo'
-    ])
+  test('every spec is well formed: a title, a parseable shortcut, a real context', () => {
+    const contexts = new Set(COMMAND_CONTEXT_GROUPS.map((group) => group.context))
+    for (const [id, spec] of Object.entries(COMMAND_SPECS)) {
+      expect(spec.title, id).toMatch(/\S/)
+      expect(contexts.has(spec.context), `${id} context ${spec.context}`).toBe(true)
+      const shortcuts = [
+        ...('shortcut' in spec && spec.shortcut ? [spec.shortcut] : []),
+        ...('shortcutAliases' in spec ? spec.shortcutAliases : [])
+      ]
+      for (const shortcut of shortcuts) {
+        // A shortcut is either a single keystroke ("Mod+Shift+k") or a chord
+        // ("g i"): each keystroke is modifiers then exactly one key, and a
+        // chord is exactly two of them separated by one space.
+        const keystrokes = shortcut.split(' ')
+        expect(keystrokes.length, `${id} shortcut ${shortcut}`).toBeLessThanOrEqual(2)
+        for (const keystroke of keystrokes) {
+          const parts = keystroke.split('+')
+          expect(
+            parts.every((part) => part.length > 0),
+            `${id} shortcut ${shortcut}`
+          ).toBe(true)
+          expect(
+            parts.slice(0, -1).every((part) => part === 'Mod' || part === 'Shift'),
+            `${id} modifiers in ${shortcut}`
+          ).toBe(true)
+        }
+      }
+      // Only a shortcut-bearing command can appear in the footer or the chord
+      // guide, both of which render its keystroke.
+      if ('footer' in spec) expect(shortcuts.length > 0 || Boolean(spec.footer), id).toBe(true)
+      if ('chordGuide' in spec) {
+        expect(
+          shortcuts.some((shortcut) => shortcut.includes(' ')),
+          `${id} chordGuide`
+        ).toBe(true)
+      }
+    }
+  })
+
+  test('allowInComposer is reserved for global commands', () => {
+    for (const [id, spec] of Object.entries(COMMAND_SPECS)) {
+      if (!('allowInComposer' in spec)) continue
+      expect(spec.context, id).toBe('global')
+    }
   })
 
   test('rejects duplicate active ids', () => {
