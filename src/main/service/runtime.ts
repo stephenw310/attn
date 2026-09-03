@@ -741,8 +741,13 @@ export class ServiceRuntime {
       auth.tokens,
       (tokens) => {
         // Stale after removal or a newer interactive sign-in of this account.
-        if (this.sessions.get(id) !== session || session.auth !== auth) return
-        session.auth = { ...auth, tokens }
+        // The generation is what identifies the credentials: `applyAccounts`
+        // assigns a fresh auth object on every roster push, so an
+        // object-identity check silently stopped persisting refreshes for
+        // long-lived clients such as the poller's (B31).
+        const currentAuth = this.sessions.get(id) === session ? session.auth : null
+        if (!currentAuth || currentAuth.generation !== auth.generation) return
+        session.auth = { ...currentAuth, tokens }
         this.emit({ kind: 'token-update', accountId: id, tokens, generation: auth.generation })
       },
       { quotaLimiter, readSignal: session.readAbort.signal }

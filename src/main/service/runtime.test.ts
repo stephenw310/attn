@@ -420,6 +420,51 @@ describe('ServiceRuntime with several accounts', () => {
     }
   )
 
+  it('keeps persisting refreshed tokens after a roster push replaces the auth object', async () => {
+    const { runtime, events } = await createRuntime(makeInput())
+    const accountId = 'primary@attn.test'
+    // Main rebuilds this payload for every push, so each one carries a new
+    // auth object even when nothing about the credentials changed.
+    const roster = () => ({
+      config: { client_id: 'test-client', client_secret: 'test-secret' },
+      accounts: [
+        {
+          id: accountId,
+          generation: 1,
+          tokens: { access_token: 'stale-access', refresh_token: 'refresh-token', expires_at: 0 }
+        }
+      ],
+      activeAccountId: accountId
+    })
+    await runtime.internal('apply-accounts', [roster()])
+    const internals = runtime as unknown as { makeClientFor(id: string): GmailClient }
+    // The poller holds one client for the life of its session.
+    const client = internals.makeClientFor(accountId)
+
+    // A roster push that reauthenticates nothing still assigns a fresh auth
+    // object; persistence used to compare object identity and stop here (B31).
+    await runtime.internal('apply-accounts', [roster()])
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL) => {
+        const url = String(input)
+        if (url.startsWith('https://oauth2.googleapis.com/token')) {
+          return new Response(JSON.stringify({ access_token: 'fresh-access', expires_in: 3600 }))
+        }
+        if (url.includes('/profile')) return new Response(JSON.stringify({ emailAddress: accountId }))
+        throw new Error(`Unexpected Gmail request: ${url}`)
+      })
+    )
+    await client.get('/profile')
+
+    expect(events.filter((event) => event.kind === 'token-update').at(-1)).toMatchObject({
+      accountId,
+      generation: 1,
+      tokens: { access_token: 'fresh-access', refresh_token: 'refresh-token' }
+    })
+  })
+
   it('serves the active account only, switches durably, and sums the badge', async () => {
     const input = makeInput()
     const { runtime, events } = await createRuntime(input)
