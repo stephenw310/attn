@@ -42,7 +42,7 @@ const SELECTION_EDGE_TOLERANCE_PX = 1
 // ceiling sits well clear of both.
 const SELECTION_SLACK_CEILING_PX = 24
 
-test.use({ seed: '.artifacts/perf-seed.json' })
+test.use({ seed: '.generated/perf-seed.json' })
 // GitHub's Linux runner can spend close to the ordinary 30-second test timeout
 // importing the 10,000-thread seed before a metric starts. Keep the measured
 // interaction ceilings strict while giving fixture setup and teardown headroom.
@@ -417,7 +417,7 @@ test.describe('@perf account switching with split inboxes', () => {
   // gitignored `.generated/` directory rather than in the uploaded artifacts.
   test.use({ seed: '.generated/perf-split-seed.json' })
   test.beforeAll(() => {
-    const fixture = JSON.parse(readFileSync(join(__dirname, '.artifacts/perf-seed.json'), 'utf8')) as {
+    const fixture = JSON.parse(readFileSync(join(__dirname, '.generated/perf-seed.json'), 'utf8')) as {
       accounts: Array<{
         splitSetup?: boolean
         threads: Array<{ messages: Array<{ labelIds: string[] }> }>
@@ -813,7 +813,7 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
   })
 
   test.describe('50,000-message search profile', () => {
-    test.use({ seed: '.artifacts/perf-search-seed.json' })
+    test.use({ seed: '.generated/perf-search-seed.json' })
 
     test('renders local search results within budget', async ({ page }, testInfo) => {
       test.setTimeout(180_000)

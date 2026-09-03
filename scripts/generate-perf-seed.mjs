@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const outputArgument = process.argv.find((argument) => argument.startsWith('--output='))
-const output = join(ROOT, outputArgument?.slice('--output='.length) ?? 'e2e/.artifacts/perf-seed.json')
+const output = join(ROOT, outputArgument?.slice('--output='.length) ?? 'e2e/.generated/perf-seed.json')
 const messageArgument = process.argv.find((argument) => argument.startsWith('--messages='))
 const messageCount = Number(messageArgument?.slice('--messages='.length) ?? 10_000)
 if (!Number.isSafeInteger(messageCount) || messageCount < 1) {
