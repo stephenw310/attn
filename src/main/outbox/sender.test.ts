@@ -123,7 +123,9 @@ describe('outbox Gmail draft protocol', () => {
       })
     ).rejects.toBe(ambiguous)
 
-    const timedOut = new GmailApiError(408, 'deadline exceeded', true)
+    // The real client marks only 429/5xx/quota retryable, so an ambiguous 408
+    // arrives here exactly as it does in production.
+    const timedOut = new GmailApiError(408, 'deadline exceeded')
     const timeout = provider({
       createDraft: vi.fn(async () => {
         throw timedOut
@@ -336,6 +338,11 @@ class FakeOutboxDb {
     if (query.startsWith("UPDATE outbox SET state = 'sending'")) {
       const row = this.rows.get(String(args[1]))
       if (!row || row.account_id !== args[0] || row.state !== 'queued') return { changes: 0 }
+      // Mirrors the claim's own send time predicate, so a row the user undid
+      // and re-sent during the mirror wait is no longer claimable.
+      if (query.includes('send_at <= ?') && (row.send_at === null || row.send_at > Number(args[2]))) {
+        return { changes: 0 }
+      }
       row.state = 'sending'
       return { changes: 1 }
     }
@@ -745,11 +752,82 @@ describe('OutboxSender effect layer', () => {
         getDraft: vi.fn(async () => {
           throw new GmailApiError(404, 'gone')
         }),
+        findByRfcId: vi.fn(async () => ({ kind: 'message' as const, messageId: 'confirmed-message' })),
         sendDraft: missingSend
       })
     ).trigger()
     expect(missingSend).not.toHaveBeenCalled()
-    expect(missingStore.row().state).toBe('sent')
+    expect(missingStore.row()).toMatchObject({ state: 'sent', gmail_message_id: 'confirmed-message' })
+  })
+
+  it('parks a draft deleted elsewhere during recovery instead of reporting it sent', async () => {
+    // "Consumed" conflates "Gmail sent it" with "deleted from Drafts on another
+    // device", and only the Message-ID lookup can tell them apart.
+    const store = new FakeOutboxDb(fakeRow({ state: 'sending', gmail_draft_id: 'draft-deleted' }))
+    const findByRfcId = vi.fn(async () => null)
+    const sendDraft = vi.fn(async () => ({ id: 'sent-message', threadId: '' }))
+    const notify = vi.fn()
+    await effectSender(
+      store,
+      effectProvider({
+        getDraft: vi.fn(async () => {
+          throw new GmailApiError(404, 'deleted on another device')
+        }),
+        findByRfcId,
+        sendDraft
+      }),
+      { notify }
+    ).trigger()
+
+    expect(findByRfcId).toHaveBeenCalledWith('<message@example.com>', expect.anything())
+    expect(sendDraft).not.toHaveBeenCalled()
+    expect(store.row()).toMatchObject({ state: 'needs-review', gmail_draft_id: null })
+    expect(store.row().last_error).toContain("couldn't confirm")
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed', id: 'outbox-1' }))
+  })
+
+  it('keeps the full undo window when the user re-sends during the mirror checkpoint wait', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const createDraft = vi.fn(async () => 'draft-1')
+    const sender = effectSender(store, effectProvider({ createDraft }), {
+      // Undo followed by a fresh send while the checkpoint wait holds the
+      // drain: the row is queued again, with a send time that has not arrived.
+      beforeRemote: async () => {
+        store.row().send_at = NOW + 30_000
+      }
+    })
+
+    await sender.trigger()
+
+    expect(createDraft).not.toHaveBeenCalled()
+    expect(store.row()).toMatchObject({ state: 'queued', send_at: NOW + 30_000 })
+  })
+
+  it('verifies an ambiguous 408 create by Message-ID instead of failing the row', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const time = new ManualTime()
+    const findByRfcId = vi.fn(async () => null)
+    const sender = effectSender(
+      store,
+      effectProvider({
+        createDraft: vi.fn(async () => {
+          throw new GmailApiError(408, 'deadline exceeded')
+        }),
+        findByRfcId
+      }),
+      { time }
+    )
+
+    await sender.trigger()
+
+    expect(store.row()).toMatchObject({ state: 'sending', attempts: 1, verify_attempts: 0 })
+    expect(store.row().send_at).toBeGreaterThan(NOW)
+
+    time.advance((store.row().send_at ?? NOW) - NOW)
+    await sender.trigger()
+
+    expect(findByRfcId).toHaveBeenCalledWith('<message@example.com>', expect.anything())
+    expect(store.row()).toMatchObject({ state: 'sending', verify_attempts: 1 })
   })
 
   it('bounds successful secondary negatives independently from transport retries', async () => {

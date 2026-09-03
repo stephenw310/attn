@@ -1,5 +1,4 @@
 import type { MailAddress } from '../../shared/address'
-import type { DraftKind } from '../../shared/drafts'
 import { errorMessage } from '../../shared/error'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
@@ -31,7 +30,6 @@ interface SendRow {
   id: string
   account_id: string
   state: 'queued' | 'sending'
-  kind: DraftKind
   gmail_draft_id: string | null
   gmail_message_id: string | null
   rfc_message_id: string
@@ -64,7 +62,12 @@ function permanentSendError(error: unknown): boolean {
     error instanceof GmailApiError &&
     error.status >= 400 &&
     error.status < 500 &&
+    // 404 (the draft is gone) and 408 (the outcome is unknown) both leave the
+    // send ambiguous, so they belong to verification, not to `failed` — a
+    // permanent verdict here mints a fresh Message-ID and can duplicate a
+    // message Gmail already accepted.
     error.status !== 404 &&
+    error.status !== 408 &&
     !error.retryable
   )
 }
@@ -336,7 +339,7 @@ export class OutboxSender {
   private nextDue(accountId: string): SendRow | undefined {
     return this.db
       .prepare(
-        `SELECT id, account_id, state, kind, gmail_draft_id, gmail_message_id, rfc_message_id,
+        `SELECT id, account_id, state, gmail_draft_id, gmail_message_id, rfc_message_id,
                 to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, created_at, updated_at, follow_up_at, send_at,
@@ -402,9 +405,17 @@ export class OutboxSender {
           this.time.now()
         )
         if (plan.next.state !== 'sending') return
+        // The wait above can run for tens of seconds while the mirror uploads
+        // attachments. An undo and re-send inside that window leaves the row
+        // queued with a fresh send_at, so the claim re-checks it: the row was
+        // due when it was read, not necessarily when it is claimed.
         const claimed = this.db
-          .prepare("UPDATE outbox SET state = 'sending' WHERE account_id = ? AND id = ? AND state = 'queued'")
-          .run(accountId, row.id)
+          .prepare(
+            `UPDATE outbox SET state = 'sending'
+             WHERE account_id = ? AND id = ? AND state = 'queued'
+               AND send_at IS NOT NULL AND send_at <= ?`
+          )
+          .run(accountId, row.id, this.time.now())
         if (claimed.changes === 0) continue
         row = { ...row, state: 'sending' }
         this.notify({ kind: 'changed' })
@@ -418,7 +429,7 @@ export class OutboxSender {
   private reloadSending(accountId: string, id: string): SendRow | undefined {
     return this.db
       .prepare(
-        `SELECT id, account_id, state, kind, gmail_draft_id, gmail_message_id, rfc_message_id,
+        `SELECT id, account_id, state, gmail_draft_id, gmail_message_id, rfc_message_id,
                 to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, created_at, updated_at, follow_up_at, send_at,
@@ -460,7 +471,7 @@ export class OutboxSender {
           if (
             (await verifyKnownDraft(provider, row.gmail_draft_id as string, controller.signal)) === 'consumed'
           ) {
-            await this.markSent(row, provider, row.thread_id, controller.signal)
+            await this.settleConsumedDraft(row, provider, controller.signal)
             return false
           }
         }
@@ -474,6 +485,28 @@ export class OutboxSender {
     } finally {
       if (this.remoteAbortController === controller) this.remoteAbortController = null
     }
+  }
+
+  /**
+   * A 404 on a draft this row owns has two causes: `drafts.send` consumed it,
+   * or somebody deleted it from Drafts on another device while the row sat in
+   * `sending`. Only a real message carrying this row's Message-ID proves
+   * delivery, so absence of one parks the row for review instead of reporting
+   * a send that never happened.
+   */
+  private async settleConsumedDraft(
+    row: SendRow,
+    provider: MailProvider,
+    signal: AbortSignal
+  ): Promise<void> {
+    const match = provider.findByRfcId
+      ? await provider.findByRfcId(row.rfc_message_id, { signal, priority: 'send' })
+      : null
+    if (match?.kind === 'message') {
+      await this.markSent(row, provider, match.threadId ?? row.thread_id, signal, match.messageId)
+      return
+    }
+    this.parkNeedsReview(row, true)
   }
 
   private async verifySecondary(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<boolean> {
@@ -495,12 +528,7 @@ export class OutboxSender {
       const durableDraftId = recovered.gmail_draft_id
       if (!durableDraftId) return false
       if ((await verifyKnownDraft(provider, durableDraftId, signal)) === 'consumed') {
-        await this.markSent(
-          recovered,
-          provider,
-          durableDraftId === match.draftId ? (match.threadId ?? recovered.thread_id) : recovered.thread_id,
-          signal
-        )
+        await this.settleConsumedDraft(recovered, provider, signal)
         return false
       }
       await this.send(recovered, provider, signal)
