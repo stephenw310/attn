@@ -218,6 +218,10 @@ describe('OnDemandBodyHydrator', () => {
     expect(hydrationEffects.hydrateMissing).not.toHaveBeenCalled()
     expect(onChanged).not.toHaveBeenCalled()
     expect(onUnavailable).not.toHaveBeenCalled()
+    // The abandoned attempt reached no conclusion, so it must leave no state:
+    // a retained 'loading' reports an in-progress hydration for every later
+    // read of this thread, including after switching back.
+    expect(hydrator.state('account@example.com', 'thread-1')).toBe('idle')
   })
 
   it('cancels an active attempt before shutdown can close the database', async () => {
