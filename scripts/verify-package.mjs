@@ -3,6 +3,7 @@ import { access, readdir, readFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listPackage, statFile } from '@electron/asar'
+import { packagedSchemaVersion } from './write-distribution-metadata.mjs'
 
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outputDir = join(projectDir, 'dist')
@@ -78,6 +79,15 @@ async function verifyArchive(archive) {
     )
   }
 
+  // Renderer-only packages are bundled into out/renderer, so shipping their
+  // sources means they drifted back into runtime `dependencies`.
+  const rendererOnly = entries.filter((entry) => entry.startsWith('/node_modules/@dnd-kit/'))
+  if (rendererOnly.length > 0) {
+    throw new Error(
+      `${relative(projectDir, archive)} ships bundled-only @dnd-kit sources; keep them in devDependencies`
+    )
+  }
+
   // @electron/asar traverses archive metadata with the host platform's path
   // separator. Keep the canonical slash form above for portable comparisons,
   // but use the native relative path for metadata lookup on Windows.
@@ -91,13 +101,6 @@ async function verifyArchive(archive) {
   if (releaseMode) verifyReleaseSignature(archive, platform)
 
   console.log(`[package] verified ${relative(projectDir, archive)} (${platform}-${arch})`)
-}
-
-async function packagedSchemaVersion() {
-  const schema = await readFile(join(projectDir, 'src/main/db/schema.ts'), 'utf8')
-  const match = schema.match(/CURRENT_SCHEMA_VERSION = (\d+)/)
-  if (!match) throw new Error('CURRENT_SCHEMA_VERSION not found in src/main/db/schema.ts')
-  return Number.parseInt(match[1], 10)
 }
 
 /**
@@ -116,7 +119,7 @@ async function verifyDistributionMetadata(archive) {
   } catch {
     throw new Error(`${relative(projectDir, archive)} has no readable distribution.json beside app.asar`)
   }
-  const schemaVersion = await packagedSchemaVersion()
+  const schemaVersion = packagedSchemaVersion()
   if (metadata?.metadataVersion !== 1) throw new Error(`${path}: unknown metadataVersion`)
   if (metadata.schemaVersion !== schemaVersion) {
     throw new Error(

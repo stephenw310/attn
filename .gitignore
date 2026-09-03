@@ -9,6 +9,9 @@ dist/
 e2e/.results/
 e2e/.artifacts/
 
+# Local audit worksheets (TEST-SUITE-AUDIT-2026-09-02.md §"local-only")
+.audit/
+
 # Per-user Google OAuth client (see README.md) — never commit
 oauth.config.json
 dist-resources/

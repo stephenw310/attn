@@ -11,6 +11,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// This module is also imported by verify-package.mjs for packagedSchemaVersion,
+// so writing the metadata is guarded on being run as the script.
+
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 export function packagedSchemaVersion() {
@@ -33,8 +36,10 @@ function buildMetadata() {
   return { metadataVersion: 1, mode, schemaVersion, feed: { owner, repo } }
 }
 
-const metadata = buildMetadata()
-const outputDir = join(projectDir, 'dist-resources')
-mkdirSync(outputDir, { recursive: true })
-writeFileSync(join(outputDir, 'distribution.json'), `${JSON.stringify(metadata, null, 2)}\n`)
-console.log(`[package] distribution metadata: mode=${metadata.mode} schema=v${metadata.schemaVersion}`)
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const metadata = buildMetadata()
+  const outputDir = join(projectDir, 'dist-resources')
+  mkdirSync(outputDir, { recursive: true })
+  writeFileSync(join(outputDir, 'distribution.json'), `${JSON.stringify(metadata, null, 2)}\n`)
+  console.log(`[package] distribution metadata: mode=${metadata.mode} schema=v${metadata.schemaVersion}`)
+}
