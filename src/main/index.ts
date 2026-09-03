@@ -3,20 +3,17 @@ import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, powerMonitor, safeStorage, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import { type AiSettings, validateAiSettingUpdate } from '../shared/ai'
-import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { shouldConstructUpdater } from '../shared/distribution'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { AppSettingUpdate } from '../shared/settings'
 import type { ThemePreference } from '../shared/theme'
 import { UPDATE_STATE_IDLE, type UpdateState } from '../shared/update'
+import { AccountRoster } from './accountRoster'
 import { AiKeyStore } from './ai/keyStore'
 import { AiManager } from './ai/manager'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, type OAuthConfig, signInWithGoogle } from './auth/googleAuth'
-import { accountIdForTokens, reorderIds, type StoredAccount } from './auth/tokenFile'
-import { loadAccounts, removeAccountTokens, reorderAccountTokens, saveAccountTokens } from './auth/tokenStore'
-import { isCurrentTokenUpdate } from './auth/tokenUpdate'
 import {
   applyMenuBarIcon,
   attachBackgroundWindow,
@@ -35,12 +32,7 @@ import {
   type RemoteImagePolicy,
   shouldBlockMailFrameRequest
 } from './remoteImages'
-import {
-  SERVICE_PROTOCOL_VERSION,
-  type ServiceAccountsState,
-  type ServiceEvent,
-  type ServiceReady
-} from './service/protocol'
+import { SERVICE_PROTOCOL_VERSION, type ServiceEvent, type ServiceReady } from './service/protocol'
 import { ServiceSupervisor } from './service/supervisor'
 import { TestSeams } from './testIpc'
 import { readDistributionMetadata } from './update/distribution'
@@ -66,17 +58,8 @@ if (testUserData) {
 }
 
 let service: ServiceSupervisor | null = null
-let seedAccountIds: string[] = []
-let storedAccounts: StoredAccount[] = []
-let activeAccountId: string | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
-// Each interactive sign-in takes a generation; a later call cancels the flow
-// in flight, and only the newest flow may clear the marker — a boolean let a
-// canceled flow's `finally` clear the flag of the flow that replaced it.
-let signInGeneration = 0
-let activeSignInGeneration = 0
-const authGenerations = new Map<string, number>()
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 let themePreference: ThemePreference = 'system'
@@ -98,7 +81,7 @@ let updateStateOverride: UpdateState | null = null
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
   focusInboxThread: (threadId, accountId) => {
-    const owner = accountId ?? activeAccountId
+    const owner = accountId ?? roster.activeId()
     if (owner) focusInboxThread(owner, threadId)
   },
   setUpdateStateOverride: (state) => {
@@ -128,7 +111,7 @@ function focusInboxThread(accountId: string, threadId: string | null): void {
  * target clears here.
  */
 function takePendingFocusTarget(): ReturnType<typeof takePendingFocus> {
-  const target = takePendingFocus(pendingFocus, activeAccountId)
+  const target = takePendingFocus(pendingFocus, roster.activeId())
   if (target === null) pendingFocus = null
   return target
 }
@@ -164,7 +147,7 @@ async function registerMailFrame(
  * bouncing the user to the notified account later.
  */
 function reconcilePendingFocus(): void {
-  if (pendingFocus && pendingFocus.accountId !== activeAccountId) pendingFocus = null
+  if (pendingFocus && pendingFocus.accountId !== roster.activeId()) pendingFocus = null
 }
 
 function oauthSearchDirs(): string[] {
@@ -182,173 +165,21 @@ function reloadOAuthConfig(): OAuthConfig | null {
   return oauthConfig
 }
 
-function rosterAccountIds(): string[] {
-  return seedAccountIds.length > 0 ? seedAccountIds : storedAccounts.map((account) => account.id)
-}
-
-function authStatus(): AuthStatus {
-  const accounts = rosterAccountIds().map((id) => ({ id, email: emailFor(id) }))
-  const active = accounts.find((account) => account.id === activeAccountId) ?? null
-  return {
-    configured: seedAccountIds.length === 0 && oauthConfig !== null,
-    signedIn: accounts.length > 0,
-    ...(active ? { email: active.email } : {}),
-    accounts,
-    activeAccountId: active?.id ?? null
+// The roster owns every account transition (F15/F18); this file boots and
+// tears down the app around it (R11).
+const roster = new AccountRoster({
+  userDataPath: () => app.getPath('userData'),
+  service: () => service,
+  oauthConfig: () => oauthConfig,
+  reloadOAuthConfig,
+  signIn: (config) => signInWithGoogle(config, (url) => shell.openExternal(url)),
+  cancelSignIn: cancelActiveSignIn,
+  testMode: Boolean(testUserData),
+  onAdopted: (status) => {
+    reconcilePendingFocus()
+    mailNotifier?.setAccounts(status.accounts)
   }
-}
-
-function emailFor(accountId: string): string {
-  const stored = storedAccounts.find((account) => account.id === accountId)
-  return stored?.tokens.email ?? accountId
-}
-
-function serviceAccountsState(): ServiceAccountsState {
-  return {
-    config: oauthConfig,
-    accounts: storedAccounts.map((account) => ({
-      id: account.id,
-      tokens: account.tokens,
-      generation: authGenerations.get(account.id) ?? 0
-    })),
-    activeAccountId,
-    ...(testUserData ? { seedAccountIds } : {})
-  }
-}
-
-async function signIn(): Promise<AuthSignInResult> {
-  const config = reloadOAuthConfig()
-  if (!config) {
-    const resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
-    return { status: authStatus(), resumedActions }
-  }
-  if (activeSignInGeneration !== 0) cancelActiveSignIn()
-  const generation = ++signInGeneration
-  activeSignInGeneration = generation
-  let resumedActions = 0
-  let signedInAccountId: string | undefined
-  try {
-    const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
-    const accountId = accountIdForTokens(tokens)
-    if (!accountId) throw new Error('Google did not return an email address for this account')
-    const refreshed = storedAccounts.some((account) => account.id === accountId)
-    storedAccounts = saveAccountTokens(app.getPath('userData'), tokens)
-    authGenerations.set(accountId, (authGenerations.get(accountId) ?? 0) + 1)
-    signedInAccountId = accountId
-    // Adding an account does not activate it: activation goes through the
-    // guarded renderer switch, so an OAuth completion that lands while a
-    // composer is open can never swap the surface (PR #94 review). The roster
-    // update is awaited — the utility's answer names the sessions that
-    // actually exist, deferred re-creates included — and its resolved active
-    // account (the first sign-in, or the persisted survivor) is adopted.
-    await adoptServiceAccounts()
-    // Resume the account the flow actually reauthenticated — not the active
-    // one, which sign-in no longer changes.
-    resumedActions = Number((await service?.internal('resume-auth-failures', accountId)) ?? 0)
-    console.log(`[auth] ${refreshed ? 'reconnected' : 'added account'} ${tokens.email ?? accountId}`)
-  } catch (error) {
-    console.error(`[auth] sign-in failed: ${errorMessage(error)}`)
-    throw error
-  } finally {
-    if (activeSignInGeneration === generation) activeSignInGeneration = 0
-  }
-  return {
-    status: authStatus(),
-    resumedActions,
-    ...(signedInAccountId ? { accountId: signedInAccountId } : {})
-  }
-}
-
-/**
- * Push the roster to the utility and mirror back the active account it
- * resolved. Waiting on the response is what keeps AuthStatus truthful: the
- * named active account's session exists before anyone reads it.
- */
-async function adoptServiceAccounts(): Promise<void> {
-  const result = await service?.applyAccounts(serviceAccountsState())
-  if (result === null || typeof result === 'string') activeAccountId = result
-  service?.noteActiveAccount(activeAccountId)
-  reconcilePendingFocus()
-  mailNotifier?.setAccounts(authStatus().accounts)
-}
-
-/**
- * Remove one account (F18, D3): tokens go and its session stops; the caller
- * chooses whether the local rows go too (Delete) or stay dormant for a future
- * re-add to resume from stored cursors (Keep).
- *
- * The purge cannot run first — the utility refuses to delete rows while a
- * session still holds them, so the roster push that stops it has to precede
- * it. Instead the roster leaves memory before the purge and the tokens leave
- * disk only after it succeeded: a failed Delete therefore restores the
- * account (session included) and rejects, leaving a signed-in account whose
- * data is intact and whose Delete can be retried, rather than a retired
- * account with orphaned rows and no way back (B23).
- */
-async function removeAccount(accountId: string, deleteData: boolean): Promise<AuthStatus> {
-  const removedIndex = rosterAccountIds().indexOf(accountId)
-  if (removedIndex < 0) throw new Error('unknown account')
-  cancelActiveSignIn()
-  const previousSeedIds = seedAccountIds
-  const previousStoredAccounts = storedAccounts
-  const previousActiveAccountId = activeAccountId
-  if (previousSeedIds.length > 0) seedAccountIds = seedAccountIds.filter((id) => id !== accountId)
-  else storedAccounts = storedAccounts.filter((account) => account.id !== accountId)
-  // Removing the active account activates the next by position; removing a
-  // background account leaves the surface alone.
-  if (activeAccountId === accountId) {
-    const remaining = rosterAccountIds()
-    activeAccountId = remaining[removedIndex] ?? remaining[0] ?? null
-  }
-  await adoptServiceAccounts()
-  if (deleteData) {
-    try {
-      await service?.internal('remove-account-data', accountId)
-    } catch (error) {
-      console.error(`[auth] could not delete local data for ${accountId}: ${errorMessage(error)}`)
-      seedAccountIds = previousSeedIds
-      storedAccounts = previousStoredAccounts
-      activeAccountId = previousActiveAccountId
-      await adoptServiceAccounts()
-      throw error
-    }
-  }
-  if (previousSeedIds.length === 0) {
-    storedAccounts = removeAccountTokens(app.getPath('userData'), accountId)
-  }
-  authGenerations.delete(accountId)
-  console.log(`[auth] removed account ${accountId} (${deleteData ? 'deleted' : 'kept'} local data)`)
-  return authStatus()
-}
-
-/**
- * Persist a new switcher order (F15). The permutation is validated against
- * the roster as it exists *now* — a stale request from before an add/remove
- * rejects, and the stored path re-reads the token file so a token refresh
- * that raced the reorder keeps its newest tokens. A failed persist throws
- * before the in-memory roster moves, leaving the old order intact. Sessions
- * are never restarted and the active account never changes: the utility
- * receives the same account set in its new order.
- */
-async function reorderAccounts(accountIds: string[]): Promise<AuthStatus> {
-  if (seedAccountIds.length > 0) seedAccountIds = reorderIds(seedAccountIds, accountIds)
-  else storedAccounts = reorderAccountTokens(app.getPath('userData'), accountIds)
-  await adoptServiceAccounts()
-  console.log(`[auth] reordered accounts: ${rosterAccountIds().join(', ')}`)
-  return authStatus()
-}
-
-async function setActiveAccount(accountId: string): Promise<AuthStatus> {
-  if (!rosterAccountIds().includes(accountId)) throw new Error('unknown account')
-  // The utility owns the flip: the response guarantees every later read the
-  // renderer issues is answered for the new account.
-  const result = await service?.internal('set-active-account', accountId)
-  activeAccountId = typeof result === 'string' ? result : accountId
-  service?.noteActiveAccount(activeAccountId)
-  reconcilePendingFocus()
-  mailNotifier?.setAccounts(authStatus().accounts)
-  return authStatus()
-}
+})
 
 function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   const shouldShow = options.show ?? true
@@ -477,29 +308,14 @@ function handleServiceEvent(event: ServiceEvent): void {
   else if (event.kind === 'notification-candidates') {
     mailNotifier?.notify(event.accountId, event.candidates, event.pausedUntil)
   } else if (event.kind === 'token-update') {
-    const userDataPath = app.getPath('userData')
-    // One decrypt per refresh: the roster read for the staleness check is the
-    // same one the write starts from.
-    const roster = loadAccounts(userDataPath)
-    const stored = roster.find((account) => account.id === event.accountId)
-    if (!isCurrentTokenUpdate(authGenerations.get(event.accountId), stored, event)) {
-      console.warn(
-        `[auth] ignored stale token update for ${event.accountId} (generation ${event.generation})`
-      )
-      return
-    }
-    storedAccounts = saveAccountTokens(userDataPath, event.tokens, roster)
-    service?.cacheTokens(event.accountId, event.tokens)
+    if (roster.applyTokenUpdate(event)) service?.cacheTokens(event.accountId, event.tokens)
   } else if (event.kind === 'log') console[event.level](event.message)
 }
 
 async function initialize(): Promise<void> {
   const userDataPath = app.getPath('userData')
   reloadOAuthConfig()
-  storedAccounts = loadAccounts(userDataPath)
-  for (const account of storedAccounts) {
-    if (!authGenerations.has(account.id)) authGenerations.set(account.id, 0)
-  }
+  roster.loadStoredAccounts()
   const ownedNotifier = new MailNotifier(showMainWindow, focusInboxThread)
   mailNotifier = ownedNotifier
   ownedNotifier.start()
@@ -510,15 +326,7 @@ async function initialize(): Promise<void> {
     downloadsPath: app.getPath('downloads'),
     testMode: Boolean(testUserData),
     ...(testUserData && process.env.ATTN_TEST_SEED ? { testSeed: process.env.ATTN_TEST_SEED } : {}),
-    accounts: {
-      config: oauthConfig,
-      accounts: storedAccounts.map((account) => ({
-        id: account.id,
-        tokens: account.tokens,
-        generation: authGenerations.get(account.id) ?? 0
-      })),
-      activeAccountId: null
-    },
+    accounts: { ...roster.serviceAccountsState(), activeAccountId: null },
     focused: false
   })
   service = ownedService
@@ -533,13 +341,8 @@ async function initialize(): Promise<void> {
   if (service !== ownedService || mailNotifier !== ownedNotifier) return
   // The utility resolved the roster (seed sessions included) and the persisted
   // active pointer; main mirrors that resolution rather than re-deriving it.
-  seedAccountIds =
-    testUserData && process.env.ATTN_TEST_SEED
-      ? ready.accountIds.filter((id) => !storedAccounts.some((account) => account.id === id))
-      : []
-  activeAccountId = ready.activeAccountId
-  ownedService.noteActiveAccount(activeAccountId)
-  ownedNotifier.setAccounts(authStatus().accounts)
+  roster.adoptReady(ready, Boolean(testUserData && process.env.ATTN_TEST_SEED))
+  ownedNotifier.setAccounts(roster.authStatus().accounts)
   ownedNotifier.setBadgeEnabled(ready.background.unreadBadgeEnabled)
   openedSchemaVersion = ready.schemaVersion
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
@@ -617,11 +420,11 @@ async function initialize(): Promise<void> {
   }
   stopIpc = registerIpc({
     service: ownedService,
-    authStatus,
-    signIn,
-    setActiveAccount,
-    removeAccount,
-    reorderAccounts,
+    authStatus: () => roster.authStatus(),
+    signIn: () => roster.signIn(),
+    setActiveAccount: (accountId) => roster.setActiveAccount(accountId),
+    removeAccount: (accountId, deleteData) => roster.removeAccount(accountId, deleteData),
+    reorderAccounts: (accountIds) => roster.reorderAccounts(accountIds),
     takePendingFocus: takePendingFocusTarget,
     acknowledgePendingFocus: acknowledgeFocusTarget,
     applySettingEffects,
