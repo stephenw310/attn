@@ -16,6 +16,12 @@ function imageAsBase64(file: File): Promise<string> {
   })
 }
 
+/**
+ * Paste, in the two shapes that need more than Lexical's default: image files
+ * and data-URL images become spooled inline attachments with a CID, and
+ * foreign HTML goes through the import pass that freezes what the editor
+ * cannot represent.
+ */
 export function PasteContentPlugin({
   draftId,
   onAttachment,
