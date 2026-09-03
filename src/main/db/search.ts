@@ -1,6 +1,7 @@
 import type { Draft } from '../../shared/drafts'
 import type { ThreadRow } from '../../shared/mail'
 import {
+  normalizeMailboxName,
   type ParsedSearchQuery,
   parseSearchQuery,
   type SearchFilter,
@@ -13,54 +14,22 @@ import { listDrafts } from '../outbox/drafts'
 import { searchCoverage } from '../sync/fts'
 import { SEARCH_RECENT_MESSAGE_LIMIT, SEARCH_RESULT_LIMIT } from '../sync/tuning'
 import type { Db } from './index'
+import { messageHasLabelSql as labelSql, messageHasNoLabelSql } from './labelSql'
+import {
+  labelIdsProjectionSql,
+  THREAD_AUXILIARY_PROJECTION_SQL,
+  type ThreadProjectionRow,
+  toThreadRow
+} from './threadRows'
 
 export { SEARCH_RECENT_MESSAGE_LIMIT, SEARCH_RESULT_LIMIT } from '../sync/tuning'
 
-interface SearchThreadRow {
-  id: string
-  from_display: string | null
-  subject: string | null
-  snippet: string | null
+interface SearchThreadRow extends ThreadProjectionRow {
   last_msg_at: number | null
-  is_unread: number
-  is_starred: number
-  has_attachment: number
-  snoozed: number
-  returned: number
-  has_draft: number
-  label_ids: string
-}
-
-function toThreadRow(row: SearchThreadRow): ThreadRow {
-  return {
-    id: row.id,
-    fromDisplay: row.from_display ?? '',
-    subject: row.subject ?? '(no subject)',
-    snippet: row.snippet ?? '',
-    lastMsgAt: row.last_msg_at ?? 0,
-    unread: row.is_unread === 1,
-    starred: row.is_starred === 1,
-    hasAttachment: row.has_attachment === 1,
-    snoozed: row.snoozed === 1,
-    returned: row.returned === 1,
-    hasDraft: row.has_draft === 1,
-    labelIds: labelIds(row.label_ids)
-  }
-}
-
-function systemMailboxName(value: string): string {
-  return value.toLowerCase().replaceAll(/[\s_-]/g, '')
 }
 
 function messageHasLabelExpressionSql(messageAlias: string, labelExpression: string): string {
-  return `((${messageAlias}.labels_json IS NOT NULL AND EXISTS (
-      SELECT 1 FROM json_each(${messageAlias}.labels_json) WHERE value = ${labelExpression}
-    )) OR (${messageAlias}.labels_json IS NULL AND EXISTS (
-      SELECT 1 FROM thread_labels search_candidate_label
-      WHERE search_candidate_label.account_id = ${messageAlias}.account_id
-        AND search_candidate_label.thread_id = ${messageAlias}.thread_id
-        AND search_candidate_label.label_id = ${labelExpression}
-    )))`
+  return labelSql({ message: messageAlias, label: labelExpression })
 }
 
 function messageHasLabelSql(messageAlias: string, label: string): string {
@@ -68,15 +37,7 @@ function messageHasLabelSql(messageAlias: string, label: string): string {
 }
 
 function normalMessageSql(messageAlias: string): string {
-  return `((${messageAlias}.labels_json IS NOT NULL AND NOT EXISTS (
-      SELECT 1 FROM json_each(${messageAlias}.labels_json)
-      WHERE value IN ('SPAM', 'TRASH', 'DRAFT', 'CHAT')
-    )) OR (${messageAlias}.labels_json IS NULL AND NOT EXISTS (
-      SELECT 1 FROM thread_labels search_candidate_label
-      WHERE search_candidate_label.account_id = ${messageAlias}.account_id
-        AND search_candidate_label.thread_id = ${messageAlias}.thread_id
-        AND search_candidate_label.label_id IN ('SPAM', 'TRASH', 'DRAFT', 'CHAT')
-    )))`
+  return messageHasNoLabelSql({ message: messageAlias, labels: ['SPAM', 'TRASH', 'DRAFT', 'CHAT'] })
 }
 
 function storedMessageHasAttachmentSql(messageAlias: string): string {
@@ -111,7 +72,7 @@ function pendingSnoozeSql(): string {
 }
 
 function messageLocationSql(value: string, messageAlias: string, values: unknown[]): string {
-  const mailbox = systemMailboxName(value)
+  const mailbox = normalizeMailboxName(value)
   if (mailbox === 'draft' || mailbox === 'drafts') return '0'
   if (mailbox === 'inbox') {
     return `${messageHasLabelSql(messageAlias, 'INBOX')} AND t.is_inbox_visible = 1`
@@ -263,16 +224,12 @@ function candidateSql(
     GROUP BY ${messageAlias}.thread_id`
 }
 
-function labelIds(value: string): string[] {
-  return value ? value.split('\u001f') : []
-}
-
 function draftLocationOnly(parsed: ParsedSearchQuery): boolean {
   const locations = parsed.filters.filter((filter) => filter.kind === 'in')
   return (
     locations.length > 0 &&
     locations.every((filter) => {
-      const mailbox = systemMailboxName(filter.value)
+      const mailbox = normalizeMailboxName(filter.value)
       return mailbox === 'draft' || mailbox === 'drafts'
     })
   )
@@ -281,7 +238,7 @@ function draftLocationOnly(parsed: ParsedSearchQuery): boolean {
 function searchesDrafts(parsed: ParsedSearchQuery): boolean {
   return parsed.filters.some((filter) => {
     if (filter.kind !== 'in') return false
-    const mailbox = systemMailboxName(filter.value)
+    const mailbox = normalizeMailboxName(filter.value)
     return mailbox === 'draft' || mailbox === 'drafts'
   })
 }
@@ -290,7 +247,7 @@ function searchesLocalSnoozes(parsed: ParsedSearchQuery): boolean {
   return parsed.filters.some((filter) => {
     if (filter.kind === 'is') return filter.value === 'snoozed'
     if (filter.kind !== 'in') return false
-    return systemMailboxName(filter.value) === 'snoozed'
+    return normalizeMailboxName(filter.value) === 'snoozed'
   })
 }
 
@@ -316,7 +273,7 @@ function draftMatchesTerm(draft: Draft, term: SearchTextTerm, accountId: string)
 
 function draftMatchesFilter(draft: Draft, filter: SearchFilter): boolean {
   if (filter.kind === 'in') {
-    const mailbox = systemMailboxName(filter.value)
+    const mailbox = normalizeMailboxName(filter.value)
     return mailbox === 'draft' || mailbox === 'drafts'
   }
   if (filter.kind === 'is') return false
@@ -339,7 +296,7 @@ function searchDraftRows(db: Db, accountId: string, parsed: ParsedSearchQuery, l
 function junkProjection(parsed: ParsedSearchQuery): 'SPAM' | 'TRASH' | null {
   const mailboxes = parsed.filters
     .filter((filter) => filter.kind === 'in')
-    .map((filter) => systemMailboxName(filter.value))
+    .map((filter) => normalizeMailboxName(filter.value))
   if (mailboxes.includes('spam')) return 'SPAM'
   if (mailboxes.includes('trash')) return 'TRASH'
   return null
@@ -397,29 +354,14 @@ export function searchRowsByThreadIds(
     .prepare(
       `WITH requested(id, position) AS (VALUES ${requested})
        SELECT t.id, ${projection},
-              ${pendingSnoozeSql()} AS snoozed,
-              EXISTS (
-                SELECT 1 FROM reminders returned_reminder
-                WHERE returned_reminder.account_id = t.account_id
-                  AND returned_reminder.thread_id = t.id
-                  AND returned_reminder.kind = 'snooze' AND returned_reminder.state = 'returned'
-              ) AS returned,
-              EXISTS (
-                SELECT 1 FROM outbox draft
-                WHERE draft.account_id = t.account_id AND draft.thread_id = t.id
-                  AND draft.state IN ('composing', 'drafted')
-              ) AS has_draft,
-              COALESCE((
-                SELECT GROUP_CONCAT(labels.label_id, char(31))
-                FROM thread_labels labels
-                WHERE labels.account_id = t.account_id AND labels.thread_id = t.id
-              ), '') AS label_ids
+              ${THREAD_AUXILIARY_PROJECTION_SQL},
+              ${labelIdsProjectionSql('t')}
        FROM requested
        JOIN threads t ON t.account_id = ? AND t.id = requested.id
        ORDER BY requested.position`
     )
     .all(...requestedValues, accountId) as SearchThreadRow[]
-  return rows.map(toThreadRow)
+  return rows.map((row) => toThreadRow(row, row.last_msg_at))
 }
 
 /** Return only requested ids that the current local index already matches. */
@@ -506,23 +448,8 @@ export function searchThreads(
     .prepare(
       `WITH search_candidates AS (${candidates})
        SELECT t.id, ${projection},
-              ${pendingSnoozeSql()} AS snoozed,
-              EXISTS (
-                SELECT 1 FROM reminders returned_reminder
-                WHERE returned_reminder.account_id = t.account_id
-                  AND returned_reminder.thread_id = t.id
-                  AND returned_reminder.kind = 'snooze' AND returned_reminder.state = 'returned'
-              ) AS returned,
-              EXISTS (
-                SELECT 1 FROM outbox draft
-                WHERE draft.account_id = t.account_id AND draft.thread_id = t.id
-                  AND draft.state IN ('composing', 'drafted')
-              ) AS has_draft,
-              COALESCE((
-                SELECT GROUP_CONCAT(labels.label_id, char(31))
-                FROM thread_labels labels
-                WHERE labels.account_id = t.account_id AND labels.thread_id = t.id
-              ), '') AS label_ids
+              ${THREAD_AUXILIARY_PROJECTION_SQL},
+              ${labelIdsProjectionSql('t')}
        FROM search_candidates candidates
        JOIN threads t ON t.id = candidates.thread_id
        WHERE t.account_id = ?
@@ -532,7 +459,7 @@ export function searchThreads(
     .all(...values) as SearchThreadRow[]
 
   return {
-    rows: rows.map(toThreadRow),
+    rows: rows.map((row) => toThreadRow(row, row.last_msg_at)),
     drafts: [],
     coverage,
     partial: recentMessageLimit !== undefined && matchedMessages > recentMessageLimit

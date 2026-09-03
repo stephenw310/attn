@@ -18,6 +18,10 @@ import {
   type SplitThreadLocation
 } from '../shared/splits'
 import type { Db } from './db'
+import { messageHasLabelSql } from './db/labelSql'
+
+/** Rules are compiled against `messages m` joined to the listed thread `t`. */
+const THREAD_KEY = { accountId: 't.account_id', id: 't.id' }
 
 interface StoredSplitRow {
   id: string
@@ -324,20 +328,10 @@ function compileCondition(condition: SplitCondition): { sql: string; params: unk
     return { sql: "m.list_id IS NOT NULL AND trim(m.list_id) <> ''", params: [] }
   }
   if (condition.type === 'label') {
+    // Both binds are the label: the stored test reads it first, the legacy
+    // thread-level fallback second.
     return {
-      sql: `(
-        (m.labels_json IS NOT NULL AND EXISTS (
-          SELECT 1 FROM json_each(m.labels_json) split_label
-          WHERE split_label.value = ?
-        )) OR (
-          m.labels_json IS NULL AND EXISTS (
-            SELECT 1 FROM thread_labels split_label_thread
-            WHERE split_label_thread.account_id = t.account_id
-              AND split_label_thread.thread_id = t.id
-              AND split_label_thread.label_id = ?
-          )
-        )
-      )`,
+      sql: messageHasLabelSql({ message: 'm', label: '?', thread: THREAD_KEY }),
       params: [condition.value, condition.value]
     }
   }
