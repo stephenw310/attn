@@ -11,7 +11,9 @@ import {
   listDrafts,
   reopenThreadDraft,
   requestDraftMirror,
-  saveDraft
+  saveDraft,
+  takeRecoveredDraft,
+  upgradeReplyToReplyAll
 } from './drafts'
 import { cachePrimarySendAs, prepareDraftWithCachedPrimarySignature } from './sendAs'
 
@@ -239,5 +241,160 @@ describe('untouched reply and forward drafts', () => {
 
   it('never discards a new draft through this rule', () => {
     expect(isUntouchedThreadDraft(emptyDraftInput())).toBe(false)
+  })
+})
+
+describe('draft store CRUD', () => {
+  function account(): Db {
+    const db = openDatabase(':memory:')
+    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+      'account',
+      'account@example.com',
+      1
+    )
+    return db
+  }
+
+  function state(db: Db, id: string): string | undefined {
+    return (db.prepare('SELECT state FROM outbox WHERE id = ?').get(id) as { state: string } | undefined)
+      ?.state
+  }
+
+  it('reopens the newest thread draft that was closed, and returns it composing', () => {
+    const db = account()
+    try {
+      const id = saveDraft(
+        db,
+        'account',
+        { ...emptyDraftInput(), kind: 'reply', threadId: 'thread', bodyText: 'Drafted' },
+        10
+      )
+      expect(closeDraft(db, 'account', id, 20)).toBe('saved')
+      expect(state(db, id)).toBe('drafted')
+
+      expect(reopenThreadDraft(db, 'account', 'thread', 'reply', undefined, 30)).toMatchObject({
+        id,
+        updatedAt: 30
+      })
+      expect(state(db, id)).toBe('composing')
+      // A forward never adopts the reply slot, and neither does a stranger thread.
+      expect(reopenThreadDraft(db, 'account', 'thread', 'forward', undefined, 40)).toBeNull()
+    } finally {
+      db.close()
+    }
+  })
+
+  it('deletes a closed empty draft outright but tombstones one Gmail already holds', () => {
+    const db = account()
+    try {
+      const local = saveDraft(db, 'account', { ...emptyDraftInput(), kind: 'reply', threadId: 't' }, 10)
+      expect(closeDraft(db, 'account', local, 20)).toBe('discarded')
+      expect(state(db, local)).toBeUndefined()
+
+      const mirrored = saveDraft(db, 'account', { ...emptyDraftInput(), kind: 'reply', threadId: 't' }, 30)
+      db.prepare("UPDATE outbox SET gmail_draft_id = 'remote-1' WHERE id = ?").run(mirrored)
+      expect(closeDraft(db, 'account', mirrored, 40)).toBe('discarded')
+      // The row survives so the mirror can delete the remote draft, but it
+      // carries none of the content the user discarded.
+      expect(
+        db.prepare('SELECT state, subject, body_html, thread_id FROM outbox WHERE id = ?').get(mirrored)
+      ).toEqual({ state: 'discarding', subject: '', body_html: '', thread_id: null })
+
+      expect(() => closeDraft(db, 'account', 'missing', 50)).toThrow('draft is unavailable')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('lists newest first and leaves blank and signature-only drafts out', () => {
+    const db = account()
+    try {
+      const older = saveDraft(db, 'account', { ...emptyDraftInput(), subject: 'Older' }, 10)
+      const newer = saveDraft(db, 'account', { ...emptyDraftInput(), subject: 'Newer' }, 20)
+      saveDraft(db, 'account', emptyDraftInput(), 30)
+      saveDraft(db, 'other-account', { ...emptyDraftInput(), subject: 'Elsewhere' }, 40)
+
+      cachePrimarySendAs(db, 'account', {
+        sendAsEmail: 'account@example.com',
+        displayName: 'Account',
+        signature: '<div>Sent from Attn</div>'
+      })
+      const prepared = prepareDraftWithCachedPrimarySignature(db, 'account', emptyDraftInput())
+      saveDraft(db, 'account', prepared.draft, 50, prepared.defaultSignatureFingerprint)
+
+      // Both excluded rows are really in the store: one is caught by the SQL
+      // blank-field guard, the other only by the signature fingerprint.
+      expect(
+        (db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE account_id = 'account'").get() as { n: number }).n
+      ).toBe(4)
+      expect(listDrafts(db, 'account').map((draft) => draft.subject)).toEqual(['Newer', 'Older'])
+
+      db.prepare('UPDATE outbox SET updated_at = ? WHERE id = ?').run(60, older)
+      expect(listDrafts(db, 'account').map((draft) => draft.id)).toEqual([older, newer])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('recovers the most recently touched open draft, and nothing once it is closed', () => {
+    const db = account()
+    try {
+      saveDraft(db, 'account', { ...emptyDraftInput(), subject: 'First' }, 10)
+      const newest = saveDraft(db, 'account', { ...emptyDraftInput(), subject: 'Second' }, 20)
+
+      expect(takeRecoveredDraft(db, 'account')?.id).toBe(newest)
+      expect(takeRecoveredDraft(db, 'other-account')).toBeNull()
+
+      closeDraft(db, 'account', newest, 30)
+      expect(takeRecoveredDraft(db, 'account')?.subject).toBe('First')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('upgrades a reply to reply-all without losing authored or manual recipients', () => {
+    const db = account()
+    try {
+      const id = saveDraft(
+        db,
+        'account',
+        {
+          ...emptyDraftInput(),
+          kind: 'reply',
+          threadId: 'thread',
+          bodyText: 'Mine',
+          to: [{ name: 'Author', email: 'author@example.com' }],
+          cc: [{ name: '', email: 'manual@example.com' }]
+        },
+        10
+      )
+      const planned = {
+        to: [{ name: 'Author', email: 'AUTHOR@example.com' }],
+        cc: [
+          { name: '', email: 'manual@example.com' },
+          { name: '', email: 'everyone@example.com' }
+        ]
+      }
+
+      const upgraded = upgradeReplyToReplyAll(db, 'account', id, planned.to, planned.cc, 20)
+      expect(upgraded).toMatchObject({ kind: 'replyAll', bodyText: 'Mine', updatedAt: 20 })
+      expect(upgraded?.to.map((address) => address.email)).toEqual(['author@example.com'])
+      expect(upgraded?.cc.map((address) => address.email)).toEqual([
+        'manual@example.com',
+        'everyone@example.com'
+      ])
+      expect(
+        (db.prepare('SELECT local_revision FROM outbox WHERE id = ?').get(id) as { local_revision: number })
+          .local_revision
+      ).toBe(2)
+
+      // Already upgraded: the second call is a plain read, not a second merge.
+      expect(upgradeReplyToReplyAll(db, 'account', id, planned.to, planned.cc, 30)).toMatchObject({
+        kind: 'replyAll',
+        updatedAt: 20
+      })
+    } finally {
+      db.close()
+    }
   })
 })

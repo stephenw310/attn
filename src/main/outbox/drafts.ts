@@ -3,6 +3,7 @@ import { type MailAddress, normalizeEmailKey } from '../../shared/address'
 import type { Draft, DraftKind, DraftSaveInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import { parseStoredDraftAttachments, publicDraftAttachments } from './draftAttachments'
+import { outboxAddresses, outboxDraftContent, outboxDraftInput } from './row'
 import { hasOnlyDefaultPrimarySignature } from './sendAs'
 
 export interface DraftRow {
@@ -36,28 +37,15 @@ const DRAFT_COLUMNS = `id, account_id, gmail_draft_id, state, kind, to_json, cc_
   references_json, quote_html, quote_text, follow_up_at, created_at, updated_at, local_revision,
   default_signature_fingerprint`
 
-function parseJson<T>(value: string): T {
-  return JSON.parse(value) as T
-}
-
 export function toDraft(row: DraftRow): Draft {
+  const content = outboxDraftContent(row)
   return {
+    ...content,
     id: row.id,
     accountId: row.account_id,
     kind: row.kind,
-    to: parseJson<MailAddress[]>(row.to_json),
-    cc: parseJson<MailAddress[]>(row.cc_json),
-    bcc: parseJson<MailAddress[]>(row.bcc_json),
-    subject: row.subject,
-    bodyHtml: row.body_html,
-    bodyText: row.body_text,
-    attachments: publicDraftAttachments(parseStoredDraftAttachments(row.attachments_json)),
-    threadId: row.thread_id,
+    attachments: publicDraftAttachments(content.attachments),
     sourceMessageId: row.source_message_id,
-    inReplyTo: row.in_reply_to,
-    references: parseJson<string[]>(row.references_json),
-    quoteHtml: row.quote_html,
-    quoteText: row.quote_text,
     followUpAt: row.follow_up_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -182,9 +170,9 @@ export function upgradeReplyToReplyAll(
     .get(accountId, id) as Pick<DraftRow, 'to_json' | 'cc_json'> | undefined
   if (!row) return getDraft(db, accountId, id)
 
-  const to = mergeAddresses(parseJson<MailAddress[]>(row.to_json), plannedTo)
+  const to = mergeAddresses(outboxAddresses(row.to_json), plannedTo)
   const toEmails = new Set(to.map(addressKey))
-  const cc = mergeAddresses(parseJson<MailAddress[]>(row.cc_json), plannedCc, toEmails)
+  const cc = mergeAddresses(outboxAddresses(row.cc_json), plannedCc, toEmails)
   db.prepare(
     `UPDATE outbox SET kind = 'replyAll', to_json = ?, cc_json = ?, updated_at = ?,
        local_revision = local_revision + 1
@@ -367,54 +355,13 @@ export function saveDraft(
 export function requestDraftMirror(db: Db, accountId: string, draftId: string): boolean {
   const draft = db
     .prepare(
-      `SELECT to_json, cc_json, bcc_json, subject, body_html, body_text, attachments_json,
-              thread_id, source_message_id, in_reply_to, references_json, kind, quote_html, quote_text,
-              local_revision, default_signature_fingerprint
-       FROM outbox
+      `SELECT ${DRAFT_COLUMNS} FROM outbox
        WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')
          AND local_revision > mirror_revision`
     )
-    .get(accountId, draftId) as
-    | Pick<
-        DraftRow,
-        | 'to_json'
-        | 'cc_json'
-        | 'bcc_json'
-        | 'subject'
-        | 'body_html'
-        | 'body_text'
-        | 'attachments_json'
-        | 'thread_id'
-        | 'source_message_id'
-        | 'in_reply_to'
-        | 'references_json'
-        | 'kind'
-        | 'quote_html'
-        | 'quote_text'
-        | 'local_revision'
-        | 'default_signature_fingerprint'
-      >
-    | undefined
+    .get(accountId, draftId) as DraftRow | undefined
   if (!draft) return false
-  const input: DraftSaveInput = {
-    id: draftId,
-    to: parseJson<MailAddress[]>(draft.to_json),
-    cc: parseJson<MailAddress[]>(draft.cc_json),
-    bcc: parseJson<MailAddress[]>(draft.bcc_json),
-    subject: draft.subject,
-    bodyHtml: draft.body_html,
-    bodyText: draft.body_text,
-    attachments: parseStoredDraftAttachments(draft.attachments_json),
-    threadId: draft.thread_id,
-    inReplyTo: draft.in_reply_to,
-    references: parseJson<string[]>(draft.references_json),
-    kind: draft.kind,
-    sourceMessageId: draft.source_message_id,
-    quoteHtml: draft.quote_html,
-    quoteText: draft.quote_text,
-    followUpAt: null
-  }
-  return shouldMirrorDraft(input, draft.local_revision, draft.default_signature_fingerprint)
+  return shouldMirrorDraft(outboxDraftInput(draft), draft.local_revision, draft.default_signature_fingerprint)
 }
 
 export function closeDraft(db: Db, accountId: string, id: string, now = Date.now()): 'saved' | 'discarded' {
@@ -422,13 +369,7 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
     .prepare(`SELECT ${DRAFT_COLUMNS} FROM outbox WHERE account_id = ? AND id = ? AND state = 'composing'`)
     .get(accountId, id) as DraftRow | undefined
   if (!row) throw new Error('draft is unavailable')
-  const draft = toDraft(row)
-  const input: DraftSaveInput = {
-    ...draft,
-    id: draft.id,
-    attachments: parseStoredDraftAttachments(row.attachments_json)
-  }
-  if (shouldMirrorDraft(input, row.local_revision, row.default_signature_fingerprint)) {
+  if (shouldMirrorDraft(outboxDraftInput(row), row.local_revision, row.default_signature_fingerprint)) {
     db.prepare("UPDATE outbox SET state = 'drafted', updated_at = ? WHERE account_id = ? AND id = ?").run(
       now,
       accountId,

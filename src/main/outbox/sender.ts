@@ -1,4 +1,3 @@
-import type { MailAddress } from '../../shared/address'
 import { errorMessage } from '../../shared/error'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
@@ -20,10 +19,10 @@ import { isOfflineFailure } from '../sync/failure'
 import { persistThread } from '../sync/persist'
 import type { MailProvider, ProviderMimeUpload } from '../sync/provider'
 import { type SchedulerTime, systemTime } from '../time'
-import { parseStoredDraftAttachments } from './draftAttachments'
 import { machineRow, persistPlan, planTransition } from './machine'
 import { buildMime, mimeByteLength, streamMime } from './mime'
 import { DraftAttachmentSourceError, prepareDraftMimeAttachments } from './mirror'
+import { outboxDraftContent } from './row'
 import { primarySenderDisplayName, SEND_AS_DISPLAY_NAME_SETTING, syncPrimarySendAs } from './sendAs'
 import { validateAttachmentCap } from './spool'
 
@@ -52,10 +51,6 @@ interface SendRow {
   send_at: number | null
   attempts: number
   verify_attempts: number
-}
-
-function parseJson<T>(value: string): T {
-  return JSON.parse(value) as T
 }
 
 function permanentSendError(error: unknown): boolean {
@@ -508,19 +503,7 @@ export class OutboxSender {
     signal?: AbortSignal
   ): Promise<{ raw: string; updateMime?: ProviderMimeUpload }> {
     const accountName = await this.senderDisplayName(row.account_id, provider, signal)
-    const storedAttachments = parseStoredDraftAttachments(row.attachments_json)
-    const draft = {
-      to: parseJson<MailAddress[]>(row.to_json),
-      cc: parseJson<MailAddress[]>(row.cc_json),
-      bcc: parseJson<MailAddress[]>(row.bcc_json),
-      subject: row.subject,
-      bodyHtml: row.body_html,
-      bodyText: row.body_text,
-      quoteHtml: row.quote_html,
-      quoteText: row.quote_text,
-      inReplyTo: row.in_reply_to,
-      references: parseJson<string[]>(row.references_json)
-    }
+    const { attachments: storedAttachments, threadId: _threadId, ...draft } = outboxDraftContent(row)
     const options = {
       accountEmail: row.account_id,
       accountName,

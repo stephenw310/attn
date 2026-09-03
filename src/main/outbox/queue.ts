@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import type { MailAddress } from '../../shared/address'
 import type { DraftKind } from '../../shared/drafts'
 import type {
   OutboxItem,
@@ -15,6 +14,7 @@ import { readSetting } from '../settings'
 import { getDraft } from './drafts'
 import { persistPlan, type StoredMachineRow } from './machine'
 import { validateMimeRecipients } from './mime'
+import { outboxAddresses } from './row'
 
 interface QueueRow {
   id: string
@@ -32,10 +32,6 @@ interface QueueRow {
   attempts: number
   verify_attempts: number
   last_error: string | null
-}
-
-function parseAddresses(value: string): MailAddress[] {
-  return JSON.parse(value) as MailAddress[]
 }
 
 export function undoSendDelayMs(db: Db): number {
@@ -62,9 +58,9 @@ export function queueSend(db: Db, accountId: string, draftId: string, now = Date
 
   validateMimeRecipients(
     {
-      to: parseAddresses(row.to_json),
-      cc: parseAddresses(row.cc_json),
-      bcc: parseAddresses(row.bcc_json)
+      to: outboxAddresses(row.to_json),
+      cc: outboxAddresses(row.cc_json),
+      bcc: outboxAddresses(row.bcc_json)
     },
     accountId
   )
@@ -93,9 +89,9 @@ export function listPendingOutbox(db: Db, accountId: string): OutboxItem[] {
     id: row.id,
     state: row.state as PendingOutboxState,
     kind: row.kind,
-    to: parseAddresses(row.to_json),
-    cc: parseAddresses(row.cc_json),
-    bcc: parseAddresses(row.bcc_json),
+    to: outboxAddresses(row.to_json),
+    cc: outboxAddresses(row.cc_json),
+    bcc: outboxAddresses(row.bcc_json),
     subject: row.subject,
     updatedAt: row.updated_at,
     sendAt: row.send_at,

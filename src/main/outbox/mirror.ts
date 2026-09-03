@@ -1,7 +1,6 @@
 import { createReadStream, type Stats } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import type { MailAddress } from '../../shared/address'
 import type { DraftKind } from '../../shared/drafts'
 import { errorMessage } from '../../shared/error'
 import type { Db } from '../db'
@@ -20,6 +19,7 @@ import {
 import { draftContentFingerprint, refreshRemoteAttachmentLocators, remoteDraftAttachments } from './draftSync'
 import { shouldMirrorDraft } from './drafts'
 import type { MimeStreamAttachment } from './mime'
+import { outboxDraftContent, outboxDraftInput } from './row'
 
 interface DraftMirrorRow {
   id: string
@@ -53,10 +53,6 @@ export class DraftMirrorRowError extends Error {
   }
 }
 
-function parseJson<T>(value: string): T {
-  return JSON.parse(value) as T
-}
-
 function nextPending(
   db: Db,
   accountId: string,
@@ -84,28 +80,7 @@ function nextPending(
     (row) =>
       !skip(row.id) &&
       (row.state === 'discarding' ||
-        shouldMirrorDraft(
-          {
-            id: row.id,
-            kind: row.kind,
-            followUpAt: null,
-            to: parseJson<MailAddress[]>(row.to_json),
-            cc: parseJson<MailAddress[]>(row.cc_json),
-            bcc: parseJson<MailAddress[]>(row.bcc_json),
-            subject: row.subject,
-            bodyHtml: row.body_html,
-            bodyText: row.body_text,
-            attachments: parseStoredDraftAttachments(row.attachments_json),
-            threadId: row.thread_id,
-            sourceMessageId: row.source_message_id,
-            inReplyTo: row.in_reply_to,
-            references: parseJson<string[]>(row.references_json),
-            quoteHtml: row.quote_html,
-            quoteText: row.quote_text
-          },
-          row.local_revision,
-          row.default_signature_fingerprint
-        ))
+        shouldMirrorDraft(outboxDraftInput(row), row.local_revision, row.default_signature_fingerprint))
   )
 }
 
@@ -276,18 +251,10 @@ async function mirrorComposing(
 ): Promise<boolean> {
   if (!provider.saveDraft) return false
   const mirroredAttachments = await refreshRemoteAttachmentIds(db, accountId, row, provider, signal)
-  const body = {
-    to: parseJson<MailAddress[]>(row.to_json),
-    cc: parseJson<MailAddress[]>(row.cc_json),
-    bcc: parseJson<MailAddress[]>(row.bcc_json),
-    subject: row.subject,
-    bodyHtml: row.body_html,
-    bodyText: row.body_text,
-    quoteHtml: row.quote_html,
-    quoteText: row.quote_text,
-    inReplyTo: row.in_reply_to,
-    references: parseJson<string[]>(row.references_json)
-  }
+  const content = outboxDraftContent(row)
+  // The MIME body carries authored content only: attachments are prepared
+  // separately below, and the thread id rides on the Gmail request instead.
+  const { attachments: _attachments, threadId: _threadId, ...body } = content
   const onRemoteMissing = (): boolean => {
     db.prepare(
       `UPDATE outbox SET gmail_draft_id = NULL, mirror_revision = 0
@@ -333,20 +300,7 @@ async function mirrorComposing(
           signal
         )
   if (!gmailDraftId) return false
-  const fingerprint = draftContentFingerprint({
-    to: parseJson<MailAddress[]>(row.to_json),
-    cc: parseJson<MailAddress[]>(row.cc_json),
-    bcc: parseJson<MailAddress[]>(row.bcc_json),
-    subject: row.subject,
-    bodyHtml: row.body_html,
-    bodyText: row.body_text,
-    attachments: mirroredAttachments,
-    threadId: row.thread_id,
-    inReplyTo: row.in_reply_to,
-    references: parseJson<string[]>(row.references_json),
-    quoteHtml: row.quote_html,
-    quoteText: row.quote_text
-  })
+  const fingerprint = draftContentFingerprint({ ...content, attachments: mirroredAttachments })
   const persisted = db
     .prepare(
       `UPDATE outbox SET gmail_draft_id = ?,
