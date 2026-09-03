@@ -20,7 +20,7 @@ export const SUMMARY_THRESHOLD = NOTIFICATION_SUMMARY_THRESHOLD
 export const PENDING_FOCUS_TTL_MS = 60_000
 
 /** How many shown notifications stay reachable for a click. See `BoundedRetainer`. */
-export const NOTIFICATION_RETENTION = 50
+const NOTIFICATION_RETENTION = 50
 
 /**
  * Keeps values alive, newest-first, so the garbage collector cannot reclaim them.

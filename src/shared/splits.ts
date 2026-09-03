@@ -65,14 +65,6 @@ export interface SetSplitNotifyInput {
   notify: boolean
 }
 
-export function splitConditionNeedsValue(type: SplitCondition['type']): boolean {
-  return type !== 'listIdPresent'
-}
-
-export function isSplitPresetId(value: unknown): value is SplitPresetId {
-  return typeof value === 'string' && (SPLIT_PRESET_IDS as readonly string[]).includes(value)
-}
-
 export function canonicalizeListIdValue(value: string): string {
   const unfolded = value
     .replace(/\r?\n[ \t]+/g, ' ')

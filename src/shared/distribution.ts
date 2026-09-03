@@ -5,7 +5,7 @@
 // Releases. `app.isPackaged` alone never enables updates.
 
 export const DISTRIBUTION_METADATA_FILE = 'distribution.json'
-export const DISTRIBUTION_METADATA_VERSION = 1
+const DISTRIBUTION_METADATA_VERSION = 1
 
 export type DistributionMode = 'personal' | 'release'
 

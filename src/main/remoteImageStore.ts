@@ -8,7 +8,7 @@ import { normalizeEmailKey } from '../shared/address'
 import type { Db } from './db'
 import { APP_SETTINGS_ACCOUNT_ID, deleteSetting, readSetting, writeSetting } from './settings'
 
-export const REMOTE_IMAGES_SETTING = 'remoteImages'
+const REMOTE_IMAGES_SETTING = 'remoteImages'
 const OVERRIDE_PREFIX = 'remoteImages:allow:'
 
 export function remoteImagesBlocked(db: Db): boolean {
