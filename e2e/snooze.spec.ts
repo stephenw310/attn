@@ -206,6 +206,9 @@ test('catches up a snooze that became due while the app was closed', async ({ bo
   })
   await expect(rows).toHaveCount(7)
 
+  // The deadline has to pass while the app is closed. Writing it already due
+  // is not an option: the same bridge call refreshes the scheduler, which
+  // would return the thread before the app could be shut down at all.
   ;({ page } = await boot.relaunch({ waitBeforeLaunch: 1_000 }))
   const returned = page.getByTestId('thread-row').filter({ hasText: 'Maya Lin' })
   await expect(returned).toHaveCount(1)
