@@ -23,8 +23,6 @@ describe('toGmailSearchQuery', () => {
       }
     ],
     ['in:trash', { q: 'in:trash -in:drafts', includeSpamTrash: true }],
-    ['in:snoozed', { q: 'in:snoozed -in:drafts', includeSpamTrash: false }],
-    ['is:snoozed', { q: 'in:snoozed -in:drafts', includeSpamTrash: false }],
     ['in:drafts subject:budget', { q: 'subject:budget in:drafts', includeSpamTrash: false }],
     ['re: budget', { q: '"re:" budget -in:drafts', includeSpamTrash: false }]
   ])('translates %j', (query, expected) => {

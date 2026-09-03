@@ -100,17 +100,23 @@ export class GmailQuotaLimiter {
     }
     this.time = options.time ?? systemTime
     this.rollingLimit = config.unitsPerMinute
-    this.capacity =
+    if (config.capacity !== undefined && config.capacity > config.unitsPerMinute) {
+      throw new Error('Gmail quota capacity cannot exceed the rolling-minute limit')
+    }
+    // The bucket always holds the most expensive single request (`drafts.send`,
+    // 100 units). A project quota configured below that cost still paces every
+    // other request through the rolling-minute limit, but without this floor
+    // `acquire` rejected the send outright — forever, on every attempt.
+    this.capacity = Math.max(
+      MAX_REQUEST_COST,
       config.capacity ??
-      Math.min(
-        config.unitsPerMinute,
-        Math.max(MAX_REQUEST_COST, (config.unitsPerMinute * GMAIL_QUOTA_BURST_SECONDS) / 60)
-      )
+        Math.min(
+          config.unitsPerMinute,
+          Math.max(MAX_REQUEST_COST, (config.unitsPerMinute * GMAIL_QUOTA_BURST_SECONDS) / 60)
+        )
+    )
     if (!Number.isFinite(this.capacity) || this.capacity <= 0) {
       throw new Error('Gmail quota capacity must be positive')
-    }
-    if (this.capacity > config.unitsPerMinute) {
-      throw new Error('Gmail quota capacity cannot exceed the rolling-minute limit')
     }
     this.refillPerMs = config.unitsPerMinute / QUOTA_WINDOW_MS
     this.reservedUnits = { ...GMAIL_QUOTA_RESERVED_UNITS, ...config.reservedUnits }
@@ -241,7 +247,10 @@ export class GmailQuotaLimiter {
         return Math.max(tokenDelay, Math.max(0, admission.at + QUOTA_WINDOW_MS - now))
       }
     }
-    return Number.POSITIVE_INFINITY
+    // `rollingReserveFor` bounds cost + reserve by the rolling limit, so the
+    // units to release never exceed what the admissions above hold: the loop
+    // always returns.
+    return tokenDelay
   }
 
   private isEligible(waiter: Waiter): boolean {

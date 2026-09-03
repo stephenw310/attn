@@ -31,11 +31,14 @@ function locationQuery(value: string, resolveLabelName: (value: string) => strin
     return `in:${mailbox}`
   }
   if (mailbox === 'starred') return 'is:starred'
-  if (mailbox === 'snoozed') return 'in:snoozed'
   return `label:${quoted(resolveLabelName(value))}`
 }
 
-/** Translate Attn's parsed query into Gmail's q= syntax. */
+/**
+ * Translate Attn's parsed query into Gmail's q= syntax. Snooze is local state
+ * with no server equivalent, so `searchAllGmail` answers those queries from the
+ * store and never reaches this translation.
+ */
 export function toGmailSearchQuery(
   parsed: ParsedSearchQuery,
   options: GmailSearchQueryOptions = {}
@@ -53,8 +56,6 @@ export function toGmailSearchQuery(
       parts.push(locationQuery(filter.value, resolveLabelName))
     } else if (filter.kind === 'before' || filter.kind === 'after') {
       parts.push(`${filter.kind}:${filter.value.replaceAll('-', '/')}`)
-    } else if (filter.kind === 'is' && filter.value === 'snoozed') {
-      parts.push('in:snoozed')
     } else {
       parts.push(`${filter.kind}:${filter.value}`)
     }
