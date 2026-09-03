@@ -118,8 +118,13 @@ const INLINE_TAGS = new Set([
   'wbr'
 ])
 
+/**
+ * CSS-inherited typography only. `background-color` is deliberately absent: it
+ * does not inherit, and materializing it onto text runs — then stripping it
+ * from their ancestors — turns a shaded table cell or a highlight block into a
+ * text highlight that no longer fills its block.
+ */
 const INHERITED_TEXT_STYLES = new Set([
-  'background-color',
   'color',
   'font-family',
   'font-size',

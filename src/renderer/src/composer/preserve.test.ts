@@ -14,6 +14,26 @@ describe('composer HTML fidelity', () => {
     expect(prepared.html).toContain('color: #c00')
   })
 
+  it('keeps a block background on the block, not on its text', () => {
+    // `background-color` does not inherit: pushing a cell or highlight fill down
+    // onto the text runs and stripping it from the block turns a shaded cell
+    // into a text highlight, and the recipient sees a different mail.
+    const html =
+      '<table><tbody><tr><td style="background-color:#eee">Shaded</td></tr></tbody></table>' +
+      '<div style="background-color:#ffc;padding:12px">Highlight</div>'
+    expect(draftHtmlFidelityIssues(html)).toEqual([])
+    const prepared = prepareHtmlForEditor(html)
+
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).not.toContain('data-attn-opaque')
+    expect(prepared.html).toContain('<td style="background-color: #eee">Shaded</td>')
+    expect(prepared.html).toContain('<div style="background-color: #ffc; padding: 12px">Highlight</div>')
+
+    const outgoing = sanitizeOutgoingHtml(prepared.html)
+    expect(outgoing).toContain('<td style="background-color: #eee">Shaded</td>')
+    expect(outgoing).toContain('<div style="background-color: #ffc; padding: 12px">Highlight</div>')
+  })
+
   it('keeps Gmail CID image metadata on the editable image path', () => {
     const html = '<img data-surl="cid:ii_gmail" src="cid:ii_gmail" alt="Signature image" width="320">'
     const prepared = prepareHtmlForEditor(html)
