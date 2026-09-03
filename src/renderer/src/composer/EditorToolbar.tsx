@@ -1,8 +1,7 @@
 import { TOGGLE_LINK_COMMAND } from '@lexical/link'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
-import { $createQuoteNode } from '@lexical/rich-text'
-import { $patchStyleText, $setBlocksType } from '@lexical/selection'
+import { $patchStyleText } from '@lexical/selection'
 import {
   $getSelection,
   $isRangeSelection,
@@ -14,6 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { safeUrl } from '../../../shared/html'
 import { createCommand, registerCommands } from '../commands'
 import { modKeyLabel } from '../platform'
+import { toggleComposerQuoteBlock } from './bodyEditing'
 import { COMPOSER_LINK_SCHEMES } from './sanitize'
 
 function normalizeLink(value: string): string | null {
@@ -47,12 +47,7 @@ export function EditorToolbar(): React.JSX.Element {
     },
     [editor]
   )
-  const quote = useCallback(() => {
-    editor.update(() => {
-      const selection = $getSelection()
-      if ($isRangeSelection(selection)) $setBlocksType(selection, () => $createQuoteNode())
-    })
-  }, [editor])
+  const quote = useCallback(() => toggleComposerQuoteBlock(editor), [editor])
   const openLink = useCallback((): void => {
     setMoreOpen(false)
     setLinkInvalid(false)

@@ -19,19 +19,20 @@ import {
 } from 'lexical'
 import { AUTOCOMPLETE_MAX_PREFIX_CHARS, AUTOCOMPLETE_MAX_SUFFIX_CHARS } from '../../../shared/ai'
 import type { AutocompleteExcerpt } from './autocompleteController'
-import { AttnFooterNode } from './nodes/AttnFooterNode'
-import { GmailSignatureNode } from './nodes/GmailSignatureNode'
-import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { OpaqueHtmlNode } from './nodes/OpaqueHtmlNode'
+import { $isProtectedComposerNode } from './nodes/protected'
 
+/**
+ * The composer's protected trail, widened for extraction: a quote block, a
+ * table and an opaque preserved region are all content the user did not type
+ * here, so the caret inside one produces no autocomplete request.
+ */
 function isProtected(node: LexicalNode): boolean {
   return (
     $isQuoteNode(node) ||
     $isTableNode(node) ||
-    node instanceof GmailSignatureNode ||
-    node instanceof GmailSignaturePrefixNode ||
-    node instanceof AttnFooterNode ||
-    node instanceof OpaqueHtmlNode
+    node instanceof OpaqueHtmlNode ||
+    $isProtectedComposerNode(node)
   )
 }
 

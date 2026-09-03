@@ -2,9 +2,7 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import { $getRoot, $isDecoratorNode, $isElementNode, type LexicalNode } from 'lexical'
 import { useEffect, useState } from 'react'
 import { modKeyLabel } from '../platform'
-import { AttnFooterNode } from './nodes/AttnFooterNode'
-import { GmailSignatureNode } from './nodes/GmailSignatureNode'
-import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
+import { $isProtectedComposerNode } from './nodes/protected'
 
 function hasNonTextContent(node: LexicalNode): boolean {
   if ($isDecoratorNode(node)) return true
@@ -14,13 +12,7 @@ function hasNonTextContent(node: LexicalNode): boolean {
 /** Whether the editable body above its protected signature/footer has content. */
 function $authoredBodyIsEmpty(): boolean {
   for (const child of $getRoot().getChildren()) {
-    if (
-      child instanceof GmailSignaturePrefixNode ||
-      child instanceof GmailSignatureNode ||
-      child instanceof AttnFooterNode
-    ) {
-      continue
-    }
+    if ($isProtectedComposerNode(child)) continue
     if (child.getTextContent().trim().length > 0 || hasNonTextContent(child)) return false
   }
   return true

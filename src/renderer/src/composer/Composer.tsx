@@ -1,9 +1,6 @@
-import { $generateNodesFromDOM } from '@lexical/html'
-import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
 import { AutoFocusPlugin } from '@lexical/react/LexicalAutoFocusPlugin'
 import { ClickableLinkPlugin } from '@lexical/react/LexicalClickableLinkPlugin'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
-import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary'
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin'
@@ -12,23 +9,6 @@ import { ListPlugin } from '@lexical/react/LexicalListPlugin'
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import { TablePlugin } from '@lexical/react/LexicalTablePlugin'
-import { $createQuoteNode } from '@lexical/rich-text'
-import { $setBlocksType } from '@lexical/selection'
-import {
-  $addUpdateTag,
-  $createParagraphNode,
-  $getRoot,
-  $getSelection,
-  $insertNodes,
-  $isRangeSelection,
-  $nodesOfType,
-  FORMAT_TEXT_COMMAND,
-  HISTORY_MERGE_TAG,
-  HISTORY_PUSH_TAG,
-  type LexicalNode,
-  REDO_COMMAND,
-  UNDO_COMMAND
-} from 'lexical'
 import {
   forwardRef,
   useCallback,
@@ -45,34 +25,29 @@ import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import { escapeHtmlText as escapeHtml, safeUrl } from '../../../shared/html'
 import { type Snippet, subjectAfterSnippetInsert } from '../../../shared/snippets'
-import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
-import { createCommand, matchComposerKey, registerCommands } from '../commands'
+import { matchComposerKey } from '../commands'
 import { Kbd } from '../components/Kbd'
 import { formatBytes } from '../formatBytes'
 import type { ShowToast } from '../hooks/useToast'
-import { normalizedContentId, TRANSPARENT_IMAGE } from '../mailInlineImages'
 import { modKeyLabel } from '../platform'
 import { AiAutocompletePlugin } from './AiAutocompletePlugin'
 import { AiDraftPlugin } from './AiDraftPlugin'
+import { BodyEditingShortcutsPlugin, ComposerCommandPlugin } from './bodyEditing'
 import { ComposerBodyHintPlugin } from './ComposerBodyHintPlugin'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
+import { FollowUpControl } from './FollowUpControl'
+import { InitialHtmlPlugin } from './InitialHtmlPlugin'
 import { InlineQuote } from './InlineQuote'
-import { AttnFooterNode } from './nodes/AttnFooterNode'
-import {
-  COLLAPSED_GMAIL_SIGNATURE_SELECTOR,
-  GmailSignatureNode,
-  revealGmailSignature
-} from './nodes/GmailSignatureNode'
-import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
-import { $createImageNode, ImageNode } from './nodes/ImageNode'
+import { CollapsedSignaturePlugin } from './nodes/CollapsedSignaturePlugin'
+import { PasteContentPlugin } from './PastePlugin'
 import { prepareHtmlForEditor } from './preserve'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
 import { recipientGreetingName } from './recipientGreeting'
-import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
 import { SnippetsPlugin } from './SnippetsPlugin'
-import { COMPOSER_LINK_SCHEMES, sanitizeOutgoingHtml } from './sanitize'
+import { COMPOSER_LINK_SCHEMES } from './sanitize'
+import { useComposerAttachments } from './useComposerAttachments'
 import { useComposerDraft } from './useComposerDraft'
 
 interface ComposerProps {
@@ -131,22 +106,6 @@ function PaperclipIcon({ title = 'Attachment' }: { title?: string }): React.JSX.
   )
 }
 
-function attachmentErrorMessage(error: unknown): string {
-  const message = errorMessage(error)
-  if (message.includes('Each attachment must be 25 MB or less')) {
-    return 'Each attachment must be 25 MB or less'
-  }
-  if (message.includes('Attachments must total 25 MB or less')) {
-    return 'Attachments must total 25 MB or less'
-  }
-  if (message.includes('Only files can be attached')) return 'Only files can be attached'
-  if (message.includes('Attach no more than')) return message
-  if (message.startsWith('Attachment is unavailable:')) return message
-  if (message.startsWith('Could not copy attachment:')) return message
-  if (message.startsWith('Attachments changed')) return message
-  return 'Could not attach file'
-}
-
 function composerTitle(kind: Draft['kind']): string {
   if (kind === 'reply') return 'Reply'
   if (kind === 'replyAll') return 'Reply all'
@@ -176,514 +135,6 @@ function hasGmailSignature(html: string): boolean {
   return document.querySelector('.gmail_signature, [data-smartmail="gmail_signature"]') !== null
 }
 
-function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string }): null {
-  const [editor] = useLexicalComposerContext()
-  useLayoutEffect(() => {
-    if (!html) return
-    let cancelled = false
-    const document = new DOMParser().parseFromString(html, 'text/html')
-    preserveBlankLineBlocks(document)
-    const contentIds = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
-      const source = image.getAttribute('src') ?? ''
-      if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
-      // The node keeps the sender's own `cid` text, so a stored draft still
-      // round-trips byte-for-byte; only the lookup key is normalized.
-      const contentId = source.slice(4)
-      image.setAttribute('src', TRANSPARENT_IMAGE)
-      image.setAttribute('data-attn-cid', contentId)
-      return [normalizedContentId(contentId)]
-    })
-    editor.update(
-      () => {
-        const nodes = rootLevelNodes($generateNodesFromDOM(editor, document))
-        const root = $getRoot()
-        root.clear()
-        root.append(...(nodes.length > 0 ? nodes : [$createParagraphNode()]))
-      },
-      { tag: 'attn-initial-html' }
-    )
-    void Promise.all(
-      contentIds.map(async (contentId) => {
-        const result = await window.attn?.draft.getInlineImage(draftId, contentId)
-        return [contentId, result && 'dataUrl' in result ? result.dataUrl : TRANSPARENT_IMAGE] as const
-      })
-    ).then((resolved) => {
-      if (cancelled) return
-      const sources = new Map(resolved)
-      editor.update(
-        () => {
-          for (const image of $nodesOfType(ImageNode)) {
-            const source = sources.get(normalizedContentId(image.getContentId()))
-            if (source) image.setSrc(source)
-          }
-        },
-        // Swapping the placeholder for the resolved image is not an edit the
-        // user made, so it merges into the current history entry rather than
-        // becoming the state one Mod+Z restores.
-        { tag: ['attn-inline-image-load', HISTORY_MERGE_TAG] }
-      )
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [draftId, editor, html])
-  return null
-}
-
-function CollapsedSignaturePlugin({
-  includesQuote,
-  onReveal
-}: {
-  includesQuote: boolean
-  onReveal: () => void
-}): null {
-  const [editor] = useLexicalComposerContext()
-  useEffect(() => {
-    const label = includesQuote ? 'Show signature and quoted history' : 'Show signature'
-    const updateLabels = (): void => {
-      for (const signature of editor
-        .getRootElement()
-        ?.querySelectorAll<HTMLElement>(COLLAPSED_GMAIL_SIGNATURE_SELECTOR) ?? []) {
-        signature.setAttribute('aria-label', label)
-        signature.setAttribute('title', label)
-      }
-    }
-    const collapsedSignature = (target: EventTarget | null): HTMLElement | null =>
-      target instanceof Element ? target.closest<HTMLElement>(COLLAPSED_GMAIL_SIGNATURE_SELECTOR) : null
-    const revealFromClick = (event: MouseEvent): void => {
-      const signature = collapsedSignature(event.target)
-      if (!signature) return
-      event.preventDefault()
-      event.stopPropagation()
-      revealGmailSignature(signature)
-      onReveal()
-    }
-    const revealFromKeyboard = (event: KeyboardEvent): void => {
-      if (event.key !== 'Enter' && event.key !== ' ') return
-      const signature = collapsedSignature(event.target)
-      if (!signature) return
-      event.preventDefault()
-      event.stopPropagation()
-      revealGmailSignature(signature)
-      onReveal()
-    }
-
-    const unregisterRoot = editor.registerRootListener((root, previous) => {
-      previous?.removeEventListener('click', revealFromClick, true)
-      previous?.removeEventListener('keydown', revealFromKeyboard, true)
-      root?.addEventListener('click', revealFromClick, true)
-      root?.addEventListener('keydown', revealFromKeyboard, true)
-      updateLabels()
-    })
-    const unregisterUpdate = editor.registerUpdateListener(updateLabels)
-    updateLabels()
-    return () => {
-      unregisterUpdate()
-      unregisterRoot()
-    }
-  }, [editor, includesQuote, onReveal])
-  return null
-}
-
-function imageAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error ?? new Error('image read failed'))
-    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] ?? '')
-    reader.readAsDataURL(file)
-  })
-}
-
-function PasteContentPlugin({
-  draftId,
-  onAttachment,
-  onError,
-  onPreservedContent
-}: {
-  draftId: string
-  onAttachment: (attachment: Draft['attachments'][number]) => void
-  onError: (message: string) => void
-  onPreservedContent: () => void
-}): null {
-  const [editor] = useLexicalComposerContext()
-  useEffect(() => {
-    // One handler per effect run: Lexical calls the root listener with
-    // `(null, previousRoot)` on unregister, so the function removed there must
-    // be the one that was added, or every re-run leaves a paste handler behind.
-    const onPaste = (event: ClipboardEvent): void => {
-      const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith('image/'))
-      if (files.length > 0 && window.attn) {
-        event.preventDefault()
-        event.stopPropagation()
-        void (async () => {
-          for (const file of files) {
-            try {
-              const dataBase64 = await imageAsBase64(file)
-              const { attachment, dataUrl } = await window.attn.draft.addInlineImage(draftId, {
-                filename: file.name || 'pasted-image',
-                mimeType: file.type,
-                dataBase64
-              })
-              onAttachment(attachment)
-              editor.update(() => {
-                $insertNodes([$createImageNode(dataUrl, attachment.contentId ?? '', attachment.filename)])
-              })
-            } catch (error) {
-              onError(error instanceof Error ? error.message : 'Could not paste image')
-            }
-          }
-        })()
-        return
-      }
-
-      const html = event.clipboardData?.getData('text/html') ?? ''
-      if (!html) return
-      event.preventDefault()
-      event.stopPropagation()
-      void (async () => {
-        const prepared = prepareHtmlForEditor(html)
-        if (prepared.issues.length > 0) onPreservedContent()
-        const document = new DOMParser().parseFromString(prepared.html, 'text/html')
-        preserveBlankLineBlocks(document)
-        for (const image of document.querySelectorAll<HTMLImageElement>('img[src]')) {
-          const source = image.getAttribute('src') ?? ''
-          if (!source.toLowerCase().startsWith('data:')) continue
-          const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,([a-z0-9+/=\s]+)$/i.exec(source)
-          if (!match || !window.attn) {
-            image.remove()
-            continue
-          }
-          try {
-            const result = await window.attn.draft.addInlineImage(draftId, {
-              filename: image.getAttribute('alt') || 'pasted-image',
-              mimeType: match[1],
-              dataBase64: match[2].replace(/\s/g, '')
-            })
-            onAttachment(result.attachment)
-            image.setAttribute('src', result.dataUrl)
-            image.setAttribute('data-attn-cid', result.attachment.contentId ?? '')
-          } catch (error) {
-            image.remove()
-            onError(error instanceof Error ? error.message : 'Could not paste image')
-          }
-        }
-        editor.update(() => $insertNodes($generateNodesFromDOM(editor, document)))
-      })()
-    }
-    return editor.registerRootListener((root, previous) => {
-      previous?.removeEventListener('paste', onPaste, true)
-      root?.addEventListener('paste', onPaste, true)
-    })
-  }, [draftId, editor, onAttachment, onError, onPreservedContent])
-  return null
-}
-
-/**
- * "Remind me if no reply" (T35/F9): the chosen deadline rides the draft's
- * outbox row; the reminder is created only when the send commits. Shares the
- * snooze natural-language parser for the custom field.
- */
-function FollowUpControl({
-  followUpAt,
-  onChange,
-  open,
-  onOpenChange
-}: {
-  followUpAt: number | null
-  onChange: (value: number | null) => void
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}): React.JSX.Element {
-  const [custom, setCustom] = useState('')
-  const parsedCustom = useMemo(() => (custom.trim() ? parseSnoozeText(custom) : null), [custom])
-  const customValid = parsedCustom !== null && parsedCustom > Date.now()
-  const choose = (value: number | null): void => {
-    onChange(value)
-    onOpenChange(false)
-    setCustom('')
-  }
-  const preset = (days: number): number => Date.now() + days * 24 * 60 * 60 * 1000
-  // Focus follows the popover (PR #101 review): its Escape containment only
-  // sees the key when focus is inside, so opening moves focus onto the
-  // popover and dismissing hands it back to the trigger — from where the
-  // next Escape reaches the composer's ordinary close handling.
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const popoverRef = useRef<HTMLDivElement | null>(null)
-  const wasOpenRef = useRef(false)
-  useEffect(() => {
-    if (open) popoverRef.current?.focus()
-    else if (wasOpenRef.current) triggerRef.current?.focus()
-    wasOpenRef.current = open
-  }, [open])
-  return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        className={`flex h-8 max-w-72 shrink-0 items-center px-1 text-xs underline decoration-current/45 underline-offset-4 ${
-          followUpAt !== null ? 'text-accent' : 'text-ink-dim hover:text-ink'
-        }`}
-        data-testid="composer-follow-up"
-        data-follow-up-at={followUpAt ?? undefined}
-        aria-expanded={open}
-        aria-label="Remind me if no reply"
-        title={`Remind me if no reply (${modKeyLabel()}⇧H)`}
-        onClick={() => onOpenChange(!open)}
-      >
-        <span className="truncate">
-          {followUpAt !== null ? `Follow up ${formatSnoozeDate(followUpAt)}` : 'Remind me'}
-        </span>
-      </button>
-      {open && (
-        // biome-ignore lint/a11y/noStaticElementInteractions: Escape containment for the transient popover; its buttons and input carry the interactions
-        <div
-          ref={popoverRef}
-          tabIndex={-1}
-          className="absolute bottom-full left-0 z-30 mb-2 flex w-72 flex-col gap-1 rounded-lg border border-edge bg-raised p-2 shadow-2xl outline-none"
-          data-composer-transient
-          data-testid="follow-up-popover"
-          onKeyDown={(event) => {
-            if (event.key !== 'Escape') return
-            event.preventDefault()
-            event.stopPropagation()
-            onOpenChange(false)
-          }}
-        >
-          <p className="px-1 text-[11px] text-ink-faint">
-            If nobody replies by the deadline, the thread resurfaces in your inbox.
-          </p>
-          <button
-            type="button"
-            className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
-            data-testid="follow-up-preset-3d"
-            onClick={() => choose(preset(3))}
-          >
-            In 3 days
-          </button>
-          <button
-            type="button"
-            className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
-            data-testid="follow-up-preset-1w"
-            onClick={() => choose(preset(7))}
-          >
-            In 1 week
-          </button>
-          <div className="flex items-center gap-1.5 px-1 pt-1">
-            <input
-              className="h-8 min-w-0 flex-1 rounded-md border border-edge bg-canvas px-2 text-xs text-ink outline-none focus:border-accent"
-              data-testid="follow-up-custom-input"
-              aria-label="Custom follow-up deadline"
-              placeholder="e.g. next Friday"
-              value={custom}
-              onChange={(event) => setCustom(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' || !customValid || parsedCustom === null) return
-                event.preventDefault()
-                event.stopPropagation()
-                choose(parsedCustom)
-              }}
-            />
-            <button
-              type="button"
-              className="h-8 rounded-md bg-accent/20 px-2.5 text-xs font-semibold text-accent disabled:opacity-45"
-              data-testid="follow-up-custom-confirm"
-              disabled={!customValid}
-              onClick={() => parsedCustom !== null && choose(parsedCustom)}
-            >
-              Set
-            </button>
-          </div>
-          {custom.trim() !== '' && (
-            <p className="px-1 text-[11px] text-ink-faint" data-testid="follow-up-resolved">
-              {customValid && parsedCustom !== null ? formatSnoozeDate(parsedCustom) : 'Pick a future time'}
-            </p>
-          )}
-          {followUpAt !== null && (
-            <button
-              type="button"
-              className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-faint hover:bg-active hover:text-ink"
-              data-testid="follow-up-clear"
-              onClick={() => choose(null)}
-            >
-              Don't remind me
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-interface CommandPluginProps {
-  onAttach: () => void
-  onRemoveAttachment: () => void
-  onClose: () => void
-  onDiscard: () => void
-  onSend: () => void
-  onFollowUp: () => void
-}
-
-function ComposerCommandPlugin({
-  onAttach,
-  onRemoveAttachment,
-  onClose,
-  onDiscard,
-  onSend,
-  onFollowUp
-}: CommandPluginProps): null {
-  const [editor] = useLexicalComposerContext()
-  const quote = useCallback(() => {
-    editor.update(() => {
-      const selection = $getSelection()
-      if ($isRangeSelection(selection)) $setBlocksType(selection, () => $createQuoteNode())
-    })
-  }, [editor])
-  useLayoutEffect(
-    () =>
-      registerCommands([
-        createCommand('composer.close', onClose),
-        createCommand('composer.undo', () => editor.dispatchCommand(UNDO_COMMAND, undefined)),
-        createCommand('composer.discard', onDiscard),
-        createCommand('composer.send', onSend),
-        createCommand('composer.attach', onAttach),
-        createCommand('composer.removeAttachment', onRemoveAttachment),
-        createCommand('composer.followUp', onFollowUp),
-        createCommand('composer.bold', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'bold')),
-        createCommand('composer.italic', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'italic')),
-        createCommand('composer.underline', () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, 'underline')),
-        createCommand('composer.bullets', () =>
-          editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)
-        ),
-        createCommand('composer.numbering', () =>
-          editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)
-        ),
-        createCommand('composer.quote', quote)
-      ]),
-    [editor, onAttach, onRemoveAttachment, onClose, onDiscard, onSend, onFollowUp, quote]
-  )
-  return null
-}
-
-/**
- * Keep native editing shortcuts inside the authored region. Explicit undo
- * avoids depending on Electron's contenteditable routing, while Mod+A selects
- * only the user's body above the signature/footer; quoted history lives
- * outside this editor and is therefore never pulled into the range.
- */
-function $isProtectedComposerNode(node: LexicalNode): boolean {
-  return (
-    node instanceof GmailSignaturePrefixNode ||
-    node instanceof GmailSignatureNode ||
-    node instanceof AttnFooterNode
-  )
-}
-
-function $topLevelComposerNode(node: LexicalNode): LexicalNode {
-  const root = $getRoot()
-  let current = node
-  let parent = current.getParent()
-  while (parent && parent !== root) {
-    current = parent
-    parent = current.getParent()
-  }
-  return current
-}
-
-function $selectionAnchorIsAuthored(): boolean {
-  const selection = $getSelection()
-  if (!$isRangeSelection(selection)) return false
-  const node = $topLevelComposerNode(selection.anchor.getNode())
-  return node !== $getRoot() && !$isProtectedComposerNode(node)
-}
-
-function $restoreAuthoredCaretFromProtectedNode(): void {
-  const selection = $getSelection()
-  if (!$isRangeSelection(selection)) return
-  const node = $topLevelComposerNode(selection.anchor.getNode())
-  if (!$isProtectedComposerNode(node)) return
-  const previous = node.getPreviousSibling()
-  if (previous && !$isProtectedComposerNode(previous)) {
-    previous.selectEnd()
-    return
-  }
-  const paragraph = $createParagraphNode()
-  node.insertBefore(paragraph)
-  paragraph.selectStart()
-}
-
-function BodyEditingShortcutsPlugin(): null {
-  const [editor] = useLexicalComposerContext()
-  useEffect(() => {
-    const rootElement = editor.getRootElement()
-    if (!rootElement) return
-    const onKeyDown = (event: KeyboardEvent): void => {
-      const key = event.key.toLowerCase()
-      if ((key === 'backspace' || key === 'delete') && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        let deletesAuthoredRegion = false
-        editor.getEditorState().read(() => {
-          const selection = $getSelection()
-          if (!$isRangeSelection(selection) || selection.isCollapsed()) return
-          const root = $getRoot()
-          let authoredCount = 0
-          for (const child of root.getChildren()) {
-            if ($isProtectedComposerNode(child)) break
-            authoredCount++
-          }
-          const rootKey = root.getKey()
-          deletesAuthoredRegion =
-            selection.anchor.key === rootKey &&
-            selection.focus.key === rootKey &&
-            ((selection.anchor.offset === 0 && selection.focus.offset === authoredCount) ||
-              (selection.focus.offset === 0 && selection.anchor.offset === authoredCount))
-        })
-        if (!deletesAuthoredRegion) return
-
-        event.preventDefault()
-        event.stopPropagation()
-        editor.update(() => {
-          $addUpdateTag(HISTORY_PUSH_TAG)
-          const root = $getRoot()
-          let firstProtectedNode = root.getFirstChild()
-          while (firstProtectedNode && !$isProtectedComposerNode(firstProtectedNode)) {
-            const next = firstProtectedNode.getNextSibling()
-            firstProtectedNode.remove()
-            firstProtectedNode = next
-          }
-          const paragraph = $createParagraphNode()
-          if (firstProtectedNode) firstProtectedNode.insertBefore(paragraph)
-          else root.append(paragraph)
-          paragraph.selectStart()
-        })
-        return
-      }
-
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
-      if (key === 'z') {
-        event.preventDefault()
-        event.stopPropagation()
-        const keepAuthoredCaret = editor.getEditorState().read(() => $selectionAnchorIsAuthored())
-        editor.dispatchCommand(event.shiftKey ? REDO_COMMAND : UNDO_COMMAND, undefined)
-        if (keepAuthoredCaret) editor.update(() => $restoreAuthoredCaretFromProtectedNode())
-        return
-      }
-      if (key !== 'a' || event.shiftKey) return
-      event.preventDefault()
-      event.stopPropagation()
-      editor.update(() => {
-        let authoredCount = 0
-        for (const child of $getRoot().getChildren()) {
-          if ($isProtectedComposerNode(child)) break
-          authoredCount++
-        }
-        $getRoot().select(0, authoredCount)
-      })
-    }
-    rootElement.addEventListener('keydown', onKeyDown, true)
-    return () => rootElement.removeEventListener('keydown', onKeyDown, true)
-  }, [editor])
-  return null
-}
-
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
   { draft, mode = 'full', attachedToMessage = false, initialError = null, onClose, onExit, onToast, aiDraft },
   ref
@@ -691,8 +142,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [to, setTo] = useState<MailAddress[]>(draft.to)
   const [cc, setCc] = useState<MailAddress[]>(draft.cc)
   const [bcc, setBcc] = useState<MailAddress[]>(draft.bcc)
-  const [attachments, setAttachments] = useState(draft.attachments)
-  const [attaching, setAttaching] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const [subject, setSubject] = useState(draft.subject)
   const [followUpAt, setFollowUpAt] = useState<number | null>(draft.followUpAt)
@@ -727,7 +176,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const revealUnifiedContent = useCallback(() => setUnifiedContentExpanded(true), [])
   const [hasPreservedContent, setHasPreservedContent] = useState(preparedHtml.issues.length > 0)
   const notePreservedContent = useCallback(() => setHasPreservedContent(true), [])
-  const attachmentMutationRef = useRef(false)
   const toFieldRef = useRef<RecipientFieldHandle | null>(null)
   const ccFieldRef = useRef<RecipientFieldHandle | null>(null)
   const bccFieldRef = useRef<RecipientFieldHandle | null>(null)
@@ -760,95 +208,31 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     },
     [updateFields]
   )
-  const addAttachment = useCallback(
-    (attachment: Draft['attachments'][number]) => {
-      setAttachments((current) => {
-        const next = [...current, attachment]
-        updateFields({ attachments: next })
-        return next
-      })
-    },
+  const noteAttachmentsChanged = useCallback(
+    (attachments: Draft['attachments']) => updateFields({ attachments }),
     [updateFields]
   )
-  const replaceAttachments = useCallback(
-    (next: Draft['attachments']) => {
-      setAttachments(next)
-      updateFields({ attachments: next })
-    },
-    [updateFields]
-  )
-  const attach = useCallback(
-    (request: () => Promise<{ attachments: Draft['attachments']; changed: boolean }>) => {
-      if (closing) return
-      if (attachmentMutationRef.current) {
-        onToast('Wait for the current attachment change to finish')
-        return
-      }
-      attachmentMutationRef.current = true
-      setAttaching(true)
-      void request()
-        .then((result) => {
-          if (result.changed) replaceAttachments(result.attachments)
-        })
-        .catch((error: unknown) => onToast(attachmentErrorMessage(error)))
-        .finally(() => {
-          attachmentMutationRef.current = false
-          setAttaching(false)
-        })
-    },
-    [closing, onToast, replaceAttachments]
-  )
-  const pickAttachments = useCallback(() => {
-    const bridge = window.attn
-    if (!bridge) return
-    attach(() => bridge.draft.pickAttachments(draft.id))
-  }, [attach, draft.id])
-  const addDroppedFiles = useCallback(
-    (files: File[]) => {
-      const bridge = window.attn
-      if (!bridge || files.length === 0) return
-      attach(() => bridge.draft.addDroppedFiles(draft.id, files))
-    },
-    [attach, draft.id]
-  )
-  const removeAttachment = useCallback(
-    (attachmentId: string) => {
-      if (!window.attn || closing) return
-      if (attachmentMutationRef.current) {
-        onToast('Wait for the current attachment change to finish')
-        return
-      }
-      attachmentMutationRef.current = true
-      setAttaching(true)
-      void window.attn.draft
-        .removeAttachment(draft.id, attachmentId)
-        .then((result) => replaceAttachments(result.attachments))
-        .catch(() => onToast('Could not remove attachment'))
-        .finally(() => {
-          attachmentMutationRef.current = false
-          setAttaching(false)
-        })
-    },
-    [closing, draft.id, onToast, replaceAttachments]
-  )
-
-  const visibleAttachments = attachments.filter((attachment) => !attachment.inline)
-
-  // Attaching is keyboard-reachable, so removing has to be too. Inline body
-  // images have no chip and are removed by editing the body instead.
-  const removeLastAttachment = useCallback(() => {
-    const last = visibleAttachments.at(-1)
-    if (!last) {
-      onToast('No attachments to remove')
-      return
-    }
-    removeAttachment(last.id)
-  }, [onToast, removeAttachment, visibleAttachments])
+  const {
+    attaching,
+    isMutating: attachmentMutationInFlight,
+    addAttachment,
+    pickAttachments,
+    addDroppedFiles,
+    removeAttachment,
+    removeLastAttachment,
+    visibleAttachments
+  } = useComposerAttachments({
+    draftId: draft.id,
+    initial: draft.attachments,
+    closing,
+    onToast,
+    onFieldsChanged: noteAttachmentsChanged
+  })
 
   const saveAndClose = useCallback(
     (afterClose: () => void) => {
       if (closing || !window.attn) return
-      if (attachmentMutationRef.current) {
+      if (attachmentMutationInFlight()) {
         onToast('Wait for the current attachment change to finish')
         return
       }
@@ -868,7 +252,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onToast('Draft could not be saved — retrying')
         })
     },
-    [closing, commitPendingRecipients, draft.id, onToast, saveNow]
+    [attachmentMutationInFlight, closing, commitPendingRecipients, draft.id, onToast, saveNow]
   )
 
   const closeAndSave = useCallback(() => saveAndClose(onClose), [onClose, saveAndClose])
@@ -907,7 +291,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const send = useCallback(() => {
     if (closing || !window.attn) return
     setSendError(null)
-    if (attachmentMutationRef.current) {
+    if (attachmentMutationInFlight()) {
       setSendError('Wait for attachments to finish')
       return
     }
@@ -931,7 +315,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             : 'Message could not be queued — your draft is still here'
         )
       })
-  }, [closing, commitPendingRecipients, draft.id, onClose, onToast, saveNow])
+  }, [attachmentMutationInFlight, closing, commitPendingRecipients, draft.id, onClose, onToast, saveNow])
 
   useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -948,7 +332,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const discard = useCallback((): void => {
     if (closing || !window.attn) return
-    if (attachmentMutationRef.current) {
+    if (attachmentMutationInFlight()) {
       onToast('Wait for the current attachment change to finish')
       return
     }
@@ -963,7 +347,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         setClosing(false)
         onToast('Draft could not be discarded')
       })
-  }, [closing, draft.id, onClose, onToast])
+  }, [attachmentMutationInFlight, closing, draft.id, onClose, onToast])
 
   return (
     <section

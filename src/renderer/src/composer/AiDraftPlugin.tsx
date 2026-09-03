@@ -18,9 +18,7 @@ import type { AiStreamEvent, AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import type { ShowToast } from '../hooks/useToast'
-import { AttnFooterNode } from './nodes/AttnFooterNode'
-import { GmailSignatureNode } from './nodes/GmailSignatureNode'
-import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
+import { $isProtectedComposerNode } from './nodes/protected'
 
 // AI reply drafting inside the composer (T37, F17). Chunks stream into
 // Lexical as ordinary editable text committed as ONE history entry — the
@@ -71,16 +69,7 @@ interface AiDraftPluginProps {
 }
 
 function $signatureBoundary(): LexicalNode | null {
-  for (const child of $getRoot().getChildren()) {
-    if (
-      child instanceof GmailSignaturePrefixNode ||
-      child instanceof GmailSignatureNode ||
-      child instanceof AttnFooterNode
-    ) {
-      return child
-    }
-  }
-  return null
+  return $getRoot().getChildren().find($isProtectedComposerNode) ?? null
 }
 
 function $isBlankParagraph(node: LexicalNode): boolean {
@@ -101,13 +90,7 @@ function $authoredSnapshot(): AuthoredSnapshot {
   const keys: string[] = []
   const parts: string[] = []
   for (const child of $getRoot().getChildren()) {
-    if (
-      child instanceof GmailSignaturePrefixNode ||
-      child instanceof GmailSignatureNode ||
-      child instanceof AttnFooterNode
-    ) {
-      break
-    }
+    if ($isProtectedComposerNode(child)) break
     keys.push(child.getKey())
     parts.push(child.getTextContent())
   }
