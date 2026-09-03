@@ -73,7 +73,12 @@ describe('mailbox triage projection', () => {
         db.prepare('SELECT kind FROM action_queue ORDER BY id LIMIT 1').get() as { kind: string }
       ).toEqual({ kind: 'modifyLabels' })
 
-      performTriage(db, ACCOUNT, { kind: 'untrash', threadIds: ['thread'] }, false)
+      performTriage(
+        db,
+        ACCOUNT,
+        { kind: 'move', threadIds: ['thread'], destination: { kind: 'inbox' }, sourceLabelId: null },
+        false
+      )
       expect(mailboxIds('allMail')).toEqual(['thread'])
       expect(mailboxIds('trash')).toEqual([])
     } finally {

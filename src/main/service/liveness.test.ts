@@ -69,8 +69,6 @@ function seedAccounts(db: Db): void {
 function mockProvider(overrides: Partial<MailProvider> = {}): MailProvider {
   return {
     modifyThread: vi.fn(),
-    trashThread: vi.fn(),
-    untrashThread: vi.fn(),
     getProfile: vi.fn(),
     listLabels: vi.fn(),
     listThreadIds: vi.fn(),

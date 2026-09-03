@@ -4,7 +4,7 @@ import { moveLabelDelta } from '../../shared/move'
 export interface ThreadActionPlan {
   add: string[]
   remove: string[]
-  queueKind: 'modifyLabels' | 'trash' | 'untrash'
+  queueKind: 'modifyLabels'
 }
 
 export function planAction(action: TriageAction): ThreadActionPlan {
@@ -17,10 +17,6 @@ export function planAction(action: TriageAction): ThreadActionPlan {
     case 'trash':
     case 'spam': {
       const delta = moveLabelDelta({ kind: action.kind }, null)
-      return { ...delta, queueKind: 'modifyLabels' }
-    }
-    case 'untrash': {
-      const delta = moveLabelDelta({ kind: 'inbox' }, null)
       return { ...delta, queueKind: 'modifyLabels' }
     }
     case 'star':
@@ -60,8 +56,6 @@ export function actionLabel(action: TriageAction, count = action.threadIds.lengt
       return plural('Unsnoozed', 'unsnoozed')
     case 'trash':
       return plural('Trashed', 'trashed')
-    case 'untrash':
-      return plural('Restored from trash', 'restored from trash')
     case 'spam':
       return plural('Marked spam', 'marked spam')
     case 'star':
@@ -103,7 +97,6 @@ export function inverseForThread(
         remove: labels.has('INBOX') ? [] : ['INBOX']
       }
     case 'trash':
-    case 'untrash':
     case 'spam': {
       const plan = planAction(action)
       return {

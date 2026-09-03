@@ -2,7 +2,6 @@ export type RevertedActionKind =
   | 'archive'
   | 'trash'
   | 'restoreInbox'
-  | 'untrash'
   | 'snooze'
   | 'snoozeReturn'
   | 'followUpReturn'
@@ -33,7 +32,6 @@ const actionPhrase: Record<RevertedActionKind, string> = {
   archive: 'archive',
   trash: 'trash',
   restoreInbox: 'restore to the inbox',
-  untrash: 'restore from trash',
   snooze: 'snooze',
   snoozeReturn: 'return snoozed',
   followUpReturn: 'resurface for follow-up',

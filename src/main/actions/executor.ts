@@ -30,7 +30,6 @@ export interface ActionRecoveryProvider extends MailActionProvider {
 
 interface QueueRow {
   id: number
-  kind: QueueIntent['kind']
   thread_id: string
   payload: string
   attempts: number
@@ -129,7 +128,7 @@ export class ActionExecutor {
         if (this.drainer.isStopping() || this.accountId() !== accountId) break
         const row = this.db
           .prepare(
-            `SELECT aq.id, aq.kind, aq.thread_id, aq.payload, aq.attempts, aq.state,
+            `SELECT aq.id, aq.thread_id, aq.payload, aq.attempts, aq.state,
                     aq.last_error, t.subject
              FROM action_queue aq
              LEFT JOIN threads t ON t.account_id = aq.account_id AND t.id = aq.thread_id
@@ -291,7 +290,7 @@ export class ActionExecutor {
     const returnedToInbox = this.threadHasInboxLabel(accountId, row.thread_id)
     reverted.push(
       revertedAction(
-        intent ?? syntheticIntent(row.kind, row.thread_id),
+        intent ?? syntheticIntent(row.thread_id),
         row.subject ?? '',
         returnedToInbox,
         actionKind === 'snoozeReturn' || actionKind === 'followUpReturn' ? 'keptLocal' : 'restored',
@@ -305,15 +304,12 @@ export class ActionExecutor {
   private decodeRow(row: QueueRow): DecodedQueueRow {
     const payload = decodeLabelDelta(row.payload)
     return {
-      intent:
-        row.kind === 'modifyLabels'
-          ? {
-              kind: row.kind,
-              threadId: row.thread_id,
-              add: payload.add,
-              remove: payload.remove
-            }
-          : { kind: row.kind, threadId: row.thread_id },
+      intent: {
+        kind: 'modifyLabels',
+        threadId: row.thread_id,
+        add: payload.add,
+        remove: payload.remove
+      },
       actionKind: payload.actionKind,
       reminderBefore: payload.reminderBefore,
       followUpBefore: payload.followUpBefore
@@ -342,7 +338,7 @@ export class ActionExecutor {
       this.dropQueuedReverts(accountId, row.id)
     })()
     invalidateRevertedUndo(accountId, [queueRowRef(row.id, row.thread_id)])
-    reverted.push(unavailableAction(row.kind, row.thread_id, row.subject ?? '', actionKind))
+    reverted.push(unavailableAction(row.thread_id, row.subject ?? '', actionKind))
     this.notify()
   }
 

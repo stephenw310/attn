@@ -20,11 +20,6 @@ describe('triage action planning', () => {
       remove: ['INBOX', 'SPAM'],
       queueKind: 'modifyLabels'
     })
-    expect(planAction({ kind: 'untrash', threadIds: ['t1'] })).toEqual({
-      add: ['INBOX'],
-      remove: ['SPAM', 'TRASH'],
-      queueKind: 'modifyLabels'
-    })
   })
 
   it('computes precise toggle and label inverses from pre-state', () => {

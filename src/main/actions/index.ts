@@ -695,7 +695,6 @@ export function isTriageAction(value: unknown): value is TriageAction {
     case 'trash':
     case 'spam':
     case 'restoreInbox':
-    case 'untrash':
     case 'unsnooze':
       return true
     case 'star':
@@ -763,7 +762,6 @@ function recoveryReminderForAction(
 function noticeKindForAction(action: TriageAction): RevertedActionKind {
   switch (action.kind) {
     case 'restoreInbox':
-    case 'untrash':
     case 'unsnooze':
     case 'archive':
     case 'trash':

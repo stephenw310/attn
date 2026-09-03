@@ -491,8 +491,6 @@ export class TestOperations implements TestHooks {
     }
     this.actionProviders.set(owner, {
       modifyThread: mutate,
-      trashThread: mutate,
-      untrashThread: mutate,
       getThread: async (requestedThreadId) => {
         const requested = readSeedThread(seedPath, requestedThreadId)
         if (!requested) throw new GmailApiError(404, 'seed thread unavailable')

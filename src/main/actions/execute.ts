@@ -3,19 +3,15 @@ import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
 import { MAIL_RETRY_FIRST_MS, MAIL_RETRY_MAX_MS, MAIL_RETRY_SECOND_MS } from '../sync/tuning'
 
-export type QueueIntent =
-  | { kind: 'modifyLabels'; threadId: string; add: string[]; remove: string[] }
-  | { kind: 'trash' | 'untrash'; threadId: string }
+export interface QueueIntent {
+  kind: 'modifyLabels'
+  threadId: string
+  add: string[]
+  remove: string[]
+}
 
 export async function executeIntent(provider: MailActionProvider, intent: QueueIntent): Promise<void> {
-  if (intent.kind === 'modifyLabels') {
-    await provider.modifyThread(intent.threadId, intent.add, intent.remove)
-  } else if (intent.kind === 'trash') {
-    await provider.trashThread(intent.threadId)
-  } else {
-    await provider.untrashThread(intent.threadId)
-    await provider.modifyThread(intent.threadId, ['INBOX'], [])
-  }
+  await provider.modifyThread(intent.threadId, intent.add, intent.remove)
 }
 
 export function isPermanentActionError(error: unknown): boolean {

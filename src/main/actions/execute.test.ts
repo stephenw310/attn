@@ -12,19 +12,14 @@ import {
 } from './execute'
 
 describe('queue intent execution', () => {
-  it('routes each intent to the provider endpoint abstraction', async () => {
+  it('routes the label intent to the provider endpoint abstraction', async () => {
     const provider = {
-      modifyThread: vi.fn(async () => {}),
-      trashThread: vi.fn(async () => {}),
-      untrashThread: vi.fn(async () => {})
+      modifyThread: vi.fn(async () => {})
     } satisfies MailActionProvider
     await executeIntent(provider, { kind: 'modifyLabels', threadId: 't1', add: ['STARRED'], remove: [] })
-    await executeIntent(provider, { kind: 'trash', threadId: 't2' })
-    await executeIntent(provider, { kind: 'untrash', threadId: 't3' })
-    expect(provider.modifyThread).toHaveBeenCalledWith('t1', ['STARRED'], [])
-    expect(provider.trashThread).toHaveBeenCalledWith('t2')
-    expect(provider.untrashThread).toHaveBeenCalledWith('t3')
-    expect(provider.modifyThread).toHaveBeenLastCalledWith('t3', ['INBOX'], [])
+    await executeIntent(provider, { kind: 'modifyLabels', threadId: 't2', add: [], remove: ['INBOX'] })
+    expect(provider.modifyThread).toHaveBeenNthCalledWith(1, 't1', ['STARRED'], [])
+    expect(provider.modifyThread).toHaveBeenLastCalledWith('t2', [], ['INBOX'])
   })
 
   it('retries quota failures and advances through the full backoff', () => {

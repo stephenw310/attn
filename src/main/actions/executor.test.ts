@@ -175,8 +175,6 @@ function provider(
 ): ActionRecoveryProvider {
   return {
     modifyThread,
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
     getThread: vi.fn(async (threadId) => snapshot(threadId))
   }
 }
