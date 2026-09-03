@@ -79,10 +79,13 @@ the frame-timed numbers in T40's exit checklist.
 These are proposals, not defects. Nothing here is required for a milestone. Each one is recorded because
 somebody found and verified it, not because it is scheduled.
 
-### REF-1: two components far exceed the ~350-line bar *(review R3)*
+### REF-1: two components still exceed the ~350-line bar *(review R3)*
 
-**Verified:** 2026-08-31
+**Verified:** 2026-09-03
 
-`Composer.tsx` is 1,397 lines and `Inbox.tsx` is 2,458, against the bar R1 set at roughly 350; both grew
-through M3–M4 (splits, settings deep links, follow-ups, AI drafting). Clean seams exist:
-`InlineQuote` plus `quoteSrcDoc` out of the composer, and the label and snooze picker wiring out of `Inbox`.
+`Composer.tsx` is 759 lines (was 1,627) and `Inbox.tsx` is 1,196 (was 2,614) after the 2026-09-02 review's splits
+landed: the composer's plugins, attachment state, follow-up control, paste handling, and inline quote are their own
+modules, and Inbox delegates to `useAccountSession`, `useViewNavigation`, `useViewRecords`, `useSearchSession`,
+`useDraftOpening`, `useListActions`, `useFocusThreadTarget`, and `useSettingsCommands`. What remains in each is
+state wiring plus one JSX tree; the next seam in Inbox is the layout itself (header/list/reader/footer composition),
+and in Composer the ~400-line JSX return.
