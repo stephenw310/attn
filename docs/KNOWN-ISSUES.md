@@ -41,20 +41,35 @@ unless a plan doc says so.
 Each was verified against `main` @ ee4fe41 on 2026-09-02. The review id in parentheses points at the full
 reasoning and fix direction in [REVIEW-2026-09-02.md](REVIEW-2026-09-02.md).
 
-### BUG-11: `preserve.ts` strips `background-color` from blocks, breaking F6 zero-loss silently *(review B11)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`INHERITED_TEXT_STYLES` (`src/renderer/src/composer/preserve.ts:121`) lists `background-color`, which is not
-inherited; `materializeInheritedTextStyles` moves it onto text spans and deletes it from the cell or div, with no
-"preserved" banner. Fix: remove it from the set; add a shaded-cell round-trip test.
-
 ### BUG-12: the composer's quote preview uses the outgoing allowlist, not the reader's *(review B12)*
 
 **Verified:** 2026-09-02 · **Severity:** medium
 
-`InlineQuote` (`src/renderer/src/composer/Composer.tsx:336-347`) sanitizes with `sanitizeOutgoingHtml`, which
-drops `style`, headings, `hr`, `pre`; the `forceLightMailCss` branch there is dead. Fix falls out of REF-8.
+`InlineQuote` (`src/renderer/src/composer/Composer.tsx` — search `sanitizeOutgoingHtml(displayCopy`) sanitizes the
+quote preview with the composer's outgoing allowlist, which drops `style`, headings, `hr`, `pre`, so a quoted
+newsletter renders flatter than in the reader and than the recipient sees. The dead `forceLightMailCss` branch and
+the double `srcDoc` load were removed on 2026-09-02; the sanitizer-policy half remains and falls out of REF-8.
+
+### BUG-14: the composer drops the last second of typing on quit *(review B28)*
+
+**Verified:** 2026-09-02 · **Severity:** low
+
+`useComposerDraft` checkpoints on a 1 s idle / 5 s maximum timer; `before-quit` (`src/main/index.ts`) tears down
+without asking the renderer to checkpoint. A renderer-only `pagehide`/`beforeunload`/`visibilitychange` commit was
+tried and backed out on this branch: serializing the editor during unload makes Lexical's `ImageNode.exportDOM`
+issue `data:` image loads that Chromium refuses once the document is unloading, so every composer with an inline
+image logs renderer console errors on quit (fails `composer.spec.ts` and `remote-images.spec.ts`). The fix needs
+the main-process half: `before-quit` asks the renderer for a checkpoint and awaits it while the document is alive.
+
+### BUG-15: `composer.spec.ts` "body undo and select-all stay inside authored text" is red on `main`
+
+**Verified:** 2026-09-02 (reproduced on ee4fe41 by three independent runs in the Claude Code cloud container)
+
+After Mod+Z in the reply body, typed text lands inside the `composer-attn-signature` footer node
+("Sent with Attn:Select only this new reply") instead of the authored paragraph. Not caused by any change on this
+branch — it fails identically at ee4fe41 with a clean build. Either the test's expectation or
+`BodyEditingShortcutsPlugin`'s protected-node handling after undo is wrong; whichever it is, `npm run verify` is
+red until it is settled. Worth confirming on a machine with a real display in case it is a hidden-window artifact.
 
 ## Test coverage gaps
 
