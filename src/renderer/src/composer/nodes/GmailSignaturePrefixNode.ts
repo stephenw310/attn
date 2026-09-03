@@ -22,9 +22,12 @@ export class GmailSignaturePrefixNode extends ElementNode {
   }
 
   static importJSON(serialized: SerializedGmailSignaturePrefixNode): GmailSignaturePrefixNode {
+    // `updateFromJSON` copies `textStyle` verbatim, so it is sanitized here
+    // alongside `style` — as `LegacyFontNode` already did (review S5).
     return new GmailSignaturePrefixNode()
       .updateFromJSON(serialized)
       .setStyle(sanitizeComposerStyle(serialized.style))
+      .setTextStyle(sanitizeComposerStyle(serialized.textStyle))
   }
 
   static importDOM(): DOMConversionMap | null {

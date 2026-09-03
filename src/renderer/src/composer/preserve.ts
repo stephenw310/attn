@@ -182,66 +182,54 @@ function materializeInheritedTextStyles(document: Document): void {
   }
 }
 
-function unsupportedReason(element: Element, hasStylesheet: boolean): string | null {
-  const tag = element.tagName.toLowerCase()
-  if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
-  const attributes = new Map(
-    element.getAttributeNames().map((name) => [name, element.getAttribute(name) ?? ''])
-  )
-  const gmailSignature =
-    tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
-  const attnFooter = tag === 'div' && attributes.get('data-attn-signature') === 'footer'
-  const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(attributes.get('class'))
-  const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
-  for (const attribute of element.getAttributeNames()) {
-    if (attribute === 'class' && isInertClass(attributes.get('class') ?? '', hasStylesheet)) continue
-    if (
-      !GLOBAL_ATTRIBUTES.has(attribute) &&
-      !tagAttributes.has(attribute) &&
-      !(gmailSignaturePrefix && attribute === 'class') &&
-      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute)) &&
-      !(attnFooter && ATTN_FOOTER_ATTRIBUTES.has(attribute))
-    ) {
-      return `${tag}[${attribute}]`
-    }
-  }
-  const style = element.getAttribute('style')
-  if (style) {
-    for (const { property } of cssDeclarations(style)) {
-      if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
-    }
-  }
-  return null
+/**
+ * One element, as either node model. The same rule set used to be written
+ * twice — once over the DOM for the fidelity walk, once over parse5 for the
+ * source-offset walk (review R14) — and the two could disagree about what the
+ * editor can represent, which freezes a region on one pass and not the other.
+ */
+interface ElementShape {
+  tag: string
+  attributes: { name: string; value: string }[]
 }
 
-function sourceUnsupportedReason(
-  element: DefaultTreeAdapterTypes.Element,
-  hasStylesheet: boolean
-): string | null {
-  const tag = element.tagName.toLowerCase()
+function domElementShape(element: Element): ElementShape {
+  return {
+    tag: element.tagName.toLowerCase(),
+    attributes: element.getAttributeNames().map((name) => ({ name, value: element.getAttribute(name) ?? '' }))
+  }
+}
+
+function sourceElementShape(element: DefaultTreeAdapterTypes.Element): ElementShape {
+  return {
+    tag: element.tagName.toLowerCase(),
+    attributes: element.attrs.map(({ name, value }) => ({ name, value }))
+  }
+}
+
+/** Why the editor cannot represent this element losslessly, or null. */
+function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boolean): string | null {
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
-  const attributes = new Map(element.attrs.map((attribute) => [attribute.name, attribute.value]))
+  const values = new Map(attributes.map(({ name, value }) => [name, value]))
   const gmailSignature =
-    tag === 'div' && isGmailSignatureAttributes(attributes.get('class'), attributes.get('data-smartmail'))
-  const attnFooter = tag === 'div' && attributes.get('data-attn-signature') === 'footer'
-  const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(attributes.get('class'))
+    tag === 'div' && isGmailSignatureAttributes(values.get('class'), values.get('data-smartmail'))
+  const attnFooter = tag === 'div' && values.get('data-attn-signature') === 'footer'
+  const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(values.get('class'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
-  for (const attribute of element.attrs) {
-    const inertClass = attribute.name === 'class' && isInertClass(attribute.value, hasStylesheet)
+  for (const { name, value } of attributes) {
+    if (name === 'class' && isInertClass(value, hasStylesheet)) continue
     if (
-      !inertClass &&
-      !GLOBAL_ATTRIBUTES.has(attribute.name) &&
-      !tagAttributes.has(attribute.name) &&
-      !(gmailSignaturePrefix && attribute.name === 'class') &&
-      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(attribute.name)) &&
-      !(attnFooter && ATTN_FOOTER_ATTRIBUTES.has(attribute.name))
+      !GLOBAL_ATTRIBUTES.has(name) &&
+      !tagAttributes.has(name) &&
+      !(gmailSignaturePrefix && name === 'class') &&
+      !(gmailSignature && GMAIL_SIGNATURE_ATTRIBUTES.has(name)) &&
+      !(attnFooter && ATTN_FOOTER_ATTRIBUTES.has(name))
     ) {
-      return `${tag}[${attribute.name}]`
+      return `${tag}[${name}]`
     }
-    if (attribute.name !== 'style') continue
-    for (const { property } of cssDeclarations(attribute.value)) {
-      if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
-    }
+  }
+  for (const { property } of cssDeclarations(values.get('style') ?? '')) {
+    if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
   }
   return null
 }
@@ -258,7 +246,7 @@ export function draftHtmlFidelityIssues(
 ): string[] {
   const document = new DOMParser().parseFromString(html, 'text/html')
   return [...document.body.querySelectorAll('*')]
-    .map((element) => unsupportedReason(element, hasStylesheet))
+    .map((element) => unsupportedReason(domElementShape(element), hasStylesheet))
     .filter((reason): reason is string => reason !== null)
 }
 
@@ -311,7 +299,7 @@ function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSource
     if (!('tagName' in node)) return
     const tag = node.tagName.toLowerCase()
     if (table && TABLE_SCOPED_TAGS.has(tag) && !promotedTables.has(table)) {
-      const reason = sourceUnsupportedReason(node, hasStylesheet)
+      const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
       if (reason) promotedTables.set(table, reason)
     }
     const nearestTable = tag === 'table' ? node : table
@@ -322,7 +310,7 @@ function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSource
   const regions: OpaqueSourceRegion[] = []
   const visit = (node: DefaultTreeAdapterTypes.ChildNode, owner: OpaqueSourceRegion | null): void => {
     if (!('tagName' in node)) return
-    const reason = promotedTables.get(node) ?? sourceUnsupportedReason(node, hasStylesheet)
+    const reason = promotedTables.get(node) ?? unsupportedReason(sourceElementShape(node), hasStylesheet)
     let region = owner
     if (reason && !owner) {
       const location = node.sourceCodeLocation
