@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+
+import createDOMPurify from 'dompurify'
 import { describe, expect, it } from 'vitest'
-import { stripUnsafeQuoteCss } from './mailSanitizer'
+import { sanitizeMailHtml, sanitizeQuotedMailHtml, stripUnsafeQuoteCss } from './mailSanitizer'
 
 describe('stripUnsafeQuoteCss', () => {
   it('removes the properties that lift quoted content out of normal flow', () => {
@@ -27,6 +30,12 @@ describe('stripUnsafeQuoteCss', () => {
     expect(stripUnsafeQuoteCss('margin-top:-500px;color:blue')).toBe('color:blue')
     expect(stripUnsafeQuoteCss('margin:0 -40px')).toBe('')
     expect(stripUnsafeQuoteCss('margin:0 auto;margin-bottom:12px')).toBe('margin:0 auto; margin-bottom:12px')
+  })
+
+  it('sees a negative length behind a calc operator', () => {
+    expect(stripUnsafeQuoteCss('margin-top:calc(600px*-1);color:blue')).toBe('color:blue')
+    expect(stripUnsafeQuoteCss('margin-left:calc(1px/-0.01);color:blue')).toBe('color:blue')
+    expect(stripUnsafeQuoteCss('margin-top:calc(8px*2)')).toBe('margin-top:calc(8px*2)')
   })
 
   it('drops declarations that consume custom properties', () => {
@@ -64,5 +73,43 @@ describe('stripUnsafeQuoteCss', () => {
     expect(stripUnsafeQuoteCss('position:fixed')).toBe('')
     expect(stripUnsafeQuoteCss('not-a-declaration;;color:red')).toBe('color:red')
     expect(stripUnsafeQuoteCss('')).toBe('')
+  })
+})
+
+describe('mail sanitizer policies', () => {
+  it('opens every displayed mail link in the browser, whoever calls it first', () => {
+    // The hook belongs to the display policy, not to whichever renderer module
+    // happened to evaluate first and register it on the shared purifier.
+    const purifier = createDOMPurify(window)
+    const clean = sanitizeMailHtml(purifier, '<a href="https://example.com">Read</a>')
+
+    expect(clean).toContain('target="_blank"')
+    expect(clean).toContain('rel="noopener noreferrer"')
+  })
+
+  it('leaves quoted mail links untouched by the display link hook', () => {
+    const purifier = createDOMPurify(window)
+    sanitizeMailHtml(purifier, '<a href="https://example.com">Read</a>')
+    const quoted = sanitizeQuotedMailHtml(purifier, '<a href="https://example.com">Read</a>')
+
+    expect(quoted).not.toContain('rel="noopener noreferrer"')
+  })
+
+  it('strips inline event handlers from displayed and quoted mail', () => {
+    const purifier = createDOMPurify(window)
+    const html = '<p onclick="steal()" onerror="x()" onmouseover="y()">Hi</p>'
+
+    expect(sanitizeMailHtml(purifier, html)).toBe('<p>Hi</p>')
+    expect(sanitizeQuotedMailHtml(purifier, html)).toBe('<p>Hi</p>')
+  })
+
+  it('refuses a sender claim on the private markers', () => {
+    const purifier = createDOMPurify(window)
+    const clean = sanitizeMailHtml(
+      purifier,
+      '<div data-attn-trim-start="1" data-attn-cid-source="x" data-attn-image-pending="1">Hi</div>'
+    )
+
+    expect(clean).toBe('<div>Hi</div>')
   })
 })

@@ -140,13 +140,6 @@ function normalizeMailLink(href: string): string | null {
   return null
 }
 
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  if (node.nodeName !== 'A') return
-  const link = node as HTMLAnchorElement
-  link.setAttribute('target', '_blank')
-  link.setAttribute('rel', 'noopener noreferrer')
-})
-
 function sanitizeToTemplate(
   html: string,
   surface: MailSurface,

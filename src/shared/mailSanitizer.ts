@@ -14,17 +14,10 @@ const FORBIDDEN_QUOTE_TAGS = [...FORBIDDEN_MAIL_TAGS, 'style', 'title']
 
 const BASE_MAIL_SANITIZER_CONFIG: Config = {
   // DOMPurify passes data-* through by default. Mail cannot claim Attn's private
-  // markers or move the renderer's trim and inline-image boundaries.
-  FORBID_ATTR: [
-    'onerror',
-    'onload',
-    'onclick',
-    'onmouseover',
-    'onfocus',
-    MAIL_TRIM_MARKER,
-    MAIL_CID_SOURCE_MARKER,
-    MAIL_IMAGE_PENDING_MARKER
-  ],
+  // markers or move the renderer's trim and inline-image boundaries. Event
+  // handlers need no entry here: DOMPurify's allowlist admits no `on*`
+  // attribute, and `mailSanitizer.test.ts` pins that.
+  FORBID_ATTR: [MAIL_TRIM_MARKER, MAIL_CID_SOURCE_MARKER, MAIL_IMAGE_PENDING_MARKER],
   ADD_ATTR: ['target'],
   FORCE_BODY: true
 }
@@ -66,8 +59,10 @@ const VENDOR_PREFIX = /^-(?:webkit|moz|ms|o)-/
 // than maintain a second, security-sensitive CSS tokenizer here.
 const CSS_ESCAPE = /\\/
 // A negative margin drags quoted content up over the reply without needing
-// `position`, so it is the one case where the value decides, not the name.
-const NEGATIVE_LENGTH = /(?:^|[\s,(])-\s*\.?\d/
+// `position`, so it is the one case where the value decides, not the name. The
+// minus can follow a `calc()` operator as well as a separator — `calc(600px*-1)`
+// and `calc(1px/-0.01)` are both negative lengths.
+const NEGATIVE_LENGTH = /(?:^|[\s,(*/])-\s*\.?\d/
 
 function isUnsafeDeclaration(property: string, value: string): boolean {
   if (CSS_ESCAPE.test(property) || CSS_ESCAPE.test(value)) return true
@@ -154,9 +149,35 @@ function installQuoteStyleHook(purifier: DOMPurify): void {
   })
 }
 
+const displayHooked = new WeakSet<DOMPurify>()
+let displaying = false
+
+// A mail link opens in the user's browser, never inside the frame, so display
+// forces `target`/`rel` onto every anchor. It lives here rather than at one
+// caller's module scope because the policy, not the import order of whichever
+// renderer module happened to evaluate first, has to decide it. The flag keeps
+// the hook inert if a quote purifier is ever passed in here.
+function installDisplayLinkHook(purifier: DOMPurify): void {
+  if (displayHooked.has(purifier)) return
+  displayHooked.add(purifier)
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    if (!displaying || node.nodeName !== 'A') return
+    const link = node as Element
+    if (typeof link.setAttribute !== 'function') return
+    link.setAttribute('target', '_blank')
+    link.setAttribute('rel', 'noopener noreferrer')
+  })
+}
+
 /** The shared DOMPurify display policy for cached mail. */
 export function sanitizeMailHtml(purifier: DOMPurify, html: string): string {
-  return purifier.sanitize(html, MAIL_SANITIZER_CONFIG)
+  installDisplayLinkHook(purifier)
+  displaying = true
+  try {
+    return purifier.sanitize(html, MAIL_SANITIZER_CONFIG)
+  } finally {
+    displaying = false
+  }
 }
 
 /** The display policy tightened for HTML embedded into an outgoing quote. */

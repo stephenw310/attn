@@ -278,7 +278,6 @@ export function sanitizeDraftHtmlForImport(html: string): string {
   return importPurifier.sanitize(html, {
     ADD_ATTR: ['dir', 'target'],
     FORBID_TAGS: ['script', 'style', 'form', 'input', 'button', 'select', 'textarea', 'iframe', 'object'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
     ADD_URI_SAFE_ATTR: URI_SAFE_ATTRIBUTES,
     ALLOWED_URI_REGEXP: SAFE_URI,
     ALLOW_ARIA_ATTR: false

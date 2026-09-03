@@ -60,6 +60,15 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
     expect(Object.values(sanitized).join('')).not.toMatch(/<script|onclick|data-secret|javascript:/)
   })
 
+  it('strips inline event handlers on the import path too', () => {
+    // DOMPurify's allowlist admits no `on*` attribute, so neither sanitizer
+    // carries a handler list of its own; this is what pins that.
+    const html = '<p onclick="steal()" onerror="x()" onmouseover="y()" onfocus="z()">Hi</p>'
+
+    expect(sanitizeDraftHtmlForImport(html)).toBe('<p>Hi</p>')
+    expect(sanitizeOutgoingHtml(html)).toBe('<p>Hi</p>')
+  })
+
   it('keeps supported numeric formatting attributes without widening URI schemes', () => {
     const html =
       '<img src="cid:a@b" alt="x" width="120" height="80"><table><tbody><tr><td colspan="2" rowspan="3">Cell</td></tr></tbody></table><ol start="4"><li>Fourth</li></ol><a href="javascript:bad()">bad</a>'
