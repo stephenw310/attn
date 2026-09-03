@@ -302,10 +302,12 @@ describe('draft synchronization identity', () => {
     expect(mergeRemoteDraftAttachments([echo], JSON.stringify(once))).toEqual([local])
   })
 
-  it('pairs an echo whose filename MIME encoding stripped non-ASCII characters', () => {
-    // The upload writes `filename="r_sum_.pdf"`, so that is the only name Gmail
-    // can echo. Matching on the raw name would append a second copy per round
-    // trip, and each checkpoint would then upload every copy.
+  it('pairs an echo of a non-ASCII filename, in the current and the legacy fold', () => {
+    // The upload now carries `résumé.pdf` in an RFC 2231 continuation, so that
+    // is what Gmail echoes. A draft checkpointed before that shipped still
+    // echoes the ASCII fold, and both must pair with the local file: matching
+    // neither would append a copy per round trip, and each checkpoint would
+    // then upload every copy.
     const local: StoredDraftAttachment = {
       id: 'local-file',
       filename: 'résumé.pdf',
@@ -313,35 +315,34 @@ describe('draft synchronization identity', () => {
       sizeBytes: 10,
       spoolPath: '/owned/outbox/draft/résumé.pdf'
     }
-    const echo: StoredDraftAttachment = {
+    const echo = (filename: string): StoredDraftAttachment => ({
       id: 'remote-echo',
-      filename: 'r_sum_.pdf',
+      filename,
       mimeType: 'application/pdf',
       sizeBytes: 10,
       spoolPath: '',
       remoteMessageId: 'message-1',
       remoteAttachmentId: 'attachment-1'
-    }
+    })
 
-    const once = mergeRemoteDraftAttachments([echo], JSON.stringify([local]))
-    expect(once).toEqual([local])
-    expect(mergeRemoteDraftAttachments([echo], JSON.stringify(once))).toEqual([local])
+    for (const echoed of ['résumé.pdf', 'r_sum_.pdf']) {
+      const once = mergeRemoteDraftAttachments([echo(echoed)], JSON.stringify([local]))
+      expect(once).toEqual([local])
+      // Round-tripping again must stay a fixed point rather than compounding.
+      expect(mergeRemoteDraftAttachments([echo(echoed)], JSON.stringify(once))).toEqual([local])
+    }
   })
 
   it('fingerprints a filename the way Gmail will echo it', () => {
     const base = { ...emptyDraftInput(), to: [{ name: '', email: 'to@example.com' }] }
     const attachment = { id: 'a', mimeType: 'application/pdf', sizeBytes: 10 }
-    expect(
-      draftContentFingerprint({
-        ...base,
-        attachments: [{ ...attachment, filename: 'résumé.pdf' }]
-      })
-    ).toBe(
-      draftContentFingerprint({
-        ...base,
-        attachments: [{ ...attachment, filename: 'r_sum_.pdf' }]
-      })
-    )
+    const fingerprintOf = (filename: string): string =>
+      draftContentFingerprint({ ...base, attachments: [{ ...attachment, filename }] })
+
+    // The RFC 2231 continuation carries the real name, so that is the identity
+    // — and an ASCII fold of it is a different file, not the same one.
+    expect(fingerprintOf('résumé.pdf')).not.toBe(fingerprintOf('r_sum_.pdf'))
+    expect(fingerprintOf('résumé.pdf')).toBe(fingerprintOf(' résumé.pdf '))
   })
 
   it('pairs an echo with its own file when two attachments share a name', () => {

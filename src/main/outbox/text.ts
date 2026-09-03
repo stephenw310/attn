@@ -1,5 +1,6 @@
+/** Collapse a value to one header-safe line: no CR, LF or NUL can survive. */
 export function singleLine(value: string): string {
-  return value.replace(/[\r\n]+/g, ' ').trim()
+  return value.replace(/[\r\n\0]+/g, ' ').trim()
 }
 
 export function escapeHtml(value: string): string {

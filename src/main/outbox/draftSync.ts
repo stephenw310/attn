@@ -18,6 +18,7 @@ import { mergeExternalBodies } from '../sync/mergeBodies'
 import type { MailProvider, ProviderDraft, ProviderRequestOptions } from '../sync/provider'
 import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import { draftHtmlBody, mimeFilename } from './draftMime'
+import { asciiFilenameFallback } from './mime'
 import { splitQuotedTrail } from './quoteSplit'
 import { outboxDraftContent } from './row'
 
@@ -304,6 +305,19 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
  * keep the local one: the spool is the durable source of the bytes, while
  * Gmail's attachment locators rotate on every draft rewrite.
  */
+/**
+ * Both encoders carry the real filename in an RFC 2231 continuation, so Gmail
+ * echoes it verbatim. A draft checkpointed before that shipped is still in
+ * Gmail holding only the ASCII fold of the name, so pair that echo with the
+ * local file that produced it — otherwise it imports as a second copy and
+ * every later checkpoint uploads both.
+ */
+function echoesTheSameFilename(remote: string, local: string): boolean {
+  const echoed = mimeFilename(remote)
+  const stored = mimeFilename(local)
+  return echoed === stored || asciiFilenameFallback(echoed) === asciiFilenameFallback(stored)
+}
+
 function matchesLocalAttachment(
   remote: StoredDraftAttachment,
   local: StoredDraftAttachment,
@@ -311,7 +325,7 @@ function matchesLocalAttachment(
 ): boolean {
   if (remote.contentId && local.contentId) return remote.contentId === local.contentId
   if (remote.contentId || local.contentId) return false
-  if (mimeFilename(remote.filename) !== mimeFilename(local.filename)) return false
+  if (!echoesTheSameFilename(remote.filename, local.filename)) return false
   if (remote.mimeType !== local.mimeType) return false
   return loose || remote.sizeBytes === local.sizeBytes
 }
