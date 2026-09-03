@@ -324,6 +324,59 @@ describe('OutboxSender effect layer', () => {
     expect(clean).toHaveBeenCalledWith('outbox-1')
   })
 
+  it('sends from the cached send-as name without a Gmail round trip', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+        'me@example.com',
+        'me@example.com',
+        NOW
+      )
+      db.prepare('INSERT INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(
+        'me@example.com',
+        'sendAsDisplayName',
+        'Chao Zhou'
+      )
+      const id = saveDraft(
+        db,
+        'me@example.com',
+        {
+          ...emptyDraftInput(),
+          to: [{ name: '', email: 'you@example.com' }],
+          subject: 'Cached identity',
+          bodyHtml: '<p>Hi</p>',
+          bodyText: 'Hi'
+        },
+        NOW
+      )
+      db.prepare("UPDATE outbox SET state = 'queued', rfc_message_id = ?, send_at = ? WHERE id = ?").run(
+        '<cached@example.com>',
+        NOW,
+        id
+      )
+      const getSendAs = vi.fn()
+      const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
+        expect(Buffer.from(raw, 'base64url').toString()).toContain('From: Chao Zhou <me@example.com>')
+        return 'created-draft'
+      })
+      const sender = new OutboxSender(
+        db,
+        () => 'me@example.com',
+        () => provider({ getSendAs, createDraft }),
+        vi.fn(),
+        { time: new ManualTime() }
+      )
+
+      await sender.trigger()
+
+      expect(getSendAs).not.toHaveBeenCalled()
+      expect(createDraft).toHaveBeenCalledTimes(1)
+      expect(db.prepare('SELECT state FROM outbox WHERE id = ?').get(id)).toEqual({ state: 'sent' })
+    } finally {
+      db.close()
+    }
+  })
+
   it('invalidates mail after persisting the confirmed sent conversation', async () => {
     const db = openDatabase(':memory:')
     const mailChanged = vi.fn()
@@ -338,6 +391,10 @@ describe('OutboxSender effect layer', () => {
            (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
          VALUES (?, 'gmail-sent', 'identity-thread', 'Chao Zhou', ?, ?, '["SENT"]')`
       ).run('me@example.com', 'me@example.com', NOW - 1)
+      // persistThread writes the thread's label union beside its messages.
+      db.prepare(
+        "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, 'identity-thread', 'SENT')"
+      ).run('me@example.com')
       const id = saveDraft(
         db,
         'me@example.com',

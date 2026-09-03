@@ -58,14 +58,22 @@ export function primarySenderDisplayName(
   if (explicit) return explicit
 
   const localPart = accountId.slice(0, accountId.indexOf('@')).trim().toLowerCase()
+  // Gmail leaves the primary name empty whenever it uses the Google profile
+  // name, so this runs on every send-as refresh for those accounts. Drive it
+  // from the SENT thread index rather than scanning every message the account
+  // has ever stored: `thread_labels` holds the union of its messages' labels,
+  // so it is a superset of the threads that can hold a SENT message, and the
+  // per-message `labels_json` test below stays the authority.
   const row = db
     .prepare(
-      `SELECT from_name
-       FROM messages
-       WHERE account_id = ? AND lower(from_email) = lower(?)
-         AND labels_json LIKE '%"SENT"%' AND trim(COALESCE(from_name, '')) <> ''
-         AND lower(trim(from_name)) <> ?
-       ORDER BY internal_date DESC
+      `SELECT m.from_name
+       FROM thread_labels tl
+       JOIN messages m ON m.account_id = tl.account_id AND m.thread_id = tl.thread_id
+       WHERE tl.account_id = ? AND tl.label_id = 'SENT'
+         AND lower(m.from_email) = lower(?)
+         AND m.labels_json LIKE '%"SENT"%' AND trim(COALESCE(m.from_name, '')) <> ''
+         AND lower(trim(m.from_name)) <> ?
+       ORDER BY m.internal_date DESC
        LIMIT 1`
     )
     .get(accountId, accountId, localPart) as { from_name: string } | undefined
@@ -305,7 +313,10 @@ function semantics(element: Element): SignatureSemantics {
  */
 function signatureFingerprint(bodyHtml: string): string | null {
   const { JSDOM } = require('jsdom') as typeof import('jsdom')
-  const document = new JSDOM(bodyHtml).window.document
+  return documentFingerprint(new JSDOM(bodyHtml).window.document)
+}
+
+function documentFingerprint(document: Document): string | null {
   const signature = signatureElement(document.body)
   const footer = footerElement(document.body)
   if (!signature && !footer) return null
@@ -355,11 +366,32 @@ export function hasOnlyDefaultPrimarySignature(
     return false
   }
   if (!defaultSignatureFingerprint) return false
+  const key = `${defaultSignatureFingerprint}\u0000${createHash('sha256').update(draft.bodyHtml).digest('hex')}`
+  const remembered = untouchedSignatureCache.get(key)
+  if (remembered !== undefined) return remembered
   const { JSDOM } = require('jsdom') as typeof import('jsdom')
   const currentDocument = new JSDOM(draft.bodyHtml).window.document
-  if (hasContentOutsideSignature(currentDocument)) return false
   // The stored fingerprint decides which regions the baseline had; comparing
   // against it also catches a deleted footer or signature (the draft is then
   // an authored edit, and its removal is never undone by reinsertion).
-  return signatureFingerprint(draft.bodyHtml) === defaultSignatureFingerprint
+  const untouched =
+    !hasContentOutsideSignature(currentDocument) &&
+    documentFingerprint(currentDocument) === defaultSignatureFingerprint
+  rememberUntouchedSignature(key, untouched)
+  return untouched
+}
+
+/**
+ * Pure in (body HTML, stored fingerprint), pure out — and every Drafts and
+ * search read asks it again for rows that have not changed. Remembering the
+ * answer keeps `listDrafts` off the DOM parser entirely on a warm read (P6).
+ */
+const UNTOUCHED_SIGNATURE_CACHE_LIMIT = 128
+const untouchedSignatureCache = new Map<string, boolean>()
+
+function rememberUntouchedSignature(key: string, untouched: boolean): void {
+  untouchedSignatureCache.set(key, untouched)
+  if (untouchedSignatureCache.size <= UNTOUCHED_SIGNATURE_CACHE_LIMIT) return
+  const oldest = untouchedSignatureCache.keys().next()
+  if (!oldest.done) untouchedSignatureCache.delete(oldest.value)
 }

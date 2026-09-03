@@ -565,19 +565,15 @@ export class OutboxSender {
     signal?: AbortSignal
   ): Promise<string> {
     if (!provider.getSendAs) return ''
+    // The sync controller refreshes this cache when the account starts and on
+    // every poll, so a send reads what it left rather than spending a Gmail
+    // round trip inside the undo window. Only an account that has never
+    // cached a name pays for one, and a failure there is a real preflight
+    // failure: the From line is not something to guess at.
     const cached = readAccountSetting(this.db, accountId, SEND_AS_DISPLAY_NAME_SETTING)
-    try {
-      const sendAs = await syncPrimarySendAs(this.db, accountId, provider, {
-        signal,
-        priority: 'send'
-      })
-      return primarySenderDisplayName(this.db, accountId, sendAs?.displayName)
-    } catch (error) {
-      if (signal?.aborted) throw error
-      if (cached === undefined) throw error
-      console.warn(`[outbox] send-as refresh failed for ${accountId}: ${errorMessage(error)}`)
-      return primarySenderDisplayName(this.db, accountId, cached)
-    }
+    if (cached !== undefined) return primarySenderDisplayName(this.db, accountId, cached)
+    const sendAs = await syncPrimarySendAs(this.db, accountId, provider, { signal, priority: 'send' })
+    return primarySenderDisplayName(this.db, accountId, sendAs?.displayName)
   }
 
   private async send(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<void> {

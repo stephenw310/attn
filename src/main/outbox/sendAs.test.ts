@@ -59,8 +59,15 @@ describe('primary Gmail send-as settings', () => {
            (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
          VALUES (?, ?, ?, 'me', ?, ?, '["SENT"]')`
       )
+      // persistThread writes the thread's label union beside its messages, and
+      // the lookup narrows to SENT threads through that index.
+      const insertSentThread = db.prepare(
+        "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, 'SENT')"
+      )
+      insertSentThread.run(ACCOUNT, 'thread-1')
       for (let index = 0; index < 25; index += 1) {
         insertAttnSent.run(ACCOUNT, `attn-sent-${index}`, `thread-${index + 2}`, ACCOUNT, 20 + index)
+        insertSentThread.run(ACCOUNT, `thread-${index + 2}`)
       }
 
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, displayName: '', signature: '' })
