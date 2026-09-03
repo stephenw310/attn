@@ -14,7 +14,7 @@ const windowsBadgeIcons = new Map<string, NativeImage>()
  * a threshold raised here alone would plan detail notifications from rows that
  * were never hydrated, titling them "New message · (no subject)".
  */
-export const SUMMARY_THRESHOLD = NOTIFICATION_SUMMARY_THRESHOLD
+const SUMMARY_THRESHOLD = NOTIFICATION_SUMMARY_THRESHOLD
 
 /** A focus target is only worth honouring briefly — see `takePendingFocus`. */
 export const PENDING_FOCUS_TTL_MS = 60_000
