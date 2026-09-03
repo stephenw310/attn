@@ -4,24 +4,22 @@
 // an SVG <image href>, a CSS url() or @import — or a deliberately blocked
 // resource would offer no Load once / Always load recovery (PR #101 review).
 
+import { safeUrl } from '../../shared/html'
+
 const REMOTE_URL = /^\s*https?:/i
 const CONTAINS_REMOTE_URL = /https?:\/\//i
 const STYLE_REMOTE = /url\(\s*["']?\s*https?:|@import\s+["']https?:/i
 
+const REMOTE_SCHEMES = ['http', 'https']
 /** Attributes whose value is one fetchable URL, on any element. */
 const FETCH_ATTRIBUTES = ['src', 'poster', 'background'] as const
 /** href fetches only on SVG image/use; anchors merely navigate. */
 const SVG_HREF_TAGS = new Set(['image', 'use'])
 
 export function isRemoteMailUrl(value: string): boolean {
-  try {
-    // Chromium's URL parser ignores ASCII whitespace inside a scheme. Use
-    // that parser instead of a raw prefix so `ht\ntp:` cannot evade policy.
-    const protocol = new URL(value, window.location.href).protocol.toLowerCase()
-    return protocol === 'http:' || protocol === 'https:'
-  } catch {
-    return false
-  }
+  // Resolved against the app document, so a relative source counts as remote
+  // exactly when the app itself is served over the network.
+  return safeUrl(value, REMOTE_SCHEMES, window.location.href) !== null
 }
 
 /**

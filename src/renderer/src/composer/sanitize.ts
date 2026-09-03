@@ -126,6 +126,12 @@ function installStyleHook(purifier: DOMPurify): void {
 
 const SAFE_URI = /^(?:(?:https?|mailto|cid):|data:image\/(?:png|jpeg|gif|webp);base64,)/i
 /**
+ * Schemes an authored composer link may carry. Kept beside the outgoing
+ * allowlist because the toolbar's validator and Lexical's own `validateUrl`
+ * have to agree with what serialization will let through (review R8).
+ */
+export const COMPOSER_LINK_SCHEMES = ['https', 'http', 'mailto']
+/**
  * Presentational table attributes real mail still ships (SPEC §9 #18a). They
  * carry no URL and run nothing, but every legacy mail client honours them, so
  * dropping them silently repainted a table on open. They are deliberately *not*

@@ -11,18 +11,16 @@ import {
   type TextFormatType
 } from 'lexical'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { safeUrl } from '../../../shared/html'
 import { createCommand, registerCommands } from '../commands'
 import { modKeyLabel } from '../platform'
-
-function isSafeLink(value: string): boolean {
-  return /^(?:https?:|mailto:)/i.test(value)
-}
+import { COMPOSER_LINK_SCHEMES } from './sanitize'
 
 function normalizeLink(value: string): string | null {
   const trimmed = value.trim()
   if (!trimmed) return null
   const normalized = /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`
-  return isSafeLink(normalized) ? normalized : null
+  return safeUrl(normalized, COMPOSER_LINK_SCHEMES)
 }
 
 export function EditorToolbar(): React.JSX.Element {

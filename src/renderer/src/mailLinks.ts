@@ -1,3 +1,5 @@
+import { safeUrl } from '../../shared/html'
+
 export interface MailTextPart {
   text: string
   href?: string
@@ -35,13 +37,7 @@ function urlEnd(value: string): number {
 }
 
 function linkHref(value: string): string | null {
-  const candidate = value.toLowerCase().startsWith('www.') ? `https://${value}` : value
-  try {
-    const url = new URL(candidate)
-    return url.protocol === 'http:' || url.protocol === 'https:' ? candidate : null
-  } catch {
-    return null
-  }
+  return safeUrl(value.toLowerCase().startsWith('www.') ? `https://${value}` : value, ['http', 'https'])
 }
 
 function hasUrlBoundary(text: string, start: number): boolean {

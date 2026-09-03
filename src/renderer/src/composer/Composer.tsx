@@ -43,7 +43,7 @@ import type { MailAddress } from '../../../shared/address'
 import { AI_PROVIDER_PRESETS, type AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
-import { escapeHtmlText as escapeHtml } from '../../../shared/html'
+import { escapeHtmlText as escapeHtml, safeUrl } from '../../../shared/html'
 import { type Snippet, subjectAfterSnippetInsert } from '../../../shared/snippets'
 import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
 import type { ThemeAppearance } from '../../../shared/theme'
@@ -76,7 +76,7 @@ import { RecipientField, type RecipientFieldHandle } from './RecipientField'
 import { recipientGreetingName } from './recipientGreeting'
 import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
 import { SnippetsPlugin } from './SnippetsPlugin'
-import { sanitizeOutgoingHtml } from './sanitize'
+import { COMPOSER_LINK_SCHEMES, sanitizeOutgoingHtml } from './sanitize'
 import { useComposerDraft } from './useComposerDraft'
 
 interface ComposerProps {
@@ -168,7 +168,7 @@ const QUOTE_MAX_HEIGHT = 720
  * of the recipient fields on every keystroke.
  */
 function validateComposerUrl(url: string): boolean {
-  return /^(?:https?:|mailto:)/i.test(url)
+  return safeUrl(url, COMPOSER_LINK_SCHEMES) !== null
 }
 
 function plainTextForEditor(value: string): string {

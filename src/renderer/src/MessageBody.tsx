@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { safeUrl } from '../../shared/html'
 import type { MessageAttachment } from '../../shared/mail'
 import {
   MAIL_CID_SOURCE_MARKER as CID_SOURCE_MARKER,
@@ -128,14 +129,22 @@ function freezeViewportHeightUnits(css: string): string {
   })
 }
 
+/**
+ * Schemes main will actually open. `shell.openExternal` refuses anything else,
+ * so a display link outside this set is dead markup that looks live — drop the
+ * href instead and leave the text (review R8/S1).
+ */
+const DISPLAY_LINK_SCHEMES = ['https', 'http', 'mailto']
+
 function normalizeMailLink(href: string): string | null {
   const value = href.trim()
   if (!value) return null
+  // An in-document fragment never leaves the frame.
   if (value.startsWith('#')) return value
-  if (value.startsWith('//')) return `https:${value}`
-  if (/^[a-z][a-z\d+.-]*:/i.test(value)) return value
+  if (value.startsWith('//')) return safeUrl(`https:${value}`, DISPLAY_LINK_SCHEMES)
+  if (/^[a-z][a-z\d+.-]*:/i.test(value)) return safeUrl(value, DISPLAY_LINK_SCHEMES)
   if (/^(?:www\.)?[a-z\d](?:[a-z\d-]*[a-z\d])?(?:\.[a-z\d](?:[a-z\d-]*[a-z\d])?)+(?:[/?#]|$)/i.test(value)) {
-    return `https://${value}`
+    return safeUrl(`https://${value}`, DISPLAY_LINK_SCHEMES)
   }
   return null
 }
