@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import type { GmailThread } from '../gmail/parse'
+import { fakeMailProvider } from '../testing/fakes'
 import { hydrateMissingThreadBodies } from './bodies'
 import type { MailProvider } from './provider'
 
@@ -21,19 +22,10 @@ function externalThread(): GmailThread {
 }
 
 function provider(): MailProvider {
-  return {
-    modifyThread: vi.fn(async () => {}),
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
-    getProfile: vi.fn(async () => ({ emailAddress: 'test@example.com', historyId: '1' })),
-    listLabels: vi.fn(async () => []),
-    listThreadIds: vi.fn(async () => ({ threadIds: [] })),
+  return fakeMailProvider({
     getThread: vi.fn(async () => externalThread()),
-    getAttachmentData: vi.fn(async () => Buffer.from('fetched body').toString('base64url')),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '1' })),
-    listDrafts: vi.fn(async () => ({ drafts: [] })),
-    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } }))
-  }
+    getAttachmentData: vi.fn(async () => Buffer.from('fetched body').toString('base64url'))
+  })
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
-import type { SchedulerTime, TimerHandle } from '../time'
+import { fakeMailProvider, fakeSchedulerTime } from '../testing/fakes'
 import { planBackfillStart, runInboxBackfill } from './backfill'
-import type { MailProvider, ThreadIdPage } from './provider'
+import type { ThreadIdPage } from './provider'
 import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './tuning'
 
 interface FakeSyncState {
@@ -36,22 +36,6 @@ function fakeDb(state: FakeSyncState | undefined, existingThreadIds = new Set<st
   } as unknown as Db
 }
 
-function emptyProvider(): MailProvider {
-  return {
-    modifyThread: vi.fn(async () => {}),
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
-    getProfile: vi.fn(async () => ({ emailAddress: 'test@example.com', historyId: '101' })),
-    listLabels: vi.fn(async () => []),
-    listThreadIds: vi.fn(async () => ({ threadIds: [] })),
-    getThread: vi.fn(async (id) => ({ id, messages: [] })),
-    getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '101' })),
-    listDrafts: vi.fn(async () => ({ drafts: [] })),
-    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } }))
-  }
-}
-
 const emptyResult = { threadCount: 0, inboxThreadIds: [], spamThreadIds: [], trashThreadIds: [] }
 
 let callbacks: { onProgress: ReturnType<typeof vi.fn>; onError: ReturnType<typeof vi.fn> }
@@ -62,20 +46,13 @@ beforeEach(() => {
 
 describe('windowed backfill checkpoints', () => {
   it('reports first-readable, per-stage rate, processed count, and real quota-wait deltas', async () => {
-    let now = 0
     let quotaWaitMs = 0
+    const time = fakeSchedulerTime({ timers: 'inert' })
     const advance = (elapsedMs: number, waitedMs = 0): void => {
-      now += elapsedMs
+      time.advance(elapsedMs)
       quotaWaitMs += waitedMs
     }
-    const time: SchedulerTime = {
-      now: () => now,
-      timers: {
-        setTimeout: () => 1 as unknown as TimerHandle,
-        clearTimeout: () => {}
-      }
-    }
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     vi.mocked(provider.getProfile).mockImplementation(async () => {
       advance(100, 1)
       return { emailAddress: 'test@example.com', historyId: '101' }
@@ -157,7 +134,7 @@ describe('windowed backfill checkpoints', () => {
   })
 
   it('runs inbox stages, then all-mail, spam, trash, and per-label reconciliation', async () => {
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     const result = await runInboxBackfill(fakeDb(undefined), provider, callbacks)
 
     expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
@@ -227,7 +204,7 @@ describe('windowed backfill checkpoints', () => {
   })
 
   it('requests metadata, full, then all-mail and junk metadata snapshots', async () => {
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     vi.mocked(provider.listThreadIds)
       .mockResolvedValueOnce({ threadIds: ['old'] })
       .mockResolvedValueOnce({ threadIds: ['recent'] })
@@ -255,7 +232,7 @@ describe('windowed backfill checkpoints', () => {
   })
 
   it('skips threads already stored during the overlapping stages', async () => {
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     const onMetric = vi.fn()
     vi.mocked(provider.listThreadIds).mockImplementation(async (options): Promise<ThreadIdPage> => {
       if (options?.q === ALL_MAIL_WINDOW && !options.labelIds) {
@@ -287,7 +264,7 @@ describe('windowed backfill checkpoints', () => {
   })
 
   it('stops the page after one thread fails instead of draining the rest', async () => {
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     let release!: () => void
     const held = new Promise<void>((resolve) => {
       release = resolve
@@ -321,7 +298,7 @@ describe('windowed backfill checkpoints', () => {
   })
 
   it('resumes directly at per-label reconciliation after the junk stages complete', async () => {
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     const result = await runInboxBackfill(
       fakeDb({ backfill_cursor: 'reconcile', last_history_id: '88' }),
       provider,
@@ -334,7 +311,7 @@ describe('windowed backfill checkpoints', () => {
   })
 
   it('resumes the draft-id pager before continuing to the all-mail stage', async () => {
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     const result = await runInboxBackfill(
       fakeDb({ backfill_cursor: 'drafts:page-2', last_history_id: '88' }),
       provider,
@@ -351,7 +328,7 @@ describe('windowed backfill checkpoints', () => {
   })
 
   it('drops an expired saved page token and restarts that phase once', async () => {
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     vi.mocked(provider.listThreadIds).mockImplementation(async (options): Promise<ThreadIdPage> => {
       if (options?.pageToken === 'expired') throw new GmailApiError(400, 'invalid page token')
       return { threadIds: [] }
@@ -380,7 +357,7 @@ describe('windowed backfill checkpoints', () => {
   })
 
   it('restarts a completed cursor for expired-history recovery', async () => {
-    const provider = emptyProvider()
+    const provider = fakeMailProvider()
     vi.mocked(provider.getProfile).mockRejectedValueOnce(new Error('offline'))
     const db = fakeDb({ backfill_cursor: 'done', last_history_id: '88' })
 

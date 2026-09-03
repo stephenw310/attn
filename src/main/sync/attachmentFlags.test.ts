@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
+import { fakeMailProvider } from '../testing/fakes'
 import {
   type AttachmentFlagCallbacks,
   planAttachmentFlagStart,
   runAttachmentFlagWalk
 } from './attachmentFlags'
-import type { MailProvider } from './provider'
 
 const ACCOUNT = 'me@example.com'
 
@@ -41,23 +41,6 @@ function cursor(db: Db): string | null {
   ).attachment_cursor
 }
 
-function provider(overrides: Partial<MailProvider> = {}): MailProvider {
-  return {
-    modifyThread: vi.fn(async () => {}),
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
-    getProfile: vi.fn(async () => ({ emailAddress: ACCOUNT, historyId: '1' })),
-    listLabels: vi.fn(async () => []),
-    listThreadIds: vi.fn(async () => ({ threadIds: [] })),
-    getThread: vi.fn(async (id) => ({ id, messages: [] })),
-    getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '1' })),
-    listDrafts: vi.fn(async () => ({ drafts: [] })),
-    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } })),
-    ...overrides
-  }
-}
-
 function callbacks(): AttachmentFlagCallbacks & {
   onProgress: ReturnType<typeof vi.fn>
   onError: ReturnType<typeof vi.fn>
@@ -85,7 +68,7 @@ describe('attachment flag cursor routing', () => {
     const listThreadIds = vi.fn()
 
     await expect(
-      runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
+      runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
     ).resolves.toEqual({ threadsFlagged: 0 })
     expect(listThreadIds).not.toHaveBeenCalled()
     expect(cursor(db)).toBe('done')
@@ -100,7 +83,7 @@ describe('attachment flag walk', () => {
     const events = callbacks()
 
     await expect(
-      runAttachmentFlagWalk(db, provider({ listThreadIds, getThread }), ACCOUNT, events, NO_PAUSE)
+      runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds, getThread }), ACCOUNT, events, NO_PAUSE)
     ).resolves.toEqual({ threadsFlagged: 1 })
 
     // Only t1 changes: t2 already knew, t3 was not listed, and a thread the
@@ -128,7 +111,7 @@ describe('attachment flag walk', () => {
     const events = callbacks()
 
     await expect(
-      runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
+      runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
     ).resolves.toEqual({ threadsFlagged: 0 })
 
     // t2 is absent from the listing, which is not evidence: the listing skips
@@ -141,10 +124,10 @@ describe('attachment flag walk', () => {
     const db = store([{ id: 't1' }], 'attachments')
     const listThreadIds = vi.fn(async () => ({ threadIds: ['t1'] }))
 
-    await runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
+    await runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
     db.prepare('UPDATE sync_state SET attachment_cursor = ? WHERE account_id = ?').run('attachments', ACCOUNT)
     await expect(
-      runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
+      runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
     ).resolves.toEqual({ threadsFlagged: 0 })
     expect(flags(db)).toEqual({ t1: 1 })
   })
@@ -157,7 +140,7 @@ describe('attachment flag walk', () => {
       .mockResolvedValueOnce({ threadIds: ['t2'] })
 
     await expect(
-      runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
+      runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
     ).resolves.toEqual({ threadsFlagged: 2 })
 
     expect(listThreadIds).toHaveBeenNthCalledWith(1, {
@@ -183,7 +166,7 @@ describe('attachment flag walk', () => {
     const events = callbacks()
 
     await expect(
-      runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
+      runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
     ).resolves.toEqual({ threadsFlagged: 1 })
 
     expect(listThreadIds).toHaveBeenNthCalledWith(2, {
@@ -203,7 +186,7 @@ describe('attachment flag walk', () => {
     const events = callbacks()
 
     await expect(
-      runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
+      runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
     ).resolves.toBeNull()
     expect(events.onError).toHaveBeenCalledWith(expect.objectContaining({ status: 429 }))
     expect(cursor(db)).toBe('attachments')
@@ -220,7 +203,7 @@ describe('attachment flag walk', () => {
     const events = callbacks()
 
     await expect(
-      runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, events, {
+      runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, events, {
         ...NO_PAUSE,
         shouldContinue: () => live
       })
@@ -240,7 +223,7 @@ describe('attachment flag walk', () => {
       .mockResolvedValueOnce({ threadIds: ['t1'], nextPageToken: 'page-2' })
       .mockResolvedValueOnce({ threadIds: ['t2'] })
     const events = callbacks()
-    const run = runAttachmentFlagWalk(db, provider({ listThreadIds }), ACCOUNT, events, {
+    const run = runAttachmentFlagWalk(db, fakeMailProvider({ listThreadIds }), ACCOUNT, events, {
       pagePauseMs: 1_000,
       foregroundYieldMs: 250,
       shouldYield: () => foregroundBusy

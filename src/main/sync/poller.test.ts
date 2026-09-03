@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
+import { fakeMailProvider } from '../testing/fakes'
 import type { fetchAndCacheThread } from './fetchThread'
 import {
   type FetchedHistoryPlan,
@@ -24,19 +25,7 @@ const fixture = JSON.parse(
 
 function providerFor(pages: HistoryPage[]): MailProvider {
   let page = 0
-  return {
-    modifyThread: vi.fn(async () => {}),
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
-    getProfile: vi.fn(async () => ({ emailAddress: 'test@example.com', historyId: '1' })),
-    listLabels: vi.fn(async () => []),
-    listThreadIds: vi.fn(async () => ({ threadIds: [] })),
-    getThread: vi.fn(async (id) => ({ id, messages: [] })),
-    getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => pages[page++]),
-    listDrafts: vi.fn(async () => ({ drafts: [] })),
-    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } }))
-  }
+  return fakeMailProvider({ listHistory: vi.fn(async () => pages[page++]) })
 }
 
 function plan(refetchThreadIds: string[] = []): FetchedHistoryPlan {

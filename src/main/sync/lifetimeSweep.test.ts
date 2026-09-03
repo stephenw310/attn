@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
-import { systemTime } from '../time'
+import { fakeMailProvider, fakeSchedulerTime } from '../testing/fakes'
 import { type LifetimeSweepCallbacks, planLifetimeSweepStart, runLifetimeSweep } from './lifetimeSweep'
 import type { MailProvider } from './provider'
 
@@ -47,25 +47,15 @@ function fakeDb(state: FakeDbState): Db {
 }
 
 function provider(overrides: Partial<MailProvider> = {}): MailProvider {
-  return {
-    modifyThread: vi.fn(async () => {}),
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
+  return fakeMailProvider({
     getProfile: vi.fn(async () => ({
       emailAddress: 'test@example.com',
       historyId: '101',
       threadsTotal: 50,
       messagesTotal: 70
     })),
-    listLabels: vi.fn(async () => []),
-    listThreadIds: vi.fn(async () => ({ threadIds: [] })),
-    getThread: vi.fn(async (id) => ({ id, messages: [] })),
-    getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '101' })),
-    listDrafts: vi.fn(async () => ({ drafts: [] })),
-    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } })),
     ...overrides
-  }
+  })
 }
 
 function callbacks(): LifetimeSweepCallbacks & {
@@ -387,7 +377,7 @@ describe('lifetime header indexing', () => {
     { threadCap: 0, expectedEtaMs: 7_200 },
     { threadCap: 1, expectedEtaMs: undefined }
   ])('estimates remaining metadata work with cap $threadCap', async ({ threadCap, expectedEtaMs }) => {
-    let now = 0
+    const time = fakeSchedulerTime()
     const state = { cursor: 'lifetime', threadIds: new Set<string>() }
     mocks.persistThread.mockImplementation((_db, _accountId, thread: GmailThread) => {
       state.threadIds.add(thread.id)
@@ -399,7 +389,7 @@ describe('lifetime header indexing', () => {
       fakeDb(state),
       provider({
         getProfile: vi.fn(async () => {
-          now = 100
+          time.set(100)
           return {
             emailAddress: 'test@example.com',
             historyId: '101',
@@ -409,19 +399,19 @@ describe('lifetime header indexing', () => {
         listThreadIds: vi
           .fn()
           .mockImplementationOnce(async () => {
-            now = 200
+            time.set(200)
             return { threadIds: ['old'], nextPageToken: 'page-2', resultSizeEstimate: 10 }
           })
           .mockResolvedValueOnce({ threadIds: [] }),
         getThread: vi.fn(async () => {
-          now = 1_000
+          time.set(1_000)
           return { id: 'old', messages: [] }
         })
       }),
       'test@example.com',
       events,
       {
-        time: { now: () => now, timers: systemTime.timers },
+        time,
         requestIntervalMs: 0,
         pagePauseMs: 0,
         threadCap

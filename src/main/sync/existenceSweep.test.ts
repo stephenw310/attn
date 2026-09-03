@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
+import { fakeMailProvider } from '../testing/fakes'
 import { reconcileThreadExistence } from './existenceSweep'
 import { persistThread } from './persist'
 import type { ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
@@ -34,19 +35,7 @@ function provider(
   listThreadIds: (options: ListThreadIdsOptions) => Promise<ThreadIdPage>,
   getThread: (id: string) => Promise<GmailThread> = async (id) => thread(id)
 ): MailProvider {
-  return {
-    modifyThread: vi.fn(async () => {}),
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
-    getProfile: vi.fn(async () => ({ emailAddress: 'account', historyId: '1' })),
-    listLabels: vi.fn(async () => []),
-    listThreadIds: vi.fn(listThreadIds),
-    getThread: vi.fn(getThread),
-    getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '1' })),
-    listDrafts: vi.fn(async () => ({ drafts: [] })),
-    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: id } }))
-  }
+  return fakeMailProvider({ listThreadIds: vi.fn(listThreadIds), getThread: vi.fn(getThread) })
 }
 
 describe('thread existence sweep', () => {

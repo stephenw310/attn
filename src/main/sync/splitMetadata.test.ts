@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
-import type { MailProvider } from './provider'
+import { fakeMailProvider } from '../testing/fakes'
 import { planSplitMetadataStart, runSplitMetadataRebuild, type SplitMetadataCallbacks } from './splitMetadata'
 
 const ACCOUNT = 'upgrade@example.com'
@@ -13,23 +13,6 @@ function callbacks(): SplitMetadataCallbacks & {
   onError: ReturnType<typeof vi.fn>
 } {
   return { onProgress: vi.fn(), onError: vi.fn() }
-}
-
-function provider(overrides: Partial<MailProvider> = {}): MailProvider {
-  return {
-    modifyThread: vi.fn(async () => {}),
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
-    getProfile: vi.fn(async () => ({ emailAddress: ACCOUNT, historyId: '1' })),
-    listLabels: vi.fn(async () => []),
-    listThreadIds: vi.fn(async () => ({ threadIds: [] })),
-    getThread: vi.fn(async (id) => ({ id, messages: [] })),
-    getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '1' })),
-    listDrafts: vi.fn(async () => ({ drafts: [] })),
-    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } })),
-    ...overrides
-  }
 }
 
 function upgradedStore(cursor = 'split-metadata'): Db {
@@ -113,7 +96,7 @@ describe('split metadata rebuild', () => {
 
     const result = await runSplitMetadataRebuild(
       db,
-      provider({ listThreadIds, getThread }),
+      fakeMailProvider({ listThreadIds, getThread }),
       ACCOUNT,
       events,
       NO_PAUSE
@@ -155,7 +138,7 @@ describe('split metadata rebuild', () => {
       .mockResolvedValueOnce({ threadIds: [] })
 
     await expect(
-      runSplitMetadataRebuild(db, provider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
+      runSplitMetadataRebuild(db, fakeMailProvider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
     ).resolves.toEqual({ threadsRefreshed: 0 })
 
     expect(listThreadIds).toHaveBeenNthCalledWith(1, {
@@ -180,7 +163,13 @@ describe('split metadata rebuild', () => {
     const getThread = vi.fn()
 
     await expect(
-      runSplitMetadataRebuild(db, provider({ listThreadIds, getThread }), ACCOUNT, callbacks(), NO_PAUSE)
+      runSplitMetadataRebuild(
+        db,
+        fakeMailProvider({ listThreadIds, getThread }),
+        ACCOUNT,
+        callbacks(),
+        NO_PAUSE
+      )
     ).resolves.toEqual({ threadsRefreshed: 0 })
 
     expect(listThreadIds).not.toHaveBeenCalled()
@@ -202,7 +191,7 @@ describe('split metadata rebuild', () => {
     await expect(
       runSplitMetadataRebuild(
         db,
-        provider({ listThreadIds: vi.fn(async () => ({ threadIds: ['stored'] })), getThread }),
+        fakeMailProvider({ listThreadIds: vi.fn(async () => ({ threadIds: ['stored'] })), getThread }),
         ACCOUNT,
         callbacks(),
         { ...NO_PAUSE, snapshotRevision: () => revision }
@@ -227,7 +216,7 @@ describe('split metadata rebuild', () => {
     const events = callbacks()
 
     await expect(
-      runSplitMetadataRebuild(db, provider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
+      runSplitMetadataRebuild(db, fakeMailProvider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
     ).resolves.toEqual({ threadsRefreshed: 0 })
     expect(listThreadIds).toHaveBeenLastCalledWith({
       labelIds: ['INBOX'],
@@ -249,7 +238,7 @@ describe('split metadata rebuild', () => {
     await expect(
       runSplitMetadataRebuild(
         db,
-        provider({ listThreadIds: vi.fn(async () => ({ threadIds: ['stored'] })), getThread }),
+        fakeMailProvider({ listThreadIds: vi.fn(async () => ({ threadIds: ['stored'] })), getThread }),
         ACCOUNT,
         callbacks(),
         { ...NO_PAUSE, shouldContinue: () => active }
