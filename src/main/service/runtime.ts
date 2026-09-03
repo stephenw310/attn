@@ -515,7 +515,8 @@ export class ServiceRuntime {
       getOutboxSender: () => outboxSender,
       getSnoozeScheduler: () => snoozeScheduler,
       acquireIndexingSlot: (accountId) => this.indexingSlot.acquire(accountId),
-      shouldPreemptIndexing: (accountId) => this.indexingSlot.hasPriorityWaiter(accountId)
+      shouldPreemptIndexing: (accountId) => this.indexingSlot.hasPriorityWaiter(accountId),
+      cleanOutboxSpool: (outboxId) => cleanOutboxSpool(this.input.userDataPath, outboxId)
     })
     const session: AccountSession = {
       id,

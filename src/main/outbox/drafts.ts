@@ -263,6 +263,30 @@ export function isUntouchedThreadDraft(
   )
 }
 
+/**
+ * The single rule for "is this draft worth putting in Gmail": not effectively
+ * empty, and not a reply or forward the user never contributed to. Every path
+ * that can push a row to Gmail — the IPC checkpoint request, closing a
+ * composer, and the mirror's own row selection — asks this one question, so a
+ * crash-recovered untouched reply cannot reach Gmail through a drain the
+ * composer never requested.
+ */
+export function shouldMirrorDraft(
+  input: DraftSaveInput,
+  localRevision: number,
+  defaultSignatureFingerprint: string | null
+): boolean {
+  // Forward planning is the only system path that creates a removable regular
+  // attachment, and it writes revision 1. Any later revision therefore means
+  // the user changed the forward even if the final fields alone cannot show it
+  // (most importantly, when they removed every forwarded file).
+  const forwardEditedSincePlan = input.kind === 'forward' && localRevision > 1
+  return (
+    !isEffectivelyEmptyDraft(input, defaultSignatureFingerprint) &&
+    !isUntouchedThreadDraft(input, forwardEditedSincePlan, defaultSignatureFingerprint)
+  )
+}
+
 /** Create-before-type and subsequent checkpoints share one operation. Id-less always means new. */
 export function saveDraft(
   db: Db,
@@ -391,11 +415,7 @@ export function requestDraftMirror(db: Db, accountId: string, draftId: string): 
     quoteText: draft.quote_text,
     followUpAt: null
   }
-  const forwardEditedSincePlan = input.kind === 'forward' && draft.local_revision > 1
-  return (
-    !isEffectivelyEmptyDraft(input, draft.default_signature_fingerprint) &&
-    !isUntouchedThreadDraft(input, forwardEditedSincePlan, draft.default_signature_fingerprint)
-  )
+  return shouldMirrorDraft(input, draft.local_revision, draft.default_signature_fingerprint)
 }
 
 export function closeDraft(db: Db, accountId: string, id: string, now = Date.now()): 'saved' | 'discarded' {
@@ -409,15 +429,7 @@ export function closeDraft(db: Db, accountId: string, id: string, now = Date.now
     id: draft.id,
     attachments: parseStoredDraftAttachments(row.attachments_json)
   }
-  // Forward planning is the only system path that creates a removable regular
-  // attachment, and it writes revision 1. Any later revision therefore means
-  // the user changed the forward even if the final fields alone cannot show it
-  // (most importantly, when they removed every forwarded file).
-  const forwardEditedSincePlan = row.kind === 'forward' && row.local_revision > 1
-  if (
-    !isEffectivelyEmptyDraft(input, row.default_signature_fingerprint) &&
-    !isUntouchedThreadDraft(input, forwardEditedSincePlan, row.default_signature_fingerprint)
-  ) {
+  if (shouldMirrorDraft(input, row.local_revision, row.default_signature_fingerprint)) {
     db.prepare("UPDATE outbox SET state = 'drafted', updated_at = ? WHERE account_id = ? AND id = ?").run(
       now,
       accountId,

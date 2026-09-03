@@ -108,7 +108,7 @@ it('aborts a stalled checkpoint after the shutdown grace period', async () => {
   expect(drain).toHaveBeenCalledOnce()
 })
 
-it('backs off a permanently rejected draft and mirrors later rows', async () => {
+it('stops retrying a permanently rejected draft until the user edits it', async () => {
   const time = new ManualTime()
   const db = openDatabase(':memory:')
   db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
@@ -149,13 +149,21 @@ it('backs off a permanently rejected draft and mirrors later rows', async () => 
     expect(db.prepare('SELECT mirror_revision FROM outbox WHERE id = ?').get(laterId)).toEqual({
       mirror_revision: 1
     })
-    expect(time.nextDelay()).toBe(5_000)
-
-    time.advance(4_999)
+    // Gmail rejects this exact content every time, so nothing is armed and a
+    // later trigger leaves the row alone.
+    expect(time.nextDelay()).toBeNull()
+    await executor.trigger()
     expect(attempted).toEqual(['rejected', 'later'])
-    time.advance(1)
-    await vi.waitFor(() => expect(attempted).toEqual(['rejected', 'later', 'rejected']))
-    await vi.waitFor(() => expect(time.nextDelay()).toBe(30_000))
+
+    // The user edits it: a new local revision is a new question for Gmail.
+    saveDraft(
+      db,
+      'user@example.com',
+      { ...emptyDraftInput(), id: rejectedId, subject: 'Rejected draft', bodyText: 'Fixed' },
+      30
+    )
+    await executor.trigger()
+    expect(attempted).toEqual(['rejected', 'later', 'rejected'])
   } finally {
     await executor.stop()
     log.mockRestore()
@@ -183,7 +191,8 @@ it('keeps the provider paired with its account when authentication changes mid-d
     }
   })
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const executor = new DraftMirrorExecutor({} as Db, accountId, provider, { time, drainDrafts: drain })
+  const db = { prepare: () => ({ get: () => undefined }) } as unknown as Db
+  const executor = new DraftMirrorExecutor(db, accountId, provider, { time, drainDrafts: drain })
 
   try {
     await executor.trigger()
@@ -191,7 +200,6 @@ it('keeps the provider paired with its account when authentication changes mid-d
     expect(drain).toHaveBeenCalledTimes(2)
     expect(accountId).toHaveBeenCalledOnce()
     expect(provider).toHaveBeenCalledOnce()
-    expect(time.nextDelay()).toBe(5_000)
   } finally {
     await executor.stop()
     log.mockRestore()

@@ -420,7 +420,9 @@ describe('draft synchronization identity', () => {
       }))
     } as unknown as Db
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: false
+    })
     expect(getDraft).not.toHaveBeenCalled()
   })
 
@@ -502,8 +504,12 @@ describe('draft synchronization identity', () => {
       getDraft
     }
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(true)
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: true
+    })
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: false
+    })
     expect(getDraft).toHaveBeenCalledWith('draft-1', { priority: 'polling' })
     expect(getDraft).toHaveBeenCalledTimes(1)
     expect(repairBinding).toHaveBeenCalledWith('forward', 'thread-1', 'account', 'local-draft')
@@ -527,7 +533,9 @@ describe('draft synchronization identity', () => {
       }))
     } as unknown as Db
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: false
+    })
     expect(getDraft).not.toHaveBeenCalled()
   })
 
@@ -563,7 +571,12 @@ describe('draft synchronization identity', () => {
       }))
     } as unknown as Db
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(true)
+    // The deleted ids come back so the caller drops their attachment spool now
+    // rather than leaving it for the next launch's reconciliation.
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toEqual({
+      changed: true,
+      deletedIds: ['closed']
+    })
     // Deleted in Gmail while closed and fully mirrored → the local row goes too.
     expect(db.prepare).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM outbox'))
     expect(run).toHaveBeenCalledWith('account', 'closed')
@@ -606,7 +619,9 @@ describe('draft synchronization identity', () => {
       }))
     } as unknown as Db
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: false
+    })
     expect(run).not.toHaveBeenCalled()
     expect(db.prepare).not.toHaveBeenCalledWith(expect.stringContaining('DELETE FROM outbox'))
     expect(db.prepare).not.toHaveBeenCalledWith(expect.stringContaining('gmail_draft_id = NULL'))

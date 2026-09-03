@@ -39,9 +39,9 @@ export class DraftMirrorExecutor {
   private remoteAbortController: AbortController | null = null
   private stopping = false
   private timer: TimerHandle | null = null
-  private blockedTimer: TimerHandle | null = null
   private attempts = 0
-  private readonly rowBackoff = new Map<string, { attempts: number; nextAttemptAt: number }>()
+  /** Rows Gmail permanently rejected, against the local revision it rejected. */
+  private readonly rejectedRows = new Map<string, number | null>()
 
   private readonly time: SchedulerTime
   private readonly drainDrafts: MirrorDrain
@@ -61,8 +61,6 @@ export class DraftMirrorExecutor {
   trigger(): Promise<void> {
     if (this.stopping || this.timer) return Promise.resolve()
     if (this.drainPromise) return this.drainPromise
-    if (this.blockedTimer) this.time.timers.clearTimeout(this.blockedTimer)
-    this.blockedTimer = null
     this.drainPromise = this.drain().finally(() => {
       this.drainPromise = null
     })
@@ -77,9 +75,7 @@ export class DraftMirrorExecutor {
   async stop(): Promise<void> {
     this.stopping = true
     if (this.timer) this.time.timers.clearTimeout(this.timer)
-    if (this.blockedTimer) this.time.timers.clearTimeout(this.blockedTimer)
     this.timer = null
-    this.blockedTimer = null
     const drain = this.drainPromise
     if (!drain) return
     let timeout: TimerHandle | null = null
@@ -100,21 +96,25 @@ export class DraftMirrorExecutor {
     return waitForAbortable(this.drainPromise ?? Promise.resolve(), signal)
   }
 
-  private scheduleBlockedRetry(): void {
-    if (this.stopping) return
-    if (this.blockedTimer) this.time.timers.clearTimeout(this.blockedTimer)
-    this.blockedTimer = null
-    const now = this.time.now()
-    const nextAttemptAt = Math.min(
-      ...[...this.rowBackoff.values()]
-        .map((entry) => entry.nextAttemptAt)
-        .filter((attemptAt) => attemptAt > now)
-    )
-    if (!Number.isFinite(nextAttemptAt)) return
-    this.blockedTimer = this.time.timers.setTimeout(() => {
-      this.blockedTimer = null
-      void this.trigger()
-    }, nextAttemptAt - now)
+  /**
+   * A row Gmail rejected outright — a malformed address, say — is rejected the
+   * same way every time, so it waits for the user to change it instead of
+   * spending a request a minute for the life of the draft. Any later revision
+   * (or a row that has since gone) clears the block.
+   */
+  private isRejected(accountId: string, rowId: string): boolean {
+    const rejectedRevision = this.rejectedRows.get(rowId)
+    if (rejectedRevision === undefined) return false
+    if (rejectedRevision === this.localRevisionOf(accountId, rowId)) return true
+    this.rejectedRows.delete(rowId)
+    return false
+  }
+
+  private localRevisionOf(accountId: string, rowId: string): number | null {
+    const row = this.db
+      .prepare('SELECT local_revision FROM outbox WHERE account_id = ? AND id = ?')
+      .get(accountId, rowId) as { local_revision: number } | undefined
+    return row?.local_revision ?? null
   }
 
   private async drain(): Promise<void> {
@@ -135,14 +135,9 @@ export class DraftMirrorExecutor {
             () => !this.stopping,
             this.spoolRoot,
             controller.signal,
-            (rowId) => (this.rowBackoff.get(rowId)?.nextAttemptAt ?? 0) > this.time.now()
+            (rowId) => this.isRejected(accountId, rowId)
           )
           this.attempts = 0
-          const now = this.time.now()
-          for (const [rowId, backoff] of this.rowBackoff) {
-            if (backoff.nextAttemptAt <= now) this.rowBackoff.delete(rowId)
-          }
-          this.scheduleBlockedRetry()
           return
         } catch (error) {
           if (this.stopping) return
@@ -151,12 +146,7 @@ export class DraftMirrorExecutor {
           console.error(`[draft] mirror failed: ${errorMessage(reason)}`)
           const retryable = !(reason instanceof GmailApiError) || reason.retryable
           if (!retryable && rowError) {
-            const previous = this.rowBackoff.get(rowError.rowId)
-            const attempts = previous?.attempts ?? 0
-            this.rowBackoff.set(rowError.rowId, {
-              attempts: attempts + 1,
-              nextAttemptAt: this.time.now() + retryDelayMs(attempts)
-            })
+            this.rejectedRows.set(rowError.rowId, this.localRevisionOf(accountId, rowError.rowId))
             continue
           }
           if (!retryable) return

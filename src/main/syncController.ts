@@ -67,6 +67,8 @@ interface SyncControllerContext {
    * that hand-over free (F18, §9 #21(g)).
    */
   shouldPreemptIndexing?: (accountId: string) => boolean
+  /** Drops the attachment spool of a draft row remote sync deleted (owned by the runtime). */
+  cleanOutboxSpool?: (outboxId: string) => void
   /** Test-only pacing overrides threaded through the historical chain stages. */
   lifetimePacing?: { requestIntervalMs?: number; pagePauseMs?: number; foregroundYieldMs?: number }
 }
@@ -517,7 +519,11 @@ export class SyncController {
         syncPrimarySendAs(this.context.db, accountId, provider, { priority: 'polling' }).then(
           () => undefined
         ),
-      syncDrafts: () => syncRemoteDrafts(this.context.db, accountId, provider),
+      syncDrafts: async () => {
+        const result = await syncRemoteDrafts(this.context.db, accountId, provider)
+        for (const outboxId of result.deletedIds) this.context.cleanOutboxSpool?.(outboxId)
+        return result.changed
+      },
       kickExecutor: () => {
         void this.context.getActionExecutor()?.trigger()
         void this.context.getDraftMirrorExecutor()?.trigger()

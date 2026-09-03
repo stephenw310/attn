@@ -535,7 +535,17 @@ export async function reconcileRemoteDraft(
   return decision
 }
 
-export async function syncRemoteDrafts(db: Db, accountId: string, provider: MailProvider): Promise<boolean> {
+export interface RemoteDraftSyncResult {
+  changed: boolean
+  /** Rows this pass deleted, so the caller can drop their attachment spool now. */
+  deletedIds: string[]
+}
+
+export async function syncRemoteDrafts(
+  db: Db,
+  accountId: string,
+  provider: MailProvider
+): Promise<RemoteDraftSyncResult> {
   const knownDrafts = new Map(
     (
       db
@@ -563,6 +573,7 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
     ])
   )
   const remoteIds = new Set<string>()
+  const deletedIds: string[] = []
   let pageToken: string | undefined
   let changed = false
   do {
@@ -621,8 +632,9 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
       ).run(accountId, row.id)
     } else {
       db.prepare('DELETE FROM outbox WHERE account_id = ? AND id = ?').run(accountId, row.id)
+      deletedIds.push(row.id)
       changed = true
     }
   }
-  return changed
+  return { changed, deletedIds }
 }
