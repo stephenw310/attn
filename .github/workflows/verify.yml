@@ -48,7 +48,9 @@ jobs:
   electron-smoke:
     name: Electron smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The full Playwright suite runs one worker and takes roughly 30 minutes;
+    # a 20-minute limit cancelled every run before it could report.
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
