@@ -4,15 +4,10 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { selectedIndex } from './nav'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 test.setTimeout(60_000)
-
-function selectedIndex(page: Page): Promise<number> {
-  return page
-    .getByTestId('thread-row')
-    .evaluateAll((rows) => rows.findIndex((row) => row.hasAttribute('data-selected')))
-}
 
 async function goToDrafts(page: Page): Promise<void> {
   const draftList = page.getByTestId('draft-list')
@@ -798,7 +793,9 @@ test('discovers a provider-gated send through the pending readout and Go to Outb
   await expect.poll(() => selectedIndex(page)).toBe(1)
   await expect(page.getByTestId('selection-count')).toHaveText('1 selected')
 
-  ;({ page } = await boot.relaunch())
+  // A force kill, not a quit: the queued row has to be durable on its own,
+  // without a shutdown hook flushing anything on the way out (GAP-5).
+  ;({ page } = await boot.relaunch({ kill: true }))
   composer = new ComposerPage(page)
   await composer.expectPending(1)
   await page.keyboard.press('g')
@@ -2371,9 +2368,9 @@ test('checkpoints continuously typed content without waiting for an idle gap', a
     await page.clock.fastForward(900)
   }
   // Time is paused 100ms before the trailing idle save could run. This read
-  // proves the hard checkpoint reached SQLite before the app is relaunched.
+  // proves the hard checkpoint reached SQLite before the app is killed.
   await composer.expectSaved()
-  ;({ page } = await boot.relaunch())
+  ;({ page } = await boot.relaunch({ kill: true }))
   composer = new ComposerPage(page)
 
   await expect(composer.root).toBeVisible()
