@@ -614,7 +614,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   includesQuote={unifiedSignatureAndQuote}
                   onReveal={revealUnifiedContent}
                 />
-                {mode === 'inline' && draft.kind !== 'forward' && <AutoFocusPlugin />}
+                {mode === 'inline' && draft.kind !== 'forward' && (
+                  // Focus the reply where the user writes it. Lexical's default
+                  // lands the caret at the end of the document — below the
+                  // signature, inside the Attn footer — so the first keystroke
+                  // typed into the footer instead of the body.
+                  <AutoFocusPlugin defaultSelection="rootStart" />
+                )}
                 <OnChangePlugin ignoreSelectionChange onChange={captureEditor} />
                 <ComposerCommandPlugin
                   onAttach={pickAttachments}
