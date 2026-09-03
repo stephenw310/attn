@@ -4,15 +4,10 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { selectedIndex } from './nav'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 test.setTimeout(60_000)
-
-function selectedIndex(page: Page): Promise<number> {
-  return page
-    .getByTestId('thread-row')
-    .evaluateAll((rows) => rows.findIndex((row) => row.hasAttribute('data-selected')))
-}
 
 async function goToDrafts(page: Page): Promise<void> {
   const draftList = page.getByTestId('draft-list')
@@ -798,7 +793,9 @@ test('discovers a provider-gated send through the pending readout and Go to Outb
   await expect.poll(() => selectedIndex(page)).toBe(1)
   await expect(page.getByTestId('selection-count')).toHaveText('1 selected')
 
-  ;({ page } = await boot.relaunch())
+  // A force kill, not a quit: the queued row has to be durable on its own,
+  // without a shutdown hook flushing anything on the way out (GAP-5).
+  ;({ page } = await boot.relaunch({ kill: true }))
   composer = new ComposerPage(page)
   await composer.expectPending(1)
   await page.keyboard.press('g')
@@ -975,6 +972,30 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await showCopies.click()
   await expect(composer.recipientField('cc')).toBeVisible()
   await expect(composer.recipientField('bcc')).toBeVisible()
+})
+
+test('strikes text through with the format menu action (B10)', async ({ page }) => {
+  // Lexical renders strikethrough purely through its theme class, so a missing
+  // `.app-composer-strikethrough` rule left the toolbar action invisible while
+  // the sent mail still carried <s>.
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.typeBody('Struck through')
+  await composer.editor.selectText()
+
+  await page.getByTestId('composer-format-more').click()
+  await page.getByTestId('composer-format-menu').getByText('Strikethrough').click()
+  await expect(page.getByTestId('composer-format-menu')).toHaveCount(0)
+
+  await expect
+    .poll(() =>
+      composer.editor.evaluate((root) =>
+        [...root.querySelectorAll('*')].some((node) =>
+          getComputedStyle(node).textDecorationLine.includes('line-through')
+        )
+      )
+    )
+    .toBe(true)
 })
 
 test('adds links from the toolbar and the registered composer shortcut', async ({ page }) => {
@@ -1989,6 +2010,36 @@ test('does not overwrite typing when CID image hydration finishes late', async (
   await expect(composer.editor).toContainText('Original body typed before hydration')
 })
 
+test('keeps a resolved inline image through the first undo', async ({ app, page }) => {
+  const error = await app.evaluate(
+    ({ ipcMain }, args) =>
+      new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
+    {
+      channel: TEST_CHANNELS.remoteDraft,
+      remote: remoteDraft(
+        'gmail-undo-image',
+        'Undo inline image',
+        '<p>Original body</p><p><img data-surl="cid:remote-inline" src="cid:remote-inline"></p>',
+        '',
+        true
+      )
+    }
+  )
+  if (error) throw new Error(error)
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Undo inline image' }).click()
+  const composer = new ComposerPage(page)
+  const image = composer.editor.locator('img')
+  await expect(image).toHaveAttribute('src', /^data:image\/png;base64,/)
+
+  // Swapping the placeholder for the hydrated image is not an edit the user
+  // made, so the first undo must not restore the transparent placeholder.
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(image).toHaveAttribute('src', /^data:image\/png;base64,/)
+  await expect(composer.editor).toContainText('Original body')
+})
+
 test('keeps the selected draft stable when a refresh reorders the list', async ({ page }) => {
   await page.getByTestId('thread-list').waitFor({ state: 'attached' })
   await page.evaluate(async () => {
@@ -2317,9 +2368,9 @@ test('checkpoints continuously typed content without waiting for an idle gap', a
     await page.clock.fastForward(900)
   }
   // Time is paused 100ms before the trailing idle save could run. This read
-  // proves the hard checkpoint reached SQLite before the app is relaunched.
+  // proves the hard checkpoint reached SQLite before the app is killed.
   await composer.expectSaved()
-  ;({ page } = await boot.relaunch())
+  ;({ page } = await boot.relaunch({ kill: true }))
   composer = new ComposerPage(page)
 
   await expect(composer.root).toBeVisible()
@@ -2515,4 +2566,23 @@ test('keeps a reply signature and quoted history collapsed with empty lines besi
   await expect(composer.editor).toContainText('My reply')
   const reopened = await page.evaluate(async (id) => window.attn.draft.get(id ?? ''), savedId)
   expect(reopened?.quoteHtml).toBe(saved?.quoteHtml)
+})
+
+test('quit checkpoints composer text no autosave timer has reached yet (B28)', async ({ boot, page }) => {
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  const clockStart = Date.now()
+  await page.clock.install({ time: clockStart })
+  // Freeze time well inside the one-second idle debounce: neither checkpoint
+  // timer can fire, so only the pre-quit request can reach SQLite.
+  await page.clock.pauseAt(clockStart + 100)
+  const typed = 'Quit must not drop this sentence.'
+  await page.keyboard.type(typed)
+  await expect(composer.editor).toContainText(typed)
+
+  ;({ page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await expect(composer.editor).toContainText(typed)
 })

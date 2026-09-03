@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
-import { sanitizeDraftHtmlForImport, sanitizeOutgoingHtml } from './sanitize'
+import { sanitizeComposerImageSource, sanitizeDraftHtmlForImport, sanitizeOutgoingHtml } from './sanitize'
 
 describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
   it('keeps only the native Gmail separator marker and strips active content', () => {
@@ -58,6 +58,15 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
     )
     expect(sanitized.fakeSignature).toBe('<div>Fake</div>')
     expect(Object.values(sanitized).join('')).not.toMatch(/<script|onclick|data-secret|javascript:/)
+  })
+
+  it('strips inline event handlers on the import path too', () => {
+    // DOMPurify's allowlist admits no `on*` attribute, so neither sanitizer
+    // carries a handler list of its own; this is what pins that.
+    const html = '<p onclick="steal()" onerror="x()" onmouseover="y()" onfocus="z()">Hi</p>'
+
+    expect(sanitizeDraftHtmlForImport(html)).toBe('<p>Hi</p>')
+    expect(sanitizeOutgoingHtml(html)).toBe('<p>Hi</p>')
   })
 
   it('keeps supported numeric formatting attributes without widening URI schemes', () => {
@@ -137,5 +146,48 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
     ]) {
       expect(sanitizeOutgoingHtml(`<div style="background:${value}">Tracked</div>`)).not.toContain('style=')
     }
+  })
+})
+
+describe('the restore-after-sanitize trust boundary', () => {
+  // `serialize.ts` turns `data-attn-cid` and `data-attn-remote-src` back into
+  // real `src` attributes AFTER this purifier has run, so nothing re-checks
+  // those two values (review S5). What makes that safe is the node level: only
+  // `ImageNode.exportDOM` writes those attributes into the export DOM, and it
+  // writes node fields that `sanitizeComposerImageSource` already vetted on
+  // every import path. These cases pin that gate, and pin that a `src` the
+  // purifier itself keeps has passed the URI allowlist.
+  it('admits only the image sources a restore may reintroduce', () => {
+    expect(sanitizeComposerImageSource('https://cdn.test/a.png')).toBe('https://cdn.test/a.png')
+    expect(sanitizeComposerImageSource('cid:logo@attn')).toBe('cid:logo@attn')
+    expect(sanitizeComposerImageSource('data:image/gif;base64,R0lGODlhAQABAAAAACw=')).toBe(
+      'data:image/gif;base64,R0lGODlhAQABAAAAACw='
+    )
+    for (const hostile of [
+      'javascript:alert(1)',
+      'file:///etc/passwd',
+      'data:text/html,<script>alert(1)</script>',
+      'vbscript:msgbox(1)',
+      ' java\nscript:alert(1)'
+    ]) {
+      expect(sanitizeComposerImageSource(hostile)).toBe('')
+    }
+    expect(sanitizeComposerImageSource(42)).toBe('')
+  })
+
+  it('keeps the composer export shape while dropping a hostile source outright', () => {
+    expect(
+      sanitizeOutgoingHtml('<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-attn-cid="logo@attn">')
+    ).toContain('data-attn-cid="logo@attn"')
+    expect(sanitizeOutgoingHtml('<img src="javascript:alert(1)" data-attn-cid="x@y">')).not.toContain(
+      'javascript:'
+    )
+    expect(sanitizeOutgoingHtml('<img src="file:///etc/passwd" data-attn-cid="x@y">')).not.toContain('file:')
+  })
+
+  it('drops every data attribute outside the composer own namespaced set', () => {
+    expect(sanitizeOutgoingHtml('<div data-attn-opaque-ish="1" data-tracking="2">Hi</div>')).toBe(
+      '<div>Hi</div>'
+    )
   })
 })

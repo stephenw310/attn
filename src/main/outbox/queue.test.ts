@@ -11,36 +11,21 @@ function settingsDb(value: string | undefined): Db {
   } as unknown as Db
 }
 
-function queueDb(): { db: Db; run: ReturnType<typeof vi.fn> } {
-  const run = vi.fn(() => ({ changes: 1 }))
-  const db = {
-    prepare: vi.fn((sql: string) => {
-      if (sql.includes('FROM settings')) return { get: vi.fn(() => ({ value: '0' })) }
-      if (sql.includes("state = 'composing'")) {
-        return {
-          get: vi.fn(() => ({
-            id: 'draft-1',
-            state: 'composing',
-            kind: 'new',
-            to_json: JSON.stringify([{ name: '', email: 'to@example.com' }]),
-            cc_json: '[]',
-            bcc_json: '[]',
-            subject: 'Message ID',
-            updated_at: 1,
-            gmail_draft_id: null,
-            rfc_message_id: null,
-            send_at: null,
-            attempts: 4,
-            verify_attempts: 5,
-            last_error: null
-          })),
-          run
-        }
-      }
-      throw new Error(`unexpected SQL: ${sql}`)
-    })
-  } as unknown as Db
-  return { db, run }
+function memoryDb(accountId: string): Db {
+  const db = openDatabase(':memory:')
+  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(accountId, accountId, 1)
+  return db
+}
+
+function composingDraft(db: Db, accountId: string): string {
+  const id = saveDraft(
+    db,
+    accountId,
+    { ...emptyDraftInput(), to: [{ name: '', email: 'to@example.com' }], subject: 'Message ID' },
+    1
+  )
+  db.prepare('UPDATE outbox SET attempts = 4, verify_attempts = 5 WHERE id = ?').run(id)
+  return id
 }
 
 describe('undo send setting', () => {
@@ -53,29 +38,37 @@ describe('undo send setting', () => {
   })
 
   it('uses the sender account domain for a durable Message-ID and resets both counters', () => {
-    const { db, run } = queueDb()
+    const db = memoryDb('me@workspace.example')
+    const id = composingDraft(db, 'me@workspace.example')
 
-    expect(queueSend(db, 'me@workspace.example', 'draft-1', 1_000)).toEqual({ id: 'draft-1', sendAt: 1_000 })
-    expect(run).toHaveBeenCalledWith(
-      expect.stringMatching(/^<[0-9a-f-]+@workspace\.example>$/),
-      1_000,
-      1_000,
-      'me@workspace.example',
-      'draft-1'
-    )
-    const updateSql = (db.prepare as unknown as ReturnType<typeof vi.fn>).mock.calls
-      .map(([sql]) => String(sql))
-      .find((sql) => sql.startsWith('UPDATE outbox'))
-    expect(updateSql).toContain('verify_attempts = 0')
+    expect(queueSend(db, 'me@workspace.example', id, 1_000)).toEqual({ id, sendAt: 6_000 })
+    const row = db
+      .prepare(
+        `SELECT state, rfc_message_id, send_at, attempts, verify_attempts, last_error, updated_at
+         FROM outbox WHERE id = ?`
+      )
+      .get(id) as Record<string, unknown>
+    expect(row.rfc_message_id).toMatch(/^<[0-9a-f-]+@workspace\.example>$/)
+    expect(row).toMatchObject({
+      state: 'queued',
+      send_at: 6_000,
+      attempts: 0,
+      verify_attempts: 0,
+      last_error: null,
+      updated_at: 1_000
+    })
+    db.close()
   })
 
   it('refuses to derive a Message-ID domain from an account id without an @', () => {
-    const { db, run } = queueDb()
+    const db = memoryDb('missing-domain')
+    const id = composingDraft(db, 'missing-domain')
 
-    expect(() => queueSend(db, 'missing-domain', 'draft-1', 1_000)).toThrow(
+    expect(() => queueSend(db, 'missing-domain', id, 1_000)).toThrow(
       'sender account is missing a Message-ID domain'
     )
-    expect(run).not.toHaveBeenCalled()
+    expect(db.prepare('SELECT state FROM outbox WHERE id = ?').get(id)).toEqual({ state: 'composing' })
+    db.close()
   })
 })
 

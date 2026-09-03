@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatSnoozeDate, parseSnoozeText, snoozePresets } from '../../../shared/snooze'
+import { wrappedIndex } from '../hooks/useHighlightedOption'
 
 interface SnoozePickerProps {
   targetCount: number
@@ -51,7 +52,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
             event.preventDefault()
             event.currentTarget.focus()
             const direction = event.key === 'ArrowDown' ? 1 : -1
-            setActiveIndex((index) => (index + direction + optionCount) % optionCount)
+            setActiveIndex((index) => wrappedIndex(index, direction, optionCount))
             return
           }
           if (event.key === 'Enter' && event.target === event.currentTarget) {

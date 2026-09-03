@@ -5,11 +5,11 @@
 
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
-import { type SchedulerTime, systemTime } from '../time'
-import { isExpiredPageTokenError } from './pageToken'
+import type { SchedulerTime } from '../time'
+import { type CursorWalkReason, lazyStatement, planCursorStart, runCursorWalk } from './cursorWalk'
 import { persistThread } from './persist'
 import type { MailProvider, ThreadIdPage } from './provider'
-import { LIFETIME_FOREGROUND_YIELD_MS, LIFETIME_PAGE_PAUSE_MS, LIFETIME_REQUEST_INTERVAL_MS } from './tuning'
+import { LIFETIME_REQUEST_INTERVAL_MS } from './tuning'
 
 const CURSOR_PHASE = 'split-metadata'
 
@@ -43,12 +43,9 @@ export interface SplitMetadataResult {
 export type SplitMetadataStartPlan = { kind: 'skip' } | { kind: 'run'; pageToken?: string }
 
 export function planSplitMetadataStart(rawCursor: string | null | undefined): SplitMetadataStartPlan {
-  if (rawCursor === 'done') return { kind: 'skip' }
-  if (!rawCursor || rawCursor === CURSOR_PHASE) return { kind: 'run' }
-  if (rawCursor.startsWith(`${CURSOR_PHASE}:`) && rawCursor.length > CURSOR_PHASE.length + 1) {
-    return { kind: 'run', pageToken: rawCursor.slice(CURSOR_PHASE.length + 1) }
-  }
-  throw new Error(`Invalid split metadata cursor: ${rawCursor}`)
+  const plan = planCursorStart(CURSOR_PHASE, rawCursor, 'split metadata')
+  if (plan.kind === 'skip') return plan
+  return { kind: 'run', ...(plan.token === undefined ? {} : { pageToken: plan.token }) }
 }
 
 /**
@@ -63,18 +60,17 @@ export async function runSplitMetadataRebuild(
   callbacks: SplitMetadataCallbacks,
   options: SplitMetadataOptions = {}
 ): Promise<SplitMetadataResult | null> {
-  const time = options.time ?? systemTime
-  const shouldContinue = options.shouldContinue ?? (() => true)
   const shouldYield = options.shouldYield ?? (() => false)
   const snapshotRevision = options.snapshotRevision ?? (() => 0)
-  const requestIntervalMs = options.requestIntervalMs ?? LIFETIME_REQUEST_INTERVAL_MS
-  const pagePauseMs = options.pagePauseMs ?? LIFETIME_PAGE_PAUSE_MS
-  const foregroundYieldMs = options.foregroundYieldMs ?? LIFETIME_FOREGROUND_YIELD_MS
-  let lastRequestAt: number | null = null
   let threadsDone = 0
   let threadsRefreshed = 0
+  let pageMailChanged = false
 
-  const progress = (reason: SplitMetadataProgress['reason'], mailChanged = false, waitMs?: number): void => {
+  // `mailChanged` belongs to the page just checkpointed, so the first report
+  // after that page carries it and the reports around the pause do not.
+  const progress = (reason: CursorWalkReason, waitMs?: number): void => {
+    const mailChanged = pageMailChanged
+    pageMailChanged = false
     callbacks.onProgress({
       threadsDone,
       reason,
@@ -83,75 +79,43 @@ export async function runSplitMetadataRebuild(
     })
   }
 
-  const wait = async (delayMs: number): Promise<boolean> => {
-    if (delayMs <= 0) return shouldContinue()
-    await new Promise<void>((resolve) => time.timers.setTimeout(resolve, delayMs))
-    return shouldContinue()
-  }
-
-  const waitForRequestSlot = async (): Promise<boolean> => {
-    let yielded = false
-    while (shouldContinue() && shouldYield()) {
-      yielded = true
-      progress('foreground-yield', false, foregroundYieldMs)
-      if (!(await wait(foregroundYieldMs))) return false
-    }
-    if (!shouldContinue()) return false
-    if (yielded) progress('running')
-    if (lastRequestAt !== null) {
-      const remaining = requestIntervalMs - (time.now() - lastRequestAt)
-      if (remaining > 0 && !(await wait(remaining))) return false
-    }
-    lastRequestAt = time.now()
-    return shouldContinue()
-  }
-
-  try {
-    const state = db
-      .prepare('SELECT split_metadata_cursor FROM sync_state WHERE account_id = ?')
-      .get(accountId) as { split_metadata_cursor: string | null } | undefined
-    const plan = planSplitMetadataStart(state?.split_metadata_cursor)
-    if (plan.kind === 'skip') return { threadsRefreshed: 0 }
-
-    const checkpoint = db.prepare('UPDATE sync_state SET split_metadata_cursor = ? WHERE account_id = ?')
-    const storedInboxThread = db.prepare(
+  const storedInboxThread = lazyStatement(() =>
+    db.prepare(
       `SELECT 1
        FROM threads t
        JOIN thread_labels inbox
          ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
        WHERE t.account_id = ? AND t.id = ? AND t.is_inbox_visible = 1`
     )
-    let pageToken = plan.pageToken
-    let resetExpiredCursor = false
+  )
 
-    for (;;) {
-      if (!(await waitForRequestSlot())) return null
-      let page: ThreadIdPage
-      try {
-        page = await provider.listThreadIds({
-          labelIds: ['INBOX'],
-          pageToken,
-          priority: 'background'
-        })
-      } catch (error) {
-        if (!pageToken || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
-        pageToken = undefined
-        resetExpiredCursor = true
-        threadsDone = 0
-        threadsRefreshed = 0
-        checkpoint.run(CURSOR_PHASE, accountId)
-        continue
-      }
-      if (!shouldContinue()) return null
-
+  return runCursorWalk<ThreadIdPage, SplitMetadataResult>({
+    db,
+    accountId,
+    cursorColumn: 'split_metadata_cursor',
+    phase: CURSOR_PHASE,
+    parseCursor: (cursor) => planCursorStart(CURSOR_PHASE, cursor, 'split metadata'),
+    time: options.time,
+    requestIntervalMs: options.requestIntervalMs ?? LIFETIME_REQUEST_INTERVAL_MS,
+    pagePauseMs: options.pagePauseMs,
+    foregroundYieldMs: options.foregroundYieldMs,
+    shouldYield: options.shouldYield,
+    shouldContinue: options.shouldContinue,
+    progress,
+    onError: callbacks.onError,
+    onSkip: () => ({ threadsRefreshed: 0 }),
+    listPage: (pageToken) =>
+      provider.listThreadIds({ labelIds: ['INBOX'], pageToken, priority: 'background' }),
+    nextToken: (page) => page.nextPageToken,
+    onPage: async (page, _token, walk) => {
       let refreshedOnPage = 0
       for (const threadId of page.threadIds) {
-        if (!shouldContinue()) return null
-        if (!storedInboxThread.get(accountId, threadId)) {
+        if (!walk.shouldContinue()) return
+        if (!storedInboxThread().get(accountId, threadId)) {
           threadsDone += 1
           continue
         }
-        if (!(await waitForRequestSlot())) return null
+        if (!(await walk.requestSlot())) return
         try {
           for (;;) {
             const revisionBeforeFetch = snapshotRevision()
@@ -159,12 +123,12 @@ export async function runSplitMetadataRebuild(
               format: 'full',
               priority: 'background'
             })
-            if (!shouldContinue()) return null
+            if (!walk.shouldContinue()) return
             // Do not let a response started before a history, action, or body
             // write overwrite the newer local snapshot. Wait for that work to
             // settle, then fetch this thread again before checkpointing it.
             if (shouldYield() || snapshotRevision() !== revisionBeforeFetch) {
-              if (!(await waitForRequestSlot())) return null
+              if (!(await walk.requestSlot())) return
               continue
             }
             if (persistThread(db, accountId, thread, { inboxVisibility: 'preserve' })) {
@@ -180,18 +144,12 @@ export async function runSplitMetadataRebuild(
         }
         threadsDone += 1
       }
-
-      pageToken = page.nextPageToken
-      checkpoint.run(pageToken ? `${CURSOR_PHASE}:${pageToken}` : 'done', accountId)
-      progress('running', refreshedOnPage > 0)
-      if (!pageToken) return { threadsRefreshed }
-
-      progress('quota-wait', false, pagePauseMs)
-      if (!(await wait(pagePauseMs))) return null
-      progress('running')
-    }
-  } catch (error) {
-    if (shouldContinue()) callbacks.onError(error)
-    return null
-  }
+      pageMailChanged = refreshedOnPage > 0
+    },
+    onRestart: () => {
+      threadsDone = 0
+      threadsRefreshed = 0
+    },
+    onFinish: () => ({ threadsRefreshed })
+  })
 }

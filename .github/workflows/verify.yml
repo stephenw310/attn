@@ -48,7 +48,9 @@ jobs:
   electron-smoke:
     name: Electron smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The full Playwright suite runs one worker and takes roughly 30 minutes;
+    # a 20-minute limit cancelled every run before it could report.
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -73,6 +75,8 @@ jobs:
           name: electron-smoke-artifacts
           path: e2e/.artifacts/
           if-no-files-found: ignore
+          # The e2e output directories are dot-directories, which v4 skips by default.
+          include-hidden-files: true
 
       - name: Upload Playwright traces
         if: failure()
@@ -81,6 +85,8 @@ jobs:
           name: electron-smoke-traces
           path: e2e/.results/
           if-no-files-found: ignore
+          # The e2e output directories are dot-directories, which v4 skips by default.
+          include-hidden-files: true
 
   electron-perf:
     name: Electron performance smoke
@@ -114,3 +120,5 @@ jobs:
             e2e/.artifacts/
             e2e/.results/
           if-no-files-found: ignore
+          # The e2e output directories are dot-directories, which v4 skips by default.
+          include-hidden-files: true

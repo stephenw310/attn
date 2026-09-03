@@ -12,6 +12,10 @@ const RECOMMENDED_HEADER_WIDTH = 78
 const ENCODED_WORD_MAX_BYTES = 45
 const RFC2231_SEGMENT_WIDTH = 45
 const MAX_FILENAME_FALLBACK_LENGTH = 40
+const MAX_FILENAME_LENGTH = 200
+// Past this an unencoded token cannot be folded under RFC 5322's 998-octet
+// hard line limit, so it goes out as foldable encoded words instead.
+const MAX_UNENCODED_HEADER_BYTES = 900
 
 export interface MimeAttachment {
   filename: string
@@ -85,9 +89,13 @@ function encodedWords(value: string): string {
     .join(' ')
 }
 
-function encodeSubject(subject: string): string {
+function needsEncodedWords(clean: string): boolean {
+  return /[^\x20-\x7e]/.test(clean) || Buffer.byteLength(clean) > MAX_UNENCODED_HEADER_BYTES
+}
+
+export function encodeSubject(subject: string): string {
   const clean = singleLine(subject)
-  return /[^\x20-\x7e]/.test(clean) || Buffer.byteLength(clean) > 900 ? encodedWords(clean) : clean
+  return needsEncodedWords(clean) ? encodedWords(clean) : clean
 }
 
 function quoteHeaderValue(value: string): string {
@@ -96,7 +104,7 @@ function quoteHeaderValue(value: string): string {
 
 function formatDisplayName(name: string): string {
   const clean = singleLine(name)
-  if (/[^\x20-\x7e]/.test(clean)) return encodedWords(clean)
+  if (needsEncodedWords(clean)) return encodedWords(clean)
   if (/^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/.test(clean)) return clean
   return quoteHeaderValue(clean)
 }
@@ -124,22 +132,34 @@ function validAddrSpec(value: string): string {
   return `${local}@${domain}`
 }
 
-function formatAddress(address: MailAddress): string {
-  const email = validAddrSpec(address.email)
+/**
+ * A draft checkpoint mirrors whatever the user has typed so far, so it may
+ * not hold a valid addr-spec yet. Only the send path — the one boundary that
+ * must never emit a malformed envelope — validates.
+ */
+function addrSpec(email: string, validate: boolean): string {
+  return validate ? validAddrSpec(email) : singleLine(email).replace(/[<>,]/g, '')
+}
+
+function formatAddress(address: MailAddress, validate: boolean): string {
+  const email = addrSpec(address.email, validate)
   const name = singleLine(address.name)
   return name ? `${formatDisplayName(name)} <${email}>` : email
 }
 
-function foldHeader(name: string, rawValue: string): string[] {
+export function foldHeader(name: string, rawValue: string): string[] {
   let value = singleLine(rawValue)
   const lines: string[] = []
   let prefix = `${name}: `
 
   while (prefix.length + value.length > RECOMMENDED_HEADER_WIDTH) {
     const room = RECOMMENDED_HEADER_WIDTH - prefix.length
-    const splitAt = value.lastIndexOf(' ', room)
-    // A long addr-spec, parameter, or token must not be split internally. RFC's
-    // 998-octet hard limit is enforced by the producers of those values.
+    // A long addr-spec, parameter, or encoded word must never be split
+    // internally, so when none fits the recommended width the fold moves to
+    // the first boundary past it — one over-long token is far better than a
+    // header of them, which RFC 5322's 998-octet hard limit would reject.
+    let splitAt = value.lastIndexOf(' ', room)
+    if (splitAt <= 0) splitAt = value.indexOf(' ')
     if (splitAt <= 0) break
     lines.push(prefix + value.slice(0, splitAt))
     value = value.slice(splitAt + 1)
@@ -150,8 +170,10 @@ function foldHeader(name: string, rawValue: string): string[] {
   return lines
 }
 
-function addressHeader(name: string, addresses: readonly MailAddress[]): string[] {
-  return addresses.length > 0 ? foldHeader(name, addresses.map(formatAddress).join(', ')) : []
+export function addressHeader(name: string, addresses: readonly MailAddress[], validate = true): string[] {
+  return addresses.length > 0
+    ? foldHeader(name, addresses.map((address) => formatAddress(address, validate)).join(', '))
+    : []
 }
 
 function deterministicBoundary(kind: 'alternative' | 'mixed' | 'related', rfcMessageId: string): string {
@@ -164,17 +186,7 @@ function textPart(mimeType: 'text/plain' | 'text/html', body: string): string[] 
     `Content-Type: ${mimeType}; charset=UTF-8`,
     'Content-Transfer-Encoding: base64',
     '',
-    base64Lines(normalizeBodyNewlines(body))
-  ]
-}
-
-function alternativeParts(boundary: string, text: string, html: string): string[] {
-  return [
-    `--${boundary}`,
-    ...textPart('text/plain', text),
-    `--${boundary}`,
-    ...textPart('text/html', html),
-    `--${boundary}--`
+    base64Lines(body)
   ]
 }
 
@@ -185,7 +197,7 @@ function safeMimeType(value: string): string {
     : 'application/octet-stream'
 }
 
-function asciiFilenameFallback(filename: string): string {
+export function asciiFilenameFallback(filename: string): string {
   const fallback = singleLine(filename)
     .replace(/[^\x20-\x7e]/g, '_')
     .replace(/[\\/]/g, '_')
@@ -253,10 +265,21 @@ interface AttachmentSegment<T> {
   attachment: T
 }
 
-type MimeSegment<T> = string | AttachmentSegment<T>
+export type MimeSegment<T> = string | AttachmentSegment<T>
 
-function attachmentPart<T extends Omit<MimeAttachment, 'content'>>(attachment: T): MimeSegment<T>[] {
-  const filename = singleLine(attachment.filename) || 'attachment'
+/**
+ * The only filename either encoder emits, and therefore the only one Gmail can
+ * echo back. Identity comparisons against a remote draft run through this;
+ * because both encoders now carry the full name in an RFC 2231 continuation,
+ * it keeps non-ASCII characters instead of folding them away. Idempotent, so
+ * applying it to an already-echoed name is safe.
+ */
+export function mimeFilename(value: string): string {
+  return singleLine(value).slice(0, MAX_FILENAME_LENGTH) || 'attachment'
+}
+
+function attachmentPart<T extends AttachmentIdentity>(attachment: T): MimeSegment<T>[] {
+  const filename = mimeFilename(attachment.filename)
   const contentId = attachment.contentId ? singleLine(attachment.contentId).replace(/^<|>$/g, '') : ''
 
   return [
@@ -277,6 +300,81 @@ function attachmentPart<T extends Omit<MimeAttachment, 'content'>>(attachment: T
   ]
 }
 
+/** Every attachment shape the encoders share, whatever supplies its bytes. */
+export interface AttachmentIdentity {
+  filename: string
+  mimeType: string
+  contentId?: string
+  inline?: boolean
+}
+
+export interface MimeEntity<T extends AttachmentIdentity> {
+  /** Fully formatted header lines, without MIME-Version. */
+  headers: readonly string[]
+  text: string
+  html: string
+  attachments: readonly T[]
+  boundary: (kind: 'alternative' | 'related' | 'mixed') => string
+  /**
+   * Send normalizes body newlines to CRLF as RFC 5322 requires. A draft
+   * checkpoint deliberately does not: its bytes round-trip through Gmail and
+   * back into the content fingerprint, so rewriting them would make every
+   * multi-line mirrored draft read as remotely changed.
+   */
+  normalizeNewlines: boolean
+}
+
+/**
+ * The one multipart layout, shared by the send and draft encoders so a
+ * message's structure cannot depend on which of them wrote it.
+ */
+export function mimeSegments<T extends AttachmentIdentity>(entity: MimeEntity<T>): MimeSegment<T>[] {
+  const alternativeBoundary = entity.boundary('alternative')
+  const relatedBoundary = entity.boundary('related')
+  const mixedBoundary = entity.boundary('mixed')
+  const inlineAttachments = entity.attachments.filter((attachment) => attachment.inline)
+  const regularAttachments = entity.attachments.filter((attachment) => !attachment.inline)
+  const body = (value: string): string => (entity.normalizeNewlines ? normalizeBodyNewlines(value) : value)
+  const headers = [...entity.headers, 'MIME-Version: 1.0']
+
+  const alternativeEntity: MimeSegment<T>[] = [
+    `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+    '',
+    `--${alternativeBoundary}`,
+    ...textPart('text/plain', body(entity.text)),
+    `--${alternativeBoundary}`,
+    ...textPart('text/html', body(entity.html)),
+    `--${alternativeBoundary}--`
+  ]
+  const bodyEntity: MimeSegment<T>[] =
+    inlineAttachments.length === 0
+      ? alternativeEntity
+      : [
+          `Content-Type: multipart/related; boundary="${relatedBoundary}"`,
+          '',
+          `--${relatedBoundary}`,
+          ...alternativeEntity,
+          ...inlineAttachments.flatMap((attachment) => [
+            `--${relatedBoundary}`,
+            ...attachmentPart(attachment)
+          ]),
+          `--${relatedBoundary}--`
+        ]
+
+  if (regularAttachments.length === 0) return [...headers, ...bodyEntity, '']
+  return [
+    ...headers,
+    `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
+    '',
+    `--${mixedBoundary}`,
+    ...bodyEntity,
+    ...regularAttachments.flatMap((attachment) => [`--${mixedBoundary}`, ...attachmentPart(attachment)]),
+    `--${mixedBoundary}--`,
+    // The trailing empty segment is what gives the message its final CRLF.
+    ''
+  ]
+}
+
 function combinedBody(primary: string, quote: string | null | undefined, separator: string): string {
   if (!quote) return primary
   if (!primary) return quote
@@ -293,7 +391,7 @@ function rfc5322Date(date: Date): string {
   return date.toUTCString().replace(/GMT$/, '+0000')
 }
 
-function buildMimeSegments<T extends Omit<MimeAttachment, 'content'>>(
+function buildMimeSegments<T extends AttachmentIdentity>(
   draft: Omit<MimeDraft, 'attachments'> & { attachments?: readonly T[] },
   options: BuildMimeOptions
 ): MimeSegment<T>[] {
@@ -303,85 +401,48 @@ function buildMimeSegments<T extends Omit<MimeAttachment, 'content'>>(
   if (!messageId) throw new Error('MIME Message-ID is required')
 
   validateMimeRecipients(draft, options.accountEmail)
-  const cc = draft.cc ?? []
-  const bcc = draft.bcc ?? []
-
-  const alternativeBoundary = deterministicBoundary('alternative', messageId)
-  const mixedBoundary = deterministicBoundary('mixed', messageId)
-  const relatedBoundary = deterministicBoundary('related', messageId)
-  const attachments = draft.attachments ?? []
-  const inlineAttachments = attachments.filter((attachment) => attachment.inline)
-  const regularAttachments = attachments.filter((attachment) => !attachment.inline)
-  const text = combinedBody(draft.bodyText, draft.quoteText, '\n\n')
   const authoredHtml = draft.bodyHtml.trim() ? draft.bodyHtml : plainTextHtml(draft.bodyText)
-  const html = combinedBody(authoredHtml, draft.quoteHtml, '\n')
-  const headers = [
-    ...foldHeader('From', formatAddress({ name: options.accountName ?? '', email: options.accountEmail })),
-    ...addressHeader('To', draft.to),
-    ...addressHeader('Cc', cc),
-    ...addressHeader('Bcc', bcc),
-    ...foldHeader('Subject', encodeSubject(draft.subject)),
-    ...foldHeader('Message-ID', messageId),
-    ...(draft.inReplyTo ? foldHeader('In-Reply-To', singleLine(draft.inReplyTo)) : []),
-    ...(draft.references?.length
-      ? foldHeader('References', draft.references.map(singleLine).filter(Boolean).join(' '))
-      : []),
-    ...foldHeader('Date', rfc5322Date(options.date)),
-    'MIME-Version: 1.0'
-  ]
-
-  if (inlineAttachments.length === 0 && regularAttachments.length === 0) {
-    return [
-      ...headers,
-      `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
-      '',
-      ...alternativeParts(alternativeBoundary, text, html),
-      ''
-    ]
-  }
-
-  const alternativeEntity = [
-    `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
-    '',
-    ...alternativeParts(alternativeBoundary, text, html)
-  ]
-  const bodyEntity =
-    inlineAttachments.length === 0
-      ? alternativeEntity
-      : [
-          `Content-Type: multipart/related; boundary="${relatedBoundary}"`,
-          '',
-          `--${relatedBoundary}`,
-          ...alternativeEntity,
-          ...inlineAttachments.flatMap((attachment) => [
-            `--${relatedBoundary}`,
-            ...attachmentPart(attachment)
-          ]),
-          `--${relatedBoundary}--`
-        ]
-
-  if (regularAttachments.length === 0) {
-    return [...headers, ...bodyEntity, '']
-  }
-
-  const mixedParts: MimeSegment<T>[] = [`--${mixedBoundary}`, ...bodyEntity]
-  for (const attachment of regularAttachments) {
-    mixedParts.push(`--${mixedBoundary}`, ...attachmentPart(attachment))
-  }
-  mixedParts.push(`--${mixedBoundary}--`)
-
-  return [...headers, `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`, '', ...mixedParts, '']
+  return mimeSegments({
+    headers: [
+      ...foldHeader(
+        'From',
+        formatAddress({ name: options.accountName ?? '', email: options.accountEmail }, true)
+      ),
+      ...addressHeader('To', draft.to),
+      ...addressHeader('Cc', draft.cc ?? []),
+      ...addressHeader('Bcc', draft.bcc ?? []),
+      ...foldHeader('Subject', encodeSubject(draft.subject)),
+      ...foldHeader('Message-ID', messageId),
+      ...(draft.inReplyTo ? foldHeader('In-Reply-To', singleLine(draft.inReplyTo)) : []),
+      ...(draft.references?.length
+        ? foldHeader('References', draft.references.map(singleLine).filter(Boolean).join(' '))
+        : []),
+      ...foldHeader('Date', rfc5322Date(options.date))
+    ],
+    text: combinedBody(draft.bodyText, draft.quoteText, '\n\n'),
+    html: combinedBody(authoredHtml, draft.quoteHtml, '\n'),
+    attachments: draft.attachments ?? [],
+    boundary: (kind) => deterministicBoundary(kind, messageId),
+    normalizeNewlines: true
+  })
 }
 
-function isAttachmentSegment<T>(segment: MimeSegment<T>): segment is AttachmentSegment<T> {
+export function isAttachmentSegment<T>(segment: MimeSegment<T>): segment is AttachmentSegment<T> {
   return typeof segment !== 'string'
+}
+
+/** Serialize buffered segments into the complete CRLF-delimited message. */
+export function joinMimeSegments<T extends { content: Uint8Array }>(
+  segments: readonly MimeSegment<T>[]
+): string {
+  return segments
+    .map((segment) => (isAttachmentSegment(segment) ? base64Lines(segment.attachment.content) : segment))
+    .join(CRLF)
 }
 
 /** Build a complete CRLF-delimited message suitable for Gmail's raw MIME field. */
 export function buildMime(draft: MimeDraft, options: BuildMimeOptions): string {
-  return buildMimeSegments(draft, options)
-    .map((segment) => (isAttachmentSegment(segment) ? base64Lines(segment.attachment.content) : segment))
-    .join(CRLF)
+  return joinMimeSegments(buildMimeSegments(draft, options))
 }
 
 async function* base64Stream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
@@ -415,12 +476,10 @@ function streamedBase64ByteLength(sizeBytes: number): number {
   return encodedBytes + (Math.ceil(encodedBytes / 76) - 1) * Buffer.byteLength(CRLF)
 }
 
-/** Exact byte count for streamMime, used to make Gmail's multipart request replayable and sized. */
-export function mimeByteLength(
-  draft: Omit<MimeDraft, 'attachments'> & { attachments?: readonly MimeStreamAttachment[] },
-  options: BuildMimeOptions
+/** Exact byte count for the streamed serialization of already-built segments. */
+export function mimeSegmentsByteLength<T extends { sizeBytes: number }>(
+  segments: readonly MimeSegment<T>[]
 ): number {
-  const segments = buildMimeSegments(draft, options)
   return segments.reduce(
     (total, segment, index) =>
       total +
@@ -432,13 +491,13 @@ export function mimeByteLength(
   )
 }
 
-/** Stream the same deterministic MIME bytes without buffering attachment files in memory. */
-export async function* streamMime(
-  draft: Omit<MimeDraft, 'attachments'> & { attachments?: readonly MimeStreamAttachment[] },
-  options: BuildMimeOptions,
-  onAttachmentComplete: (attachment: MimeStreamAttachment, index: number) => void = () => {}
+/** The same bytes {@link joinMimeSegments} would produce, without buffering attachments. */
+export async function* streamMimeSegments<
+  T extends { sizeBytes: number; open: () => AsyncIterable<Uint8Array> }
+>(
+  segments: readonly MimeSegment<T>[],
+  onAttachmentComplete: (attachment: T, index: number) => void = () => {}
 ): AsyncIterable<Uint8Array> {
-  const segments = buildMimeSegments(draft, options)
   let attachmentIndex = 0
   for (const [index, segment] of segments.entries()) {
     if (isAttachmentSegment(segment)) {
@@ -449,6 +508,23 @@ export async function* streamMime(
     }
     if (index < segments.length - 1) yield Buffer.from(CRLF)
   }
+}
+
+/** Exact byte count for streamMime, used to make Gmail's multipart request replayable and sized. */
+export function mimeByteLength(
+  draft: Omit<MimeDraft, 'attachments'> & { attachments?: readonly MimeStreamAttachment[] },
+  options: BuildMimeOptions
+): number {
+  return mimeSegmentsByteLength(buildMimeSegments(draft, options))
+}
+
+/** Stream the same deterministic MIME bytes without buffering attachment files in memory. */
+export function streamMime(
+  draft: Omit<MimeDraft, 'attachments'> & { attachments?: readonly MimeStreamAttachment[] },
+  options: BuildMimeOptions,
+  onAttachmentComplete: (attachment: MimeStreamAttachment, index: number) => void = () => {}
+): AsyncIterable<Uint8Array> {
+  return streamMimeSegments(buildMimeSegments(draft, options), onAttachmentComplete)
 }
 
 /** Validate before queue persistence; buildMime repeats this as a final boundary. */

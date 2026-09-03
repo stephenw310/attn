@@ -6,6 +6,7 @@ import {
   parseRecipientInput
 } from '../../../shared/address'
 import type { ContactSearchResult } from '../../../shared/contacts'
+import { isCompleteRecipient, shouldCommitOnComma } from './recipientInput'
 import { useAutocomplete } from './useAutocomplete'
 
 interface RecipientFieldProps {
@@ -33,6 +34,9 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
   const [query, setQuery] = useState('')
   const [invalid, setInvalid] = useState<string | null>(null)
   const [highlighted, setHighlighted] = useState(0)
+  // A suggestion wins over typed text only once the user has moved to it. Until
+  // then a complete typed address is what Enter commits (review B30).
+  const [navigated, setNavigated] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const suggestions = useAutocomplete(query).filter(
     (suggestion) =>
@@ -110,21 +114,32 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
           onChange={(event) => {
             setQuery(event.target.value)
             setHighlighted(0)
+            setNavigated(false)
             setInvalid(null)
             onPendingChange()
           }}
           onKeyDown={(event) => {
+            const suggestion =
+              (navigated || !isCompleteRecipient(query)) && suggestions[highlighted]
+                ? suggestions[highlighted]
+                : null
             if (event.key === 'ArrowDown' && suggestions.length > 0) {
               event.preventDefault()
+              setNavigated(true)
               setHighlighted((index) => Math.min(index + 1, suggestions.length - 1))
             } else if (event.key === 'ArrowUp' && suggestions.length > 0) {
               event.preventDefault()
+              setNavigated(true)
               setHighlighted((index) => Math.max(index - 1, 0))
-            } else if ((event.key === 'Enter' || event.key === 'Tab') && suggestions[highlighted]) {
+            } else if ((event.key === 'Enter' || event.key === 'Tab') && suggestion) {
               event.preventDefault()
-              const recipient = fromContact(suggestions[highlighted])
+              const recipient = fromContact(suggestion)
               if (recipient) add([recipient])
-            } else if (event.key === 'Enter' || event.key === ',') {
+            } else if (
+              event.key === 'Enter' ||
+              (event.key === ',' &&
+                shouldCommitOnComma(query, event.currentTarget.selectionStart ?? query.length))
+            ) {
               event.preventDefault()
               commit()
             } else if (event.key === 'Backspace' && query.length === 0 && recipients.length > 0) {

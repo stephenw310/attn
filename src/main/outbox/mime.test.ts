@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { MailAddress } from '../../shared/mail'
+import { encodeDraftMessage } from './draftMime'
 import { buildMime, type MimeDraft, mimeByteLength, streamMime, validateMimeRecipients } from './mime'
 
 const OPTIONS = {
@@ -383,5 +384,96 @@ describe('MIME builder', () => {
       const topHeaderBlock = raw.split('\r\n\r\n', 1)[0]
       expect(topHeaderBlock.split('\r\n').every((line) => Buffer.byteLength(line) <= 998)).toBe(true)
     }
+  })
+})
+
+describe('send and draft encoders agree', () => {
+  const SHARED_HEADERS = ['to', 'cc', 'bcc', 'subject', 'in-reply-to', 'references', 'mime-version']
+
+  function shared(raw: string): Record<string, string> {
+    const headers = parseTopHeaders(raw)
+    return Object.fromEntries(
+      SHARED_HEADERS.flatMap((name) => {
+        const value = headers.get(name)
+        return value === undefined ? [] : [[name, value]]
+      })
+    )
+  }
+
+  const inputs = [
+    {
+      label: 'a plain ASCII display name',
+      to: [{ name: 'Zoe Chen', email: 'zoe@example.com' }],
+      subject: 'Quarterly review'
+    },
+    {
+      label: 'a display name needing a quoted string',
+      to: [{ name: 'Chen, Zoe (PM)', email: 'zoe@example.com' }],
+      subject: 'Re: notes'
+    },
+    {
+      label: 'a Unicode display name and subject',
+      to: [{ name: '李明', email: 'li@example.com' }],
+      subject: 'Café ☕'
+    },
+    {
+      label: 'an ASCII display name well past one encoded word',
+      to: [{ name: `Alexander ${'Montgomery '.repeat(8)}Fitzgerald`, email: 'long@example.com' }],
+      subject: `Status ${'update '.repeat(20)}`.trim()
+    }
+  ]
+
+  it.each(inputs)('formats shared headers identically for $label', ({ to, subject }) => {
+    const body = {
+      to,
+      cc: [{ name: 'Copy Reader', email: 'cc@example.com' }],
+      bcc: [],
+      subject,
+      bodyHtml: '<p>Body</p>',
+      bodyText: 'Body',
+      inReplyTo: '<root@example.com>',
+      references: ['<root@example.com>', '<reply@example.com>']
+    }
+    const sent = buildMime(body, OPTIONS)
+    const drafted = Buffer.from(encodeDraftMessage(body), 'base64url').toString('utf8')
+
+    expect(shared(drafted)).toEqual(shared(sent))
+    // Beyond the shared set and the boundary-bearing Content-Type, the send
+    // envelope adds exactly the three headers a draft cannot carry.
+    expect(
+      [...parseTopHeaders(sent).keys()].filter(
+        (name) => !SHARED_HEADERS.includes(name) && name !== 'content-type'
+      )
+    ).toEqual(['from', 'message-id', 'date'])
+  })
+
+  it('gives an attachment the same name parameters in both encoders', () => {
+    const attachment = {
+      filename: 'résumé final.pdf',
+      mimeType: 'application/pdf',
+      content: Buffer.from('PDF')
+    }
+    const body = {
+      to: [{ name: '', email: 'to@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 'Attached',
+      bodyHtml: '<p>Body</p>',
+      bodyText: 'Body',
+      attachments: [attachment]
+    }
+    const nameLines = (raw: string): string[] =>
+      raw
+        .split('\r\n')
+        .filter((line) =>
+          /^(Content-Type: application\/pdf|Content-Disposition:|\s+(name|filename)\*)/.test(line)
+        )
+
+    const sent = nameLines(buildMime(body, OPTIONS))
+    const drafted = nameLines(Buffer.from(encodeDraftMessage(body), 'base64url').toString('utf8'))
+
+    expect(drafted).toEqual(sent)
+    // The real name survives as an RFC 2231 continuation, not as underscores.
+    expect(sent.join('\n')).toContain("UTF-8''r%C3%A9sum%C3%A9%20final.pdf")
   })
 })

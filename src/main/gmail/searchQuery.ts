@@ -1,4 +1,4 @@
-import type { ParsedSearchQuery, SearchTextTerm } from '../../shared/searchQuery'
+import { normalizeMailboxName, type ParsedSearchQuery, type SearchTextTerm } from '../../shared/searchQuery'
 
 export interface GmailSearchQuery {
   q: string
@@ -7,10 +7,6 @@ export interface GmailSearchQuery {
 
 export interface GmailSearchQueryOptions {
   resolveLabelName?: (value: string) => string
-}
-
-function normalizedMailbox(value: string): string {
-  return value.toLowerCase().replaceAll(/[\s_-]/g, '')
 }
 
 function quoted(value: string): string {
@@ -22,7 +18,7 @@ function searchValue(term: SearchTextTerm): string {
 }
 
 function locationQuery(value: string, resolveLabelName: (value: string) => string): string {
-  const mailbox = normalizedMailbox(value)
+  const mailbox = normalizeMailboxName(value)
   if (mailbox === 'all' || mailbox === 'allmail') {
     return 'in:anywhere -in:spam -in:trash'
   }
@@ -31,11 +27,14 @@ function locationQuery(value: string, resolveLabelName: (value: string) => strin
     return `in:${mailbox}`
   }
   if (mailbox === 'starred') return 'is:starred'
-  if (mailbox === 'snoozed') return 'in:snoozed'
   return `label:${quoted(resolveLabelName(value))}`
 }
 
-/** Translate Attn's parsed query into Gmail's q= syntax. */
+/**
+ * Translate Attn's parsed query into Gmail's q= syntax. Snooze is local state
+ * with no server equivalent, so `searchAllGmail` answers those queries from the
+ * store and never reaches this translation.
+ */
 export function toGmailSearchQuery(
   parsed: ParsedSearchQuery,
   options: GmailSearchQueryOptions = {}
@@ -48,19 +47,17 @@ export function toGmailSearchQuery(
   let includeSpamTrash = false
   for (const filter of parsed.filters) {
     if (filter.kind === 'in') {
-      const mailbox = normalizedMailbox(filter.value)
+      const mailbox = normalizeMailboxName(filter.value)
       includeSpamTrash ||= mailbox === 'spam' || mailbox === 'trash'
       parts.push(locationQuery(filter.value, resolveLabelName))
     } else if (filter.kind === 'before' || filter.kind === 'after') {
       parts.push(`${filter.kind}:${filter.value.replaceAll('-', '/')}`)
-    } else if (filter.kind === 'is' && filter.value === 'snoozed') {
-      parts.push('in:snoozed')
     } else {
       parts.push(`${filter.kind}:${filter.value}`)
     }
   }
   const searchesDrafts = parsed.filters.some(
-    (filter) => filter.kind === 'in' && ['draft', 'drafts'].includes(normalizedMailbox(filter.value))
+    (filter) => filter.kind === 'in' && ['draft', 'drafts'].includes(normalizeMailboxName(filter.value))
   )
   if (!searchesDrafts) parts.push('-in:drafts')
   return { q: parts.join(' '), includeSpamTrash }

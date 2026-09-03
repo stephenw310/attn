@@ -1,5 +1,6 @@
 import type { RevertedAction, RevertedActionKind } from '../../shared/actionRevert'
 import type { Db } from '../db'
+import { GracefulDrainer } from '../drain'
 import type { GmailThread } from '../gmail/parse'
 import { applyThreadDelta } from '../store/mutate'
 import {
@@ -10,13 +11,12 @@ import {
 } from '../store/reminders'
 import { nonDraftMessages, persistThread } from '../sync/persist'
 import type { GetThreadOptions, MailActionProvider } from '../sync/provider'
-import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
+import { type SchedulerTime, systemTime } from '../time'
 import { invalidateRevertedUndo } from '.'
 import {
   classifyActionError,
   executeIntent,
   isStoredAuthActionError,
-  isTypedStoredActionError,
   type QueueIntent,
   retryDelayMs,
   storeActionError
@@ -30,20 +30,12 @@ export interface ActionRecoveryProvider extends MailActionProvider {
 
 interface QueueRow {
   id: number
-  kind: QueueIntent['kind']
   thread_id: string
   payload: string
   attempts: number
   state: 'pending' | 'recovering'
   last_error: string | null
   subject?: string
-}
-
-interface FailedAuthRow {
-  id: number
-  account_id: string
-  state: 'pending' | 'recovering' | 'failed'
-  last_error: string | null
 }
 
 interface DecodedQueueRow {
@@ -66,13 +58,9 @@ export interface ActionExecutorOptions {
 }
 
 export class ActionExecutor {
-  private drainPromise: Promise<void> | null = null
-  private stopping = false
-  private timer: TimerHandle | null = null
-  private timerAccountId: string | null = null
+  private readonly drainer: GracefulDrainer
   private readonly notify: () => void
   private readonly notifyReverted: (accountId: string, actions: RevertedAction[]) => void
-  private readonly time: SchedulerTime
 
   constructor(
     private readonly db: Db,
@@ -82,58 +70,47 @@ export class ActionExecutor {
   ) {
     this.notify = options.notify ?? (() => {})
     this.notifyReverted = options.notifyReverted ?? (() => {})
-    this.time = options.time ?? systemTime
+    this.drainer = new GracefulDrainer(() => this.drain(), {
+      time: options.time ?? systemTime,
+      // Preserve the retry ladder when another subsystem nudges the executor:
+      // only a switch to a different account may cut a pending backoff short.
+      preemptTimer: (timerAccountId) => {
+        const activeAccountId = this.accountId()
+        return activeAccountId !== null && activeAccountId !== timerAccountId
+      }
+    })
     db.prepare("UPDATE action_queue SET state = 'pending' WHERE state = 'inflight'").run()
-    this.prepareLegacyFailures()
   }
 
   trigger(): Promise<void> {
-    if (this.stopping) return Promise.resolve()
-    // Preserve the retry ladder when another subsystem nudges the executor.
-    if (this.timer) {
-      const activeAccountId = this.accountId()
-      if (!activeAccountId || activeAccountId === this.timerAccountId) return Promise.resolve()
-      this.time.timers.clearTimeout(this.timer)
-      this.timer = null
-      this.timerAccountId = null
-    }
-    if (this.drainPromise) return this.drainPromise
-    this.drainPromise = this.drain().finally(() => {
-      this.drainPromise = null
-    })
-    return this.drainPromise
+    return this.drainer.trigger()
   }
 
   /** True only while user-action replay is actively using Gmail, not during retry backoff. */
   isRunning(): boolean {
-    return this.drainPromise !== null
+    return this.drainer.isRunning()
   }
 
   stop(): void {
-    this.stopping = true
-    if (this.timer) this.time.timers.clearTimeout(this.timer)
-    this.timer = null
-    this.timerAccountId = null
+    this.drainer.halt()
   }
 
   /** Resume execution or recovery rows after fresh same-account authentication succeeds. */
   resumeAuthFailures(accountId: string): number {
     const rows = this.db
       .prepare(
-        `SELECT id, account_id, state, last_error FROM action_queue
-         WHERE account_id = ? AND state IN ('pending', 'recovering', 'failed')`
+        `SELECT id, last_error FROM action_queue
+         WHERE account_id = ? AND state IN ('pending', 'recovering')`
       )
-      .all(accountId) as FailedAuthRow[]
+      .all(accountId) as Array<{ id: number; last_error: string | null }>
     const resume = this.db.prepare(
-      `UPDATE action_queue SET state = ?, attempts = 0, last_error = NULL
-       WHERE account_id = ? AND id = ?`
+      'UPDATE action_queue SET attempts = 0, last_error = NULL WHERE account_id = ? AND id = ?'
     )
     let resumed = 0
     this.db.transaction(() => {
       for (const row of rows) {
         if (!isStoredAuthActionError(row.last_error)) continue
-        const nextState = row.state === 'failed' ? 'pending' : row.state
-        resumed += resume.run(nextState, accountId, row.id).changes
+        resumed += resume.run(accountId, row.id).changes
       }
     })()
     if (resumed > 0) this.notify()
@@ -148,10 +125,10 @@ export class ActionExecutor {
     const reverted: RevertedAction[] = []
     try {
       for (;;) {
-        if (this.stopping || this.accountId() !== accountId) break
+        if (this.drainer.isStopping() || this.accountId() !== accountId) break
         const row = this.db
           .prepare(
-            `SELECT aq.id, aq.kind, aq.thread_id, aq.payload, aq.attempts, aq.state,
+            `SELECT aq.id, aq.thread_id, aq.payload, aq.attempts, aq.state,
                     aq.last_error, t.subject
              FROM action_queue aq
              LEFT JOIN threads t ON t.account_id = aq.account_id AND t.id = aq.thread_id
@@ -210,11 +187,11 @@ export class ActionExecutor {
         if (claimed === 0) continue
         try {
           await executeIntent(provider, intent)
-          if (this.stopping) break
+          if (this.drainer.isStopping()) break
           this.db.prepare('DELETE FROM action_queue WHERE account_id = ? AND id = ?').run(accountId, row.id)
           this.notify()
         } catch (error) {
-          if (this.stopping) break
+          if (this.drainer.isStopping()) break
           const errorKind = classifyActionError(error)
           if (errorKind === 'permanent') {
             this.markRecovering(row, accountId, error, errorKind)
@@ -242,13 +219,8 @@ export class ActionExecutor {
       }
     } finally {
       if (reverted.length > 0) this.notifyReverted(accountId, reverted)
-      if (!this.stopping && retryMs !== null && this.accountId() === accountId) {
-        this.timerAccountId = accountId
-        this.timer = this.time.timers.setTimeout(() => {
-          this.timer = null
-          this.timerAccountId = null
-          void this.trigger()
-        }, retryMs)
+      if (!this.drainer.isStopping() && retryMs !== null && this.accountId() === accountId) {
+        this.drainer.arm(retryMs, accountId)
       }
     }
   }
@@ -263,12 +235,12 @@ export class ActionExecutor {
     followUpBefore: FollowUpReminderSnapshot | null | undefined,
     reverted: RevertedAction[]
   ): Promise<RecoveryOutcome> {
-    if (this.stopping || this.accountId() !== accountId) return { kind: 'stop' }
+    if (this.drainer.isStopping() || this.accountId() !== accountId) return { kind: 'stop' }
     let snapshot: GmailThread
     try {
       snapshot = await provider.getThread(row.thread_id, { format: 'full' })
     } catch (error) {
-      if (this.stopping || this.accountId() !== accountId) return { kind: 'stop' }
+      if (this.drainer.isStopping() || this.accountId() !== accountId) return { kind: 'stop' }
       const errorKind = classifyActionError(error)
       if (errorKind === 'permanent') {
         this.finishUnrecoverable(row, accountId, actionKind, reverted)
@@ -278,7 +250,7 @@ export class ActionExecutor {
       this.notify()
       return errorKind === 'auth' ? { kind: 'pause' } : { kind: 'retry', delayMs: retryDelayMs(row.attempts) }
     }
-    if (this.stopping || this.accountId() !== accountId) return { kind: 'stop' }
+    if (this.drainer.isStopping() || this.accountId() !== accountId) return { kind: 'stop' }
     const messages = nonDraftMessages(snapshot.messages ?? [])
     if (messages.length === 0) {
       this.finishUnrecoverable(row, accountId, actionKind, reverted)
@@ -318,7 +290,7 @@ export class ActionExecutor {
     const returnedToInbox = this.threadHasInboxLabel(accountId, row.thread_id)
     reverted.push(
       revertedAction(
-        intent ?? syntheticIntent(row.kind, row.thread_id),
+        intent ?? syntheticIntent(row.thread_id),
         row.subject ?? '',
         returnedToInbox,
         actionKind === 'snoozeReturn' || actionKind === 'followUpReturn' ? 'keptLocal' : 'restored',
@@ -332,15 +304,12 @@ export class ActionExecutor {
   private decodeRow(row: QueueRow): DecodedQueueRow {
     const payload = decodeLabelDelta(row.payload)
     return {
-      intent:
-        row.kind === 'modifyLabels'
-          ? {
-              kind: row.kind,
-              threadId: row.thread_id,
-              add: payload.add,
-              remove: payload.remove
-            }
-          : { kind: row.kind, threadId: row.thread_id },
+      intent: {
+        kind: 'modifyLabels',
+        threadId: row.thread_id,
+        add: payload.add,
+        remove: payload.remove
+      },
       actionKind: payload.actionKind,
       reminderBefore: payload.reminderBefore,
       followUpBefore: payload.followUpBefore
@@ -369,7 +338,7 @@ export class ActionExecutor {
       this.dropQueuedReverts(accountId, row.id)
     })()
     invalidateRevertedUndo(accountId, [queueRowRef(row.id, row.thread_id)])
-    reverted.push(unavailableAction(row.kind, row.thread_id, row.subject ?? '', actionKind))
+    reverted.push(unavailableAction(row.thread_id, row.subject ?? '', actionKind))
     this.notify()
   }
 
@@ -423,30 +392,5 @@ export class ActionExecutor {
          WHERE account_id = ? AND id = ?`
       )
       .run(incrementAttempts ? 1 : 0, storeActionError(error, errorKind), accountId, row.id)
-  }
-
-  private prepareLegacyFailures(): void {
-    const rows = this.db
-      .prepare(
-        `SELECT id, account_id, state, last_error FROM action_queue
-         WHERE state IN ('pending', 'recovering', 'failed')`
-      )
-      .all() as FailedAuthRow[]
-    const prepare = this.db.prepare(
-      'UPDATE action_queue SET state = ?, last_error = ? WHERE account_id = ? AND id = ?'
-    )
-    this.db.transaction(() => {
-      for (const row of rows) {
-        const auth = isStoredAuthActionError(row.last_error)
-        if (row.state !== 'failed' && !auth) continue
-        const state = row.state === 'failed' ? (auth ? 'pending' : 'recovering') : row.state
-        const lastError =
-          auth && !isTypedStoredActionError(row.last_error)
-            ? storeActionError(row.last_error ?? 'legacy authentication failure', 'auth')
-            : row.last_error
-        if (state === row.state && lastError === row.last_error) continue
-        prepare.run(state, lastError, row.account_id, row.id)
-      }
-    })()
   }
 }

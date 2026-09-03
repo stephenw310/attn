@@ -153,6 +153,9 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     )
     .toBe(true)
   const stableHeight = await iframe.evaluate((element) => element.clientHeight)
+  // Settling is the absence of a further resize, and the frame reports no
+  // event for one that never happens — so this stays a window, held open long
+  // enough for the auto-height loop to have oscillated if it were going to.
   await page.waitForTimeout(250)
   expect(await iframe.evaluate((element) => element.clientHeight)).toBe(stableHeight)
 

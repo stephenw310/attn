@@ -47,6 +47,59 @@ describe('thread label deltas', () => {
     }
   })
 
+  it('promotes a lifetime-hidden thread into the Inbox surface when INBOX is added', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare(
+        `INSERT INTO threads (account_id, id, subject, last_msg_at, is_inbox_visible)
+         VALUES ('account', 'thread', 'Roadmap', 100, 0)`
+      ).run()
+      db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, labels_json)
+         VALUES ('account', 'message', 'thread', '[]')`
+      ).run()
+
+      applyThreadDelta(db, 'account', { threadId: 'thread', add: ['INBOX'], remove: [] })
+
+      expect(
+        db
+          .prepare('SELECT is_inbox_visible FROM threads WHERE account_id = ? AND id = ?')
+          .get('account', 'thread')
+      ).toEqual({ is_inbox_visible: 1 })
+      expect(
+        db
+          .prepare('SELECT view FROM thread_mailboxes WHERE account_id = ? AND thread_id = ? ORDER BY view')
+          .all('account', 'thread')
+      ).toContainEqual({ view: 'inbox' })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('leaves the Inbox surface flag alone when no INBOX label is added', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare(
+        `INSERT INTO threads (account_id, id, subject, last_msg_at, is_inbox_visible)
+         VALUES ('account', 'thread', 'Roadmap', 100, 0)`
+      ).run()
+      db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, labels_json)
+         VALUES ('account', 'message', 'thread', '["INBOX"]')`
+      ).run()
+
+      applyThreadDelta(db, 'account', { threadId: 'thread', add: ['STARRED'], remove: [] })
+
+      expect(
+        db
+          .prepare('SELECT is_inbox_visible FROM threads WHERE account_id = ? AND id = ?')
+          .get('account', 'thread')
+      ).toEqual({ is_inbox_visible: 0 })
+    } finally {
+      db.close()
+    }
+  })
+
   it('keeps hidden junk labels out of optimistic normal-reader flags', () => {
     const db = openDatabase(':memory:')
     try {

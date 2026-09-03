@@ -152,3 +152,13 @@ export function searchDateMilliseconds(value: string): number {
   const [year, month, day] = value.split('-').map(Number)
   return Date.UTC(year, month - 1, day)
 }
+
+/**
+ * One spelling for an `in:` mailbox name across the local query, the translated
+ * Gmail query and the server-search shortcut: case, spaces, underscores and
+ * hyphens carry no meaning, so `in:All Mail`, `in:all_mail` and `in:allmail`
+ * name the same mailbox.
+ */
+export function normalizeMailboxName(value: string): string {
+  return value.toLowerCase().replaceAll(/[\s_-]/g, '')
+}

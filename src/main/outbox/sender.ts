@@ -1,5 +1,3 @@
-import type { MailAddress } from '../../shared/address'
-import type { DraftKind } from '../../shared/drafts'
 import { errorMessage } from '../../shared/error'
 import type { OutboxChanged, OutboxProgress } from '../../shared/outbox'
 import { NEEDS_REVIEW_EXPLANATION } from '../../shared/outbox'
@@ -13,17 +11,18 @@ import {
 } from '../../shared/outboxTuning'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
+import { GracefulDrainer } from '../drain'
 import { createFollowUpOnSent, evaluateThreadFollowUp, resolveFollowUpOrigins } from '../followUps'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import { readAccountSetting } from '../settings'
 import { isOfflineFailure } from '../sync/failure'
 import { persistThread } from '../sync/persist'
 import type { MailProvider, ProviderMimeUpload } from '../sync/provider'
-import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
-import { parseStoredDraftAttachments } from './draftAttachments'
-import { planTransition } from './machine'
+import { type SchedulerTime, systemTime } from '../time'
+import { machineRow, persistPlan, planTransition } from './machine'
 import { buildMime, mimeByteLength, streamMime } from './mime'
 import { DraftAttachmentSourceError, prepareDraftMimeAttachments } from './mirror'
+import { outboxDraftContent } from './row'
 import { primarySenderDisplayName, SEND_AS_DISPLAY_NAME_SETTING, syncPrimarySendAs } from './sendAs'
 import { validateAttachmentCap } from './spool'
 
@@ -31,7 +30,6 @@ interface SendRow {
   id: string
   account_id: string
   state: 'queued' | 'sending'
-  kind: DraftKind
   gmail_draft_id: string | null
   gmail_message_id: string | null
   rfc_message_id: string
@@ -55,16 +53,17 @@ interface SendRow {
   verify_attempts: number
 }
 
-function parseJson<T>(value: string): T {
-  return JSON.parse(value) as T
-}
-
 function permanentSendError(error: unknown): boolean {
   return (
     error instanceof GmailApiError &&
     error.status >= 400 &&
     error.status < 500 &&
+    // 404 (the draft is gone) and 408 (the outcome is unknown) both leave the
+    // send ambiguous, so they belong to verification, not to `failed` — a
+    // permanent verdict here mints a fresh Message-ID and can duplicate a
+    // message Gmail already accepted.
     error.status !== 404 &&
+    error.status !== 408 &&
     !error.retryable
   )
 }
@@ -216,11 +215,9 @@ export interface OutboxSenderOptions {
 
 /** The sole production chokepoint that may call Gmail drafts.send. */
 export class OutboxSender {
-  private drainPromise: Promise<void> | null = null
   private remoteAbortController: AbortController | null = null
-  private stopping = false
-  private timer: TimerHandle | null = null
   private drainAttempts = 0
+  private readonly drainer: GracefulDrainer
 
   private readonly beforeRemote: (signal?: AbortSignal) => Promise<void>
   private readonly time: SchedulerTime
@@ -244,72 +241,52 @@ export class OutboxSender {
     this.progress = options.progress ?? (() => {})
     this.mailChanged = options.mailChanged ?? (() => {})
     this.followUpsChanged = options.followUpsChanged ?? (() => {})
+    this.drainer = new GracefulDrainer(() => this.drainSafely(), {
+      time: this.time,
+      graceMs: OUTBOX_STOP_TIMEOUT_MS,
+      abort: () => this.remoteAbortController?.abort(new Error('outbox shutdown'))
+      // A trigger always cancels an armed timer: the send it carries is due
+      // now, and the drain re-arms whatever is left from the database.
+    })
   }
 
   start(): void {
-    this.stopping = false
+    this.drainer.start()
     const accountId = this.accountId()
     if (accountId) this.pruneSent(accountId)
     this.refresh()
   }
 
   refresh(): void {
-    if (this.stopping) return
-    if (this.timer) this.time.timers.clearTimeout(this.timer)
-    this.timer = null
-    if (this.drainPromise) return
+    if (this.drainer.isStopping()) return
+    this.drainer.clearTimer()
+    if (this.drainer.isRunning()) return
     this.armFromDatabase()
   }
 
   trigger(): Promise<void> {
-    if (this.stopping) return Promise.resolve()
-    if (this.timer) this.time.timers.clearTimeout(this.timer)
-    this.timer = null
-    if (this.drainPromise) return this.drainPromise
-    this.drainPromise = this.drainSafely().finally(() => {
-      this.drainPromise = null
-    })
-    return this.drainPromise
+    return this.drainer.trigger()
   }
 
   private async drainSafely(): Promise<void> {
     try {
       await this.drain()
-      if (!this.stopping && !this.timer) this.armFromDatabase()
+      if (!this.drainer.isStopping() && !this.drainer.hasTimer()) this.armFromDatabase()
       this.drainAttempts = 0
     } catch (error) {
-      if (this.stopping) return
+      if (this.drainer.isStopping()) return
       console.error(`[outbox] drain failed: ${errorMessage(error)}`)
-      const delay = retryDelayMs(this.drainAttempts++)
-      this.timer = this.time.timers.setTimeout(() => {
-        this.timer = null
-        void this.trigger()
-      }, delay)
+      this.drainer.arm(retryDelayMs(this.drainAttempts++))
     }
   }
 
   /** True only while send recovery or delivery is active, not while an undo/retry timer is idle. */
   isRunning(): boolean {
-    return this.drainPromise !== null
+    return this.drainer.isRunning()
   }
 
-  async stop(): Promise<void> {
-    this.stopping = true
-    if (this.timer) this.time.timers.clearTimeout(this.timer)
-    this.timer = null
-    const drain = this.drainPromise
-    if (!drain) return
-    let timeout: TimerHandle | null = null
-    const timedOut = await Promise.race([
-      drain.then(() => false),
-      new Promise<boolean>((resolve) => {
-        timeout = this.time.timers.setTimeout(() => resolve(true), OUTBOX_STOP_TIMEOUT_MS)
-      })
-    ])
-    if (timeout) this.time.timers.clearTimeout(timeout)
-    if (!timedOut) return
-    this.remoteAbortController?.abort(new Error('outbox shutdown'))
-    await drain
+  stop(): Promise<void> {
+    return this.drainer.stop()
   }
 
   private armFromDatabase(): void {
@@ -326,17 +303,13 @@ export class OutboxSender {
       .get(accountId) as { state: string; send_at: number | null } | undefined
     if (!next) return
     const now = this.time.now()
-    const delay = next.send_at === null ? 0 : Math.max(0, next.send_at - now)
-    this.timer = this.time.timers.setTimeout(() => {
-      this.timer = null
-      void this.trigger()
-    }, delay)
+    this.drainer.arm(next.send_at === null ? 0 : Math.max(0, next.send_at - now))
   }
 
   private nextDue(accountId: string): SendRow | undefined {
     return this.db
       .prepare(
-        `SELECT id, account_id, state, kind, gmail_draft_id, gmail_message_id, rfc_message_id,
+        `SELECT id, account_id, state, gmail_draft_id, gmail_message_id, rfc_message_id,
                 to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, created_at, updated_at, follow_up_at, send_at,
@@ -356,15 +329,12 @@ export class OutboxSender {
     const accountId = this.accountId()
     const provider = this.provider()
     if (!accountId || !provider) {
-      this.timer = this.time.timers.setTimeout(() => {
-        this.timer = null
-        void this.trigger()
-      }, OUTBOX_OFFLINE_RECHECK_MS)
+      this.drainer.arm(OUTBOX_OFFLINE_RECHECK_MS)
       return
     }
 
     for (;;) {
-      if (this.stopping || this.accountId() !== accountId) return
+      if (this.drainer.isStopping() || this.accountId() !== accountId) return
       let row = this.nextDue(accountId)
       if (!row) return
       const recovering = row.state === 'sending'
@@ -378,34 +348,24 @@ export class OutboxSender {
         try {
           await this.beforeRemote(checkpointController.signal)
         } catch (error) {
-          if (this.stopping && checkpointController.signal.aborted) return
+          if (this.drainer.isStopping() && checkpointController.signal.aborted) return
           console.warn(`[outbox] draft checkpoint wait failed: ${errorMessage(error)}`)
-          this.timer = this.time.timers.setTimeout(() => {
-            this.timer = null
-            void this.trigger()
-          }, retryDelayMs(row.attempts))
+          this.drainer.arm(retryDelayMs(row.attempts))
           return
         } finally {
           if (this.remoteAbortController === checkpointController) this.remoteAbortController = null
         }
         checkpointWaited = true
-        if (this.stopping || this.accountId() !== accountId) return
-        const plan = planTransition(
-          {
-            state: row.state,
-            gmailDraftId: row.gmail_draft_id,
-            sendAt: row.send_at,
-            attempts: row.attempts,
-            verifyAttempts: row.verify_attempts
-          },
-          { type: 'timer' },
-          this.time.now()
-        )
-        if (plan.next.state !== 'sending') return
-        const claimed = this.db
-          .prepare("UPDATE outbox SET state = 'sending' WHERE account_id = ? AND id = ? AND state = 'queued'")
-          .run(accountId, row.id)
-        if (claimed.changes === 0) continue
+        if (this.drainer.isStopping() || this.accountId() !== accountId) return
+        // The wait above can run for tens of seconds while the mirror uploads
+        // attachments. An undo and re-send inside that window leaves the row
+        // queued with a fresh send_at, so the claim re-checks it: the row was
+        // due when it was read, not necessarily when it is claimed.
+        const claimed = persistPlan(this.db, row, { type: 'timer' }, this.time.now(), {
+          requireDueSendAt: this.time.now()
+        })
+        if (claimed.plan.next.state !== 'sending') return
+        if (!claimed.persisted) continue
         row = { ...row, state: 'sending' }
         this.notify({ kind: 'changed' })
       }
@@ -418,7 +378,7 @@ export class OutboxSender {
   private reloadSending(accountId: string, id: string): SendRow | undefined {
     return this.db
       .prepare(
-        `SELECT id, account_id, state, kind, gmail_draft_id, gmail_message_id, rfc_message_id,
+        `SELECT id, account_id, state, gmail_draft_id, gmail_message_id, rfc_message_id,
                 to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, created_at, updated_at, follow_up_at, send_at,
@@ -438,21 +398,11 @@ export class OutboxSender {
     this.remoteAbortController = controller
     try {
       if (!checkpointWaited) await this.beforeRemote(controller.signal)
-      if (this.stopping || this.accountId() !== initial.account_id) return true
+      if (this.drainer.isStopping() || this.accountId() !== initial.account_id) return true
       const row = this.reloadSending(initial.account_id, initial.id)
       if (!row) return false
       if (recovering) {
-        const recovery = planTransition(
-          {
-            state: row.state,
-            gmailDraftId: row.gmail_draft_id,
-            sendAt: row.send_at,
-            attempts: row.attempts,
-            verifyAttempts: row.verify_attempts
-          },
-          { type: 'recover' },
-          this.time.now()
-        )
+        const recovery = planTransition(machineRow(row), { type: 'recover' }, this.time.now())
         if (recovery.effects.includes('verify-secondary')) {
           return this.verifySecondary(row, provider, controller.signal)
         }
@@ -460,20 +410,46 @@ export class OutboxSender {
           if (
             (await verifyKnownDraft(provider, row.gmail_draft_id as string, controller.signal)) === 'consumed'
           ) {
-            await this.markSent(row, provider, row.thread_id, controller.signal)
+            await this.settleConsumedDraft(row, provider, controller.signal)
             return false
           }
+          // The draft is still in Drafts, so the interrupted send never
+          // reached Gmail and this row may resend it.
+          const present = planTransition(machineRow(row), { type: 'draft-present' }, this.time.now())
+          if (!present.effects.includes('send')) return false
         }
       }
 
       await this.send(row, provider, controller.signal)
       return false
     } catch (error) {
-      if (this.stopping && controller.signal.aborted) return true
+      if (this.drainer.isStopping() && controller.signal.aborted) return true
       return this.handleError(initial, error)
     } finally {
       if (this.remoteAbortController === controller) this.remoteAbortController = null
     }
+  }
+
+  /**
+   * A 404 on a draft this row owns has two causes: `drafts.send` consumed it,
+   * or somebody deleted it from Drafts on another device while the row sat in
+   * `sending`. Only a real message carrying this row's Message-ID proves
+   * delivery, so absence of one parks the row for review instead of reporting
+   * a send that never happened.
+   */
+  private async settleConsumedDraft(
+    row: SendRow,
+    provider: MailProvider,
+    signal: AbortSignal
+  ): Promise<void> {
+    const match = provider.findByRfcId
+      ? await provider.findByRfcId(row.rfc_message_id, { signal, priority: 'send' })
+      : null
+    if (match?.kind === 'message') {
+      await this.markSent(row, provider, match.threadId ?? row.thread_id, signal, match.messageId)
+      return
+    }
+    this.parkNeedsReview(row)
   }
 
   private async verifySecondary(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<boolean> {
@@ -484,23 +460,16 @@ export class OutboxSender {
       return false
     }
     if (match?.kind === 'draft') {
-      this.db
-        .prepare(
-          `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
-           WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-        )
-        .run(match.draftId, row.account_id, row.id)
+      persistPlan(this.db, row, { type: 'draft-id-assigned', gmailDraftId: match.draftId }, this.time.now(), {
+        lastError: null,
+        requireMissingDraftId: true
+      })
       const recovered = this.reloadSending(row.account_id, row.id)
       if (!recovered) return false
       const durableDraftId = recovered.gmail_draft_id
       if (!durableDraftId) return false
       if ((await verifyKnownDraft(provider, durableDraftId, signal)) === 'consumed') {
-        await this.markSent(
-          recovered,
-          provider,
-          durableDraftId === match.draftId ? (match.threadId ?? recovered.thread_id) : recovered.thread_id,
-          signal
-        )
+        await this.settleConsumedDraft(recovered, provider, signal)
         return false
       }
       await this.send(recovered, provider, signal)
@@ -509,32 +478,17 @@ export class OutboxSender {
 
     const exhausted = row.verify_attempts + 1 >= SECONDARY_CHECKS
     const retryAt = this.time.now() + SECONDARY_CHECK_MS
-    const plan = planTransition(
-      {
-        state: row.state,
-        gmailDraftId: row.gmail_draft_id,
-        sendAt: row.send_at,
-        attempts: row.attempts,
-        verifyAttempts: row.verify_attempts
-      },
+    const { plan, persisted } = persistPlan(
+      this.db,
+      row,
       { type: 'secondary-negative', exhausted, retryAt },
-      this.time.now()
+      this.time.now(),
+      {
+        lastError: exhausted ? NEEDS_REVIEW_EXPLANATION : null,
+        requireMissingDraftId: true
+      }
     )
-    const persisted = this.db
-      .prepare(
-        `UPDATE outbox SET state = ?, send_at = ?, attempts = ?, verify_attempts = ?, last_error = ?
-         WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-      )
-      .run(
-        plan.next.state,
-        plan.next.sendAt,
-        plan.next.attempts,
-        plan.next.verifyAttempts,
-        plan.next.state === 'needs-review' ? NEEDS_REVIEW_EXPLANATION : null,
-        row.account_id,
-        row.id
-      )
-    if (persisted.changes === 0) return false
+    if (!persisted) return false
     if (plan.next.state === 'needs-review') {
       this.notify({ kind: 'failed', id: row.id, error: NEEDS_REVIEW_EXPLANATION })
       return false
@@ -549,19 +503,7 @@ export class OutboxSender {
     signal?: AbortSignal
   ): Promise<{ raw: string; updateMime?: ProviderMimeUpload }> {
     const accountName = await this.senderDisplayName(row.account_id, provider, signal)
-    const storedAttachments = parseStoredDraftAttachments(row.attachments_json)
-    const draft = {
-      to: parseJson<MailAddress[]>(row.to_json),
-      cc: parseJson<MailAddress[]>(row.cc_json),
-      bcc: parseJson<MailAddress[]>(row.bcc_json),
-      subject: row.subject,
-      bodyHtml: row.body_html,
-      bodyText: row.body_text,
-      quoteHtml: row.quote_html,
-      quoteText: row.quote_text,
-      inReplyTo: row.in_reply_to,
-      references: parseJson<string[]>(row.references_json)
-    }
+    const { attachments: storedAttachments, threadId: _threadId, ...draft } = outboxDraftContent(row)
     const options = {
       accountEmail: row.account_id,
       accountName,
@@ -623,19 +565,15 @@ export class OutboxSender {
     signal?: AbortSignal
   ): Promise<string> {
     if (!provider.getSendAs) return ''
+    // The sync controller refreshes this cache when the account starts and on
+    // every poll, so a send reads what it left rather than spending a Gmail
+    // round trip inside the undo window. Only an account that has never
+    // cached a name pays for one, and a failure there is a real preflight
+    // failure: the From line is not something to guess at.
     const cached = readAccountSetting(this.db, accountId, SEND_AS_DISPLAY_NAME_SETTING)
-    try {
-      const sendAs = await syncPrimarySendAs(this.db, accountId, provider, {
-        signal,
-        priority: 'send'
-      })
-      return primarySenderDisplayName(this.db, accountId, sendAs?.displayName)
-    } catch (error) {
-      if (signal?.aborted) throw error
-      if (cached === undefined) throw error
-      console.warn(`[outbox] send-as refresh failed for ${accountId}: ${errorMessage(error)}`)
-      return primarySenderDisplayName(this.db, accountId, cached)
-    }
+    if (cached !== undefined) return primarySenderDisplayName(this.db, accountId, cached)
+    const sendAs = await syncPrimarySendAs(this.db, accountId, provider, { signal, priority: 'send' })
+    return primarySenderDisplayName(this.db, accountId, sendAs?.displayName)
   }
 
   private async send(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<void> {
@@ -657,13 +595,19 @@ export class OutboxSender {
           raw: prepared.raw,
           updateMime: prepared.updateMime,
           threadId: row.thread_id,
-          persistCreatedId: (gmailDraftId) =>
-            this.db
-              .prepare(
-                `UPDATE outbox SET gmail_draft_id = ?, attempts = 0, verify_attempts = 0, last_error = NULL
-                 WHERE account_id = ? AND id = ? AND state = 'sending' AND gmail_draft_id IS NULL`
-              )
-              .run(gmailDraftId, row.account_id, row.id).changes > 0
+          persistCreatedId: (gmailDraftId) => {
+            const assigned = persistPlan(
+              this.db,
+              row,
+              { type: 'draft-id-assigned', gmailDraftId },
+              this.time.now(),
+              { lastError: null, requireMissingDraftId: true }
+            )
+            // Keep the in-memory row in step with what was just committed, so
+            // the sent transition below cannot write the pre-create id back.
+            if (assigned.persisted) row.gmail_draft_id = gmailDraftId
+            return assigned.persisted
+          }
         },
         signal
       )
@@ -672,7 +616,7 @@ export class OutboxSender {
     }
     if (result.kind === 'aborted') return
     if (result.kind === 'missing-before-send') {
-      this.parkNeedsReview(row, true)
+      this.parkNeedsReview(row)
       return
     }
     await this.markSent(
@@ -684,34 +628,11 @@ export class OutboxSender {
     )
   }
 
-  private parkNeedsReview(row: SendRow, clearDraftId: boolean): void {
-    const plan = planTransition(
-      {
-        state: row.state,
-        gmailDraftId: row.gmail_draft_id,
-        sendAt: row.send_at,
-        attempts: row.attempts,
-        verifyAttempts: row.verify_attempts
-      },
-      { type: 'needs-review' },
-      this.time.now()
-    )
-    const parked = this.db
-      .prepare(
-        `UPDATE outbox SET state = ?, gmail_draft_id = CASE WHEN ? THEN NULL ELSE gmail_draft_id END,
-         send_at = NULL, attempts = ?, verify_attempts = ?, last_error = ?
-         WHERE account_id = ? AND id = ? AND state = 'sending'`
-      )
-      .run(
-        plan.next.state,
-        clearDraftId ? 1 : 0,
-        plan.next.attempts,
-        plan.next.verifyAttempts,
-        NEEDS_REVIEW_EXPLANATION,
-        row.account_id,
-        row.id
-      )
-    if (parked.changes === 0) return
+  private parkNeedsReview(row: SendRow): void {
+    const { persisted } = persistPlan(this.db, row, { type: 'needs-review' }, this.time.now(), {
+      lastError: NEEDS_REVIEW_EXPLANATION
+    })
+    if (!persisted) return
     this.notify({ kind: 'failed', id: row.id, error: NEEDS_REVIEW_EXPLANATION })
   }
 
@@ -732,38 +653,18 @@ export class OutboxSender {
       ? 'An attachment is still unavailable — reopen the message and attach it again'
       : userFacingSendError(cause)
     const retryAt = this.time.now() + retryDelayMs(current.attempts)
-    const plan = planTransition(
-      {
-        state: current.state,
-        gmailDraftId: current.gmail_draft_id,
-        sendAt: current.send_at,
-        attempts: current.attempts,
-        verifyAttempts: current.verify_attempts
-      },
+    const { plan, persisted } = persistPlan(
+      this.db,
+      current,
       permanent
         ? { type: 'permanent-error' }
         : noRemoteMutation
           ? { type: 'preflight-retry', exhausted, retryAt }
-          : current.gmail_draft_id === null
-            ? { type: 'verification-error', retryAt }
-            : { type: 'retryable-error', retryAt },
-      this.time.now()
+          : { type: 'retryable-error', retryAt },
+      this.time.now(),
+      { lastError: displayError }
     )
-    const persisted = this.db
-      .prepare(
-        `UPDATE outbox SET state = ?, send_at = ?, attempts = ?, verify_attempts = ?, last_error = ?
-         WHERE account_id = ? AND id = ? AND state = 'sending'`
-      )
-      .run(
-        plan.next.state,
-        plan.next.sendAt,
-        plan.next.attempts,
-        plan.next.verifyAttempts,
-        displayError,
-        current.account_id,
-        current.id
-      )
-    if (persisted.changes === 0) return false
+    if (!persisted) return false
     if (plan.next.state === 'failed') {
       this.notify({ kind: 'failed', id: current.id, error: displayError })
       return false
@@ -784,16 +685,14 @@ export class OutboxSender {
     // undone or failed send can never leave one behind, and a crash between
     // the two can never lose one. Its origin stays unresolved until the
     // post-send read (or the account's sync session) supplies internalDate.
-    let settledChanges = 0
+    let settled = false
     this.db.transaction(() => {
-      settledChanges = this.db
-        .prepare(
-          `UPDATE outbox SET state = 'sent', gmail_message_id = COALESCE(?, gmail_message_id),
-           send_at = NULL, last_error = NULL, updated_at = ?
-           WHERE account_id = ? AND id = ? AND state = 'sending'`
-        )
-        .run(gmailMessageId, now, row.account_id, row.id).changes
-      if (settledChanges === 0 || row.follow_up_at === null) return
+      settled = persistPlan(this.db, row, { type: 'send-confirmed' }, now, {
+        gmailMessageId,
+        lastError: null,
+        updatedAt: now
+      }).persisted
+      if (!settled || row.follow_up_at === null) return
       if (!threadId) {
         console.warn(`[outbox] sent ${row.id} with a follow-up but no thread id — reminder skipped`)
         return
@@ -806,13 +705,13 @@ export class OutboxSender {
         rowCreatedAt: row.created_at
       })
     })()
-    if (settledChanges === 0) return
+    if (!settled) return
     this.cleanSpool(row.id)
     this.pruneSent(row.account_id, now)
     this.notify({ kind: 'changed' })
     // Sending is already durably settled. Do not make normal shutdown or an
     // account switch wait on the best-effort post-send conversation refresh.
-    if (!threadId || this.stopping || this.accountId() !== row.account_id) return
+    if (!threadId || this.drainer.isStopping() || this.accountId() !== row.account_id) return
     try {
       const thread = await provider.getThread(threadId, { format: 'full', signal, priority: 'send' })
       if (persistThread(this.db, row.account_id, thread)) this.mailChanged()

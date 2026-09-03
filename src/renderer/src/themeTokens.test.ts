@@ -24,13 +24,7 @@ describe('theme token coverage', () => {
   it('keeps app chrome free of component-level color literals', () => {
     // These files serialize sender-authored mail or Google brand colors. Their
     // literals do not paint themeable Attn chrome and are covered separately.
-    const interoperabilityFiles = new Set([
-      'MessageBody.tsx',
-      'components/LoginScreen.tsx',
-      'composer/Composer.tsx',
-      'composer/EditorToolbar.tsx',
-      'composer/nodes/OpaqueHtmlNode.tsx'
-    ])
+    const interoperabilityFiles = new Set(['components/LoginScreen.tsx', 'composer/nodes/OpaqueHtmlNode.tsx'])
     const offenders = sourceFiles(rendererDirectory).flatMap((file) => {
       const relative = file.pathname.slice(rendererDirectory.pathname.length)
       if (interoperabilityFiles.has(relative)) return []

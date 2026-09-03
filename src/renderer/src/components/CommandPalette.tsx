@@ -16,12 +16,15 @@ import {
   registerCommands,
   subscribeCommandRegistry
 } from '../commands'
-import { modKeyLabel } from '../platform'
+import { wrappedIndex } from '../hooks/useHighlightedOption'
+import { formatShortcut } from '../platform'
 import { Kbd } from './Kbd'
 
 interface CommandPaletteProps {
   account: string | null
   context: ActiveCommandContext
+  /** Reported upward so overlays underneath know the palette owns input. */
+  onOpenChange: (open: boolean) => void
 }
 
 interface ReturnFocus {
@@ -38,20 +41,11 @@ function isPaletteShortcut(event: KeyboardEvent): boolean {
   )
 }
 
-export function shortcutLabel(shortcut: string): string {
-  return shortcut
-    .replace(/Mod/gi, modKeyLabel())
-    .split(' ')
-    .map((part) =>
-      part
-        .split('+')
-        .map((key) => (/^[a-z]$/i.test(key) ? key.toLocaleUpperCase() : key))
-        .join('+')
-    )
-    .join(' ')
-}
-
-export function CommandPalette({ account, context }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({
+  account,
+  context,
+  onOpenChange
+}: CommandPaletteProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -99,6 +93,12 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
   }, [])
 
   useLayoutEffect(() => registerCommands([createCommand('palette.open', openPalette)]), [openPalette])
+
+  // Layout phase, not passive: the cheat sheet reads this before the next key
+  // event can be dispatched, which the DOM probe it replaces guaranteed (P9).
+  useLayoutEffect(() => {
+    onOpenChange(open)
+  }, [onOpenChange, open])
 
   useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -244,7 +244,7 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
                 event.stopPropagation()
                 if (results.length === 0) return
                 const direction = event.key === 'ArrowDown' ? 1 : -1
-                setActiveIndex((current) => (current + direction + results.length) % results.length)
+                setActiveIndex((current) => wrappedIndex(current, direction, results.length))
                 return
               }
               if (event.key === 'Enter' && activeResult) {
@@ -290,7 +290,7 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
                 onClick={() => runResult(result)}
               >
                 <span className="min-w-0 flex-1 truncate">{result.title}</span>
-                {result.command.shortcut && <Kbd>{shortcutLabel(result.command.shortcut)}</Kbd>}
+                {result.command.shortcut && <Kbd>{formatShortcut(result.command.shortcut)}</Kbd>}
               </button>
             ))
           )}

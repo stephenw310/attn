@@ -1,7 +1,7 @@
 import { createReadStream, type Stats } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import type { MailAddress } from '../../shared/address'
+import type { DraftKind } from '../../shared/drafts'
 import { errorMessage } from '../../shared/error'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
@@ -17,12 +17,14 @@ import {
   streamDraftMessage
 } from './draftMime'
 import { draftContentFingerprint, refreshRemoteAttachmentLocators, remoteDraftAttachments } from './draftSync'
-import { isEmptyDraft } from './drafts'
+import { shouldMirrorDraft } from './drafts'
 import type { MimeStreamAttachment } from './mime'
+import { outboxDraftContent, outboxDraftInput } from './row'
 
 interface DraftMirrorRow {
   id: string
   state: 'composing' | 'drafted' | 'discarding'
+  kind: DraftKind
   gmail_draft_id: string | null
   to_json: string
   cc_json: string
@@ -36,7 +38,9 @@ interface DraftMirrorRow {
   references_json: string
   quote_html: string
   quote_text: string
+  source_message_id: string | null
   local_revision: number
+  default_signature_fingerprint: string | null
 }
 
 export class DraftMirrorRowError extends Error {
@@ -49,10 +53,6 @@ export class DraftMirrorRowError extends Error {
   }
 }
 
-function parseJson<T>(value: string): T {
-  return JSON.parse(value) as T
-}
-
 function nextPending(
   db: Db,
   accountId: string,
@@ -60,9 +60,9 @@ function nextPending(
 ): DraftMirrorRow | undefined {
   const rows = db
     .prepare(
-      `SELECT id, state, gmail_draft_id, to_json, cc_json, bcc_json, subject, body_html,
+      `SELECT id, state, kind, gmail_draft_id, to_json, cc_json, bcc_json, subject, body_html,
               body_text, attachments_json, thread_id, in_reply_to, references_json, quote_html,
-              quote_text, local_revision
+              quote_text, source_message_id, local_revision, default_signature_fingerprint
        FROM outbox
        WHERE account_id = ? AND (
          state = 'discarding' OR
@@ -72,28 +72,15 @@ function nextPending(
       `
     )
     .all(accountId) as DraftMirrorRow[]
+  // Any drain trigger reaches these rows, not only the composer's own
+  // checkpoint request, so the gate here must be the IPC gate: a
+  // crash-recovered reply the user never contributed to has work pending
+  // (local_revision 1, mirror_revision 0) and must still stay out of Gmail.
   return rows.find(
     (row) =>
       !skip(row.id) &&
       (row.state === 'discarding' ||
-        !isEmptyDraft({
-          id: row.id,
-          kind: 'new',
-          followUpAt: null,
-          to: parseJson<MailAddress[]>(row.to_json),
-          cc: parseJson<MailAddress[]>(row.cc_json),
-          bcc: parseJson<MailAddress[]>(row.bcc_json),
-          subject: row.subject,
-          bodyHtml: row.body_html,
-          bodyText: row.body_text,
-          attachments: parseStoredDraftAttachments(row.attachments_json),
-          threadId: row.thread_id,
-          sourceMessageId: null,
-          inReplyTo: row.in_reply_to,
-          references: parseJson<string[]>(row.references_json),
-          quoteHtml: row.quote_html,
-          quoteText: row.quote_text
-        }))
+        shouldMirrorDraft(outboxDraftInput(row), row.local_revision, row.default_signature_fingerprint))
   )
 }
 
@@ -220,11 +207,18 @@ async function streamDraftCheckpoint(
       signal
     )
     if (!created) return null
-    db.prepare('UPDATE outbox SET gmail_draft_id = ? WHERE account_id = ? AND id = ?').run(
-      created,
-      accountId,
-      row.id
-    )
+    const persisted = db
+      .prepare('UPDATE outbox SET gmail_draft_id = ? WHERE account_id = ? AND id = ?')
+      .run(created, accountId, row.id)
+    // The row can be discarded and hard-deleted while this create is in
+    // flight (closeDraft removes an effectively-empty row that has no remote
+    // id yet). A create is not idempotent, so the draft Gmail just minted has
+    // to be deleted here — otherwise it stays in Gmail and draft sync imports
+    // it back as a fresh row holding the text the user just discarded.
+    if (persisted.changes === 0) {
+      await deleteDraftCheckpoint(provider, created, signal)
+      return null
+    }
     return created
   }
 
@@ -257,18 +251,10 @@ async function mirrorComposing(
 ): Promise<boolean> {
   if (!provider.saveDraft) return false
   const mirroredAttachments = await refreshRemoteAttachmentIds(db, accountId, row, provider, signal)
-  const body = {
-    to: parseJson<MailAddress[]>(row.to_json),
-    cc: parseJson<MailAddress[]>(row.cc_json),
-    bcc: parseJson<MailAddress[]>(row.bcc_json),
-    subject: row.subject,
-    bodyHtml: row.body_html,
-    bodyText: row.body_text,
-    quoteHtml: row.quote_html,
-    quoteText: row.quote_text,
-    inReplyTo: row.in_reply_to,
-    references: parseJson<string[]>(row.references_json)
-  }
+  const content = outboxDraftContent(row)
+  // The MIME body carries authored content only: attachments are prepared
+  // separately below, and the thread id rides on the Gmail request instead.
+  const { attachments: _attachments, threadId: _threadId, ...body } = content
   const onRemoteMissing = (): boolean => {
     db.prepare(
       `UPDATE outbox SET gmail_draft_id = NULL, mirror_revision = 0
@@ -314,26 +300,20 @@ async function mirrorComposing(
           signal
         )
   if (!gmailDraftId) return false
-  const fingerprint = draftContentFingerprint({
-    to: parseJson<MailAddress[]>(row.to_json),
-    cc: parseJson<MailAddress[]>(row.cc_json),
-    bcc: parseJson<MailAddress[]>(row.bcc_json),
-    subject: row.subject,
-    bodyHtml: row.body_html,
-    bodyText: row.body_text,
-    attachments: mirroredAttachments,
-    threadId: row.thread_id,
-    inReplyTo: row.in_reply_to,
-    references: parseJson<string[]>(row.references_json),
-    quoteHtml: row.quote_html,
-    quoteText: row.quote_text
-  })
-  db.prepare(
-    `UPDATE outbox SET gmail_draft_id = ?,
-       mirror_revision = CASE WHEN state IN ('composing', 'drafted') THEN ? ELSE mirror_revision END,
-       remote_fingerprint = CASE WHEN state IN ('composing', 'drafted') THEN ? ELSE remote_fingerprint END
-     WHERE account_id = ? AND id = ?`
-  ).run(gmailDraftId, row.local_revision, fingerprint, accountId, row.id)
+  const fingerprint = draftContentFingerprint({ ...content, attachments: mirroredAttachments })
+  const persisted = db
+    .prepare(
+      `UPDATE outbox SET gmail_draft_id = ?,
+         mirror_revision = CASE WHEN state IN ('composing', 'drafted') THEN ? ELSE mirror_revision END,
+         remote_fingerprint = CASE WHEN state IN ('composing', 'drafted') THEN ? ELSE remote_fingerprint END
+       WHERE account_id = ? AND id = ?`
+    )
+    .run(gmailDraftId, row.local_revision, fingerprint, accountId, row.id)
+  // Same discard race as the streaming create above, for the buffered path
+  // that creates and checkpoints in one call.
+  if (persisted.changes === 0 && gmailDraftId !== row.gmail_draft_id) {
+    await deleteDraftCheckpoint(provider, gmailDraftId, signal)
+  }
   return true
 }
 

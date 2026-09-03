@@ -7,12 +7,12 @@ import {
   type SerializedLexicalNode,
   type Spread
 } from 'lexical'
-import { useContext, useEffect, useState } from 'react'
+import { useContext } from 'react'
+import { useMailFrameAccess } from '../../mailFrame'
+import { TRANSPARENT_IMAGE } from '../../mailInlineImages'
 import { isRemoteMailUrl } from '../../mailRemoteContent'
 import { DraftSourceMessageIdContext } from '../DraftContentContext'
 import { sanitizeComposerImageSource, sanitizeComposerStyle } from '../sanitize'
-
-const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 
 /**
  * T33 (PR #101 review): the editor renders in the TOP frame, which main's
@@ -41,44 +41,10 @@ function ComposerImage({
 }): React.JSX.Element {
   const sourceMessageId = useContext(DraftSourceMessageIdContext)
   const remote = isRemoteMailUrl(src)
-  const [allowed, setAllowed] = useState(!remote)
-  const [policyEpoch, setPolicyEpoch] = useState(0)
-  useEffect(() => {
-    if (!remote) return
-    const bridge = window.attn
-    if (!bridge) return
-    return bridge.mail.onRemoteImagesChanged(() => setPolicyEpoch((epoch) => epoch + 1))
-  }, [remote])
-  // biome-ignore lint/correctness/useExhaustiveDependencies: policyEpoch deliberately re-resolves so policy changes reach a mounted image
-  useEffect(() => {
-    if (!remote) return
-    const bridge = window.attn
-    setAllowed(false)
-    if (!bridge) return
-    let stale = false
-    if (sourceMessageId !== null) {
-      const nonce = crypto.randomUUID()
-      bridge.mail
-        .registerMessageFrame(nonce, sourceMessageId, false)
-        .then(({ imagesAllowed }) => {
-          if (!stale) setAllowed(imagesAllowed)
-        })
-        .catch(() => {})
-      return () => {
-        stale = true
-        void bridge.mail.unregisterMessageFrame(nonce).catch(() => {})
-      }
-    }
-    void bridge.settings
-      .getAll()
-      .then((settings) => {
-        if (!stale) setAllowed(!settings.remoteImagesBlocked)
-      })
-      .catch(() => {})
-    return () => {
-      stale = true
-    }
-  }, [remote, sourceMessageId, policyEpoch])
+  // The same registration the quote and preserved-region frames make, for the
+  // answer alone: there is no frame here to name, so nothing is mounted on it.
+  const { access } = useMailFrameAccess({ messageId: sourceMessageId, enabled: remote })
+  const allowed = !remote || access?.imagesAllowed === true
 
   return (
     <img

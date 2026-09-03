@@ -1,15 +1,8 @@
-import type { ElectronApplication } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { emitFocusThread } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
-
-async function emitFocusThread(app: ElectronApplication, threadId: string): Promise<void> {
-  await app.evaluate(({ ipcMain }, { channel, id }) => ipcMain.emit(channel, {}, id), {
-    channel: TEST_CHANNELS.focusThread,
-    id: threadId
-  })
-}
 
 test('focus-thread push selects the requested row and opens its conversation', async ({ app, page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)

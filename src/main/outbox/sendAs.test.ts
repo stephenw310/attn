@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL } from '../../shared/settings'
 import { openDatabase } from '../db'
-import { readAccountSetting, writeAccountSetting, writeAccountSetting as writeSetting } from '../settings'
+import { readAccountSetting, writeAccountSetting as writeSetting } from '../settings'
 import { closeDraft, listDrafts, requestDraftMirror, saveDraft } from './drafts'
 import {
   ATTN_SIGNATURE_SETTING,
@@ -11,8 +11,6 @@ import {
   prepareDraftWithCachedPrimarySignature,
   SEND_AS_DISPLAY_NAME_SETTING,
   SEND_AS_SIGNATURE_HTML_SETTING,
-  SEND_AS_SIGNATURE_SOURCE_SETTING,
-  SEND_AS_SIGNATURE_TEXT_SETTING,
   syncPrimarySendAs
 } from './sendAs'
 
@@ -61,8 +59,15 @@ describe('primary Gmail send-as settings', () => {
            (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
          VALUES (?, ?, ?, 'me', ?, ?, '["SENT"]')`
       )
+      // persistThread writes the thread's label union beside its messages, and
+      // the lookup narrows to SENT threads through that index.
+      const insertSentThread = db.prepare(
+        "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, 'SENT')"
+      )
+      insertSentThread.run(ACCOUNT, 'thread-1')
       for (let index = 0; index < 25; index += 1) {
         insertAttnSent.run(ACCOUNT, `attn-sent-${index}`, `thread-${index + 2}`, ACCOUNT, 20 + index)
+        insertSentThread.run(ACCOUNT, `thread-${index + 2}`)
       }
 
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, displayName: '', signature: '' })
@@ -74,31 +79,6 @@ describe('primary Gmail send-as settings', () => {
         signature: ''
       })
       expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Updated Name')
-    } finally {
-      db.close()
-    }
-  })
-
-  it('rebuilds a legacy cached signature envelope without a Gmail settings change', () => {
-    const db = openDatabase(':memory:')
-    const source = '<div dir="ltr">Best,<div>Chao Wu</div></div>'
-    try {
-      writeAccountSetting(db, ACCOUNT, SEND_AS_SIGNATURE_SOURCE_SETTING, source)
-      writeAccountSetting(
-        db,
-        ACCOUNT,
-        SEND_AS_SIGNATURE_HTML_SETTING,
-        `<div><br></div><div class="gmail_signature" data-smartmail="gmail_signature">${source}</div>`
-      )
-      writeAccountSetting(db, ACCOUNT, SEND_AS_SIGNATURE_TEXT_SETTING, '\nBest,\nChao Wu')
-
-      const signature = cachePrimarySendAs(db, ACCOUNT, {
-        sendAsEmail: ACCOUNT,
-        signature: source
-      })
-      expect(signature.bodyHtml).toContain(
-        '<div dir="ltr"><div><br></div><div><div dir="ltr" class="gmail_signature"'
-      )
     } finally {
       db.close()
     }

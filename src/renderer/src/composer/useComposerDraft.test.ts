@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import type { Draft } from '../../../shared/drafts'
 import { MIRROR_IDLE_MS, MIRROR_PAYLOAD_IDLE_MS } from '../../../shared/outboxTuning'
-import { type ComposerDraftController, mirrorIdleMs, useComposerDraft } from './useComposerDraft'
+import { type ComposerDraftController, useComposerDraft } from './useComposerDraft'
 
 const draft: Draft = {
   id: 'local-draft',
@@ -36,13 +36,6 @@ const file = (sizeBytes: number) => ({
   sizeBytes
 })
 
-it('slows the mirror only once a draft carries real attachment payload', () => {
-  expect(mirrorIdleMs([])).toBe(MIRROR_IDLE_MS)
-  expect(mirrorIdleMs([file(64_000)])).toBe(MIRROR_IDLE_MS)
-  expect(mirrorIdleMs([file(4_000_000)])).toBe(MIRROR_PAYLOAD_IDLE_MS)
-  expect(mirrorIdleMs([file(600_000), file(600_000)])).toBe(MIRROR_PAYLOAD_IDLE_MS)
-})
-
 it('pushes an attachment change promptly but lets body edits wait', async () => {
   vi.useFakeTimers()
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -52,7 +45,12 @@ it('pushes an attachment change promptly but lets body edits wait', async () => 
   Object.defineProperty(window, 'attn', {
     configurable: true,
     value: {
-      draft: { save: vi.fn(async () => ({ id: 'local-draft' })), mirror }
+      draft: {
+        save: vi.fn(async () => ({ id: 'local-draft' })),
+        mirror,
+        // The pre-quit checkpoint subscription (B28); main drives it in e2e.
+        onCheckpointRequest: () => () => {}
+      }
     } as unknown as Window['attn']
   })
 
@@ -110,7 +108,9 @@ it('does not re-arm a failed autosave after the composer unmounts', async () => 
   )
   Object.defineProperty(window, 'attn', {
     configurable: true,
-    value: { draft: { save, mirror: vi.fn() } } as unknown as Window['attn']
+    value: {
+      draft: { save, mirror: vi.fn(), onCheckpointRequest: () => () => {} }
+    } as unknown as Window['attn']
   })
 
   const container = document.createElement('div')

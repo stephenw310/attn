@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSearchQuery, searchMatchExpression } from './searchQuery'
+import { normalizeMailboxName, parseSearchQuery, searchMatchExpression } from './searchQuery'
 
 describe('parseSearchQuery', () => {
   it.each([
@@ -85,5 +85,18 @@ describe('searchMatchExpression', () => {
 
   it('returns null for a filter-only query', () => {
     expect(searchMatchExpression(parseSearchQuery('is:unread'))).toBeNull()
+  })
+})
+
+describe('normalizeMailboxName', () => {
+  it('folds case, spaces, underscores and hyphens so one spelling reaches every layer', () => {
+    expect(['All Mail', 'all_mail', 'ALL-MAIL', 'allmail'].map(normalizeMailboxName)).toEqual([
+      'allmail',
+      'allmail',
+      'allmail',
+      'allmail'
+    ])
+    expect(normalizeMailboxName(' Drafts ')).toBe('drafts')
+    expect(normalizeMailboxName('Team/Design')).toBe('team/design')
   })
 })

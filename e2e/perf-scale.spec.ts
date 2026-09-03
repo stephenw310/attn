@@ -42,7 +42,7 @@ const ALL_MAIL_PAGE_CEILING_MS = 20
 // An unbounded candidate set turns this into seconds; the bounded window is 134 ms.
 const COMMON_TERM_SEARCH_CEILING_MS = 300
 
-test.use({ seed: '.artifacts/perf-scale-seed.json' })
+test.use({ seed: '.generated/perf-scale-seed.json' })
 test.describe.configure({ retries: 0, timeout: SCALE_TEST_TIMEOUT_MS })
 
 function median(samples: readonly number[]): number {

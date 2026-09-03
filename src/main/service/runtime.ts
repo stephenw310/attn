@@ -1,52 +1,34 @@
-import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RevertedAction } from '../../shared/actionRevert'
 import { type AccountSyncStatus, accountSyncPhase } from '../../shared/auth'
-import { type InvokeChannel, type MailChangeReason, TEST_CHANNELS } from '../../shared/ipc'
-import {
-  type MessageMailbox,
-  type SyncState,
-  type SystemMailboxCounts,
-  THREAD_PAGE_SIZE
-} from '../../shared/mail'
-import { ALLOWED_UNDO_SEND_SECONDS } from '../../shared/outboxTuning'
+import type { InvokeChannel, MailChangeReason } from '../../shared/ipc'
+import type { SystemMailboxCounts } from '../../shared/mail'
 import { APP_SETTINGS_DEFAULTS } from '../../shared/settings'
 import type { SplitState } from '../../shared/splits'
 import { actionQueueStatus, clearUndo } from '../actions'
-import { ActionExecutor, type ActionRecoveryProvider } from '../actions/executor'
+import { ActionExecutor } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
+import { notificationPausedUntil, setNotificationPausedUntil } from '../appSettings'
 import { type Db, openDatabase, schemaVersion } from '../db'
-import { accountKeyedTables, accountOutboxSpoolIds, purgeAccountRows } from '../db/purgeAccount'
-import { countInboxUnread, countSystemMailboxes, listMailboxThreads } from '../db/queries'
-import { searchThreads } from '../db/search'
-import { loadSeed, readSeedRemoteThreadIds, readSeedThread, readSeedThreadAccount } from '../dev/seed'
-import { settleFollowUpCandidates } from '../followUps'
+import { accountOutboxSpoolIds, purgeAccountRows } from '../db/purgeAccount'
+import { countInboxUnread, countSystemMailboxes } from '../db/queries'
+import { loadSeed, readSeedRemoteThreadIds, readSeedThread } from '../dev/seed'
 import { GmailApiError, GmailClient } from '../gmail/client'
-import type { GmailThread } from '../gmail/parse'
 import { GmailMailProvider } from '../gmail/provider'
 import { GmailQuotaLimiter } from '../gmail/quota'
-import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
-import { cachePrimarySendAs } from '../outbox/sendAs'
 import { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, deleteOutboxSpool, reconcileOutboxSpool } from '../outbox/spool'
 import { resolveMessageSender, storedRemoteImagePolicy } from '../remoteImageStore'
 import { SnoozeScheduler } from '../scheduler'
 import { deleteSetting, readSetting, settingEnabled, writeSetting } from '../settings'
 import { getSplitState, hasSplitSetup } from '../splits'
-import { reconcileThreadExistence } from '../sync/existenceSweep'
-import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
-import { runFtsBackfill } from '../sync/ftsBackfill'
-import { effectiveLifetimeThreadCap } from '../sync/lifetimeCap'
-import { runLifetimeSweep } from '../sync/lifetimeSweep'
-import { deleteThread, type LabelRow } from '../sync/persist'
-import { historyEvents, type NewMail, runHistoryCycle } from '../sync/poller'
-import type { HistoryRecord, MailProvider } from '../sync/provider'
+import { historyEvents, type NewMail } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE } from '../sync/tuning'
 import { SyncController } from '../syncController'
 import { createServiceHandlers, type ServiceHandlers } from './handlers'
-import { candidatesFor, notificationPausedUntil, setNotificationPausedUntil } from './notificationQueries'
+import { candidatesFor } from './notificationQueries'
 import type {
   ServiceAccountAuth,
   ServiceAccountsState,
@@ -56,6 +38,8 @@ import type {
   ServiceOperation,
   ServiceReady
 } from './protocol'
+import type { ServiceSession } from './session'
+import { TestOperations } from './testOperations'
 
 export type ServiceEventSink = (event: ServiceEvent) => void
 
@@ -73,17 +57,10 @@ interface AccountMailSummary {
  * exactly as single-account as they were — the runtime holds one set per
  * account instead of one total.
  */
-interface AccountSession {
-  readonly id: string
+interface AccountSession extends ServiceSession {
   /** Null for seeded e2e accounts, which never talk to Gmail. */
   auth: ServiceAccountAuth | null
-  readonly seeded: boolean
   readAbort: AbortController
-  readonly syncController: SyncController
-  readonly actionExecutor: ActionExecutor
-  readonly draftMirrorExecutor: DraftMirrorExecutor
-  readonly outboxSender: OutboxSender
-  readonly snoozeScheduler: SnoozeScheduler
 }
 
 /**
@@ -171,18 +148,13 @@ export class ServiceRuntime {
   private stopped = false
   private schedulersStarted = false
   private mailRevision = 0
-  private searchWindowOverride: number | null = null
   private readonly mailSummaryByAccount = new Map<string, AccountMailSummary>()
   private lastAccountStatuses = ''
-  private draftSaveFailures = 0
-  private conversationDelay: { threadId: string; delayMs: number } | null = null
-  private draftReopenDelayMs = 0
-  private draftInlineImageDelayMs = 0
-  private setActiveAccountDelayMs = 0
-  /** Test-only seeded providers, keyed by the owning account (A5 seam). */
-  private readonly actionProviders = new Map<string, ActionRecoveryProvider>()
-  /** Test-only send-capable providers (T35 seam): seeded sends can complete. */
-  private readonly outboxProviders = new Map<string, MailProvider>()
+  /**
+   * Every e2e seam, or null outside ATTN_TEST_USER_DATA (REF-6). Production
+   * code touches it only through the hooks below and `internal('test', …)`.
+   */
+  private readonly test: TestOperations | null
 
   private readonly onNewMail = (accountId: string, newMail: NewMail[]): void => {
     // Every signed-in account notifies, active or not (F12/F18). Batching is
@@ -232,6 +204,21 @@ export class ServiceRuntime {
       this.log('log', `[sync] backfill stages skipped for seeded accounts ${seedIds.join(', ')}`)
     }
 
+    this.test = input.testMode
+      ? new TestOperations({
+          db: this.db,
+          testSeed: input.testSeed,
+          userDataPath: input.userDataPath,
+          activeAccountId: () => this.activeAccountId,
+          activeSession: () => this.activeSession(),
+          broadcastMailChanged: (accountId) => this.broadcastMailChanged(accountId),
+          invalidateMailSummaries: (accountId) => {
+            if (accountId === null) this.mailSummaryByAccount.clear()
+            else this.mailSummaryByAccount.delete(accountId)
+          }
+        })
+      : null
+
     this.handlers = createServiceHandlers({
       db: this.db,
       currentAccountId: () => this.activeAccountId,
@@ -241,12 +228,7 @@ export class ServiceRuntime {
       makeClient: () => this.makeClientForActive(),
       makeProvider: () => this.makeProviderForActive(),
       makeServerSearchProvider: () => this.makeCurrentServerSearchProvider(),
-      isSeeded: () => this.activeSession()?.seeded ?? false,
-      executor: () => this.activeSession()?.actionExecutor ?? null,
-      draftMirrorExecutor: () => this.activeSession()?.draftMirrorExecutor ?? null,
-      outboxSender: () => this.activeSession()?.outboxSender ?? null,
-      scheduler: () => this.activeSession()?.snoozeScheduler ?? null,
-      syncController: () => this.activeSession()?.syncController ?? null,
+      activeSession: () => this.activeSession(),
       broadcastMailChanged: (serverSearchRequestId) =>
         this.broadcastMailChanged(this.activeAccountId, serverSearchRequestId),
       publishRemoteImagePolicy: () => this.emitRemoteImagePolicy(),
@@ -257,11 +239,7 @@ export class ServiceRuntime {
       peekRevertedActions: (accountId) => this.actionRevertNotices.peek(accountId),
       acknowledgeRevertedActions: (accountId, noticeId) =>
         this.actionRevertNotices.acknowledge(accountId, noticeId),
-      waitForConversation: (threadId) => this.waitForConversation(threadId),
-      draftReopenDelay: () => this.draftReopenDelayMs,
-      draftInlineImageDelay: () => this.draftInlineImageDelayMs,
-      consumeTestDraftSaveFailure: () => this.consumeDraftSaveFailure(),
-      searchWindowOverride: () => this.searchWindowOverride,
+      ...(this.test ? { test: this.test } : {}),
       testUserData: input.testMode,
       userDataPath: input.userDataPath,
       downloadsPath: input.downloadsPath
@@ -323,13 +301,7 @@ export class ServiceRuntime {
     if (operation === 'set-active-account') {
       const accountId = args[0]
       if (typeof accountId !== 'string') throw new Error('unknown account')
-      if (this.input.testMode && this.setActiveAccountDelayMs > 0) {
-        // One-shot e2e seam modeling the retirement wait below without
-        // needing a real mid-quiesce account.
-        const delayMs = this.setActiveAccountDelayMs
-        this.setActiveAccountDelayMs = 0
-        await new Promise((resolve) => setTimeout(resolve, delayMs))
-      }
+      await this.test?.awaitSetActiveAccountDelay()
       // A just-re-added account can still be waiting out its predecessor's
       // worker retirement; the switch waits for the session instead of failing.
       const pending = this.pendingSessionCreations.get(accountId)
@@ -390,21 +362,16 @@ export class ServiceRuntime {
       setNotificationPausedUntil(this.db, pausedUntil)
       return undefined
     }
-    if (operation === 'test') return this.handleTest(args[0], args.slice(1))
+    if (operation === 'test') {
+      if (!this.test) throw new Error('test operations are disabled')
+      return this.test.handle(args[0], args.slice(1))
+    }
     throw new Error(`unknown service operation: ${operation}`)
   }
 
   control(control: ServiceControl): void {
-    if (control.kind === 'accounts') {
-      void this.applyAccounts(control.accounts)
-      return
-    }
     if (control.kind === 'focus') {
       this.focused = control.focused
-      return
-    }
-    if (control.kind === 'resume') {
-      for (const session of this.sessions.values()) void session.syncController.resumeOnlineWork()
       return
     }
     if (control.kind === 'refresh-schedulers') {
@@ -467,7 +434,7 @@ export class ServiceRuntime {
     const actionExecutor = new ActionExecutor(
       this.db,
       () => (this.sessions.get(id) ? id : null),
-      () => this.actionProviders.get(id) ?? this.makeProviderFor(id),
+      () => this.test?.actionProvider(id) ?? this.makeProviderFor(id),
       {
         notify: () => this.broadcastMailChanged(id),
         notifyReverted: (accountId, actions) => this.broadcastActionsReverted(accountId, actions)
@@ -482,7 +449,7 @@ export class ServiceRuntime {
     const outboxSender = new OutboxSender(
       this.db,
       () => (this.sessions.get(id) ? id : null),
-      () => this.outboxProviders.get(id) ?? this.makeProviderFor(id),
+      () => this.test?.outboxProvider(id) ?? this.makeProviderFor(id),
       (payload) => this.emitForAccount(id, { kind: 'outbox-changed', payload }),
       {
         beforeRemote: (signal) => draftMirrorExecutor.waitForIdle(signal),
@@ -523,7 +490,8 @@ export class ServiceRuntime {
       getOutboxSender: () => outboxSender,
       getSnoozeScheduler: () => snoozeScheduler,
       acquireIndexingSlot: (accountId) => this.indexingSlot.acquire(accountId),
-      shouldPreemptIndexing: (accountId) => this.indexingSlot.hasPriorityWaiter(accountId)
+      shouldPreemptIndexing: (accountId) => this.indexingSlot.hasPriorityWaiter(accountId),
+      cleanOutboxSpool: (outboxId) => cleanOutboxSpool(this.input.userDataPath, outboxId)
     })
     const session: AccountSession = {
       id,
@@ -575,7 +543,7 @@ export class ServiceRuntime {
       this.gmailQuotaLimiters.delete(session.id)
     }
     this.actionRevertNotices.clear(session.id)
-    this.actionProviders.delete(session.id)
+    this.test?.forgetAccount(session.id)
     clearUndo(session.id)
   }
 
@@ -741,8 +709,13 @@ export class ServiceRuntime {
       auth.tokens,
       (tokens) => {
         // Stale after removal or a newer interactive sign-in of this account.
-        if (this.sessions.get(id) !== session || session.auth !== auth) return
-        session.auth = { ...auth, tokens }
+        // The generation is what identifies the credentials: `applyAccounts`
+        // assigns a fresh auth object on every roster push, so an
+        // object-identity check silently stopped persisting refreshes for
+        // long-lived clients such as the poller's (B31).
+        const currentAuth = this.sessions.get(id) === session ? session.auth : null
+        if (!currentAuth || currentAuth.generation !== auth.generation) return
+        session.auth = { ...currentAuth, tokens }
         this.emit({ kind: 'token-update', accountId: id, tokens, generation: auth.generation })
       },
       { quotaLimiter, readSignal: session.readAbort.signal }
@@ -930,672 +903,9 @@ export class ServiceRuntime {
     this.emit({ kind: 'actions-reverted', accountId, actions })
   }
 
-  private async waitForConversation(threadId: string): Promise<void> {
-    const delay = this.conversationDelay
-    if (delay?.threadId === threadId) await new Promise((resolve) => setTimeout(resolve, delay.delayMs))
-  }
-
-  private consumeDraftSaveFailure(): boolean {
-    if (this.draftSaveFailures === 0) return false
-    this.draftSaveFailures--
-    return true
-  }
-
-  private async handleTest(channel: unknown, args: unknown[]): Promise<unknown> {
-    if (typeof channel !== 'string') throw new Error('invalid test channel')
-    if (!this.input.testMode) throw new Error('test operations are disabled')
-    const accountId = this.activeAccountId
-    if (channel === TEST_CHANNELS.setSyncState) {
-      this.activeSession()?.syncController.setStateForTest(args[0] as SyncState)
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.reloadSeed) {
-      if (!this.input.testSeed) throw new Error('seed store unavailable')
-      const labels = args[0]
-      if (labels !== undefined && !isLabelRows(labels)) throw new Error('invalid authoritative label catalog')
-      const result = loadSeed(this.db, this.input.testSeed, labels === undefined ? {} : { labels })
-      this.mailSummaryByAccount.clear()
-      if (result.labelsChanged) this.broadcastMailChanged(this.activeAccountId)
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.deleteThread) {
-      if (!accountId || typeof args[0] !== 'string') throw new Error('invalid thread delete')
-      deleteThread(this.db, accountId, args[0])
-      this.mailSummaryByAccount.delete(accountId)
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.delayConversation) {
-      const [threadId, delayMs] = args
-      if (typeof threadId === 'string' && typeof delayMs === 'number' && delayMs >= 0) {
-        this.conversationDelay = { threadId, delayMs }
-      }
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.delayDraftReopen) {
-      this.draftReopenDelayMs = validDelay(args[0])
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.delayDraftInlineImage) {
-      this.draftInlineImageDelayMs = validDelay(args[0])
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.delaySetActiveAccount) {
-      this.setActiveAccountDelayMs = validDelay(args[0])
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.updateMessageBody) {
-      const [messageId, bodyText, bodyHtml] = args
-      if (!accountId || typeof messageId !== 'string' || typeof bodyText !== 'string') {
-        throw new Error('invalid message update')
-      }
-      if (bodyHtml !== undefined && typeof bodyHtml !== 'string') throw new Error('invalid message html')
-      this.db.transaction(() => {
-        this.db
-          .prepare(
-            'UPDATE messages SET body_text = ?, body_html = COALESCE(?, body_html) WHERE account_id = ? AND id = ?'
-          )
-          .run(bodyText, bodyHtml ?? null, accountId, messageId)
-        // Keep the seam on the production invariant: body and index move together.
-        refreshMessageBodyFromStore(this.db, accountId, messageId)
-      })()
-      this.broadcastMailChanged(this.activeAccountId)
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.setSendAsSignature) {
-      const signature = args[0]
-      if (!accountId || typeof signature !== 'string') throw new Error('invalid send-as signature')
-      cachePrimarySendAs(this.db, accountId, {
-        sendAsEmail: accountId,
-        signature,
-        isPrimary: true,
-        isDefault: true
-      })
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.failNextDraftSave) {
-      this.draftSaveFailures++
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.markDraftMirrored) {
-      const [draftId, gmailDraftId] = args
-      if (!accountId || typeof draftId !== 'string') throw new Error('invalid mirrored draft update')
-      this.db
-        .prepare(
-          `UPDATE outbox SET mirror_revision = local_revision,
-         gmail_draft_id = COALESCE(?, gmail_draft_id)
-         WHERE account_id = ? AND id = ? AND state IN ('composing', 'drafted')`
-        )
-        .run(typeof gmailDraftId === 'string' ? gmailDraftId : null, accountId, draftId)
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.failNextAction || channel === TEST_CHANNELS.failNextActionAuth) {
-      this.installActionFailure(args[0], channel === TEST_CHANNELS.failNextAction ? 400 : 401)
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.setUndoSendDelay) {
-      const seconds = args[0]
-      if (typeof seconds === 'number' && ALLOWED_UNDO_SEND_SECONDS.has(seconds)) {
-        writeSetting(this.db, 'undoSendDelaySeconds', String(seconds))
-      }
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.failOutbox) {
-      const [id, message] = args
-      if (!accountId || typeof id !== 'string' || typeof message !== 'string') {
-        throw new Error('invalid outbox failure')
-      }
-      const result = this.db
-        .prepare(
-          `UPDATE outbox SET state = 'failed', send_at = NULL, last_error = ?
-           WHERE account_id = ? AND id = ? AND state = 'queued'`
-        )
-        .run(message, accountId, id)
-      if (result.changes === 0) throw new Error('queued message unavailable')
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.remoteDraft) {
-      const remote = args[0]
-      if (!accountId || !remote || typeof remote !== 'object') throw new Error('invalid remote draft')
-      await reconcileRemoteDraft(this.db, accountId, remote as Parameters<typeof reconcileRemoteDraft>[2])
-      this.broadcastMailChanged(this.activeAccountId)
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.listMailboxThreadIds) {
-      const mailbox = args[0]
-      if (!accountId || !isMessageMailbox(mailbox)) throw new Error('mailbox query unavailable')
-      const view = mailbox === 'all-mail' ? 'allMail' : mailbox
-      return listMailboxThreads(this.db, accountId, view).map((row) => row.id)
-    }
-    if (channel === TEST_CHANNELS.accountDataStats) {
-      const requested = args[0]
-      if (typeof requested !== 'string' || requested.length === 0) {
-        throw new Error('invalid account stats request')
-      }
-      // A6's zero-trace proof: per-table row counts across every
-      // account-keyed table, the roster row, and the whole spool inventory
-      // (an orphaned spool directory for *any* account fails the check).
-      const perTable: Record<string, number> = {}
-      let rowTotal = 0
-      for (const table of accountKeyedTables(this.db)) {
-        const count = (
-          this.db.prepare(`SELECT COUNT(*) AS count FROM "${table}" WHERE account_id = ?`).get(requested) as {
-            count: number
-          }
-        ).count
-        perTable[table] = count
-        rowTotal += count
-      }
-      const accountsRow = (
-        this.db.prepare('SELECT COUNT(*) AS count FROM accounts WHERE id = ?').get(requested) as {
-          count: number
-        }
-      ).count
-      const spoolRoot = join(this.input.userDataPath, 'outbox')
-      const spoolEntries = existsSync(spoolRoot) ? readdirSync(spoolRoot) : []
-      return { rowTotal, perTable, ftsRows: perTable.message_fts ?? 0, accountsRow, spoolEntries }
-    }
-    if (channel === TEST_CHANNELS.installSendProvider) {
-      this.installTestSendProvider()
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.runHistoryCycle) return this.runTestHistoryCycle(args[0])
-    if (channel === TEST_CHANNELS.runLifetimeSweep) return this.runTestLifetimeSweep(args[0])
-    if (channel === TEST_CHANNELS.runExistenceSweep) return this.runTestExistenceSweep(args[0])
-    if (channel === TEST_CHANNELS.runFtsBackfill) return this.runTestFtsBackfill(args[0])
-    if (channel === TEST_CHANNELS.searchIndexStats) return this.testSearchIndexStats(args[0])
-    if (channel === TEST_CHANNELS.queryPerfStats) return this.testQueryPerfStats(args[0])
-    if (channel === TEST_CHANNELS.setSearchWindow) {
-      // The partial marker only appears once a search fills its recency window,
-      // which a seeded store is far too small to do at the production size.
-      const limit = args[0]
-      this.searchWindowOverride = typeof limit === 'number' && limit > 0 ? Math.trunc(limit) : null
-      return undefined
-    }
-    if (channel === TEST_CHANNELS.utilityState) {
-      const ids = args[0]
-      if (!accountId || !Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
-        throw new Error('invalid utility state request')
-      }
-      const placeholders = ids.map(() => '?').join(', ')
-      const threadCount = ids.length
-        ? (
-            this.db
-              .prepare(
-                `SELECT COUNT(*) AS count FROM threads WHERE account_id = ? AND id IN (${placeholders})`
-              )
-              .get(accountId, ...ids) as { count: number }
-          ).count
-        : 0
-      const messageCount = ids.length
-        ? (
-            this.db
-              .prepare(
-                `SELECT COUNT(*) AS count FROM messages WHERE account_id = ? AND thread_id IN (${placeholders})`
-              )
-              .get(accountId, ...ids) as { count: number }
-          ).count
-        : 0
-      const cursors = this.db
-        .prepare(
-          `SELECT backfill_cursor, sweep_cursor, attachment_cursor, split_metadata_cursor, fts_cursor
-           FROM sync_state WHERE account_id = ?`
-        )
-        .get(accountId)
-      const memory = process.memoryUsage()
-      const cacheSize = this.db.pragma('cache_size', { simple: true }) as number
-      const pageSize = this.db.pragma('page_size', { simple: true }) as number
-      const sqliteCacheBudgetKb = cacheSize < 0 ? -cacheSize : (cacheSize * pageSize) / 1024
-      return {
-        threadCount,
-        messageCount,
-        cursors,
-        utilityMemoryKb: {
-          rss: memory.rss / 1024,
-          heapTotal: memory.heapTotal / 1024,
-          heapUsed: memory.heapUsed / 1024,
-          external: memory.external / 1024,
-          sqliteCacheBudget: sqliteCacheBudgetKb
-        }
-      }
-    }
-    throw new Error(`test operation is not implemented: ${channel}`)
-  }
-
-  /**
-   * T35 e2e seam: a send-capable in-memory provider for the active seeded
-   * account, so the production OutboxSender can carry a queued row through
-   * create/update/send and the post-send read — reminder creation and origin
-   * resolution run the real code path, with zero Gmail.
-   */
-  private installTestSendProvider(): void {
-    const seedPath = this.input.testSeed
-    const accountId = this.activeAccountId
-    if (!seedPath || !accountId) return
-    const drafts = new Map<string, { raw: string; threadId: string | null }>()
-    const sentByThread = new Map<
-      string,
-      Array<{ id: string; internalDate: number; rfcMessageId: string | null }>
-    >()
-    let sequence = 0
-    const rfcIdOf = (raw: string): string | null => /^Message-ID:\s*(<[^>]+>)\s*$/im.exec(raw)?.[1] ?? null
-    const provider = {
-      createDraft: async (input: { raw: string; threadId?: string | null }) => {
-        sequence++
-        const id = `test-draft-${sequence}`
-        drafts.set(id, { raw: input.raw, threadId: input.threadId ?? null })
-        return id
-      },
-      updateDraft: async (input: { id: string; raw?: string; threadId?: string | null }) => {
-        const existing = drafts.get(input.id)
-        if (!existing) throw new GmailApiError(404, 'test draft unavailable')
-        drafts.set(input.id, {
-          raw: input.raw ?? existing.raw,
-          threadId: input.threadId ?? existing.threadId
-        })
-      },
-      sendDraft: async (id: string) => {
-        const draft = drafts.get(id)
-        if (!draft) throw new GmailApiError(404, 'test draft unavailable')
-        drafts.delete(id)
-        sequence++
-        const messageId = `test-sent-${sequence}`
-        const threadId = draft.threadId ?? `t-test-sent-${sequence}`
-        const sent = sentByThread.get(threadId) ?? []
-        sent.push({ id: messageId, internalDate: Date.now(), rfcMessageId: rfcIdOf(draft.raw) })
-        sentByThread.set(threadId, sent)
-        return { id: messageId, threadId }
-      },
-      getThread: async (threadId: string): Promise<GmailThread> => {
-        const base = readSeedThread(seedPath, threadId, Date.now(), accountId)
-        const messages = [...(base?.messages ?? [])]
-        for (const sent of sentByThread.get(threadId) ?? []) {
-          messages.push({
-            id: sent.id,
-            threadId,
-            labelIds: ['SENT'],
-            internalDate: String(sent.internalDate),
-            snippet: 'Sent from the e2e send seam.',
-            payload: {
-              mimeType: 'text/plain',
-              headers: [
-                { name: 'From', value: `Test <${accountId}>` },
-                { name: 'Subject', value: 'e2e send' },
-                ...(sent.rfcMessageId ? [{ name: 'Message-ID', value: sent.rfcMessageId }] : [])
-              ]
-            }
-          })
-        }
-        if (messages.length === 0) throw new GmailApiError(404, 'test thread unavailable')
-        return { id: threadId, messages }
-      }
-    } as unknown as MailProvider
-    this.outboxProviders.set(accountId, provider)
-  }
-
-  /**
-   * T35/GAP-1 e2e seam: run the production history cycle against supplied
-   * records and thread snapshots — the reply-candidate settle, the snooze
-   * wake, and the checkpoint advance all execute the shipped code.
-   */
-  private async runTestHistoryCycle(value: unknown): Promise<void> {
-    const accountId = this.activeAccountId
-    const session = accountId ? this.sessions.get(accountId) : null
-    if (!accountId || !session) throw new Error('no active account for history cycle')
-    const request = (value ?? {}) as { records?: unknown; threads?: unknown }
-    const records = Array.isArray(request.records) ? (request.records as HistoryRecord[]) : []
-    const supplied = new Map(
-      (Array.isArray(request.threads) ? (request.threads as GmailThread[]) : []).map(
-        (thread) => [thread.id, thread] as const
-      )
-    )
-    this.db
-      .prepare(
-        `INSERT INTO sync_state (account_id, last_history_id) VALUES (?, '1')
-         ON CONFLICT(account_id) DO UPDATE SET last_history_id = '1'`
-      )
-      .run(accountId)
-    const seedPath = this.input.testSeed
-    const provider = {
-      listHistory: async () => ({ history: records, historyId: '2' }),
-      getThread: async (threadId: string): Promise<GmailThread> => {
-        const thread =
-          supplied.get(threadId) ??
-          (seedPath ? readSeedThread(seedPath, threadId, Date.now(), accountId) : null)
-        if (!thread) throw new GmailApiError(404, 'test thread unavailable')
-        return thread
-      }
-    } as unknown as MailProvider
-    await runHistoryCycle(this.db, accountId, provider, {
-      wakeThread: (threadId) => session.snoozeScheduler.wakeThread(threadId),
-      settleFollowUps: (candidates) => {
-        if (
-          settleFollowUpCandidates(
-            this.db,
-            accountId,
-            candidates.map((candidate) => candidate.threadId)
-          )
-        ) {
-          session.snoozeScheduler.refresh()
-        }
-      },
-      hydrate: async () => {}
-    })
-    session.snoozeScheduler.refresh()
-    this.broadcastMailChanged(accountId)
-  }
-
-  private installActionFailure(threadId: unknown, status: 400 | 401): void {
-    if (!this.input.testSeed || typeof threadId !== 'string') return
-    // The failure arms the thread's *owning* account, active or not — a
-    // background account's auth pause must be reproducible too (F18/A5).
-    const owner = readSeedThreadAccount(this.input.testSeed, threadId)
-    if (!owner || !readSeedThread(this.input.testSeed, threadId)) return
-    let rejectTarget = true
-    const mutate = async (requestedThreadId: string): Promise<void> => {
-      if (requestedThreadId !== threadId) return
-      if (!rejectTarget) {
-        if (status === 401) this.actionProviders.delete(owner)
-        return
-      }
-      rejectTarget = false
-      const reason = status === 401 ? 'authentication e2e failure' : 'permanent e2e failure'
-      throw new GmailApiError(status, `gmail /threads/${threadId}/modify failed (${status}): ${reason}`)
-    }
-    this.actionProviders.set(owner, {
-      modifyThread: mutate,
-      trashThread: mutate,
-      untrashThread: mutate,
-      getThread: async (requestedThreadId) => {
-        const requested = readSeedThread(this.input.testSeed as string, requestedThreadId)
-        if (!requested) throw new GmailApiError(404, 'seed thread unavailable')
-        if (requestedThreadId === threadId) this.actionProviders.delete(owner)
-        return requested
-      }
-    })
-  }
-
-  private async runTestLifetimeSweep(value: unknown): Promise<unknown> {
-    const accountId = this.activeAccountId
-    if (!accountId || !isLifetimeSweepRequest(value)) throw new Error('invalid lifetime sweep request')
-    if (value.resetCursor) {
-      this.db
-        .prepare(
-          `UPDATE sync_state
-         SET sweep_cursor = ?, sweep_threads_done = 0, sweep_threads_total = NULL
-         WHERE account_id = ?`
-        )
-        .run(value.resetCursor, accountId)
-    }
-    const threads = new Map(value.threads.map((thread) => [thread.id, thread]))
-    const formats: string[] = []
-    const pageTokens: Array<string | undefined> = []
-    let failure: unknown
-    const provider = {
-      getProfile: async () => ({
-        emailAddress: accountId,
-        historyId: 'test-history',
-        threadsTotal: value.threadsTotal,
-        messagesTotal: value.messagesTotal
-      }),
-      listThreadIds: async (options = {}) => {
-        pageTokens.push(options.pageToken)
-        if (value.pauseAtPageToken !== undefined && options.pageToken === value.pauseAtPageToken) {
-          await new Promise<never>(() => {})
-        }
-        if (value.offlineAtPageToken !== undefined && options.pageToken === value.offlineAtPageToken) {
-          throw new Error('offline')
-        }
-        return value.pages.find((candidate) => candidate.pageToken === options.pageToken) ?? { threadIds: [] }
-      },
-      getThread: async (id: string, options = {}) => {
-        formats.push(options.format ?? 'full')
-        const thread = threads.get(id)
-        if (!thread) throw new Error(`missing test thread ${id}`)
-        return thread
-      }
-    } as MailProvider
-    await runLifetimeSweep(
-      this.db,
-      provider,
-      accountId,
-      {
-        onProgress: () => {},
-        onError: (error) => {
-          failure = error
-        }
-      },
-      {
-        requestIntervalMs: 0,
-        pagePauseMs: 0,
-        // With no explicit override the seam reads the persisted per-account
-        // preference — the same value the production chain reads — so T32A's
-        // e2e can drive the cap through the real settings bridge.
-        threadCap: value.threadCap ?? effectiveLifetimeThreadCap(this.db, accountId)
-      }
-    )
-    const state = this.db
-      .prepare('SELECT sweep_cursor FROM sync_state WHERE account_id = ?')
-      .get(accountId) as { sweep_cursor: string | null } | undefined
-    return {
-      cursor: state?.sweep_cursor ?? null,
-      ...(failure ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
-      formats,
-      pageTokens
-    }
-  }
-
-  private async runTestFtsBackfill(value: unknown): Promise<unknown> {
-    const accountId = this.activeAccountId
-    if (!accountId || !isFtsBackfillRequest(value)) throw new Error('invalid FTS backfill request')
-    if (value.resetIndex) {
-      // Reproduce the manual revision-18 upgrade state: stored messages with an
-      // empty index and an unset cursor.
-      this.db.transaction(() => {
-        removeAccountFromIndex(this.db, accountId)
-        this.db.prepare('UPDATE sync_state SET fts_cursor = NULL WHERE account_id = ?').run(accountId)
-      })()
-    }
-    let failure: unknown
-    const result = await runFtsBackfill(
-      this.db,
-      accountId,
-      {
-        onProgress: () => {},
-        onError: (error) => {
-          failure = error
-        }
-      },
-      {
-        batchPauseMs: 0,
-        ...(value.batchSize === undefined ? {} : { batchSize: value.batchSize }),
-        ...(value.pauseAfterBatches === undefined
-          ? {}
-          : {
-              onBatchCheckpoint: ({ batchIndex }) =>
-                batchIndex + 1 >= (value.pauseAfterBatches as number)
-                  ? new Promise<never>(() => {})
-                  : undefined
-            })
-      }
-    )
-    const state = this.db.prepare('SELECT fts_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
-      | { fts_cursor: string | null }
-      | undefined
-    const parity = this.db
-      .prepare(
-        `SELECT
-           (SELECT COUNT(*) FROM messages WHERE account_id = ?) AS messages,
-           (SELECT COUNT(*) FROM message_fts_map WHERE account_id = ?) AS mapped,
-           (SELECT COUNT(*) FROM message_fts) AS ftsRows`
-      )
-      .get(accountId, accountId)
-    return {
-      cursor: state?.fts_cursor ?? null,
-      indexed: result?.messagesIndexed ?? null,
-      parity,
-      ...(failure ? { error: failure instanceof Error ? failure.message : String(failure) } : {})
-    }
-  }
-
-  private testSearchIndexStats(value: unknown): unknown {
-    const accountId = this.activeAccountId
-    if (!accountId || !isSearchIndexStatsRequest(value)) throw new Error('invalid search stats request')
-    const runsPerQuery = value.runsPerQuery ?? 1
-    const limit = value.limit ?? 50
-    const queries = value.queries.map((match) => {
-      const samplesUs: number[] = []
-      let threadCount = 0
-      for (let run = 0; run < runsPerQuery; run++) {
-        const startedAt = process.hrtime.bigint()
-        threadCount = searchMessageIndex(this.db, accountId, match, limit).length
-        samplesUs.push(Number(process.hrtime.bigint() - startedAt) / 1_000)
-      }
-      return { match, threadCount, samplesUs }
-    })
-    const indexBytes = (
-      this.db
-        .prepare("SELECT COALESCE(SUM(pgsize), 0) AS bytes FROM dbstat WHERE name LIKE '%message_fts%'")
-        .get() as { bytes: number }
-    ).bytes
-    return { indexBytes, queries }
-  }
-
-  private testQueryPerfStats(value: unknown): unknown {
-    const accountId = this.activeAccountId
-    if (!accountId || !isQueryPerfStatsRequest(value)) throw new Error('invalid query perf request')
-    const runsPerQuery = value.runsPerQuery ?? 1
-    const threadLimit = value.threadLimit ?? THREAD_PAGE_SIZE + 1
-    const searchQuery = value.searchQuery ?? 'performance'
-
-    const time = <T>(read: () => T): { result: T; samplesUs: number[] } => {
-      const samplesUs: number[] = []
-      let result!: T
-      for (let run = 0; run < runsPerQuery; run++) {
-        const startedAt = process.hrtime.bigint()
-        result = read()
-        samplesUs.push(Number(process.hrtime.bigint() - startedAt) / 1_000)
-      }
-      return { result, samplesUs }
-    }
-
-    const mailboxCounts = time(() => countSystemMailboxes(this.db, accountId))
-    const allMailPage = time(() => listMailboxThreads(this.db, accountId, 'allMail', threadLimit))
-    const search = time(() => searchThreads(this.db, accountId, searchQuery))
-
-    return {
-      mailboxCounts: { samplesUs: mailboxCounts.samplesUs, counts: mailboxCounts.result },
-      allMailPage: { samplesUs: allMailPage.samplesUs, rowCount: allMailPage.result.length },
-      search: {
-        samplesUs: search.samplesUs,
-        rowCount: search.result.rows.length,
-        partial: search.result.partial
-      }
-    }
-  }
-
-  private async runTestExistenceSweep(value: unknown): Promise<unknown> {
-    const accountId = this.activeAccountId
-    if (!accountId || !isExistenceSweepRequest(value)) throw new Error('invalid existence sweep request')
-    const provider: Pick<MailProvider, 'listThreadIds' | 'getThread'> = {
-      listThreadIds: async (options = {}) => {
-        if (options.labelIds?.includes('SPAM')) return { threadIds: value.spamThreadIds }
-        if (options.labelIds?.includes('TRASH')) return { threadIds: value.trashThreadIds }
-        return { threadIds: value.allMailThreadIds }
-      },
-      getThread: async () => {
-        // This seam receives complete authoritative id sets. A local row
-        // absent from their union models a server-purged thread.
-        throw new GmailApiError(404, 'test existence sweep thread missing')
-      }
-    }
-    const result = await reconcileThreadExistence(this.db, accountId, provider)
-    if (result?.deletedThreadIds.length) this.broadcastMailChanged(this.activeAccountId)
-    return result
-  }
-
   private log(level: 'log' | 'warn' | 'error', message: string): void {
     this.emit({ kind: 'log', level, message })
   }
-}
-
-interface LifetimeSweepRequest {
-  resetCursor?: string
-  threadCap?: number
-  threads: GmailThread[]
-  pages: Array<{
-    pageToken?: string
-    threadIds: string[]
-    nextPageToken?: string
-    resultSizeEstimate?: number
-  }>
-  offlineAtPageToken?: string
-  pauseAtPageToken?: string
-  threadsTotal?: number
-  messagesTotal?: number
-}
-
-interface ExistenceSweepRequest {
-  allMailThreadIds: string[]
-  spamThreadIds: string[]
-  trashThreadIds: string[]
-}
-
-interface FtsBackfillRequest {
-  resetIndex?: boolean
-  batchSize?: number
-  pauseAfterBatches?: number
-}
-
-interface SearchIndexStatsRequest {
-  queries: string[]
-  runsPerQuery?: number
-  limit?: number
-}
-
-interface QueryPerfStatsRequest {
-  runsPerQuery?: number
-  threadLimit?: number
-  searchQuery?: string
-}
-
-function optionalPositiveInteger(value: unknown): boolean {
-  return value === undefined || (typeof value === 'number' && Number.isInteger(value) && value > 0)
-}
-
-function isFtsBackfillRequest(value: unknown): value is FtsBackfillRequest {
-  if (!value || typeof value !== 'object') return false
-  const request = value as Partial<FtsBackfillRequest>
-  return (
-    (request.resetIndex === undefined || typeof request.resetIndex === 'boolean') &&
-    optionalPositiveInteger(request.batchSize) &&
-    optionalPositiveInteger(request.pauseAfterBatches)
-  )
-}
-
-function isSearchIndexStatsRequest(value: unknown): value is SearchIndexStatsRequest {
-  if (!value || typeof value !== 'object') return false
-  const request = value as Partial<SearchIndexStatsRequest>
-  return (
-    Array.isArray(request.queries) &&
-    request.queries.length > 0 &&
-    request.queries.every((query) => typeof query === 'string' && query.length > 0) &&
-    optionalPositiveInteger(request.runsPerQuery) &&
-    optionalPositiveInteger(request.limit)
-  )
-}
-
-function isQueryPerfStatsRequest(value: unknown): value is QueryPerfStatsRequest {
-  if (!value || typeof value !== 'object') return false
-  const request = value as Partial<QueryPerfStatsRequest>
-  return (
-    optionalPositiveInteger(request.runsPerQuery) &&
-    optionalPositiveInteger(request.threadLimit) &&
-    (request.searchQuery === undefined || typeof request.searchQuery === 'string')
-  )
-}
-
-function isMessageMailbox(value: unknown): value is MessageMailbox {
-  return value === 'all-mail' || value === 'spam' || value === 'trash'
 }
 
 function isServiceAccountsState(value: unknown): value is ServiceAccountsState {
@@ -1605,41 +915,5 @@ function isServiceAccountsState(value: unknown): value is ServiceAccountsState {
     Array.isArray(state.accounts) &&
     (state.activeAccountId === null || typeof state.activeAccountId === 'string') &&
     (state.seedAccountIds === undefined || Array.isArray(state.seedAccountIds))
-  )
-}
-
-function validDelay(value: unknown): number {
-  return typeof value === 'number' && value >= 0 ? value : 0
-}
-
-function isLabelRows(value: unknown): value is LabelRow[] {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (label) =>
-        typeof label === 'object' &&
-        label !== null &&
-        typeof (label as LabelRow).id === 'string' &&
-        typeof (label as LabelRow).name === 'string' &&
-        typeof (label as LabelRow).type === 'string'
-    )
-  )
-}
-
-function isLifetimeSweepRequest(value: unknown): value is LifetimeSweepRequest {
-  if (!value || typeof value !== 'object') return false
-  const request = value as Partial<LifetimeSweepRequest>
-  return (
-    Array.isArray(request.threads) &&
-    Array.isArray(request.pages) &&
-    (request.threadCap === undefined || (Number.isSafeInteger(request.threadCap) && request.threadCap >= 0))
-  )
-}
-
-function isExistenceSweepRequest(value: unknown): value is ExistenceSweepRequest {
-  if (!value || typeof value !== 'object') return false
-  const request = value as Partial<ExistenceSweepRequest>
-  return [request.allMailThreadIds, request.spamThreadIds, request.trashThreadIds].every(
-    (ids) => Array.isArray(ids) && ids.every((id) => typeof id === 'string')
   )
 }

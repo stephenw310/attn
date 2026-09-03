@@ -3,20 +3,17 @@ import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, powerMonitor, safeStorage, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import { type AiSettings, validateAiSettingUpdate } from '../shared/ai'
-import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import { shouldConstructUpdater } from '../shared/distribution'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { AppSettingUpdate } from '../shared/settings'
 import type { ThemePreference } from '../shared/theme'
 import { UPDATE_STATE_IDLE, type UpdateState } from '../shared/update'
+import { AccountRoster } from './accountRoster'
 import { AiKeyStore } from './ai/keyStore'
 import { AiManager } from './ai/manager'
 import { oauthConfigSearchDirs } from './auth/configPaths'
-import { cancelActiveSignIn, loadOAuthConfig, signInWithGoogle } from './auth/googleAuth'
-import { accountIdForTokens, reorderIds, type StoredAccount } from './auth/tokenFile'
-import { loadAccounts, removeAccountTokens, reorderAccountTokens, saveAccountTokens } from './auth/tokenStore'
-import { isCurrentTokenUpdate } from './auth/tokenUpdate'
+import { cancelActiveSignIn, loadOAuthConfig, type OAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import {
   applyMenuBarIcon,
   attachBackgroundWindow,
@@ -26,6 +23,7 @@ import {
 } from './background'
 import { applyLoginItemSetting } from './backgroundSettings'
 import { CURRENT_SCHEMA_VERSION } from './db/schema'
+import { isOpenableExternalUrl } from './externalLinks'
 import { registerIpc } from './ipc'
 import { acknowledgePendingFocus, MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import {
@@ -34,12 +32,7 @@ import {
   type RemoteImagePolicy,
   shouldBlockMailFrameRequest
 } from './remoteImages'
-import {
-  SERVICE_PROTOCOL_VERSION,
-  type ServiceAccountsState,
-  type ServiceEvent,
-  type ServiceReady
-} from './service/protocol'
+import { SERVICE_PROTOCOL_VERSION, type ServiceEvent, type ServiceReady } from './service/protocol'
 import { ServiceSupervisor } from './service/supervisor'
 import { TestSeams } from './testIpc'
 import { readDistributionMetadata } from './update/distribution'
@@ -65,22 +58,17 @@ if (testUserData) {
 }
 
 let service: ServiceSupervisor | null = null
-let seedAccountIds: string[] = []
-let storedAccounts: StoredAccount[] = []
-let activeAccountId: string | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
-let signInInFlight = false
-const authGenerations = new Map<string, number>()
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 let themePreference: ThemePreference = 'system'
+// The OAuth client from oauth.config.json, loaded at boot and on sign-in.
+let oauthConfig: OAuthConfig | null = null
 // T33: the live remote-image policy (pushed by the utility) and the reader's
 // registered mail frames, consulted by the request filter in createWindow.
 let remoteImagePolicy: RemoteImagePolicy = DEFAULT_REMOTE_IMAGE_POLICY
 const mailFrames = new MailFrameRegistry()
-// T36: AI key custody and the streaming LLM transport live in main (F17/D2).
-let aiManager: AiManager | null = null
 // T39: constructed only for packaged release builds outside the test seam.
 let appUpdater: AppUpdater | null = null
 // The opened database's schema, from the utility's ready handshake: updates
@@ -89,12 +77,15 @@ let openedSchemaVersion: number | null = null
 // Test-only: lets the seeded harness stage a stored update state for the
 // renderer's mount-time read; always null outside ATTN_TEST_USER_DATA.
 let updateStateOverride: UpdateState | null = null
+// B28: in-flight pre-quit composer checkpoints, keyed by request id.
+const pendingComposerCheckpoints = new Map<number, () => void>()
+let composerCheckpointId = 0
+const COMPOSER_CHECKPOINT_TIMEOUT_MS = 2_000
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
-  ai: () => aiManager,
   focusInboxThread: (threadId, accountId) => {
-    const owner = accountId ?? activeAccountId
+    const owner = accountId ?? roster.activeId()
     if (owner) focusInboxThread(owner, threadId)
   },
   setUpdateStateOverride: (state) => {
@@ -124,7 +115,7 @@ function focusInboxThread(accountId: string, threadId: string | null): void {
  * target clears here.
  */
 function takePendingFocusTarget(): ReturnType<typeof takePendingFocus> {
-  const target = takePendingFocus(pendingFocus, activeAccountId)
+  const target = takePendingFocus(pendingFocus, roster.activeId())
   if (target === null) pendingFocus = null
   return target
 }
@@ -160,154 +151,39 @@ async function registerMailFrame(
  * bouncing the user to the notified account later.
  */
 function reconcilePendingFocus(): void {
-  if (pendingFocus && pendingFocus.accountId !== activeAccountId) pendingFocus = null
+  if (pendingFocus && pendingFocus.accountId !== roster.activeId()) pendingFocus = null
 }
 
 function oauthSearchDirs(): string[] {
   return oauthConfigSearchDirs(app.getAppPath(), app.getPath('userData'), Boolean(testUserData))
 }
 
-function rosterAccountIds(): string[] {
-  return seedAccountIds.length > 0 ? seedAccountIds : storedAccounts.map((account) => account.id)
-}
-
-function authStatus(): AuthStatus {
-  const accounts = rosterAccountIds().map((id) => ({ id, email: emailFor(id) }))
-  const active = accounts.find((account) => account.id === activeAccountId) ?? null
-  return {
-    configured: seedAccountIds.length === 0 && loadOAuthConfig(oauthSearchDirs()) !== null,
-    signedIn: accounts.length > 0,
-    ...(active ? { email: active.email } : {}),
-    accounts,
-    activeAccountId: active?.id ?? null
-  }
-}
-
-function emailFor(accountId: string): string {
-  const stored = storedAccounts.find((account) => account.id === accountId)
-  return stored?.tokens.email ?? accountId
-}
-
-function serviceAccountsState(): ServiceAccountsState {
-  return {
-    config: loadOAuthConfig(oauthSearchDirs()),
-    accounts: storedAccounts.map((account) => ({
-      id: account.id,
-      tokens: account.tokens,
-      generation: authGenerations.get(account.id) ?? 0
-    })),
-    activeAccountId,
-    ...(testUserData ? { seedAccountIds } : {})
-  }
-}
-
-async function signIn(): Promise<AuthSignInResult> {
-  const config = loadOAuthConfig(oauthSearchDirs())
-  if (!config) {
-    const resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
-    return { status: authStatus(), resumedActions }
-  }
-  if (signInInFlight) cancelActiveSignIn()
-  signInInFlight = true
-  let resumedActions = 0
-  let signedInAccountId: string | undefined
-  try {
-    const tokens = await signInWithGoogle(config, (url) => shell.openExternal(url))
-    const accountId = accountIdForTokens(tokens)
-    if (!accountId) throw new Error('Google did not return an email address for this account')
-    const refreshed = storedAccounts.some((account) => account.id === accountId)
-    storedAccounts = saveAccountTokens(app.getPath('userData'), tokens)
-    authGenerations.set(accountId, (authGenerations.get(accountId) ?? 0) + 1)
-    signedInAccountId = accountId
-    // Adding an account does not activate it: activation goes through the
-    // guarded renderer switch, so an OAuth completion that lands while a
-    // composer is open can never swap the surface (PR #94 review). The roster
-    // update is awaited — the utility's answer names the sessions that
-    // actually exist, deferred re-creates included — and its resolved active
-    // account (the first sign-in, or the persisted survivor) is adopted.
-    await adoptServiceAccounts()
-    // Resume the account the flow actually reauthenticated — not the active
-    // one, which sign-in no longer changes.
-    resumedActions = Number((await service?.internal('resume-auth-failures', accountId)) ?? 0)
-    console.log(`[auth] ${refreshed ? 'reconnected' : 'added account'} ${tokens.email ?? accountId}`)
-  } catch (error) {
-    console.error(`[auth] sign-in failed: ${errorMessage(error)}`)
-    throw error
-  } finally {
-    signInInFlight = false
-  }
-  return {
-    status: authStatus(),
-    resumedActions,
-    ...(signedInAccountId ? { accountId: signedInAccountId } : {})
-  }
-}
-
 /**
- * Push the roster to the utility and mirror back the active account it
- * resolved. Waiting on the response is what keeps AuthStatus truthful: the
- * named active account's session exists before anyone reads it.
+ * The OAuth client is read from up to three directories, so it is cached
+ * rather than re-read synchronously by every status read and roster push.
+ * A sign-in reloads it first, which is when an operator who just dropped
+ * `oauth.config.json` in place clicks.
  */
-async function adoptServiceAccounts(): Promise<void> {
-  const result = await service?.applyAccounts(serviceAccountsState())
-  if (result === null || typeof result === 'string') activeAccountId = result
-  service?.noteActiveAccount(activeAccountId)
-  reconcilePendingFocus()
-  mailNotifier?.setAccounts(authStatus().accounts)
+function reloadOAuthConfig(): OAuthConfig | null {
+  oauthConfig = loadOAuthConfig(oauthSearchDirs())
+  return oauthConfig
 }
 
-/**
- * Remove one account (F18, D3): tokens always go and its session stops; the
- * caller chooses whether the local rows go too (Delete) or stay dormant for
- * a future re-add to resume from stored cursors (Keep).
- */
-async function removeAccount(accountId: string, deleteData: boolean): Promise<AuthStatus> {
-  const removedIndex = rosterAccountIds().indexOf(accountId)
-  if (removedIndex < 0) throw new Error('unknown account')
-  cancelActiveSignIn()
-  if (seedAccountIds.length > 0) seedAccountIds = seedAccountIds.filter((id) => id !== accountId)
-  else storedAccounts = removeAccountTokens(app.getPath('userData'), accountId)
-  authGenerations.delete(accountId)
-  // Removing the active account activates the next by position; removing a
-  // background account leaves the surface alone.
-  if (activeAccountId === accountId) {
-    const remaining = rosterAccountIds()
-    activeAccountId = remaining[removedIndex] ?? remaining[0] ?? null
+// The roster owns every account transition (F15/F18); this file boots and
+// tears down the app around it (R11).
+const roster = new AccountRoster({
+  userDataPath: () => app.getPath('userData'),
+  service: () => service,
+  oauthConfig: () => oauthConfig,
+  reloadOAuthConfig,
+  signIn: (config) => signInWithGoogle(config, (url) => shell.openExternal(url)),
+  cancelSignIn: cancelActiveSignIn,
+  testMode: Boolean(testUserData),
+  onAdopted: (status) => {
+    reconcilePendingFocus()
+    mailNotifier?.setAccounts(status.accounts)
   }
-  await adoptServiceAccounts()
-  if (deleteData) await service?.internal('remove-account-data', accountId)
-  console.log(`[auth] removed account ${accountId} (${deleteData ? 'deleted' : 'kept'} local data)`)
-  return authStatus()
-}
-
-/**
- * Persist a new switcher order (F15). The permutation is validated against
- * the roster as it exists *now* — a stale request from before an add/remove
- * rejects, and the stored path re-reads the token file so a token refresh
- * that raced the reorder keeps its newest tokens. A failed persist throws
- * before the in-memory roster moves, leaving the old order intact. Sessions
- * are never restarted and the active account never changes: the utility
- * receives the same account set in its new order.
- */
-async function reorderAccounts(accountIds: string[]): Promise<AuthStatus> {
-  if (seedAccountIds.length > 0) seedAccountIds = reorderIds(seedAccountIds, accountIds)
-  else storedAccounts = reorderAccountTokens(app.getPath('userData'), accountIds)
-  await adoptServiceAccounts()
-  console.log(`[auth] reordered accounts: ${rosterAccountIds().join(', ')}`)
-  return authStatus()
-}
-
-async function setActiveAccount(accountId: string): Promise<AuthStatus> {
-  if (!rosterAccountIds().includes(accountId)) throw new Error('unknown account')
-  // The utility owns the flip: the response guarantees every later read the
-  // renderer issues is answered for the new account.
-  const result = await service?.internal('set-active-account', accountId)
-  activeAccountId = typeof result === 'string' ? result : accountId
-  service?.noteActiveAccount(activeAccountId)
-  reconcilePendingFocus()
-  mailNotifier?.setAccounts(authStatus().accounts)
-  return authStatus()
-}
+})
 
 function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   const shouldShow = options.show ?? true
@@ -374,8 +250,18 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   win.on('blur', publishFocus)
   attachBackgroundWindow(win)
   win.webContents.on('will-navigate', (event) => event.preventDefault())
+  // T33: a reload or a renderer crash takes every mounted mail frame with it
+  // without unregistering; stale entries (an `allowOnce` grant among them)
+  // must not outlive the frames they described.
+  win.webContents.on('render-process-gone', () => mailFrames.clear())
+  win.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) mailFrames.clear()
+  })
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    // Mail bodies are untrusted, so main decides which schemes may reach the
+    // OS; everything else is dropped rather than handed to a protocol handler.
+    if (isOpenableExternalUrl(url)) void shell.openExternal(url)
+    else console.warn(`[window] refused to open a ${url.split(':', 1)[0] || 'scheme-less'} link`)
     return { action: 'deny' }
   })
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -426,25 +312,14 @@ function handleServiceEvent(event: ServiceEvent): void {
   else if (event.kind === 'notification-candidates') {
     mailNotifier?.notify(event.accountId, event.candidates, event.pausedUntil)
   } else if (event.kind === 'token-update') {
-    const userDataPath = app.getPath('userData')
-    const stored = loadAccounts(userDataPath).find((account) => account.id === event.accountId)
-    if (!isCurrentTokenUpdate(authGenerations.get(event.accountId), stored, event)) {
-      console.warn(
-        `[auth] ignored stale token update for ${event.accountId} (generation ${event.generation})`
-      )
-      return
-    }
-    storedAccounts = saveAccountTokens(userDataPath, event.tokens)
-    service?.cacheTokens(event.accountId, event.tokens)
+    if (roster.applyTokenUpdate(event)) service?.cacheTokens(event.accountId, event.tokens)
   } else if (event.kind === 'log') console[event.level](event.message)
 }
 
 async function initialize(): Promise<void> {
   const userDataPath = app.getPath('userData')
-  storedAccounts = loadAccounts(userDataPath)
-  for (const account of storedAccounts) {
-    if (!authGenerations.has(account.id)) authGenerations.set(account.id, 0)
-  }
+  reloadOAuthConfig()
+  roster.loadStoredAccounts()
   const ownedNotifier = new MailNotifier(showMainWindow, focusInboxThread)
   mailNotifier = ownedNotifier
   ownedNotifier.start()
@@ -455,15 +330,7 @@ async function initialize(): Promise<void> {
     downloadsPath: app.getPath('downloads'),
     testMode: Boolean(testUserData),
     ...(testUserData && process.env.ATTN_TEST_SEED ? { testSeed: process.env.ATTN_TEST_SEED } : {}),
-    accounts: {
-      config: loadOAuthConfig(oauthSearchDirs()),
-      accounts: storedAccounts.map((account) => ({
-        id: account.id,
-        tokens: account.tokens,
-        generation: authGenerations.get(account.id) ?? 0
-      })),
-      activeAccountId: null
-    },
+    accounts: { ...roster.serviceAccountsState(), activeAccountId: null },
     focused: false
   })
   service = ownedService
@@ -478,13 +345,8 @@ async function initialize(): Promise<void> {
   if (service !== ownedService || mailNotifier !== ownedNotifier) return
   // The utility resolved the roster (seed sessions included) and the persisted
   // active pointer; main mirrors that resolution rather than re-deriving it.
-  seedAccountIds =
-    testUserData && process.env.ATTN_TEST_SEED
-      ? ready.accountIds.filter((id) => !storedAccounts.some((account) => account.id === id))
-      : []
-  activeAccountId = ready.activeAccountId
-  ownedService.noteActiveAccount(activeAccountId)
-  ownedNotifier.setAccounts(authStatus().accounts)
+  roster.adoptReady(ready, Boolean(testUserData && process.env.ATTN_TEST_SEED))
+  ownedNotifier.setAccounts(roster.authStatus().accounts)
   ownedNotifier.setBadgeEnabled(ready.background.unreadBadgeEnabled)
   openedSchemaVersion = ready.schemaVersion
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
@@ -537,9 +399,11 @@ async function initialize(): Promise<void> {
   const ownedAiManager = new AiManager({
     keyStore: aiKeyStore,
     readSettings: () => ownedService.invoke(IPC_CHANNELS.aiGetSettings),
-    emit: (event) => broadcast(IPC_CHANNELS.aiStreamEvent, event)
+    emit: (event) => broadcast(IPC_CHANNELS.aiStreamEvent, event),
+    // Under the seam the scripted provider replaces the network entirely; the
+    // manager runs its one production path either way (T36).
+    ...(testUserData ? { fetchFn: testSeams.aiTransport.fetch } : {})
   })
-  aiManager = ownedAiManager
   const aiSettingsSnapshot = async (): Promise<AiSettings> => ({
     ...(await ownedService.invoke(IPC_CHANNELS.aiGetSettings)),
     keyPresent: aiKeyStore.present()
@@ -560,13 +424,14 @@ async function initialize(): Promise<void> {
   }
   stopIpc = registerIpc({
     service: ownedService,
-    authStatus,
-    signIn,
-    setActiveAccount,
-    removeAccount,
-    reorderAccounts,
+    authStatus: () => roster.authStatus(),
+    signIn: () => roster.signIn(),
+    setActiveAccount: (accountId) => roster.setActiveAccount(accountId),
+    removeAccount: (accountId, deleteData) => roster.removeAccount(accountId, deleteData),
+    reorderAccounts: (accountIds) => roster.reorderAccounts(accountIds),
     takePendingFocus: takePendingFocusTarget,
     acknowledgePendingFocus: acknowledgeFocusTarget,
+    acknowledgeComposerCheckpoint: (requestId) => pendingComposerCheckpoints.get(requestId)?.(),
     applySettingEffects,
     update: {
       getState: () => updateStateOverride ?? appUpdater?.state() ?? UPDATE_STATE_IDLE,
@@ -617,6 +482,41 @@ async function initialize(): Promise<void> {
   app.on('activate', () => showMainWindow())
 }
 
+/**
+ * Ask every window to commit its open composer and wait for the answers
+ * (B28). This runs on `before-quit`, while the documents are still alive: a
+ * renderer that serializes its editor during unload cannot load the `data:`
+ * URLs an inline image needs, so the checkpoint has to happen here rather than
+ * in a `pagehide` handler. The wait is bounded — a wedged renderer delays the
+ * quit by at most `COMPOSER_CHECKPOINT_TIMEOUT_MS`, and the preload answers
+ * immediately when no composer is mounted.
+ */
+function checkpointComposers(): Promise<void> {
+  const windows = BrowserWindow.getAllWindows().filter((win) => !win.webContents.isDestroyed())
+  if (windows.length === 0) return Promise.resolve()
+  const requestId = ++composerCheckpointId
+  return new Promise<void>((resolve) => {
+    let remaining = windows.length
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const settle = (): void => {
+      if (!pendingComposerCheckpoints.delete(requestId)) return
+      if (timer !== null) clearTimeout(timer)
+      resolve()
+    }
+    timer = setTimeout(() => {
+      console.warn('[composer] checkpoint timed out before quit')
+      settle()
+    }, COMPOSER_CHECKPOINT_TIMEOUT_MS)
+    pendingComposerCheckpoints.set(requestId, () => {
+      remaining -= 1
+      if (remaining <= 0) settle()
+    })
+    for (const win of windows) {
+      win.webContents.send(IPC_CHANNELS.draftCheckpointRequest, { requestId })
+    }
+  })
+}
+
 function refreshSchedulersAfterResume(): void {
   service?.control({ kind: 'refresh-schedulers' })
 }
@@ -652,10 +552,13 @@ else {
     event.preventDefault()
     if (preparingQuit) return
     preparingQuit = true
-    void teardown().finally(() => {
-      quitPrepared = true
-      app.quit()
-    })
+    void checkpointComposers()
+      .catch(() => {})
+      .then(teardown)
+      .finally(() => {
+        quitPrepared = true
+        app.quit()
+      })
   })
   app.on('second-instance', () => showMainWindow())
   app.whenReady().then(async () => {

@@ -40,7 +40,7 @@ interface SyncControllerContext {
   currentAccountId: () => string | null
   isSignedIn: () => boolean
   isSeeded: () => boolean
-  makeProvider: (generation: number) => GmailMailProvider | null
+  makeProvider: () => GmailMailProvider | null
   /** Drives the poller's foreground/background cadence; owned by index.ts so this stays Electron-free. */
   isForeground: () => boolean
   /** True while an interactive body or attachment request is using Gmail for this account. */
@@ -67,6 +67,8 @@ interface SyncControllerContext {
    * that hand-over free (F18, §9 #21(g)).
    */
   shouldPreemptIndexing?: (accountId: string) => boolean
+  /** Drops the attachment spool of a draft row remote sync deleted (owned by the runtime). */
+  cleanOutboxSpool?: (outboxId: string) => void
   /** Test-only pacing overrides threaded through the historical chain stages. */
   lifetimePacing?: { requestIntervalMs?: number; pagePauseMs?: number; foregroundYieldMs?: number }
 }
@@ -108,10 +110,6 @@ export class SyncController {
     return this.state
   }
 
-  getGeneration(): number {
-    return this.generation
-  }
-
   isInboxRecoveryPending(): boolean {
     return this.inboxRecoveryPending
   }
@@ -126,12 +124,6 @@ export class SyncController {
     if (this.stopped) return
     this.resetSession()
     void this.resumeOnlineWork()
-  }
-
-  onSignOut(): void {
-    if (this.stopped) return
-    this.resetSession()
-    this.setState({ phase: 'idle' })
   }
 
   stop(): void {
@@ -166,7 +158,7 @@ export class SyncController {
     const generation = this.generation
     const accountId = this.context.currentAccountId()
     if (!accountId) return
-    const provider = this.context.makeProvider(generation)
+    const provider = this.context.makeProvider()
     if (!provider) return
     this.startLifetimeSweep(accountId, provider, generation)
   }
@@ -370,7 +362,7 @@ export class SyncController {
     this.offlineRetry.clear()
     const generation = this.generation
     const accountId = this.context.currentAccountId()
-    const provider = this.context.makeProvider(generation)
+    const provider = this.context.makeProvider()
     if (!accountId) return
     // Ahead of the provider check: membership is local, so an unconfigured or
     // offline client still gets working counts and All Mail.
@@ -527,7 +519,11 @@ export class SyncController {
         syncPrimarySendAs(this.context.db, accountId, provider, { priority: 'polling' }).then(
           () => undefined
         ),
-      syncDrafts: () => syncRemoteDrafts(this.context.db, accountId, provider),
+      syncDrafts: async () => {
+        const result = await syncRemoteDrafts(this.context.db, accountId, provider)
+        for (const outboxId of result.deletedIds) this.context.cleanOutboxSpool?.(outboxId)
+        return result.changed
+      },
       kickExecutor: () => {
         void this.context.getActionExecutor()?.trigger()
         void this.context.getDraftMirrorExecutor()?.trigger()

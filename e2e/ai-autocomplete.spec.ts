@@ -1,8 +1,10 @@
 import type { ElectronApplication, Page } from '@playwright/test'
-import { TEST_CHANNELS } from '../src/shared/ipc'
+import { AUTOCOMPLETE_DEBOUNCE_MS, AUTOCOMPLETE_MIN_START_INTERVAL_MS } from '../src/shared/ai'
 import { ATTN_SIGNATURE_LINE } from '../src/shared/settings'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { enableAi } from './nav'
+import { aiRequests, flushRendererIpc, installFakeAi } from './seams'
 
 // T37A (F17): inline autocomplete under the fake provider — the separate
 // consent, the debounced typing trigger, the transient gray preview that
@@ -12,39 +14,27 @@ import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
-async function emitSeam(app: ElectronApplication, channel: string, request?: unknown): Promise<void> {
-  const error = await app.evaluate(
-    ({ ipcMain }, input) =>
-      new Promise<string | undefined>((resolve) => ipcMain.emit(input.channel, {}, input.request, resolve)),
-    { channel, request }
-  )
-  if (error) throw new Error(error)
+/**
+ * Both autocomplete intervals are real time, not renderer time (T3): the
+ * debounce runs on the controller's timers, but the one-start-per-second
+ * cooldown is enforced by the main-process transport on its own clock, which
+ * `page.clock` cannot reach — a faked renderer clock dispatches into a
+ * limiter that still refuses. So these waits stay wall-clock, and are derived
+ * from the constants they are keyed to rather than picked by hand.
+ */
+async function waitOutStartCooldown(page: Page): Promise<void> {
+  await page.waitForTimeout(AUTOCOMPLETE_MIN_START_INTERVAL_MS + 100)
 }
 
-function installFakeAi(app: ElectronApplication, script: unknown): Promise<void> {
-  return emitSeam(app, TEST_CHANNELS.installFakeAiProvider, script)
-}
-
-interface RecordedRequest {
-  purpose: string
-  system: string
-  messages: Array<{ role: string; content: string }>
-  canceled: boolean
-}
-
-function aiRequests(app: ElectronApplication): Promise<RecordedRequest[]> {
-  return app.evaluate(
-    ({ ipcMain }, channel) => new Promise<RecordedRequest[]>((resolve) => ipcMain.emit(channel, {}, resolve)),
-    TEST_CHANNELS.aiProviderRequests
-  )
-}
-
-async function enableAi(page: Page, autocomplete: boolean): Promise<void> {
-  await page.evaluate(async (auto) => {
-    await window.attn.ai.setKey('sk-e2e-test')
-    await window.attn.ai.setSetting('enabled', true)
-    if (auto) await window.attn.ai.setSetting('autocompleteEnabled', true)
-  }, autocomplete)
+/**
+ * Prove typing started no request: give the debounce the edit armed its full
+ * delay, then let the dispatch it would have made cross IPC twice — the
+ * consent read and the request itself — before reading the recorder.
+ */
+async function expectNoRequestAfterDebounce(app: ElectronApplication, page: Page): Promise<void> {
+  await page.waitForTimeout(AUTOCOMPLETE_DEBOUNCE_MS + 200)
+  await flushRendererIpc(page)
+  expect(await aiRequests(app)).toHaveLength(0)
 }
 
 const editor = (page: Page) => page.getByTestId('composer-editor')
@@ -122,8 +112,7 @@ test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab acc
   // but autocomplete intentionally ignores that protected footer region.
   await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Thanks for the')
-  await page.waitForTimeout(800)
-  expect(await aiRequests(app)).toHaveLength(0)
+  await expectNoRequestAfterDebounce(app, page)
   await expect(preview(page)).toHaveCount(0)
 
   // The separate opt-in turns typing pauses into bounded requests.
@@ -178,7 +167,7 @@ test('Esc dismisses without closing, and an unaccepted preview never reaches the
 
   // A fresh pause after more typing may suggest again (rate limit allows a
   // second start after a second).
-  await page.waitForTimeout(1_100)
+  await waitOutStartCooldown(page)
   await page.keyboard.type('e')
   await expect(preview(page)).toBeVisible()
 
@@ -225,16 +214,14 @@ test('a caret in the Attn footer never requests; provider failure yields silence
   const footerLine = editor(page).getByText(ATTN_SIGNATURE_LINE)
   await footerLine.click()
   await page.keyboard.type('x')
-  await page.waitForTimeout(800)
-  expect(await aiRequests(app)).toHaveLength(0)
+  await expectNoRequestAfterDebounce(app, page)
   await expect(preview(page)).toHaveCount(0)
 
   // A failing provider produces no suggestion and no error surface.
   await installFakeAi(app, { error: 'provider exploded' })
   await editor(page).click({ position: { x: 40, y: 12 } })
   await page.keyboard.type('Hello worl')
-  await page.waitForTimeout(900)
-  expect((await aiRequests(app)).length).toBeGreaterThanOrEqual(1)
+  await expect.poll(() => aiRequests(app).then((requests) => requests.length)).toBeGreaterThanOrEqual(1)
   await expect(preview(page)).toHaveCount(0)
   await expect(page.getByTestId('toast')).toHaveCount(0)
   // Typing stays ordinary.
@@ -268,7 +255,7 @@ test('suggestions render legibly at the caret in dark and light themes (artifact
   await page.getByTestId('theme-picker').selectOption('dispatch-light')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dispatch-light')
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(1_100)
+  await waitOutStartCooldown(page)
   await page.keyboard.press('c')
   await expect(composer.root).toBeVisible()
   await editor(page).click({ position: { x: 24, y: 24 } })

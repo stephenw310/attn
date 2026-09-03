@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IMPORTANT_SPLIT_ID,
   type ReorderSplitsInput,
@@ -7,11 +7,10 @@ import {
   type SplitState
 } from '../../../shared/splits'
 
-interface SplitData {
+export interface SplitData {
   state: SplitState | null
   activeSplitId: string | null
   setActiveSplitId: (id: string) => void
-  moveActive: (direction: -1 | 1) => void
   save: (input: SaveSplitInput) => Promise<void>
   setNotify: (id: string, notify: boolean) => Promise<void>
   remove: (id: string) => Promise<void>
@@ -81,17 +80,6 @@ export function useSplits(account: string | null, initialSplitId: string | null 
     setActiveSplitIdState(id)
   }, [])
 
-  const moveActive = useCallback(
-    (direction: -1 | 1): void => {
-      if (!state || !activeSplitId) return
-      const current = state.splits.findIndex((split) => split.id === activeSplitId)
-      if (current < 0) return
-      const next = (current + direction + state.splits.length) % state.splits.length
-      setActiveSplitIdState(state.splits[next].id)
-    },
-    [activeSplitId, state]
-  )
-
   const mutate = useCallback(
     async (operation: () => Promise<SplitState>): Promise<void> => {
       const next = await operation()
@@ -115,15 +103,20 @@ export function useSplits(account: string | null, initialSplitId: string | null 
     [mutate]
   )
 
-  return {
-    state,
-    activeSplitId,
-    setActiveSplitId,
-    moveActive,
-    save,
-    setNotify,
-    remove,
-    reorder,
-    restorePreset
-  }
+  // Inbox threads this object through `switchSplit` into the ~60-command batch
+  // `useInboxCommands` registers, so a fresh literal per render would unregister
+  // and re-register the whole batch (and notify every registry subscriber).
+  return useMemo(
+    () => ({
+      state,
+      activeSplitId,
+      setActiveSplitId,
+      save,
+      setNotify,
+      remove,
+      reorder,
+      restorePreset
+    }),
+    [activeSplitId, remove, reorder, restorePreset, save, setActiveSplitId, setNotify, state]
+  )
 }

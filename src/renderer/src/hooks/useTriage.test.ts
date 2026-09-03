@@ -22,6 +22,15 @@ const thread: ThreadRow = {
   labelIds: []
 }
 
+/** The hook reads the display shape the list renders, not the stored row. */
+function triageThreads(rows: readonly ThreadRow[]): ReturnType<typeof displayShape>[] {
+  return rows.map(displayShape)
+}
+
+function displayShape(row: ThreadRow) {
+  return { ...row, from: row.fromDisplay }
+}
+
 test('rolls back overlapping failed star and unread actions independently', async () => {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
@@ -41,22 +50,20 @@ test('rolls back overlapping failed star and unread actions independently', asyn
 
   const container = document.createElement('div')
   const root = createRoot(container)
-  let runTriage: ReturnType<typeof useTriage> | undefined
+  let runTriage: ReturnType<typeof useTriage>['triage'] | undefined
   let visibleRows: ThreadRow[] = []
   let visibleSearchRows: ThreadRow[] = []
   function Harness(): null {
     const [rows, setRows] = useState<ThreadRow[] | null>([thread])
     const [searchRows, setSearchRows] = useState<ThreadRow[]>([thread])
     const [, setSnoozedRows] = useState<SnoozedThreadRow[] | null>(null)
-    const [, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
     const [, setSelectedIndex] = useState(0)
     visibleRows = rows ?? []
     visibleSearchRows = searchRows
     runTriage = useTriage({
       selectedIds: new Set(),
       selectedIndex: 0,
-      threads: rows ?? [],
-      moveCacheRows: rows ?? [],
+      threads: triageThreads(rows ?? []),
       readerOpen: false,
       view: 'inbox',
       activeSplitId: null,
@@ -77,9 +84,8 @@ test('rolls back overlapping failed star and unread actions independently', asyn
       autoAdvance: 'next',
       closeReader: () => {},
       reopenReader: () => {},
-      setExitingThreadIds,
       setSelectedIndex
-    })
+    }).triage
     return null
   }
 
@@ -133,7 +139,7 @@ test('updates inactive Move cache membership immediately and restores it on reje
   const snoozedThread = { ...movedThread, dueAt: 123 }
   const container = document.createElement('div')
   const root = createRoot(container)
-  let runTriage: ReturnType<typeof useTriage> | undefined
+  let runTriage: ReturnType<typeof useTriage>['triage'] | undefined
   let visibleInbox: ThreadRow[] = []
   let visibleSnoozed: SnoozedThreadRow[] = []
   let visibleAllMail: ThreadRow[] = []
@@ -146,7 +152,6 @@ test('updates inactive Move cache membership immediately and restores it on reje
       'label:source': [movedThread],
       'label:destination': []
     })
-    const [, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
     const [, setSelectedIndex] = useState(0)
     visibleInbox = inboxRows ?? []
     visibleSnoozed = snoozedRows ?? []
@@ -155,8 +160,7 @@ test('updates inactive Move cache membership immediately and restores it on reje
     runTriage = useTriage({
       selectedIds: new Set(),
       selectedIndex: 0,
-      threads: mailboxRows.allMail ?? [],
-      moveCacheRows: mailboxRows.allMail ?? [],
+      threads: triageThreads(mailboxRows.allMail ?? []),
       readerOpen: false,
       view: 'allMail',
       activeSplitId: null,
@@ -176,9 +180,8 @@ test('updates inactive Move cache membership immediately and restores it on reje
       autoAdvance: 'next',
       closeReader: () => {},
       reopenReader: () => {},
-      setExitingThreadIds,
       setSelectedIndex
-    })
+    }).triage
     return null
   }
 
@@ -240,17 +243,15 @@ test("a rejected write reopens the reader that 'list' auto-advance closed", asyn
 
   const container = document.createElement('div')
   const root = createRoot(container)
-  let runTriage: ReturnType<typeof useTriage> | undefined
+  let runTriage: ReturnType<typeof useTriage>['triage'] | undefined
   function Harness(): null {
     const [rows, setRows] = useState<ThreadRow[] | null>([{ ...thread, labelIds: ['INBOX'] }])
     const [, setSnoozedRows] = useState<SnoozedThreadRow[] | null>(null)
-    const [, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
     const [, setSelectedIndex] = useState(0)
     runTriage = useTriage({
       selectedIds: new Set(),
       selectedIndex: 0,
-      threads: rows ?? [],
-      moveCacheRows: rows ?? [],
+      threads: triageThreads(rows ?? []),
       readerOpen: true,
       view: 'inbox',
       activeSplitId: null,
@@ -270,9 +271,8 @@ test("a rejected write reopens the reader that 'list' auto-advance closed", asyn
       autoAdvance: 'list',
       closeReader,
       reopenReader,
-      setExitingThreadIds,
       setSelectedIndex
-    })
+    }).triage
     return null
   }
 

@@ -1,7 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GmailApiError, GmailAuthError, GmailClient } from './client'
+import type { SchedulerTime, TimerHandle } from '../time'
+import { GmailApiError, GmailAuthError, GmailClient, type GmailClientOptions } from './client'
 
-function expiredClient(refreshToken?: string): GmailClient {
+/** Runs every scheduled backoff at once, so retry budgets cost no wall-clock time. */
+const immediateTime: SchedulerTime = {
+  now: () => Date.now(),
+  timers: {
+    setTimeout: (callback: () => void): TimerHandle => {
+      callback()
+      return 0 as unknown as TimerHandle
+    },
+    clearTimeout: () => {}
+  }
+}
+
+function expiredClient(refreshToken?: string, options: GmailClientOptions = {}): GmailClient {
   return new GmailClient(
     { client_id: 'client', client_secret: 'secret' },
     {
@@ -10,7 +23,8 @@ function expiredClient(refreshToken?: string): GmailClient {
       expires_at: 0,
       email: 'a@example.com'
     },
-    vi.fn()
+    vi.fn(),
+    options
   )
 }
 
@@ -64,15 +78,45 @@ describe('Gmail token refresh failures', () => {
     )
     await expect(expiredClient('revoked').get('/threads/t1')).rejects.toBeInstanceOf(GmailAuthError)
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValueOnce(new Response('temporarily unavailable', { status: 503 }))
-    )
-    const failure = await expiredClient('valid')
+    const unavailable = vi.fn(async () => new Response('temporarily unavailable', { status: 503 }))
+    vi.stubGlobal('fetch', unavailable)
+    const failure = await expiredClient('valid', { time: immediateTime, random: () => 0 })
       .get('/threads/t1')
       .catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(GmailApiError)
     expect(failure).toMatchObject({ status: 503, retryable: true })
+    // The refresh rides out the same transient failure `request()` does instead
+    // of escaping its retry loop on the first 503.
+    expect(unavailable.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('refreshes once for every caller that crosses the expiry margin together', async () => {
+    let release!: (response: Response) => void
+    const tokenPost = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve
+        })
+    )
+    const fetchMock = vi.fn((url: unknown) => {
+      if (String(url).includes('oauth2.googleapis.com/token')) return tokenPost()
+      return Promise.resolve(new Response(JSON.stringify({ id: 't1' })))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const persist = vi.fn()
+    const client = new GmailClient(
+      { client_id: 'client', client_secret: 'secret' },
+      { access_token: 'expired', refresh_token: 'refresh', expires_at: 0, email: 'a@example.com' },
+      persist
+    )
+
+    const reads = [client.get('/threads/t1'), client.get('/threads/t2'), client.get('/messages/m1')]
+    await vi.waitFor(() => expect(tokenPost).toHaveBeenCalled())
+    release(new Response(JSON.stringify({ access_token: 'fresh', expires_in: 3600 })))
+
+    await expect(Promise.all(reads)).resolves.toEqual([{ id: 't1' }, { id: 't1' }, { id: 't1' }])
+    expect(tokenPost).toHaveBeenCalledOnce()
+    expect(persist).toHaveBeenCalledOnce()
   })
 })
 

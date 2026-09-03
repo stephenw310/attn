@@ -21,7 +21,7 @@ import { persistThread } from '../sync/persist'
 import { type HistoryPoller, historyEvents } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
-import type { ServiceEvent, ServiceInitialize } from './protocol'
+import type { ServiceAccountsState, ServiceEvent, ServiceInitialize } from './protocol'
 import { IndexingSlot, ServiceRuntime } from './runtime'
 
 // Two seeded accounts prove the session-per-account runtime (F18): reads are
@@ -126,6 +126,17 @@ describe('ServiceRuntime with several accounts', () => {
     const runtime = await ServiceRuntime.create(input, (event) => events.push(event))
     runtimes.push(runtime)
     return { runtime, events }
+  }
+
+  /**
+   * Apply a roster without awaiting the deferred session creates, the way
+   * `apply-accounts` does before it awaits them: several cases below assert
+   * what the runtime reports *before* a re-added account's session exists.
+   */
+  function pushAccounts(runtime: ServiceRuntime, accounts: ServiceAccountsState): void {
+    void (
+      runtime as unknown as { applyAccounts(state: ServiceAccountsState): Promise<void>[] }
+    ).applyAccounts(accounts)
   }
 
   async function listInboxSubjects(runtime: ServiceRuntime): Promise<string[]> {
@@ -358,6 +369,7 @@ describe('ServiceRuntime with several accounts', () => {
       if (!controller) throw new Error('Seeded account session missing')
       const polling = controller as unknown as {
         startHistoryPoller(id: string, provider: GmailMailProvider, generation: number): void
+        generation: number
         poller: HistoryPoller
       }
       let releaseThread!: (response: Response) => void
@@ -388,7 +400,7 @@ describe('ServiceRuntime with several accounts', () => {
       polling.startHistoryPoller(
         accountId,
         new GmailMailProvider(internals.makeClientFor(accountId)),
-        controller.getGeneration()
+        polling.generation
       )
       const cycle = polling.poller.runNow()
       await vi.waitFor(() => expect(releaseThread).toBeTypeOf('function'))
@@ -419,6 +431,51 @@ describe('ServiceRuntime with several accounts', () => {
       expect(await listInboxSubjects(runtime)).toEqual(['Beta launch', 'Beta digest'])
     }
   )
+
+  it('keeps persisting refreshed tokens after a roster push replaces the auth object', async () => {
+    const { runtime, events } = await createRuntime(makeInput())
+    const accountId = 'primary@attn.test'
+    // Main rebuilds this payload for every push, so each one carries a new
+    // auth object even when nothing about the credentials changed.
+    const roster = () => ({
+      config: { client_id: 'test-client', client_secret: 'test-secret' },
+      accounts: [
+        {
+          id: accountId,
+          generation: 1,
+          tokens: { access_token: 'stale-access', refresh_token: 'refresh-token', expires_at: 0 }
+        }
+      ],
+      activeAccountId: accountId
+    })
+    await runtime.internal('apply-accounts', [roster()])
+    const internals = runtime as unknown as { makeClientFor(id: string): GmailClient }
+    // The poller holds one client for the life of its session.
+    const client = internals.makeClientFor(accountId)
+
+    // A roster push that reauthenticates nothing still assigns a fresh auth
+    // object; persistence used to compare object identity and stop here (B31).
+    await runtime.internal('apply-accounts', [roster()])
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL) => {
+        const url = String(input)
+        if (url.startsWith('https://oauth2.googleapis.com/token')) {
+          return new Response(JSON.stringify({ access_token: 'fresh-access', expires_in: 3600 }))
+        }
+        if (url.includes('/profile')) return new Response(JSON.stringify({ emailAddress: accountId }))
+        throw new Error(`Unexpected Gmail request: ${url}`)
+      })
+    )
+    await client.get('/profile')
+
+    expect(events.filter((event) => event.kind === 'token-update').at(-1)).toMatchObject({
+      accountId,
+      generation: 1,
+      tokens: { access_token: 'fresh-access', refresh_token: 'refresh-token' }
+    })
+  })
 
   it('serves the active account only, switches durably, and sums the badge', async () => {
     const input = makeInput()
@@ -481,9 +538,11 @@ describe('ServiceRuntime with several accounts', () => {
     // Remove the active account, then re-add it through the awaited operation
     // main uses: the answer must name a session that actually exists, so the
     // published AuthStatus can never point at a still-retiring account.
-    runtime.control({
-      kind: 'accounts',
-      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['second@attn.test']
     })
     const active = await runtime.internal('apply-accounts', [
       {
@@ -498,18 +557,17 @@ describe('ServiceRuntime with several accounts', () => {
     expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
 
     // And a switch aimed at a still-pending session waits instead of failing.
-    runtime.control({
-      kind: 'accounts',
-      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['second@attn.test']
     })
-    runtime.control({
-      kind: 'accounts',
-      accounts: {
-        config: null,
-        accounts: [],
-        activeAccountId: null,
-        seedAccountIds: ['primary@attn.test', 'second@attn.test']
-      }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['primary@attn.test', 'second@attn.test']
     })
     expect(runtime.ready().accountIds).toEqual(['second@attn.test'])
     expect(await runtime.internal('set-active-account', ['primary@attn.test'])).toBe('primary@attn.test')
@@ -527,7 +585,7 @@ describe('ServiceRuntime with several accounts', () => {
     const db = openDatabase(input.dbPath)
     const insert = db.prepare(
       `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, attempts, last_error)
-       VALUES (?, 'archive', ?, '{}', 'failed', 3, ?)`
+       VALUES (?, 'archive', ?, '{}', 'pending', 3, ?)`
     )
     const authError = storeActionError(new Error('invalid_grant'), 'auth')
     insert.run('primary@attn.test', 't-alpha', authError)
@@ -537,12 +595,13 @@ describe('ServiceRuntime with several accounts', () => {
     expect(await runtime.internal('resume-auth-failures', ['second@attn.test'])).toBe(1)
     const states = openDatabase(input.dbPath)
     const rows = states
-      .prepare('SELECT account_id, state FROM action_queue ORDER BY account_id')
-      .all() as Array<{ account_id: string; state: string }>
+      .prepare('SELECT account_id, attempts, last_error FROM action_queue ORDER BY account_id')
+      .all() as Array<{ account_id: string; attempts: number; last_error: string | null }>
     states.close()
+    // Only the reconnected account's row loses its auth marker and retry count.
     expect(rows).toEqual([
-      { account_id: 'primary@attn.test', state: 'failed' },
-      { account_id: 'second@attn.test', state: 'pending' }
+      { account_id: 'primary@attn.test', attempts: 3, last_error: authError },
+      { account_id: 'second@attn.test', attempts: 0, last_error: null }
     ])
 
     // Without an explicit account the operation still serves the active one.
@@ -557,18 +616,17 @@ describe('ServiceRuntime with several accounts', () => {
     // outbox workers are still quiescing, so a second session for the same
     // rows must not exist yet — two executor sets could double a
     // non-idempotent remote draft create.
-    runtime.control({
-      kind: 'accounts',
-      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['second@attn.test']
     })
-    runtime.control({
-      kind: 'accounts',
-      accounts: {
-        config: null,
-        accounts: [],
-        activeAccountId: 'primary@attn.test',
-        seedAccountIds: ['primary@attn.test', 'second@attn.test']
-      }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: 'primary@attn.test',
+      seedAccountIds: ['primary@attn.test', 'second@attn.test']
     })
     expect(runtime.ready().accountIds).toEqual(['second@attn.test'])
 
@@ -617,7 +675,7 @@ describe('ServiceRuntime with several accounts', () => {
     const db = openDatabase(input.dbPath)
     db.prepare(
       `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, attempts, last_error)
-       VALUES ('second@attn.test', 'archive', 't-beta', '{}', 'failed', 3, ?)`
+       VALUES ('second@attn.test', 'archive', 't-beta', '{}', 'pending', 3, ?)`
     ).run(storeActionError(new Error('invalid_grant'), 'auth'))
     db.close()
     const statuses = (await runtime.invoke(IPC_CHANNELS.accountsGetStatuses, [])) as Array<{
@@ -786,14 +844,11 @@ describe('ServiceRuntime with several accounts', () => {
     const { runtime } = await createRuntime(input)
     await runtime.internal('set-active-account', ['second@attn.test'])
 
-    runtime.control({
-      kind: 'accounts',
-      accounts: {
-        config: null,
-        accounts: [],
-        activeAccountId: null,
-        seedAccountIds: ['primary@attn.test']
-      }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['primary@attn.test']
     })
     expect(runtime.ready().accountIds).toEqual(['primary@attn.test'])
     expect(runtime.ready().activeAccountId).toBe('primary@attn.test')

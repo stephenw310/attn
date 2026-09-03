@@ -1,16 +1,8 @@
-import type { ElectronApplication } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
-import type { SyncState } from '../src/shared/mail'
 import { expect, test } from './electron'
+import { emitSeam, setSyncState } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
-
-async function setSyncState(app: ElectronApplication, state: SyncState): Promise<void> {
-  await app.evaluate(({ ipcMain }, { channel, next }) => ipcMain.emit(channel, {}, next), {
-    channel: TEST_CHANNELS.setSyncState,
-    next: state
-  })
-}
 
 test('renders seeded mail through IPC and the real SQLite store', async ({ page, mainLog }) => {
   const rows = page.getByTestId('thread-row')
@@ -28,7 +20,6 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
     Math.abs((statusBox?.x ?? 0) + (statusBox?.width ?? 0) - (contentBox?.x ?? 0) - (contentBox?.width ?? 0))
   ).toBeLessThan(1)
 
-  expect(await page.evaluate(() => window.attn.mail.listThreads('inbox'))).toHaveLength(8)
   const firstPage = await page.evaluate(() => window.attn.mail.listThreadPage('inbox'))
   expect(firstPage.rows).toHaveLength(8)
   expect(firstPage.nextCursor).toBeNull()
@@ -100,28 +91,14 @@ test('exposes threading headers and idempotent contact ranking over IPC', async 
 
   // Replay the exact same snapshots through the production persistence path.
   // Contribution PKs make this a no-op for aggregate frequency.
-  await app.evaluate(
-    ({ ipcMain }, channel) =>
-      new Promise<void>((resolve, reject) => {
-        ipcMain.emit(channel, {}, (error?: string) => {
-          if (error) reject(new Error(error))
-          else resolve()
-        })
-      }),
-    TEST_CHANNELS.reloadSeed
-  )
+  await emitSeam(app, TEST_CHANNELS.reloadSeed)
   const after = await page.evaluate(() => window.attn.contacts.search('maya'))
   expect(after[0]).toMatchObject({ name: 'Maya Lin', email: 'maya@example.com' })
   expect(after[0].score).toBeCloseTo(before[0].score, 5)
 
   // Removing the only sent contribution drops Priya from the projection while
   // preserving Maya's independent received-mail contributions.
-  const deleteError = await app.evaluate(
-    ({ ipcMain }, channel) =>
-      new Promise<string | undefined>((resolve) => ipcMain.emit(channel, {}, 't-sent-history', resolve)),
-    TEST_CHANNELS.deleteThread
-  )
-  if (deleteError) throw new Error(deleteError)
+  await emitSeam(app, TEST_CHANNELS.deleteThread, 't-sent-history')
   expect(await page.evaluate(() => window.attn.contacts.search('pri'))).toEqual([])
   expect(await page.evaluate(() => window.attn.contacts.search('maya'))).toEqual([
     expect.objectContaining({ name: 'Maya Lin', email: 'maya@example.com' })

@@ -146,6 +146,7 @@ describe('follow-up scheduling against a real store (T35)', () => {
     advance: (to: number) => void
     fire: () => void
     armedDelays: () => number[]
+    announced: { changed: number; queueChanged: number }
   } {
     let now = 10_000
     const armed: ArmedTimer[] = []
@@ -161,11 +162,16 @@ describe('follow-up scheduling against a real store (T35)', () => {
     }
     const db = openDatabase(':memory:')
     db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+    const announced = { changed: 0, queueChanged: 0 }
     const scheduler = new SnoozeScheduler(
       db,
       () => ACCOUNT,
-      () => {},
-      () => {},
+      () => {
+        announced.changed++
+      },
+      () => {
+        announced.queueChanged++
+      },
       time
     )
     return {
@@ -176,7 +182,8 @@ describe('follow-up scheduling against a real store (T35)', () => {
         now = to
       },
       fire: () => armed.at(-1)?.callback(),
-      armedDelays: () => armed.map((timer) => timer.delayMs)
+      armedDelays: () => armed.map((timer) => timer.delayMs),
+      announced
     }
   }
 
@@ -276,6 +283,20 @@ describe('follow-up scheduling against a real store (T35)', () => {
     expect(reminderState(db, 't-f', 'snooze')).toBe('returned')
     expect(reminderState(db, 't-f', 'follow_up')).toBe('returned')
     expect(queueRows(db)).toHaveLength(1)
+  })
+
+  it('announces a wake once, re-arming in the same pass', () => {
+    const { db, scheduler, announced } = followUpStore()
+    insertSnooze(db, 't-f', 50_000)
+    // Another reminder is already due; re-arming used to return it with a
+    // second announcement on top of the wake's own.
+    insertSnooze(db, 't-other', 9_000)
+
+    expect(scheduler.wakeThread('t-f')).toBe(true)
+
+    expect(reminderState(db, 't-f', 'snooze')).toBe('returned')
+    expect(reminderState(db, 't-other', 'snooze')).toBe('returned')
+    expect(announced).toEqual({ changed: 1, queueChanged: 1 })
   })
 
   it('a snooze wake settles the overdue follow-up with the snooze', () => {

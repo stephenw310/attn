@@ -392,6 +392,32 @@ describe('searchThreads', () => {
     }
   })
 
+  it('shows the same reminder state as every other list, including a returned follow-up', () => {
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(
+        db,
+        ACCOUNT,
+        thread('awaiting', {
+          from: 'Client <client@example.test>',
+          subject: 'Contract review',
+          body: 'Waiting on the signed contract.',
+          at: String(Date.UTC(2026, 1, 2))
+        })
+      )
+      db.prepare(
+        `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+         VALUES (?, 'awaiting', 'follow_up', ?, 'returned')`
+      ).run(ACCOUNT, Date.UTC(2026, 1, 3))
+
+      const [row] = searchThreads(db, ACCOUNT, 'contract').rows
+      expect(row).toMatchObject({ id: 'awaiting', followUpReturned: true, snoozed: false })
+      expect(listMailboxThreads(db, ACCOUNT, 'allMail')[0]?.followUpReturned).toBe(true)
+    } finally {
+      db.close()
+    }
+  })
+
   it('returns no rows for empty input and searches unknown operators literally', () => {
     const db = openDatabase(':memory:')
     try {

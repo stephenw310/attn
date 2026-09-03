@@ -37,3 +37,34 @@ export function settingEnabled(db: Db, key: string, defaultValue: boolean): bool
   const value = readSetting(db, key)
   return value === undefined ? defaultValue : value === 'true'
 }
+
+/** One app-global row read and written as a typed value. */
+export interface TypedSetting<T> {
+  read: (db: Db) => T
+  write: (db: Db, value: T) => void
+}
+
+/**
+ * Bind one app-global key to a typed value with a default. The default is not
+ * stored — writing it deletes the row, so an absent row always means "the
+ * default" and the table holds explicit choices only. An unparseable stored
+ * value reads as the default rather than throwing: a settings row must never
+ * be able to break a snapshot read.
+ */
+export function typedSetting<T>(
+  key: string,
+  defaultValue: T,
+  parse: (raw: string) => T | undefined,
+  format: (value: T) => string = String
+): TypedSetting<T> {
+  return {
+    read: (db) => {
+      const raw = readSetting(db, key)
+      return raw === undefined ? defaultValue : (parse(raw) ?? defaultValue)
+    },
+    write: (db, value) => {
+      if (value === defaultValue) deleteSetting(db, key)
+      else writeSetting(db, key, format(value))
+    }
+  }
+}

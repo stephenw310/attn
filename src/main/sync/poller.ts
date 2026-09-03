@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { errorMessage } from '../../shared/error'
 import type { Db } from '../db'
-import { GmailApiError } from '../gmail/client'
+import { GmailApiError, GmailAuthError } from '../gmail/client'
 import { applyThreadDelta } from '../store/mutate'
 import { replayPendingThreadDeltas } from '../store/replay'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { hydrateMissingThreadBodies } from './bodies'
+import { isOfflineFailure } from './failure'
 import { fetchAndCacheThread } from './fetchThread'
 import { deleteThread } from './persist'
 import type { HistoryRecord, MailProvider } from './provider'
@@ -31,6 +32,12 @@ export interface CyclePlan {
 
 export interface FetchedHistoryPlan extends CyclePlan {
   historyId: string
+  /**
+   * Threads this cycle could not refetch. The checkpoint still advances past
+   * them, so the poller reports the failure once instead of replaying the whole
+   * window against the same broken thread every 15 seconds.
+   */
+  refetchFailures?: unknown[]
 }
 
 export const historyEvents = new EventEmitter()
@@ -55,11 +62,11 @@ export function planCycle(records: HistoryRecord[]): CyclePlan {
       }
       if (labels.has('INBOX')) promoteInboxThreadIds.add(message.threadId)
     }
+    // Every history record lists each changed message in `messages`, so a
+    // deleted message or a label-only change is already queued for refetch
+    // above. Only the Inbox promotion has to read the label events themselves.
     for (const event of record.labelsAdded ?? []) {
       if (event.labelIds?.includes('INBOX')) promoteInboxThreadIds.add(event.message.threadId)
-    }
-    for (const events of [record.messagesDeleted, record.labelsAdded, record.labelsRemoved]) {
-      for (const event of events ?? []) refetchThreadIds.add(event.message.threadId)
     }
   }
 
@@ -184,6 +191,7 @@ export async function runHistoryCycle(
 
   const plan = await fetchHistoryPlan(provider, state.last_history_id)
   const promoteInbox = new Set(plan.promoteInboxThreadIds)
+  const refetchFailures: unknown[] = []
   for (const threadId of plan.refetchThreadIds) {
     try {
       const { thread } = await (effects.fetchThread ?? fetchAndCacheThread)(
@@ -208,7 +216,14 @@ export async function runHistoryCycle(
         else deleteThread(db, accountId, threadId)
         continue
       }
-      throw error
+      if (abortsHistoryCycle(error)) throw error
+      // One thread Gmail will never hand over — an oversized 403, a persist
+      // fault — must not wedge the account: every cycle re-fetched the whole
+      // window (40 quota units a thread) and failed at the same id, with no
+      // checkpoint progress and no exit. Skip it, keep the rest of the window,
+      // and let the existence sweep or the thread's next change repair it.
+      console.error(`[sync] history refetch failed for thread ${threadId}: ${errorMessage(error)}`)
+      refetchFailures.push(error)
     }
   }
   // Cancellation first: a reply that both wakes a snooze and answers a
@@ -219,7 +234,19 @@ export async function runHistoryCycle(
     effects.wakeThread?.(threadId)
   }
   db.prepare('UPDATE sync_state SET last_history_id = ? WHERE account_id = ?').run(plan.historyId, accountId)
-  return plan
+  return refetchFailures.length > 0 ? { ...plan, refetchFailures } : plan
+}
+
+/**
+ * Whether a per-thread refetch failure describes the whole window rather than
+ * one thread. An expired token, a transient Gmail failure and a lost network
+ * hit every thread alike, and advancing the checkpoint past changes that were
+ * never applied would drop them for good, so those still abort the cycle.
+ */
+function abortsHistoryCycle(error: unknown): boolean {
+  if (error instanceof GmailAuthError) return true
+  if (error instanceof GmailApiError) return error.retryable || error.status === 401
+  return isOfflineFailure(error)
 }
 
 export interface HistoryPollerOptions {
@@ -274,7 +301,15 @@ export class HistoryPoller {
   requestRunNow(onStarted: () => void): RunNowRequest {
     if (this.stopped) return 'stopped'
     if (this.executing) {
-      this.queuedRunStart = onStarted
+      const queued = this.queuedRunStart
+      // Two requests can queue behind one running cycle; both callers are
+      // waiting to be told the run began.
+      this.queuedRunStart = queued
+        ? () => {
+            queued()
+            onStarted()
+          }
+        : onStarted
       return 'queued'
     }
     onStarted()
@@ -342,6 +377,10 @@ export class HistoryPoller {
       if (plan && plan.newMail.length > 0) {
         historyEvents.emit('newMail', this.options.accountId, plan.newMail)
       }
+      // The cycle checkpointed and its new mail landed; a thread it had to skip
+      // is still a failure worth surfacing, reported once rather than retried.
+      const skipped = plan?.refetchFailures?.[0]
+      if (skipped !== undefined) this.options.onError(skipped)
     } catch (error) {
       if (!this.stopped) this.options.onError(error)
     } finally {

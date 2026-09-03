@@ -1,3 +1,4 @@
+import { cssDeclarations, parsedRgbColor, type RgbColor } from '../../shared/css'
 import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
 
 export type MailSurface = 'native' | 'light'
@@ -13,7 +14,10 @@ const CSS_COMMENT = /\/\*[\s\S]*?\*\//g
 const IMPORTANT = /\s*!\s*important\s*$/i
 const GENERATED_CANVAS =
   /\b(?:url|(?:repeating-)?(?:linear|radial|conic)-gradient|image-set|cross-fade|element|paint|var)\s*\(/i
-const DARK_COLOR_SCHEME = /\(\s*prefers-color-scheme\s*:\s*dark\s*\)/i
+const DARK_COLOR_SCHEME_SOURCE = String.raw`\(\s*prefers-color-scheme\s*:\s*dark\s*\)`
+const DARK_COLOR_SCHEME = new RegExp(DARK_COLOR_SCHEME_SOURCE, 'i')
+const EVERY_DARK_COLOR_SCHEME = new RegExp(DARK_COLOR_SCHEME_SOURCE, 'gi')
+const ALWAYS_FALSE_LIGHT_MEDIA_FEATURE = '(width < 0px)'
 const INTERACTION_PSEUDO = /:(?:hover|active|focus(?:-visible|-within)?|visited)\b/gi
 const PSEUDO_ELEMENT = /::[a-z-]+(?:\([^)]*\))?|:(?:before|after|first-letter|first-line)\b/gi
 const CONDITIONAL_RULE = new Set(['container', 'document', 'layer', 'scope', 'supports'])
@@ -28,33 +32,16 @@ const NEUTRAL_TEXT_CHROMA = 24
 const backgroundProbe = document.createElement('span').style
 const textColorProbe = document.createElement('span').style
 
-interface RgbColor {
-  red: number
-  green: number
-  blue: number
-  alpha: number
-}
+/**
+ * Resolving a named colour needs a live element: `getComputedStyle` on a probe
+ * attached to the document forces layout, and `normalizeNativeMailDocument`
+ * asks per declaration. A newsletter repeats a handful of colours across
+ * hundreds of elements, so the answer is cached by the declaration text it was
+ * derived from (review P7).
+ */
+const resolvedTextColors = new Map<string, RgbColor | null>()
 
-function parsedRgbColor(value: string): RgbColor | null {
-  const match = value.match(
-    /^rgba?\(\s*([\d.]+)(%?)[,\s]+([\d.]+)(%?)[,\s]+([\d.]+)(%?)(?:\s*[,/]\s*([\d.]+)(%?))?\s*\)$/i
-  )
-  if (!match) return null
-  const channel = (part: string, percent: string): number => {
-    const numeric = Number(part)
-    return percent ? (numeric / 100) * 255 : numeric
-  }
-  return {
-    red: channel(match[1], match[2]),
-    green: channel(match[3], match[4]),
-    blue: channel(match[5], match[6]),
-    alpha: match[7] ? Number(match[7]) / (match[8] ? 100 : 1) : 1
-  }
-}
-
-function resolvedTextColor(value: string): RgbColor | null {
-  const raw = value.replace(CSS_COMMENT, '').replace(IMPORTANT, '').trim()
-  if (!raw || /^(?:currentcolor|transparent)$/i.test(raw) || /var\s*\(/i.test(raw)) return null
+function resolveTextColor(raw: string): RgbColor | null {
   textColorProbe.cssText = ''
   textColorProbe.color = raw
   if (!textColorProbe.color) return null
@@ -68,6 +55,16 @@ function resolvedTextColor(value: string): RgbColor | null {
     probe.remove()
   }
   return parsedRgbColor(serialized)
+}
+
+function resolvedTextColor(value: string): RgbColor | null {
+  const raw = value.replace(CSS_COMMENT, '').replace(IMPORTANT, '').trim()
+  if (!raw || /^(?:currentcolor|transparent)$/i.test(raw) || /var\s*\(/i.test(raw)) return null
+  const cached = resolvedTextColors.get(raw)
+  if (cached !== undefined) return cached
+  const resolved = resolveTextColor(raw)
+  resolvedTextColors.set(raw, resolved)
+  return resolved
 }
 
 function linearChannel(channel: number): number {
@@ -154,56 +151,6 @@ function isNeutralCanvas(value: string): boolean {
     return true
   }
   return /^rgba\([^)]*,0(?:\.0+)?\)$/.test(normalized) || /^rgb\([^)]*\/0(?:\.0+)?%?\)$/.test(normalized)
-}
-
-function splitCssDeclarations(style: string): string[] {
-  const declarations: string[] = []
-  let current = ''
-  let depth = 0
-  let quote: string | null = null
-  let escaped = false
-
-  for (const character of style) {
-    if (escaped) {
-      current += character
-      escaped = false
-      continue
-    }
-    if (character === '\\') {
-      current += character
-      escaped = true
-      continue
-    }
-    if (quote) {
-      current += character
-      if (character === quote) quote = null
-      continue
-    }
-    if (character === '"' || character === "'") quote = character
-    else if (character === '(') depth += 1
-    else if (character === ')') depth = Math.max(0, depth - 1)
-    else if (character === ';' && depth === 0) {
-      declarations.push(current)
-      current = ''
-      continue
-    }
-    current += character
-  }
-  declarations.push(current)
-  return declarations
-}
-
-function styleDeclarations(style: string): { property: string; value: string; raw: string }[] {
-  return splitCssDeclarations(style).flatMap((raw) => {
-    const separator = raw.indexOf(':')
-    if (separator <= 0) return []
-    const property = raw
-      .slice(0, separator)
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\s/g, '')
-      .toLowerCase()
-    return [{ property, value: raw.slice(separator + 1).trim(), raw: raw.trim() }]
-  })
 }
 
 function backgroundCreatesCanvas(property: string, rawValue: string): boolean {
@@ -874,7 +821,7 @@ function removeElementBackgrounds(root: ParentNode): void {
   root.querySelectorAll<HTMLElement>('[bgcolor], [background], [style]').forEach((element) => {
     element.removeAttribute('bgcolor')
     element.removeAttribute('background')
-    const style = styleDeclarations(element.getAttribute('style') ?? '')
+    const style = cssDeclarations(element.getAttribute('style') ?? '')
       .filter(({ property }) => !property.startsWith('background'))
       .map(({ raw }) => raw)
       .join('; ')
@@ -943,4 +890,13 @@ export function mailPresentationForHtml(html: string | null): MailPresentation {
 
 export function mailSurfaceForHtml(html: string | null): MailSurface {
   return mailPresentationForHtml(html).surface
+}
+
+/**
+ * HTML mail is rendered on an intentionally light canvas. Chromium evaluates
+ * sender-authored color-scheme media queries against the dark host app, so
+ * disable only the dark branch while leaving light and responsive rules intact.
+ */
+export function forceLightMailCss(css: string): string {
+  return css.replace(EVERY_DARK_COLOR_SCHEME, ALWAYS_FALSE_LIGHT_MEDIA_FEATURE)
 }

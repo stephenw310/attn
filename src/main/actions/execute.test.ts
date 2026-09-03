@@ -6,26 +6,20 @@ import {
   executeIntent,
   isPermanentActionError,
   isStoredAuthActionError,
-  isTypedStoredActionError,
   retryDelayMs,
   storeActionError,
   storedActionErrorKind
 } from './execute'
 
 describe('queue intent execution', () => {
-  it('routes each intent to the provider endpoint abstraction', async () => {
+  it('routes the label intent to the provider endpoint abstraction', async () => {
     const provider = {
-      modifyThread: vi.fn(async () => {}),
-      trashThread: vi.fn(async () => {}),
-      untrashThread: vi.fn(async () => {})
+      modifyThread: vi.fn(async () => {})
     } satisfies MailActionProvider
     await executeIntent(provider, { kind: 'modifyLabels', threadId: 't1', add: ['STARRED'], remove: [] })
-    await executeIntent(provider, { kind: 'trash', threadId: 't2' })
-    await executeIntent(provider, { kind: 'untrash', threadId: 't3' })
-    expect(provider.modifyThread).toHaveBeenCalledWith('t1', ['STARRED'], [])
-    expect(provider.trashThread).toHaveBeenCalledWith('t2')
-    expect(provider.untrashThread).toHaveBeenCalledWith('t3')
-    expect(provider.modifyThread).toHaveBeenLastCalledWith('t3', ['INBOX'], [])
+    await executeIntent(provider, { kind: 'modifyLabels', threadId: 't2', add: [], remove: ['INBOX'] })
+    expect(provider.modifyThread).toHaveBeenNthCalledWith(1, 't1', ['STARRED'], [])
+    expect(provider.modifyThread).toHaveBeenLastCalledWith('t2', [], ['INBOX'])
   })
 
   it('retries quota failures and advances through the full backoff', () => {
@@ -45,14 +39,13 @@ describe('queue intent execution', () => {
     expect(classifyActionError(new GmailAuthError('token refresh rejected'))).toBe('auth')
   })
 
-  it('stores typed auth markers while recognizing legacy Gmail 401 rows', () => {
-    const legacy = 'gmail /threads/t-roadmap/modify failed (401): invalid credentials'
+  it('recognizes only its own typed auth marker', () => {
     const stored = storeActionError(new GmailApiError(401, 'revoked'), 'auth')
     expect(isStoredAuthActionError(stored)).toBe(true)
-    expect(isTypedStoredActionError(stored)).toBe(true)
     expect(storedActionErrorKind(stored)).toBe('auth')
-    expect(isStoredAuthActionError(legacy)).toBe(true)
-    expect(isTypedStoredActionError(legacy)).toBe(false)
-    expect(isStoredAuthActionError('gmail /threads/t-roadmap/modify failed (403): forbidden')).toBe(false)
+    expect(storedActionErrorKind(storeActionError(new Error('nope'), 'permanent'))).toBe('permanent')
+    // Raw provider text is never a marker: only this executor writes them.
+    expect(isStoredAuthActionError('gmail /threads/t-roadmap/modify failed (401): invalid')).toBe(false)
+    expect(storedActionErrorKind('gmail /threads/t-roadmap/modify failed (401): invalid')).toBeNull()
   })
 })

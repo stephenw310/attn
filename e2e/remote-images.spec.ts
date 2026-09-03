@@ -6,6 +6,8 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { runPaletteCommand } from './nav'
+import { emitSeam } from './seams'
 
 // T33 (§9 #5): remote-content blocking enforced in main's request layer. The
 // seeded message points its resources at a local HTTP server the test
@@ -53,15 +55,26 @@ async function startProbeServer(): Promise<ProbeServer> {
   }
 }
 
-async function setMessageHtml(app: ElectronApplication, id: string, html: string): Promise<void> {
-  const error = await app.evaluate(
-    ({ ipcMain }, input) =>
-      new Promise<string | undefined>((resolve) =>
-        ipcMain.emit(input.channel, {}, input.id, input.text, input.html, resolve)
-      ),
-    { channel: TEST_CHANNELS.updateMessageBody, id, text: 'Lunch plans with a pixel.', html }
-  )
-  if (error) throw new Error(error)
+function setMessageHtml(app: ElectronApplication, id: string, html: string): Promise<void> {
+  return emitSeam(app, TEST_CHANNELS.updateMessageBody, id, 'Lunch plans with a pixel.', html)
+}
+
+/**
+ * Proving that nothing reaches the wire needs a window in which nothing may
+ * arrive: there is no counter to poll toward and no product constant behind
+ * it, so this states the window once, in one place, and fails at the first
+ * unexpected hit rather than only when the window ends.
+ */
+const WIRE_QUIET_MS = 250
+
+async function expectWireQuiet(probe: ProbeServer, page: Page, path?: string): Promise<void> {
+  const hits = () => (path ? probe.count(path) : probe.hits.length)
+  const deadline = Date.now() + WIRE_QUIET_MS
+  do {
+    expect(hits()).toBe(0)
+    await page.waitForTimeout(25)
+  } while (Date.now() < deadline)
+  expect(hits()).toBe(0)
 }
 
 function lunchRow(page: Page) {
@@ -76,14 +89,6 @@ async function openLunch(page: Page): Promise<void> {
 async function closeReader(page: Page): Promise<void> {
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('conversation-view')).toHaveCount(0)
-}
-
-async function runPaletteCommand(page: Page, query: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+K')
-  await expect(page.getByTestId('command-palette-input')).toBeFocused()
-  await page.getByTestId('command-palette-input').fill(query)
-  await page.getByTestId('command-palette-input').press('Enter')
-  await expect(page.getByTestId('command-palette')).toHaveCount(0)
 }
 
 async function expectBlockedSetting(page: Page, blocked: boolean): Promise<void> {
@@ -167,8 +172,7 @@ test('blocking cancels every request type; overrides, live policy changes, and r
     await runPaletteCommand(page, 'Block remote images')
     await expectBlockedSetting(page, true)
     await expect(banner).toBeVisible()
-    await page.waitForTimeout(250)
-    expect(probe.hits.length).toBe(0)
+    await expectWireQuiet(probe, page)
 
     // Always load writes the per-sender override: the banner clears and the
     // remounted frame fetches again — exactly once, through the policy
@@ -319,8 +323,7 @@ test('editable composer images obey blocking, per-sender exceptions, and the tog
     await expect(replyImage).toHaveAttribute('data-remote-blocked', 'true')
     await expect(replyImage).toHaveAttribute('src', /^data:image\/gif/)
     probe.reset()
-    await page.waitForTimeout(250)
-    expect(probe.count('/editor-reply.png')).toBe(0)
+    await expectWireQuiet(probe, page, '/editor-reply.png')
     await page.keyboard.press('Escape')
     await expect(composer.root).toHaveCount(0)
     await closeReader(page)

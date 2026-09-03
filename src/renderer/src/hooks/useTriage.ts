@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
 import type { AutoAdvanceDirection } from '../../../shared/settings'
@@ -27,14 +27,18 @@ interface Options {
   selectedIndex: number
   threads: readonly {
     id: string
+    from: string
+    subject: string
+    snippet: string
+    lastMsgAt: number
     starred: boolean
     unread: boolean
     hasAttachment: boolean
+    hasDraft: boolean
     labelIds: readonly string[]
     snoozed: boolean
     returned: boolean
   }[]
-  moveCacheRows: readonly ThreadRow[]
   readerOpen: boolean
   view: MailView
   activeSplitId: string | null
@@ -53,7 +57,6 @@ interface Options {
   updateSearchRows?: (updater: (rows: ThreadRow[]) => ThreadRow[]) => void
   clearSelection: () => void
   showToast: (message: string) => void
-  setExitingThreadIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>
   /** Where triage lands after removing the focused row (F3, F15 setting). */
   autoAdvance: AutoAdvanceDirection
@@ -65,6 +68,16 @@ interface Options {
    * the reader the advance closed (PR #101 review).
    */
   reopenReader: () => void
+}
+
+export interface TriageApi {
+  /** Stable for the life of the mount: every input is read through a ref (P1). */
+  triage: (action: TriageAction) => void
+  /**
+   * Rows the exit animation is playing on. Triage owns them because it is what
+   * starts and cancels the animation, and it prunes them as rows leave the list.
+   */
+  exitingThreadIds: ReadonlySet<string>
 }
 
 function flagOwnerKey(threadId: string, field: ThreadFlagSnapshot['field']): string {
@@ -93,56 +106,70 @@ function moveRetainsActiveInboxSplit(row: ThreadRow, activeSplitId: string | nul
   return true
 }
 
-export function useTriage(options: Options): (action: TriageAction) => void {
-  const {
-    selectedIds,
-    selectedIndex,
-    threads,
-    moveCacheRows,
-    readerOpen,
-    view,
-    activeSplitId,
-    searchOpen,
-    searchMoveRetains,
-    preserveSelectionOnRefreshRef,
-    deferRefreshUntilRef,
-    selectedThreadIdRef,
-    selectedRowRef,
-    realThreads,
-    setRealThreads,
-    realSnoozedThreads,
-    setRealSnoozedThreads,
-    mailboxRows,
-    setMailboxRows,
-    updateSearchRows,
-    clearSelection,
-    showToast,
-    setExitingThreadIds,
-    setSelectedIndex,
-    autoAdvance,
-    closeReader,
-    reopenReader
-  } = options
+/**
+ * The rows a move can add to another cached view: only threads the move
+ * touched, projected into the `ThreadRow` shape those caches hold.
+ */
+function moveCandidates(threads: Options['threads'], snapshot: ThreadMoveSnapshot): readonly ThreadRow[] {
+  const candidates: ThreadRow[] = []
+  for (const thread of threads) {
+    if (!snapshot.before.has(thread.id)) continue
+    candidates.push({
+      id: thread.id,
+      fromDisplay: thread.from,
+      subject: thread.subject,
+      snippet: thread.snippet,
+      lastMsgAt: thread.lastMsgAt,
+      unread: thread.unread,
+      starred: thread.starred,
+      hasAttachment: thread.hasAttachment,
+      snoozed: thread.snoozed,
+      returned: thread.returned,
+      hasDraft: thread.hasDraft,
+      labelIds: [...thread.labelIds]
+    })
+  }
+  return candidates
+}
+
+export function useTriage(options: Options): TriageApi {
+  const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
+  // One render-time mirror of every input, so the returned callback keeps a
+  // single identity for the life of the mount. It reaches the ~60-command batch
+  // `useInboxCommands` registers, which would otherwise be unregistered and
+  // rebuilt on each J/K and each background list refresh (P1).
+  const latest = useRef(options)
+  latest.current = options
   const flagOwnersRef = useRef(new Map<string, symbol>())
   const moveOwnersRef = useRef(new Map<string, symbol>())
-  const applyFlagToMailboxRows = useCallback(
-    (snapshot: ThreadFlagSnapshot, rollback: boolean) => {
-      setMailboxRows((current) => {
-        let changed = false
-        const next: MailboxRowCache = {}
-        for (const [cachedView, rows] of Object.entries(current) as [string, ThreadRow[]][]) {
-          const updated = rollback ? rollbackThreadFlag(rows, snapshot) : applyThreadFlag(rows, snapshot)
-          if (updated !== rows) changed = true
-          next[cachedView as keyof MailboxRowCache] = updated ?? rows
-        }
-        return changed ? next : current
-      })
-    },
-    [setMailboxRows]
-  )
+
+  const { threads } = options
+  // A row that left the list can never finish its exit animation, and a stale
+  // id would keep an unrelated later row hidden if the id came back.
+  useEffect(() => {
+    setExitingThreadIds((current) => {
+      if (current.size === 0) return current
+      const visibleIds = new Set(threads.map((thread) => thread.id))
+      const next = new Set([...current].filter((id) => visibleIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [threads])
+
+  const applyFlagToMailboxRows = useCallback((snapshot: ThreadFlagSnapshot, rollback: boolean) => {
+    latest.current.setMailboxRows((current) => {
+      let changed = false
+      const next: MailboxRowCache = {}
+      for (const [cachedView, rows] of Object.entries(current) as [string, ThreadRow[]][]) {
+        const updated = rollback ? rollbackThreadFlag(rows, snapshot) : applyThreadFlag(rows, snapshot)
+        if (updated !== rows) changed = true
+        next[cachedView as keyof MailboxRowCache] = updated ?? rows
+      }
+      return changed ? next : current
+    })
+  }, [])
   const applyMoveToMailboxRows = useCallback(
     (snapshot: ThreadMoveSnapshot, preservedView: MailView | null, candidates: readonly ThreadRow[]) => {
-      setMailboxRows((current) => {
+      latest.current.setMailboxRows((current) => {
         let changed = false
         const next: MailboxRowCache = {}
         for (const [cachedView, rows] of Object.entries(current) as [string, ThreadRow[]][]) {
@@ -173,11 +200,11 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         return changed ? next : current
       })
     },
-    [setMailboxRows]
+    []
   )
   const rollbackMoveInMailboxRows = useCallback(
     (snapshot: ThreadMoveSnapshot, beforeRows: MailboxRowCache) => {
-      setMailboxRows((current) => {
+      latest.current.setMailboxRows((current) => {
         let changed = false
         const next: MailboxRowCache = {}
         for (const [cachedView, rows] of Object.entries(current) as [string, ThreadRow[]][]) {
@@ -188,11 +215,37 @@ export function useTriage(options: Options): (action: TriageAction) => void {
         return changed ? next : current
       })
     },
-    [setMailboxRows]
+    []
   )
-  return useCallback(
+  const triage = useCallback(
     (action: TriageAction) => {
       if (!window.attn) return
+      const {
+        selectedIds,
+        selectedIndex,
+        threads,
+        readerOpen,
+        view,
+        activeSplitId,
+        searchOpen,
+        searchMoveRetains,
+        preserveSelectionOnRefreshRef,
+        deferRefreshUntilRef,
+        selectedThreadIdRef,
+        selectedRowRef,
+        realThreads,
+        setRealThreads,
+        realSnoozedThreads,
+        setRealSnoozedThreads,
+        mailboxRows,
+        updateSearchRows,
+        clearSelection,
+        showToast,
+        setSelectedIndex,
+        autoAdvance,
+        closeReader,
+        reopenReader
+      } = latest.current
       preserveSelectionOnRefreshRef.current = false
       const isBulk = selectedIds.size > 0 || (action.kind === 'move' && action.threadIds.length > 1)
       const targetedAction: TriageAction =
@@ -236,7 +289,10 @@ export function useTriage(options: Options): (action: TriageAction) => void {
             preservedView === 'snoozed' ? preservedIds : undefined
           )
         )
-        applyMoveToMailboxRows(moveSnapshot, preservedView, moveCacheRows)
+        // Only rows the move touched can be added to another cached view, so
+        // the candidate list is built here from the moved ids rather than
+        // maintaining a full copy of the visible list on every list change.
+        applyMoveToMailboxRows(moveSnapshot, preservedView, moveCandidates(threads, moveSnapshot))
         updateSearchRows?.((rows) => applyThreadMove(rows, moveSnapshot) ?? rows)
       }
       const settleFlag = (rollback: boolean): void => {
@@ -279,7 +335,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       let selectionRollback: { fromId: string; toId: string | null } | null = null
       let closedReaderForAdvance = false
       if (isBulk) clearSelection()
-      const exitingThreadIds =
+      const exitingIds =
         targetedAction.kind === 'archive' && view === 'inbox'
           ? targetedAction.threadIds
           : moveSnapshot
@@ -289,23 +345,23 @@ export function useTriage(options: Options): (action: TriageAction) => void {
                 ? targetedAction.threadIds
                 : []
             : []
-      if (exitingThreadIds.length > 0 && !readerOpen) {
+      if (exitingIds.length > 0 && !readerOpen) {
         // Give the focused row feedback before React projects the surviving
         // layout. That projection is deliberately comprehensive for bulk
         // actions and can take more than one frame in a 10,000-thread inbox.
         // The state update below immediately makes this DOM hint declarative.
         const selectedRow = selectedRowRef.current
-        if (selectedRow && exitingThreadIds.includes(selectedRow.dataset.threadId ?? '')) {
+        if (selectedRow && exitingIds.includes(selectedRow.dataset.threadId ?? '')) {
           selectedRow.dataset.exiting = 'true'
           selectedRow.classList.add('app-thread-exit')
         }
-        setExitingThreadIds((current) => new Set([...current, ...exitingThreadIds]))
+        setExitingThreadIds((current) => new Set([...current, ...exitingIds]))
         const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 550
         deferRefreshUntilRef.current = Math.max(deferRefreshUntilRef.current, Date.now() + duration)
         // 'list' only distinguishes the reader; in the list it means 'next'.
         const selection = selectionAfterExit(
           threads,
-          exitingThreadIds,
+          exitingIds,
           selectedIndex,
           autoAdvance === 'previous' ? 'previous' : 'next'
         )
@@ -315,7 +371,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
           preserveSelectionOnRefreshRef.current = selection.toId !== null
           setSelectedIndex(Math.max(0, selection.nextIndex))
         }
-      } else if (exitingThreadIds.length > 0 && readerOpen && autoAdvance !== 'next') {
+      } else if (exitingIds.length > 0 && readerOpen && autoAdvance !== 'next') {
         // The reader's default advance is free: the removed row's successor
         // slides into the same index on refresh. The other two directions
         // retarget before the refresh lands (F3 auto-advance setting).
@@ -323,7 +379,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
           closedReaderForAdvance = true
           closeReader()
         } else {
-          const selection = selectionAfterExit(threads, exitingThreadIds, selectedIndex, 'previous')
+          const selection = selectionAfterExit(threads, exitingIds, selectedIndex, 'previous')
           if (selection && selection.toId !== null && selection.toId !== selection.fromId) {
             selectionRollback = { fromId: selection.fromId, toId: selection.toId }
             selectedThreadIdRef.current = selection.toId
@@ -352,7 +408,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
           }
           setExitingThreadIds((current) => {
             const next = new Set(current)
-            for (const id of exitingThreadIds) next.delete(id)
+            for (const id of exitingIds) next.delete(id)
             return next
           })
           // A rejected write rolled the action back entirely; the reader the
@@ -360,36 +416,7 @@ export function useTriage(options: Options): (action: TriageAction) => void {
           if (closedReaderForAdvance) reopenReader()
         })
     },
-    [
-      applyFlagToMailboxRows,
-      applyMoveToMailboxRows,
-      activeSplitId,
-      autoAdvance,
-      clearSelection,
-      closeReader,
-      reopenReader,
-      deferRefreshUntilRef,
-      preserveSelectionOnRefreshRef,
-      readerOpen,
-      realSnoozedThreads,
-      realThreads,
-      mailboxRows,
-      moveCacheRows,
-      rollbackMoveInMailboxRows,
-      searchMoveRetains,
-      searchOpen,
-      selectedIds,
-      selectedIndex,
-      selectedRowRef,
-      selectedThreadIdRef,
-      setExitingThreadIds,
-      setRealSnoozedThreads,
-      setRealThreads,
-      setSelectedIndex,
-      showToast,
-      threads,
-      updateSearchRows,
-      view
-    ]
+    [applyFlagToMailboxRows, applyMoveToMailboxRows, rollbackMoveInMailboxRows]
   )
+  return { triage, exitingThreadIds }
 }

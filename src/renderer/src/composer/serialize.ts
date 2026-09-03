@@ -18,7 +18,9 @@ function childrenOf(node: SerializedLexicalNode): SerializedLexicalNode[] {
 
 function inlineText(node: SerializedLexicalNode): string {
   const element = node as SerializedElement
-  if (node.type === 'text' || node.type === 'styled-text') return element.text ?? ''
+  // Every text node is a `StyledTextNode`: `editorConfig.ts` replaces Lexical's
+  // `TextNode` globally, and no editor state is persisted as JSON.
+  if (node.type === 'styled-text') return element.text ?? ''
   if (node.type === 'linebreak') return '\n'
   if (node.type === 'composer-image') return element.altText ? `[Image: ${element.altText}]` : '[Image]'
   if (node.type === 'opaque-html') return element.html ? opaqueHtmlText(element.html) : ''
@@ -63,6 +65,19 @@ function blockText(node: SerializedLexicalNode): string {
   return inlineText(node)
 }
 
+/**
+ * The trust boundary (review S5). Both attribute values become real `src`
+ * attributes AFTER `sanitizeOutgoingHtml` has run, so nothing re-checks them
+ * here — and the purifier does keep these two `data-*` names, by design, on
+ * whatever element carries them. What makes the restore safe is that only
+ * `ImageNode.exportDOM` can put them into the export DOM: it is the sole node
+ * that emits them, and it emits fields that `sanitizeComposerImageSource`
+ * vetted on every import path (crafted JSON, DOM conversion, paste). Markup
+ * the editor could not represent never reaches here either — the opaque
+ * regions are still encoded tokens at this point, restored one step later.
+ * Widen `ImageNode`'s import paths and this restore stops being safe;
+ * `sanitize.test.ts` pins the gate it depends on.
+ */
 function inlineImageSourcesToCid(html: string): string {
   const template = document.createElement('template')
   template.innerHTML = html

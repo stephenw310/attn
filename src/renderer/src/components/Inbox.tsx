@@ -1,63 +1,50 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import {
-  type AccountSyncStatus,
-  type AuthSignInResult,
-  type AuthStatus,
-  isSignInCanceled
-} from '../../../shared/auth'
-import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
-import type { ConversationMailbox, MailLabel, ThreadListView, ThreadRow } from '../../../shared/mail'
-import type { MoveDestination } from '../../../shared/move'
-import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { AuthStatus } from '../../../shared/auth'
+import type { Draft } from '../../../shared/drafts'
+import type { MailLabel, ThreadListView } from '../../../shared/mail'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
 import type { UpdateState } from '../../../shared/update'
-import { clearAccountView, readAccountView, saveAccountView } from '../accountViewMemory'
-import { actionReconnectMessage } from '../actionReconnect'
-import { aiThreadContext } from '../aiContext'
-import { createCommand, registerCommands } from '../commands'
+import { readAccountView } from '../accountViewMemory'
 import { Composer, type ComposerHandle } from '../composer/Composer'
+import { useAccountSession } from '../hooks/useAccountSession'
 import { useConversation } from '../hooks/useConversation'
+import { useDraftOpening } from '../hooks/useDraftOpening'
+import { useFocusThreadTarget } from '../hooks/useFocusThreadTarget'
 import { useInboxCommands } from '../hooks/useInboxCommands'
-import { useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
-import { useLocalSearch } from '../hooks/useLocalSearch'
+import { isTextEntry, useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
+import { type MoveRequest, useListActions } from '../hooks/useListActions'
 import { useMailData } from '../hooks/useMailData'
-import { useRestoreTarget } from '../hooks/useRestoreTarget'
-import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
+import { useSearchSession } from '../hooks/useSearchSession'
 import { useSelectionState } from '../hooks/useSelectionState'
-import { useServerSearch } from '../hooks/useServerSearch'
 import { useAccountSettings, useSettings } from '../hooks/useSettings'
+import { useSettingsCommands } from '../hooks/useSettingsCommands'
 import { useSplits } from '../hooks/useSplits'
 import { useSyncActions } from '../hooks/useSyncActions'
 import { useToast } from '../hooks/useToast'
 import { useTriage } from '../hooks/useTriage'
-import { type LabelCheckState, LabelPicker } from '../LabelPicker'
-import { MovePicker, type MoveTarget } from '../MovePicker'
+import { useViewNavigation } from '../hooks/useViewNavigation'
+import { useViewRecords } from '../hooks/useViewRecords'
+import { LabelPicker } from '../LabelPicker'
+import { MovePicker } from '../MovePicker'
 import {
   cachedThreadView,
   type DisplayThread,
-  displaySnoozedThread,
   displaySnoozedThreads,
-  displayThread,
   displayThreads,
   type MailView,
-  type NavigableMailView,
   type PagedThreadView,
   userLabelId,
   userLabelView,
   VIEW_TITLES
 } from '../mailDisplay'
-import { selectionAfterExit } from '../optimisticTriage'
-import { isMacPlatform } from '../platform'
 import {
+  conversationMailboxFor,
   conversationMailboxForSearch,
-  retainedSearchQuery,
   searchAllowsMove,
-  searchesDrafts,
-  searchesLocalSnoozes,
-  searchRetainsMovedThread,
   triageViewForSearch
 } from '../searchView'
 import { readSidebarCollapsed, writeSidebarCollapsed } from '../sidebarState'
+import { ToastContext } from '../toastContext'
 import { CheatSheet } from './CheatSheet'
 import { CommandPalette } from './CommandPalette'
 import { ConversationView, type MessageReplyTarget } from './ConversationView'
@@ -82,31 +69,8 @@ interface InboxProps {
   /** Runs the reorder round trip above the keyed remount, with a supersession ticket (see App). */
   onReorderAccounts: (ids: string[]) => Promise<void>
   onRemovalError: (message: string) => void
-}
-
-/** Selection and scroll survive a round trip away from each view (SPEC F3). */
-interface ViewRecord {
-  rowId: string | null
-  index: number
-  scrollTop: number
-  loadedRows?: number
-}
-
-interface MoveRequest {
-  targets: readonly MoveTarget[]
-  sourceLabelId: string | null
-}
-
-/**
- * The reader projection each view owns. All Mail deliberately maps to 'normal':
- * both hide spam and keep trashed-message markers, so the projections are
- * identical and sharing the value keeps the conversation cache warm across an
- * Inbox ⇄ All Mail switch.
- */
-function conversationMailboxFor(view: MailView): ConversationMailbox {
-  if (view === 'spam') return 'spam'
-  if (view === 'trash') return 'trash'
-  return 'normal'
+  /** Claims the one announcement of a ready update, above the keyed remount (see App). */
+  onClaimUpdateAnnouncement: (version: string) => boolean
 }
 
 function threadListKind(view: MailView): ThreadListView | 'label' {
@@ -121,19 +85,12 @@ function titleForView(view: MailView, labelsById: ReadonlyMap<string, MailLabel>
   return VIEW_TITLES[view as keyof typeof VIEW_TITLES]
 }
 
-function sidebarStorage(): Storage | null {
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
-
 export function Inbox({
   status,
   onStatus,
   onReorderAccounts,
-  onRemovalError
+  onRemovalError,
+  onClaimUpdateAnnouncement
 }: InboxProps): React.JSX.Element {
   // The previous visit's snapshot for this account, saved by the guarded
   // switch before the tree remounted (F18: a warm switch restores the
@@ -143,11 +100,19 @@ export function Inbox({
     return accountId ? readAccountView(accountId) : null
   })
   const [view, setView] = useState<MailView>(() => restoredView?.view ?? 'inbox')
+  // `activeViewRef` is the synchronous half of `view`: navigation, the record
+  // store and useMailData all read the view inside the same event turn that
+  // changes it, before React re-renders. `applyView` is the only writer of
+  // either, so the two can never drift.
+  const activeViewRef = useRef<MailView>(restoredView?.view ?? 'inbox')
+  const applyView = useCallback((next: MailView) => {
+    activeViewRef.current = next
+    setView(next)
+  }, [])
   const [pendingChord, setPendingChord] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchKeyboardTarget, setSearchKeyboardTarget] = useState<'query' | 'results'>('query')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(sidebarStorage()))
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed())
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
@@ -157,95 +122,55 @@ export function Inbox({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsFocus, setSettingsFocus] = useState<SettingsControl | null>(null)
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
+  // The palette can sit above the cheat sheet, and the sheet's capture-phase
+  // handler runs first, so the sheet has to know when input belongs to the
+  // palette. Lifted here rather than probed out of the DOM (P9).
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [labelTargetIds, setLabelTargetIds] = useState<readonly string[] | null>(null)
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
-  const [accountStatuses, setAccountStatuses] = useState<AccountSyncStatus[] | null>(null)
-  const [removeAccountConfirm, setRemoveAccountConfirm] = useState(false)
-  // A switch can wait on the utility (a retiring session holds it for up to
-  // five seconds). Its settle remounts the tree, so while it is in flight
-  // every composer open is inert — a composer that opened mid-wait would be
-  // torn down with whatever was typed into it (F18). State blocks keyboard
-  // dispatch; the ref answers async completions that outlive their closure.
-  const [accountSwitchPending, setAccountSwitchPending] = useState(false)
   const [detachedDraftThread, setDetachedDraftThread] = useState<DisplayThread | null>(null)
   const [composerError, setComposerError] = useState<string | null>(null)
   const [toast, showToast] = useToast()
   const { settings: appSettings, update: updateAppSetting } = useSettings(showToast)
-  const appSettingsRef = useRef(appSettings)
-  appSettingsRef.current = appSettings
   const { accountSettings, updateAccountSetting } = useAccountSettings(
     status.activeAccountId ?? status.email ?? null,
     showToast
   )
   const autoAdvance = appSettings?.autoAdvanceDirection ?? 'next'
-  const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const selectedThreadIdRef = useRef<string | null>(null)
   const selectedDraftIdRef = useRef<string | null>(null)
-  const activeViewRef = useRef<MailView>(restoredView?.view ?? 'inbox')
   const listElRef = useRef<HTMLElement | null>(null)
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const searchSelectedRowIdRef = useRef<string | null>(null)
-  const previousSearchRowIdsRef = useRef<readonly string[]>([])
-  const viewStateRef = useRef(new Map<MailView, ViewRecord>(restoredView?.viewRecords ?? []))
-  const splitViewStateRef = useRef(new Map<string, ViewRecord>(restoredView?.splitRecords ?? []))
-  // Cross-account restore rides the same pending-restore machinery a
-  // same-account view switch uses: prime it at mount and the layout effects
-  // below apply selection and scroll once the restored view's rows load.
-  const pendingSplitRestoreRef = useRef<{ id: string; record: ViewRecord } | null>(
-    restoredView?.view === 'inbox' && restoredView.splitId
-      ? {
-          id: restoredView.splitId,
-          record: new Map(restoredView.splitRecords).get(restoredView.splitId) ?? {
-            rowId: null,
-            index: 0,
-            scrollTop: 0
-          }
-        }
-      : null
-  )
-  const pendingViewRestoreRef = useRef<{ view: MailView; record: ViewRecord } | null>(
-    restoredView && (restoredView.view !== 'inbox' || !restoredView.splitId)
-      ? {
-          view: restoredView.view,
-          record: new Map(restoredView.viewRecords).get(restoredView.view) ?? {
-            rowId: null,
-            index: 0,
-            scrollTop: 0
-          }
-        }
-      : null
-  )
-  const searchReturnRef = useRef<ViewRecord | null>(null)
+  const loadedRowsRef = useRef(0)
   const searchOpenRef = useRef(false)
   searchOpenRef.current = searchOpen
   const setMailboxSelectedIndex = useCallback<React.Dispatch<React.SetStateAction<number>>>((next) => {
     if (!searchOpenRef.current) setSelectedIndex(next)
   }, [])
-  // Render-time mirrors keep the view-switch callbacks referentially stable:
-  // effects subscribe on top of switchView, and churning it re-runs them all.
+  // The synchronous halves of the shell's own state: the extracted hooks read
+  // the cursor, the reader and the settings surface inside the same event turn
+  // that changes them, before React re-renders.
   const selectedIndexRef = useRef(0)
   selectedIndexRef.current = selectedIndex
   const readerOpenRef = useRef(false)
   readerOpenRef.current = readerOpen
   const settingsOpenRef = useRef(false)
   settingsOpenRef.current = settingsOpen
-  const outboxReturnRef = useRef<{
-    view: NavigableMailView
-    selectedIndex: number
-    readerOpen: boolean
-  }>({
-    view: 'inbox',
-    selectedIndex: 0,
-    readerOpen: false
-  })
   const composerOpeningRef = useRef(false)
-  const accountSwitchPendingRef = useRef(false)
+  // Switching or adding an account swaps (remounts) the whole mail surface,
+  // which would drop an open composer's not-yet-autosaved keystrokes. The
+  // keyboard and palette are already inert while composing; these guards and
+  // the menu's disabled rows make the pointer path match. `Esc` saves and
+  // closes the draft first (F6), so nothing is ever lost to a switch. The
+  // guards read the ref, not the captured boolean: an OAuth completion can
+  // arrive minutes after the closure was created, and only the ref knows
+  // whether a composer is open *now*.
+  const accountActionsBlocked = composerDraft !== null
+  const composerOpenRef = useRef(false)
+  composerOpenRef.current = accountActionsBlocked
   const draftOpenRequestRef = useRef(0)
   const draftOpenTargetRef = useRef<{ request: number; draftId: string; threadId: string } | null>(null)
-  const discardingDraftIdRef = useRef<string | null>(null)
-  const activeComposerDraftIdRef = useRef<string | null>(null)
   const inlineComposerRef = useRef<ComposerHandle | null>(null)
   const messageReplyTargetRef = useRef<MessageReplyTarget | null>(null)
 
@@ -257,8 +182,6 @@ export function Inbox({
   activeSplitIdRef.current = splits.activeSplitId
   const inboxSplitIdsKey = splits.state?.splits.map((split) => split.id).join('\u0000') ?? ''
   const inboxSplitRevision = splits.state?.revision
-  const setActiveSplitForFocusRef = useRef(splits.setActiveSplitId)
-  setActiveSplitForFocusRef.current = splits.setActiveSplitId
   const {
     sync,
     inboxBackfillReady,
@@ -304,9 +227,32 @@ export function Inbox({
     setMailboxSelectedIndex,
     splits.state !== null
   )
+  const records = useViewRecords({
+    account: activeAccount,
+    restored: restoredView,
+    view: activeViewRef,
+    searchOpen: searchOpenRef,
+    readerOpen: readerOpenRef,
+    activeSplitId: activeSplitIdRef,
+    listEl: listElRef,
+    selectedIndex: selectedIndexRef,
+    selectedThreadId: selectedThreadIdRef,
+    selectedDraftId: selectedDraftIdRef,
+    loadedRows: loadedRowsRef
+  })
+  const accounts = useAccountSession({
+    status,
+    onStatus,
+    onRemovalError,
+    showToast,
+    composerOpen: composerOpenRef,
+    composerOpening: composerOpeningRef,
+    saveAccountSnapshot: records.saveAccountSnapshot
+  })
+  const accountSwitchPendingRef = accounts.accountSwitchPendingRef
   const userLabelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
   const online = networkOnline && sync.phase !== 'offline'
-  const backingMailView = view === 'outbox' ? outboxReturnRef.current.view : view
+  const backingMailView = view === 'outbox' ? records.outboxReturn.current.view : view
   const backingCachedView = cachedThreadView(backingMailView)
   const activeInboxRowsReady =
     realThreads !== null && (!splits.state || loadedInboxSplitId === splits.activeSplitId)
@@ -349,69 +295,58 @@ export function Inbox({
             : [],
     [backingCachedView, backingMailView, activeInboxRowsReady, mailboxRows, realSnoozedThreads, realThreads]
   )
-  const search = useLocalSearch(searchOpen, searchQuery, activeAccount, mailRevision)
-  const serverSearch = useServerSearch(
-    searchOpen,
-    searchQuery,
-    activeAccount,
+  // The two pickers that hang off the focused row: any navigation drops them.
+  const closePickers = useCallback(() => {
+    setSnoozeOpen(false)
+    setLabelTargetIds(null)
+  }, [])
+  const closeMove = useCallback(() => setMoveRequest(null), [])
+  // Leave search without restoring anything; the caller owns the restore.
+  const leaveSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [])
+  // Closing the reader invalidates any in-flight draft-open request, so a late
+  // `draft:reopen` for the conversation just left cannot mount a composer.
+  const finishReaderClose = useCallback(() => {
+    draftOpenRequestRef.current += 1
+    draftOpenTargetRef.current = null
+    setReaderOpen(false)
+    setDetachedDraftThread(null)
+  }, [])
+  const search = useSearchSession({
+    open: searchOpen,
+    setOpen: setSearchOpen,
+    openRef: searchOpenRef,
+    query: searchQuery,
+    setQuery: setSearchQuery,
+    view,
+    account: activeAccount,
     mailRevision,
     mailChangeSource,
-    online
-  )
-  const localSearchThreads = useMemo(() => displayThreads(search.response?.rows ?? []), [search.response])
-  const serverSearchThreads = useMemo(() => displayThreads(serverSearch.rows), [serverSearch.rows])
-  const serverSearchThreadIds = useMemo(
-    () => new Set(serverSearchThreads.map((thread) => thread.id)),
-    [serverSearchThreads]
-  )
-  const visibleLocalSearchThreads = useMemo(
-    () => localSearchThreads.filter((thread) => !serverSearchThreadIds.has(thread.id)),
-    [localSearchThreads, serverSearchThreadIds]
-  )
-  const searchThreads = useMemo(
-    () => [...visibleLocalSearchThreads, ...serverSearchThreads],
-    [serverSearchThreads, visibleLocalSearchThreads]
-  )
-  const searchSectionDivider = useMemo(
-    () =>
-      serverSearchThreads.length > 0
-        ? { beforeIndex: visibleLocalSearchThreads.length, label: 'More from Gmail' }
-        : undefined,
-    [serverSearchThreads.length, visibleLocalSearchThreads.length]
-  )
-  const searchDrafts = useMemo(() => search.response?.drafts ?? [], [search.response])
-  const searchResultQuery = retainedSearchQuery(searchQuery, search.completedQuery)
-  const searchDraftMode = searchOpen && searchesDrafts(searchResultQuery)
-  const searchSnoozeMode = searchOpen && searchesLocalSnoozes(searchResultQuery)
+    online,
+    labels,
+    readerOpen,
+    composerCovering: composerDraft !== null,
+    records,
+    setSelectedIndex,
+    selectedIndex,
+    finishReaderClose,
+    closeMove,
+    reconnectGoogle: accounts.reconnectGoogle,
+    listElRef,
+    readerOpenRef,
+    selectedIndexRef,
+    selectedThreadIdRef,
+    selectedDraftIdRef
+  })
+  const searchResultQuery = search.resultQuery
+  const searchDraftMode = search.draftMode
   const moveAllowed = searchOpen
     ? searchAllowsMove(searchResultQuery)
     : view !== 'drafts' && view !== 'snoozed' && view !== 'outbox'
-  const searchRowIds = useMemo(
-    () =>
-      searchDraftMode ? searchDrafts.map((draft) => draft.id) : searchThreads.map((thread) => thread.id),
-    [searchDraftMode, searchDrafts, searchThreads]
-  )
-  const threads = searchOpen ? searchThreads : mailboxThreads
-  const loadedRowsRef = useRef(0)
+  const threads = searchOpen ? search.threads : mailboxThreads
   loadedRowsRef.current = mailboxThreads.length
-  const moveCacheRows = useMemo<ThreadRow[]>(
-    () =>
-      threads.map((thread) => ({
-        id: thread.id,
-        fromDisplay: thread.from,
-        subject: thread.subject,
-        snippet: thread.snippet,
-        lastMsgAt: thread.lastMsgAt,
-        unread: thread.unread,
-        starred: thread.starred,
-        hasAttachment: thread.hasAttachment,
-        snoozed: thread.snoozed,
-        returned: thread.returned,
-        hasDraft: thread.hasDraft,
-        labelIds: [...thread.labelIds]
-      })),
-    [threads]
-  )
   const activeViewTitle = titleForView(view, userLabelsById)
   const pagedView = searchOpen || view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
   const activePageState = pagedView ? threadPagination[pagedView] : undefined
@@ -435,113 +370,20 @@ export function Inbox({
   const loadMoreVisibleThreads = useCallback(() => {
     if (pagedView) void loadMoreThreads(pagedView)
   }, [loadMoreThreads, pagedView])
-  const { selectedIds, clearSelection, toggleFocusedSelection, extendSelectionTo } = useSelectionState(
-    threads,
-    selectedIndex,
-    setSelectedIndex
-  )
-
-  const showDraft = useCallback(
-    (draft: Draft) => {
-      if (accountSwitchPendingRef.current) return
-      activeComposerDraftIdRef.current = draft.id
-      if (draft.kind !== 'new' && draft.threadId) {
-        const inboxIndex = (realThreads ?? []).findIndex((thread) => thread.id === draft.threadId)
-        const snoozedIndex = (realSnoozedThreads ?? []).findIndex((thread) => thread.id === draft.threadId)
-        const cachedThread =
-          inboxIndex >= 0
-            ? displayThread((realThreads ?? [])[inboxIndex])
-            : snoozedIndex >= 0
-              ? displaySnoozedThread((realSnoozedThreads ?? [])[snoozedIndex])
-              : null
-        const fallbackThread: DisplayThread = {
-          id: draft.threadId,
-          from: '',
-          subject: draft.subject.replace(/^(?:(?:re|fwd?|forward)\s*:\s*)+/i, '') || '(no subject)',
-          snippet: '',
-          at: '',
-          unread: false,
-          starred: false,
-          hasAttachment: false,
-          snoozed: false,
-          returned: false,
-          followUpReturned: false,
-          hasDraft: true,
-          labelIds: [],
-          lastMsgAt: draft.updatedAt
-        }
-
-        if (activeViewRef.current === 'drafts') {
-          // Keep Drafts as the navigation origin even when the parent thread is
-          // also cached in Inbox or Snoozed. The reader can render that cached
-          // thread as a detached item without changing the underlying list.
-          selectedThreadIdRef.current = draft.threadId
-          setReaderOpen(true)
-          setSnoozeOpen(false)
-          setLabelTargetIds(null)
-          setDetachedDraftThread(cachedThread ?? fallbackThread)
-          setComposerDraft(draft)
-          return
-        }
-        const destination =
-          inboxIndex >= 0
-            ? { view: 'inbox' as const, index: inboxIndex }
-            : snoozedIndex >= 0
-              ? { view: 'snoozed' as const, index: snoozedIndex }
-              : null
-        if (destination) {
-          activeViewRef.current = destination.view
-          selectedThreadIdRef.current = draft.threadId
-          selectedDraftIdRef.current = null
-          clearSelection()
-          setView(destination.view)
-          setSelectedIndex(destination.index)
-          setReaderOpen(true)
-          setSnoozeOpen(false)
-          setLabelTargetIds(null)
-          setDetachedDraftThread(null)
-        } else {
-          setDetachedDraftThread(fallbackThread)
-          selectedThreadIdRef.current = draft.threadId
-          setReaderOpen(true)
-        }
-      }
-      setComposerDraft(draft)
-    },
-    [clearSelection, realSnoozedThreads, realThreads]
-  )
+  const { selectedIds, clearSelection, toggleFocusedSelection, extendSelectionTo, extendSelectionBy } =
+    useSelectionState(threads, selectedIndex, setSelectedIndex)
 
   // App keys this tree by account: transient state starts fresh on each mount,
   // while the saved view and split records above survive the round trip.
 
-  useEffect(() => {
-    // Taking consumes the recovered pointer; skip while a switch is settling
-    // so an unclaimed crash recovery stays claimable instead of vanishing.
-    if (!window.attn || !activeAccount || accountSwitchPendingRef.current) return
-    let active = true
-    void window.attn.draft
-      .takeRecovered()
-      .then((draft) => {
-        if (active && draft && !accountSwitchPendingRef.current) setComposerDraft(draft)
-      })
-      .catch(() => {})
-    return () => {
-      active = false
-    }
-  }, [activeAccount])
-
-  useEffect(() => {
-    activeComposerDraftIdRef.current = composerDraft?.id ?? null
-  }, [composerDraft?.id])
-
   // T39: a ready update surfaces once as a quiet toast; the palette command
-  // applies it through the awaited shutdown, and nothing forces a restart.
-  const updateToastedRef = useRef<string | null>(null)
+  // applies it through the awaited shutdown, and nothing forces a restart. The
+  // dedupe lives in App, above this account-keyed tree, so switching accounts
+  // does not re-announce an update the user has already seen.
   useEffect(() => {
     const announce = (state: UpdateState): void => {
       if (state.phase !== 'ready' || state.readyVersion === null) return
-      if (updateToastedRef.current === state.readyVersion) return
-      updateToastedRef.current = state.readyVersion
+      if (!onClaimUpdateAnnouncement(state.readyVersion)) return
       showToast(`Update ${state.readyVersion} ready — it applies on quit, or Restart to update`)
     }
     // Subscribe first, then read: a download that finished while no window
@@ -553,27 +395,13 @@ export function Inbox({
       .then(announce)
       .catch(() => {})
     return unsubscribe
-  }, [showToast])
+  }, [onClaimUpdateAnnouncement, showToast])
 
-  // T37 AI reply drafting: one Inbox-owned command serves the reader and the
-  // composer. An invocation parks in the pending ref until the (possibly just
-  // opened) reply composer's plugin claims it — claiming is one-shot, so a
-  // remounted composer can never replay a consumed invocation. The pending
-  // value is the target THREAD id: a composer for any other conversation
-  // finds nothing to claim, so an invocation can never carry into an
-  // unrelated draft (PR #101 review).
-  const [aiDraftRequest, setAiDraftRequest] = useState(0)
-  const aiDraftPendingRef = useRef<string | null>(null)
-  const aiCommandPreparingRef = useRef(false)
-  const claimAiDraftRequest = useCallback((threadId: string) => {
-    if (aiDraftPendingRef.current === null || aiDraftPendingRef.current !== threadId) return false
-    aiDraftPendingRef.current = null
-    return true
-  }, [])
-
+  // The cursor can never point past the visible list, however the list got
+  // shorter — a refresh, a triage removal, or a narrowing search.
   useEffect(() => {
     const visibleCount = searchDraftMode
-      ? searchDrafts.length
+      ? search.drafts.length
       : searchOpen
         ? threads.length
         : view === 'drafts'
@@ -582,40 +410,8 @@ export function Inbox({
             ? realOutbox.length
             : threads.length
     setSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(visibleCount - 1, 0))))
-    setExitingThreadIds((current) => {
-      if (current.size === 0) return current
-      const visibleIds = new Set(threads.map((thread) => thread.id))
-      const next = new Set([...current].filter((id) => visibleIds.has(id)))
-      return next.size === current.size ? current : next
-    })
     if ((searchOpen || view !== 'drafts') && threads.length === 0) setReaderOpen(false)
-  }, [realDrafts.length, realOutbox.length, searchDraftMode, searchDrafts.length, searchOpen, threads, view])
-
-  // Search results can refresh or reorder while their backing mailbox also
-  // refreshes. Preserve the cursor by result identity instead of interpreting
-  // its old numeric index against a new response.
-  useLayoutEffect(() => {
-    if (!searchOpen) {
-      previousSearchRowIdsRef.current = []
-      searchSelectedRowIdRef.current = null
-      return
-    }
-    if (previousSearchRowIdsRef.current !== searchRowIds) {
-      previousSearchRowIdsRef.current = searchRowIds
-      const previousId = searchSelectedRowIdRef.current
-      const restoredIndex = previousId ? searchRowIds.indexOf(previousId) : -1
-      const nextIndex =
-        restoredIndex >= 0
-          ? restoredIndex
-          : Math.max(0, Math.min(selectedIndex, Math.max(searchRowIds.length - 1, 0)))
-      searchSelectedRowIdRef.current = searchRowIds[nextIndex] ?? null
-      if (nextIndex !== selectedIndex) setSelectedIndex(nextIndex)
-      selectedThreadIdRef.current = searchDraftMode ? null : searchSelectedRowIdRef.current
-      return
-    }
-    searchSelectedRowIdRef.current = searchRowIds[selectedIndex] ?? null
-    selectedThreadIdRef.current = searchDraftMode ? null : searchSelectedRowIdRef.current
-  }, [searchDraftMode, searchOpen, searchRowIds, selectedIndex])
+  }, [realDrafts.length, realOutbox.length, searchDraftMode, search.drafts.length, searchOpen, threads, view])
 
   const selected = detachedDraftThread ?? threads[selectedIndex]
   // Split and mailbox switches snapshot selection synchronously inside the same
@@ -626,24 +422,9 @@ export function Inbox({
   }
   const conversationThreads = detachedDraftThread ? [detachedDraftThread] : threads
   const conversationSelectedIndex = detachedDraftThread ? 0 : selectedIndex
-  const inlineComposerDraft =
-    composerDraft && composerDraft.kind !== 'new' && readerOpen && selected?.id === composerDraft.threadId
-      ? composerDraft
-      : null
-  const fullWindowComposerDraft = composerDraft && !inlineComposerDraft ? composerDraft : null
-  // Render-time mirror for the Draft-AI-reply command: only the inline reply
-  // composer mounts the plugin that can serve an invocation.
-  const inlineComposerDraftIdRef = useRef<string | null>(null)
-  inlineComposerDraftIdRef.current = inlineComposerDraft?.id ?? null
-
-  // A pending AI invocation must not outlive the composer (or the failed
-  // open) it targeted: reopening a reply later must start clean.
-  useEffect(() => {
-    if (composerDraft === null) aiDraftPendingRef.current = null
-  }, [composerDraft])
 
   useEffect(() => {
-    writeSidebarCollapsed(sidebarStorage(), sidebarCollapsed)
+    writeSidebarCollapsed(sidebarCollapsed)
   }, [sidebarCollapsed])
 
   const toggleSidebar = useCallback(() => {
@@ -677,73 +458,19 @@ export function Inbox({
   // cheat sheet, remove-account dialog) consume it during capture, and the
   // split manager's own bubble listener is excluded by the guard here.
   useEffect(() => {
-    if (!settingsOpen || splitRulesOpen || removeAccountConfirm || cheatSheetOpen) return
+    if (!settingsOpen || splitRulesOpen || accounts.removeAccountOpen || cheatSheetOpen) return
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
+      // Escape inside a Settings field cancels that edit; closing Settings from
+      // under the cursor would discard the snippet or rule being typed (B9).
+      if (isTextEntry(event.target)) return
       event.preventDefault()
       closeSettings()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [cheatSheetOpen, closeSettings, removeAccountConfirm, settingsOpen, splitRulesOpen])
+  }, [cheatSheetOpen, closeSettings, accounts.removeAccountOpen, settingsOpen, splitRulesOpen])
 
-  const reopenDraftForThread = useCallback(
-    (threadId: string) => {
-      const draft = realDrafts.find(
-        (candidate) => candidate.kind !== 'new' && candidate.threadId === threadId
-      )
-      if (!draft || !window.attn) return
-      // Reopening mutates the draft pointer; while a switch is settling
-      // nothing may touch the outgoing account's queue (F18), so the gate
-      // sits before the request, not on its completion.
-      if (accountSwitchPendingRef.current) return
-      const request = ++draftOpenRequestRef.current
-      draftOpenTargetRef.current = { request, draftId: draft.id, threadId }
-      void window.attn.draft
-        .reopen(draft.id)
-        .then((reopened) => {
-          if (!reopened) {
-            if (draftOpenTargetRef.current?.request === request) draftOpenTargetRef.current = null
-            return
-          }
-          const ownsResult =
-            request === draftOpenRequestRef.current &&
-            selectedThreadIdRef.current === threadId &&
-            !accountSwitchPendingRef.current
-          if (ownsResult) {
-            draftOpenTargetRef.current = null
-            activeComposerDraftIdRef.current = reopened.id
-            setComposerDraft(reopened)
-            return
-          }
-
-          // `draft:reopen` mutates the row before returning it. If navigation
-          // superseded this request, release that composing lease unless a
-          // newer request or mounted composer already owns the same row.
-          // Only a *different* request can be that owner: J/K moves the
-          // selection without bumping the counter, so this request's own
-          // entry is still parked here and must not be read as a competitor.
-          const pending = draftOpenTargetRef.current
-          if (pending?.request === request) draftOpenTargetRef.current = null
-          const ownedByNewerRequest = pending !== null && pending.request !== request
-          if (
-            (ownedByNewerRequest && pending.draftId === reopened.id) ||
-            activeComposerDraftIdRef.current === reopened.id
-          ) {
-            return
-          }
-          void window.attn?.draft.close(reopened.id).catch(() => {})
-        })
-        .catch(() => {
-          if (draftOpenTargetRef.current?.request !== request) return
-          draftOpenTargetRef.current = null
-          if (activeComposerDraftIdRef.current !== draft.id) {
-            void window.attn?.draft.close(draft.id).catch(() => {})
-          }
-        })
-    },
-    [realDrafts]
-  )
   const { conversation, scrollRef: conversationScrollRef } = useConversation({
     selected,
     selectedIndex: conversationSelectedIndex,
@@ -757,8 +484,68 @@ export function Inbox({
   })
   const targetedThreads =
     selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
-  const starOn = targetedThreads.some((thread) => !thread.starred)
-  const markUnreadOn = targetedThreads.some((thread) => !thread.unread)
+  // Read at invocation, not captured at registration: both flip as the focused
+  // row moves, and the command batch must not churn with it (P1).
+  const starOnRef = useRef(false)
+  starOnRef.current = targetedThreads.some((thread) => !thread.starred)
+  const markUnreadOnRef = useRef(false)
+  markUnreadOnRef.current = targetedThreads.some((thread) => !thread.unread)
+  // Stable views of the focused row for the command batch and the AI-draft
+  // command, both of which must not re-register as the cursor moves.
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+
+  const drafting = useDraftOpening({
+    account: activeAccount,
+    view,
+    viewRef: activeViewRef,
+    searchOpen,
+    searchOpenRef,
+    searchResultQuery,
+    readerOpen,
+    readerOpenRef,
+    selected,
+    selectedRef,
+    conversation,
+    messageReplyTargetRef,
+    composerDraft,
+    setComposerDraft,
+    composerError,
+    setComposerError,
+    setDetachedDraftThread,
+    realThreads,
+    realSnoozedThreads,
+    realDrafts,
+    realOutbox,
+    selectedIndex,
+    accountSwitchPendingRef,
+    composerOpeningRef,
+    draftOpenRequestRef,
+    draftOpenTargetRef,
+    inlineComposerRef,
+    selectedThreadIdRef,
+    selectedDraftIdRef,
+    settingsOpenRef,
+    applyView,
+    clearSelection,
+    setSelectedIndex,
+    setReaderOpen,
+    closePickers,
+    finishReaderClose,
+    invalidateConversations,
+    refreshMailRows,
+    refreshDrafts,
+    showToast
+  })
+  const {
+    reopenDraftForThread,
+    reopenListDraft,
+    openOutboxItem,
+    openComposer,
+    openReply,
+    inlineComposerDraft,
+    fullWindowComposerDraft
+  } = drafting
 
   // Snapshot ids when the picker opens. A bulk apply clears the list selection,
   // but the open picker keeps operating on the same conversations.
@@ -797,343 +584,6 @@ export function Inbox({
     return window.attn.mail.onActionsReverted(activeAccount, showToast)
   }, [activeAccount, showToast])
 
-  // Live roster health: seeded once, then pushed by the utility whenever any
-  // account's phase moves — the chip's attention mark and the menu status
-  // lines follow without polling (F18). A push that lands while the seed read
-  // is still in flight is the fresher answer, so the seed never overwrites it.
-  useEffect(() => {
-    const bridge = window.attn
-    if (!bridge) return
-    let pushed = false
-    const unsubscribe = bridge.auth.onAccountStatuses((statuses) => {
-      pushed = true
-      setAccountStatuses(statuses)
-    })
-    bridge.auth
-      .getAccountStatuses()
-      .then((statuses) => {
-        if (!pushed) setAccountStatuses(statuses)
-      })
-      .catch(() => {})
-    return unsubscribe
-  }, [])
-
-  const reconnectGoogle = useCallback(async (): Promise<AuthSignInResult | null> => {
-    if (!window.attn) return null
-    try {
-      const result = await window.attn.auth.signIn()
-      onStatus(result.status)
-      return result
-    } catch (reason) {
-      // A canceled or superseded sign-in is not a failure worth a toast.
-      if (!isSignInCanceled(reason)) {
-        void showToast(reason instanceof Error ? reason.message : 'Could not reconnect Google')
-      }
-      return null
-    }
-  }, [onStatus, showToast])
-  const reconnectActions = useCallback(() => {
-    void reconnectGoogle().then((result) => {
-      if (result) void showToast(actionReconnectMessage(activeAccount ?? '', result))
-    })
-  }, [activeAccount, reconnectGoogle, showToast])
-  const reconnectSearch = useCallback(() => {
-    void reconnectGoogle().then((result) => {
-      if (result?.status.signedIn) serverSearch.run()
-    })
-  }, [reconnectGoogle, serverSearch.run])
-
-  // Switching or adding an account swaps (remounts) the whole mail surface,
-  // which would drop an open composer's not-yet-autosaved keystrokes. The
-  // keyboard and palette are already inert while composing; these guards and
-  // the menu's disabled rows make the pointer path match. `Esc` saves and
-  // closes the draft first (F6), so nothing is ever lost to a switch.
-  const accountActionsBlocked = composerDraft !== null
-  // The guards below read this ref, not the captured boolean: an OAuth
-  // completion (or any queued callback) can arrive minutes after the closure
-  // was created, and only the ref knows whether a composer is open *now*.
-  const composerOpenRef = useRef(false)
-  composerOpenRef.current = accountActionsBlocked
-  // Assigned below once the view-record helpers exist; routed through a ref
-  // because this guarded switch is declared before them.
-  const saveAccountSnapshotRef = useRef<() => void>(() => {})
-  const switchAccount = useCallback(
-    (accountId: string) => {
-      if (!window.attn || accountId === status.activeAccountId) return
-      if (composerOpenRef.current || composerOpeningRef.current) {
-        showToast('Save and close the draft before switching accounts')
-        return
-      }
-      if (accountSwitchPendingRef.current) return
-      // Capture this account's view, selection, and scroll before the tree
-      // remounts, so returning here restores them (F18).
-      saveAccountSnapshotRef.current()
-      accountSwitchPendingRef.current = true
-      setAccountSwitchPending(true)
-      void window.attn.auth
-        .setActiveAccount(accountId)
-        .then(onStatus)
-        .catch(() => void showToast('Could not switch accounts'))
-        .finally(() => {
-          accountSwitchPendingRef.current = false
-          setAccountSwitchPending(false)
-        })
-    },
-    [onStatus, showToast, status.activeAccountId]
-  )
-  // Adding an account is the same OAuth flow as reconnecting: an existing
-  // address refreshes its tokens, a new one joins the roster (F18). Sign-in
-  // no longer activates the addition — the browser flow can complete minutes
-  // later, when a composer may be open — so activation goes through the
-  // guarded switch here, and a blocked switch leaves the account added but
-  // not active rather than dropping unsaved keystrokes.
-  const addAccount = useCallback(() => {
-    if (composerOpenRef.current || composerOpeningRef.current) {
-      showToast('Save and close the draft before adding an account')
-      return
-    }
-    void reconnectGoogle().then((result) => {
-      if (!result?.accountId || result.accountId === result.status.activeAccountId) return
-      if (composerOpenRef.current || composerOpeningRef.current) {
-        void showToast(`Added ${result.accountId} — save the draft, then switch from the account menu`)
-        return
-      }
-      switchAccount(result.accountId)
-    })
-  }, [reconnectGoogle, showToast, switchAccount])
-  // Removing an account is destructive enough for a confirmation that also
-  // decides the local data's fate (F18, D3): Delete purges every local trace,
-  // Keep leaves the rows dormant for a future re-add to resume from cursors.
-  const requestRemoveAccount = useCallback(() => {
-    if (composerOpenRef.current || composerOpeningRef.current) {
-      showToast('Save and close the draft before removing an account')
-      return
-    }
-    if (accountSwitchPendingRef.current) return
-    setRemoveAccountConfirm(true)
-  }, [showToast])
-  const removeActiveAccount = useCallback(
-    (deleteData: boolean) => {
-      const target = status.activeAccountId
-      if (
-        !window.attn ||
-        !target ||
-        composerOpenRef.current ||
-        composerOpeningRef.current ||
-        accountSwitchPendingRef.current
-      )
-        return
-      accountSwitchPendingRef.current = true
-      setAccountSwitchPending(true)
-      setRemoveAccountConfirm(false)
-      void window.attn.auth
-        .removeAccount(target, deleteData)
-        .then((next) => {
-          clearAccountView(target)
-          onStatus(next)
-        })
-        .catch(() => {
-          onRemovalError(
-            deleteData
-              ? `Could not delete all local data for ${target}. Re-add the account if needed, then sign out and delete local data again.`
-              : `Could not remove the account ${target}. Check the account menu and try again if it is still listed.`
-          )
-          // The removal can fail after main already dropped the tokens and
-          // activated the next account; re-pull the status so this tree never
-          // keeps rendering a removed account over another account's reads.
-          return window.attn?.auth
-            .getStatus()
-            .then(onStatus)
-            .catch(() => {})
-        })
-        .finally(() => {
-          accountSwitchPendingRef.current = false
-          setAccountSwitchPending(false)
-        })
-    },
-    [onRemovalError, onStatus, status.activeAccountId]
-  )
-  const removeAccountDeleteRef = useRef<HTMLButtonElement | null>(null)
-  useEffect(() => {
-    if (!removeAccountConfirm) return
-    // Focus the first choice once, on open — an inline ref callback would
-    // re-run on every re-render and yank focus back onto the destructive
-    // button after the user tabbed to Keep or Cancel.
-    removeAccountDeleteRef.current?.focus()
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        setRemoveAccountConfirm(false)
-      }
-    }
-    document.addEventListener('keydown', onKey, true)
-    return () => document.removeEventListener('keydown', onKey, true)
-  }, [removeAccountConfirm])
-
-  const accountCommands = useMemo(
-    () => ({
-      accounts: status.accounts,
-      activeAccountId: status.activeAccountId,
-      switchTo: switchAccount,
-      add: addAccount,
-      remove: requestRemoveAccount
-    }),
-    [addAccount, requestRemoveAccount, status.accounts, status.activeAccountId, switchAccount]
-  )
-
-  const saveActiveViewRecord = useCallback(() => {
-    const current = activeViewRef.current
-    if (current === 'outbox') return
-    // While the reader is open the list is display:none and reads scrollTop 0;
-    // keep the last visible offset instead of clobbering it.
-    const scrollTop = readerOpenRef.current
-      ? (viewStateRef.current.get(current)?.scrollTop ?? 0)
-      : (listElRef.current?.scrollTop ?? 0)
-    viewStateRef.current.set(current, {
-      rowId: current === 'drafts' ? selectedDraftIdRef.current : selectedThreadIdRef.current,
-      index: selectedIndexRef.current,
-      scrollTop,
-      loadedRows: loadedRowsRef.current
-    })
-  }, [])
-
-  // Everything a warm return to this account restores: the view on screen,
-  // the active split, and every view's selection/scroll records (F18). While
-  // search is open the live selection and scroll describe the *search* list,
-  // so the records take the pre-search state `openSearch` stashed instead —
-  // mirroring the `!wasSearching` guard in switchViewNow.
-  saveAccountSnapshotRef.current = () => {
-    if (!activeAccount) return
-    const searching = searchOpenRef.current
-    const searchReturn = searchReturnRef.current
-    const rawView = activeViewRef.current
-    if (!searching) saveActiveViewRecord()
-    else if (searchReturn && rawView !== 'outbox') {
-      viewStateRef.current.set(rawView, { ...searchReturn, loadedRows: loadedRowsRef.current })
-    }
-    const currentSplitId = activeSplitIdRef.current
-    if (rawView === 'inbox' && currentSplitId) {
-      if (!searching) {
-        splitViewStateRef.current.set(currentSplitId, {
-          rowId: selectedThreadIdRef.current,
-          index: selectedIndexRef.current,
-          loadedRows: loadedRowsRef.current,
-          scrollTop: readerOpenRef.current
-            ? (splitViewStateRef.current.get(currentSplitId)?.scrollTop ?? 0)
-            : (listElRef.current?.scrollTop ?? 0)
-        })
-      } else if (searchReturn) {
-        splitViewStateRef.current.set(currentSplitId, { ...searchReturn, loadedRows: loadedRowsRef.current })
-      }
-    }
-    saveAccountView(activeAccount, {
-      view: rawView === 'outbox' ? outboxReturnRef.current.view : rawView,
-      splitId: currentSplitId,
-      viewRecords: [...viewStateRef.current],
-      splitRecords: [...splitViewStateRef.current]
-    })
-  }
-
-  const switchViewNow = useCallback(
-    (next: NavigableMailView) => {
-      const previous = activeViewRef.current
-      const wasSearching = searchOpenRef.current
-      if (!wasSearching && previous !== next) saveActiveViewRecord()
-      activeViewRef.current = next
-      const record =
-        wasSearching && previous === next
-          ? (searchReturnRef.current ?? { rowId: null, index: 0, scrollTop: 0 })
-          : (viewStateRef.current.get(next) ?? { rowId: null, index: 0, scrollTop: 0 })
-      if (wasSearching) {
-        searchReturnRef.current = null
-        setSearchOpen(false)
-        setSearchQuery('')
-      }
-      selectedDraftIdRef.current = next === 'drafts' ? record.rowId : null
-      selectedThreadIdRef.current = next === 'drafts' ? null : record.rowId
-      pendingViewRestoreRef.current = { view: next, record }
-      // Reader projections differ per mailbox: a Trash reader must never reuse
-      // an All Mail conversation, so drop the cache when the projection changes.
-      if (conversationMailboxFor(previous) !== conversationMailboxFor(next)) invalidateConversations()
-      const target = cachedThreadView(next)
-      if (target) void refreshCachedThreadView(target).catch(() => {})
-      clearSelection()
-      setView(next)
-      setSelectedIndex(Math.max(0, record.index))
-      setReaderOpen(false)
-      setSnoozeOpen(false)
-      setLabelTargetIds(null)
-      setMoveRequest(null)
-      setDetachedDraftThread(null)
-      setSettingsOpen(false)
-      setSettingsFocus(null)
-    },
-    [clearSelection, invalidateConversations, refreshCachedThreadView, saveActiveViewRecord]
-  )
-
-  const switchView = useCallback(
-    (next: NavigableMailView, afterSwitch?: () => void) => {
-      if (inlineComposerDraft && inlineComposerRef.current) {
-        inlineComposerRef.current.exitConversation(() => {
-          switchViewNow(next)
-          afterSwitch?.()
-        })
-        return
-      }
-      switchViewNow(next)
-      afterSwitch?.()
-    },
-    [inlineComposerDraft, switchViewNow]
-  )
-
-  const switchSplit = useCallback(
-    (id: string) => {
-      const splitState = splits.state
-      if (!splitState?.splits.some((split) => split.id === id)) return
-      const currentId = splits.activeSplitId
-      if (!searchOpenRef.current && activeViewRef.current === 'inbox' && currentId === id) return
-      if (!searchOpenRef.current && activeViewRef.current === 'inbox' && currentId) {
-        splitViewStateRef.current.set(currentId, {
-          // Read the selected row from this render. The mirror ref updates in a
-          // passive effect and can still point at the previous row if a user
-          // presses J and immediately clicks another split.
-          rowId: mailboxThreads[selectedIndexRef.current]?.id ?? selectedThreadIdRef.current,
-          index: selectedIndexRef.current,
-          loadedRows: mailboxThreads.length,
-          scrollTop: readerOpenRef.current
-            ? (splitViewStateRef.current.get(currentId)?.scrollTop ?? 0)
-            : (listElRef.current?.scrollTop ?? 0)
-        })
-      }
-      if (activeViewRef.current !== 'inbox' || searchOpenRef.current) switchViewNow('inbox')
-      const record = splitViewStateRef.current.get(id) ?? { rowId: null, index: 0, scrollTop: 0 }
-      pendingSplitRestoreRef.current = { id, record }
-      selectedThreadIdRef.current = record.rowId
-      selectedDraftIdRef.current = null
-      clearSelection()
-      setReaderOpen(false)
-      setSnoozeOpen(false)
-      setLabelTargetIds(null)
-      setSelectedIndex(Math.max(0, record.index))
-      activateInboxSplitCache(id)
-      splits.setActiveSplitId(id)
-    },
-    [activateInboxSplitCache, clearSelection, mailboxThreads, splits, switchViewNow]
-  )
-
-  const moveSplit = useCallback(
-    (direction: -1 | 1) => {
-      const splitState = splits.state
-      const currentId = splits.activeSplitId
-      if (!splitState || !currentId) return
-      const current = splitState.splits.findIndex((split) => split.id === currentId)
-      if (current < 0) return
-      const next = (current + direction + splitState.splits.length) % splitState.splits.length
-      switchSplit(splitState.splits[next].id)
-    },
-    [splits.activeSplitId, splits.state, switchSplit]
-  )
-
   // Stale split rows can paint immediately, but selection restoration depends
   // on their final order and waits for the SQLite revalidation.
   const viewRowsLoaded =
@@ -1146,304 +596,78 @@ export function Inbox({
           : backingCachedView
             ? mailboxRows[backingCachedView] !== undefined
             : true
-
-  const pendingThreadRestore =
-    view === 'inbox' && pendingSplitRestoreRef.current?.id === splits.activeSplitId
-      ? pendingSplitRestoreRef.current.record
-      : pendingViewRestoreRef.current?.view === view
-        ? pendingViewRestoreRef.current.record
-        : null
-  const missingRestoreTarget =
-    viewRowsLoaded &&
-    pagedView &&
-    activePageState?.nextCursor &&
-    pendingThreadRestore?.rowId &&
-    threads.length >= (pendingThreadRestore.loadedRows ?? pendingThreadRestore.index + 1) &&
-    !threads.some((thread) => thread.id === pendingThreadRestore.rowId)
-      ? pendingThreadRestore.rowId
-      : null
-  const restoreTargetPresent = useRestoreTarget(
-    pagedView,
-    missingRestoreTarget,
-    activePageState?.nextCursor ?? null,
-    view === 'inbox' ? splits.activeSplitId : null,
-    view === 'inbox' ? inboxSplitRevision : undefined,
-    mailRevision
-  )
-
-  // Restore the returning view's selection and scroll once its rows are in
-  // state. Selection follows the thread id first — refreshed rows may have
-  // moved it — and falls back to the clamped index when the thread left the
-  // view. ThreadList's follow-scroll then keeps the row visible if the two
-  // restored halves disagree.
-  useLayoutEffect(() => {
-    const pending = pendingViewRestoreRef.current
-    if (!pending || pending.view !== view || !viewRowsLoaded) return
-    const record = pending.record
-    const rowIds =
-      view === 'drafts'
-        ? realDrafts.map((draft) => draft.id)
-        : view === 'outbox'
-          ? realOutbox.map((item) => item.id)
-          : threads.map((thread) => thread.id)
-    const restoredIndex = record.rowId ? rowIds.indexOf(record.rowId) : -1
-    // Drafts have no loaded/empty sentinel: a freshly remounted tree renders
-    // an empty list before the first read lands. Hold a restore that expects
-    // rows until they arrive rather than consuming it against nothing.
-    if (view === 'drafts' && rowIds.length === 0 && (record.rowId !== null || record.index > 0)) return
-    // A remount starts with one page. Reload up to the saved extent (for the
-    // scroll offset and the selected row) before restoring. Beyond that extent,
-    // only keep paging if a targeted read confirms the row still belongs here.
-    if (pagedView && activePageState?.nextCursor && rowIds.length < (record.loadedRows ?? record.index + 1)) {
-      void loadMoreThreads(pagedView)
-      return
-    }
-    if (missingRestoreTarget && pagedView && restoreTargetPresent !== false) {
-      if (restoreTargetPresent) void loadMoreThreads(pagedView)
-      return
-    }
-    pendingViewRestoreRef.current = null
-    const nextIndex =
-      restoredIndex >= 0 ? restoredIndex : Math.max(0, Math.min(record.index, rowIds.length - 1))
-    const draftLikeView = view === 'drafts' || view === 'outbox'
-    selectedDraftIdRef.current = draftLikeView ? (rowIds[nextIndex] ?? null) : null
-    selectedThreadIdRef.current = draftLikeView ? null : (rowIds[nextIndex] ?? null)
-    setSelectedIndex(nextIndex)
-    const list = listElRef.current
-    if (list) list.scrollTop = record.scrollTop
-  }, [
-    activePageState?.nextCursor,
-    loadMoreThreads,
-    missingRestoreTarget,
-    pagedView,
+  const navigation = useViewNavigation({
+    view,
+    viewRef: activeViewRef,
+    applyView,
+    records,
+    splits,
+    inlineComposerRef,
+    searchOpenRef,
+    closeSearch: leaveSearch,
+    viewRowsLoaded,
+    threads,
+    mailboxThreads,
+    realThreads,
     realDrafts,
     realOutbox,
-    restoreTargetPresent,
-    threads,
-    view,
-    viewRowsLoaded
-  ])
-
-  useLayoutEffect(() => {
-    const pending = pendingSplitRestoreRef.current
-    // A restored split can have been deleted since the snapshot was taken;
-    // drop the stale restore once the rules are known rather than waiting on
-    // a split that will never activate.
-    if (pending && splits.state && !splits.state.splits.some((split) => split.id === pending.id)) {
-      pendingSplitRestoreRef.current = null
-      return
-    }
-    if (
-      !pending ||
-      view !== 'inbox' ||
-      splits.activeSplitId !== pending.id ||
-      loadedInboxSplitId !== pending.id ||
-      loadedInboxSplitStale ||
-      realThreads === null
-    ) {
-      return
-    }
-    const restoredIndex = pending.record.rowId
-      ? realThreads.findIndex((thread) => thread.id === pending.record.rowId)
-      : -1
-    if (
-      threadPagination.inbox?.nextCursor &&
-      realThreads.length < (pending.record.loadedRows ?? pending.record.index + 1)
-    ) {
-      void loadMoreThreads('inbox')
-      return
-    }
-    if (missingRestoreTarget && restoreTargetPresent !== false) {
-      if (restoreTargetPresent) void loadMoreThreads('inbox')
-      return
-    }
-    pendingSplitRestoreRef.current = null
-    const nextIndex =
-      restoredIndex >= 0
-        ? restoredIndex
-        : Math.max(0, Math.min(pending.record.index, Math.max(0, realThreads.length - 1)))
-    selectedThreadIdRef.current = realThreads[nextIndex]?.id ?? null
-    setSelectedIndex(nextIndex)
-    if (listElRef.current) listElRef.current.scrollTop = pending.record.scrollTop
-  }, [
+    pagedView,
+    activePageState,
+    threadPagination,
+    loadMoreThreads,
     loadedInboxSplitId,
     loadedInboxSplitStale,
-    loadMoreThreads,
-    missingRestoreTarget,
-    realThreads,
-    restoreTargetPresent,
-    splits.activeSplitId,
-    splits.state,
-    threadPagination.inbox?.nextCursor,
-    view
-  ])
+    activateInboxSplitCache,
+    inboxSplitRevision,
+    mailRevision,
+    selectedIndex,
+    readerOpen,
+    clearSelection,
+    invalidateConversations,
+    refreshCachedThreadView,
+    setSelectedIndex,
+    setReaderOpen,
+    closePickers,
+    closeMove,
+    closeSettings,
+    setDetachedDraftThread,
+    listElRef,
+    selectedIndexRef,
+    readerOpenRef,
+    selectedThreadIdRef,
+    selectedDraftIdRef
+  })
+  const { switchView, switchSplit, moveSplit, openOutbox, closeOutbox } = navigation
 
-  const openOutboxNow = useCallback(() => {
-    if (view === 'outbox') {
-      if (searchOpenRef.current) {
-        const record = searchReturnRef.current ?? { rowId: null, index: 0, scrollTop: 0 }
-        searchReturnRef.current = null
-        setSearchOpen(false)
-        setSearchQuery('')
-        pendingViewRestoreRef.current = { view: 'outbox', record }
-        selectedDraftIdRef.current = record.rowId
-        selectedThreadIdRef.current = null
-        setSelectedIndex(Math.max(0, record.index))
-      }
-      return
-    }
-    if (searchOpenRef.current) {
-      searchReturnRef.current = null
-      setSearchOpen(false)
-      setSearchQuery('')
-    }
-    outboxReturnRef.current = { view, selectedIndex, readerOpen }
-    activeViewRef.current = 'outbox'
-    selectedDraftIdRef.current = null
-    setView('outbox')
-    setSelectedIndex(0)
-    setReaderOpen(false)
-    setSnoozeOpen(false)
-    setLabelTargetIds(null)
-    setMoveRequest(null)
-    setSettingsOpen(false)
-    setSettingsFocus(null)
-  }, [readerOpen, selectedIndex, view])
+  useFocusThreadTarget({
+    account: activeAccount,
+    splitsReady: splits.state !== null,
+    setActiveSplitId: splits.setActiveSplitId,
+    focusInboxThread,
+    switchView,
+    switchAccount: accounts.switchAccount,
+    clearSelection,
+    cancelPendingRestores: navigation.cancelPendingRestores,
+    setSelectedIndex,
+    setReaderOpen,
+    setDetachedDraftThread,
+    selectedThreadIdRef
+  })
 
-  const openOutbox = useCallback(() => {
-    if (view === 'outbox' && !searchOpenRef.current) return
-    if (inlineComposerDraft && inlineComposerRef.current) {
-      inlineComposerRef.current.exitConversation(openOutboxNow)
-      return
-    }
-    openOutboxNow()
-  }, [inlineComposerDraft, openOutboxNow, view])
-
-  const closeOutbox = useCallback(() => {
-    const previous = outboxReturnRef.current
-    activeViewRef.current = previous.view
-    selectedDraftIdRef.current = null
-    setView(previous.view)
-    setSelectedIndex(previous.selectedIndex)
-    setReaderOpen(previous.readerOpen)
-  }, [])
-
-  // The focus subscription is stable per account after split bootstrap:
-  // helper identity changes route through this ref instead of re-subscribing.
-  // Waiting for bootstrap avoids pulling a target before the active split has
-  // propagated to useMailData, where the targeted read would correctly
-  // decline it. Main keeps the target pending until this ready tree accepts
-  // and acknowledges it (T32).
-  const focusHandlersRef = useRef({ clearSelection, focusInboxThread, switchAccount, switchView })
-  focusHandlersRef.current = { clearSelection, focusInboxThread, switchAccount, switchView }
-  const focusSplitsReady = splits.state !== null
-  useEffect(() => {
-    const bridge = window.attn
-    if (!bridge || !activeAccount || !focusSplitsReady) return
-    return bridge.mail.onFocusThread((target) => {
-      const handlers = focusHandlersRef.current
-      // A notification for an inactive account switches there first (F12/F18).
-      // The switch runs the guarded path — a live composer blocks it with the
-      // usual toast — and the target stays pending in main, so the remounted
-      // tree for the right account pulls it again and lands here as 'focus'.
-      if (target.kind === 'switch') {
-        handlers.switchAccount(target.accountId)
-        return
-      }
-      if (target.accountId !== activeAccount) {
-        // A stale tree can pull a target owned by another account while its
-        // remount settles. Leave it un-acknowledged for the right tree and
-        // nudge the guarded switch (a settling switch ignores the nudge).
-        handlers.switchAccount(target.accountId)
-        return
-      }
-      const threadId = target.threadId
-      if (threadId === null) {
-        // A summary names no single thread; it lands on this account's inbox.
-        handlers.switchView('inbox', () => {
-          handlers.clearSelection()
-          void bridge.mail.acknowledgeFocusThread(target.id).catch(() => {})
-        })
-        return
-      }
-      // Close the old reader before changing lists so auto-read cannot observe
-      // an old cursor against Inbox and mutate the wrong thread.
-      handlers.switchView('inbox', () => {
-        handlers.clearSelection()
-        void (async () => {
-          const openTarget = (nextIndex: number): void => {
-            // The notification target owns the selection: cancel any saved
-            // record the switch queued so it cannot override this focus.
-            pendingViewRestoreRef.current = null
-            pendingSplitRestoreRef.current = null
-            selectedThreadIdRef.current = threadId
-            setDetachedDraftThread(null)
-            setSelectedIndex(nextIndex)
-            setReaderOpen(true)
-            // Clear the pending notification only after its target is applied.
-            // If this tree is torn down or the targeted read loses a race, a
-            // newly mounted tree can still pull and finish the request.
-            void bridge.mail.acknowledgeFocusThread(target.id).catch(() => {})
-          }
-          // A rule edit can land between location lookup and page fetch. Retry
-          // once with a fresh atomic split id + revision instead of dropping the
-          // native notification click.
-          for (let attempt = 0; attempt < 2; attempt += 1) {
-            const location = await bridge.splits.getThreadLocation(threadId)
-            if (!location) {
-              // The deterministic legacy test profile intentionally has no
-              // split setup. Preserve its whole-Inbox notification path.
-              const nextIndex = await focusHandlersRef.current
-                .focusInboxThread(threadId, null)
-                .catch(() => null)
-              if (nextIndex !== null) openTarget(nextIndex)
-              return
-            }
-            setActiveSplitForFocusRef.current(location.splitId)
-            const nextIndex = await focusHandlersRef.current
-              .focusInboxThread(threadId, location.splitId, location.revision)
-              .catch(() => null)
-            if (nextIndex === null) continue
-            openTarget(nextIndex)
-            return
-          }
-        })().catch(() => {})
-      })
-    })
-  }, [activeAccount, focusSplitsReady])
-
-  const updateSearchRows = useCallback(
-    (updater: Parameters<typeof search.updateRows>[0]) => {
-      search.updateRows(updater)
-      serverSearch.updateRows(updater)
-    },
-    [search.updateRows, serverSearch.updateRows]
-  )
-  const searchMoveRetains = useCallback(
-    (thread: Parameters<typeof searchRetainsMovedThread>[1]) =>
-      searchRetainsMovedThread(searchResultQuery, thread, labels),
-    [labels, searchResultQuery]
-  )
-
-  // 'Back to list' auto-advance closes the reader after a triage removal; the
-  // real close helper is declared below, so the stable wrapper routes through
-  // a ref (the saveAccountSnapshotRef pattern).
-  const readerCloseForAdvanceRef = useRef<() => void>(() => {})
-  const closeReaderForAdvance = useCallback(() => readerCloseForAdvanceRef.current(), [])
-  // The inverse, for a triage write that is rejected outright: the rollback
-  // restores rows and selection, and this restores the closed reader.
+  // The inverse of 'Back to list' auto-advance, for a triage write that is
+  // rejected outright: the rollback restores rows and selection, and this
+  // restores the reader the advance closed.
   const reopenReaderForAdvance = useCallback(() => setReaderOpen(true), [])
 
-  const triage = useTriage({
+  const { triage, exitingThreadIds } = useTriage({
     selectedIds,
     selectedIndex,
     threads,
-    moveCacheRows,
     readerOpen,
     view: searchOpen ? triageViewForSearch(searchResultQuery) : view,
     activeSplitId: searchOpen ? null : splits.activeSplitId,
     searchOpen,
-    searchMoveRetains: searchOpen ? searchMoveRetains : undefined,
+    searchMoveRetains: searchOpen ? search.moveRetains : undefined,
     preserveSelectionOnRefreshRef,
     deferRefreshUntilRef,
     selectedThreadIdRef,
@@ -1454,522 +678,88 @@ export function Inbox({
     setRealSnoozedThreads,
     mailboxRows,
     setMailboxRows,
-    updateSearchRows: searchOpen ? updateSearchRows : undefined,
+    updateSearchRows: searchOpen ? search.updateRows : undefined,
     clearSelection,
     showToast,
-    setExitingThreadIds,
     setSelectedIndex,
     autoAdvance,
-    closeReader: closeReaderForAdvance,
+    closeReader: finishReaderClose,
     reopenReader: reopenReaderForAdvance
   })
 
-  const toggleLabel = useCallback(
-    (label: MailLabel, state: LabelCheckState) => {
-      if (!labelTargets) return
-      triage({
-        kind: 'label',
-        threadIds: labelTargets.map((target) => target.id),
-        add: state === 'all' ? [] : [label.id],
-        remove: state === 'all' ? [label.id] : []
-      })
-    },
-    [labelTargets, triage]
-  )
-
-  const openOutboxItem = useCallback(
-    (index: number) => {
-      const item = realOutbox[index]
-      if (!item || !window.attn) return
-      // undoSend cancels the scheduled send and reopen mutates the row, so the
-      // switch-settling gate must run before either request goes out — a
-      // gated completion alone would cancel a send and then hide its composer.
-      if (accountSwitchPendingRef.current) return
-      if (item.state === 'sending') {
-        showToast('Sending in progress')
-        return
-      }
-      const request =
-        item.state === 'queued' ? window.attn.outbox.undoSend(item.id) : window.attn.outbox.reopen(item.id)
-      void request
-        .then((result) => {
-          if (!result.draft) {
-            if (result.error) showToast(result.error)
-            return
-          }
-          if (accountSwitchPendingRef.current) return
-          setComposerError(result.error)
-          setComposerDraft(result.draft)
-        })
-        .catch(() => showToast('Message could not be reopened'))
-    },
-    [realOutbox, showToast]
-  )
-
-  const reopenUndoDraft = useCallback((id: string) => {
-    if (!window.attn || accountSwitchPendingRef.current) return
-    void window.attn.draft
-      .get(id)
-      .then((draft) => {
-        if (!draft || accountSwitchPendingRef.current) return
-        setComposerError(null)
-        setComposerDraft(draft)
-      })
-      .catch(() => {})
-  }, [])
-
-  /** Shared by the Drafts list and draft search results: reopen mutates the
-      draft pointer, so it carries the same before-request gate. */
-  const reopenListDraft = useCallback(
-    (draftId: string) => {
-      if (!window.attn || accountSwitchPendingRef.current) return
-      void window.attn.draft
-        .reopen(draftId)
-        .then((reopened) => {
-          if (reopened) showDraft(reopened)
-        })
-        .catch(() => {})
-    },
-    [showDraft]
-  )
-
-  const openSelected = useCallback(() => {
-    if (searchDraftMode) {
-      const draft = searchDrafts[selectedIndex]
-      if (!draft) return
-      reopenListDraft(draft.id)
-      return
-    }
-    if (!searchOpen && view === 'outbox') {
-      openOutboxItem(selectedIndex)
-      return
-    }
-    if (!searchOpen && view === 'drafts') {
-      const draft = realDrafts[selectedIndex]
-      if (!draft) return
-      reopenListDraft(draft.id)
-      return
-    }
-    const thread = threads[selectedIndex]
-    if (!thread) return
-    if (!searchOpen) {
-      viewStateRef.current.set(view, {
-        rowId: thread.id,
-        index: selectedIndex,
-        scrollTop: listElRef.current?.scrollTop ?? 0
-      })
-    }
-    selectedThreadIdRef.current = thread.id
-    setReaderOpen(true)
-    reopenDraftForThread(thread.id)
-  }, [
-    openOutboxItem,
+  const listActions = useListActions({
+    view,
+    searchOpen,
+    searchDraftMode,
+    searchDrafts: search.drafts,
+    threads,
     realDrafts,
+    realOutbox,
+    selectedIndex,
+    selected,
+    selectedIds,
+    targetedThreads,
+    detachedDraftThread,
+    readerOpen,
+    moveAllowed,
+    autoAdvance,
+    labelTargets,
+    moveRequest,
+    triage,
+    records,
+    inlineComposerRef,
+    listElRef,
+    selectedThreadIdRef,
+    setSelectedIndex,
+    setReaderOpen,
+    setSnoozeOpen,
+    setLabelTargetIds,
+    setMoveRequest,
+    setDetachedDraftThread,
+    finishReaderClose,
+    clearSelection,
     reopenDraftForThread,
     reopenListDraft,
-    searchDraftMode,
-    searchDrafts,
-    searchOpen,
-    selectedIndex,
-    threads,
-    view
-  ])
-  const finishReaderClose = useCallback(() => {
-    draftOpenRequestRef.current += 1
-    draftOpenTargetRef.current = null
-    setReaderOpen(false)
-    setDetachedDraftThread(null)
-  }, [])
-  readerCloseForAdvanceRef.current = finishReaderClose
-  const closeReader = useCallback(() => {
-    if (inlineComposerDraft && inlineComposerRef.current) {
-      inlineComposerRef.current.exitConversation()
-      return
-    }
-    finishReaderClose()
-  }, [finishReaderClose, inlineComposerDraft])
+    openOutboxItem,
+    focusSearchResults: search.focusResults,
+    showToast
+  })
+  const {
+    openSelected,
+    openThreadFromList,
+    navigateNext,
+    navigatePrevious,
+    closeReader,
+    openSnooze,
+    openLabel,
+    openMove,
+    moveSelected,
+    markNotDone,
+    snoozeSelected,
+    unsnoozeSelected,
+    toggleLabel
+  } = listActions
+
+  // The search session hands the selection back to the list it covered, so
+  // clearing it stays with the shell that owns it.
   const focusSearchQuery = useCallback(() => {
-    setSearchKeyboardTarget('query')
     clearSelection()
-    if (readerOpenRef.current) finishReaderClose()
-    else searchInputRef.current?.focus({ preventScroll: true })
-  }, [clearSelection, finishReaderClose])
+    search.focusQuery()
+  }, [clearSelection, search.focusQuery])
   const openSearch = useCallback(() => {
-    if (searchOpenRef.current) {
-      focusSearchQuery()
-      return
-    }
-    setSearchKeyboardTarget('query')
-    const rowId =
-      view === 'drafts' || view === 'outbox' ? selectedDraftIdRef.current : selectedThreadIdRef.current
-    const currentRecord = {
-      rowId,
-      index: selectedIndexRef.current,
-      scrollTop: listElRef.current?.scrollTop ?? 0
-    }
-    const record = readerOpenRef.current ? (viewStateRef.current.get(view) ?? currentRecord) : currentRecord
-    searchReturnRef.current = record
-    if (view !== 'outbox') viewStateRef.current.set(view, record)
     clearSelection()
-    setSelectedIndex(0)
-    searchSelectedRowIdRef.current = null
-    selectedThreadIdRef.current = null
-    selectedDraftIdRef.current = null
-    finishReaderClose()
-    setMoveRequest(null)
-    setSearchOpen(true)
-  }, [clearSelection, finishReaderClose, focusSearchQuery, view])
+    search.openSearch()
+  }, [clearSelection, search.openSearch])
   const clearSearch = useCallback(() => {
-    if (!searchOpenRef.current) return
-    const record = searchReturnRef.current ?? { rowId: null, index: 0, scrollTop: 0 }
-    searchReturnRef.current = null
-    setSearchOpen(false)
-    setSearchQuery('')
-    setSearchKeyboardTarget('query')
-    setMoveRequest(null)
     clearSelection()
-    pendingViewRestoreRef.current = { view, record }
-    const draftLikeView = view === 'drafts' || view === 'outbox'
-    selectedDraftIdRef.current = draftLikeView ? record.rowId : null
-    selectedThreadIdRef.current = draftLikeView ? null : record.rowId
-    setSelectedIndex(Math.max(0, record.index))
-  }, [clearSelection, view])
-  useLayoutEffect(() => {
-    if (!searchOpen || readerOpen || fullWindowComposerDraft) return
-    const target = searchKeyboardTarget === 'query' ? searchInputRef.current : listElRef.current
-    target?.focus({ preventScroll: true })
-  }, [fullWindowComposerDraft, readerOpen, searchKeyboardTarget, searchOpen])
-  const focusSearchResults = useCallback(() => setSearchKeyboardTarget('results'), [])
-  const submitSearch = useCallback(() => {
-    focusSearchResults()
-    const query = searchQuery.trim()
-    if (
-      !query ||
-      searchesDrafts(query) ||
-      searchesLocalSnoozes(query) ||
-      !online ||
-      serverSearch.phase === 'waiting' ||
-      serverSearch.phase === 'complete'
-    ) {
-      return
-    }
-    if (serverSearch.phase === 'auth-required') reconnectSearch()
-    else serverSearch.run()
-  }, [focusSearchResults, online, reconnectSearch, searchQuery, serverSearch.phase, serverSearch.run])
-  useEffect(() => {
-    if (
-      searchOpen &&
-      !readerOpen &&
-      (serverSearch.phase === 'auth-required' ||
-        serverSearch.phase === 'offline' ||
-        serverSearch.phase === 'error')
-    ) {
-      setSearchKeyboardTarget('query')
-    }
-  }, [readerOpen, searchOpen, serverSearch.phase])
+    search.clearSearch()
+  }, [clearSelection, search.clearSearch])
   const closeSnooze = useCallback(() => setSnoozeOpen(false), [])
   const closeLabel = useCallback(() => setLabelTargetIds(null), [])
-  const closeMove = useCallback(() => setMoveRequest(null), [])
-  const openSnooze = useCallback(() => {
-    if (selected) setSnoozeOpen(true)
-  }, [selected])
-  const openLabel = useCallback(() => {
-    if (!selected) return
-    setLabelTargetIds(selectedIds.size > 0 ? [...selectedIds] : [selected.id])
-  }, [selected, selectedIds])
-  const openMove = useCallback(() => {
-    if (!selected || !moveAllowed) return
-    setMoveRequest({
-      targets: targetedThreads.map((thread) => ({
-        id: thread.id,
-        labelIds: [...thread.labelIds],
-        snoozed: thread.snoozed,
-        returned: thread.returned
-      })),
-      sourceLabelId: searchOpen ? null : userLabelId(view)
-    })
-  }, [moveAllowed, searchOpen, selected, targetedThreads, view])
-  const moveSelected = useCallback(
-    (destination: MoveDestination) => {
-      if (!moveRequest) return
-      setMoveRequest(null)
-      triage({
-        kind: 'move',
-        threadIds: moveRequest.targets.map((target) => target.id),
-        destination,
-        sourceLabelId: moveRequest.sourceLabelId
-      })
-    },
-    [moveRequest, triage]
-  )
-  const markNotDone = useCallback(() => {
-    if (!selected) return
-    triage({
-      kind: 'move',
-      threadIds: selectedIds.size > 0 ? [...selectedIds] : [selected.id],
-      destination: { kind: 'inbox' },
-      sourceLabelId: null,
-      verb: 'markNotDone'
-    })
-  }, [selected, selectedIds, triage])
-  const openThread = useCallback(
-    (index: number) => {
-      const thread = threads[index]
-      if (!thread) return
-      // Opening unread mail can immediately broadcast a mark-read refresh. Pin
-      // the identity before that refresh starts; the effect that mirrors index
-      // changes is deliberately too late for this transition.
-      selectedThreadIdRef.current = thread.id
-      if (!searchOpen) {
-        viewStateRef.current.set(view, {
-          rowId: thread.id,
-          index,
-          scrollTop: listElRef.current?.scrollTop ?? 0
-        })
-      }
-      setDetachedDraftThread(null)
-      setSelectedIndex(index)
-      setReaderOpen(true)
-      reopenDraftForThread(thread.id)
-    },
-    [reopenDraftForThread, searchOpen, threads, view]
-  )
-  const openComposer = useCallback(() => {
-    if (!window.attn || composerOpeningRef.current || accountSwitchPendingRef.current) return
-    composerOpeningRef.current = true
-    void window.attn.draft
-      .save(emptyDraftInput())
-      .then(({ draft }) => {
-        if (draft && !accountSwitchPendingRef.current) {
-          setComposerError(null)
-          setComposerDraft(draft)
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        composerOpeningRef.current = false
-      })
-  }, [])
-
-  const openReply = useCallback(
-    (kind: Exclude<DraftKind, 'new'>, sourceMessageId?: string) => {
-      if (
-        !window.attn ||
-        !selected ||
-        (!readerOpen && !searchOpen && view === 'drafts') ||
-        composerOpeningRef.current ||
-        draftOpenTargetRef.current?.threadId === selected.id ||
-        accountSwitchPendingRef.current
-      )
-        return
-      // Keep reply shortcuts available during the initial conversation read.
-      // Once the reader has a cursor, use that exact message instead of the
-      // thread default. The thread id prevents a previous reader's target from
-      // leaking into a fast conversation switch.
-      const target = readerOpen ? messageReplyTargetRef.current : null
-      const useReaderTarget = sourceMessageId === undefined && target?.threadId === selected.id
-      if (useReaderTarget && !target.canReply) {
-        showToast('This message is not available for a reply or forward')
-        return
-      }
-      const replySourceMessageId = useReaderTarget ? target.messageId : sourceMessageId
-      if (!readerOpen) {
-        selectedThreadIdRef.current = selected.id
-        setDetachedDraftThread(null)
-        setReaderOpen(true)
-        setSnoozeOpen(false)
-        setLabelTargetIds(null)
-      }
-      composerOpeningRef.current = true
-      const replyMailbox = searchOpen
-        ? conversationMailboxForSearch(searchResultQuery)
-        : conversationMailboxFor(view)
-      void window.attn.draft
-        .createReply(selected.id, kind, replyMailbox, replySourceMessageId)
-        .then((draft) => {
-          if (draft) {
-            setComposerError(null)
-            showDraft(draft)
-          } else {
-            // The reply never opened, so a parked AI invocation targeting it
-            // must not wait around for an unrelated later composer.
-            aiDraftPendingRef.current = null
-            showToast(
-              'Could not open this message for a reply or forward. Its body may not be available offline.'
-            )
-          }
-        })
-        .catch(() => {
-          aiDraftPendingRef.current = null
-          showToast('Could not open the reply or forward draft')
-        })
-        .finally(() => {
-          composerOpeningRef.current = false
-        })
-    },
-    [readerOpen, searchOpen, searchResultQuery, selected, showDraft, showToast, view]
-  )
-
-  const openMessageOrReplyAll = useCallback(() => {
-    if (!readerOpen || !selected) return
-    const target = messageReplyTargetRef.current
-    if (target?.threadId === selected.id && target.expand) {
-      target.expand()
-      return
-    }
-    openReply('replyAll')
-  }, [openReply, readerOpen, selected])
-
-  const closeComposer = useCallback(() => {
-    activeComposerDraftIdRef.current = null
-    // Closing is the local handoff from an inline composer back to its
-    // conversation. Invalidate directly instead of relying on the outbox event
-    // racing the IPC response, so a queued reply/forward is fetched in the same
-    // render turn that removes the composer.
-    invalidateConversations()
-    setComposerDraft(null)
-    void refreshMailRows().catch(() => {
-      void refreshDrafts().catch(() => {})
-    })
-  }, [invalidateConversations, refreshDrafts, refreshMailRows])
-  const closeComposerAndReader = useCallback(() => {
-    closeComposer()
-    finishReaderClose()
-  }, [closeComposer, finishReaderClose])
-
-  // Stable views of the state the Draft-AI-reply command reads at invocation
-  // time (its registration must not churn on every keystroke or selection).
-  const composerDraftRef = useRef(composerDraft)
-  composerDraftRef.current = composerDraft
-  const selectedRef = useRef(selected)
-  selectedRef.current = selected
-  const openReplyRef = useRef(openReply)
-  openReplyRef.current = openReply
-  const conversationRef = useRef(conversation)
-  conversationRef.current = conversation
-  const getAiThreadContext = useCallback(
-    (sourceMessageId: string | null) => aiThreadContext(conversationRef.current, sourceMessageId),
-    []
-  )
-  const requestAiDraft = useCallback((threadId: string) => {
-    aiDraftPendingRef.current = threadId
-    setAiDraftRequest((count) => count + 1)
-  }, [])
-
-  const snoozeSelected = useCallback(
-    (dueAt: number) => {
-      if (!window.attn || !selected) return
-      const isBulk = selectedIds.size > 0
-      const threadIds = isBulk ? [...selectedIds] : [selected.id]
-      closeSnooze()
-      if (isBulk) clearSelection()
-      // Snooze removes rows on refresh rather than optimistically, so the
-      // default 'next' advance is free (index preservation). The other two
-      // directions retarget before the refresh lands (F3 auto-advance).
-      if (!searchOpen && view !== 'snoozed') {
-        if (readerOpen && autoAdvance === 'list') finishReaderClose()
-        else if (autoAdvance === 'previous') {
-          const selection = selectionAfterExit(threads, threadIds, selectedIndex, 'previous')
-          if (selection && selection.toId !== null && selection.toId !== selection.fromId) {
-            selectedThreadIdRef.current = selection.toId
-            setSelectedIndex(Math.max(0, selection.nextIndex))
-          }
-        }
-      }
-      void window.attn.mail
-        .snooze(threadIds, dueAt)
-        .then((result) => showToast(result.label))
-        .catch(() => {})
-    },
-    [
-      autoAdvance,
-      clearSelection,
-      closeSnooze,
-      finishReaderClose,
-      readerOpen,
-      searchOpen,
-      selected,
-      selectedIds,
-      selectedIndex,
-      showToast,
-      threads,
-      view
-    ]
-  )
-
-  const unsnoozeSelected = useCallback(() => {
-    if (!selected) return
-    closeSnooze()
-    triage({ kind: 'unsnooze', threadIds: [selected.id] })
-  }, [closeSnooze, selected, triage])
-
-  const visibleRowCount = searchDraftMode
-    ? searchDrafts.length
-    : searchOpen
-      ? threads.length
-      : view === 'drafts'
-        ? realDrafts.length
-        : view === 'outbox'
-          ? realOutbox.length
-          : threads.length
-
-  // While reading, J/K opens the next/previous conversation at its newest
-  // message or restored draft (SPEC §5) — the same entry point Enter and a row
-  // click use, so a Draft chip behaves identically however the row is reached.
-  const readNextThread = useCallback(
-    (index: number) => {
-      if (!readerOpen || (!searchOpen && (view === 'drafts' || view === 'outbox'))) return
-      const thread = threads[index]
-      if (!thread) return
-      selectedThreadIdRef.current = thread.id
-      reopenDraftForThread(thread.id)
-    },
-    [readerOpen, reopenDraftForThread, searchOpen, threads, view]
-  )
-
-  const navigateNext = useCallback(() => {
-    if (detachedDraftThread) {
-      finishReaderClose()
-      return
-    }
-    const next = Math.min(selectedIndex + 1, Math.max(visibleRowCount - 1, 0))
-    setSelectedIndex(next)
-    if (next !== selectedIndex) readNextThread(next)
-  }, [detachedDraftThread, finishReaderClose, readNextThread, selectedIndex, visibleRowCount])
-
-  const navigatePrevious = useCallback(() => {
-    if (detachedDraftThread) {
-      finishReaderClose()
-      return
-    }
-    if (readerOpen && selectedIndex === 0) {
-      closeReader()
-      return
-    }
-    const previous = Math.max(selectedIndex - 1, 0)
-    setSelectedIndex(previous)
-    if (previous !== selectedIndex) readNextThread(previous)
-  }, [closeReader, detachedDraftThread, finishReaderClose, readNextThread, readerOpen, selectedIndex])
-
-  const discardSelectedDraft = useCallback(() => {
-    if (searchOpen || view !== 'drafts' || !window.attn || discardingDraftIdRef.current) return
-    const draft = realDrafts[selectedIndex]
-    if (!draft) return
-    discardingDraftIdRef.current = draft.id
-    void window.attn.draft
-      .discard(draft.id, 'drafted')
-      .then(() => {
-        showToast('Draft discarded')
-        void refreshMailRows().catch(() => {
-          void refreshDrafts().catch(() => {})
-        })
-      })
-      .catch(() => showToast('Draft could not be discarded'))
-      .finally(() => {
-        discardingDraftIdRef.current = null
-      })
-  }, [realDrafts, refreshDrafts, refreshMailRows, searchOpen, selectedIndex, showToast, view])
-
+  // ThreadList and ConversationView are memoized, so every prop they take has
+  // to keep its identity across renders they do not care about — a sync push
+  // must not re-render a mounted Lexical tree (P3).
+  const openLabelView = useCallback((labelId: string) => switchView(userLabelView(labelId)), [switchView])
   const splitCommands = useMemo(() => {
     if (!splits.state || splits.state.splits.length === 0) return null
     return {
@@ -1985,40 +775,40 @@ export function Inbox({
   }, [moveSplit, splits.state, switchSplit])
 
   useInboxCommands({
-    selected,
+    hasSelection: selected !== undefined,
+    selectedRef,
     selectedCount: selectedIds.size,
-    selectedIndex,
     readerOpen,
     view,
     searchOpen,
-    searchBrowsing: searchOpen && searchKeyboardTarget === 'results' && !readerOpen,
+    searchBrowsing: searchOpen && search.keyboardTarget === 'results' && !readerOpen,
     sidebarCollapsed,
-    starOn,
-    markUnreadOn,
+    starOnRef,
+    markUnreadOnRef,
     moveAllowed,
     preserveSelectionOnRefreshRef,
     navigateNext,
     navigatePrevious,
     clearSelection,
     toggleSelection: toggleFocusedSelection,
-    extendSelection: extendSelectionTo,
+    extendSelectionBy,
     openSelected,
     closeReader,
     switchView,
     openOutbox,
     closeOutbox,
-    discardSelectedDraft: !searchOpen && view === 'drafts' ? discardSelectedDraft : null,
+    discardSelectedDraft: !searchOpen && view === 'drafts' ? drafting.discardSelectedDraft : null,
     toggleSidebar,
     openSearch,
     focusSearchQuery,
     searchAllEnabled:
       !searchDraftMode &&
-      !searchSnoozeMode &&
+      !search.snoozeMode &&
       Boolean(searchQuery.trim()) &&
       online &&
-      serverSearch.phase !== 'waiting' &&
-      serverSearch.phase !== 'complete',
-    submitSearch,
+      search.server.phase !== 'waiting' &&
+      search.server.phase !== 'complete',
+    submitSearch: search.submit,
     clearSearch,
     triage,
     openSnooze,
@@ -2028,145 +818,24 @@ export function Inbox({
     markNotDone,
     openComposer,
     openReply,
-    openMessageOrReplyAll,
+    openMessageOrReplyAll: drafting.openMessageOrReplyAll,
     showToast,
-    reopenUndoDraft,
+    reopenUndoDraft: drafting.reopenUndoDraft,
     splitCommands,
-    accountCommands
+    accountCommands: accounts.accountCommands
   })
 
-  // Every settings control is also a palette command (F5, T32 rule 5). The
-  // deep-link commands open the surface focused on their control; the direct
-  // ones act immediately, exactly like the tray menu.
   const openCheatSheet = useCallback(() => setCheatSheetOpen(true), [])
   const closeCheatSheet = useCallback(() => setCheatSheetOpen(false), [])
-  useLayoutEffect(
-    () =>
-      registerCommands([
-        createCommand('settings.open', () => openSettings(null)),
-        createCommand('settings.reorderAccounts', () => openSettings('accounts')),
-        createCommand('settings.syncLimit', () => openSettings('syncLimit')),
-        createCommand('compose.attnFooter.enable', () => updateAccountSetting('attnSignatureEnabled', true)),
-        createCommand('compose.attnFooter.disable', () =>
-          updateAccountSetting('attnSignatureEnabled', false)
-        ),
-        createCommand('privacy.remoteImages.block', () => updateAppSetting('remoteImagesBlocked', true)),
-        createCommand('privacy.remoteImages.load', () => updateAppSetting('remoteImagesBlocked', false)),
-        createCommand('privacy.remoteImages.overrides', () => openSettings('remoteImages')),
-        createCommand('snippets.manage', () => openSettings('snippets')),
-        createCommand('ai.settings', () => openSettings('aiWriting')),
-        createCommand('autocomplete.enable', () => openSettings('aiWriting')),
-        createCommand('autocomplete.disable', () => {
-          void window.attn?.ai
-            .setSetting('autocompleteEnabled', false)
-            .then(() => showToast('Inline autocomplete disabled'))
-            .catch(() => {})
-        }),
-        // T37 (F17): from the reader the command opens the inline reply first,
-        // then streams into it; in a reply composer it streams in place. New
-        // messages and forwards are out of v1's whole-body generation scope.
-        createCommand('composer.aiDraft', () => {
-          const bridge = window.attn?.ai
-          if (!bridge) return
-          const open = composerDraftRef.current
-          if (open) {
-            // The mounted plugin owns settings and style preparation. Claim
-            // synchronously here so a second shortcut cannot queue another
-            // invocation whose async preparation outlives Esc on the first.
-            if (aiDraftPendingRef.current !== null) return
-            if (open.kind !== 'reply' && open.kind !== 'replyAll') {
-              showToast('AI drafting writes replies — reply to a conversation to use it')
-            } else if (open.id === inlineComposerDraftIdRef.current && open.threadId) {
-              requestAiDraft(open.threadId)
-            } else {
-              showToast('Open the reply from its conversation to draft with AI')
-            }
-            return
-          }
-          if (aiCommandPreparingRef.current || aiDraftPendingRef.current !== null) return
-          // Coalesce repeated shortcuts before either the existing composer or
-          // reader-opened composer can claim the request.
-          aiCommandPreparingRef.current = true
-          // The target is what the user is looking at NOW: the settings round
-          // trip yields, and the selection or open composer can change
-          // underneath it — a stale invocation must do nothing rather than
-          // draft for the newly opened conversation (PR #101 review).
-          const target = readerOpenRef.current ? (selectedRef.current ?? null) : null
-          const messageTarget = target ? messageReplyTargetRef.current : null
-          const targetMessageId =
-            target !== null && messageTarget?.threadId === target.id ? messageTarget.messageId : null
-          void bridge
-            .getSettings()
-            .then((ai) => {
-              if (!ai.enabled) {
-                showToast('Enable AI writing in Settings to draft replies')
-                return
-              }
-              if (target) {
-                if (!readerOpenRef.current || selectedRef.current?.id !== target.id) return
-                if (
-                  settingsOpenRef.current ||
-                  composerDraftRef.current !== null ||
-                  composerOpeningRef.current
-                ) {
-                  return
-                }
-                const currentMessageTarget = messageReplyTargetRef.current
-                const currentMessageId =
-                  currentMessageTarget?.threadId === target.id ? currentMessageTarget.messageId : null
-                // The reader shell can render just before ConversationView
-                // publishes its initial latest-message cursor. That null → id
-                // transition is initialization, not a user moving the cursor,
-                // so let the command bind to the now-known source. Once a
-                // source existed at invocation time, any change still cancels
-                // the stale request.
-                if (targetMessageId !== null && currentMessageId !== targetMessageId) return
-                const sourceMessageId = targetMessageId ?? currentMessageId
-                requestAiDraft(target.id)
-                openReplyRef.current('reply', sourceMessageId ?? undefined)
-                return
-              }
-              showToast('Open a conversation to draft an AI reply')
-            })
-            .catch(() => {})
-            .finally(() => {
-              aiCommandPreparingRef.current = false
-            })
-        }),
-        createCommand('settings.undoSendDelay', () => openSettings('undoSendDelay')),
-        createCommand('settings.autoAdvance', () => openSettings('autoAdvance')),
-        createCommand('settings.unreadBadge', () =>
-          updateAppSetting('unreadBadgeEnabled', !(appSettingsRef.current?.unreadBadgeEnabled ?? true))
-        ),
-        createCommand('settings.launchAtLogin', () =>
-          updateAppSetting('launchAtLogin', !(appSettingsRef.current?.launchAtLogin ?? true))
-        ),
-        ...(isMacPlatform()
-          ? [
-              createCommand('settings.menuBarIcon', () =>
-                updateAppSetting('menuBarIcon', !(appSettingsRef.current?.menuBarIcon ?? false))
-              )
-            ]
-          : []),
-        createCommand('notifications.pauseHour', () =>
-          updateAppSetting('notificationsPausedUntil', oneHourFrom())
-        ),
-        createCommand('notifications.pauseTomorrow', () =>
-          updateAppSetting('notificationsPausedUntil', tomorrowStart())
-        ),
-        createCommand('notifications.resume', () => updateAppSetting('notificationsPausedUntil', null)),
-        createCommand('cheatsheet.open', openCheatSheet),
-        createCommand('update.restart', () => {
-          void window.attn?.update
-            .restart()
-            .then((applying) => {
-              if (!applying) showToast('No update is ready yet')
-            })
-            .catch(() => {})
-        })
-      ]),
-    [openCheatSheet, openSettings, requestAiDraft, showToast, updateAccountSetting, updateAppSetting]
-  )
+  useSettingsCommands({
+    settings: appSettings,
+    openSettings,
+    openCheatSheet,
+    updateAppSetting,
+    updateAccountSetting,
+    requestAiDraft: drafting.requestAiDraftCommand,
+    showToast
+  })
 
   useKeyboardDispatch({
     blocked:
@@ -2174,22 +843,20 @@ export function Inbox({
       moveRequest !== null ||
       composerDraft !== null ||
       splitRulesOpen ||
-      removeAccountConfirm ||
+      accounts.removeAccountOpen ||
       settingsOpen ||
       cheatSheetOpen ||
-      accountSwitchPending,
+      accounts.accountSwitchPending,
     readerOpen,
     outboxOpen: !searchOpen && view === 'outbox',
     snoozeOpen,
     onCloseSnooze: closeSnooze,
     viewKey: `${view}:${readerOpen ? 'reader' : 'list'}:${
-      searchOpen ? searchKeyboardTarget : 'mail'
+      searchOpen ? search.keyboardTarget : 'mail'
     }:${splits.activeSplitId ?? ''}`,
     onPendingChordChange: setPendingChord,
     conversationScrollRef
   })
-
-  useSelectedRowScroll(selectedRowRef, selectedIndex, readerOpen)
 
   useEffect(() => {
     if (!outboxFailure) return
@@ -2198,402 +865,332 @@ export function Inbox({
   }, [clearOutboxFailure, outboxFailure, showToast])
 
   return (
-    <div className="flex h-full flex-col">
-      <MailHeader
-        unreadCount={realUnreadTotal}
-        pendingActionCount={pendingActionCount}
-        pausedActionCount={pausedActionCount}
-        outboxCount={realOutbox.length}
-        selectionCount={searchOpen || (view !== 'drafts' && view !== 'outbox') ? selectedIds.size : 0}
-        composerOpen={fullWindowComposerDraft !== null}
-        sidebarCollapsed={sidebarCollapsed}
-        status={status}
-        accountStatuses={accountStatuses}
-        onReconnectActions={reconnectActions}
-        onOpenOutbox={openOutbox}
-        onToggleSidebar={toggleSidebar}
-        onSwitchAccount={switchAccount}
-        onAddAccount={addAccount}
-        onRemoveAccount={requestRemoveAccount}
-        onOpenSettings={() => openSettings(null)}
-        onOpenCheatSheet={openCheatSheet}
-        accountActionsBlocked={accountActionsBlocked}
-      />
+    <ToastContext.Provider value={showToast}>
+      <div className="flex h-full flex-col">
+        <MailHeader
+          unreadCount={realUnreadTotal}
+          pendingActionCount={pendingActionCount}
+          pausedActionCount={pausedActionCount}
+          outboxCount={realOutbox.length}
+          selectionCount={searchOpen || (view !== 'drafts' && view !== 'outbox') ? selectedIds.size : 0}
+          composerOpen={fullWindowComposerDraft !== null}
+          sidebarCollapsed={sidebarCollapsed}
+          status={status}
+          accountStatuses={accounts.accountStatuses}
+          onReconnectActions={accounts.reconnectActions}
+          onOpenOutbox={openOutbox}
+          onToggleSidebar={toggleSidebar}
+          onSwitchAccount={accounts.switchAccount}
+          onAddAccount={accounts.addAccount}
+          onRemoveAccount={accounts.requestRemoveAccount}
+          onOpenSettings={() => openSettings(null)}
+          onOpenCheatSheet={openCheatSheet}
+          accountActionsBlocked={accountActionsBlocked}
+        />
 
-      {removeAccountConfirm && activeAccount && (
-        // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled by the dialog's key capture
-        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is the pointer dismissal path
+        {accounts.removeAccountDialog}
+
         <div
-          data-testid="remove-account-dialog"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => setRemoveAccountConfirm(false)}
+          className={`min-h-0 flex-1 ${fullWindowComposerDraft ? 'hidden' : 'flex'}`}
+          aria-hidden={!!fullWindowComposerDraft}
         >
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: the handler only stops backdrop dismissal */}
+          {!sidebarCollapsed && (
+            <MailSidebar
+              view={view}
+              labels={labels}
+              mailboxCounts={realMailboxCounts}
+              draftCount={realDrafts.length}
+              outboxCount={realOutbox.length}
+              onSwitchView={switchView}
+              onOpenOutbox={openOutbox}
+            />
+          )}
+          {settingsOpen && activeAccount && (
+            <SettingsView
+              status={status}
+              accountStatuses={accounts.accountStatuses}
+              settings={appSettings}
+              accountSettings={accountSettings}
+              onUpdateSetting={updateAppSetting}
+              onUpdateAccountSetting={updateAccountSetting}
+              onReorderAccounts={onReorderAccounts}
+              onAddAccount={accounts.addAccount}
+              onReconnect={accounts.reconnectActions}
+              onSignOut={accounts.requestRemoveAccount}
+              onClose={closeSettings}
+              focusControl={settingsFocus}
+            />
+          )}
           <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Sign out of ${activeAccount}?`}
-            className="w-[460px] rounded-lg border border-edge bg-raised p-5 shadow-menu"
-            onClick={(event) => event.stopPropagation()}
+            className={`min-w-0 flex-1 flex-col ${settingsOpen ? 'hidden' : 'flex'}`}
+            aria-hidden={settingsOpen || undefined}
           >
-            <h2 className="text-sm font-semibold text-ink">Sign out of {activeAccount}?</h2>
-            <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
-              This signs the account out and stops its sync. Choose what happens to its mail cached on this
-              device: deleting removes every local trace; keeping leaves it dormant so adding the account
-              again picks up where it left off.
-            </p>
-            <div className="mt-4 flex flex-col gap-1.5">
-              <button
-                type="button"
-                data-testid="remove-account-delete"
-                ref={removeAccountDeleteRef}
-                onClick={() => removeActiveAccount(true)}
-                className="w-full cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
-              >
-                Sign out and delete local data
-              </button>
-              <button
-                type="button"
-                data-testid="remove-account-keep"
-                onClick={() => removeActiveAccount(false)}
-                className="w-full cursor-pointer rounded-md border border-edge px-3 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
-              >
-                Sign out and keep local data
-              </button>
-              <button
-                type="button"
-                data-testid="remove-account-cancel"
-                onClick={() => setRemoveAccountConfirm(false)}
-                className="w-full cursor-pointer rounded-md px-3 py-1.5 text-[13px] text-ink-faint hover:bg-active hover:text-ink"
-              >
-                Cancel
-              </button>
+            {!readerOpen &&
+              !fullWindowComposerDraft &&
+              (searchOpen ? (
+                <SearchHeader
+                  inputRef={search.inputRef}
+                  query={searchQuery}
+                  pending={search.local.pending}
+                  onQuery={setSearchQuery}
+                  onClear={clearSearch}
+                  onFocusQuery={focusSearchQuery}
+                  onSubmit={search.submit}
+                />
+              ) : (
+                <div
+                  data-testid="mail-view-header"
+                  className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
+                >
+                  <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
+                    <span data-testid="view-title">{activeViewTitle}</span>
+                  </h1>
+                  <button
+                    type="button"
+                    data-testid="search-open"
+                    aria-label="Search mail"
+                    title="Search mail (/)"
+                    onClick={openSearch}
+                    className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
+                      <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
+                      <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                    <span>/</span>
+                  </button>
+                </div>
+              ))}
+            {!readerOpen && !fullWindowComposerDraft && !searchOpen && view === 'inbox' && splits.state && (
+              <SplitStrip
+                splits={splits.state.splits}
+                activeSplitId={splits.activeSplitId}
+                onSelect={switchSplit}
+                onManage={() => setSplitRulesOpen(true)}
+              />
+            )}
+            <div className={`flex min-h-0 flex-1 ${searchOpen && !readerOpen ? 'flex-col' : ''}`}>
+              {searchDraftMode ? (
+                <DraftList
+                  drafts={search.drafts}
+                  readerOpen={false}
+                  selectedIndex={selectedIndex}
+                  selectionVisible={search.keyboardTarget === 'results'}
+                  selectedRowRef={selectedRowRef}
+                  listRef={listElRef}
+                  onOpen={(index) => {
+                    search.focusResults()
+                    setSelectedIndex(index)
+                    const draft = search.drafts[index]
+                    if (draft) reopenListDraft(draft.id)
+                  }}
+                />
+              ) : !searchOpen && view === 'drafts' ? (
+                <DraftList
+                  drafts={realDrafts}
+                  readerOpen={readerOpen}
+                  selectedIndex={selectedIndex}
+                  selectedRowRef={selectedRowRef}
+                  listRef={listElRef}
+                  onOpen={(index) => {
+                    setSelectedIndex(index)
+                    const draft = realDrafts[index]
+                    if (!draft) return
+                    selectedDraftIdRef.current = draft.id
+                    reopenListDraft(draft.id)
+                  }}
+                />
+              ) : !searchOpen && view === 'outbox' ? (
+                <OutboxList
+                  items={realOutbox}
+                  selectedIndex={selectedIndex}
+                  selectedRowRef={selectedRowRef}
+                  listRef={listElRef}
+                  onOpen={(index) => {
+                    setSelectedIndex(index)
+                    selectedDraftIdRef.current = realOutbox[index]?.id ?? null
+                    openOutboxItem(index)
+                  }}
+                />
+              ) : showInboxZero && splits.state && splits.activeSplitId ? (
+                <InboxZero
+                  activeSplitId={splits.activeSplitId}
+                  splits={splits.state.splits}
+                  listRef={listElRef}
+                  onSelectSplit={switchSplit}
+                />
+              ) : (
+                <ThreadList
+                  threads={threads}
+                  view={searchOpen ? 'search' : threadListKind(view)}
+                  hasMore={
+                    !searchOpen && activePageState?.nextCursor !== null && activePageState !== undefined
+                  }
+                  loadingMore={!searchOpen && (activePageState?.loadingMore ?? false)}
+                  loadingInitial={
+                    !searchOpen &&
+                    view === 'inbox' &&
+                    (!activeInboxRowsResolved || inboxBackfillReady !== true)
+                  }
+                  syncing={!searchOpen && sync.phase === 'syncing'}
+                  readerOpen={readerOpen}
+                  selectedIndex={selectedIndex}
+                  selectionVisible={!searchOpen || search.keyboardTarget === 'results'}
+                  selectedIds={selectedIds}
+                  exitingThreadIds={exitingThreadIds}
+                  labelsById={userLabelsById}
+                  selectedRowRef={selectedRowRef}
+                  listRef={listElRef}
+                  onExtendSelection={extendSelectionTo}
+                  onLoadMore={loadMoreVisibleThreads}
+                  onOpenLabel={openLabelView}
+                  onOpen={openThreadFromList}
+                  sectionDivider={searchOpen ? search.sectionDivider : undefined}
+                />
+              )}
+
+              {searchOpen && !readerOpen && !searchDraftMode && !search.snoozeMode && searchQuery.trim() && (
+                <ServerSearchRow
+                  phase={search.server.phase}
+                  resultCount={search.server.resultCount}
+                  message={search.server.message}
+                  quotaWaitMs={search.server.quotaWaitMs}
+                  online={online}
+                />
+              )}
+
+              {searchOpen && !readerOpen && searchQuery.trim() && (
+                <div
+                  data-testid="search-coverage"
+                  data-search-query={search.local.completedQuery ?? undefined}
+                  role={search.local.failed ? 'alert' : 'status'}
+                  data-partial={search.local.response?.partial || undefined}
+                  className={`flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] ${
+                    search.local.response?.partial ? 'text-accent' : 'text-ink-faint'
+                  }`}
+                >
+                  {search.local.failed
+                    ? 'Local search could not be completed'
+                    : search.local.response
+                      ? searchCoverageText(search.local.response.coverage, search.local.response.partial)
+                      : 'Searching cached mail…'}
+                </div>
+              )}
+
+              {readerOpen && selected && (
+                <ConversationView
+                  selected={selected}
+                  selectedIndex={conversationSelectedIndex}
+                  threadCount={conversationThreadCount}
+                  threadCountExact={conversationThreadCountExact}
+                  mailboxTitle={searchOpen ? 'Search' : activeViewTitle}
+                  conversation={conversation}
+                  account={activeAccount}
+                  online={online}
+                  scrollRef={conversationScrollRef}
+                  replyTargetRef={messageReplyTargetRef}
+                  inlineComposer={drafting.inlineComposer}
+                  inlineComposerDraftId={inlineComposerDraft?.id ?? null}
+                  inlineComposerSourceMessageId={inlineComposerDraft?.sourceMessageId ?? null}
+                  onReply={openReply}
+                  onClose={closeReader}
+                />
+              )}
             </div>
           </div>
         </div>
-      )}
 
-      <div
-        className={`min-h-0 flex-1 ${fullWindowComposerDraft ? 'hidden' : 'flex'}`}
-        aria-hidden={!!fullWindowComposerDraft}
-      >
-        {!sidebarCollapsed && (
-          <MailSidebar
-            view={view}
+        {!fullWindowComposerDraft && (
+          <MailFooter
+            context={
+              inlineComposerDraft
+                ? 'composer'
+                : searchOpen && search.keyboardTarget === 'query' && !readerOpen
+                  ? 'search'
+                  : readerOpen
+                    ? 'reader'
+                    : !searchOpen && view === 'outbox'
+                      ? 'outbox'
+                      : 'list'
+            }
+            pendingChord={pendingChord}
+            sync={sync}
+            networkOnline={networkOnline}
+            onRetry={retrySync}
+            onCopyError={copySyncError}
+          />
+        )}
+
+        {!composerDraft && snoozeOpen && selected && (
+          <SnoozePicker
+            targetCount={targetedThreads.length}
+            onCancel={closeSnooze}
+            onConfirm={snoozeSelected}
+            onUnsnooze={view === 'snoozed' ? unsnoozeSelected : undefined}
+          />
+        )}
+
+        {!composerDraft && labelTargets && (
+          <LabelPicker
             labels={labels}
-            mailboxCounts={realMailboxCounts}
-            draftCount={realDrafts.length}
-            outboxCount={realOutbox.length}
-            onSwitchView={switchView}
-            onOpenOutbox={openOutbox}
+            targets={labelTargets.map((target) => ({ id: target.id, labelIds: target.labelIds }))}
+            onClose={closeLabel}
+            onToggle={toggleLabel}
           />
         )}
-        {settingsOpen && activeAccount && (
-          <SettingsView
-            status={status}
-            accountStatuses={accountStatuses}
-            settings={appSettings}
-            accountSettings={accountSettings}
-            onUpdateSetting={updateAppSetting}
-            onUpdateAccountSetting={updateAccountSetting}
-            onReorderAccounts={onReorderAccounts}
-            onAddAccount={addAccount}
-            onReconnect={reconnectActions}
-            onSignOut={requestRemoveAccount}
-            onClose={closeSettings}
+
+        {!composerDraft && moveRequest && (
+          <MovePicker
+            labels={labels}
+            targets={moveRequest.targets}
+            sourceLabelId={moveRequest.sourceLabelId}
+            showImportanceActions={Boolean(
+              !searchOpen &&
+                view === 'inbox' &&
+                splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
+                splits.state.splits.some((split) => split.id === OTHER_SPLIT_ID)
+            )}
+            onClose={closeMove}
+            onMove={moveSelected}
+          />
+        )}
+
+        {!composerDraft && splitRulesOpen && splits.state && (
+          <SplitRuleManager
+            state={splits.state}
+            onSave={splits.save}
+            onNotify={splits.setNotify}
+            onDelete={splits.remove}
+            onReorder={(ids) => splits.reorder({ ids })}
+            onRestore={splits.restorePreset}
+            onClose={() => setSplitRulesOpen(false)}
+          />
+        )}
+
+        <CommandPalette
+          account={activeAccount}
+          context={composerDraft ? 'composer' : readerOpen ? 'reader' : view === 'outbox' ? 'outbox' : 'list'}
+          onOpenChange={setPaletteOpen}
+        />
+
+        <CheatSheet
+          open={cheatSheetOpen}
+          paletteOpen={paletteOpen}
+          onOpen={openCheatSheet}
+          onClose={closeCheatSheet}
+        />
+
+        {fullWindowComposerDraft && activeAccount && (
+          <Composer
+            draft={fullWindowComposerDraft}
+            initialError={composerError}
+            onClose={drafting.closeComposer}
             onToast={showToast}
-            focusControl={settingsFocus}
           />
         )}
-        <div
-          className={`min-w-0 flex-1 flex-col ${settingsOpen ? 'hidden' : 'flex'}`}
-          aria-hidden={settingsOpen || undefined}
-        >
-          {!readerOpen &&
-            !fullWindowComposerDraft &&
-            (searchOpen ? (
-              <SearchHeader
-                inputRef={searchInputRef}
-                query={searchQuery}
-                pending={search.pending}
-                onQuery={setSearchQuery}
-                onClear={clearSearch}
-                onFocusQuery={focusSearchQuery}
-                onSubmit={submitSearch}
-              />
-            ) : (
-              <div
-                data-testid="mail-view-header"
-                className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
-              >
-                <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
-                  <span data-testid="view-title">{activeViewTitle}</span>
-                </h1>
-                <button
-                  type="button"
-                  data-testid="search-open"
-                  aria-label="Search mail"
-                  title="Search mail (/)"
-                  onClick={openSearch}
-                  className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
-                >
-                  <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
-                    <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
-                    <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                  <span>/</span>
-                </button>
-              </div>
-            ))}
-          {!readerOpen && !fullWindowComposerDraft && !searchOpen && view === 'inbox' && splits.state && (
-            <SplitStrip
-              splits={splits.state.splits}
-              activeSplitId={splits.activeSplitId}
-              onSelect={switchSplit}
-              onManage={() => setSplitRulesOpen(true)}
-            />
-          )}
-          <div className={`flex min-h-0 flex-1 ${searchOpen && !readerOpen ? 'flex-col' : ''}`}>
-            {searchDraftMode ? (
-              <DraftList
-                drafts={searchDrafts}
-                readerOpen={false}
-                selectedIndex={selectedIndex}
-                selectionVisible={searchKeyboardTarget === 'results'}
-                selectedRowRef={selectedRowRef}
-                listRef={listElRef}
-                onOpen={(index) => {
-                  setSearchKeyboardTarget('results')
-                  setSelectedIndex(index)
-                  const draft = searchDrafts[index]
-                  if (draft) reopenListDraft(draft.id)
-                }}
-              />
-            ) : !searchOpen && view === 'drafts' ? (
-              <DraftList
-                drafts={realDrafts}
-                readerOpen={readerOpen}
-                selectedIndex={selectedIndex}
-                selectedRowRef={selectedRowRef}
-                listRef={listElRef}
-                onOpen={(index) => {
-                  setSelectedIndex(index)
-                  const draft = realDrafts[index]
-                  if (!draft) return
-                  selectedDraftIdRef.current = draft.id
-                  reopenListDraft(draft.id)
-                }}
-              />
-            ) : !searchOpen && view === 'outbox' ? (
-              <OutboxList
-                items={realOutbox}
-                selectedIndex={selectedIndex}
-                selectedRowRef={selectedRowRef}
-                listRef={listElRef}
-                onOpen={(index) => {
-                  setSelectedIndex(index)
-                  selectedDraftIdRef.current = realOutbox[index]?.id ?? null
-                  openOutboxItem(index)
-                }}
-              />
-            ) : showInboxZero && splits.state && splits.activeSplitId ? (
-              <InboxZero
-                activeSplitId={splits.activeSplitId}
-                splits={splits.state.splits}
-                listRef={listElRef}
-                onSelectSplit={switchSplit}
-              />
-            ) : (
-              <ThreadList
-                threads={threads}
-                view={searchOpen ? 'search' : threadListKind(view)}
-                hasMore={!searchOpen && activePageState?.nextCursor !== null && activePageState !== undefined}
-                loadingMore={!searchOpen && (activePageState?.loadingMore ?? false)}
-                loadingInitial={
-                  !searchOpen && view === 'inbox' && (!activeInboxRowsResolved || inboxBackfillReady !== true)
-                }
-                syncing={!searchOpen && sync.phase === 'syncing'}
-                readerOpen={readerOpen}
-                selectedIndex={selectedIndex}
-                selectionVisible={!searchOpen || searchKeyboardTarget === 'results'}
-                selectedIds={selectedIds}
-                exitingThreadIds={exitingThreadIds}
-                labelsById={userLabelsById}
-                selectedRowRef={selectedRowRef}
-                listRef={listElRef}
-                onExtendSelection={extendSelectionTo}
-                onLoadMore={loadMoreVisibleThreads}
-                onOpenLabel={(labelId) => switchView(userLabelView(labelId))}
-                onOpen={(index) => {
-                  if (searchOpen) setSearchKeyboardTarget('results')
-                  openThread(index)
-                }}
-                sectionDivider={searchOpen ? searchSectionDivider : undefined}
-              />
-            )}
 
-            {searchOpen && !readerOpen && !searchDraftMode && !searchSnoozeMode && searchQuery.trim() && (
-              <ServerSearchRow
-                phase={serverSearch.phase}
-                resultCount={serverSearchThreads.length}
-                message={serverSearch.message}
-                quotaWaitMs={serverSearch.quotaWaitMs}
-                online={online}
-              />
-            )}
-
-            {searchOpen && !readerOpen && searchQuery.trim() && (
-              <div
-                data-testid="search-coverage"
-                data-search-query={search.completedQuery ?? undefined}
-                role={search.failed ? 'alert' : 'status'}
-                data-partial={search.response?.partial || undefined}
-                className={`flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] ${
-                  search.response?.partial ? 'text-accent' : 'text-ink-faint'
-                }`}
-              >
-                {search.failed
-                  ? 'Local search could not be completed'
-                  : search.response
-                    ? searchCoverageText(search.response.coverage, search.response.partial)
-                    : 'Searching cached mail…'}
-              </div>
-            )}
-
-            {readerOpen && selected && (
-              <ConversationView
-                selected={selected}
-                selectedIndex={conversationSelectedIndex}
-                threadCount={conversationThreadCount}
-                threadCountExact={conversationThreadCountExact}
-                mailboxTitle={searchOpen ? 'Search' : activeViewTitle}
-                conversation={conversation}
-                account={activeAccount}
-                online={online}
-                scrollRef={conversationScrollRef}
-                replyTargetRef={messageReplyTargetRef}
-                inlineComposer={
-                  inlineComposerDraft && activeAccount ? (
-                    <Composer
-                      key={inlineComposerDraft.id}
-                      ref={inlineComposerRef}
-                      draft={inlineComposerDraft}
-                      mode="inline"
-                      attachedToMessage={
-                        conversation?.messages.some(
-                          (message) => message.id === inlineComposerDraft.sourceMessageId
-                        ) ?? false
-                      }
-                      initialError={composerError}
-                      onClose={closeComposer}
-                      onExit={closeComposerAndReader}
-                      onToast={showToast}
-                      aiDraft={{
-                        request: aiDraftRequest,
-                        claim: () =>
-                          inlineComposerDraft.threadId !== null &&
-                          claimAiDraftRequest(inlineComposerDraft.threadId),
-                        getThreadContext: () => getAiThreadContext(inlineComposerDraft.sourceMessageId)
-                      }}
-                    />
-                  ) : null
-                }
-                inlineComposerDraftId={inlineComposerDraft?.id ?? null}
-                inlineComposerSourceMessageId={inlineComposerDraft?.sourceMessageId ?? null}
-                onReply={openReply}
-                onClose={closeReader}
-                onToast={showToast}
-              />
-            )}
-          </div>
-        </div>
+        <Toast toast={toast} progress={outboxProgress} />
       </div>
-
-      {!fullWindowComposerDraft && (
-        <MailFooter
-          context={
-            inlineComposerDraft
-              ? 'composer'
-              : searchOpen && searchKeyboardTarget === 'query' && !readerOpen
-                ? 'search'
-                : readerOpen
-                  ? 'reader'
-                  : !searchOpen && view === 'outbox'
-                    ? 'outbox'
-                    : 'list'
-          }
-          pendingChord={pendingChord}
-          sync={sync}
-          networkOnline={networkOnline}
-          onRetry={retrySync}
-          onCopyError={copySyncError}
-        />
-      )}
-
-      {!composerDraft && snoozeOpen && selected && (
-        <SnoozePicker
-          targetCount={targetedThreads.length}
-          onCancel={closeSnooze}
-          onConfirm={snoozeSelected}
-          onUnsnooze={view === 'snoozed' ? unsnoozeSelected : undefined}
-        />
-      )}
-
-      {!composerDraft && labelTargets && (
-        <LabelPicker
-          labels={labels}
-          targets={labelTargets.map((target) => ({ id: target.id, labelIds: target.labelIds }))}
-          onClose={closeLabel}
-          onToggle={toggleLabel}
-        />
-      )}
-
-      {!composerDraft && moveRequest && (
-        <MovePicker
-          labels={labels}
-          targets={moveRequest.targets}
-          sourceLabelId={moveRequest.sourceLabelId}
-          showImportanceActions={Boolean(
-            !searchOpen &&
-              view === 'inbox' &&
-              splits.state?.splits.some((split) => split.id === IMPORTANT_SPLIT_ID) &&
-              splits.state.splits.some((split) => split.id === OTHER_SPLIT_ID)
-          )}
-          onClose={closeMove}
-          onMove={moveSelected}
-        />
-      )}
-
-      {!composerDraft && splitRulesOpen && splits.state && (
-        <SplitRuleManager
-          state={splits.state}
-          onSave={splits.save}
-          onNotify={splits.setNotify}
-          onDelete={splits.remove}
-          onReorder={(ids) => splits.reorder({ ids })}
-          onRestore={splits.restorePreset}
-          onClose={() => setSplitRulesOpen(false)}
-        />
-      )}
-
-      <CommandPalette
-        key={activeAccount ?? 'signed-in'}
-        account={activeAccount}
-        context={composerDraft ? 'composer' : readerOpen ? 'reader' : view === 'outbox' ? 'outbox' : 'list'}
-      />
-
-      <CheatSheet open={cheatSheetOpen} onOpen={openCheatSheet} onClose={closeCheatSheet} />
-
-      {fullWindowComposerDraft && activeAccount && (
-        <Composer
-          draft={fullWindowComposerDraft}
-          initialError={composerError}
-          onClose={closeComposer}
-          onToast={showToast}
-        />
-      )}
-
-      <Toast toast={toast} progress={outboxProgress} />
-    </div>
+    </ToastContext.Provider>
   )
 }

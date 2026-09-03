@@ -15,19 +15,14 @@ import { editorConfig } from '../composer/editorConfig'
 import { prepareHtmlForEditor } from '../composer/preserve'
 import { preserveBlankLineBlocks, rootLevelNodes } from '../composer/rootNodes'
 import { serializeEditorState } from '../composer/serialize'
+import { useShowToast } from '../toastContext'
+import { ACTION_BUTTON, NOTE } from './settingsStyles'
 
 // F8's manager: a T32 settings section editing the app-global snippet set with
 // the same Lexical document the composer uses, so what is saved here is exactly
 // what expansion inserts. Bodies are untrusted (rule 3): the import below and
 // the serialize on save both run the composer sanitize path.
 
-interface SnippetManagerProps {
-  onToast: (message: string) => void
-}
-
-const NOTE = 'text-[13px] leading-[1.55] text-ink-dim'
-const ACTION_BUTTON =
-  'cursor-pointer whitespace-nowrap rounded-md border border-edge px-2.5 py-1.5 text-sm text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent'
 const FIELD =
   'h-9 w-full rounded-md border border-edge bg-ground px-2.5 text-sm text-ink outline-none focus:border-accent'
 
@@ -78,7 +73,8 @@ interface EditingState {
   bodyHtml: string
 }
 
-export function SnippetManager({ onToast }: SnippetManagerProps): React.JSX.Element {
+export function SnippetManager(): React.JSX.Element {
+  const onToast = useShowToast()
   const [snippets, setSnippets] = useState<Snippet[] | null>(null)
   const [editing, setEditing] = useState<EditingState | null>(null)
   const [error, setError] = useState<string | null>(null)

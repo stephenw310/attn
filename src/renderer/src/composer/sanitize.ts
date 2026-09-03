@@ -1,4 +1,5 @@
 import createDOMPurify, { type DOMPurify } from 'dompurify'
+import { cssDeclarations } from '../../../shared/css'
 
 const ALLOWED_TAGS = [
   'p',
@@ -70,16 +71,11 @@ const UNSAFE_STYLE_RESOURCE =
 
 export function sanitizeComposerStyle(style: unknown): string {
   if (typeof style !== 'string') return ''
-  return style
-    .split(';')
-    .map((declaration) => declaration.trim())
-    .filter((declaration) => {
-      const separator = declaration.indexOf(':')
-      if (separator <= 0) return false
-      const property = declaration.slice(0, separator).trim().toLowerCase()
-      const value = declaration.slice(separator + 1)
-      return COMPOSER_STYLE_PROPERTIES.has(property) && !UNSAFE_STYLE_RESOURCE.test(value)
-    })
+  return cssDeclarations(style)
+    .filter(
+      ({ property, value }) => COMPOSER_STYLE_PROPERTIES.has(property) && !UNSAFE_STYLE_RESOURCE.test(value)
+    )
+    .map(({ raw }) => raw)
     .join('; ')
 }
 
@@ -89,7 +85,6 @@ let outgoingPurifier: DOMPurify | null = null
 let importPurifier: DOMPurify | null = null
 const hooked = new WeakSet<DOMPurify>()
 const outgoingDataHooked = new WeakSet<DOMPurify>()
-const importAttributesHooked = new WeakSet<DOMPurify>()
 const COMPOSER_DATA_ATTRIBUTES = new Set([
   'data-attn-cid',
   'data-attn-opaque',
@@ -130,6 +125,12 @@ function installStyleHook(purifier: DOMPurify): void {
 
 const SAFE_URI = /^(?:(?:https?|mailto|cid):|data:image\/(?:png|jpeg|gif|webp);base64,)/i
 /**
+ * Schemes an authored composer link may carry. Kept beside the outgoing
+ * allowlist because the toolbar's validator and Lexical's own `validateUrl`
+ * have to agree with what serialization will let through (review R8).
+ */
+export const COMPOSER_LINK_SCHEMES = ['https', 'http', 'mailto']
+/**
  * Presentational table attributes real mail still ships (SPEC §9 #18a). They
  * carry no URL and run nothing, but every legacy mail client honours them, so
  * dropping them silently repainted a table on open. They are deliberately *not*
@@ -153,6 +154,35 @@ const URI_SAFE_ATTRIBUTES = [
   ...LEGACY_FONT_ATTRIBUTES
 ]
 
+const directionHooked = new WeakSet<DOMPurify>()
+
+/**
+ * `dir` and `target` are the two attributes both composer purifiers keep, and
+ * both used to spell out the same pair of hooks (review R14). DOMPurify's own
+ * value checks can drop them, so the first hook pins the values worth keeping
+ * and the second removes anything else that got through.
+ */
+function installDirectionAndTargetHook(purifier: DOMPurify): void {
+  if (directionHooked.has(purifier)) return
+  directionHooked.add(purifier)
+  purifier.addHook('uponSanitizeAttribute', (_node, data) => {
+    const name = data.attrName.toLowerCase()
+    if (name === 'dir' && VALID_DIRECTION.test(data.attrValue)) data.forceKeepAttr = true
+    if (name === 'target' && ALLOWED_TARGETS.has(data.attrValue)) data.forceKeepAttr = true
+  })
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    const element = node as Element
+    if (typeof element.getAttribute !== 'function') return
+    const direction = element.getAttribute('dir')
+    if (direction && !VALID_DIRECTION.test(direction)) element.removeAttribute('dir')
+    const target = element.getAttribute('target')
+    if (target && !ALLOWED_TARGETS.has(target)) element.removeAttribute('target')
+  })
+}
+
+const VALID_DIRECTION = /^(?:ltr|rtl|auto)$/i
+const ALLOWED_TARGETS = new Set(['_blank', '_self'])
+
 const legacyTableHooked = new WeakSet<DOMPurify>()
 
 /** Keep presentation attributes on their native elements; none of these values are resource URLs. */
@@ -175,15 +205,9 @@ function purifier(): DOMPurify {
   outgoingPurifier ??= createDOMPurify(window)
   installStyleHook(outgoingPurifier)
   installLegacyTableAttributeHook(outgoingPurifier)
+  installDirectionAndTargetHook(outgoingPurifier)
   if (!outgoingDataHooked.has(outgoingPurifier)) {
     outgoingDataHooked.add(outgoingPurifier)
-    outgoingPurifier.addHook('uponSanitizeAttribute', (_node, data) => {
-      const name = data.attrName.toLowerCase()
-      if (name === 'dir' && /^(?:ltr|rtl|auto)$/i.test(data.attrValue)) data.forceKeepAttr = true
-      if (name === 'target' && (data.attrValue === '_blank' || data.attrValue === '_self')) {
-        data.forceKeepAttr = true
-      }
-    })
     outgoingPurifier.addHook('afterSanitizeAttributes', (node) => {
       const element = node as Element
       if (typeof element.getAttributeNames !== 'function') return
@@ -201,13 +225,10 @@ function purifier(): DOMPurify {
         element.removeAttribute('class')
       }
       if (!isGmailSignature) element.removeAttribute('data-smartmail')
-      const direction = element.getAttribute('dir')
-      if (direction && !/^(?:ltr|rtl|auto)$/i.test(direction)) element.removeAttribute('dir')
-      const target = element.getAttribute('target')
+      // Only an anchor navigates, so the link attributes belong to anchors
+      // alone; the shared hook has already vetted the value.
       if (element.tagName.toLowerCase() !== 'a') {
         element.removeAttribute('rel')
-        element.removeAttribute('target')
-      } else if (target && target !== '_blank' && target !== '_self') {
         element.removeAttribute('target')
       }
     })
@@ -259,26 +280,10 @@ export function sanitizeDraftHtmlForImport(html: string): string {
   importPurifier ??= createDOMPurify(window)
   installStyleHook(importPurifier)
   installLegacyTableAttributeHook(importPurifier)
-  if (!importAttributesHooked.has(importPurifier)) {
-    importAttributesHooked.add(importPurifier)
-    importPurifier.addHook('uponSanitizeAttribute', (_node, data) => {
-      const name = data.attrName.toLowerCase()
-      if (name === 'dir' && /^(?:ltr|rtl|auto)$/i.test(data.attrValue)) data.forceKeepAttr = true
-      if (name === 'target' && data.attrValue === '_blank') data.forceKeepAttr = true
-    })
-    importPurifier.addHook('afterSanitizeAttributes', (node) => {
-      const element = node as Element
-      if (typeof element.getAttribute !== 'function') return
-      const direction = element.getAttribute('dir')
-      if (direction && !/^(?:ltr|rtl|auto)$/i.test(direction)) element.removeAttribute('dir')
-      const target = element.getAttribute('target')
-      if (target && target !== '_blank' && target !== '_self') element.removeAttribute('target')
-    })
-  }
+  installDirectionAndTargetHook(importPurifier)
   return importPurifier.sanitize(html, {
     ADD_ATTR: ['dir', 'target'],
     FORBID_TAGS: ['script', 'style', 'form', 'input', 'button', 'select', 'textarea', 'iframe', 'object'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus'],
     ADD_URI_SAFE_ATTR: URI_SAFE_ATTRIBUTES,
     ALLOWED_URI_REGEXP: SAFE_URI,
     ALLOW_ARIA_ATTR: false

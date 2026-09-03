@@ -46,14 +46,6 @@ export class GmailMailProvider implements MailProvider {
     )
   }
 
-  async trashThread(threadId: string): Promise<void> {
-    await this.client.post(`/threads/${encodeURIComponent(threadId)}/trash`, {}, { priority: 'action' })
-  }
-
-  async untrashThread(threadId: string): Promise<void> {
-    await this.client.post(`/threads/${encodeURIComponent(threadId)}/untrash`, {}, { priority: 'action' })
-  }
-
   async saveDraft(
     draft: { id: string | null; raw: string; threadId?: string | null },
     options?: ProviderRequestOptions

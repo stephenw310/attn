@@ -2,15 +2,12 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from './electron'
+import { goTo } from './nav'
+import { mailboxThreadIds } from './seams'
 
 // F3 system mailbox navigation (T22): eight views over one seeded SQLite
 // store, no provider and no network — switching is a local read.
 test.use({ seed: 'fixtures/seed-inbox.json' })
-
-async function goTo(page: Page, chordKey: string): Promise<void> {
-  await page.keyboard.press('g')
-  await page.keyboard.press(chordKey)
-}
 
 async function createClosedDrafts(page: Page, count: number): Promise<void> {
   await page.evaluate(
@@ -371,4 +368,28 @@ test('a triage verb removes a row only from views it no longer matches', async (
 
   await goTo(page, 'a')
   await expect(rows).toHaveCount(10)
+})
+
+// Moved here from a spec of its own (T5): same seed, same thread, same opening
+// assertions as the trashed-message reader test above.
+test('keeps a partially trashed thread in All Mail and Trash while the normal reader keeps its body hidden', async ({
+  app,
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  expect(await mailboxThreadIds(app, 'all-mail')).toContain('t-roadmap')
+  expect(await mailboxThreadIds(app, 'trash')).toContain('t-roadmap')
+  expect(await mailboxThreadIds(app, 'spam')).not.toContain('t-roadmap')
+
+  const roadmapRow = page.getByTestId('thread-row').filter({ hasText: 'Q3 roadmap review' })
+  await expect(roadmapRow.getByTestId('thread-snippet')).toContainText('I added the launch milestones.')
+  await expect(roadmapRow).not.toContainText('This deleted reply belongs only in Trash.')
+  await roadmapRow.click()
+  await expect(page.getByTestId('message-card')).toHaveCount(2)
+  await expect(page.getByTestId('conversation-content')).not.toContainText(
+    'This deleted reply belongs only in Trash.'
+  )
+  await expect(page.getByTestId('conversation-content')).not.toContainText(
+    'This unsent Gmail draft must never render as a message.'
+  )
 })

@@ -20,10 +20,6 @@ type Handler<K extends InvokeChannel> = (
   ...args: unknown[]
 ) => InvokeChannels[K]['result'] | Promise<InvokeChannels[K]['result']>
 
-function handle<K extends InvokeChannel>(channel: K, handler: Handler<K>): void {
-  ipcMain.handle(channel, handler as Parameters<typeof ipcMain.handle>[1])
-}
-
 export interface IpcContext {
   service: ServiceSupervisor
   authStatus: () => AuthStatus
@@ -33,6 +29,8 @@ export interface IpcContext {
   reorderAccounts: (accountIds: string[]) => Promise<AuthStatus>
   takePendingFocus: () => PendingFocusTarget | null
   acknowledgePendingFocus: (id: number) => void
+  /** A renderer finished its pre-quit composer checkpoint (B28). */
+  acknowledgeComposerCheckpoint: (requestId: number) => void
   /** T33: register/unregister a mounted mail frame with the request filter. */
   registerMailFrame: (
     nonce: string,
@@ -61,30 +59,13 @@ export interface IpcContext {
 }
 
 export function registerIpc(context: IpcContext): () => void {
-  const mainOwned = new Set<InvokeChannel>([
-    IPC_CHANNELS.authGetStatus,
-    IPC_CHANNELS.authSignIn,
-    IPC_CHANNELS.accountsSetActive,
-    IPC_CHANNELS.accountsRemove,
-    IPC_CHANNELS.accountsReorder,
-    IPC_CHANNELS.draftPickAttachments,
-    IPC_CHANNELS.mailDownloadAttachment,
-    IPC_CHANNELS.mailTakePendingFocus,
-    IPC_CHANNELS.mailAcknowledgePendingFocus,
-    IPC_CHANNELS.mailRegisterMessageFrame,
-    IPC_CHANNELS.mailUnregisterMessageFrame,
-    IPC_CHANNELS.settingsSetTheme,
-    IPC_CHANNELS.settingsSet,
-    IPC_CHANNELS.syncGetState,
-    IPC_CHANNELS.aiGetSettings,
-    IPC_CHANNELS.aiSetSetting,
-    IPC_CHANNELS.aiSetKey,
-    IPC_CHANNELS.aiDeleteKey,
-    IPC_CHANNELS.aiGenerate,
-    IPC_CHANNELS.aiCancel,
-    IPC_CHANNELS.updateGetState,
-    IPC_CHANNELS.updateRestart
-  ])
+  // Every channel main answers itself; the rest are forwarded to the utility
+  // by the loop below, so registering here is what claims a channel.
+  const mainOwned = new Set<InvokeChannel>()
+  const handle = <K extends InvokeChannel>(channel: K, handler: Handler<K>): void => {
+    mainOwned.add(channel)
+    ipcMain.handle(channel, handler as Parameters<typeof ipcMain.handle>[1])
+  }
   handle(IPC_CHANNELS.updateGetState, () => context.update.getState())
   handle(IPC_CHANNELS.updateRestart, () => context.update.restart())
   handle(IPC_CHANNELS.aiGetSettings, () => context.ai.getSettings())
@@ -134,6 +115,13 @@ export function registerIpc(context: IpcContext): () => void {
     context.applySettingEffects(update)
     return settings
   })
+  handle(IPC_CHANNELS.draftCheckpointDone, (_event, requestId) => {
+    if (typeof requestId !== 'number' || !Number.isFinite(requestId)) {
+      throw new Error('invalid checkpoint id')
+    }
+    context.acknowledgeComposerCheckpoint(requestId)
+    return undefined
+  })
   handle(IPC_CHANNELS.mailAcknowledgePendingFocus, (_event, id) => {
     if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('invalid focus id')
     context.acknowledgePendingFocus(id)
@@ -166,7 +154,8 @@ export function registerIpc(context: IpcContext): () => void {
       paths = (await (parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options)))
         .filePaths
     }
-    return context.service.invoke(IPC_CHANNELS.draftPickAttachments, id, paths)
+    // The dialog is main's half; spooling is the shared utility handler.
+    return context.service.invoke(IPC_CHANNELS.draftAddAttachments, id, paths)
   })
   handle(IPC_CHANNELS.mailDownloadAttachment, async (_event, request) => {
     const result = await context.service.invoke(IPC_CHANNELS.mailDownloadAttachment, request)
@@ -183,7 +172,7 @@ export function registerIpc(context: IpcContext): () => void {
   handle(IPC_CHANNELS.mailTakePendingFocus, () => context.takePendingFocus())
   for (const channel of INVOKE_CHANNEL_NAMES) {
     if (mainOwned.has(channel)) continue
-    handle(channel, (_event, ...args) => context.service.invoke(channel, ...args))
+    ipcMain.handle(channel, (_event, ...args) => context.service.invoke(channel, ...args))
   }
   return () => {
     for (const channel of INVOKE_CHANNEL_NAMES) ipcMain.removeHandler(channel)

@@ -10,6 +10,7 @@ import {
   type ThreadPageCursor,
   type ThreadRow
 } from '../../../shared/mail'
+import type { OutboxItem } from '../../../shared/outbox'
 import type { MailView } from '../mailDisplay'
 import { useMailData } from './useMailData'
 
@@ -48,6 +49,21 @@ function thread(id: string): ThreadRow {
     returned: false,
     hasDraft: false,
     labelIds: []
+  }
+}
+
+function outboxItem(id: string): OutboxItem {
+  return {
+    id,
+    state: 'queued',
+    kind: 'new',
+    to: [],
+    cc: [],
+    bcc: [],
+    subject: id,
+    updatedAt: 1,
+    sendAt: null,
+    lastError: null
   }
 }
 
@@ -466,6 +482,81 @@ describe('useMailData mailbox refreshes', () => {
     expect(results.at(-1)?.realThreads).toBeNull()
     expect(results.at(-1)?.loadedInboxSplitId).toBeNull()
   })
+  it('resolves the Outbox selection against the outbox list on a manual refresh', async () => {
+    // Closing an outbox row calls refreshMailRows. It once read only drafts and
+    // clamped the outbox selection into that unrelated list (B8).
+    const listThreadPage = vi.fn(() => Promise.resolve({ rows: [], nextCursor: null }))
+    const pending = [outboxItem('outbox-1'), outboxItem('outbox-2'), outboxItem('outbox-3')]
+    const listPending = vi.fn(() => Promise.resolve(pending))
+    const stop = (): void => {}
+    const bridge = {
+      sync: {
+        getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
+        retry: () => Promise.resolve(),
+        onState: () => stop
+      },
+      mail: {
+        listThreadPage,
+        listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listLabels: () => Promise.resolve([]),
+        getMailboxCounts: () =>
+          Promise.resolve({ inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }),
+        getUnreadCount: () => Promise.resolve(0),
+        getPendingActionCount: () => Promise.resolve(0),
+        getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
+        onChanged: () => stop
+      },
+      draft: { list: () => Promise.resolve([{ id: 'draft-1' }]) },
+      outbox: { listPending, onChanged: () => stop, onProgress: () => stop }
+    } as unknown as typeof window.attn
+    Object.defineProperty(window, 'attn', { configurable: true, value: bridge })
+
+    const activeViewRef: React.RefObject<MailView> = { current: 'outbox' }
+    const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
+    const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
+    const selection = selectedIndexState()
+    let latest: ReturnType<typeof useMailData> | null = null
+
+    function Harness(): null {
+      latest = useMailData(
+        'seed@attn.test',
+        null,
+        null,
+        activeViewRef,
+        selectedThreadIdRef,
+        selectedDraftIdRef,
+        selection.setState
+      )
+      return null
+    }
+
+    const root = createRoot(document.createElement('div'))
+    mountedRoots.push(root)
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const currentState = (): ReturnType<typeof useMailData> => {
+      if (!latest) throw new Error('hook state was not captured')
+      return latest
+    }
+    const refreshMailRows = currentState().refreshMailRows
+    selectedDraftIdRef.current = 'outbox-3'
+    selection.setState(0)
+    const requestsBefore = listPending.mock.calls.length
+    await act(async () => {
+      await refreshMailRows()
+    })
+
+    expect(listPending.mock.calls.length).toBeGreaterThan(requestsBefore)
+    expect(selection.valueRef.current).toBe(2)
+    expect(currentState().realOutbox).toEqual(pending)
+  })
+
   it('paints the first thread page before the sidebar counts answer', async () => {
     const rows = [thread('first-paint')]
     const listThreadPage = vi.fn((view: string) =>

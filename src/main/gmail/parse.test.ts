@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   collectAttachments,
+  extractBodyHtml,
   extractBodyText,
   extractThreadingHeaders,
+  findExternalTextParts,
   hasAttachment,
   hasCalendarPart,
+  hasInlinePlainText,
   parseAddress,
   parseAddressList,
   parseMessageIds
@@ -22,6 +25,39 @@ describe('Gmail message parsing', () => {
         ]
       })
     ).toBe('Plain text')
+  })
+
+  it('reads body parts case-insensitively and never from a forwarded message', () => {
+    const encode = (value: string): string => Buffer.from(value).toString('base64url')
+    const payload = {
+      mimeType: 'Multipart/Mixed',
+      parts: [
+        { mimeType: 'Text/Plain', body: { data: encode('Authored body') } },
+        { mimeType: 'TEXT/HTML', body: { data: encode('<b>Authored body</b>') } },
+        {
+          // A forwarded-as-attachment message: its own text belongs to the
+          // attachment, not to this message's body.
+          mimeType: 'Message/RFC822',
+          filename: 'forwarded.eml',
+          parts: [
+            { mimeType: 'text/plain', body: { data: encode('Embedded body') } },
+            { mimeType: 'text/html', body: { data: encode('<i>Embedded body</i>') } },
+            { mimeType: 'text/plain', body: { attachmentId: 'embedded-external', size: 900_000 } }
+          ]
+        }
+      ]
+    }
+
+    expect(extractBodyText(payload)).toBe('Authored body')
+    expect(extractBodyHtml(payload)).toBe('<b>Authored body</b>')
+    expect(hasInlinePlainText(payload)).toBe(true)
+    expect(findExternalTextParts(payload)).toEqual([])
+    expect(
+      findExternalTextParts({
+        mimeType: 'Multipart/Alternative',
+        parts: [{ mimeType: 'Text/Plain', body: { attachmentId: 'big-text', size: 900_000 } }]
+      })
+    ).toEqual([{ attachmentId: 'big-text', mimeType: 'text/plain' }])
   })
 
   it('parses addresses and finds nested attachments', () => {

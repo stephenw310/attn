@@ -1,8 +1,8 @@
 import { app, BrowserWindow, Menu, nativeImage, Tray } from 'electron'
 import menuBarTemplate from '../../resources/menuBarTemplate.png?asset'
 import trayIcon from '../../resources/tray.png?asset'
+import { oneHourFrom, tomorrowStart } from '../shared/notifications'
 import { loginItemSettingsFor } from './backgroundSettings'
-import { oneHourFrom, tomorrowStart } from './notify'
 
 type CreateWindow = (options?: { show?: boolean }) => BrowserWindow
 

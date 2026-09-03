@@ -1,22 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from '../db'
-import type { SchedulerTime } from '../time'
+import { fakeSchedulerTime } from '../testing/fakes'
 import { searchMessageIndex } from './fts'
 import { type FtsBackfillProgress, planFtsBackfillStart, runFtsBackfill } from './ftsBackfill'
 import { persistThread } from './persist'
 
 const ACCOUNT = 'account@example.test'
 
-const immediateTime: SchedulerTime = {
-  now: () => 0,
-  timers: {
-    setTimeout: (callback) => {
-      callback()
-      return 0 as unknown as ReturnType<typeof setTimeout>
-    },
-    clearTimeout: () => {}
-  }
-}
+const immediateTime = fakeSchedulerTime({ timers: 'immediate' })
 
 /**
  * Insert rows the way a manually upgraded revision-18 profile holds them:

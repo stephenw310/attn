@@ -34,11 +34,6 @@ function queueDb(lastErrors: Array<string | null>): Db {
 }
 
 describe('action queue status', () => {
-  it('keeps legacy failed rows visible in the pending count', () => {
-    const db = queueDb([null])
-    expect(pendingActionCount(db, 'a@example.com')).toBe(1)
-  })
-
   it('surfaces typed auth pauses separately from ordinary pending work', () => {
     const db = queueDb([null, storeActionError(new Error('revoked'), 'auth')])
     // `paused` counts only the auth-held rows, so the header can name them
@@ -78,7 +73,12 @@ describe('mailbox triage projection', () => {
         db.prepare('SELECT kind FROM action_queue ORDER BY id LIMIT 1').get() as { kind: string }
       ).toEqual({ kind: 'modifyLabels' })
 
-      performTriage(db, ACCOUNT, { kind: 'untrash', threadIds: ['thread'] }, false)
+      performTriage(
+        db,
+        ACCOUNT,
+        { kind: 'move', threadIds: ['thread'], destination: { kind: 'inbox' }, sourceLabelId: null },
+        false
+      )
       expect(mailboxIds('allMail')).toEqual(['thread'])
       expect(mailboxIds('trash')).toEqual([])
     } finally {
@@ -475,6 +475,65 @@ describe('mailbox triage projection', () => {
       ).toEqual({ label: 'Moved' })
       expect(pendingActionCount(db, ACCOUNT)).toBe(1)
       expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid moved' })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('does not queue, undo, or claim an archive of a thread that never carried INBOX', () => {
+    // triage.archive is offered in search and All Mail (useInboxCommands), so
+    // the target can already be out of the inbox. Undoing must not file it.
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare("INSERT INTO threads (account_id, id, subject) VALUES (?, 'filed', 'Filed')").run(ACCOUNT)
+      db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, labels_json)
+         VALUES (?, 'filed-message', 'filed', '["Label_Keep"]')`
+      ).run(ACCOUNT)
+      db.prepare(
+        "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, 'filed', 'Label_Keep')"
+      ).run(ACCOUNT)
+
+      expect(performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['filed'] })).toEqual({
+        label: 'Already there'
+      })
+      expect(pendingActionCount(db, ACCOUNT)).toBe(0)
+      expect(undoLast(db, ACCOUNT)).toBeNull()
+      expect(
+        db
+          .prepare('SELECT label_id FROM thread_labels WHERE account_id = ? AND thread_id = ?')
+          .all(ACCOUNT, 'filed')
+      ).toEqual([{ label_id: 'Label_Keep' }])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('links a label undo to the queue row it reverts so a rejected action can drop it', () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare("INSERT INTO threads (account_id, id, subject) VALUES (?, 'thread', 'Roadmap')").run(ACCOUNT)
+      db.prepare(
+        `INSERT INTO messages (account_id, id, thread_id, labels_json)
+         VALUES (?, 'message', 'thread', '["INBOX"]')`
+      ).run(ACCOUNT)
+      db.prepare(
+        "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, 'thread', 'INBOX')"
+      ).run(ACCOUNT)
+
+      expect(performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['thread'] })).toEqual({
+        label: 'Archived'
+      })
+      expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid archived' })
+      const payloads = (
+        db.prepare('SELECT payload FROM action_queue ORDER BY id').all() as Array<{ payload: string }>
+      ).map((row) => JSON.parse(row.payload) as Record<string, unknown>)
+      expect(payloads).toEqual([
+        expect.objectContaining({ add: [], remove: ['INBOX'], actionKind: 'archive' }),
+        expect.objectContaining({ add: ['INBOX'], remove: [], actionKind: 'undo', revertsQueueId: 1 })
+      ])
     } finally {
       db.close()
     }

@@ -1,30 +1,12 @@
 import { NOTIFICATION_SUMMARY_THRESHOLD } from '../../shared/notifications'
 import type { Db } from '../db'
-import { deleteSetting, readSetting, writeSetting } from '../settings'
 import { notificationEnabledSplitIds, splitAssignmentForAccount } from '../splits'
 import type { NewMail } from '../sync/poller'
-
-const PAUSED_UNTIL_KEY = 'notificationsPausedUntil'
 
 export interface NotificationCandidate extends NewMail {
   sender: string
   subject: string
   snippet: string
-}
-
-export function notificationPausedUntil(db: Db): number | null {
-  const stored = readSetting(db, PAUSED_UNTIL_KEY)
-  if (stored === undefined) return null
-  const value = Number(stored)
-  return Number.isFinite(value) ? value : null
-}
-
-export function setNotificationPausedUntil(db: Db, pausedUntil: number | null): void {
-  if (pausedUntil === null) {
-    deleteSetting(db, PAUSED_UNTIL_KEY)
-    return
-  }
-  writeSetting(db, PAUSED_UNTIL_KEY, String(pausedUntil))
 }
 
 export function candidatesFor(

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
 import type { GmailThread } from '../gmail/parse'
+import { fakeMailProvider } from '../testing/fakes'
 import { systemTime } from '../time'
 import { type HydrationEffects, OnDemandBodyHydrator } from './onDemandBodies'
 import type { MailProvider } from './provider'
@@ -9,19 +10,7 @@ import { BODY_HYDRATION_TIMEOUT_MS, MAX_RETAINED_BODY_HYDRATION_STATES } from '.
 const thread: GmailThread = { id: 'thread-1', messages: [] }
 
 function provider(getThread: MailProvider['getThread']): MailProvider {
-  return {
-    getThread,
-    getProfile: vi.fn(),
-    listLabels: vi.fn(),
-    listThreadIds: vi.fn(),
-    getAttachmentData: vi.fn(),
-    listHistory: vi.fn(),
-    listDrafts: vi.fn(),
-    getDraft: vi.fn(),
-    modifyThread: vi.fn(),
-    trashThread: vi.fn(),
-    untrashThread: vi.fn()
-  }
+  return fakeMailProvider({ getThread })
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -218,6 +207,10 @@ describe('OnDemandBodyHydrator', () => {
     expect(hydrationEffects.hydrateMissing).not.toHaveBeenCalled()
     expect(onChanged).not.toHaveBeenCalled()
     expect(onUnavailable).not.toHaveBeenCalled()
+    // The abandoned attempt reached no conclusion, so it must leave no state:
+    // a retained 'loading' reports an in-progress hydration for every later
+    // read of this thread, including after switching back.
+    expect(hydrator.state('account@example.com', 'thread-1')).toBe('idle')
   })
 
   it('cancels an active attempt before shutdown can close the database', async () => {

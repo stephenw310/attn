@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ACCOUNT_SYNC_PHASE_LABELS, type AccountSyncStatus, type AuthStatus } from '../../../shared/auth'
+import type { AccountSyncStatus, AuthStatus } from '../../../shared/auth'
 import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import { ALLOWED_UNDO_SEND_SECONDS, DEFAULT_UNDO_SEND_SECONDS } from '../../../shared/outboxTuning'
 import {
@@ -16,11 +16,15 @@ import {
 } from '../../../shared/settings'
 import { formatSnoozeDate } from '../../../shared/snooze'
 import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
+import { accountNeedsAttention, useAccountHealth } from '../hooks/useAccountHealth'
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
+import { useShowToast } from '../toastContext'
+import { AccountHealthLine } from './AccountHealthLine'
 import { AiSettingsSection } from './AiSettingsSection'
 import { Kbd } from './Kbd'
 import { SnippetManager } from './SnippetManager'
+import { ACTION_BUTTON, NOTE, ROW, SECTION_TITLE, SELECT } from './settingsStyles'
 
 /** A control the palette can deep-link to (`Set undo send delay…` etc.). */
 export type SettingsControl =
@@ -58,17 +62,8 @@ interface SettingsViewProps {
   onReconnect: () => void
   onSignOut: () => void
   onClose: () => void
-  onToast: (message: string) => void
   focusControl: SettingsControl | null
 }
-
-const SECTION_TITLE = 'text-sm font-semibold text-ink'
-const ROW = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 rounded-md px-3 py-2.5'
-const SELECT =
-  'min-w-0 max-w-[min(21rem,45vw)] cursor-pointer rounded-md border border-edge bg-ground px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent'
-const NOTE = 'text-[13px] leading-[1.55] text-ink-dim'
-const ACTION_BUTTON =
-  'cursor-pointer whitespace-nowrap rounded-md border border-edge px-2.5 py-1.5 text-sm text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent'
 
 function SectionTitle({ children }: { children: React.ReactNode }): React.JSX.Element {
   return <h3 className={SECTION_TITLE}>{children}</h3>
@@ -94,37 +89,15 @@ export function SettingsView({
   onReconnect,
   onSignOut,
   onClose,
-  onToast,
   focusControl
 }: SettingsViewProps): React.JSX.Element {
+  const onToast = useShowToast()
   const { preference, setPreference } = useTheme()
   const [reorderPending, setReorderPending] = useState(false)
-  const [openedStatuses, setOpenedStatuses] = useState<{
-    statuses: AccountSyncStatus[]
-    source: readonly AccountSyncStatus[] | null
-  } | null>(null)
-  const pushedStatusesRef = useRef(accountStatuses)
-  pushedStatusesRef.current = accountStatuses
   const rootRef = useRef<HTMLDivElement | null>(null)
   const activeEmail = status.email ?? status.activeAccountId ?? null
 
-  // The pushed statuses move only on phase changes; their unread counts can
-  // lag, so the opened view re-reads once. A later push supersedes it — the
-  // same contract the account menu keeps (F18).
-  useEffect(() => {
-    if (!window.attn) return
-    let stale = false
-    const source = pushedStatusesRef.current
-    window.attn.auth
-      .getAccountStatuses()
-      .then((statuses) => {
-        if (!stale) setOpenedStatuses({ statuses, source })
-      })
-      .catch(() => {})
-    return () => {
-      stale = true
-    }
-  }, [])
+  const { healthFor } = useAccountHealth(accountStatuses, true)
 
   useEffect(() => {
     if (!focusControl) return
@@ -132,13 +105,6 @@ export function SettingsView({
     target?.scrollIntoView({ block: 'center' })
     target?.focus({ preventScroll: true })
   }, [focusControl])
-
-  const healthById = new Map(
-    [
-      ...(accountStatuses ?? []),
-      ...(openedStatuses?.source === accountStatuses ? openedStatuses.statuses : [])
-    ].map((health) => [health.accountId, health])
-  )
 
   const moveAccount = useCallback(
     (index: number, delta: -1 | 1) => {
@@ -237,8 +203,8 @@ export function SettingsView({
             <div className="mt-2 flex flex-col">
               {status.accounts.map((account, index) => {
                 const active = account.id === status.activeAccountId
-                const health = healthById.get(account.id) ?? null
-                const attention = health?.phase === 'reconnect' || health?.phase === 'error'
+                const health = healthFor(account.id)
+                const attention = accountNeedsAttention(health)
                 return (
                   <div
                     key={account.id}
@@ -257,14 +223,11 @@ export function SettingsView({
                         )}
                       </span>
                       {health && (
-                        <span
-                          data-testid="settings-account-status"
-                          data-phase={health.phase}
-                          className={`text-[11px] ${attention ? 'font-medium text-accent' : 'text-ink-faint'}`}
-                        >
-                          {ACCOUNT_SYNC_PHASE_LABELS[health.phase]}
-                          {health.unread > 0 ? ` · ${health.unread} unread` : ''}
-                        </span>
+                        <AccountHealthLine
+                          health={health}
+                          attention={attention}
+                          testId="settings-account-status"
+                        />
                       )}
                     </span>
                     <span className="flex flex-none items-center gap-1.5">
@@ -530,13 +493,13 @@ export function SettingsView({
 
               <section data-testid="settings-ai" aria-label="AI writing">
                 <SectionTitle>AI writing</SectionTitle>
-                <AiSettingsSection onToast={onToast} />
+                <AiSettingsSection />
               </section>
 
               <section data-testid="settings-snippets" aria-label="Snippets">
                 <SectionTitle>Snippets</SectionTitle>
                 <div className="mt-2">
-                  <SnippetManager onToast={onToast} />
+                  <SnippetManager />
                 </div>
               </section>
 

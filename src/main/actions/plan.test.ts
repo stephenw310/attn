@@ -20,11 +20,6 @@ describe('triage action planning', () => {
       remove: ['INBOX', 'SPAM'],
       queueKind: 'modifyLabels'
     })
-    expect(planAction({ kind: 'untrash', threadIds: ['t1'] })).toEqual({
-      add: ['INBOX'],
-      remove: ['SPAM', 'TRASH'],
-      queueKind: 'modifyLabels'
-    })
   })
 
   it('computes precise toggle and label inverses from pre-state', () => {
@@ -53,6 +48,37 @@ describe('triage action planning', () => {
       add: ['TRASH'],
       remove: ['SPAM']
     })
+  })
+
+  it('makes the INBOX verbs undo against the pre-state, not against the verb', () => {
+    // triage.archive is offered in search and All Mail, where the target may
+    // never have carried INBOX: undoing must not file it for the first time.
+    expect(inverseForThread({ kind: 'archive', threadIds: ['t1'] }, new Set(['INBOX']), 't1')).toEqual({
+      kind: 'label',
+      threadIds: ['t1'],
+      add: ['INBOX'],
+      remove: []
+    })
+    expect(inverseForThread({ kind: 'archive', threadIds: ['t1'] }, new Set(['keep']), 't1')).toEqual({
+      kind: 'label',
+      threadIds: ['t1'],
+      add: [],
+      remove: []
+    })
+    for (const kind of ['restoreInbox', 'unsnooze'] as const) {
+      expect(inverseForThread({ kind, threadIds: ['t1'] }, new Set(['keep']), 't1')).toEqual({
+        kind: 'label',
+        threadIds: ['t1'],
+        add: [],
+        remove: ['INBOX']
+      })
+      expect(inverseForThread({ kind, threadIds: ['t1'] }, new Set(['INBOX']), 't1')).toEqual({
+        kind: 'label',
+        threadIds: ['t1'],
+        add: [],
+        remove: []
+      })
+    }
   })
 
   it('plans Move separately from label editing and preserves pre-existing destinations on undo', () => {

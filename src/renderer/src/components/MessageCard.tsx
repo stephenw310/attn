@@ -6,6 +6,7 @@ import { MessageBody } from '../MessageBody'
 import type { DisplayMessage } from '../mailDisplay'
 import { mailReadingForHtml } from '../mailReading'
 import { useTheme } from '../theme'
+import { useShowToast } from '../toastContext'
 
 function firstName(address: MailAddress, account: string | null): string {
   if (account && normalizeEmailKey(address.email) === normalizeEmailKey(account)) return 'me'
@@ -81,7 +82,6 @@ interface MessageCardProps {
   threadId: string
   message: DisplayMessage
   account: string | null
-  onToast: (message: string) => void
   collapsed?: boolean
   active?: boolean
   hasInlineComposer?: boolean
@@ -96,7 +96,6 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     threadId,
     message,
     account,
-    onToast,
     collapsed = false,
     active = false,
     hasInlineComposer = false,
@@ -105,6 +104,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     onToggleTrim,
     bodyHydrationMessage
   } = props
+  const onToast = useShowToast()
   const { appearance } = useTheme()
   const [viewOriginal, setViewOriginal] = useState(false)
   const reading = useMemo(() => mailReadingForHtml(message.html), [message.html])

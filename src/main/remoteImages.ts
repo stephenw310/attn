@@ -65,4 +65,14 @@ export class MailFrameRegistry {
   get(nonce: string | null | undefined): RegisteredMailFrame | undefined {
     return nonce ? this.frames.get(nonce) : undefined
   }
+
+  /**
+   * Drop every registration at once. A renderer reload or crash takes all of
+   * its frames with it and never unregisters them, so the entries would
+   * otherwise linger — including their `allowOnce` grants — for the lifetime
+   * of the process.
+   */
+  clear(): void {
+    this.frames.clear()
+  }
 }

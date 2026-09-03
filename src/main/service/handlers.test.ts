@@ -8,6 +8,19 @@ import { ensureAccount, persistThread } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
 import { createServiceHandlers, type ServiceHandlerContext } from './handlers'
+import type { ServiceSession } from './session'
+import type { TestHooks } from './testOperations'
+
+/** The harness hooks default to production behavior; a test overrides one. */
+function defaultTestHooks(): TestHooks {
+  return {
+    waitForConversation: async () => undefined,
+    draftReopenDelayMs: () => 0,
+    draftInlineImageDelayMs: () => 0,
+    consumeDraftSaveFailure: () => false,
+    searchWindowOverride: () => null
+  }
+}
 
 const ACCOUNT = 'search@example.test'
 
@@ -15,7 +28,8 @@ function handlerContext(
   db: ReturnType<typeof openDatabase>,
   provider: ServerSearchProvider,
   broadcastMailChanged = vi.fn(),
-  syncController: SyncController | null = null
+  syncController: SyncController | null = null,
+  testHooks: TestHooks = defaultTestHooks()
 ): ServiceHandlerContext {
   return {
     db,
@@ -27,23 +41,14 @@ function handlerContext(
     makeClient: () => null,
     makeProvider: () => null,
     makeServerSearchProvider: () => provider,
-    isSeeded: () => false,
-    executor: () => null,
-    draftMirrorExecutor: () => null,
-    outboxSender: () => null,
-    scheduler: () => null,
-    syncController: () => syncController,
+    activeSession: () => (syncController ? ({ syncController } as unknown as ServiceSession) : null),
     broadcastMailChanged,
     broadcastOutboxChanged: vi.fn(),
     broadcastBodyHydrationFailed: vi.fn(),
     trackForegroundProviderWork: async <T>(_accountId: string, work: () => Promise<T>) => work(),
     peekRevertedActions: () => null,
     acknowledgeRevertedActions: () => false,
-    waitForConversation: async () => undefined,
-    draftReopenDelay: () => 0,
-    draftInlineImageDelay: () => 0,
-    consumeTestDraftSaveFailure: () => false,
-    searchWindowOverride: () => null,
+    test: testHooks,
     testUserData: false,
     userDataPath: '/tmp/attn-test-user-data',
     downloadsPath: '/tmp/attn-test-downloads'
@@ -89,10 +94,11 @@ describe('message-specific reply service handler', () => {
     if (!newer) throw new Error('missing fixture message')
     newer.threadId = 'source'
     persistThread(db, ACCOUNT, { ...original, messages: [...(original.messages ?? []), newer] })
-    const context = handlerContext(db, emptyProvider)
-    context.waitForConversation = async () => {
+    const hooks = defaultTestHooks()
+    hooks.waitForConversation = async () => {
       db.prepare('DELETE FROM messages WHERE account_id = ? AND id = ?').run(ACCOUNT, 'message-source')
     }
+    const context = handlerContext(db, emptyProvider, undefined, null, hooks)
     const handlers = createServiceHandlers(context)
     try {
       await expect(

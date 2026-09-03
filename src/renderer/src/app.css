@@ -392,6 +392,10 @@
   text-decoration: underline;
 }
 
+.app-composer-strikethrough {
+  text-decoration: line-through;
+}
+
 .app-composer-link {
   color: var(--color-accent);
   text-decoration: underline;

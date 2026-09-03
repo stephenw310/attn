@@ -82,6 +82,8 @@ export const IPC_CHANNELS = {
   draftDiscard: 'draft:discard',
   draftMirror: 'draft:mirror',
   draftTakeRecovered: 'draft:takeRecovered',
+  draftCheckpointRequest: 'draft:checkpointRequest',
+  draftCheckpointDone: 'draft:checkpointDone',
   outboxSend: 'outbox:send',
   outboxUndoSend: 'outbox:undoSend',
   outboxReopen: 'outbox:reopen',
@@ -176,7 +178,8 @@ export const TEST_CHANNELS = {
   crashUtility: 'attn:test:crashUtility',
   accountDataStats: 'attn:test:accountDataStats',
   listMailboxThreadIds: 'attn:test:listMailboxThreadIds',
-  setUpdateState: 'attn:test:setUpdateState'
+  setUpdateState: 'attn:test:setUpdateState',
+  holdNextResponse: 'attn:test:holdNextResponse'
 } as const
 
 export interface InvokeChannels {
@@ -349,6 +352,12 @@ export interface InvokeChannels {
   [IPC_CHANNELS.mailUndo]: { args: []; result: TriageResult | null }
   [IPC_CHANNELS.mailGetPendingActionCount]: { args: []; result: number }
   [IPC_CHANNELS.mailGetActionQueueStatus]: { args: []; result: ActionQueueStatus }
+  /**
+   * The renderer's answer to a checkpoint request (B28): the open composer
+   * committed, or there was none. Main waits on it before tearing down, so a
+   * quit cannot drop the last second of typing.
+   */
+  [IPC_CHANNELS.draftCheckpointDone]: { args: [requestId: number]; result: undefined }
 }
 
 export interface BroadcastChannels {
@@ -362,6 +371,9 @@ export interface BroadcastChannels {
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
+  // B28: quit is imminent — commit any open composer while the document is
+  // still alive, then answer on `draft:checkpointDone` with this id.
+  [IPC_CHANNELS.draftCheckpointRequest]: { requestId: number }
   [IPC_CHANNELS.accountsStatusChanged]: AccountSyncStatus[]
   [IPC_CHANNELS.updateState]: UpdateState
   [IPC_CHANNELS.syncState]: SyncState
@@ -379,6 +391,7 @@ const BROADCAST_CHANNELS = {
   [IPC_CHANNELS.mailActionsReverted]: true,
   [IPC_CHANNELS.mailBodyHydrationFailed]: true,
   [IPC_CHANNELS.mailFocusThreadAvailable]: true,
+  [IPC_CHANNELS.draftCheckpointRequest]: true,
   [IPC_CHANNELS.accountsStatusChanged]: true,
   [IPC_CHANNELS.updateState]: true,
   [IPC_CHANNELS.syncState]: true

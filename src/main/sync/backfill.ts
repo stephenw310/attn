@@ -10,6 +10,7 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
+import { ensureSplitSetup } from '../splits'
 import { type SchedulerTime, systemTime } from '../time'
 import { type BackfillPhase, type ParsedCursor, parseBackfillCursor } from './backfillCursor'
 import { hydrateMissingThreadBodies } from './bodies'
@@ -192,6 +193,10 @@ export async function runInboxBackfill(
     const profile = await provider.getProfile({ priority: 'foreground' })
     const accountId = profile.emailAddress
     ensureAccount(db, accountId, profile.emailAddress)
+    // The one place every real account is registered, and so the one place the
+    // split rules are seeded: the split readers on the Inbox, badge and
+    // notification paths stay pure SELECTs.
+    ensureSplitSetup(db, accountId)
 
     const previous = db
       .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
@@ -538,11 +543,20 @@ function checkpoint(db: Db, accountId: string, cursor: string): void {
 
 async function mapConcurrent<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   const queue = [...items]
+  // One worker's failure ends the phase, so the others stop taking work rather
+  // than draining the rest of the page — and spending its quota — behind a
+  // rejection the caller has already seen.
+  let failed = false
   const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
     for (;;) {
       const item = queue.shift()
-      if (item === undefined) return
-      await fn(item)
+      if (failed || item === undefined) return
+      try {
+        await fn(item)
+      } catch (error) {
+        failed = true
+        throw error
+      }
     }
   })
   await Promise.all(workers)

@@ -24,7 +24,7 @@ import { recipientGreetingSuggestion } from './recipientGreeting'
 // their keys because focus (and therefore this plugin's guard) leaves with them.
 
 /** Tags an acceptance insert so the trigger listener never re-requests. */
-export const AUTOCOMPLETE_ACCEPT_TAG = 'attn-autocomplete-accept'
+const AUTOCOMPLETE_ACCEPT_TAG = 'attn-autocomplete-accept'
 
 interface PreviewPlacement {
   text: string

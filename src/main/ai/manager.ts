@@ -4,8 +4,9 @@
 // (T37A). Requests go directly to the user's chosen provider; the settings
 // snapshot is read fresh per request so a disable wins before any network
 // object is constructed. Request payloads, generated text, and the key never
-// appear in logs (F17); only the fake provider installed by the e2e seam
-// records payloads, and that seam exists solely under ATTN_TEST_USER_DATA.
+// appear in logs (F17). The e2e seam replaces the transport below rather than
+// this module's behavior, so there is exactly one generation path in the
+// product and the harness exercises it (REF-6).
 
 import {
   AI_AUTOCOMPLETE_TIMEOUT_MS,
@@ -23,6 +24,7 @@ import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import type { AiKeyStore } from './keyStore'
 import {
   type AiPrompt,
+  AiStreamError,
   AiStreamParser,
   buildPrompt,
   buildWireRequest,
@@ -30,26 +32,12 @@ import {
 } from './protocol'
 
 /**
- * Scripted provider behavior for the e2e/unit fake (attn:test:installFakeAiProvider).
- * Chunks stream in order after `delayMs`; `error` replaces them; `hang` never
- * completes, exercising cancellation and deadlines.
+ * The streaming HTTP transport. Production passes `fetch` itself; the harness
+ * passes a scripted one (`ai/fakeTransport.ts`). `purpose` rides along as a
+ * third argument — real `fetch` ignores it — so a scripted transport can label
+ * what it recorded without this module knowing a fake exists.
  */
-export interface FakeAiScript {
-  chunks?: string[]
-  delayMs?: number
-  /** When set, chunks arrive one per interval — the mid-stream cancel probe. */
-  chunkIntervalMs?: number
-  error?: string
-  hang?: boolean
-}
-
-/** What the fake records per request — the proof payloads used in tests. */
-export interface RecordedAiRequest {
-  purpose: AiPurpose
-  system: string
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>
-  canceled: boolean
-}
+export type AiTransport = (url: string, init: RequestInit, purpose: AiPurpose) => Promise<Response>
 
 interface ActiveRequest {
   id: string
@@ -59,7 +47,6 @@ interface ActiveRequest {
   settled: boolean
   abort: AbortController
   deadline: TimerHandle | null
-  record: RecordedAiRequest | null
 }
 
 export interface AiManagerOptions {
@@ -68,14 +55,13 @@ export interface AiManagerOptions {
   readSettings: () => Promise<AiStoredSettings>
   emit: (event: AiStreamEvent) => void
   time?: SchedulerTime
-  fetchFn?: typeof fetch
+  fetchFn?: AiTransport
 }
 
 export class AiManager {
   private readonly time: SchedulerTime
-  private readonly fetchFn: typeof fetch
+  private readonly fetchFn: AiTransport
   private readonly active = new Map<string, ActiveRequest>()
-  private fake: { script: FakeAiScript; requests: RecordedAiRequest[] } | null = null
   private nextId = 1
   /** Start times of recent autocomplete requests (the rolling-minute cap). */
   private autocompleteStarts: number[] = []
@@ -139,8 +125,7 @@ export class AiManager {
       startedAt: this.time.now(),
       settled: false,
       abort: new AbortController(),
-      deadline: null,
-      record: null
+      deadline: null
     }
     this.active.set(requestId, entry)
     if (request.purpose === 'autocomplete') {
@@ -151,8 +136,7 @@ export class AiManager {
     entry.deadline = this.time.timers.setTimeout(() => {
       this.fail(entry, 'The AI request timed out')
     }, timeoutMs)
-    if (this.fake) this.runFake(entry, prompt)
-    else void this.runReal(entry, settings, key, prompt)
+    void this.run(entry, settings, key, prompt)
     return { requestId }
   }
 
@@ -174,16 +158,6 @@ export class AiManager {
     }
   }
 
-  /** Test seam only: replace the network with a scripted provider. */
-  installFakeProvider(script: FakeAiScript): void {
-    this.fake = { script, requests: this.fake?.requests ?? [] }
-  }
-
-  /** Test seam only: the recorded requests (purpose + payload + canceled). */
-  fakeProviderRequests(): RecordedAiRequest[] {
-    return this.fake?.requests ?? []
-  }
-
   private settle(entry: ActiveRequest, outcome: { canceled?: boolean; error?: string }): void {
     if (entry.settled) return
     entry.settled = true
@@ -194,7 +168,6 @@ export class AiManager {
       const result = outcome.error !== undefined ? outcome.error : outcome.canceled ? 'canceled' : 'completed'
       this.logAutocomplete(`${entry.id} ${result} after ${this.time.now() - entry.startedAt}ms`)
     }
-    if (entry.record && outcome.canceled) entry.record.canceled = true
     if (outcome.error !== undefined) {
       this.options.emit({ requestId: entry.id, kind: 'error', message: outcome.error })
     } else if (!outcome.canceled) {
@@ -206,9 +179,9 @@ export class AiManager {
     this.settle(entry, { error: message })
   }
 
-  /** Development diagnostics for real providers; never log prompts, text, or keys. */
+  /** Development diagnostics; never log prompts, generated text, or keys. */
   private logAutocomplete(message: string): void {
-    if (this.fake === null) console.info(`[ai:autocomplete] ${message}`)
+    console.info(`[ai:autocomplete] ${message}`)
   }
 
   private chunk(entry: ActiveRequest, text: string): void {
@@ -216,43 +189,7 @@ export class AiManager {
     this.options.emit({ requestId: entry.id, kind: 'chunk', text })
   }
 
-  private runFake(entry: ActiveRequest, prompt: AiPrompt): void {
-    const fake = this.fake
-    if (!fake) return
-    const record: RecordedAiRequest = {
-      purpose: entry.purpose,
-      system: prompt.system,
-      messages: prompt.messages,
-      canceled: false
-    }
-    entry.record = record
-    fake.requests.push(record)
-    const script = fake.script
-    const chunks = script.chunks ?? []
-    const interval = script.chunkIntervalMs ?? 0
-    let next = 0
-    const step = (): void => {
-      if (entry.settled || script.hang) return
-      if (script.error !== undefined) {
-        this.fail(entry, script.error)
-        return
-      }
-      if (interval > 0) {
-        if (next < chunks.length) {
-          this.chunk(entry, chunks[next++])
-          this.time.timers.setTimeout(step, interval)
-          return
-        }
-        this.settle(entry, {})
-        return
-      }
-      for (const text of chunks) this.chunk(entry, text)
-      this.settle(entry, {})
-    }
-    this.time.timers.setTimeout(step, script.delayMs ?? 0)
-  }
-
-  private async runReal(
+  private async run(
     entry: ActiveRequest,
     settings: AiStoredSettings,
     key: string | null,
@@ -261,12 +198,16 @@ export class AiManager {
     try {
       const target = resolveProviderTarget(settings.provider, settings.baseUrl, settings.model, key)
       const wire = buildWireRequest(target, prompt)
-      const response = await this.fetchFn(wire.url, {
-        method: 'POST',
-        headers: wire.headers,
-        body: wire.body,
-        signal: entry.abort.signal
-      })
+      const response = await this.fetchFn(
+        wire.url,
+        {
+          method: 'POST',
+          headers: wire.headers,
+          body: wire.body,
+          signal: entry.abort.signal
+        },
+        entry.purpose
+      )
       if (!response.ok || !response.body) {
         // Status only — never echo a provider response body into an error
         // that could reach logs or toasts with generated/request content.
@@ -287,6 +228,12 @@ export class AiManager {
       this.settle(entry, {})
     } catch (error) {
       if (entry.settled) return
+      // A mid-stream provider error already carries its own user-facing text,
+      // and never the provider's own message.
+      if (error instanceof AiStreamError) {
+        this.fail(entry, error.message)
+        return
+      }
       const aborted = error instanceof Error && error.name === 'AbortError'
       this.fail(entry, aborted ? 'The AI request was canceled' : 'The AI provider could not be reached')
     }

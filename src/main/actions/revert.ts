@@ -14,10 +14,7 @@ export interface UndoEntryWithRefs {
   refs: readonly QueuedActionRef[]
 }
 
-export function queueIntentRef(intent: QueueIntent, queueId: number): QueuedActionRef {
-  return { queueId, threadId: intent.threadId }
-}
-
+/** The pair an undo entry needs to drop itself when Gmail rejects its forward action. */
 export function queueRowRef(queueId: number, threadId: string): QueuedActionRef {
   return { queueId, threadId }
 }
@@ -68,23 +65,19 @@ export function revertedAction(
 }
 
 /** A stand-in intent for a queue row whose payload is unusable or undecodable. */
-export function syntheticIntent(queueKind: QueueIntent['kind'], threadId: string): QueueIntent {
-  return queueKind === 'modifyLabels'
-    ? { kind: queueKind, threadId, add: [], remove: [] }
-    : { kind: queueKind, threadId }
+export function syntheticIntent(threadId: string): QueueIntent {
+  return { kind: 'modifyLabels', threadId, add: [], remove: [] }
 }
 
 export function unavailableAction(
-  queueKind: QueueIntent['kind'],
   threadId: string,
   subject: string,
   actionKind?: RevertedActionKind
 ): RevertedAction {
-  return revertedAction(syntheticIntent(queueKind, threadId), subject, false, 'unavailable', actionKind)
+  return revertedAction(syntheticIntent(threadId), subject, false, 'unavailable', actionKind)
 }
 
 function revertedActionKind(intent: QueueIntent): RevertedActionKind {
-  if (intent.kind !== 'modifyLabels') return intent.kind === 'trash' ? 'trash' : 'untrash'
   const add = new Set(intent.add)
   const remove = new Set(intent.remove)
   if (add.has('SPAM')) return 'spam'

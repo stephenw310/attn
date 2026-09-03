@@ -18,7 +18,11 @@ const ROOT = join(__dirname, '..')
 interface Boot {
   app: ElectronApplication
   mainLog: () => string
-  relaunch: (options?: { waitBeforeLaunch?: number }) => Promise<{ app: ElectronApplication; page: Page }>
+  relaunch: (options?: {
+    waitBeforeLaunch?: number
+    /** SIGKILL the app instead of quitting it: a real crash, not a clean exit. */
+    kill?: boolean
+  }) => Promise<{ app: ElectronApplication; page: Page }>
   userData: string
 }
 
@@ -138,7 +142,8 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       mainLog,
       userData,
       relaunch: async (options) => {
-        await boot.app.close()
+        if (options?.kill) await kill(boot.app)
+        else await boot.app.close()
         if (options?.waitBeforeLaunch) {
           await new Promise((resolve) => setTimeout(resolve, options.waitBeforeLaunch))
         }
@@ -175,6 +180,21 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     await use(await app.firstWindow())
   }
 })
+
+/**
+ * Crash the app the way a lost machine does (GAP-5): SIGKILL, no quit
+ * handlers, no SQLite close. Playwright's own bookkeeping is closed
+ * afterwards so the next launch starts from a clean fixture; the boot
+ * fixture's log capture and renderer-error collection span both launches
+ * either way, because they live in the fixture, not in the app.
+ */
+async function kill(app: ElectronApplication): Promise<void> {
+  const child = app.process()
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+  child.kill('SIGKILL')
+  await exited
+  await app.close().catch(() => {})
+}
 
 function cleanEnv(): Record<string, string> {
   const env: Record<string, string> = {}

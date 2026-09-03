@@ -139,9 +139,9 @@ export class ServiceSupervisor {
   }
 
   control(payload: ServiceControl): void {
-    // Mirror auth and focus state into the initialize payload so a restarted
-    // utility resumes from the latest roster rather than the boot-time one.
-    if (payload.kind === 'accounts') this.initialize.accounts = payload.accounts
+    // Mirror focus state into the initialize payload so a restarted utility
+    // resumes from the latest state rather than the boot-time one; the roster
+    // is mirrored by applyAccounts.
     if (payload.kind === 'focus') this.initialize.focused = payload.focused
     if (!this.child || !this.readyState) {
       this.queueControl(payload)
@@ -152,10 +152,6 @@ export class ServiceSupervisor {
     } catch {
       this.queueControl(payload)
     }
-  }
-
-  setAccounts(accounts: ServiceAccountsState): void {
-    this.control({ kind: 'accounts', accounts })
   }
 
   /**
@@ -386,9 +382,7 @@ export class ServiceSupervisor {
   }
 
   private queueControl(payload: ServiceControl): void {
-    if (payload.kind === 'accounts') {
-      this.queuedControls = this.queuedControls.filter((queued) => queued.kind !== 'accounts')
-    } else if (payload.kind === 'focus') {
+    if (payload.kind === 'focus') {
       this.queuedControls = this.queuedControls.filter((queued) => queued.kind !== 'focus')
     } else if (this.queuedControls.some((queued) => queued.kind === payload.kind)) {
       return

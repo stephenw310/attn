@@ -1,4 +1,4 @@
-import { useLayoutEffect } from 'react'
+import { useCallback, useLayoutEffect } from 'react'
 import type { TriageAction } from '../../../shared/actions'
 import type { DraftKind } from '../../../shared/drafts'
 import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
@@ -10,24 +10,31 @@ import {
 } from '../commands'
 import type { MailView, NavigableMailView } from '../mailDisplay'
 
+/** The triage verbs that act on the focused row alone. */
+type SelectedTriage = { kind: 'archive' | 'trash' | 'spam' } | { kind: 'star' | 'markUnread'; on: boolean }
+
 interface Options {
-  selected: { id: string } | undefined
+  /** Whether a row is focused at all — the commands' registration condition. */
+  hasSelection: boolean
+  /** Which row, read when a command runs: it moves on every J/K (P1). */
+  selectedRef: React.RefObject<{ id: string } | undefined>
   selectedCount: number
-  selectedIndex: number
   readerOpen: boolean
   view: MailView
   searchOpen: boolean
   searchBrowsing: boolean
   sidebarCollapsed: boolean
-  starOn: boolean
-  markUnreadOn: boolean
+  /** Star/unread titles and payloads are read lazily for the same reason. */
+  starOnRef: React.RefObject<boolean>
+  markUnreadOnRef: React.RefObject<boolean>
   moveAllowed: boolean
   preserveSelectionOnRefreshRef: React.RefObject<boolean>
   navigateNext: () => void
   navigatePrevious: () => void
   clearSelection: () => void
   toggleSelection: () => void
-  extendSelection: (index: number) => void
+  /** Shift+J/K: the focused index comes from the selection hook's own ref (P1). */
+  extendSelectionBy: (delta: number) => void
   openSelected: () => void
   closeReader: () => void
   switchView: (view: NavigableMailView) => void
@@ -70,23 +77,23 @@ interface Options {
 
 export function useInboxCommands(options: Options): void {
   const {
-    selected,
+    hasSelection,
+    selectedRef,
     selectedCount,
-    selectedIndex,
     readerOpen,
     view,
     searchOpen,
     searchBrowsing,
     sidebarCollapsed,
-    starOn,
-    markUnreadOn,
+    starOnRef,
+    markUnreadOnRef,
     moveAllowed,
     preserveSelectionOnRefreshRef,
     navigateNext,
     navigatePrevious,
     clearSelection,
     toggleSelection,
-    extendSelection,
+    extendSelectionBy,
     openSelected,
     closeReader,
     switchView,
@@ -114,6 +121,14 @@ export function useInboxCommands(options: Options): void {
     accountCommands
   } = options
   const mailCommandsEnabled = !searchOpen || searchBrowsing || readerOpen
+  // The focused row is read at invocation, never captured at registration.
+  const triageSelected = useCallback(
+    (action: SelectedTriage): void => {
+      const id = selectedRef.current?.id
+      if (id) triage({ ...action, threadIds: [id] })
+    },
+    [selectedRef, triage]
+  )
   useLayoutEffect(
     () =>
       registerCommands([
@@ -165,8 +180,8 @@ export function useInboxCommands(options: Options): void {
         ...(mailCommandsEnabled && (searchOpen || view !== 'drafts')
           ? [
               createCommand('selection.toggle', toggleSelection),
-              createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
-              createCommand('selection.extendPrevious', () => extendSelection(selectedIndex - 1)),
+              createCommand('selection.extendNext', () => extendSelectionBy(1)),
+              createCommand('selection.extendPrevious', () => extendSelectionBy(-1)),
               ...(searchBrowsing
                 ? [createCommand('selection.clear', focusSearchQuery, { title: 'Edit search query' })]
                 : selectedCount > 0
@@ -199,7 +214,7 @@ export function useInboxCommands(options: Options): void {
           title: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
         }),
         createCommand('composer.new', openComposer),
-        ...(mailCommandsEnabled && (readerOpen || searchOpen || view !== 'drafts') && selected
+        ...(mailCommandsEnabled && (readerOpen || searchOpen || view !== 'drafts') && hasSelection
           ? [
               createCommand('composer.reply', () => openReply('reply'), {
                 context: readerOpen ? 'reader' : 'list'
@@ -215,9 +230,9 @@ export function useInboxCommands(options: Options): void {
               })
             ]
           : []),
-        ...(mailCommandsEnabled && (searchOpen || view !== 'drafts') && selected
+        ...(mailCommandsEnabled && (searchOpen || view !== 'drafts') && hasSelection
           ? [
-              createCommand('triage.archive', () => triage({ kind: 'archive', threadIds: [selected.id] })),
+              createCommand('triage.archive', () => triageSelected({ kind: 'archive' })),
               createCommand('triage.notDone', markNotDone),
               createCommand('triage.snooze', openSnooze, {
                 title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later',
@@ -234,22 +249,15 @@ export function useInboxCommands(options: Options): void {
                   }
                 }
               }),
-              createCommand('triage.trash', () => triage({ kind: 'trash', threadIds: [selected.id] })),
-              createCommand('triage.spam', () => triage({ kind: 'spam', threadIds: [selected.id] })),
-              createCommand(
-                'triage.star',
-                () => triage({ kind: 'star', threadIds: [selected.id], on: starOn }),
-                { title: starOn ? 'Star' : 'Unstar' }
-              ),
+              createCommand('triage.trash', () => triageSelected({ kind: 'trash' })),
+              createCommand('triage.spam', () => triageSelected({ kind: 'spam' })),
+              createCommand('triage.star', () => triageSelected({ kind: 'star', on: starOnRef.current }), {
+                titleOf: () => (starOnRef.current ? 'Star' : 'Unstar')
+              }),
               createCommand(
                 'triage.unread',
-                () =>
-                  triage({
-                    kind: 'markUnread',
-                    threadIds: [selected.id],
-                    on: markUnreadOn
-                  }),
-                { title: markUnreadOn ? 'Mark unread' : 'Mark read' }
+                () => triageSelected({ kind: 'markUnread', on: markUnreadOnRef.current }),
+                { titleOf: () => (markUnreadOnRef.current ? 'Mark unread' : 'Mark read') }
               ),
               ...(moveAllowed ? [createCommand('triage.move', openMove)] : []),
               createCommand('triage.label', openLabel)
@@ -278,10 +286,11 @@ export function useInboxCommands(options: Options): void {
       closeReader,
       closeOutbox,
       discardSelectedDraft,
-      extendSelection,
+      extendSelectionBy,
       focusSearchQuery,
+      hasSelection,
       markNotDone,
-      markUnreadOn,
+      markUnreadOnRef,
       moveAllowed,
       mailCommandsEnabled,
       navigateNext,
@@ -298,9 +307,7 @@ export function useInboxCommands(options: Options): void {
       preserveSelectionOnRefreshRef,
       readerOpen,
       reopenUndoDraft,
-      selected,
       selectedCount,
-      selectedIndex,
       snoozeAt,
       searchOpen,
       submitSearch,
@@ -309,11 +316,11 @@ export function useInboxCommands(options: Options): void {
       showToast,
       sidebarCollapsed,
       splitCommands,
-      starOn,
+      starOnRef,
       switchView,
       toggleSidebar,
       toggleSelection,
-      triage,
+      triageSelected,
       view
     ]
   )

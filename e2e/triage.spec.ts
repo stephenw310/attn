@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { goTo } from './nav'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
@@ -341,17 +342,35 @@ test('toggles star and unread, then trashes', async ({ page }) => {
   await expect(page.getByTestId('pending-count')).toContainText('3 pending')
 })
 
-test('keeps offline actions across relaunch without reseeding', async ({ boot }) => {
-  let page = await boot.app.firstWindow()
-  await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  for (let i = 0; i < 3; i++) {
-    await page.keyboard.press('e')
-    await expect(page.getByTestId('thread-row')).toHaveCount(7 - i)
-  }
-  ;({ page } = await boot.relaunch())
-  await expect(page.getByTestId('thread-row')).toHaveCount(5)
-  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
-  expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
+// F2's airplane-mode criterion is twenty archives, not a handful (GAP-4), and
+// twenty threads is more than the shared inbox fixture holds — hence a seed of
+// its own for this one test.
+const OFFLINE_ARCHIVE_COUNT = 20
+const OFFLINE_SEED_THREADS = 22
+
+test.describe('offline replay at the F2 criterion', () => {
+  test.use({ seed: 'fixtures/seed-offline-replay.json' })
+
+  test('keeps offline actions across relaunch without reseeding', async ({ boot }) => {
+    let page = await boot.app.firstWindow()
+    const rows = page.getByTestId('thread-row')
+    await expect(rows).toHaveCount(OFFLINE_SEED_THREADS)
+    // Each archive is observed on its own: the row leaves the inbox before the
+    // next keystroke, so twenty distinct intents reach the queue.
+    for (let archived = 1; archived <= OFFLINE_ARCHIVE_COUNT; archived++) {
+      await page.keyboard.press('e')
+      await expect(rows).toHaveCount(OFFLINE_SEED_THREADS - archived)
+      await expect(page.getByTestId('pending-count')).toContainText(`${archived} pending`)
+    }
+    ;({ page } = await boot.relaunch())
+    await expect(page.getByTestId('thread-row')).toHaveCount(OFFLINE_SEED_THREADS - OFFLINE_ARCHIVE_COUNT)
+    await expect(page.getByTestId('pending-count')).toContainText(`${OFFLINE_ARCHIVE_COUNT} pending`)
+    // Every archive applied to its own thread and none was lost: All Mail
+    // still holds the whole seed after the restart.
+    await goTo(page, 'a')
+    await expect(page.getByTestId('thread-row')).toHaveCount(OFFLINE_SEED_THREADS)
+    expect(boot.mainLog().match(/\[log\] \[seed\] loaded/g)).toHaveLength(1)
+  })
 })
 
 test('triages from the reader and advances the open conversation', async ({ page }) => {

@@ -18,7 +18,7 @@ export type TriageAction =
       sourceLabelId: string | null
       verb?: never
     }
-  | { kind: 'restoreInbox' | 'untrash' | 'unsnooze'; threadIds: string[] }
+  | { kind: 'restoreInbox' | 'unsnooze'; threadIds: string[] }
 
 export interface TriageResult {
   label: string

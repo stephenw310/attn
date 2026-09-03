@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { createHeadlessEditor } from '@lexical/headless'
-import { $createListItemNode, $createListNode, ListItemNode, ListNode } from '@lexical/list'
-import { $createQuoteNode, QuoteNode } from '@lexical/rich-text'
+import { $createListItemNode, $createListNode } from '@lexical/list'
+import { $createQuoteNode } from '@lexical/rich-text'
 import { $createParagraphNode, $createTextNode, $getRoot, type SerializedEditorState } from 'lexical'
 import { describe, expect, it } from 'vitest'
+import { editorConfig } from './editorConfig'
 import { GmailSignatureNode } from './nodes/GmailSignatureNode'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
@@ -33,7 +34,7 @@ describe('plain-text alternative', () => {
   })
 
   it('wraps a marked signature in the dedicated block Gmail sends', () => {
-    const editor = createHeadlessEditor({ nodes: [GmailSignatureNode] })
+    const editor = createHeadlessEditor({ nodes: editorConfig.nodes })
     editor.update(
       () => {
         const signature = new GmailSignatureNode().append(
@@ -103,7 +104,7 @@ describe('plain-text alternative', () => {
   })
 
   it('preserves list markers and quote prefixes from the editor model', () => {
-    const editor = createHeadlessEditor({ nodes: [ListNode, ListItemNode, QuoteNode] })
+    const editor = createHeadlessEditor({ nodes: editorConfig.nodes })
     editor.update(
       () => {
         $getRoot().append(
@@ -124,7 +125,7 @@ describe('plain-text alternative', () => {
   })
 
   it('preserves nested list markers and indentation', () => {
-    const editor = createHeadlessEditor({ nodes: [ListNode, ListItemNode] })
+    const editor = createHeadlessEditor({ nodes: editorConfig.nodes })
     editor.update(
       () => {
         const parent = $createListItemNode().append($createTextNode('Parent'))

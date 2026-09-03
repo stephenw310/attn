@@ -35,24 +35,27 @@ export class SnoozeScheduler {
     this.stop()
     const accountId = this.getAccountId()
     if (!accountId) return
-    const returned = this.returnDue(accountId)
-    if (returned) {
-      this.onChanged()
-      this.onQueueChanged()
-    }
+    this.publish(this.returnDue(accountId))
     this.arm(accountId)
   }
 
   wakeThread(threadId: string): boolean {
     const accountId = this.getAccountId()
     if (!accountId) return false
-    const returned = this.returnSnoozedThreads(accountId, [threadId]) > 0
-    if (returned) {
-      this.onChanged()
-      this.onQueueChanged()
-      this.refresh()
-    }
-    return returned
+    if (this.returnSnoozedThreads(accountId, [threadId]) === 0) return false
+    // Re-arming shares this pass: anything else that came due is returned with
+    // the woken thread and announced once, not twice.
+    this.stop()
+    this.returnDue(accountId)
+    this.publish(true)
+    this.arm(accountId)
+    return true
+  }
+
+  private publish(changed: boolean): void {
+    if (!changed) return
+    this.onChanged()
+    this.onQueueChanged()
   }
 
   private returnDue(accountId: string): boolean {

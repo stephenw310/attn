@@ -8,6 +8,11 @@ dist/
 # E2E output (traces, screenshots)
 e2e/.results/
 e2e/.artifacts/
+# E2E inputs generated at run time (large seeds); never uploaded by CI
+e2e/.generated/
+
+# Local audit worksheets (TEST-SUITE-AUDIT-2026-09-02.md §"local-only")
+.audit/
 
 # Per-user Google OAuth client (see README.md) — never commit
 oauth.config.json

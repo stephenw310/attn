@@ -9,20 +9,14 @@ import {
   isAiProviderKind,
   isAiVoiceTone
 } from '../../../shared/ai'
+import { useShowToast } from '../toastContext'
+import { ACTION_BUTTON, INPUT, NOTE, ROW, SELECT } from './settingsStyles'
 
 // The AI-writing settings pane (T36, SPEC F17). Everything here is app-global
 // (F18 rule 9). Both enables are deliberate consent flows: turning one on
 // shows its disclosure first, and only the confirm button writes. The key is
 // write-only — it is never echoed back into the UI after saving.
 
-const ROW = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 rounded-md px-3 py-2.5'
-const NOTE = 'text-[13px] leading-[1.55] text-ink-dim'
-const SELECT =
-  'min-w-0 max-w-[min(21rem,45vw)] cursor-pointer rounded-md border border-edge bg-ground px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent'
-const INPUT =
-  'rounded-md border border-edge bg-ground px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent'
-const ACTION_BUTTON =
-  'cursor-pointer whitespace-nowrap rounded-md border border-edge px-2.5 py-1.5 text-sm text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent'
 const CONFIRM_PANEL = 'mx-3 mt-1 rounded-md border border-accent/40 bg-accent/10 px-3 py-2'
 const CONFIRM_APPLY =
   'cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20'
@@ -41,7 +35,8 @@ const AUTOCOMPLETE_DISCLOSURE =
   'sent mail, and ' +
   'content already sent to a provider cannot be recalled.'
 
-export function AiSettingsSection({ onToast }: { onToast: (message: string) => void }): React.JSX.Element {
+export function AiSettingsSection(): React.JSX.Element {
+  const onToast = useShowToast()
   const [settings, setSettings] = useState<AiSettings | null>(null)
   const [confirming, setConfirming] = useState<'enable' | 'autocomplete' | null>(null)
   const [keyDraft, setKeyDraft] = useState('')

@@ -6,12 +6,15 @@ import {
   type AiStreamEvent
 } from '../../shared/ai'
 import type { SchedulerTime, TimerHandle } from '../time'
+import { FakeAiTransport } from './fakeTransport'
 import type { AiKeyStore } from './keyStore'
-import { AiManager } from './manager'
+import { AiManager, type AiTransport } from './manager'
 
-// Deterministic timers: the fake provider's delivery and the request deadline
-// both ride the injected SchedulerTime, so tests fire exactly the timers they
-// mean to and never wait on the wall clock.
+// Deterministic timers: the scripted transport's delivery and the request
+// deadline both ride the injected SchedulerTime, so tests fire exactly the
+// timers they mean to and never wait on the wall clock. Delivery itself is a
+// chain of already-resolved promises, so `flush()` — a bounded number of
+// microtask turns — settles it without any wall-clock wait either.
 class ManualTimers {
   private next = 1
   private pending = new Map<number, { callback: () => void; delayMs: number }>()
@@ -56,31 +59,34 @@ function keyStore(key: string | null = 'sk-test'): AiKeyStore {
   } as unknown as AiKeyStore
 }
 
+async function flush(): Promise<void> {
+  for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+}
+
 interface Harness {
   manager: AiManager
   timers: ManualTimers
+  transport: FakeAiTransport
   events: AiStreamEvent[]
   fetchFn: ReturnType<typeof vi.fn>
 }
 
 function harness(
   settings: Partial<AiStoredSettings>,
-  options: { key?: string | null; fetchImpl?: typeof fetch } = {}
+  options: { key?: string | null; fetchImpl?: AiTransport } = {}
 ): Harness {
   const timers = new ManualTimers()
   const events: AiStreamEvent[] = []
-  const fetchFn = vi.fn(
-    options.fetchImpl ??
-      (() => Promise.reject(new Error('unexpected network call')) as ReturnType<typeof fetch>)
-  )
+  const transport = new FakeAiTransport(timers.time)
+  const fetchFn = vi.fn(options.fetchImpl ?? transport.fetch)
   const manager = new AiManager({
     keyStore: keyStore(options.key === undefined ? 'sk-test' : options.key),
     readSettings: async () => ({ ...AI_SETTINGS_DEFAULTS, ...settings }),
     emit: (event) => events.push(event),
     time: timers.time,
-    fetchFn: fetchFn as unknown as typeof fetch
+    fetchFn: fetchFn as unknown as AiTransport
   })
-  return { manager, timers, events, fetchFn }
+  return { manager, timers, transport, events, fetchFn }
 }
 
 const replyRequest = {
@@ -116,84 +122,103 @@ describe('gating', () => {
   })
 })
 
-describe('fake provider streaming', () => {
+describe('scripted provider streaming', () => {
   it('streams scripted chunks as events and completes with done', async () => {
-    const { manager, timers, events } = harness({ enabled: true })
-    manager.installFakeProvider({ chunks: ['Hel', 'lo'] })
+    const { manager, timers, transport, events } = harness({ enabled: true })
+    transport.install({ chunks: ['Hel', 'lo'] })
     const { requestId } = await manager.generate(replyRequest)
     timers.fire(0)
+    await flush()
     expect(events).toEqual([
       { requestId, kind: 'chunk', text: 'Hel' },
       { requestId, kind: 'chunk', text: 'lo' },
       { requestId, kind: 'done' }
     ])
-    expect(manager.fakeProviderRequests()).toHaveLength(1)
-    expect(manager.fakeProviderRequests()[0]).toMatchObject({ purpose: 'reply', canceled: false })
+    expect(transport.recorded()).toHaveLength(1)
+    expect(transport.recorded()[0]).toMatchObject({ purpose: 'reply', canceled: false })
+  })
+
+  it('the recorded payload is the request body that actually left main', async () => {
+    const { manager, timers, transport, fetchFn } = harness({ enabled: true })
+    transport.install({ chunks: ['ok'] })
+    await manager.generate(replyRequest)
+    timers.fire(0)
+    await flush()
+    const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('anthropic.com')
+    const body = JSON.parse(String(init.body)) as { system: string; messages: unknown[] }
+    expect(transport.recorded()[0].system).toBe(body.system)
+    expect(transport.recorded()[0].messages).toEqual(body.messages)
   })
 
   it('cancel drops late chunks and records the cancellation', async () => {
-    const { manager, timers, events } = harness({ enabled: true })
-    manager.installFakeProvider({ chunks: ['never'], delayMs: 50 })
+    const { manager, timers, transport, events } = harness({ enabled: true })
+    transport.install({ chunks: ['never'], delayMs: 50 })
     const { requestId } = await manager.generate(replyRequest)
     manager.cancel(requestId)
     timers.fire(50)
+    await flush()
     expect(events).toEqual([])
-    expect(manager.fakeProviderRequests()[0].canceled).toBe(true)
+    expect(transport.recorded()[0].canceled).toBe(true)
   })
 
   it('a hung provider hits the deadline and reports a timeout error', async () => {
-    const { manager, timers, events } = harness({ enabled: true })
-    manager.installFakeProvider({ hang: true })
+    const { manager, timers, transport, events } = harness({ enabled: true })
+    transport.install({ hang: true })
     const { requestId } = await manager.generate(replyRequest)
     timers.fire(Number.MAX_SAFE_INTEGER)
     expect(events).toEqual([{ requestId, kind: 'error', message: expect.stringMatching(/timed out/) }])
   })
 
   it('disabling mid-request aborts it; the autocomplete switch cancels only its own', async () => {
-    const { manager, timers, events } = harness({ enabled: true, autocompleteEnabled: true })
-    manager.installFakeProvider({ chunks: ['text'], delayMs: 10 })
+    const { manager, timers, transport, events } = harness({ enabled: true, autocompleteEnabled: true })
+    transport.install({ chunks: ['text'], delayMs: 10 })
     await manager.generate(replyRequest)
     const auto = await manager.generate({ purpose: 'autocomplete', prefix: 'Hi', suffix: '' })
     manager.cancelAll('autocomplete')
     timers.fire(10)
+    await flush()
     // The reply stream completed; the autocomplete one emitted nothing.
     expect(events.some((event) => event.requestId === auto.requestId)).toBe(false)
     expect(events.some((event) => event.kind === 'done')).toBe(true)
 
     events.length = 0
-    manager.installFakeProvider({ chunks: ['more'], delayMs: 10 })
+    transport.install({ chunks: ['more'], delayMs: 10 })
     const { requestId } = await manager.generate(replyRequest)
     manager.cancelAll()
     timers.fire(10)
+    await flush()
     expect(events.filter((event) => event.requestId === requestId)).toEqual([])
   })
 
   it('voice matching off strips style examples from the recorded payload', async () => {
-    const { manager, timers } = harness({ enabled: true, voiceMatchingEnabled: false })
-    manager.installFakeProvider({ chunks: ['ok'] })
+    const { manager, timers, transport } = harness({ enabled: true, voiceMatchingEnabled: false })
+    transport.install({ chunks: ['ok'] })
     await manager.generate({ ...replyRequest, styleExamples: ['My style example text'] })
     timers.fire(0)
-    const recorded = manager.fakeProviderRequests()[0]
+    await flush()
+    const recorded = transport.recorded()[0]
     const payload = recorded.system + recorded.messages.map((message) => message.content).join('')
     expect(payload).not.toContain('My style example text')
   })
 
   it('voice matching on keeps the examples', async () => {
-    const { manager, timers } = harness({ enabled: true, voiceMatchingEnabled: true })
-    manager.installFakeProvider({ chunks: ['ok'] })
+    const { manager, timers, transport } = harness({ enabled: true, voiceMatchingEnabled: true })
+    transport.install({ chunks: ['ok'] })
     await manager.generate({ ...replyRequest, styleExamples: ['My style example text'] })
     timers.fire(0)
-    expect(manager.fakeProviderRequests()[0].system).toContain('My style example text')
+    await flush()
+    expect(transport.recorded()[0].system).toContain('My style example text')
   })
 
   it('autocomplete receives its subject, current thread, tone, and standing rules', async () => {
-    const { manager, timers } = harness({
+    const { manager, timers, transport } = harness({
       enabled: true,
       autocompleteEnabled: true,
       voiceTone: 'formal',
       voiceRules: 'Avoid exclamation marks.'
     })
-    manager.installFakeProvider({ chunks: ['ok'] })
+    transport.install({ chunks: ['ok'] })
     await manager.generate({
       purpose: 'autocomplete',
       prefix: 'Dear team',
@@ -202,7 +227,8 @@ describe('fake provider streaming', () => {
       thread: [{ author: 'Maya', text: 'Ping?' }]
     })
     timers.fire(0)
-    const recorded = manager.fakeProviderRequests()[0]
+    await flush()
+    const recorded = transport.recorded()[0]
     expect(recorded.purpose).toBe('autocomplete')
     const payload = recorded.system + recorded.messages.map((message) => message.content).join('')
     expect(payload).toContain('Dear team')
@@ -213,27 +239,32 @@ describe('fake provider streaming', () => {
   })
 
   it('a paced script delivers chunk by chunk, so a mid-stream cancel keeps a true partial', async () => {
-    const { manager, timers, events } = harness({ enabled: true })
-    manager.installFakeProvider({ chunks: ['one', 'two', 'three'], chunkIntervalMs: 10 })
+    const { manager, timers, transport, events } = harness({ enabled: true })
+    transport.install({ chunks: ['one', 'two', 'three'], chunkIntervalMs: 10 })
     const { requestId } = await manager.generate(replyRequest)
+    timers.fire(0)
+    await flush()
     timers.fire(10)
-    timers.fire(10)
+    await flush()
     expect(events).toEqual([
       { requestId, kind: 'chunk', text: 'one' },
       { requestId, kind: 'chunk', text: 'two' }
     ])
     manager.cancel(requestId)
     timers.fire(Number.MAX_SAFE_INTEGER)
+    await flush()
     expect(events).toHaveLength(2)
-    expect(manager.fakeProviderRequests()[0].canceled).toBe(true)
+    expect(transport.recorded()[0].canceled).toBe(true)
   })
 
   it('a scripted error surfaces as an error event', async () => {
-    const { manager, timers, events } = harness({ enabled: true })
-    manager.installFakeProvider({ error: 'provider exploded' })
+    const { manager, timers, transport, events } = harness({ enabled: true })
+    transport.install({ error: 'provider exploded' })
     const { requestId } = await manager.generate(replyRequest)
     timers.fire(0)
+    await flush()
     expect(events).toEqual([{ requestId, kind: 'error', message: 'provider exploded' }])
+    expect(transport.recorded()[0].canceled).toBe(false)
   })
 })
 
@@ -242,16 +273,16 @@ describe('autocomplete rate limits', () => {
   const enabled = { enabled: true, autocompleteEnabled: true }
 
   it('allows only one request in flight app-wide', async () => {
-    const { manager, timers } = harness(enabled)
-    manager.installFakeProvider({ hang: true })
+    const { manager, timers, transport } = harness(enabled)
+    transport.install({ hang: true })
     await manager.generate(autocomplete)
     timers.nowMs = 5_000
     await expect(manager.generate(autocomplete)).rejects.toThrow(/in flight/)
   })
 
   it('allows the autocomplete-specific response window before timing out', async () => {
-    const { manager, timers, events } = harness(enabled)
-    manager.installFakeProvider({ hang: true })
+    const { manager, timers, transport, events } = harness(enabled)
+    transport.install({ hang: true })
     const { requestId } = await manager.generate(autocomplete)
     timers.fire(AI_AUTOCOMPLETE_TIMEOUT_MS - 1)
     expect(events).toEqual([])
@@ -260,10 +291,11 @@ describe('autocomplete rate limits', () => {
   })
 
   it('spaces starts one second apart and skips rather than queues', async () => {
-    const { manager, timers } = harness(enabled)
-    manager.installFakeProvider({ chunks: ['ok'] })
+    const { manager, timers, transport } = harness(enabled)
+    transport.install({ chunks: ['ok'] })
     await manager.generate(autocomplete)
     timers.fire(0)
+    await flush()
     timers.nowMs = 400
     await expect(manager.generate(autocomplete)).rejects.toThrow(/rate limited/)
     timers.nowMs = 1_000
@@ -271,12 +303,13 @@ describe('autocomplete rate limits', () => {
   })
 
   it('caps starts per rolling minute and recovers as the window slides', async () => {
-    const { manager, timers } = harness(enabled)
-    manager.installFakeProvider({ chunks: ['ok'] })
+    const { manager, timers, transport } = harness(enabled)
+    transport.install({ chunks: ['ok'] })
     for (let index = 0; index < 20; index++) {
       timers.nowMs = index * 2_000
       await manager.generate(autocomplete)
       timers.fire(0)
+      await flush()
     }
     timers.nowMs = 20 * 2_000
     await expect(manager.generate(autocomplete)).rejects.toThrow(/rate limited/)
@@ -286,8 +319,8 @@ describe('autocomplete rate limits', () => {
   })
 
   it('reply generation is never rate limited by autocomplete traffic', async () => {
-    const { manager, timers } = harness(enabled)
-    manager.installFakeProvider({ hang: true })
+    const { manager, timers, transport } = harness(enabled)
+    transport.install({ hang: true })
     await manager.generate(autocomplete)
     timers.nowMs = 100
     await expect(manager.generate(replyRequest)).resolves.toBeTruthy()
@@ -319,7 +352,7 @@ describe('real transport', () => {
           'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}\n',
           'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":" there"}}\n'
         ])
-      )) as unknown as typeof fetch
+      )) as unknown as AiTransport
     const { manager, events, fetchFn } = harness({ enabled: true }, { fetchImpl })
     const { requestId } = await manager.generate(replyRequest)
     await vi.waitFor(() => {
@@ -337,7 +370,7 @@ describe('real transport', () => {
 
   it('a non-OK response becomes a status-only error event', async () => {
     const fetchImpl = (() =>
-      Promise.resolve({ ok: false, status: 401, body: null } as unknown as Response)) as typeof fetch
+      Promise.resolve({ ok: false, status: 401, body: null } as unknown as Response)) as AiTransport
     const { manager, events } = harness({ enabled: true }, { fetchImpl })
     const { requestId } = await manager.generate(replyRequest)
     await vi.waitFor(() => {
@@ -350,7 +383,7 @@ describe('real transport', () => {
     const fetchImpl = ((_url: string, init: RequestInit) => {
       seenSignal = init.signal as AbortSignal
       return new Promise(() => {})
-    }) as unknown as typeof fetch
+    }) as unknown as AiTransport
     const { manager, events } = harness({ enabled: true }, { fetchImpl })
     const { requestId } = await manager.generate(replyRequest)
     manager.cancel(requestId)

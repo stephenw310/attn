@@ -29,7 +29,15 @@ import { splitAssignmentForAccount } from '../splits'
 import { needsBodyHydration } from '../sync/bodyHydration'
 import { THREAD_LIST_LIMIT } from '../sync/tuning'
 import type { Db } from './index'
+import { storedMessageLabelSql, threadLabelSql } from './labelSql'
 import type { MaterializedMailboxView } from './mailboxMembership'
+import {
+  labelIds,
+  labelIdsProjectionSql,
+  THREAD_AUXILIARY_PROJECTION_SQL,
+  type ThreadProjectionRow,
+  toThreadRow
+} from './threadRows'
 
 interface StoredAttachment extends MessageAttachment {
   inlineData?: string
@@ -56,25 +64,19 @@ function cursorValues(cursor: ThreadPageCursor | null): [number, number, string]
   return cursor ? [cursor.at, cursor.at, cursor.id] : []
 }
 
-function labelIds(value: string): string[] {
-  return value ? value.split('\u001f') : []
-}
-
-const threadLabelSql = (label: string): string => `
-    EXISTS (SELECT 1 FROM thread_labels tl
-            WHERE tl.account_id = t.account_id AND tl.thread_id = t.id
-              AND tl.label_id = '${label}')`
-const storedLabelSql = (label: string): string => `
-    EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = '${label}')`
-const HIDDEN_STORED_LABELS_SQL = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
-  .map((label) => storedLabelSql(label))
-  .join(' OR ')
-const HIDDEN_FALLBACK_LABELS_SQL = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
-  .map((label) => threadLabelSql(label))
-  .join(' OR ')
+/** Membership SQL below joins `threads t` and tests `messages m` against it. */
+const THREAD_KEY = { accountId: 't.account_id', id: 't.id' }
+const storedLabelSql = (label: string): string => storedMessageLabelSql('m', `'${label}'`)
+const HIDDEN_LABELS = ['SPAM', 'TRASH', 'DRAFT', 'CHAT']
+const HIDDEN_STORED_LABELS_SQL = HIDDEN_LABELS.map((label) => storedLabelSql(label)).join(' OR ')
+const HIDDEN_FALLBACK_LABELS_SQL = HIDDEN_LABELS.map((label) =>
+  threadLabelSql(THREAD_KEY, `'${label}'`)
+).join(' OR ')
 
 export function allMailMembershipSql(): string {
-  const junkThreadLabels = ['SPAM', 'TRASH'].map((label) => threadLabelSql(label)).join(' OR ')
+  const junkThreadLabels = ['SPAM', 'TRASH']
+    .map((label) => threadLabelSql(THREAD_KEY, `'${label}'`))
+    .join(' OR ')
   return `(NOT (${junkThreadLabels}) AND EXISTS (
       SELECT 1 FROM messages m
       WHERE m.account_id = t.account_id AND m.thread_id = t.id
@@ -98,7 +100,7 @@ export function labeledMailboxMembershipSql(labelExpression = 'mailbox.label_id'
       SELECT 1 FROM messages m
       WHERE m.account_id = t.account_id AND m.thread_id = t.id
         AND ((m.labels_json IS NOT NULL
-              AND EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = ${labelExpression})
+              AND ${storedMessageLabelSql('m', labelExpression)}
               AND NOT (${HIDDEN_STORED_LABELS_SQL}))
              OR (m.labels_json IS NULL AND NOT (${HIDDEN_FALLBACK_LABELS_SQL})))
     )`
@@ -114,38 +116,13 @@ const MAILBOX_LABEL_IDS = {
   trash: 'TRASH'
 } as const
 
-const THREAD_AUXILIARY_PROJECTION_SQL = `EXISTS(SELECT 1 FROM reminders r
-                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
-                       AND r.kind = 'snooze' AND r.state = 'pending') AS snoozed,
-              EXISTS(SELECT 1 FROM reminders r
-                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
-                       AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
-              EXISTS(SELECT 1 FROM reminders r
-                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
-                       AND r.kind = 'follow_up' AND r.state = 'returned') AS follow_up_returned,
-              EXISTS(SELECT 1 FROM outbox o
-                     WHERE o.account_id = t.account_id AND o.thread_id = t.id
-                       AND o.state IN ('composing', 'drafted')) AS has_draft`
-
 const THREAD_PROJECTION_SQL = `t.account_id, t.id, t.from_display, t.subject, t.snippet,
                 t.is_unread, t.is_starred, t.has_attachment,
               ${THREAD_AUXILIARY_PROJECTION_SQL}`
 
-interface MailboxThreadQueryRow {
+interface MailboxThreadQueryRow extends ThreadProjectionRow {
   account_id: string
-  id: string
-  from_display: string | null
-  subject: string | null
-  snippet: string | null
   mailbox_last_msg_at: number | null
-  is_unread: number
-  is_starred: number
-  has_attachment: number
-  snoozed: number
-  returned: number
-  follow_up_returned: number
-  has_draft: number
-  label_ids: string
 }
 
 /**
@@ -164,10 +141,7 @@ export function listMailboxThreads(
 ): ThreadRow[] {
   const wrap = (visibleSql: string): string =>
     `WITH visible AS (${visibleSql})
-     SELECT v.*,
-            COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
-                      FROM thread_labels tl
-                      WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+     SELECT v.*, ${labelIdsProjectionSql('v')}
      FROM visible v
      ORDER BY v.mailbox_last_msg_at DESC, v.id`
   let rows: MailboxThreadQueryRow[]
@@ -270,10 +244,7 @@ export function listMailboxThreads(
            ORDER BY summary.mailbox_last_msg_at DESC, t.id
            LIMIT ?
          )
-         SELECT v.*,
-                COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
-                          FROM thread_labels tl
-                          WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+         SELECT v.*, ${labelIdsProjectionSql('v')}
          FROM visible v
          ORDER BY v.mailbox_last_msg_at DESC, v.id`
       )
@@ -306,21 +277,7 @@ export function listMailboxThreads(
         limit
       ) as MailboxThreadQueryRow[]
   }
-  return rows.map((r) => ({
-    id: r.id,
-    fromDisplay: r.from_display ?? '',
-    subject: r.subject ?? '(no subject)',
-    snippet: r.snippet ?? '',
-    lastMsgAt: r.mailbox_last_msg_at ?? 0,
-    unread: r.is_unread === 1,
-    starred: r.is_starred === 1,
-    hasAttachment: r.has_attachment === 1,
-    snoozed: r.snoozed === 1,
-    returned: r.returned === 1,
-    followUpReturned: r.follow_up_returned === 1,
-    hasDraft: r.has_draft === 1,
-    labelIds: labelIds(r.label_ids)
-  }))
+  return rows.map((r) => toThreadRow(r, r.mailbox_last_msg_at))
 }
 
 /**
@@ -352,10 +309,7 @@ export function listLabelThreads(
          ORDER BY mailbox_last_msg_at DESC, t.id
          LIMIT ?
        )
-       SELECT v.*,
-              COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
-                        FROM thread_labels tl
-                        WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+       SELECT v.*, ${labelIdsProjectionSql('v')}
        FROM visible v
        ORDER BY v.mailbox_last_msg_at DESC, v.id`
     )
@@ -367,21 +321,7 @@ export function listLabelThreads(
       limit
     ) as MailboxThreadQueryRow[]
 
-  return rows.map((r) => ({
-    id: r.id,
-    fromDisplay: r.from_display ?? '',
-    subject: r.subject ?? '(no subject)',
-    snippet: r.snippet ?? '',
-    lastMsgAt: r.mailbox_last_msg_at ?? 0,
-    unread: r.is_unread === 1,
-    starred: r.is_starred === 1,
-    hasAttachment: r.has_attachment === 1,
-    snoozed: r.snoozed === 1,
-    returned: r.returned === 1,
-    followUpReturned: r.follow_up_returned === 1,
-    hasDraft: r.has_draft === 1,
-    labelIds: labelIds(r.label_ids)
-  }))
+  return rows.map((r) => toThreadRow(r, r.mailbox_last_msg_at))
 }
 
 export function listInboxThreads(
@@ -406,18 +346,7 @@ export function listInboxThreads(
         `WITH visible AS (
          SELECT t.account_id, t.id, t.from_display, t.subject, t.snippet, t.last_msg_at,
                 t.is_unread, t.is_starred, t.has_attachment,
-              EXISTS(SELECT 1 FROM reminders r
-                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
-                       AND r.kind = 'snooze' AND r.state = 'pending') AS snoozed,
-              EXISTS(SELECT 1 FROM reminders r
-                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
-                       AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
-              EXISTS(SELECT 1 FROM reminders r
-                     WHERE r.account_id = t.account_id AND r.thread_id = t.id
-                       AND r.kind = 'follow_up' AND r.state = 'returned') AS follow_up_returned,
-              EXISTS(SELECT 1 FROM outbox o
-                     WHERE o.account_id = t.account_id AND o.thread_id = t.id
-                       AND o.state IN ('composing', 'drafted')) AS has_draft
+              ${THREAD_AUXILIARY_PROJECTION_SQL}
          FROM threads t ${recent ? 'INDEXED BY idx_threads_recent' : ''}
          ${recent ? 'CROSS JOIN' : 'JOIN'} thread_labels inbox
            ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
@@ -430,10 +359,7 @@ export function listInboxThreads(
          ORDER BY ${sortExpression} DESC, t.id
          LIMIT ?
        )
-       SELECT v.*,
-              COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
-                        FROM thread_labels tl
-                        WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+       SELECT v.*, ${labelIdsProjectionSql('v')}
        FROM visible v
        ORDER BY COALESCE(v.last_msg_at, 0) DESC, v.id`
       )
@@ -443,22 +369,7 @@ export function listInboxThreads(
         ...(threadId ? [threadId] : []),
         ...cursorValues(pageCursor),
         pageLimit
-      ) as {
-      account_id: string
-      id: string
-      from_display: string | null
-      subject: string | null
-      snippet: string | null
-      last_msg_at: number | null
-      is_unread: number
-      is_starred: number
-      has_attachment: number
-      snoozed: number
-      returned: number
-      follow_up_returned: number
-      has_draft: number
-      label_ids: string
-    }[]
+      ) as (ThreadProjectionRow & { account_id: string; last_msg_at: number | null })[]
   }
 
   // Returned follow-ups sort above normal mail until triaged (F9). The tier
@@ -483,24 +394,7 @@ export function listInboxThreads(
     rows.push(...readRows(mailLimit - rows.length, false, true, mailCursor))
   }
 
-  return [
-    ...tier,
-    ...rows.map((r) => ({
-      id: r.id,
-      fromDisplay: r.from_display ?? '',
-      subject: r.subject ?? '(no subject)',
-      snippet: r.snippet ?? '',
-      lastMsgAt: r.last_msg_at ?? 0,
-      unread: r.is_unread === 1,
-      starred: r.is_starred === 1,
-      hasAttachment: r.has_attachment === 1,
-      snoozed: r.snoozed === 1,
-      returned: r.returned === 1,
-      followUpReturned: r.follow_up_returned === 1,
-      hasDraft: r.has_draft === 1,
-      labelIds: labelIds(r.label_ids)
-    }))
-  ]
+  return [...tier, ...rows.map((r) => toThreadRow(r, r.last_msg_at))]
 }
 
 const FOLLOW_UP_TIER_EXCLUSION_SQL = `AND NOT EXISTS (
@@ -536,10 +430,7 @@ function readFollowUpTier(
          ORDER BY fr.due_at DESC, t.id
          LIMIT ?
        )
-       SELECT v.*,
-              COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
-                        FROM thread_labels tl
-                        WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+       SELECT v.*, ${labelIdsProjectionSql('v')}
        FROM visible v
        ORDER BY v.due_at DESC, v.id`
     )
@@ -550,20 +441,9 @@ function readFollowUpTier(
       limit
     ) as (MailboxThreadQueryRow & { due_at: number })[]
   return rows.map((r) => ({
-    id: r.id,
-    fromDisplay: r.from_display ?? '',
-    subject: r.subject ?? '(no subject)',
-    snippet: r.snippet ?? '',
-    lastMsgAt: r.mailbox_last_msg_at ?? 0,
-    unread: r.is_unread === 1,
-    starred: r.is_starred === 1,
-    hasAttachment: r.has_attachment === 1,
-    snoozed: r.snoozed === 1,
-    returned: r.returned === 1,
+    ...toThreadRow(r, r.mailbox_last_msg_at),
     followUpReturned: true,
-    followUpTierAt: r.due_at,
-    hasDraft: r.has_draft === 1,
-    labelIds: labelIds(r.label_ids)
+    followUpTierAt: r.due_at
   }))
 }
 
@@ -608,10 +488,7 @@ export function listSnoozedThreads(
          ORDER BY live.due_at ASC, t.id
          LIMIT ?
        )
-       SELECT v.*,
-              COALESCE((SELECT GROUP_CONCAT(tl.label_id, char(31))
-                        FROM thread_labels tl
-                        WHERE tl.account_id = v.account_id AND tl.thread_id = v.id), '') AS label_ids
+       SELECT v.*, ${labelIdsProjectionSql('v')}
        FROM visible v
        ORDER BY v.due_at ASC, v.id`
     )
@@ -738,6 +615,13 @@ export function countInboxUnread(db: Db, accountId: string): number {
   return row.count
 }
 
+/** The signed-in address. `account_id` doubles as the email in v1 (SPEC D4). */
+function accountEmail(db: Db, accountId: string): string | undefined {
+  return (
+    db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as { email: string } | undefined
+  )?.email
+}
+
 export function getConversation(
   db: Db,
   accountId: string,
@@ -745,6 +629,18 @@ export function getConversation(
   missingBodyState: Exclude<MessageBodyState, 'complete'>,
   mailbox: ConversationMailbox = 'normal',
   withTrashedMarkers = false
+): Conversation | null {
+  return readConversation(db, accountId, threadId, missingBodyState, mailbox, withTrashedMarkers)
+}
+
+function readConversation(
+  db: Db,
+  accountId: string,
+  threadId: string,
+  missingBodyState: Exclude<MessageBodyState, 'complete'>,
+  mailbox: ConversationMailbox,
+  withTrashedMarkers: boolean,
+  selfAddress: string | undefined = accountEmail(db, accountId)
 ): Conversation | null {
   const thread = db
     .prepare('SELECT subject FROM threads WHERE account_id = ? AND id = ?')
@@ -780,10 +676,7 @@ export function getConversation(
     references_json: string | null
     trashed?: boolean
   }[]
-  const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
-    | { email: string }
-    | undefined
-  const selfEmail = normalizeEmailKey(account?.email ?? accountId)
+  const selfEmail = normalizeEmailKey(selfAddress ?? accountId)
 
   const messages: ConversationMsg[] = rows
     .flatMap((row) => {
@@ -862,13 +755,19 @@ export function getConversationForDisplay(
   mailbox: ConversationMailbox = 'normal',
   withTrashedMarkers = false
 ): Conversation | null {
-  const conversation = getConversation(db, accountId, threadId, missingBodyState, mailbox, withTrashedMarkers)
+  // One account read for both halves: the reader below needs the same address.
+  const account = accountEmail(db, accountId)
+  const conversation = readConversation(
+    db,
+    accountId,
+    threadId,
+    missingBodyState,
+    mailbox,
+    withTrashedMarkers,
+    account
+  )
   if (!conversation) return null
   if (mailbox === 'spam' || mailbox === 'trash') return conversation
-
-  const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
-    | { email: string }
-    | undefined
   const confirmedMessageIds = new Set(conversation.messages.map((message) => message.id))
   const confirmedByRfcId = new Map(
     conversation.messages.flatMap((message) =>
@@ -911,7 +810,7 @@ export function getConversationForDisplay(
           (message) =>
             canonicalBody.length > 0 &&
             !claimedConfirmedIds.has(message.id) &&
-            normalizeEmailKey(message.fromEmail) === normalizeEmailKey(account.email) &&
+            normalizeEmailKey(message.fromEmail) === normalizeEmailKey(account) &&
             Math.abs(message.at - row.updated_at) <= LEGACY_SENT_MATCH_WINDOW_MS &&
             canonicalSentBody(message.bodyText) === canonicalBody
         )
@@ -931,7 +830,7 @@ export function getConversationForDisplay(
         rfcMessageId: row.rfc_message_id,
         references: parseJson(row.references_json, []),
         fromName: 'Me',
-        fromEmail: account?.email ?? accountId,
+        fromEmail: account ?? accountId,
         at: row.updated_at,
         recipients: {
           to: parseJson(row.to_json, []),
@@ -1027,10 +926,7 @@ export function searchContacts(
   const needle = foldForSearch(query)
   // account_id doubles as the email in v1, but read the account row so a future
   // opaque account id (SPEC D4) cannot start suggesting the signed-in address.
-  const account = db.prepare('SELECT email FROM accounts WHERE id = ?').get(accountId) as
-    | { email: string }
-    | undefined
-  const selfEmail = account?.email ?? accountId
+  const selfEmail = accountEmail(db, accountId) ?? accountId
 
   const rows = (needle ? contactPrefixMatches(db, accountId, needle) : []).filter((row) =>
     isValidEmail(row.email)

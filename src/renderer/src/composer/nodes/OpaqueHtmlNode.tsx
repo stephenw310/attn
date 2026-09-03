@@ -7,7 +7,9 @@ import {
   type SerializedLexicalNode,
   type Spread
 } from 'lexical'
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { MailFrame, mailFrameShell, useMailFrameAccess } from '../../mailFrame'
+import { normalizedContentId, TRANSPARENT_IMAGE } from '../../mailInlineImages'
 import { suppressBlockedRemoteImages } from '../../mailRemoteContent'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from '../DraftContentContext'
 import { decodeOpaqueHtml, encodeOpaqueHtml, opaqueHtmlText, sanitizedDomMatchesSource } from '../preserve'
@@ -15,7 +17,6 @@ import { sanitizeDraftHtmlForImport } from '../sanitize'
 
 export type SerializedOpaqueHtmlNode = Spread<{ html: string; inline: boolean }, SerializedLexicalNode>
 
-const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 const MAX_PREVIEW_HEIGHT = 600
 
 function sanitizeEncodedHtml(encoded: unknown): string {
@@ -26,14 +27,6 @@ function sanitizeEncodedHtml(encoded: unknown): string {
     return sanitizedDomMatchesSource(source, sanitized) ? encoded : encodeOpaqueHtml(sanitized)
   } catch {
     return ''
-  }
-}
-
-function normalizeContentId(value: string): string {
-  try {
-    return decodeURIComponent(value).replace(/^<|>$/g, '').toLowerCase()
-  } catch {
-    return value.replace(/^<|>$/g, '').toLowerCase()
   }
 }
 
@@ -49,6 +42,11 @@ function opaqueContentIds(html: string): string[] {
   ]
 }
 
+/**
+ * The preserved region is already node-level sanitized; this pass only swaps in
+ * the images the preview may paint, then hands the body to the one mail-frame
+ * shell every untrusted `about:srcdoc` document shares (review R5).
+ */
 function previewSrcDoc(
   html: string,
   images: ReadonlyMap<string, string>,
@@ -59,9 +57,16 @@ function previewSrcDoc(
   for (const image of document.querySelectorAll<HTMLImageElement>('img[src]')) {
     const source = image.getAttribute('src')?.trim() ?? ''
     if (!source.toLowerCase().startsWith('cid:')) continue
-    image.setAttribute('src', images.get(normalizeContentId(source.slice(4))) ?? TRANSPARENT_IMAGE)
+    image.setAttribute('src', images.get(normalizedContentId(source.slice(4))) ?? TRANSPARENT_IMAGE)
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'"><base target="_blank"><style>html,body{margin:0;padding:0;background:#fff;color:#202124}body{font:14px/1.6 Arial,sans-serif;overflow-wrap:break-word}img{max-width:100%;height:auto}img[data-remote-blocked="true"]{visibility:hidden}table{max-width:100%}</style></head><body>${document.body.innerHTML}</body></html>`
+  // A draft's preserved markup is authored content on the sender's own light
+  // canvas, whatever theme the app is wearing.
+  return mailFrameShell(document.body.innerHTML, {
+    surface: 'light',
+    layout: 'padded',
+    appearance: 'light',
+    scrollable: true
+  })
 }
 
 function OpaqueHtmlPreview({ encoded, inline }: { encoded: string; inline: boolean }): React.JSX.Element {
@@ -71,69 +76,17 @@ function OpaqueHtmlPreview({ encoded, inline }: { encoded: string; inline: boole
   const contentIds = useMemo(() => opaqueContentIds(html), [html])
   const [images, setImages] = useState<ReadonlyMap<string, string>>(() => new Map())
   const [height, setHeight] = useState<number | null>(null)
-  const observerRef = useRef<ResizeObserver | null>(null)
-  const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(false)
-  const srcDoc = useMemo(
-    () => previewSrcDoc(html, images, remoteImagesAllowed),
-    [html, images, remoteImagesAllowed]
-  )
 
   // T33: the preserved region is the same untrusted about:srcdoc mail HTML as
   // the quoted history, so it registers with main's request filter under the
   // draft's source message — a per-sender exception then covers a reply's
   // preserved content too (PR #101 review). Without a source id the frame
-  // stays unnamed and fails closed while blocking is on, exactly as before.
-  const [frameNonce, setFrameNonce] = useState<string | null>(null)
-  const [frameEpoch, setFrameEpoch] = useState(0)
-  useEffect(() => {
-    const bridge = window.attn
-    if (!bridge) return
-    return bridge.mail.onRemoteImagesChanged(() => setFrameEpoch((epoch) => epoch + 1))
-  }, [])
-  // biome-ignore lint/correctness/useExhaustiveDependencies: frameEpoch deliberately re-registers so policy changes reach a mounted preview
-  useEffect(() => {
-    const bridge = window.attn
-    setFrameNonce(null)
-    setRemoteImagesAllowed(false)
-    if (!bridge) {
-      setFrameNonce('')
-      return
-    }
-    if (sourceMessageId === null) {
-      let stale = false
-      void bridge.settings
-        .getAll()
-        .then((settings) => {
-          if (!stale) {
-            setRemoteImagesAllowed(!settings.remoteImagesBlocked)
-            setFrameNonce('')
-          }
-        })
-        .catch(() => {
-          if (!stale) setFrameNonce('')
-        })
-      return () => {
-        stale = true
-      }
-    }
-    const nonce = crypto.randomUUID()
-    let stale = false
-    bridge.mail
-      .registerMessageFrame(nonce, sourceMessageId, false)
-      .then(({ imagesAllowed }) => {
-        if (!stale) {
-          setRemoteImagesAllowed(imagesAllowed)
-          setFrameNonce(nonce)
-        }
-      })
-      .catch(() => {
-        if (!stale) setFrameNonce('')
-      })
-    return () => {
-      stale = true
-      void bridge.mail.unregisterMessageFrame(nonce).catch(() => {})
-    }
-  }, [frameEpoch, sourceMessageId])
+  // stays unnamed and fails closed while blocking is on.
+  const { access } = useMailFrameAccess({ messageId: sourceMessageId })
+  const srcDoc = useMemo(
+    () => previewSrcDoc(html, images, access?.imagesAllowed === true),
+    [access?.imagesAllowed, html, images]
+  )
 
   useEffect(() => {
     setImages(new Map())
@@ -141,9 +94,9 @@ function OpaqueHtmlPreview({ encoded, inline }: { encoded: string; inline: boole
     let cancelled = false
     void Promise.all(
       contentIds.map(async (contentId) => {
-        const normalizedContentId = normalizeContentId(contentId)
-        const result = await window.attn?.draft.getInlineImage(draftId, normalizedContentId)
-        return [normalizedContentId, result && 'dataUrl' in result ? result.dataUrl : null] as const
+        const normalized = normalizedContentId(contentId)
+        const result = await window.attn?.draft.getInlineImage(draftId, normalized)
+        return [normalized, result && 'dataUrl' in result ? result.dataUrl : null] as const
       })
     ).then((entries) => {
       if (cancelled) return
@@ -154,41 +107,23 @@ function OpaqueHtmlPreview({ encoded, inline }: { encoded: string; inline: boole
     }
   }, [contentIds, draftId])
 
-  const observe = useCallback((frame: HTMLIFrameElement) => {
-    observerRef.current?.disconnect()
-    const document = frame.contentDocument
-    if (!document?.body) return
-    const measure = (): void => {
-      const next = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, 1)
-      setHeight(Math.min(Math.ceil(next), MAX_PREVIEW_HEIGHT))
-    }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(document.body)
-    observerRef.current = observer
+  const measure = useCallback((frameDocument: Document) => {
+    const next = Math.max(frameDocument.documentElement.scrollHeight, frameDocument.body.scrollHeight, 1)
+    setHeight(Math.min(Math.ceil(next), MAX_PREVIEW_HEIGHT))
   }, [])
-
-  useEffect(
-    () => () => {
-      observerRef.current?.disconnect()
-    },
-    []
-  )
 
   // The frame mounts only after main has answered its registration, so an
   // allowed sender's images are never spuriously cancelled by a race; a
   // policy change remounts it (new key) under a fresh registration.
   const frame =
-    frameNonce === null ? null : (
-      <iframe
-        key={frameNonce}
-        name={frameNonce || undefined}
+    access === null ? null : (
+      <MailFrame
+        access={access}
         title="Preserved draft content"
-        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         referrerPolicy="no-referrer"
         className={inline ? 'block w-96 max-w-full border-0 bg-white' : 'block w-full border-0 bg-white'}
         srcDoc={srcDoc}
-        onLoad={(event) => observe(event.currentTarget)}
+        onMeasure={measure}
         style={{ height: height ?? 1, visibility: height === null ? 'hidden' : 'visible' }}
       />
     )

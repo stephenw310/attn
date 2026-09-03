@@ -27,7 +27,7 @@ export const SNIPPET_CURSOR_MARKER = '{cursor}'
 export const SNIPPET_NAME_MAX_LENGTH = 100
 export const SNIPPET_SUBJECT_MAX_LENGTH = 500
 export const SNIPPET_BODY_MAX_LENGTH = 262_144
-export const SNIPPET_TRIGGER_MAX_LENGTH = 32
+const SNIPPET_TRIGGER_MAX_LENGTH = 32
 
 /** A trigger is one `;`-invokable word: letters/digits with - or _ inside. */
 const TRIGGER_SHAPE = /^[a-z0-9][a-z0-9_-]*$/

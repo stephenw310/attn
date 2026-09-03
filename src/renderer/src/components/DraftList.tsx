@@ -1,4 +1,5 @@
 import type { Draft } from '../../../shared/drafts'
+import { recipientLabel, SimpleRowList } from './SimpleRowList'
 
 interface DraftListProps {
   drafts: readonly Draft[]
@@ -8,12 +9,6 @@ interface DraftListProps {
   selectedRowRef: React.RefObject<HTMLDivElement | null>
   listRef: React.RefObject<HTMLElement | null>
   onOpen: (index: number) => void
-}
-
-function recipientLabel(draft: Draft): string {
-  const recipients = [...draft.to, ...draft.cc, ...draft.bcc]
-  if (recipients.length === 0) return draft.kind === 'forward' ? 'Forward' : 'No recipients'
-  return recipients.map((address) => address.name || address.email).join(', ')
 }
 
 export function DraftList({
@@ -26,43 +21,33 @@ export function DraftList({
   onOpen
 }: DraftListProps): React.JSX.Element {
   return (
-    <main
-      ref={listRef}
-      data-testid="draft-list"
-      tabIndex={-1}
-      className={`min-h-0 flex-1 overflow-y-auto py-2 outline-none ${readerOpen ? 'hidden' : ''}`}
-      aria-label="Drafts"
-    >
-      {drafts.length === 0 && (
-        <div className="flex h-full items-center justify-center text-ink-faint">No drafts</div>
-      )}
-      {drafts.map((draft, index) => {
-        const selected = index === selectedIndex
-        const selectionShown = selectionVisible && selected
-        return (
-          // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard access is provided by the command registry
-          // biome-ignore lint/a11y/noStaticElementInteractions: keyboard access is provided by the command registry
-          <div
-            key={draft.id}
-            ref={selected ? selectedRowRef : null}
-            data-testid="draft-row"
-            data-draft-id={draft.id}
-            data-selected={selectionShown || undefined}
-            className={`flex cursor-default select-none items-center gap-4 border-l-[3px] py-3 pr-7 pl-5 ${
-              selectionShown ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'
-            }`}
-            onClick={() => onOpen(index)}
-          >
-            <span className="w-52 flex-none truncate text-sm text-ink-dim">{recipientLabel(draft)}</span>
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
-              {draft.subject || '(no subject)'}
-            </span>
-            <span className="text-xs capitalize text-ink-faint">
-              {draft.kind === 'replyAll' ? 'reply all' : draft.kind}
-            </span>
-          </div>
+    <SimpleRowList
+      testId="draft-list"
+      ariaLabel="Drafts"
+      listRef={listRef}
+      containerClassName={`min-h-0 flex-1 overflow-y-auto py-2 outline-none ${readerOpen ? 'hidden' : ''}`}
+      focusable
+      emptyLabel="No drafts"
+      rows={drafts}
+      rowKey={(draft) => draft.id}
+      rowTestId="draft-row"
+      rowData={(draft) => ({ 'data-draft-id': draft.id })}
+      recipients={(draft) =>
+        recipientLabel(
+          [draft.to, draft.cc, draft.bcc],
+          draft.kind === 'forward' ? 'Forward' : 'No recipients'
         )
-      })}
-    </main>
+      }
+      subject={(draft) => draft.subject || '(no subject)'}
+      trailing={(draft) => (
+        <span className="text-xs capitalize text-ink-faint">
+          {draft.kind === 'replyAll' ? 'reply all' : draft.kind}
+        </span>
+      )}
+      selectedIndex={selectedIndex}
+      selectionVisible={selectionVisible}
+      selectedRowRef={selectedRowRef}
+      onOpen={onOpen}
+    />
   )
 }

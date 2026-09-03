@@ -1,77 +1,87 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Db } from '../db'
-import { GmailApiError } from '../gmail/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { type Db, openDatabase } from '../db'
 import type { GmailThread } from '../gmail/parse'
-import { systemTime } from '../time'
+import { fakeMailProvider, fakeSchedulerTime } from '../testing/fakes'
 import { type LifetimeSweepCallbacks, planLifetimeSweepStart, runLifetimeSweep } from './lifetimeSweep'
 import type { MailProvider } from './provider'
 
+// A spy that calls the real writer: the sweep's persistence options stay
+// assertable while every read and write goes through real SQLite, the way the
+// other sync suites work.
 const mocks = vi.hoisted(() => ({ persistThread: vi.fn() }))
 
-vi.mock('./persist', () => ({ persistThread: mocks.persistThread }))
+vi.mock('./persist', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./persist')>()
+  mocks.persistThread.mockImplementation(actual.persistThread)
+  return { ...actual, persistThread: mocks.persistThread }
+})
 
-interface FakeDbState {
-  cursor: string | null
-  threadIds: Set<string>
-  done?: number
-  total?: number | null
+const ACCOUNT = 'test@example.com'
+
+/** What Gmail returns for `format: 'metadata'`: headers, no body parts. */
+function metadataThread(id: string): GmailThread {
+  return {
+    id,
+    messages: [
+      {
+        id: `m-${id}`,
+        threadId: id,
+        labelIds: ['INBOX'],
+        internalDate: '1000',
+        snippet: `Snippet ${id}`,
+        payload: {
+          headers: [
+            { name: 'From', value: 'Sender <sender@example.com>' },
+            { name: 'Subject', value: `Subject ${id}` }
+          ]
+        }
+      }
+    ]
+  }
 }
 
-const fakeDbStates = new WeakMap<Db, FakeDbState>()
-
-function fakeDb(state: FakeDbState): Db {
-  const db = {
-    prepare: (sql: string) => ({
-      get: (...args: unknown[]) => {
-        if (sql.startsWith('SELECT sweep_cursor')) {
-          return {
-            sweep_cursor: state.cursor,
-            sweep_threads_done: state.done ?? 0,
-            sweep_threads_total: state.total ?? null
-          }
-        }
-        if (sql.startsWith('SELECT COUNT(*) AS count FROM threads')) {
-          return { count: state.threadIds.size }
-        }
-        if (sql.startsWith('SELECT 1 FROM threads')) {
-          return state.threadIds.has(args[1] as string) ? { 1: 1 } : undefined
-        }
-        return undefined
-      },
-      run: (...args: unknown[]) => {
-        if (sql.includes('UPDATE sync_state')) {
-          state.cursor = args[0] as string
-          state.done = args[1] as number
-          state.total = args[2] as number | null
-        }
-        return { changes: 1 }
-      }
-    })
-  } as unknown as Db
-  fakeDbStates.set(db, state)
+function store(cursor: string | null, storedIds: readonly string[] = [], threadsDone = 0): Db {
+  const db = openDatabase(':memory:')
+  db.prepare('INSERT INTO sync_state (account_id, sweep_cursor, sweep_threads_done) VALUES (?, ?, ?)').run(
+    ACCOUNT,
+    cursor,
+    threadsDone
+  )
+  const insert = db.prepare(
+    'INSERT INTO threads (account_id, id, last_msg_at, is_inbox_visible) VALUES (?, ?, 1000, 0)'
+  )
+  db.transaction(() => {
+    for (const id of storedIds) insert.run(ACCOUNT, id)
+  })()
   return db
 }
 
+function storedIds(db: Db): string[] {
+  return (
+    db.prepare('SELECT id FROM threads WHERE account_id = ? ORDER BY id').all(ACCOUNT) as {
+      id: string
+    }[]
+  ).map((row) => row.id)
+}
+
+function sweepState(db: Db): { cursor: string | null; done: number } {
+  const row = db
+    .prepare('SELECT sweep_cursor, sweep_threads_done FROM sync_state WHERE account_id = ?')
+    .get(ACCOUNT) as { sweep_cursor: string | null; sweep_threads_done: number }
+  return { cursor: row.sweep_cursor, done: row.sweep_threads_done }
+}
+
 function provider(overrides: Partial<MailProvider> = {}): MailProvider {
-  return {
-    modifyThread: vi.fn(async () => {}),
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
+  return fakeMailProvider({
     getProfile: vi.fn(async () => ({
-      emailAddress: 'test@example.com',
+      emailAddress: ACCOUNT,
       historyId: '101',
       threadsTotal: 50,
       messagesTotal: 70
     })),
-    listLabels: vi.fn(async () => []),
-    listThreadIds: vi.fn(async () => ({ threadIds: [] })),
-    getThread: vi.fn(async (id) => ({ id, messages: [] })),
-    getAttachmentData: vi.fn(async () => undefined),
-    listHistory: vi.fn(async () => ({ history: [], historyId: '101' })),
-    listDrafts: vi.fn(async () => ({ drafts: [] })),
-    getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: `thread-${id}` } })),
+    getThread: vi.fn(async (id: string) => metadataThread(id)),
     ...overrides
-  }
+  })
 }
 
 function callbacks(): LifetimeSweepCallbacks & {
@@ -86,16 +96,11 @@ async function flush(): Promise<void> {
   await Promise.resolve()
 }
 
+const NO_PAUSE = { requestIntervalMs: 0, pagePauseMs: 0 }
+
 afterEach(() => {
   vi.useRealTimers()
-  mocks.persistThread.mockReset()
-})
-
-beforeEach(() => {
-  mocks.persistThread.mockImplementation((db: Db, _accountId: string, thread: GmailThread) => {
-    fakeDbStates.get(db)?.threadIds.add(thread.id)
-    return true
-  })
+  mocks.persistThread.mockClear()
 })
 
 describe('lifetime sweep cursor routing', () => {
@@ -119,223 +124,223 @@ describe('lifetime sweep cursor routing', () => {
 })
 
 describe('lifetime header indexing', () => {
-  it('uses an unfiltered listing, skips stored ids, and fetches metadata only', async () => {
-    const state: FakeDbState = { cursor: null, threadIds: new Set(['stored']) }
-    const mail = provider({
-      listThreadIds: vi.fn(async () => ({ threadIds: ['stored', 'old'] })),
-      getThread: vi.fn(async (id) => ({ id, messages: [] }))
-    })
-    const events = callbacks()
+  it('uses an unfiltered listing, skips stored ids, and stores hidden metadata rows', async () => {
+    const db = store(null, ['stored'])
+    try {
+      const mail = provider({ listThreadIds: vi.fn(async () => ({ threadIds: ['stored', 'old'] })) })
+      const events = callbacks()
 
-    const result = await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', events, {
-      requestIntervalMs: 0,
-      pagePauseMs: 0
-    })
+      const result = await runLifetimeSweep(db, mail, ACCOUNT, events, NO_PAUSE)
 
-    expect(mail.listThreadIds).toHaveBeenCalledWith({
-      pageToken: undefined,
-      priority: 'background'
-    })
-    expect(mail.getThread).toHaveBeenCalledOnce()
-    expect(mail.getThread).toHaveBeenCalledWith('old', {
-      format: 'metadata',
-      priority: 'background'
-    })
-    expect(mocks.persistThread).toHaveBeenCalledWith(
-      expect.anything(),
-      'test@example.com',
-      { id: 'old', messages: [] },
-      { metadataOnly: true, inboxVisibility: 'hide' }
-    )
-    expect(state.cursor).toBe('done')
-    expect(state.done).toBe(2)
-    expect(result).toMatchObject({ threadCount: 2, quotaWaitMs: 0 })
-    expect(events.onError).not.toHaveBeenCalled()
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ threadsDone: 2, threadsTotal: 50, messagesTotal: 70 })
-    )
+      expect(mail.listThreadIds).toHaveBeenCalledWith({
+        pageToken: undefined,
+        priority: 'background'
+      })
+      expect(mail.getThread).toHaveBeenCalledOnce()
+      expect(mail.getThread).toHaveBeenCalledWith('old', {
+        format: 'metadata',
+        priority: 'background'
+      })
+      expect(mocks.persistThread).toHaveBeenCalledWith(expect.anything(), ACCOUNT, metadataThread('old'), {
+        metadataOnly: true,
+        inboxVisibility: 'hide'
+      })
+      // Stored for lifetime recall, outside the bounded Inbox surface.
+      expect(storedIds(db)).toEqual(['old', 'stored'])
+      expect(
+        db.prepare('SELECT is_inbox_visible FROM threads WHERE account_id = ? AND id = ?').get(ACCOUNT, 'old')
+      ).toEqual({ is_inbox_visible: 0 })
+      expect(sweepState(db)).toEqual({ cursor: 'done', done: 2 })
+      expect(result).toMatchObject({ threadCount: 2, quotaWaitMs: 0 })
+      expect(events.onError).not.toHaveBeenCalled()
+      expect(events.onProgress).toHaveBeenCalledWith(
+        expect.objectContaining({ threadsDone: 2, threadsTotal: 50, messagesTotal: 70 })
+      )
+    } finally {
+      db.close()
+    }
   })
 
   it('stops at the conversation cap without discarding its cursor or making requests', async () => {
     // The walk is newest first, so a cap keeps the newest conversations and
     // leaves the rest to server search. Two already stored, cap of two: the
     // third must never be fetched.
-    const state: FakeDbState = { cursor: null, threadIds: new Set(['newest', 'next']) }
-    const mail = provider({
-      listThreadIds: vi.fn(async () => ({ threadIds: ['newest', 'next', 'older'] })),
-      getThread: vi.fn(async (id) => ({ id, messages: [] }))
-    })
-    const events = callbacks()
+    const db = store(null, ['newest', 'next'])
+    try {
+      const mail = provider({
+        listThreadIds: vi.fn(async () => ({ threadIds: ['newest', 'next', 'older'] }))
+      })
+      const events = callbacks()
 
-    const result = await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', events, {
-      requestIntervalMs: 0,
-      pagePauseMs: 0,
-      threadCap: 2
-    })
+      const result = await runLifetimeSweep(db, mail, ACCOUNT, events, { ...NO_PAUSE, threadCap: 2 })
 
-    expect(mail.getThread).not.toHaveBeenCalled()
-    expect(mail.getProfile).not.toHaveBeenCalled()
-    expect(mail.listThreadIds).not.toHaveBeenCalled()
-    expect(mocks.persistThread).not.toHaveBeenCalled()
-    expect(state.cursor).toBe('capped:lifetime')
-    expect(result).toMatchObject({ threadCount: 0 })
-    expect(events.onError).not.toHaveBeenCalled()
+      expect(mail.getThread).not.toHaveBeenCalled()
+      expect(mail.getProfile).not.toHaveBeenCalled()
+      expect(mail.listThreadIds).not.toHaveBeenCalled()
+      expect(mocks.persistThread).not.toHaveBeenCalled()
+      expect(sweepState(db).cursor).toBe('capped:lifetime')
+      expect(result).toMatchObject({ threadCount: 0 })
+      expect(events.onError).not.toHaveBeenCalled()
+    } finally {
+      db.close()
+    }
   })
 
   it.each([4, 0])(
     'resumes a partial page when the cap changes to %i without double-counting ids',
     async (cap) => {
-      const state = { cursor: 'lifetime:page-2', threadIds: new Set(['first', 'second']), done: 2 }
-      const db = fakeDb(state)
-      const mail = provider({
-        listThreadIds: vi.fn(async ({ pageToken } = {}) =>
-          pageToken === 'page-2'
-            ? { threadIds: ['third', 'fourth'], nextPageToken: 'page-3' }
-            : { threadIds: ['fifth'] }
-        )
-      })
-      const events = callbacks()
-      const run = (threadCap: number) =>
-        runLifetimeSweep(db, mail, 'test@example.com', events, {
-          threadCap,
-          requestIntervalMs: 0,
-          pagePauseMs: 0
+      const db = store('lifetime:page-2', ['first', 'second'], 2)
+      try {
+        const mail = provider({
+          listThreadIds: vi.fn(async ({ pageToken } = {}) =>
+            pageToken === 'page-2'
+              ? { threadIds: ['third', 'fourth'], nextPageToken: 'page-3' }
+              : { threadIds: ['fifth'] }
+          )
         })
+        const events = callbacks()
+        const run = (threadCap: number) =>
+          runLifetimeSweep(db, mail, ACCOUNT, events, { ...NO_PAUSE, threadCap })
 
-      await run(3)
-      expect(state.threadIds).toEqual(new Set(['first', 'second', 'third']))
-      expect(state.cursor).toBe('capped:lifetime:page-2')
-      expect(state.done).toBe(2)
-      vi.mocked(mail.getThread).mockClear()
-      vi.mocked(mail.listThreadIds).mockClear()
-      vi.mocked(mail.getProfile).mockClear()
-      await run(3)
-      await run(2)
-      expect(mail.getThread).not.toHaveBeenCalled()
-      expect(mail.listThreadIds).not.toHaveBeenCalled()
-      expect(mail.getProfile).not.toHaveBeenCalled()
+        await run(3)
+        expect(storedIds(db)).toEqual(['first', 'second', 'third'])
+        expect(sweepState(db)).toEqual({ cursor: 'capped:lifetime:page-2', done: 2 })
+        vi.mocked(mail.getThread).mockClear()
+        vi.mocked(mail.listThreadIds).mockClear()
+        vi.mocked(mail.getProfile).mockClear()
+        await run(3)
+        await run(2)
+        expect(mail.getThread).not.toHaveBeenCalled()
+        expect(mail.listThreadIds).not.toHaveBeenCalled()
+        expect(mail.getProfile).not.toHaveBeenCalled()
 
-      await run(cap)
-      expect(mail.listThreadIds).toHaveBeenNthCalledWith(1, {
-        pageToken: 'page-2',
-        priority: 'background'
-      })
-      expect(vi.mocked(mail.getThread).mock.calls.map(([id]) => id)).toEqual(
-        cap === 0 ? ['fourth', 'fifth'] : ['fourth']
-      )
-      expect(state.done).toBe(cap === 0 ? 5 : 4)
-      expect(state.cursor).toBe(cap === 0 ? 'done' : 'capped:lifetime:page-3')
-      expect(events.onError).not.toHaveBeenCalled()
+        await run(cap)
+        expect(mail.listThreadIds).toHaveBeenNthCalledWith(1, {
+          pageToken: 'page-2',
+          priority: 'background'
+        })
+        expect(vi.mocked(mail.getThread).mock.calls.map(([id]) => id)).toEqual(
+          cap === 0 ? ['fourth', 'fifth'] : ['fourth']
+        )
+        expect(sweepState(db)).toEqual({
+          cursor: cap === 0 ? 'done' : 'capped:lifetime:page-3',
+          done: cap === 0 ? 5 : 4
+        })
+        expect(events.onError).not.toHaveBeenCalled()
+      } finally {
+        db.close()
+      }
     }
   )
 
   it('stores the whole account when the cap is disabled', async () => {
-    const state: FakeDbState = { cursor: null, threadIds: new Set(['stored']) }
-    const mail = provider({
-      listThreadIds: vi.fn(async () => ({ threadIds: ['stored', 'older'] })),
-      getThread: vi.fn(async (id) => ({ id, messages: [] }))
-    })
+    const db = store(null, ['stored'])
+    try {
+      const mail = provider({ listThreadIds: vi.fn(async () => ({ threadIds: ['stored', 'older'] })) })
 
-    await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', callbacks(), {
-      requestIntervalMs: 0,
-      pagePauseMs: 0,
-      threadCap: 0
-    })
+      await runLifetimeSweep(db, mail, ACCOUNT, callbacks(), { ...NO_PAUSE, threadCap: 0 })
 
-    expect(mail.getThread).toHaveBeenCalledWith('older', expect.anything())
-  })
-
-  it('resumes from the durable page token and restarts an expired token once', async () => {
-    const state = { cursor: 'lifetime:expired', threadIds: new Set<string>() }
-    const listThreadIds = vi
-      .fn()
-      .mockRejectedValueOnce(new GmailApiError(400, 'invalid page token'))
-      .mockResolvedValueOnce({ threadIds: [] })
-    const mail = provider({ listThreadIds })
-
-    await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', callbacks(), {
-      requestIntervalMs: 0,
-      pagePauseMs: 0
-    })
-
-    expect(listThreadIds).toHaveBeenNthCalledWith(1, {
-      pageToken: 'expired',
-      priority: 'background'
-    })
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
-      pageToken: undefined,
-      priority: 'background'
-    })
-    expect(state.cursor).toBe('done')
+      expect(mail.getThread).toHaveBeenCalledWith('older', expect.anything())
+      expect(storedIds(db)).toEqual(['older', 'stored'])
+    } finally {
+      db.close()
+    }
   })
 
   it('does not write or advance the cursor after cancellation during a metadata request', async () => {
-    let resolveThread!: (thread: GmailThread) => void
-    const thread = new Promise<GmailThread>((resolve) => {
-      resolveThread = resolve
-    })
-    let active = true
-    const state = { cursor: 'lifetime', threadIds: new Set<string>() }
-    const mail = provider({
-      listThreadIds: vi.fn(async () => ({ threadIds: ['old'] })),
-      getThread: vi.fn(() => thread)
-    })
+    const db = store('lifetime')
+    try {
+      let resolveThread!: (thread: GmailThread) => void
+      const thread = new Promise<GmailThread>((resolve) => {
+        resolveThread = resolve
+      })
+      let active = true
+      const mail = provider({
+        listThreadIds: vi.fn(async () => ({ threadIds: ['old'] })),
+        getThread: vi.fn(() => thread)
+      })
 
-    const run = runLifetimeSweep(fakeDb(state), mail, 'test@example.com', callbacks(), {
-      requestIntervalMs: 0,
-      pagePauseMs: 0,
-      shouldContinue: () => active
-    })
-    await flush()
-    active = false
-    resolveThread({ id: 'old', messages: [] })
+      const run = runLifetimeSweep(db, mail, ACCOUNT, callbacks(), {
+        ...NO_PAUSE,
+        shouldContinue: () => active
+      })
+      await flush()
+      active = false
+      resolveThread(metadataThread('old'))
 
-    await expect(run).resolves.toBeNull()
-    expect(mocks.persistThread).not.toHaveBeenCalled()
-    expect(state.cursor).toBe('lifetime')
+      await expect(run).resolves.toBeNull()
+      expect(mocks.persistThread).not.toHaveBeenCalled()
+      expect(storedIds(db)).toEqual([])
+      expect(sweepState(db).cursor).toBe('lifetime')
+    } finally {
+      db.close()
+    }
   })
 
-  it('paces page requests and yields repeatedly to foreground work on injected time', async () => {
+  it('counts stored threads once a page, never on a foreground-yield tick', async () => {
     vi.useFakeTimers()
-    let foregroundBusy = true
-    const state = { cursor: 'lifetime', threadIds: new Set<string>() }
-    const listThreadIds = vi
-      .fn()
-      .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-2' })
-      .mockResolvedValueOnce({ threadIds: [] })
-    const events = callbacks()
-    const run = runLifetimeSweep(fakeDb(state), provider({ listThreadIds }), 'test@example.com', events, {
-      requestIntervalMs: 100,
-      pagePauseMs: 1_000,
-      foregroundYieldMs: 250,
-      shouldYield: () => foregroundBusy
-    })
+    const inner = store('lifetime')
+    try {
+      let foregroundBusy = true
+      let counts = 0
+      // Counting every stored thread id scans the account: on a 400,000-thread
+      // store the 250 ms yield loop would repeat that scan while foreground work
+      // holds the single utility-process connection.
+      const countingStatement = (statement: ReturnType<Db['prepare']>): ReturnType<Db['prepare']> =>
+        new Proxy(statement, {
+          get(target, property, receiver) {
+            if (property === 'get') {
+              return (accountId: string) => {
+                counts++
+                return target.get(accountId)
+              }
+            }
+            const value = Reflect.get(target, property, receiver)
+            return typeof value === 'function' ? value.bind(target) : value
+          }
+        })
+      const db = new Proxy(inner, {
+        get(target, property, receiver) {
+          if (property === 'prepare') {
+            return (sql: string) => {
+              const statement = target.prepare(sql)
+              return sql.startsWith('SELECT COUNT(*) AS count FROM threads')
+                ? countingStatement(statement)
+                : statement
+            }
+          }
+          const value = Reflect.get(target, property, receiver)
+          return typeof value === 'function' ? value.bind(target) : value
+        }
+      }) as Db
+      const listThreadIds = vi
+        .fn()
+        .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-2' })
+        .mockResolvedValueOnce({ threadIds: [] })
+      const events = callbacks()
 
-    await flush()
-    expect(listThreadIds).not.toHaveBeenCalled()
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: 'foreground-yield', waitMs: 250 })
-    )
+      const run = runLifetimeSweep(db, provider({ listThreadIds }), ACCOUNT, events, {
+        requestIntervalMs: 0,
+        pagePauseMs: 1_000,
+        foregroundYieldMs: 250,
+        shouldYield: () => foregroundBusy
+      })
 
-    foregroundBusy = false
-    await vi.advanceTimersByTimeAsync(250)
-    expect(listThreadIds).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(99)
-    expect(listThreadIds).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(listThreadIds).toHaveBeenCalledOnce()
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: 'quota-wait', waitMs: 1_000 })
-    )
+      await flush()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(events.onProgress).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: 'foreground-yield', waitMs: 250 })
+      )
+      expect(events.onProgress.mock.calls.length).toBeGreaterThan(3)
+      expect(counts).toBe(1)
 
-    await vi.advanceTimersByTimeAsync(999)
-    expect(listThreadIds).toHaveBeenCalledOnce()
-    await vi.advanceTimersByTimeAsync(1)
-    await expect(run).resolves.toMatchObject({ threadCount: 0, quotaWaitMs: 0 })
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
-      pageToken: 'page-2',
-      priority: 'background'
-    })
+      foregroundBusy = false
+      await vi.advanceTimersByTimeAsync(2_000)
+      await expect(run).resolves.toMatchObject({ threadCount: 0 })
+      expect(counts).toBe(3)
+    } finally {
+      inner.close()
+    }
   })
 
   it.each([
@@ -345,236 +350,238 @@ describe('lifetime header indexing', () => {
     { threadCap: 0, expectedEtaMs: 7_200 },
     { threadCap: 1, expectedEtaMs: undefined }
   ])('estimates remaining metadata work with cap $threadCap', async ({ threadCap, expectedEtaMs }) => {
-    let now = 0
-    const state = { cursor: 'lifetime', threadIds: new Set<string>() }
-    mocks.persistThread.mockImplementation((_db, _accountId, thread: GmailThread) => {
-      state.threadIds.add(thread.id)
-      return true
-    })
-    const events = callbacks()
+    const db = store('lifetime')
+    try {
+      const time = fakeSchedulerTime()
+      const events = callbacks()
 
-    await runLifetimeSweep(
-      fakeDb(state),
-      provider({
-        getProfile: vi.fn(async () => {
-          now = 100
-          return {
-            emailAddress: 'test@example.com',
-            historyId: '101',
-            threadsTotal: 10
-          }
-        }),
-        listThreadIds: vi
-          .fn()
-          .mockImplementationOnce(async () => {
-            now = 200
-            return { threadIds: ['old'], nextPageToken: 'page-2', resultSizeEstimate: 10 }
+      await runLifetimeSweep(
+        db,
+        provider({
+          getProfile: vi.fn(async () => {
+            time.set(100)
+            return { emailAddress: ACCOUNT, historyId: '101', threadsTotal: 10 }
+          }),
+          listThreadIds: vi
+            .fn()
+            .mockImplementationOnce(async () => {
+              time.set(200)
+              return { threadIds: ['old'], nextPageToken: 'page-2', resultSizeEstimate: 10 }
+            })
+            .mockResolvedValueOnce({ threadIds: [] }),
+          getThread: vi.fn(async () => {
+            time.set(1_000)
+            return metadataThread('old')
           })
-          .mockResolvedValueOnce({ threadIds: [] }),
-        getThread: vi.fn(async () => {
-          now = 1_000
-          return { id: 'old', messages: [] }
-        })
-      }),
-      'test@example.com',
-      events,
-      {
-        time: { now: () => now, timers: systemTime.timers },
-        requestIntervalMs: 0,
-        pagePauseMs: 0,
-        threadCap
-      }
-    )
+        }),
+        ACCOUNT,
+        events,
+        { ...NO_PAUSE, time, threadCap }
+      )
 
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        threadsDone: 1,
-        threadsTotal: 10,
-        elapsedMs: 1_000,
-        threadsPerMinute: 60
-      })
-    )
-    // Listing takes 200ms; only the 800ms metadata fetch determines the pace.
-    // Keep the full account total for coverage, but time only the work before
-    // the cap or account end, whichever comes first. At the cap, no ETA remains.
-    const indexed = events.onProgress.mock.calls.find(([event]) => event.threadsDone === 1)?.[0]
-    expect(indexed?.etaMs).toBe(expectedEtaMs)
+      expect(events.onProgress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadsDone: 1,
+          threadsTotal: 10,
+          elapsedMs: 1_000,
+          threadsPerMinute: 60
+        })
+      )
+      // Listing takes 200ms; only the 800ms metadata fetch determines the pace.
+      // Keep the full account total for coverage, but time only the work before
+      // the cap or account end, whichever comes first. At the cap, no ETA remains.
+      const indexed = events.onProgress.mock.calls.find(([event]) => event.threadsDone === 1)?.[0]
+      expect(indexed?.etaMs).toBe(expectedEtaMs)
+    } finally {
+      db.close()
+    }
   })
 
   it('reports actual weighted-limiter wait separately from the sweep duty cycle', async () => {
-    let quotaWaitMs = 0
-    const events = callbacks()
-    const mail = provider({
-      listThreadIds: vi.fn(async () => ({ threadIds: ['old'] })),
-      getThread: vi.fn(async (id) => {
-        quotaWaitMs = 250
-        return { id, messages: [] }
-      }),
-      quotaMetrics: () => ({ requests: 2, units: 50, waitMs: quotaWaitMs })
-    })
+    const db = store('lifetime')
+    try {
+      let quotaWaitMs = 0
+      const events = callbacks()
+      const mail = provider({
+        listThreadIds: vi.fn(async () => ({ threadIds: ['old'] })),
+        getThread: vi.fn(async (id: string) => {
+          quotaWaitMs = 250
+          return metadataThread(id)
+        }),
+        quotaMetrics: () => ({ requests: 2, units: 50, waitMs: quotaWaitMs })
+      })
 
-    const result = await runLifetimeSweep(
-      fakeDb({ cursor: 'lifetime', threadIds: new Set<string>() }),
-      mail,
-      'test@example.com',
-      events,
-      { requestIntervalMs: 0, pagePauseMs: 0 }
-    )
+      const result = await runLifetimeSweep(db, mail, ACCOUNT, events, NO_PAUSE)
 
-    expect(result).toMatchObject({ threadCount: 1, quotaWaitMs: 250 })
-    expect(events.onProgress).toHaveBeenCalledWith(expect.objectContaining({ quotaWaitMs: 250 }))
+      expect(result).toMatchObject({ threadCount: 1, quotaWaitMs: 250 })
+      expect(events.onProgress).toHaveBeenCalledWith(expect.objectContaining({ quotaWaitMs: 250 }))
+    } finally {
+      db.close()
+    }
   })
 
   it('does not count a foreground write that lands during a metadata request as sweep throughput', async () => {
-    const state = { cursor: 'lifetime', threadIds: new Set<string>() }
-    let resolveThread: ((thread: GmailThread) => void) | undefined
-    const getThread = vi.fn(
-      () =>
-        new Promise<GmailThread>((resolve) => {
-          resolveThread = resolve
-        })
-    )
-    const events = callbacks()
+    const db = store('lifetime')
+    try {
+      let resolveThread: ((thread: GmailThread) => void) | undefined
+      const getThread = vi.fn(
+        () =>
+          new Promise<GmailThread>((resolve) => {
+            resolveThread = resolve
+          })
+      )
+      const events = callbacks()
 
-    const run = runLifetimeSweep(
-      fakeDb(state),
-      provider({
-        getProfile: vi.fn(async () => ({
-          emailAddress: 'test@example.com',
-          historyId: '101',
-          threadsTotal: 10
-        })),
-        listThreadIds: vi.fn(async () => ({ threadIds: ['old'] })),
-        getThread
-      }),
-      'test@example.com',
-      events,
-      { requestIntervalMs: 0, pagePauseMs: 0 }
-    )
+      const run = runLifetimeSweep(
+        db,
+        provider({
+          getProfile: vi.fn(async () => ({
+            emailAddress: ACCOUNT,
+            historyId: '101',
+            threadsTotal: 10
+          })),
+          listThreadIds: vi.fn(async () => ({ threadIds: ['old'] })),
+          getThread
+        }),
+        ACCOUNT,
+        events,
+        NO_PAUSE
+      )
 
-    await vi.waitFor(() => expect(getThread).toHaveBeenCalledOnce())
-    state.threadIds.add('old')
-    resolveThread?.({ id: 'old', messages: [] })
+      await vi.waitFor(() => expect(getThread).toHaveBeenCalledOnce())
+      // Foreground history work indexes the same thread while the metadata
+      // request is still in flight.
+      db.prepare('INSERT INTO threads (account_id, id, last_msg_at) VALUES (?, ?, 1000)').run(ACCOUNT, 'old')
+      resolveThread?.(metadataThread('old'))
 
-    await expect(run).resolves.toMatchObject({ threadCount: 1 })
-    expect(mocks.persistThread).not.toHaveBeenCalled()
-    expect(events.onProgress).toHaveBeenLastCalledWith(
-      expect.objectContaining({ threadsDone: 1, threadsTotal: 10 })
-    )
-    expect(events.onProgress.mock.calls.every(([event]) => event.etaMs === undefined)).toBe(true)
+      await expect(run).resolves.toMatchObject({ threadCount: 1 })
+      expect(mocks.persistThread).not.toHaveBeenCalled()
+      expect(events.onProgress).toHaveBeenLastCalledWith(
+        expect.objectContaining({ threadsDone: 1, threadsTotal: 10 })
+      )
+      expect(events.onProgress.mock.calls.every(([event]) => event.etaMs === undefined)).toBe(true)
+    } finally {
+      db.close()
+    }
   })
 
   it('persists processed listing progress so a resumed page does not restart at zero', async () => {
     const existingIds = Array.from({ length: 500 }, (_, index) => `stored-${index}`)
-    const state = {
-      cursor: 'lifetime:page-2',
-      threadIds: new Set(existingIds),
-      done: 500,
-      total: 1_000 as number | null
+    const db = store('lifetime:page-2', existingIds, 500)
+    try {
+      const events = callbacks()
+
+      await runLifetimeSweep(
+        db,
+        provider({
+          getProfile: vi.fn(async () => ({
+            emailAddress: ACCOUNT,
+            historyId: '101',
+            threadsTotal: 1_000
+          })),
+          listThreadIds: vi
+            .fn()
+            .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-3' })
+            .mockResolvedValueOnce({ threadIds: [] })
+        }),
+        ACCOUNT,
+        events,
+        NO_PAUSE
+      )
+
+      expect(events.onProgress).toHaveBeenCalledWith(
+        expect.objectContaining({ threadsDone: 500, threadsTotal: 1_000 })
+      )
+      expect(sweepState(db)).toEqual({ cursor: 'done', done: 500 })
+    } finally {
+      db.close()
     }
-    const events = callbacks()
-
-    await runLifetimeSweep(
-      fakeDb(state),
-      provider({
-        getProfile: vi.fn(async () => ({
-          emailAddress: 'test@example.com',
-          historyId: '101',
-          threadsTotal: 1_000
-        })),
-        listThreadIds: vi
-          .fn()
-          .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-3' })
-          .mockResolvedValueOnce({ threadIds: [] })
-      }),
-      'test@example.com',
-      events,
-      { requestIntervalMs: 0, pagePauseMs: 0 }
-    )
-
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ threadsDone: 500, threadsTotal: 1_000 })
-    )
-    expect(state.cursor).toBe('done')
-    expect(state.done).toBe(500)
   })
 
   it('uses the account total and unique local rows instead of a page result estimate', async () => {
-    const events = callbacks()
-    const threadIds = new Set(['stage-one', 'all-mail', 'spam'])
+    const db = store('lifetime', ['stage-one', 'all-mail', 'spam'])
+    try {
+      const events = callbacks()
 
-    await runLifetimeSweep(
-      fakeDb({ cursor: 'lifetime', threadIds }),
-      provider({
-        getProfile: vi.fn(async () => ({
-          emailAddress: 'test@example.com',
-          historyId: '101',
-          threadsTotal: 50_000
-        })),
-        listThreadIds: vi
-          .fn()
-          .mockResolvedValueOnce({
-            threadIds: [],
-            nextPageToken: 'page-2',
-            resultSizeEstimate: 201
-          })
-          .mockResolvedValueOnce({ threadIds: [] })
-      }),
-      'test@example.com',
-      events,
-      { requestIntervalMs: 0, pagePauseMs: 0 }
-    )
+      await runLifetimeSweep(
+        db,
+        provider({
+          getProfile: vi.fn(async () => ({
+            emailAddress: ACCOUNT,
+            historyId: '101',
+            threadsTotal: 50_000
+          })),
+          listThreadIds: vi
+            .fn()
+            .mockResolvedValueOnce({
+              threadIds: [],
+              nextPageToken: 'page-2',
+              resultSizeEstimate: 201
+            })
+            .mockResolvedValueOnce({ threadIds: [] })
+        }),
+        ACCOUNT,
+        events,
+        NO_PAUSE
+      )
 
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        threadsDone: 3,
-        threadsTotal: 50_000,
-        reason: 'quota-wait'
-      })
-    )
-    const waiting = events.onProgress.mock.calls.find(([event]) => event.reason === 'quota-wait')?.[0]
-    expect(waiting.threadsTotal).not.toBe(201)
+      expect(events.onProgress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadsDone: 3,
+          threadsTotal: 50_000,
+          reason: 'quota-wait'
+        })
+      )
+      const waiting = events.onProgress.mock.calls.find(([event]) => event.reason === 'quota-wait')?.[0]
+      expect(waiting.threadsTotal).not.toBe(201)
+    } finally {
+      db.close()
+    }
   })
 
   it('keeps progress indeterminate when the account profile omits its thread total', async () => {
-    const events = callbacks()
+    const db = store('lifetime', ['stored'])
+    try {
+      const events = callbacks()
 
-    await runLifetimeSweep(
-      fakeDb({ cursor: 'lifetime', threadIds: new Set(['stored']) }),
-      provider({
-        getProfile: vi.fn(async () => ({
-          emailAddress: 'test@example.com',
-          historyId: '101'
-        })),
-        listThreadIds: vi.fn(async () => ({ threadIds: [], resultSizeEstimate: 201 }))
-      }),
-      'test@example.com',
-      events,
-      { requestIntervalMs: 0, pagePauseMs: 0 }
-    )
+      await runLifetimeSweep(
+        db,
+        provider({
+          getProfile: vi.fn(async () => ({ emailAddress: ACCOUNT, historyId: '101' })),
+          listThreadIds: vi.fn(async () => ({ threadIds: [], resultSizeEstimate: 201 }))
+        }),
+        ACCOUNT,
+        events,
+        NO_PAUSE
+      )
 
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ threadsDone: 1, reason: 'running' })
-    )
-    expect(events.onProgress.mock.calls.every(([event]) => !('threadsTotal' in event))).toBe(true)
-    expect(events.onProgress.mock.calls.every(([event]) => !('etaMs' in event))).toBe(true)
+      expect(events.onProgress).toHaveBeenCalledWith(
+        expect.objectContaining({ threadsDone: 1, reason: 'running' })
+      )
+      expect(events.onProgress.mock.calls.every(([event]) => !('threadsTotal' in event))).toBe(true)
+      expect(events.onProgress.mock.calls.every(([event]) => !('etaMs' in event))).toBe(true)
+    } finally {
+      db.close()
+    }
   })
 
   it('does not expose hidden persistence as a visible-mail change signal', async () => {
-    mocks.persistThread.mockReturnValue(true)
-    const events = callbacks()
+    const db = store('lifetime')
+    try {
+      const events = callbacks()
 
-    await runLifetimeSweep(
-      fakeDb({ cursor: 'lifetime', threadIds: new Set<string>() }),
-      provider({
-        listThreadIds: vi.fn(async () => ({ threadIds: ['chat'] })),
-        getThread: vi.fn(async () => ({ id: 'chat', messages: [] }))
-      }),
-      'test@example.com',
-      events,
-      { requestIntervalMs: 0, pagePauseMs: 0 }
-    )
+      await runLifetimeSweep(
+        db,
+        provider({ listThreadIds: vi.fn(async () => ({ threadIds: ['chat'] })) }),
+        ACCOUNT,
+        events,
+        NO_PAUSE
+      )
 
-    expect(events.onProgress.mock.calls.every(([event]) => !('mailChanged' in event))).toBe(true)
+      expect(storedIds(db)).toEqual(['chat'])
+      expect(events.onProgress.mock.calls.every(([event]) => !('mailChanged' in event))).toBe(true)
+    } finally {
+      db.close()
+    }
   })
 })

@@ -1,6 +1,6 @@
 import type { ThreadRow } from '../../shared/mail'
 import type { ServerSearchResponse } from '../../shared/searchQuery'
-import { parseSearchQuery } from '../../shared/searchQuery'
+import { normalizeMailboxName, parseSearchQuery } from '../../shared/searchQuery'
 import type { Db } from '../db'
 import {
   matchingStoredThreadIds,
@@ -74,9 +74,8 @@ export async function searchAllGmail(
   const parsed = parseSearchQuery(query)
   const searchesLocalOnlyState = parsed.filters.some(
     (filter) =>
-      (filter.kind === 'in' && ['draft', 'drafts'].includes(filter.value.toLowerCase())) ||
-      (filter.kind === 'is' && filter.value === 'snoozed') ||
-      (filter.kind === 'in' && filter.value.toLowerCase().replaceAll(/[\s_-]/g, '') === 'snoozed')
+      (filter.kind === 'in' && ['draft', 'drafts', 'snoozed'].includes(normalizeMailboxName(filter.value))) ||
+      (filter.kind === 'is' && filter.value === 'snoozed')
   )
   if (
     !shouldContinue() ||

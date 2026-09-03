@@ -1,9 +1,17 @@
 import type { ElectronApplication, Page } from '@playwright/test'
-import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
+import { IPC_CHANNELS } from '../src/shared/ipc'
 import { ATTN_SIGNATURE_LINE } from '../src/shared/settings'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
-import { expectResponseHeld, holdNextResponse } from './holdResponse'
+import { enableAi, threadRow } from './nav'
+import {
+  aiRequests,
+  armSending,
+  expectResponseHeld,
+  flushRendererIpc,
+  holdNextResponse,
+  installFakeAi
+} from './seams'
 
 // T37 (F17): AI reply drafting end to end under the fake provider — Mod+J
 // from the reader opening and streaming into the inline reply composer, the
@@ -12,51 +20,8 @@ import { expectResponseHeld, holdNextResponse } from './holdResponse'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
-async function emitSeam(app: ElectronApplication, channel: string, request?: unknown): Promise<void> {
-  const error = await app.evaluate(
-    ({ ipcMain }, input) =>
-      new Promise<string | undefined>((resolve) => ipcMain.emit(input.channel, {}, input.request, resolve)),
-    { channel, request }
-  )
-  if (error) throw new Error(error)
-}
-
-function installFakeAi(app: ElectronApplication, script: unknown): Promise<void> {
-  return emitSeam(app, TEST_CHANNELS.installFakeAiProvider, script)
-}
-
-interface RecordedRequest {
-  purpose: string
-  system: string
-  messages: Array<{ role: string; content: string }>
-  canceled: boolean
-}
-
-function aiRequests(app: ElectronApplication): Promise<RecordedRequest[]> {
-  return app.evaluate(
-    ({ ipcMain }, channel) => new Promise<RecordedRequest[]>((resolve) => ipcMain.emit(channel, {}, resolve)),
-    TEST_CHANNELS.aiProviderRequests
-  )
-}
-
-async function enableAi(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    await window.attn.ai.setKey('sk-e2e-test')
-    await window.attn.ai.setSetting('enabled', true)
-  })
-}
-
-async function armSending(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 0), TEST_CHANNELS.setUndoSendDelay)
-  await emitSeam(app, TEST_CHANNELS.installSendProvider)
-}
-
-function designRow(page: Page) {
-  return page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
-}
-
 async function openDesignReader(page: Page): Promise<void> {
-  await designRow(page).click()
+  await threadRow(page, 'Design notes').click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
 }
 
@@ -185,12 +150,13 @@ test('Esc mid-stream keeps partial text, then dismisses Refine before closing no
   const composer = new ComposerPage(page)
   await expect(composer.root).toBeVisible()
 
-  // The canceled stream never lands its remaining chunk.
-  await page.waitForTimeout(900)
+  // The canceled stream never lands its remaining chunk. The provider
+  // recording the cancellation is the moment after which no chunk can follow,
+  // so it is the barrier to wait on — not a sleep past the chunk interval.
+  await expect.poll(() => aiRequests(app).then((requests) => requests[0]?.canceled)).toBe(true)
+  await flushRendererIpc(page)
   await expect(editor(page)).toContainText('First sentence lands.')
   await expect(editor(page)).not.toContainText('Never arrives')
-  const requests = await aiRequests(app)
-  expect(requests[0].canceled).toBe(true)
 
   // The landed partial draft owns the next Esc through its Refine affordance;
   // only the following Esc is the composer's ordinary save-and-exit.
@@ -223,10 +189,9 @@ test('rapid repeat invocations start exactly one generation — Esc must cancel 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('ai-drafting')).toHaveCount(0)
 
-  await page.waitForTimeout(600)
-  const requests = await aiRequests(app)
-  expect(requests).toHaveLength(1)
-  expect(requests[0].canceled).toBe(true)
+  await expect.poll(() => aiRequests(app).then((requests) => requests.map((r) => r.canceled))).toEqual([true])
+  await flushRendererIpc(page)
+  expect(await aiRequests(app)).toHaveLength(1)
 })
 
 test('an invocation on a recovered full-window reply never parks for another draft', async ({
@@ -266,7 +231,7 @@ test('an invocation on a recovered full-window reply never parks for another dra
   await expect(page.getByTestId('conversation-subject')).toHaveText('Lunch next week')
   const lunchReply = new ComposerPage(page)
   await lunchReply.openReply()
-  await page.waitForTimeout(600)
+  await flushRendererIpc(page)
   await expect(page.getByTestId('ai-drafting')).toHaveCount(0)
   await expect(editor(page)).not.toContainText('Must never stream.')
   expect(await aiRequests(app)).toHaveLength(0)
@@ -349,7 +314,7 @@ test('opening Settings cancels an AI reply whose settings read is still pending'
   await expect(page.getByTestId('settings-view')).toBeVisible()
   await release()
 
-  await page.waitForTimeout(300)
+  await flushRendererIpc(page)
   await expect(page.getByTestId('composer')).toHaveCount(0)
   await expect(page.getByTestId('settings-view')).toBeVisible()
   expect(await aiRequests(app)).toHaveLength(0)
@@ -393,7 +358,7 @@ test.describe('AI replies to an individual message', () => {
     await expect(page.getByTestId('conversation-message').nth(1).getByTestId('message-cursor')).toBeVisible()
     await release()
 
-    await page.waitForTimeout(300)
+    await flushRendererIpc(page)
     await expect(page.getByTestId('composer')).toHaveCount(0)
     expect(await aiRequests(app)).toHaveLength(0)
   })

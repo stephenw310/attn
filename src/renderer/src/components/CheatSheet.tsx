@@ -2,14 +2,17 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import {
   COMMAND_CONTEXT_GROUPS,
   type Command,
+  commandTitle,
   getCommandRegistrySnapshot,
   subscribeCommandRegistry
 } from '../commands'
-import { shortcutLabel } from './CommandPalette'
+import { formatShortcut } from '../platform'
 import { Kbd } from './Kbd'
 
 interface CheatSheetProps {
   open: boolean
+  /** The palette renders above the sheet and owns input while it is up. */
+  paletteOpen: boolean
   onOpen: () => void
   onClose: () => void
 }
@@ -44,12 +47,17 @@ function sheetGroups(commands: readonly Command[]): SheetGroup[] {
   return [...groups.entries()]
     .map(([label, grouped]) => ({
       label,
-      commands: grouped.sort((left, right) => left.title.localeCompare(right.title))
+      commands: grouped.sort((left, right) => commandTitle(left).localeCompare(commandTitle(right)))
     }))
     .filter((group) => group.commands.length > 0)
 }
 
-export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JSX.Element | null {
+export function CheatSheet({
+  open,
+  paletteOpen,
+  onOpen,
+  onClose
+}: CheatSheetProps): React.JSX.Element | null {
   const registeredCommands = useSyncExternalStore(
     subscribeCommandRegistry,
     getCommandRegistrySnapshot,
@@ -67,7 +75,7 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
       }
       if (!open) return
       // The palette can sit above the sheet; while it is up, input is its.
-      if (document.querySelector('[data-testid="command-palette"]')) return
+      if (paletteOpen) return
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
@@ -83,7 +91,7 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [onClose, onOpen, open])
+  }, [onClose, onOpen, open, paletteOpen])
 
   // Modal focus: the sheet's scroll region takes focus while open — that is
   // what makes arrow/page keys scroll it and keeps typing out of whatever the
@@ -139,8 +147,8 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
                       data-command-id={command.id}
                       className="flex items-center justify-between gap-3 text-[13px] text-ink-dim"
                     >
-                      <span className="min-w-0 truncate">{command.title}</span>
-                      {command.shortcut && <Kbd>{shortcutLabel(command.shortcut)}</Kbd>}
+                      <span className="min-w-0 truncate">{commandTitle(command)}</span>
+                      {command.shortcut && <Kbd>{formatShortcut(command.shortcut)}</Kbd>}
                     </li>
                   ))}
                 </ul>

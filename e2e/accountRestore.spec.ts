@@ -6,7 +6,9 @@ import { expect, test } from './electron'
 
 for (const view of ['inbox', 'split', 'all'] as const) {
   test.describe(`account restoration in ${view}`, () => {
-    const seed = `.artifacts/account-restore-${view}.json`
+    // A generated 250-thread seed, not a test artifact: `.artifacts/` is
+    // uploaded wholesale by CI, `.generated/` is gitignored and stays local.
+    const seed = `.generated/account-restore-${view}.json`
     test.use({ seed })
     test.beforeEach(() => {
       const fixture = JSON.parse(readFileSync(join(__dirname, 'fixtures/seed-two-accounts.json'), 'utf8'))
@@ -29,7 +31,7 @@ for (const view of ['inbox', 'split', 'all'] as const) {
           ]
         }))
       )
-      mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+      mkdirSync(join(__dirname, '.generated'), { recursive: true })
       writeFileSync(join(__dirname, seed), JSON.stringify(fixture))
     })
 

@@ -184,7 +184,7 @@ test('returns a due snooze to the inbox with a returned chip', async ({ page }) 
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await page.evaluate(async () => {
-    const [thread] = await window.attn.mail.listThreads('inbox')
+    const [thread] = (await window.attn.mail.listThreadPage('inbox')).rows
     await window.attn.mail.snooze([thread.id], Date.now() + 800)
   })
   await expect(rows).toHaveCount(7)
@@ -201,11 +201,14 @@ test('catches up a snooze that became due while the app was closed', async ({ bo
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await page.evaluate(async () => {
-    const [thread] = await window.attn.mail.listThreads('inbox')
+    const [thread] = (await window.attn.mail.listThreadPage('inbox')).rows
     await window.attn.mail.snooze([thread.id], Date.now() + 600)
   })
   await expect(rows).toHaveCount(7)
 
+  // The deadline has to pass while the app is closed. Writing it already due
+  // is not an option: the same bridge call refreshes the scheduler, which
+  // would return the thread before the app could be shut down at all.
   ;({ page } = await boot.relaunch({ waitBeforeLaunch: 1_000 }))
   const returned = page.getByTestId('thread-row').filter({ hasText: 'Maya Lin' })
   await expect(returned).toHaveCount(1)

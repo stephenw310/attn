@@ -2,10 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { Db } from '../db'
+import { emptyDraftInput } from '../../shared/drafts'
+import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
 import type { StoredDraftAttachment } from './draftAttachments'
+import { closeDraft, saveDraft } from './drafts'
 import {
   deleteDraftCheckpoint,
   drainDraftMirrors,
@@ -168,6 +170,7 @@ describe('draft mirror attachments', () => {
         {
           id: 'draft-1',
           state: 'drafted',
+          kind: 'new',
           gmail_draft_id: null,
           to_json: '[{"name":"","email":"to@example.com"}]',
           cc_json: '[]',
@@ -181,14 +184,16 @@ describe('draft mirror attachments', () => {
           references_json: '[]',
           quote_html: '',
           quote_text: '',
-          local_revision: 1
+          source_message_id: null,
+          local_revision: 1,
+          default_signature_fingerprint: null
         }
       ])
       .mockReturnValueOnce([])
     const writes: string[] = []
     const db = {
       prepare: vi.fn((sql: string) => {
-        if (sql.includes('SELECT id, state, gmail_draft_id')) return { all: pending }
+        if (sql.includes('SELECT id, state, kind')) return { all: pending }
         return {
           run: (...args: unknown[]) => {
             writes.push(`${sql.replace(/\s+/g, ' ').trim()} :: ${JSON.stringify(args)}`)
@@ -252,6 +257,7 @@ describe('draft mirror selection', () => {
         {
           id: 'outbox-1',
           state: 'drafted',
+          kind: 'new',
           gmail_draft_id: 'gmail-1',
           to_json: '[]',
           cc_json: '[]',
@@ -265,16 +271,16 @@ describe('draft mirror selection', () => {
           references_json: '[]',
           quote_html: '',
           quote_text: '',
-          local_revision: 1
+          source_message_id: null,
+          local_revision: 1,
+          default_signature_fingerprint: null
         }
       ])
       .mockReturnValueOnce([])
     const update = vi.fn(() => ({ changes: 1 }))
     const db = {
       prepare: vi.fn((sql: string) =>
-        sql.includes('SELECT id, state, gmail_draft_id')
-          ? { all: pending }
-          : { run: update, get: () => undefined }
+        sql.includes('SELECT id, state, kind') ? { all: pending } : { run: update, get: () => undefined }
       )
     } as unknown as Db
     // Gmail replaced the draft's message on the previous checkpoint, so both
@@ -312,6 +318,79 @@ describe('draft mirror selection', () => {
     expect(saveDraft).toHaveBeenCalledOnce()
   })
 
+  it('keeps an untouched crash-recovered reply out of Gmail until the user contributes', async () => {
+    // A planned reply has local_revision 1 and mirror_revision 0, so any drain
+    // trigger — an account switch, someone else's discard — reaches it. The
+    // composer's own IPC gate refuses it; this selection must refuse it too.
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 1)').run(
+        'user@example.com',
+        'user@example.com'
+      )
+      const planned = {
+        ...emptyDraftInput(),
+        kind: 'reply' as const,
+        to: [{ name: '', email: 'them@example.com' }],
+        subject: 'Re: Roadmap',
+        threadId: 'thread-1',
+        quoteHtml: '<blockquote>Original</blockquote>',
+        quoteText: '> Original'
+      }
+      const id = saveDraft(db, 'user@example.com', planned, 10)
+      const saveRemote = vi.fn(async () => 'gmail-untouched')
+
+      await drainDraftMirrors(db, 'user@example.com', {
+        saveDraft: saveRemote
+      } as unknown as MailActionProvider)
+      expect(saveRemote).not.toHaveBeenCalled()
+
+      saveDraft(db, 'user@example.com', { ...planned, id, bodyHtml: '<p>Thanks</p>', bodyText: 'Thanks' }, 20)
+      await drainDraftMirrors(db, 'user@example.com', {
+        saveDraft: saveRemote
+      } as unknown as MailActionProvider)
+      expect(saveRemote).toHaveBeenCalledOnce()
+    } finally {
+      db.close()
+    }
+  })
+
+  it('deletes the Gmail draft its create minted when the row was discarded meanwhile', async () => {
+    // Type → mirror starts → select-all, delete, Esc inside the request
+    // latency. `closeDraft` hard-deletes the now-empty row, so the create's id
+    // has nowhere to land and the draft must not be left for sync to import.
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 1)').run(
+        'user@example.com',
+        'user@example.com'
+      )
+      const id = saveDraft(
+        db,
+        'user@example.com',
+        { ...emptyDraftInput(), bodyHtml: '<p>Draft text</p>', bodyText: 'Draft text' },
+        10
+      )
+      const deleteDraft = vi.fn(async () => {})
+      const saveRemote = vi.fn(async () => {
+        saveDraft(db, 'user@example.com', { ...emptyDraftInput(), id }, 20)
+        expect(closeDraft(db, 'user@example.com', id, 30)).toBe('discarded')
+        return 'gmail-orphan'
+      })
+
+      await drainDraftMirrors(db, 'user@example.com', {
+        saveDraft: saveRemote,
+        deleteDraft
+      } as unknown as MailActionProvider)
+
+      expect(saveRemote).toHaveBeenCalledOnce()
+      expect(deleteDraft).toHaveBeenCalledWith('gmail-orphan')
+      expect(db.prepare('SELECT COUNT(*) AS count FROM outbox').get()).toEqual({ count: 0 })
+    } finally {
+      db.close()
+    }
+  })
+
   it('mirrors a draft whose only meaningful authored content is HTML', async () => {
     const pending = vi
       .fn()
@@ -319,6 +398,7 @@ describe('draft mirror selection', () => {
         {
           id: 'html-only',
           state: 'drafted',
+          kind: 'new',
           gmail_draft_id: null,
           to_json: '[]',
           cc_json: '[]',
@@ -332,14 +412,16 @@ describe('draft mirror selection', () => {
           references_json: '[]',
           quote_html: '',
           quote_text: '',
-          local_revision: 1
+          source_message_id: null,
+          local_revision: 1,
+          default_signature_fingerprint: null
         }
       ])
       .mockReturnValueOnce([])
     const update = vi.fn(() => ({ changes: 1 }))
     const db = {
       prepare: vi.fn((sql: string) =>
-        sql.includes('SELECT id, state, gmail_draft_id') ? { all: pending } : { run: update }
+        sql.includes('SELECT id, state, kind') ? { all: pending } : { run: update }
       )
     } as unknown as Db
     const saveDraft = vi.fn(

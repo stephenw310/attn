@@ -3,19 +3,15 @@ import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
 import { MAIL_RETRY_FIRST_MS, MAIL_RETRY_MAX_MS, MAIL_RETRY_SECOND_MS } from '../sync/tuning'
 
-export type QueueIntent =
-  | { kind: 'modifyLabels'; threadId: string; add: string[]; remove: string[] }
-  | { kind: 'trash' | 'untrash'; threadId: string }
+export interface QueueIntent {
+  kind: 'modifyLabels'
+  threadId: string
+  add: string[]
+  remove: string[]
+}
 
 export async function executeIntent(provider: MailActionProvider, intent: QueueIntent): Promise<void> {
-  if (intent.kind === 'modifyLabels') {
-    await provider.modifyThread(intent.threadId, intent.add, intent.remove)
-  } else if (intent.kind === 'trash') {
-    await provider.trashThread(intent.threadId)
-  } else {
-    await provider.untrashThread(intent.threadId)
-    await provider.modifyThread(intent.threadId, ['INBOX'], [])
-  }
+  await provider.modifyThread(intent.threadId, intent.add, intent.remove)
 }
 
 export function isPermanentActionError(error: unknown): boolean {
@@ -62,16 +58,7 @@ export function storedActionErrorKind(message: string | null | undefined): Actio
       return null
     }
   }
-  // Compatibility for rows written before typed stored errors were introduced.
-  return /\bfailed \(401\):/i.test(message) ? 'auth' : null
-}
-
-export function isTypedStoredActionError(message: string | null | undefined): boolean {
-  return (
-    typeof message === 'string' &&
-    message.startsWith(STORED_ERROR_PREFIX) &&
-    storedActionErrorKind(message) !== null
-  )
+  return null
 }
 
 export function isStoredAuthActionError(message: string | null | undefined): boolean {

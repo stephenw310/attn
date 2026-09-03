@@ -1,8 +1,10 @@
-import type { ElectronApplication, Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import type { GmailThread } from '../src/main/gmail/parse'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { threadRow } from './nav'
+import { armSending, emitSeam } from './seams'
 
 // T35 (F9): follow-up reminders end to end — the composer deadline, the
 // reminder created at the sent transition through the production OutboxSender
@@ -17,27 +19,9 @@ import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
-async function emitSeam(app: ElectronApplication, channel: string, request?: unknown): Promise<void> {
-  const error = await app.evaluate(
-    ({ ipcMain }, input) =>
-      new Promise<string | undefined>((resolve) => ipcMain.emit(input.channel, {}, input.request, resolve)),
-    { channel, request }
-  )
-  if (error) throw new Error(error)
-}
-
-async function armSending(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 0), TEST_CHANNELS.setUndoSendDelay)
-  await emitSeam(app, TEST_CHANNELS.installSendProvider)
-}
-
-function designRow(page: Page) {
-  return page.getByTestId('thread-row').filter({ hasText: 'Design notes' })
-}
-
 /** Reply to the design-notes thread with a follow-up deadline, then send it. */
 async function sendReplyWithFollowUp(page: Page, deadline: string): Promise<void> {
-  await designRow(page).click()
+  await threadRow(page, 'Design notes').click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   const composer = new ComposerPage(page)
   await composer.openReply()
@@ -63,7 +47,7 @@ async function expectReminderListed(page: Page): Promise<void> {
   await page.keyboard.press('g')
   await page.keyboard.press('h')
   await expect(
-    designRow(page).getByTestId('chip-follow-up-due'),
+    threadRow(page, 'Design notes').getByTestId('chip-follow-up-due'),
     'the pending follow-up lists in the Reminders view'
   ).toBeVisible()
   await page.keyboard.press('g')
@@ -102,7 +86,7 @@ test('a due follow-up resurfaces above normal mail with its chip, and archive co
   await sendReplyWithFollowUp(page, 'in 2 seconds')
 
   // The reminder resurfaces the thread at the top under its own heading.
-  const returned = designRow(page)
+  const returned = threadRow(page, 'Design notes')
   await expect(returned.getByTestId('chip-follow-up')).toBeVisible({ timeout: 10_000 })
   await expect(page.getByTestId('thread-row').first()).toContainText('Design notes')
   await expect(page.getByTestId('thread-date-group').first()).toHaveText('Follow up')
@@ -111,11 +95,11 @@ test('a due follow-up resurfaces above normal mail with its chip, and archive co
   await returned.click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   await page.keyboard.press('Escape')
-  await expect(designRow(page).getByTestId('chip-follow-up')).toBeVisible()
+  await expect(threadRow(page, 'Design notes').getByTestId('chip-follow-up')).toBeVisible()
 
   // Archive completes it: the thread leaves the inbox and stays gone.
   await page.keyboard.press('e')
-  await expect(designRow(page)).toHaveCount(0)
+  await expect(threadRow(page, 'Design notes')).toHaveCount(0)
 })
 
 test('the originating send never cancels; a real reply does, before the deadline', async ({ app, page }) => {
@@ -154,14 +138,14 @@ test('the originating send never cancels; a real reply does, before the deadline
   await expect(page.getByTestId('chip-follow-up-due')).toHaveCount(0)
   await page.keyboard.press('g')
   await page.keyboard.press('i')
-  await expect(designRow(page).getByTestId('chip-follow-up')).toHaveCount(0)
+  await expect(threadRow(page, 'Design notes').getByTestId('chip-follow-up')).toHaveCount(0)
 })
 
 test('the shortcut opens follow-up without overflowing the toolbar, and Escape restores focus', async ({
   page
 }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  await designRow(page).click()
+  await threadRow(page, 'Design notes').click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   const composer = new ComposerPage(page)
   await composer.openReply()
@@ -202,7 +186,7 @@ test('the shortcut opens follow-up without overflowing the toolbar, and Escape r
 
 test('a reply during snooze wakes the thread with its Returned chip (GAP-1)', async ({ app, page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
-  const row = designRow(page)
+  const row = threadRow(page, 'Design notes')
   await row.click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   await page.keyboard.press('Escape')
@@ -235,9 +219,12 @@ test('coexisting snooze and follow-up produce one stable return across relaunch'
   await sendReplyWithFollowUp(page, 'in 2 seconds')
   // Snooze before the follow-up fires: the pending snooze postpones it.
   await page.evaluate(() => window.attn.mail.snooze(['t-design'], Date.now() + 1_200))
-  await expect(designRow(page)).toHaveCount(0)
+  await expect(threadRow(page, 'Design notes')).toHaveCount(0)
 
   // Both deadlines pass while the app is closed; startup settles them once.
+  // Neither can be written already due: the snooze bridge refreshes the
+  // scheduler in the same call, so a past deadline returns the thread
+  // immediately instead of while the app is down.
   const { page: relaunched } = await boot.relaunch({ waitBeforeLaunch: 2_500 })
   const returned = relaunched.getByTestId('thread-row').filter({ hasText: 'Design notes' })
   await expect(returned.getByTestId('chip-follow-up')).toBeVisible({ timeout: 10_000 })

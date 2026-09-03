@@ -82,6 +82,29 @@ describe('Gmail weighted quota scheduling', () => {
     expect(released).toBe(true)
   })
 
+  it('still admits the most expensive request under a quota smaller than its cost', async () => {
+    const time = new ManualTime()
+    // A deliberately small project quota must slow sending down, not make
+    // `drafts.send` (100 units) unschedulable for the life of the client.
+    const limiter = new GmailQuotaLimiter({ unitsPerMinute: 60 }, { time })
+
+    await expect(limiter.acquire(GMAIL_QUOTA_UNITS['drafts.send'], 'send')).resolves.toBeUndefined()
+
+    let released = false
+    const waiting = limiter.acquire(GMAIL_QUOTA_UNITS['drafts.send'], 'send').then(() => {
+      released = true
+    })
+    expect(released).toBe(false)
+    // Paced, not refused: the next send waits out the configured 60 units a
+    // minute rather than being rejected outright.
+    for (let minute = 0; minute < 3 && !released; minute++) {
+      time.advance(60_000)
+      await Promise.resolve()
+    }
+    await waiting
+    expect(released).toBe(true)
+  })
+
   it('paces by weighted cost while retaining the configured background reserve', async () => {
     const time = new ManualTime()
     const limiter = new GmailQuotaLimiter(

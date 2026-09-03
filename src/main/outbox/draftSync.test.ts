@@ -302,10 +302,12 @@ describe('draft synchronization identity', () => {
     expect(mergeRemoteDraftAttachments([echo], JSON.stringify(once))).toEqual([local])
   })
 
-  it('pairs an echo whose filename MIME encoding stripped non-ASCII characters', () => {
-    // The upload writes `filename="r_sum_.pdf"`, so that is the only name Gmail
-    // can echo. Matching on the raw name would append a second copy per round
-    // trip, and each checkpoint would then upload every copy.
+  it('pairs an echo of a non-ASCII filename, in the current and the legacy fold', () => {
+    // The upload now carries `résumé.pdf` in an RFC 2231 continuation, so that
+    // is what Gmail echoes. A draft checkpointed before that shipped still
+    // echoes the ASCII fold, and both must pair with the local file: matching
+    // neither would append a copy per round trip, and each checkpoint would
+    // then upload every copy.
     const local: StoredDraftAttachment = {
       id: 'local-file',
       filename: 'résumé.pdf',
@@ -313,35 +315,66 @@ describe('draft synchronization identity', () => {
       sizeBytes: 10,
       spoolPath: '/owned/outbox/draft/résumé.pdf'
     }
+    const echo = (filename: string): StoredDraftAttachment => ({
+      id: 'remote-echo',
+      filename,
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      spoolPath: '',
+      remoteMessageId: 'message-1',
+      remoteAttachmentId: 'attachment-1'
+    })
+
+    for (const echoed of ['résumé.pdf', 'r_sum_.pdf']) {
+      const once = mergeRemoteDraftAttachments([echo(echoed)], JSON.stringify([local]))
+      expect(once).toEqual([local])
+      // Round-tripping again must stay a fixed point rather than compounding.
+      expect(mergeRemoteDraftAttachments([echo(echoed)], JSON.stringify(once))).toEqual([local])
+    }
+  })
+
+  it('fingerprints a filename the way Gmail will echo it', () => {
+    const base = { ...emptyDraftInput(), to: [{ name: '', email: 'to@example.com' }] }
+    const attachment = { id: 'a', mimeType: 'application/pdf', sizeBytes: 10 }
+    const fingerprintOf = (filename: string): string =>
+      draftContentFingerprint({ ...base, attachments: [{ ...attachment, filename }] })
+
+    // The RFC 2231 continuation carries the real name, so that is the identity
+    // — and an ASCII fold of it is a different file, not the same one.
+    expect(fingerprintOf('résumé.pdf')).not.toBe(fingerprintOf('r_sum_.pdf'))
+    expect(fingerprintOf('résumé.pdf')).toBe(fingerprintOf(' résumé.pdf '))
+  })
+
+  it('refreshes a locator whose echo carries only the legacy ASCII fold', () => {
+    const local: StoredDraftAttachment = {
+      id: 'local-file',
+      filename: 'résumé.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      spoolPath: '',
+      remoteMessageId: 'old-message',
+      remoteAttachmentId: 'old-attachment'
+    }
     const echo: StoredDraftAttachment = {
       id: 'remote-echo',
       filename: 'r_sum_.pdf',
       mimeType: 'application/pdf',
       sizeBytes: 10,
       spoolPath: '',
-      remoteMessageId: 'message-1',
-      remoteAttachmentId: 'attachment-1'
+      remoteMessageId: 'new-message',
+      remoteAttachmentId: 'new-attachment'
     }
 
-    const once = mergeRemoteDraftAttachments([echo], JSON.stringify([local]))
-    expect(once).toEqual([local])
-    expect(mergeRemoteDraftAttachments([echo], JSON.stringify(once))).toEqual([local])
-  })
-
-  it('fingerprints a filename the way Gmail will echo it', () => {
-    const base = { ...emptyDraftInput(), to: [{ name: '', email: 'to@example.com' }] }
-    const attachment = { id: 'a', mimeType: 'application/pdf', sizeBytes: 10 }
-    expect(
-      draftContentFingerprint({
-        ...base,
-        attachments: [{ ...attachment, filename: 'résumé.pdf' }]
-      })
-    ).toBe(
-      draftContentFingerprint({
-        ...base,
-        attachments: [{ ...attachment, filename: 'r_sum_.pdf' }]
-      })
+    const refreshed = parseStoredDraftAttachments(
+      refreshRemoteAttachmentLocators(JSON.stringify([local]), [echo])
     )
+
+    expect(refreshed).toHaveLength(1)
+    expect(refreshed[0]).toMatchObject({
+      filename: 'résumé.pdf',
+      remoteMessageId: 'new-message',
+      remoteAttachmentId: 'new-attachment'
+    })
   })
 
   it('pairs an echo with its own file when two attachments share a name', () => {
@@ -420,7 +453,9 @@ describe('draft synchronization identity', () => {
       }))
     } as unknown as Db
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: false
+    })
     expect(getDraft).not.toHaveBeenCalled()
   })
 
@@ -502,8 +537,12 @@ describe('draft synchronization identity', () => {
       getDraft
     }
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(true)
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: true
+    })
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: false
+    })
     expect(getDraft).toHaveBeenCalledWith('draft-1', { priority: 'polling' })
     expect(getDraft).toHaveBeenCalledTimes(1)
     expect(repairBinding).toHaveBeenCalledWith('forward', 'thread-1', 'account', 'local-draft')
@@ -527,7 +566,9 @@ describe('draft synchronization identity', () => {
       }))
     } as unknown as Db
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: false
+    })
     expect(getDraft).not.toHaveBeenCalled()
   })
 
@@ -563,7 +604,12 @@ describe('draft synchronization identity', () => {
       }))
     } as unknown as Db
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(true)
+    // The deleted ids come back so the caller drops their attachment spool now
+    // rather than leaving it for the next launch's reconciliation.
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toEqual({
+      changed: true,
+      deletedIds: ['closed']
+    })
     // Deleted in Gmail while closed and fully mirrored → the local row goes too.
     expect(db.prepare).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM outbox'))
     expect(run).toHaveBeenCalledWith('account', 'closed')
@@ -606,7 +652,9 @@ describe('draft synchronization identity', () => {
       }))
     } as unknown as Db
 
-    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toBe(false)
+    await expect(syncRemoteDrafts(db, 'account', provider as never)).resolves.toMatchObject({
+      changed: false
+    })
     expect(run).not.toHaveBeenCalled()
     expect(db.prepare).not.toHaveBeenCalledWith(expect.stringContaining('DELETE FROM outbox'))
     expect(db.prepare).not.toHaveBeenCalledWith(expect.stringContaining('gmail_draft_id = NULL'))

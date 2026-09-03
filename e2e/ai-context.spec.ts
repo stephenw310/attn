@@ -1,22 +1,9 @@
-import type { ElectronApplication } from '@playwright/test'
-import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { enableAi } from './nav'
+import { aiRequests, installFakeAi } from './seams'
 
 test.use({ seed: 'fixtures/seed-ai-context.json' })
-
-interface RecordedRequest {
-  purpose: string
-  system: string
-  messages: Array<{ content: string }>
-}
-
-function aiRequests(app: ElectronApplication): Promise<RecordedRequest[]> {
-  return app.evaluate(
-    ({ ipcMain }, channel) => new Promise<RecordedRequest[]>((resolve) => ipcMain.emit(channel, {}, resolve)),
-    TEST_CHANNELS.aiProviderRequests
-  )
-}
 
 for (const kind of ['reply', 'replyAll'] as const) {
   test(`${kind} drafting, refine, and reopened autocomplete stop at the middle message`, async ({
@@ -24,20 +11,9 @@ for (const kind of ['reply', 'replyAll'] as const) {
     page
   }) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(1)
-    await page.evaluate(async () => {
-      await window.attn.ai.setKey('sk-e2e-test')
-      await window.attn.ai.setSetting('enabled', true)
-      await window.attn.ai.setSetting('voiceMatchingEnabled', true)
-      await window.attn.ai.setSetting('autocompleteEnabled', true)
-    })
-    const error = await app.evaluate(
-      ({ ipcMain }, channel) =>
-        new Promise<string | undefined>((resolve) =>
-          ipcMain.emit(channel, {}, { chunks: ['Bounded response.'] }, resolve)
-        ),
-      TEST_CHANNELS.installFakeAiProvider
-    )
-    if (error) throw new Error(error)
+    await enableAi(page, true)
+    await page.evaluate(() => window.attn.ai.setSetting('voiceMatchingEnabled', true))
+    await installFakeAi(app, { chunks: ['Bounded response.'] })
 
     await page.getByTestId('thread-row').click()
     const messages = page.getByTestId('conversation-message')

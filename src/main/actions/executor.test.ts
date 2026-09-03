@@ -3,7 +3,7 @@ import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import type { SnoozeReminderSnapshot } from '../store/reminders'
-import { isStoredAuthActionError, storeActionError } from './execute'
+import { isStoredAuthActionError } from './execute'
 import { ActionExecutor, type ActionRecoveryProvider } from './executor'
 
 interface FakeRow {
@@ -13,14 +13,13 @@ interface FakeRow {
   thread_id: string
   payload: string
   attempts: number
-  state: 'pending' | 'inflight' | 'recovering' | 'failed'
+  state: 'pending' | 'inflight' | 'recovering'
   last_error?: string | null
 }
 
 interface FakeDbOptions {
   failRecoveryDelete?: boolean
   inboxThreads?: string[]
-  onLegacyPrepareUpdate?: () => void
   reminders?: Map<string, SnoozeReminderSnapshot>
 }
 
@@ -56,20 +55,11 @@ function fakeDb(rows: FakeRow[], options: FakeDbOptions = {}): Db {
             rows.splice(index, 1)
             changes = 1
           }
-        } else if (sql.includes('SET state = ?, attempts = 0')) {
-          const row = rows.find((item) => item.id === args[2])
+        } else if (sql.includes('SET attempts = 0, last_error = NULL')) {
+          const row = rows.find((item) => item.account_id === args[0] && item.id === args[1])
           if (row) {
-            row.state = args[0] as FakeRow['state']
             row.attempts = 0
             row.last_error = null
-            changes = 1
-          }
-        } else if (sql.includes('SET state = ?, last_error = ?')) {
-          const row = rows.find((item) => item.account_id === args[2] && item.id === args[3])
-          if (row) {
-            options.onLegacyPrepareUpdate?.()
-            row.state = args[0] as FakeRow['state']
-            row.last_error = args[1] as string | null
             changes = 1
           }
         } else if (sql.includes("SET state = 'pending', attempts")) {
@@ -135,21 +125,12 @@ function fakeDb(rows: FakeRow[], options: FakeDbOptions = {}): Db {
               (row.state === 'pending' || row.state === 'inflight')
           )
         }
-        if (sql.includes("state IN ('pending', 'recovering', 'failed')")) {
-          if (!sql.includes('account_id = ?')) {
-            return rows.filter(
-              (row) => row.state === 'pending' || row.state === 'recovering' || row.state === 'failed'
-            )
-          }
+        if (sql.includes("state IN ('pending', 'recovering')")) {
           return rows.filter(
-            (row) =>
-              row.account_id === accountId &&
-              (row.state === 'pending' || row.state === 'recovering' || row.state === 'failed')
+            (row) => row.account_id === accountId && (row.state === 'pending' || row.state === 'recovering')
           )
         }
-        return sql.includes("state = 'failed'")
-          ? rows.filter((row) => row.account_id === accountId && row.state === 'failed')
-          : []
+        return []
       }
     }),
     transaction: (callback: () => unknown) => callback
@@ -194,8 +175,6 @@ function provider(
 ): ActionRecoveryProvider {
   return {
     modifyThread,
-    trashThread: vi.fn(async () => {}),
-    untrashThread: vi.fn(async () => {}),
     getThread: vi.fn(async (threadId) => snapshot(threadId))
   }
 }
@@ -276,77 +255,6 @@ describe('action executor', () => {
     } finally {
       vi.useRealTimers()
     }
-  })
-
-  it('re-pends legacy stored 401 rows only after successful auth calls the hook', () => {
-    const auth = row(1, 'a@example.com', 'auth')
-    auth.state = 'failed'
-    auth.last_error = 'gmail /threads/auth/modify failed (401): revoked'
-    const permanent = row(2, 'a@example.com', 'bad')
-    permanent.state = 'failed'
-    permanent.last_error = 'gmail /threads/bad/modify failed (400): bad request'
-    const executor = new ActionExecutor(
-      fakeDb([auth, permanent]),
-      () => null,
-      () => null
-    )
-
-    expect(executor.resumeAuthFailures('a@example.com')).toBe(1)
-    expect(auth).toMatchObject({ state: 'pending', attempts: 0, last_error: null })
-    expect(permanent.state).toBe('recovering')
-  })
-
-  it('makes a legacy auth failure visible but does not retry it during startup', async () => {
-    const auth = row(1, 'a@example.com', 'auth')
-    auth.state = 'failed'
-    auth.last_error = 'gmail /threads/auth/modify failed (401): revoked'
-    const actionProvider = provider()
-    const executor = new ActionExecutor(
-      fakeDb([auth]),
-      () => 'a@example.com',
-      () => actionProvider
-    )
-
-    await executor.trigger()
-
-    expect(auth.state).toBe('pending')
-    expect(actionProvider.modifyThread).not.toHaveBeenCalled()
-  })
-
-  it('does not wrap an already-typed auth marker again during startup', () => {
-    const auth = row(1, 'a@example.com', 'auth')
-    const marker = storeActionError(new GmailApiError(401, 'revoked'), 'auth')
-    auth.last_error = marker
-
-    const onLegacyPrepareUpdate = vi.fn()
-    new ActionExecutor(
-      fakeDb([auth], { onLegacyPrepareUpdate }),
-      () => null,
-      () => null
-    )
-
-    expect(auth.last_error).toBe(marker)
-    expect(onLegacyPrepareUpdate).not.toHaveBeenCalled()
-  })
-
-  it('self-heals a legacy permanently failed row on the next online drain', async () => {
-    const legacy = row(1, 'a@example.com', 'legacy')
-    legacy.state = 'failed'
-    legacy.last_error = 'gmail /threads/legacy/modify failed (400): bad request'
-    const actionProvider = provider()
-    const onReverted = vi.fn()
-    const executor = new ActionExecutor(
-      fakeDb([legacy]),
-      () => 'a@example.com',
-      () => actionProvider,
-      { notifyReverted: onReverted }
-    )
-
-    await executor.trigger()
-
-    expect(actionProvider.modifyThread).not.toHaveBeenCalled()
-    expect(actionProvider.getThread).toHaveBeenCalledWith('legacy', { format: 'full' })
-    expect(onReverted).toHaveBeenCalledOnce()
   })
 
   it('retries only the authoritative refetch after recovery goes offline', async () => {

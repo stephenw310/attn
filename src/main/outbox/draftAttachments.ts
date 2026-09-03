@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import type { DraftAttachment } from '../../shared/drafts'
 
 /** Main-process-only attachment data. None of these locators cross the preload bridge. */
@@ -12,27 +11,9 @@ export interface StoredDraftAttachment extends DraftAttachment {
   remoteInlineData?: string
 }
 
-function legacyAttachmentId(attachment: Omit<StoredDraftAttachment, 'id'>): string {
-  const identity = [
-    attachment.spoolPath,
-    attachment.remoteMessageId,
-    attachment.remoteAttachmentId,
-    attachment.contentId,
-    attachment.filename,
-    attachment.mimeType,
-    attachment.sizeBytes
-  ].join('\0')
-  return `legacy-${createHash('sha256').update(identity).digest('hex').slice(0, 24)}`
-}
-
-/** Accept rows written before attachment ids existed without exposing their storage details. */
+/** Every producer mints an id (spool, inline images, reply planning, draft import). */
 export function parseStoredDraftAttachments(value: string): StoredDraftAttachment[] {
-  const parsed = JSON.parse(value) as (StoredDraftAttachment | Omit<StoredDraftAttachment, 'id'>)[]
-  return parsed.map((attachment) =>
-    'id' in attachment && typeof attachment.id === 'string' && attachment.id
-      ? attachment
-      : { ...attachment, id: legacyAttachmentId(attachment) }
-  )
+  return JSON.parse(value) as StoredDraftAttachment[]
 }
 
 export function publicDraftAttachment(attachment: StoredDraftAttachment): DraftAttachment {

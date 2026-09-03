@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest'
-import { mailReadingForHtml } from './mailReading'
+import { findHtmlTrimStart, findTrimIndex, mailReadingForHtml } from './mailReading'
 
 const richQuote =
   '<div class="gmail_quote"><div>On Monday, Example wrote:</div>' +
@@ -75,5 +75,81 @@ describe('reading a simple reply above rich history', () => {
     ).parts
     expect(parts?.authoredText).toBe('First line\nSecond line\nNext paragraph')
     expect(parts?.quoteText).toBe('Build\tReady\t\nOlder paragraph')
+  })
+})
+
+describe('findTrimIndex', () => {
+  it('finds RFC signatures', () => {
+    expect(findTrimIndex('Thanks for the update.\n-- \nMaya Lin')).toBe('Thanks for the update.'.length)
+  })
+
+  it('finds authored reply headers and trailing quote runs', () => {
+    expect(findTrimIndex('Sounds good.\nOn Monday, Priya wrote:\n> Earlier note')).toBe(
+      'Sounds good.\n'.length
+    )
+    expect(findTrimIndex('Current answer.\n> Old line one\n> Old line two')).toBe('Current answer.'.length)
+  })
+
+  it('uses the first marker when signature and quote are both present', () => {
+    expect(findTrimIndex('Reply.\n-- \nMaya\nOn Tuesday, Daniel wrote:\n> Old')).toBe('Reply.'.length)
+  })
+
+  it('finds common mobile signatures', () => {
+    expect(findTrimIndex('See you there.\nSent from my iPhone')).toBe('See you there.'.length)
+    expect(findTrimIndex('Approved.\nSent from my Galaxy S25')).toBe('Approved.'.length)
+  })
+
+  it('finds decorated team signatures before trailing disclaimers', () => {
+    const body =
+      'We thank you for your trust and confidence.\n\n-- The Stokes Pharmacy Team --\nThis email may contain confidential information.'
+    expect(findTrimIndex(body)).toBe('We thank you for your trust and confidence.\n'.length)
+  })
+
+  it('leaves normal text and mid-line delimiters untouched', () => {
+    expect(findTrimIndex('No quoted content here.')).toBeNull()
+    expect(findTrimIndex('Keep this -- text in the middle.')).toBeNull()
+    expect(findTrimIndex('Treat the -- draft status -- as ordinary inline text.')).toBeNull()
+    expect(findTrimIndex('Overview\n-- RELEASE NOTES --\nThe release includes three fixes.')).toBeNull()
+    expect(findTrimIndex('> Quoted example\nAuthored text after it.')).toBeNull()
+  })
+
+  it('scans large mid-message quote runs in linear time', () => {
+    const quoted = Array.from({ length: 2_000 }, (_, index) => `> Quoted line ${index}`).join('\n')
+    expect(findTrimIndex(`Authored intro.\n${quoted}\nAuthored bottom reply.`)).toBeNull()
+  })
+
+  it('never collapses an all-quote message to nothing', () => {
+    expect(findTrimIndex('> Entire message\n> Still quoted')).toBeNull()
+    expect(findTrimIndex('On Monday, Maya wrote:\n> Entire message')).toBeNull()
+  })
+})
+
+function fragment(html: string): DocumentFragment {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  return template.content
+}
+
+describe('findHtmlTrimStart', () => {
+  it('reads a lone dash line as content inside verbatim text and table cells', () => {
+    // A signature separator is a line the sender wrote to end the message. The
+    // same two characters in a receipt cell or a code block are data, and
+    // trimming there hides the rest of the mail behind the trim control.
+    for (const html of [
+      '<table><tbody><tr><td>--</td><td>No discount</td></tr><tr><td>Total</td><td>$10</td></tr></tbody></table>',
+      '<table><tbody><tr><th>--</th><th>Column</th></tr></tbody></table>',
+      '<pre>diff --git a/x b/x\n--\nstill the message</pre>',
+      '<p><code>--</code> ends the options, and the rest of the mail follows.</p>'
+    ]) {
+      expect(findHtmlTrimStart(fragment(html))).toBeNull()
+    }
+  })
+
+  it('still trims at an ordinary signature separator', () => {
+    const content = fragment('<div>Answer</div><div>-- </div><div>Chao</div>')
+    const boundary = findHtmlTrimStart(content)
+
+    expect(boundary).not.toBeNull()
+    expect((boundary as Element).textContent).toBe('-- ')
   })
 })

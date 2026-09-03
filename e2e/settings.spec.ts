@@ -5,7 +5,15 @@ import type { GmailThread } from '../src/main/gmail/parse'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
-import { expectResponseHeld, holdNextResponse } from './holdResponse'
+import { runPaletteCommand } from './nav'
+import {
+  emitSeam,
+  expectResponseHeld,
+  flushRendererIpc,
+  holdNextResponse,
+  type LifetimeSweepResult,
+  runSweep as runLifetimeSweep
+} from './seams'
 
 // T32 (F15): the full-window settings surface, its palette commands, the
 // accounts reorder, the notification pause, and the Mod+/ cheat sheet — all
@@ -15,18 +23,6 @@ const artifactDirectory = join(__dirname, '.artifacts')
 
 function row(page: Page, subject: string) {
   return page.getByTestId('thread-row').filter({ hasText: subject })
-}
-
-async function openPalette(page: Page, query: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+K')
-  await expect(page.getByTestId('command-palette-input')).toBeFocused()
-  await page.getByTestId('command-palette-input').fill(query)
-}
-
-async function runPaletteCommand(page: Page, query: string): Promise<void> {
-  await openPalette(page, query)
-  await page.getByTestId('command-palette-input').press('Enter')
-  await expect(page.getByTestId('command-palette')).toHaveCount(0)
 }
 
 test.describe('settings surface', () => {
@@ -434,7 +430,7 @@ test.describe('account reorder', () => {
     // new order), so give it a beat and assert the switch was not rolled
     // back — the buggy adoption reverted the chip immediately on release.
     await release()
-    await page.waitForTimeout(500)
+    await flushRendererIpc(page)
     await expect(page.getByTestId('account-menu')).toContainText('second@attn.test')
     await expect(row(page, 'Beta launch')).toBeVisible()
     await page.getByTestId('account-menu').getByRole('button').first().click()
@@ -448,13 +444,6 @@ test.describe('account reorder', () => {
 
 test.describe('historical sync limit', () => {
   test.use({ seed: 'fixtures/seed-two-accounts.json' })
-
-  interface SweepResult {
-    cursor: string | null
-    error?: string
-    formats: string[]
-    pageTokens: Array<string | undefined>
-  }
 
   function oldThread(id: string): GmailThread {
     return {
@@ -482,8 +471,8 @@ test.describe('historical sync limit', () => {
 
   /** The production sweep against a scripted provider; the cap comes from the
       persisted preference the settings control wrote — no override here. */
-  async function runSweep(app: ElectronApplication, resetCursor?: string): Promise<SweepResult> {
-    const request = {
+  function runSweep(app: ElectronApplication, resetCursor?: string): Promise<LifetimeSweepResult> {
+    return runLifetimeSweep(app, {
       ...(resetCursor ? { resetCursor } : {}),
       threads: ['old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6'].map(oldThread),
       pages: [
@@ -492,12 +481,7 @@ test.describe('historical sync limit', () => {
       ],
       threadsTotal: 8,
       messagesTotal: 8
-    }
-    return app.evaluate(
-      ({ ipcMain }, { channel, input }) =>
-        new Promise<SweepResult>((resolve) => ipcMain.emit(channel, {}, input, resolve)),
-      { channel: TEST_CHANNELS.runLifetimeSweep, input: request }
-    )
+    })
   }
 
   async function setCustomLimit(page: Page, value: string): Promise<void> {
@@ -618,15 +602,8 @@ test.describe('historical sync limit', () => {
 test.describe('"Sent with Attn" footer', () => {
   test.use({ seed: 'fixtures/seed-two-accounts.json' })
 
-  async function setSendAsSignature(app: ElectronApplication, signature: string): Promise<void> {
-    const error = await app.evaluate(
-      ({ ipcMain }, input) =>
-        new Promise<string | undefined>((resolve) =>
-          ipcMain.emit(input.channel, {}, input.signature, resolve)
-        ),
-      { channel: TEST_CHANNELS.setSendAsSignature, signature }
-    )
-    if (error) throw new Error(error)
+  function setSendAsSignature(app: ElectronApplication, signature: string): Promise<void> {
+    return emitSeam(app, TEST_CHANNELS.setSendAsSignature, signature)
   }
 
   async function expectStoredFooter(page: Page, accountId: string, value: boolean): Promise<void> {
@@ -768,11 +745,17 @@ test.describe('"Sent with Attn" footer', () => {
     // driver before its retrying save assertion.)
     composer = new ComposerPage(page)
     await composer.root.waitFor()
-    await footer(page).click()
-    await page.keyboard.press('Home')
-    await page.keyboard.press('Shift+End')
+    // A hidden window omits selectionchange, so anchor the pointer caret at the
+    // footer's start through beforeinput before keydown-driven deletion.
+    const footerBox = await footer(page).boundingBox()
+    if (!footerBox) throw new Error('footer bounds missing')
+    const footerY = footerBox.y + footerBox.height / 2
+    await page.mouse.click(footerBox.x + 1, footerY)
+    await page.keyboard.insertText('x')
     await page.keyboard.press('Backspace')
-    await page.keyboard.press('Backspace')
+    for (let index = 0; index < 'Sent with Attn:'.length; index += 1) {
+      await page.keyboard.press('Delete')
+    }
     await expect(composer.editor).not.toContainText('Sent with Attn')
     await expect(composer.editor).toContainText('Reply that keeps its footer.')
     await composer.expectSaved()

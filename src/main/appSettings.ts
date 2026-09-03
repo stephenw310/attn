@@ -15,10 +15,49 @@ import {
 import type { Db } from './db'
 import { undoSendDelayMs } from './outbox/queue'
 import { attnSignatureEnabled } from './outbox/sendAs'
-import { remoteImagesBlocked, setRemoteImagesBlocked } from './remoteImageStore'
-import { notificationPausedUntil, setNotificationPausedUntil } from './service/notificationQueries'
-import { deleteSetting, readSetting, settingEnabled, writeSetting } from './settings'
+import { deleteSetting, readSetting, settingEnabled, typedSetting, writeSetting } from './settings'
 import { storedLifetimeThreadCap } from './sync/lifetimeCap'
+
+/**
+ * The app-global rows with a shape of their own. Every other key in the
+ * snapshot is a plain boolean or enum read below; these two carry a stored
+ * form that is not `String(value)`, so they own a parser and a formatter.
+ * (`attnSignatureEnabled` and `lifetimeThreadCap` stay with their features:
+ * both are account-scoped, not app-global.)
+ */
+const notificationsPausedUntilSetting = typedSetting<number | null>(
+  'notificationsPausedUntil',
+  null,
+  (raw) => {
+    const value = Number(raw)
+    return Number.isFinite(value) ? value : null
+  }
+)
+
+// The stored form is the word 'blocked'; loading is the default (§9 decision
+// #5), so an absent row means every remote image passes.
+const remoteImagesBlockedSetting = typedSetting(
+  'remoteImages',
+  false,
+  (raw) => raw === 'blocked',
+  () => 'blocked'
+)
+
+export function notificationPausedUntil(db: Db): number | null {
+  return notificationsPausedUntilSetting.read(db)
+}
+
+export function setNotificationPausedUntil(db: Db, pausedUntil: number | null): void {
+  notificationsPausedUntilSetting.write(db, pausedUntil)
+}
+
+export function remoteImagesBlocked(db: Db): boolean {
+  return remoteImagesBlockedSetting.read(db)
+}
+
+export function setRemoteImagesBlocked(db: Db, blocked: boolean): void {
+  remoteImagesBlockedSetting.write(db, blocked)
+}
 
 /** The account-scoped snapshot for the owning account (F18 rule 9). */
 export function readAccountSettings(db: Db, accountId: string): AccountSettings {

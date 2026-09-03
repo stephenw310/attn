@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { MailAddress } from '../../shared/address'
 import type { DraftKind, DraftSaveInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import type { GmailMessage } from '../gmail/parse'
@@ -19,7 +18,9 @@ import { mergeExternalBodies } from '../sync/mergeBodies'
 import type { MailProvider, ProviderDraft, ProviderRequestOptions } from '../sync/provider'
 import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import { draftHtmlBody, mimeFilename } from './draftMime'
+import { asciiFilenameFallback } from './mime'
 import { splitQuotedTrail } from './quoteSplit'
+import { outboxDraftContent } from './row'
 
 export type DraftConflictDecision = 'defer' | 'local' | 'remote'
 
@@ -291,21 +292,7 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
     )
     .all(accountId, remote.input.threadId, ...kinds) as UnboundLocalSyncRow[]
   const matched = candidates.find(
-    (candidate) =>
-      draftContentFingerprint({
-        to: JSON.parse(candidate.to_json) as MailAddress[],
-        cc: JSON.parse(candidate.cc_json) as MailAddress[],
-        bcc: JSON.parse(candidate.bcc_json) as MailAddress[],
-        subject: candidate.subject,
-        bodyHtml: candidate.body_html,
-        bodyText: candidate.body_text,
-        attachments: parseStoredDraftAttachments(candidate.attachments_json),
-        threadId: candidate.thread_id,
-        inReplyTo: candidate.in_reply_to,
-        references: JSON.parse(candidate.references_json) as string[],
-        quoteHtml: candidate.quote_html,
-        quoteText: candidate.quote_text
-      }) === remote.fingerprint
+    (candidate) => draftContentFingerprint(outboxDraftContent(candidate)) === remote.fingerprint
   )
   return matched ? { ...matched, matchedCurrentContent: true } : undefined
 }
@@ -318,6 +305,19 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
  * keep the local one: the spool is the durable source of the bytes, while
  * Gmail's attachment locators rotate on every draft rewrite.
  */
+/**
+ * Both encoders carry the real filename in an RFC 2231 continuation, so Gmail
+ * echoes it verbatim. A draft checkpointed before that shipped is still in
+ * Gmail holding only the ASCII fold of the name, so pair that echo with the
+ * local file that produced it — otherwise it imports as a second copy and
+ * every later checkpoint uploads both.
+ */
+function echoesTheSameFilename(remote: string, local: string): boolean {
+  const echoed = mimeFilename(remote)
+  const stored = mimeFilename(local)
+  return echoed === stored || asciiFilenameFallback(echoed) === asciiFilenameFallback(stored)
+}
+
 function matchesLocalAttachment(
   remote: StoredDraftAttachment,
   local: StoredDraftAttachment,
@@ -325,7 +325,7 @@ function matchesLocalAttachment(
 ): boolean {
   if (remote.contentId && local.contentId) return remote.contentId === local.contentId
   if (remote.contentId || local.contentId) return false
-  if (mimeFilename(remote.filename) !== mimeFilename(local.filename)) return false
+  if (!echoesTheSameFilename(remote.filename, local.filename)) return false
   if (remote.mimeType !== local.mimeType) return false
   return loose || remote.sizeBytes === local.sizeBytes
 }
@@ -411,9 +411,12 @@ function writeRemoteDraft(
 
 function attachmentLocatorIdentity(attachment: StoredDraftAttachment): string {
   return JSON.stringify([
-    // Matched across the same local/remote seam as the fingerprint, so it must
-    // normalize the filename the same way.
-    mimeFilename(attachment.filename),
+    // Matched across the same local/remote seam as the fingerprint, and it has
+    // to pair a draft checkpointed before RFC 2231 filenames shipped, whose
+    // echo carries only the ASCII fold. Two files can share a fold, so the
+    // type, size, content id and disposition below stay part of the identity
+    // and matches are consumed in order.
+    asciiFilenameFallback(mimeFilename(attachment.filename)),
     attachment.mimeType,
     attachment.sizeBytes,
     attachment.contentId ?? null,
@@ -535,7 +538,17 @@ export async function reconcileRemoteDraft(
   return decision
 }
 
-export async function syncRemoteDrafts(db: Db, accountId: string, provider: MailProvider): Promise<boolean> {
+export interface RemoteDraftSyncResult {
+  changed: boolean
+  /** Rows this pass deleted, so the caller can drop their attachment spool now. */
+  deletedIds: string[]
+}
+
+export async function syncRemoteDrafts(
+  db: Db,
+  accountId: string,
+  provider: MailProvider
+): Promise<RemoteDraftSyncResult> {
   const knownDrafts = new Map(
     (
       db
@@ -563,6 +576,7 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
     ])
   )
   const remoteIds = new Set<string>()
+  const deletedIds: string[] = []
   let pageToken: string | undefined
   let changed = false
   do {
@@ -621,8 +635,9 @@ export async function syncRemoteDrafts(db: Db, accountId: string, provider: Mail
       ).run(accountId, row.id)
     } else {
       db.prepare('DELETE FROM outbox WHERE account_id = ? AND id = ?').run(accountId, row.id)
+      deletedIds.push(row.id)
       changed = true
     }
   }
-  return changed
+  return { changed, deletedIds }
 }

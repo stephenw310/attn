@@ -43,7 +43,6 @@ import {
   snoozeThreads,
   undoLast
 } from '../actions'
-import type { ActionExecutor } from '../actions/executor'
 import { listStyleExamples } from '../ai/styleExamples'
 import { readAiStoredSettings, writeAiStoredSetting } from '../aiSettings'
 import { readAccountSettings, readAppSettings, writeAppSetting } from '../appSettings'
@@ -80,11 +79,9 @@ import {
   upgradeReplyToReplyAll
 } from '../outbox/drafts'
 import { addInlineImage, isSupportedInlineImageMimeType } from '../outbox/inlineImages'
-import type { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from '../outbox/queue'
 import { planReply, replySourceMessage } from '../outbox/replyPlan'
 import { ATTN_SIGNATURE_SETTING, prepareDraftWithCachedPrimarySignature } from '../outbox/sendAs'
-import type { OutboxSender } from '../outbox/sender'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
 import {
@@ -93,7 +90,6 @@ import {
   removeRemoteImageOverride,
   resolveMessageSender
 } from '../remoteImageStore'
-import type { SnoozeScheduler } from '../scheduler'
 import {
   deleteAccountSetting,
   readAccountSetting,
@@ -119,7 +115,8 @@ import { inboxBackfillReady } from '../sync/inboxReady'
 import { applyLifetimeCapChange } from '../sync/lifetimeCap'
 import { OnDemandBodyHydrator } from '../sync/onDemandBodies'
 import { type ServerSearchProvider, searchAllGmail, serverSearchFailure } from '../sync/serverSearch'
-import type { SyncController } from '../syncController'
+import type { ServiceSession } from './session'
+import type { TestHooks } from './testOperations'
 
 /**
  * Handler arguments stay `unknown`: the renderer is sandboxed but untrusted, so
@@ -143,12 +140,8 @@ export interface ServiceHandlerContext {
   makeClient: () => GmailClient | null
   makeProvider: () => GmailMailProvider | null
   makeServerSearchProvider: () => ServerSearchProvider | null
-  isSeeded: () => boolean
-  executor: () => ActionExecutor | null
-  draftMirrorExecutor: () => DraftMirrorExecutor | null
-  outboxSender: () => OutboxSender | null
-  scheduler: () => SnoozeScheduler | null
-  syncController: () => SyncController | null
+  /** The active account's live workers, or null while no account is active. */
+  activeSession: () => ServiceSession | null
   broadcastMailChanged: (serverSearchRequestId?: string) => void
   /** Push the stored remote-image policy to main's request filter (T33). */
   publishRemoteImagePolicy: () => void
@@ -159,12 +152,8 @@ export interface ServiceHandlerContext {
   trackForegroundProviderWork: <T>(accountId: string, work: () => Promise<T>) => Promise<T>
   peekRevertedActions: (accountId: string) => ActionRevertNotice | null
   acknowledgeRevertedActions: (accountId: string, noticeId: number) => boolean
-  waitForConversation: (threadId: string) => Promise<void>
-  draftReopenDelay: () => number
-  draftInlineImageDelay: () => number
-  consumeTestDraftSaveFailure: () => boolean
-  /** Test-only override of the search recency window; null in production. */
-  searchWindowOverride: () => number | null
+  /** The e2e seams' production-path hooks; absent outside the harness. */
+  test?: TestHooks
   testUserData: boolean
   userDataPath: string
   downloadsPath: string
@@ -393,7 +382,7 @@ async function resolveAttachmentData(
     ? getInlineAttachmentData(context.db, account, request.messageId, request.attachmentId)
     : null
   if (inlineData !== null) return { kind: 'available', data: inlineData }
-  if (context.isSeeded()) return { kind: 'signed-out' }
+  if (context.activeSession()?.seeded === true) return { kind: 'signed-out' }
   const client = context.makeClient()
   if (!client || !account) return { kind: 'signed-out' }
   const data = await context.trackForegroundProviderWork(
@@ -464,7 +453,8 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (typeof accountId !== 'string' || accountId !== account) throw new Error('account changed')
     const update = validateAccountSettingUpdate(key, value)
     if (update.key === 'lifetimeThreadCap') {
-      applyLifetimeCapChange(context.db, context.syncController(), account, update.value)
+      const syncController = context.activeSession()?.syncController ?? null
+      applyLifetimeCapChange(context.db, syncController, account, update.value)
     } else if (update.key === 'attnSignatureEnabled') {
       // Absent means on (F6). Keep an explicit false row for an opt-out; when
       // enabled again, remove the override so the account follows the default.
@@ -508,7 +498,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.draftSave, (_event, draft) => {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')
-    if (context.consumeTestDraftSaveFailure()) throw new Error('injected draft save failure')
+    if (context.test?.consumeDraftSaveFailure()) throw new Error('injected draft save failure')
     const account = requireAccount(context)
     const canonical = canonicalizeRendererDraft(context.db, account, draft)
     const prepared =
@@ -535,7 +525,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.draftReopen, async (_event, id) => {
     if (!nonEmptyString(id)) return null
-    const delay = context.testUserData ? context.draftReopenDelay() : 0
+    const delay = context.test?.draftReopenDelayMs() ?? 0
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     return reopenDraft(context.db, requireAccount(context), id)
   })
@@ -564,7 +554,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const existing = reopenThreadDraft(context.db, account, threadId, kind, sourceMessageId)
     const shouldUpgradeReplyAll = kind === 'replyAll' && existing?.kind === 'reply'
     if (existing && !shouldUpgradeReplyAll) return existing
-    await context.waitForConversation(threadId)
+    await context.test?.waitForConversation(threadId)
     let conversation = getConversation(
       context.db,
       account,
@@ -670,20 +660,11 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     context.broadcastMailChanged()
     return getDraft(context.db, account, id)
   })
-  handle(IPC_CHANNELS.draftPickAttachments, async (_event, id, paths) => {
+  // Both the file dialog (`draft:pickAttachments`, answered in main) and a
+  // renderer drop arrive here with the same paths, so one handler serves them.
+  handle(IPC_CHANNELS.draftAddAttachments, async (_event, id, paths) => {
     if (!nonEmptyString(id)) throw new Error('invalid draft id')
     if (!Array.isArray(paths) || !paths.every((path) => nonEmptyString(path))) {
-      throw new Error('invalid attachments')
-    }
-    return spoolDraftAttachments(context.db, context.userDataPath, requireAccount(context), id, paths)
-  })
-  handle(IPC_CHANNELS.draftAddAttachments, async (_event, id, paths) => {
-    if (
-      typeof id !== 'string' ||
-      id.length === 0 ||
-      !Array.isArray(paths) ||
-      !paths.every((path) => nonEmptyString(path))
-    ) {
       throw new Error('invalid attachments')
     }
     return spoolDraftAttachments(context.db, context.userDataPath, requireAccount(context), id, paths)
@@ -710,7 +691,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       return { error: 'Invalid inline image' }
     }
     const account = requireAccount(context)
-    const delay = context.testUserData ? context.draftInlineImageDelay() : 0
+    const delay = context.test?.draftInlineImageDelayMs() ?? 0
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
     const row = context.db
       .prepare(
@@ -762,7 +743,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     context.broadcastMailChanged()
     if (result === 'discarded') {
       cleanOutboxSpool(context.userDataPath, id)
-      void context.draftMirrorExecutor()?.trigger()
+      void context.activeSession()?.draftMirrorExecutor?.trigger()
     }
     return result
   })
@@ -776,13 +757,13 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     }
     cleanOutboxSpool(context.userDataPath, id)
     context.broadcastMailChanged()
-    void context.draftMirrorExecutor()?.trigger()
+    void context.activeSession()?.draftMirrorExecutor?.trigger()
     return undefined
   })
   handle(IPC_CHANNELS.draftMirror, (_event, id) => {
     if (!nonEmptyString(id)) throw new Error('invalid draft id')
     if (requestDraftMirror(context.db, requireAccount(context), id)) {
-      void context.draftMirrorExecutor()?.trigger()
+      void context.activeSession()?.draftMirrorExecutor?.trigger()
     }
     return undefined
   })
@@ -793,7 +774,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const result = queueSend(context.db, account, id)
     recordOutboxSendUndo(account, id)
     context.broadcastOutboxChanged({ kind: 'changed' })
-    context.outboxSender()?.refresh()
+    context.activeSession()?.outboxSender?.refresh()
     return result
   })
   handle(IPC_CHANNELS.outboxUndoSend, (_event, id) => {
@@ -802,7 +783,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const result = undoQueuedSend(context.db, account, id)
     if (result.draft) dropOutboxSendUndo(account, id)
     context.broadcastOutboxChanged({ kind: 'changed' })
-    context.outboxSender()?.refresh()
+    context.activeSession()?.outboxSender?.refresh()
     return result
   })
   handle(IPC_CHANNELS.outboxReopen, (_event, id) => {
@@ -819,9 +800,12 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const account = context.currentAccountId()
     return account ? listPendingOutbox(context.db, account) : []
   })
-  handle(IPC_CHANNELS.syncGetState, () => context.syncController()?.getState() ?? { phase: 'idle' })
+  handle(
+    IPC_CHANNELS.syncGetState,
+    () => context.activeSession()?.syncController.getState() ?? { phase: 'idle' }
+  )
   handle(IPC_CHANNELS.syncGetInboxReady, () => {
-    const syncController = context.syncController()
+    const syncController = context.activeSession()?.syncController ?? null
     if (syncController?.isInboxRecoveryPending()) return false
     const sync = syncController?.getState()
     if (sync?.phase === 'syncing' && (sync.stage === 'metadata' || sync.stage === 'bodies')) return false
@@ -837,7 +821,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     return inboxBackfillReady(state?.backfill_cursor, state?.split_metadata_cursor)
   })
   handle(IPC_CHANNELS.syncRetry, () => {
-    context.syncController()?.retry()
+    context.activeSession()?.syncController.retry()
     return undefined
   })
   handle(IPC_CHANNELS.mailSearch, (_event, query) => {
@@ -856,7 +840,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
         partial: false
       }
     }
-    const searchWindow = context.searchWindowOverride()
+    const searchWindow = context.test?.searchWindowOverride() ?? null
     return searchThreads(context.db, account, query.slice(0, 1_000), {
       ...(searchWindow === null ? {} : { recentMessageLimit: searchWindow })
     })
@@ -880,7 +864,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
         searchAllGmail(context.db, account, provider, boundedQuery, {
           shouldContinue: () => context.currentAccountId() === account,
           signal: controller.signal,
-          recentMessageLimit: context.searchWindowOverride() ?? undefined,
+          recentMessageLimit: context.test?.searchWindowOverride() ?? undefined,
           onStoreChanged: () => {
             storeChanged = true
           }
@@ -1007,7 +991,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration, mailbox) => {
     if (typeof threadId !== 'string') return null
-    await context.waitForConversation(threadId)
+    await context.test?.waitForConversation(threadId)
     const account = context.currentAccountId()
     if (!account) return null
     const attemptState = bodyHydrator.state(account, threadId)
@@ -1015,7 +999,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       context.db,
       account,
       threadId,
-      attemptState === 'idle' ? idleMissingBodyState(context.isSeeded()) : attemptState,
+      attemptState === 'idle' ? idleMissingBodyState(context.activeSession()?.seeded === true) : attemptState,
       isConversationMailbox(mailbox) ? mailbox : 'normal',
       true
     )
@@ -1025,7 +1009,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     ) {
       return conversation
     }
-    if (context.isSeeded()) return conversation
+    if (context.activeSession()?.seeded === true) return conversation
     const provider = context.makeProvider()
     if (!provider) return relabelMissingBodyState(conversation, 'signed-out')
     setImmediate(() => void bodyHydrator.request(account, threadId, provider))
@@ -1117,17 +1101,17 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (!isTriageAction(action)) throw new Error('invalid triage action')
     const account = requireAccount(context)
     const result = performTriage(context.db, account, action)
-    context.scheduler()?.refresh()
+    context.activeSession()?.snoozeScheduler?.refresh()
     context.broadcastMailChanged()
-    void context.executor()?.trigger()
+    void context.activeSession()?.actionExecutor?.trigger()
     return result
   })
   handle(IPC_CHANNELS.mailSnooze, (_event, input) => {
     if (!isSnoozeRequest(input)) throw new Error('invalid snooze request')
     const result = snoozeThreads(context.db, requireAccount(context), input.threadIds, input.dueAt)
-    context.scheduler()?.refresh()
+    context.activeSession()?.snoozeScheduler?.refresh()
     context.broadcastMailChanged()
-    void context.executor()?.trigger()
+    void context.activeSession()?.actionExecutor?.trigger()
     return result
   })
   handle(IPC_CHANNELS.mailMarkReadOnOpen, (_event, threadId) => {
@@ -1145,7 +1129,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const markedRead = thread?.is_unread === 1
     if (markedRead) {
       performTriage(context.db, account, { kind: 'markUnread', threadIds: [threadId], on: false }, false)
-      void context.executor()?.trigger()
+      void context.activeSession()?.actionExecutor?.trigger()
     }
     if (settled || markedRead) context.broadcastMailChanged()
     return undefined
@@ -1155,11 +1139,11 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (!account) return null
     const result = undoLast(context.db, account)
     if (result) {
-      context.scheduler()?.refresh()
+      context.activeSession()?.snoozeScheduler?.refresh()
       context.broadcastMailChanged()
-      void context.executor()?.trigger()
+      void context.activeSession()?.actionExecutor?.trigger()
       if (result.reopenDraftId) {
-        context.outboxSender()?.refresh()
+        context.activeSession()?.outboxSender?.refresh()
         context.broadcastOutboxChanged({ kind: 'changed' })
       }
     }

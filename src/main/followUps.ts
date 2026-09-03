@@ -14,7 +14,7 @@ export const FOLLOW_UP_KIND = 'follow_up'
  * and a reply may exist that only an authoritative thread snapshot can show.
  * Stored per account in settings so it survives restart mid-recovery.
  */
-export const FOLLOW_UP_RECOVERY_SETTING = 'followUpRecoveryPending'
+const FOLLOW_UP_RECOVERY_SETTING = 'followUpRecoveryPending'
 
 export function followUpRecoveryPending(db: Db, accountId: string): boolean {
   return readAccountSetting(db, accountId, FOLLOW_UP_RECOVERY_SETTING) === '1'

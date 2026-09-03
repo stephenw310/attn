@@ -14,13 +14,13 @@ const windowsBadgeIcons = new Map<string, NativeImage>()
  * a threshold raised here alone would plan detail notifications from rows that
  * were never hydrated, titling them "New message · (no subject)".
  */
-export const SUMMARY_THRESHOLD = NOTIFICATION_SUMMARY_THRESHOLD
+const SUMMARY_THRESHOLD = NOTIFICATION_SUMMARY_THRESHOLD
 
 /** A focus target is only worth honouring briefly — see `takePendingFocus`. */
 export const PENDING_FOCUS_TTL_MS = 60_000
 
 /** How many shown notifications stay reachable for a click. See `BoundedRetainer`. */
-export const NOTIFICATION_RETENTION = 50
+const NOTIFICATION_RETENTION = 50
 
 /**
  * Keeps values alive, newest-first, so the garbage collector cannot reclaim them.
@@ -88,14 +88,6 @@ export interface BadgeEffects {
   setWindowsOverlay: (unreadCount: number, description: string) => void
 }
 
-export function isolateNotificationFailure(operation: () => void, report: (message: string) => void): void {
-  try {
-    operation()
-  } catch (error) {
-    report(errorMessage(error))
-  }
-}
-
 export function applyUnreadBadge(
   platform: NodeJS.Platform,
   unreadCount: number,
@@ -127,22 +119,16 @@ export function planNotifications(
   if (focused || (pausedUntil !== null && pausedUntil !== undefined && pausedUntil > now)) return []
 
   const suffix = accountLabel ? ` · ${accountLabel}` : ''
-  const byThread = new Map<string, NotificationCandidate>()
-  for (const mail of newMail) byThread.set(mail.threadId, mail)
-  const conversations = [...byThread.values()]
-  if (conversations.length > SUMMARY_THRESHOLD) {
-    return [{ title: `Attn${suffix}`, body: `${conversations.length} new conversations` }]
+  // `candidatesFor` already collapsed the cycle to one candidate per thread.
+  if (newMail.length > SUMMARY_THRESHOLD) {
+    return [{ title: `Attn${suffix}`, body: `${newMail.length} new conversations` }]
   }
-  return conversations.map((mail) => ({
+  return newMail.map((mail) => ({
     threadId: mail.threadId,
     title: `${mail.sender || 'New message'} · ${mail.subject || '(no subject)'}${suffix}`,
     body: mail.snippet
   }))
 }
-
-// The pause deadlines are shared with the renderer's settings surface (F15);
-// the tray and settings must compute identical "1 hour" / "until tomorrow".
-export { oneHourFrom, tomorrowStart } from '../shared/notifications'
 
 /**
  * Resolve a focus target requested by a notification click. A renderer that

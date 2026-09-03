@@ -202,6 +202,115 @@ describe('thread snapshot persistence', () => {
     }
   })
 
+  it('replays pending local intent inside the snapshot transaction', () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, 'account', 'account')
+      db.prepare(
+        `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
+         VALUES ('account', 'modifyLabels', 'thread', '{"add":[],"remove":["INBOX"]}', 'pending')`
+      ).run()
+
+      // A crash between the snapshot and the replay would leave Gmail's label
+      // set visible — the archived thread back in the Inbox — so both must
+      // commit together. The nested transaction becomes a savepoint.
+      const prepared: { sql: string; inTransaction: boolean }[] = []
+      const tracked = {
+        prepare: (sql: string) => {
+          prepared.push({ sql, inTransaction: db.inTransaction })
+          return db.prepare(sql)
+        },
+        transaction: (callback: () => void) => db.transaction(callback)
+      } as unknown as Db
+
+      persistThread(tracked, 'account', {
+        id: 'thread',
+        messages: [{ id: 'message', threadId: 'thread', labelIds: ['INBOX'], internalDate: '100' }]
+      })
+
+      const replayReads = prepared.filter(
+        (statement) => statement.sql.includes('FROM action_queue') || statement.sql.includes('FROM reminders')
+      )
+      expect(replayReads.length).toBeGreaterThan(0)
+      expect(replayReads.every((statement) => statement.inTransaction)).toBe(true)
+      // The pending archive still wins over the authoritative snapshot.
+      expect(db.prepare('SELECT label_id FROM thread_labels').all()).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('keeps a new row out of the bounded Inbox surface unless the caller promotes it', () => {
+    const db = openDatabase(':memory:')
+    try {
+      const message = (threadId: string): { id: string; threadId: string; labelIds: string[] } => ({
+        id: `message-${threadId}`,
+        threadId,
+        labelIds: ['INBOX']
+      })
+      const visibility = (threadId: string): { is_inbox_visible: number } =>
+        db
+          .prepare('SELECT is_inbox_visible FROM threads WHERE account_id = ? AND id = ?')
+          .get('account', threadId) as { is_inbox_visible: number }
+
+      // A label-only poller refetch and a server-search store both pass
+      // 'preserve': neither may pull an older thread into the Inbox surface.
+      persistThread(
+        db,
+        'account',
+        { id: 'preserved', messages: [message('preserved')] },
+        {
+          inboxVisibility: 'preserve'
+        }
+      )
+      persistThread(
+        db,
+        'account',
+        { id: 'hidden', messages: [message('hidden')] },
+        {
+          inboxVisibility: 'hide'
+        }
+      )
+      persistThread(
+        db,
+        'account',
+        { id: 'promoted', messages: [message('promoted')] },
+        {
+          inboxVisibility: 'show'
+        }
+      )
+      persistThread(db, 'account', { id: 'default', messages: [message('default')] })
+
+      expect(visibility('preserved')).toEqual({ is_inbox_visible: 0 })
+      expect(visibility('hidden')).toEqual({ is_inbox_visible: 0 })
+      expect(visibility('promoted')).toEqual({ is_inbox_visible: 1 })
+      expect(visibility('default')).toEqual({ is_inbox_visible: 1 })
+
+      // A later Inbox event promotes the stored row; an ordinary refetch keeps
+      // whichever choice the row already carries.
+      persistThread(
+        db,
+        'account',
+        { id: 'preserved', messages: [message('preserved')] },
+        {
+          inboxVisibility: 'show'
+        }
+      )
+      persistThread(
+        db,
+        'account',
+        { id: 'promoted', messages: [message('promoted')] },
+        {
+          inboxVisibility: 'preserve'
+        }
+      )
+      expect(visibility('preserved')).toEqual({ is_inbox_visible: 1 })
+      expect(visibility('promoted')).toEqual({ is_inbox_visible: 1 })
+    } finally {
+      db.close()
+    }
+  })
+
   it('summarizes the messages shown by the normal reader instead of newer junk', () => {
     const db = openDatabase(':memory:')
     try {
@@ -260,6 +369,56 @@ describe('thread snapshot persistence', () => {
         is_starred: 0,
         has_attachment: 0
       })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('never lets a newer Gmail draft drive the thread summary', () => {
+    // The `t-roadmap` fixture's newest message is a DRAFT: unsent text belongs
+    // to the outbox, so the list must summarize the last real reply instead.
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'reply',
+            threadId: 'thread',
+            labelIds: ['INBOX'],
+            internalDate: '200',
+            snippet: 'Latest sent reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Maya <maya@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          },
+          {
+            id: 'draft',
+            threadId: 'thread',
+            labelIds: ['DRAFT'],
+            internalDate: '300',
+            snippet: 'Half-written answer',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Me <account>' },
+                { name: 'Subject', value: 'Re: Roadmap' }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        db
+          .prepare('SELECT snippet, last_msg_at, from_display FROM threads WHERE account_id = ? AND id = ?')
+          .get('account', 'thread')
+      ).toEqual({ snippet: 'Latest sent reply', last_msg_at: 200, from_display: 'Maya' })
+      expect(db.prepare('SELECT id FROM messages WHERE account_id = ?').all('account')).toEqual([
+        { id: 'reply' }
+      ])
     } finally {
       db.close()
     }

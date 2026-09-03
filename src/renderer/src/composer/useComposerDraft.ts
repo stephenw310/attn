@@ -12,7 +12,7 @@ import { serializeEditorState } from './serialize'
 
 type MutableDraftFields = Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject' | 'attachments' | 'followUpAt'>
 
-export function mirrorIdleMs(attachments: DraftSaveInput['attachments']): number {
+function mirrorIdleMs(attachments: DraftSaveInput['attachments']): number {
   const bytes = (attachments ?? []).reduce((total, attachment) => total + attachment.sizeBytes, 0)
   return bytes > MIRROR_PAYLOAD_BYTES ? MIRROR_PAYLOAD_IDLE_MS : MIRROR_IDLE_MS
 }
@@ -163,6 +163,12 @@ export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): Com
       if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
     }
   }, [clearTimers])
+
+  // B28: main asks for a checkpoint on `before-quit`, while the document is
+  // still alive — serializing the editor during unload cannot load the `data:`
+  // URLs an inline image needs. Committing here is what keeps the last second
+  // of typing; main waits for the answer before it tears anything down.
+  useEffect(() => window.attn?.draft.onCheckpointRequest(() => commitRef.current()), [])
 
   const saveNow = useCallback(async () => {
     if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)

@@ -3,19 +3,13 @@ import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { emitFocusThread } from './seams'
 
 test.use({ seed: 'fixtures/seed-splits.json' })
 
 async function openSplitRules(page: Page): Promise<void> {
   await page.getByTestId('split-rules-settings').click()
   await expect(page.getByTestId('split-rules')).toBeVisible()
-}
-
-async function emitFocusThread(app: ElectronApplication, threadId: string): Promise<void> {
-  await app.evaluate(({ ipcMain }, { channel, id }) => ipcMain.emit(channel, {}, id), {
-    channel: TEST_CHANNELS.focusThread,
-    id: threadId
-  })
 }
 
 async function updateMessageBody(

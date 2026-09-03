@@ -1,0 +1,468 @@
+{
+  "account": "seed@attn.test",
+  "labels": [
+    {
+      "id": "Label_1",
+      "name": "receipts",
+      "type": "user"
+    },
+    {
+      "id": "Label_2",
+      "name": "projects",
+      "type": "user"
+    },
+    {
+      "id": "Label_3",
+      "name": "clients",
+      "type": "user"
+    },
+    {
+      "id": "Label_4",
+      "name": "design",
+      "type": "user"
+    },
+    {
+      "id": "Label_5",
+      "name": "engineering",
+      "type": "user"
+    },
+    {
+      "id": "Label_6",
+      "name": "finance",
+      "type": "user"
+    },
+    {
+      "id": "Label_7",
+      "name": "follow-up",
+      "type": "user"
+    },
+    {
+      "id": "Label_8",
+      "name": "hiring",
+      "type": "user"
+    },
+    {
+      "id": "Label_9",
+      "name": "legal",
+      "type": "user"
+    },
+    {
+      "id": "Label_10",
+      "name": "marketing",
+      "type": "user"
+    },
+    {
+      "id": "Label_11",
+      "name": "personal",
+      "type": "user"
+    },
+    {
+      "id": "Label_12",
+      "name": "travel",
+      "type": "user"
+    },
+    {
+      "id": "STARRED",
+      "name": "Starred",
+      "type": "system"
+    }
+  ],
+  "threads": [
+    {
+      "id": "t-offline-01",
+      "historyId": "2001",
+      "messages": [
+        {
+          "id": "m-offline-01",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "08:03",
+          "from": "Priya Raman <priya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-01@example.com>",
+          "subject": "Offline batch 01",
+          "snippet": "Queued archive number 01.",
+          "bodyText": "This thread is archived offline as number 01 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-02",
+      "historyId": "2002",
+      "messages": [
+        {
+          "id": "m-offline-02",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:06",
+          "from": "Daniel Okafor <daniel@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-02@example.com>",
+          "subject": "Offline batch 02",
+          "snippet": "Queued archive number 02.",
+          "bodyText": "This thread is archived offline as number 02 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-03",
+      "historyId": "2003",
+      "messages": [
+        {
+          "id": "m-offline-03",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:09",
+          "from": "Maya Lin <maya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-03@example.com>",
+          "subject": "Offline batch 03",
+          "snippet": "Queued archive number 03.",
+          "bodyText": "This thread is archived offline as number 03 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-04",
+      "historyId": "2004",
+      "messages": [
+        {
+          "id": "m-offline-04",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "11:12",
+          "from": "Theo Alvarez <theo@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-04@example.com>",
+          "subject": "Offline batch 04",
+          "snippet": "Queued archive number 04.",
+          "bodyText": "This thread is archived offline as number 04 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-05",
+      "historyId": "2005",
+      "messages": [
+        {
+          "id": "m-offline-05",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "12:15",
+          "from": "Nina Costa <nina@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-05@example.com>",
+          "subject": "Offline batch 05",
+          "snippet": "Queued archive number 05.",
+          "bodyText": "This thread is archived offline as number 05 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-06",
+      "historyId": "2006",
+      "messages": [
+        {
+          "id": "m-offline-06",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "13:18",
+          "from": "Priya Raman <priya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-06@example.com>",
+          "subject": "Offline batch 06",
+          "snippet": "Queued archive number 06.",
+          "bodyText": "This thread is archived offline as number 06 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-07",
+      "historyId": "2007",
+      "messages": [
+        {
+          "id": "m-offline-07",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "14:21",
+          "from": "Daniel Okafor <daniel@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-07@example.com>",
+          "subject": "Offline batch 07",
+          "snippet": "Queued archive number 07.",
+          "bodyText": "This thread is archived offline as number 07 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-08",
+      "historyId": "2008",
+      "messages": [
+        {
+          "id": "m-offline-08",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "15:24",
+          "from": "Maya Lin <maya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-08@example.com>",
+          "subject": "Offline batch 08",
+          "snippet": "Queued archive number 08.",
+          "bodyText": "This thread is archived offline as number 08 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-09",
+      "historyId": "2009",
+      "messages": [
+        {
+          "id": "m-offline-09",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "16:27",
+          "from": "Theo Alvarez <theo@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-09@example.com>",
+          "subject": "Offline batch 09",
+          "snippet": "Queued archive number 09.",
+          "bodyText": "This thread is archived offline as number 09 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-10",
+      "historyId": "2010",
+      "messages": [
+        {
+          "id": "m-offline-10",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "17:30",
+          "from": "Nina Costa <nina@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-10@example.com>",
+          "subject": "Offline batch 10",
+          "snippet": "Queued archive number 10.",
+          "bodyText": "This thread is archived offline as number 10 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-11",
+      "historyId": "2011",
+      "messages": [
+        {
+          "id": "m-offline-11",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "18:33",
+          "from": "Priya Raman <priya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-11@example.com>",
+          "subject": "Offline batch 11",
+          "snippet": "Queued archive number 11.",
+          "bodyText": "This thread is archived offline as number 11 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-12",
+      "historyId": "2012",
+      "messages": [
+        {
+          "id": "m-offline-12",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "07:36",
+          "from": "Daniel Okafor <daniel@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-12@example.com>",
+          "subject": "Offline batch 12",
+          "snippet": "Queued archive number 12.",
+          "bodyText": "This thread is archived offline as number 12 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-13",
+      "historyId": "2013",
+      "messages": [
+        {
+          "id": "m-offline-13",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "08:39",
+          "from": "Maya Lin <maya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-13@example.com>",
+          "subject": "Offline batch 13",
+          "snippet": "Queued archive number 13.",
+          "bodyText": "This thread is archived offline as number 13 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-14",
+      "historyId": "2014",
+      "messages": [
+        {
+          "id": "m-offline-14",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:42",
+          "from": "Theo Alvarez <theo@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-14@example.com>",
+          "subject": "Offline batch 14",
+          "snippet": "Queued archive number 14.",
+          "bodyText": "This thread is archived offline as number 14 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-15",
+      "historyId": "2015",
+      "messages": [
+        {
+          "id": "m-offline-15",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:45",
+          "from": "Nina Costa <nina@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-15@example.com>",
+          "subject": "Offline batch 15",
+          "snippet": "Queued archive number 15.",
+          "bodyText": "This thread is archived offline as number 15 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-16",
+      "historyId": "2016",
+      "messages": [
+        {
+          "id": "m-offline-16",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "11:48",
+          "from": "Priya Raman <priya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-16@example.com>",
+          "subject": "Offline batch 16",
+          "snippet": "Queued archive number 16.",
+          "bodyText": "This thread is archived offline as number 16 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-17",
+      "historyId": "2017",
+      "messages": [
+        {
+          "id": "m-offline-17",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "12:51",
+          "from": "Daniel Okafor <daniel@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-17@example.com>",
+          "subject": "Offline batch 17",
+          "snippet": "Queued archive number 17.",
+          "bodyText": "This thread is archived offline as number 17 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-18",
+      "historyId": "2018",
+      "messages": [
+        {
+          "id": "m-offline-18",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "13:54",
+          "from": "Maya Lin <maya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-18@example.com>",
+          "subject": "Offline batch 18",
+          "snippet": "Queued archive number 18.",
+          "bodyText": "This thread is archived offline as number 18 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-19",
+      "historyId": "2019",
+      "messages": [
+        {
+          "id": "m-offline-19",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "14:57",
+          "from": "Theo Alvarez <theo@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-19@example.com>",
+          "subject": "Offline batch 19",
+          "snippet": "Queued archive number 19.",
+          "bodyText": "This thread is archived offline as number 19 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-20",
+      "historyId": "2020",
+      "messages": [
+        {
+          "id": "m-offline-20",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "15:00",
+          "from": "Nina Costa <nina@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-20@example.com>",
+          "subject": "Offline batch 20",
+          "snippet": "Queued archive number 20.",
+          "bodyText": "This thread is archived offline as number 20 of twenty."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-21",
+      "historyId": "2021",
+      "messages": [
+        {
+          "id": "m-offline-21",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "16:03",
+          "from": "Priya Raman <priya@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-21@example.com>",
+          "subject": "Offline batch 21",
+          "snippet": "Queued archive number 21.",
+          "bodyText": "This thread stays in the inbox while twenty others are archived offline."
+        }
+      ]
+    },
+    {
+      "id": "t-offline-22",
+      "historyId": "2022",
+      "messages": [
+        {
+          "id": "m-offline-22",
+          "labelIds": ["INBOX", "UNREAD"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "17:06",
+          "from": "Daniel Okafor <daniel@example.com>",
+          "to": "seed@attn.test",
+          "messageId": "<offline-22@example.com>",
+          "subject": "Offline batch 22",
+          "snippet": "Queued archive number 22.",
+          "bodyText": "This thread stays in the inbox while twenty others are archived offline."
+        }
+      ]
+    }
+  ]
+}

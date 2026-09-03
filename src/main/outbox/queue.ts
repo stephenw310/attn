@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import type { MailAddress } from '../../shared/address'
 import type { DraftKind } from '../../shared/drafts'
 import type {
   OutboxItem,
@@ -13,11 +12,13 @@ import { ALLOWED_UNDO_SEND_SECONDS, DEFAULT_UNDO_SEND_SECONDS } from '../../shar
 import type { Db } from '../db'
 import { readSetting } from '../settings'
 import { getDraft } from './drafts'
-import { planTransition } from './machine'
+import { persistPlan, type StoredMachineRow } from './machine'
 import { validateMimeRecipients } from './mime'
+import { outboxAddresses } from './row'
 
 interface QueueRow {
   id: string
+  account_id: string
   state: PendingOutboxState | 'composing'
   kind: DraftKind
   to_json: string
@@ -33,10 +34,6 @@ interface QueueRow {
   last_error: string | null
 }
 
-function parseAddresses(value: string): MailAddress[] {
-  return JSON.parse(value) as MailAddress[]
-}
-
 export function undoSendDelayMs(db: Db): number {
   const value = Number(readSetting(db, 'undoSendDelaySeconds'))
   const seconds = ALLOWED_UNDO_SEND_SECONDS.has(value) ? value : DEFAULT_UNDO_SEND_SECONDS
@@ -46,7 +43,7 @@ export function undoSendDelayMs(db: Db): number {
 export function queueSend(db: Db, accountId: string, draftId: string, now = Date.now()): QueueSendResult {
   const row = db
     .prepare(
-      `SELECT id, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
+      `SELECT id, account_id, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
               gmail_draft_id, rfc_message_id, send_at, attempts, verify_attempts, last_error
        FROM outbox WHERE account_id = ? AND id = ? AND state = 'composing'`
     )
@@ -61,42 +58,27 @@ export function queueSend(db: Db, accountId: string, draftId: string, now = Date
 
   validateMimeRecipients(
     {
-      to: parseAddresses(row.to_json),
-      cc: parseAddresses(row.cc_json),
-      bcc: parseAddresses(row.bcc_json)
+      to: outboxAddresses(row.to_json),
+      cc: outboxAddresses(row.cc_json),
+      bcc: outboxAddresses(row.bcc_json)
     },
     accountId
   )
   const sendAt = now + undoSendDelayMs(db)
-  const plan = planTransition(
-    {
-      state: row.state,
-      gmailDraftId: row.gmail_draft_id,
-      sendAt: row.send_at,
-      attempts: row.attempts,
-      verifyAttempts: row.verify_attempts
-    },
-    { type: 'queue', sendAt },
-    now
-  )
-  if (plan.next.state !== 'queued') throw new Error('draft could not be queued')
-
   const messageId = row.rfc_message_id ?? `<${randomUUID()}@${accountDomain}>`
-  const result = db
-    .prepare(
-      `UPDATE outbox SET state = 'queued', rfc_message_id = ?, send_at = ?, attempts = 0,
-       verify_attempts = 0, last_error = NULL, updated_at = ?
-       WHERE account_id = ? AND id = ? AND state = 'composing'`
-    )
-    .run(messageId, sendAt, now, accountId, draftId)
-  if (result.changes === 0) throw new Error('draft could not be queued')
+  const { persisted } = persistPlan(db, row, { type: 'queue', sendAt }, now, {
+    rfcMessageId: messageId,
+    lastError: null,
+    updatedAt: now
+  })
+  if (!persisted) throw new Error('draft could not be queued')
   return { id: draftId, sendAt }
 }
 
 export function listPendingOutbox(db: Db, accountId: string): OutboxItem[] {
   const rows = db
     .prepare(
-      `SELECT id, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
+      `SELECT id, account_id, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
               gmail_draft_id, rfc_message_id, send_at, attempts, verify_attempts, last_error
        FROM outbox
        WHERE account_id = ? AND state IN ('queued', 'sending', 'failed', 'needs-review')
@@ -107,14 +89,34 @@ export function listPendingOutbox(db: Db, accountId: string): OutboxItem[] {
     id: row.id,
     state: row.state as PendingOutboxState,
     kind: row.kind,
-    to: parseAddresses(row.to_json),
-    cc: parseAddresses(row.cc_json),
-    bcc: parseAddresses(row.bcc_json),
+    to: outboxAddresses(row.to_json),
+    cc: outboxAddresses(row.cc_json),
+    bcc: outboxAddresses(row.bcc_json),
     subject: row.subject,
     updatedAt: row.updated_at,
     sendAt: row.send_at,
     lastError: row.last_error
   }))
+}
+
+interface StoredStateRow extends StoredMachineRow {
+  last_error: string | null
+}
+
+function machineColumns(db: Db, accountId: string, id: string): StoredStateRow | undefined {
+  return db
+    .prepare(
+      `SELECT account_id, id, state, gmail_draft_id, send_at, attempts, verify_attempts, last_error
+       FROM outbox WHERE account_id = ? AND id = ?`
+    )
+    .get(accountId, id) as StoredStateRow | undefined
+}
+
+function currentState(db: Db, accountId: string, id: string): OutboxState | undefined {
+  const row = db.prepare('SELECT state FROM outbox WHERE account_id = ? AND id = ?').get(accountId, id) as
+    | { state: OutboxState }
+    | undefined
+  return row?.state
 }
 
 function unavailableUndoMessage(state: OutboxState | undefined): string {
@@ -127,47 +129,13 @@ function unavailableUndoMessage(state: OutboxState | undefined): string {
 }
 
 export function undoQueuedSend(db: Db, accountId: string, id: string, now = Date.now()): ReopenOutboxResult {
-  const row = db
-    .prepare(
-      `SELECT state, gmail_draft_id, send_at, attempts, verify_attempts FROM outbox
-       WHERE account_id = ? AND id = ?`
-    )
-    .get(accountId, id) as
-    | {
-        state: string
-        gmail_draft_id: string | null
-        send_at: number | null
-        attempts: number
-        verify_attempts: number
-      }
-    | undefined
+  const row = machineColumns(db, accountId, id)
   if (!row) return { draft: null, error: unavailableUndoMessage(undefined) }
-  const plan = planTransition(
-    {
-      state: row.state as QueueRow['state'],
-      gmailDraftId: row.gmail_draft_id,
-      sendAt: row.send_at,
-      attempts: row.attempts,
-      verifyAttempts: row.verify_attempts
-    },
-    { type: 'undo' },
-    now
-  )
-  if (plan.next.state !== 'composing') {
-    return { draft: null, error: unavailableUndoMessage(row.state as OutboxState) }
-  }
-  const undone = db
-    .prepare(
-      `UPDATE outbox SET state = 'composing', send_at = NULL, attempts = 0, verify_attempts = 0,
-       last_error = NULL, updated_at = ? WHERE account_id = ? AND id = ? AND state = 'queued'`
-    )
-    .run(now, accountId, id)
-  if (undone.changes === 0) {
-    const current = db
-      .prepare('SELECT state FROM outbox WHERE account_id = ? AND id = ?')
-      .get(accountId, id) as { state: OutboxState } | undefined
-    return { draft: null, error: unavailableUndoMessage(current?.state) }
-  }
+  const { persisted } = persistPlan(db, row, { type: 'undo' }, now, {
+    lastError: null,
+    updatedAt: now
+  })
+  if (!persisted) return { draft: null, error: unavailableUndoMessage(currentState(db, accountId, id)) }
   return { draft: getDraft(db, accountId, id), error: null }
 }
 
@@ -177,26 +145,17 @@ export function reopenPendingOutbox(
   id: string,
   now = Date.now()
 ): ReopenOutboxResult {
-  const row = db
-    .prepare('SELECT state, last_error FROM outbox WHERE account_id = ? AND id = ?')
-    .get(accountId, id) as { state: string; last_error: string | null } | undefined
+  const row = machineColumns(db, accountId, id)
   if (!row || (row.state !== 'failed' && row.state !== 'needs-review')) {
     return { draft: null, error: row?.state === 'sending' ? 'Sending in progress' : 'Message is unavailable' }
   }
   const explanation =
     row.state === 'needs-review' ? NEEDS_REVIEW_EXPLANATION : row.last_error || 'Message could not be sent'
-  const reopened = db
-    .prepare(
-      `UPDATE outbox SET state = 'composing', rfc_message_id = NULL, send_at = NULL, attempts = 0,
-     verify_attempts = 0, last_error = NULL, updated_at = ?
-     WHERE account_id = ? AND id = ? AND state IN ('failed', 'needs-review')`
-    )
-    .run(now, accountId, id)
-  if (reopened.changes === 0) {
-    const current = db
-      .prepare('SELECT state FROM outbox WHERE account_id = ? AND id = ?')
-      .get(accountId, id) as { state: OutboxState } | undefined
-    return { draft: null, error: unavailableUndoMessage(current?.state) }
-  }
+  const { persisted } = persistPlan(db, row, { type: 'reopen' }, now, {
+    rfcMessageId: null,
+    lastError: null,
+    updatedAt: now
+  })
+  if (!persisted) return { draft: null, error: unavailableUndoMessage(currentState(db, accountId, id)) }
   return { draft: getDraft(db, accountId, id), error: explanation }
 }

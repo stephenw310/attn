@@ -1,3 +1,5 @@
+import { isRgbColor } from '../../shared/css'
+
 // Chromium serializes the WebKit alias as the unprefixed property.
 const LINE_PROPERTIES = new Set(['-webkit-text-size-adjust', 'text-size-adjust', 'background-color'])
 const TEXT_PROPERTIES = new Set([
@@ -10,8 +12,13 @@ const TEXT_PROPERTIES = new Set([
   'text-decoration-line'
 ])
 const INLINE_TAGS = new Set(['SPAN', 'A', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'BR', 'FONT'])
+// The artifact's own two colours, read through the shared colour parser so a
+// different but equivalent serialization still matches (review R8).
+const APPLE_DARK_LINE = { red: 58, green: 58, blue: 60 }
+
 function hasWhiteBackground(element: HTMLElement): boolean {
-  return ['white', 'rgb(255, 255, 255)'].includes(element.style.backgroundColor)
+  const value = element.style.backgroundColor
+  return value === 'white' || isRgbColor(value, 255, 255, 255)
 }
 
 function appleLineSpan(line: HTMLElement): HTMLElement | null {
@@ -19,7 +26,12 @@ function appleLineSpan(line: HTMLElement): HTMLElement | null {
     line.closest('table') ||
     (line.style.getPropertyValue('text-size-adjust') ||
       line.style.getPropertyValue('-webkit-text-size-adjust')) !== 'auto' ||
-    line.style.backgroundColor !== 'rgb(58, 58, 60)' ||
+    !isRgbColor(
+      line.style.backgroundColor,
+      APPLE_DARK_LINE.red,
+      APPLE_DARK_LINE.green,
+      APPLE_DARK_LINE.blue
+    ) ||
     line.hasAttribute('bgcolor') ||
     line.hasAttribute('background') ||
     Array.from(line.style).some((property) => !LINE_PROPERTIES.has(property)) ||

@@ -11,7 +11,7 @@ export type SerializedGmailSignatureNode = SerializedElementNode
 
 export const COLLAPSED_GMAIL_SIGNATURE_SELECTOR = '.gmail_signature[data-attn-signature-collapsed="true"]'
 
-export function collapseGmailSignature(element: HTMLElement): void {
+function collapseGmailSignature(element: HTMLElement): void {
   element.setAttribute('data-attn-signature-collapsed', 'true')
   element.setAttribute('contenteditable', 'false')
   element.setAttribute('role', 'button')

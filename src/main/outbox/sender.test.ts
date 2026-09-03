@@ -9,27 +9,14 @@ import { type Db, openDatabase } from '../db'
 import { getConversationForDisplay } from '../db/queries'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
+import { fakeMailProvider } from '../testing/fakes'
 import type { SchedulerTime, TimerHandle } from '../time'
 import { saveDraft } from './drafts'
-import {
-  executeDraftSendProtocol,
-  isRetryableOutboxPreflightError,
-  OutboxSender,
-  verifyKnownDraft
-} from './sender'
+import { OutboxSender } from './sender'
 
+/** The shared fake plus the draft/send members the outbox protocol drives. */
 function provider(overrides: Partial<MailProvider> = {}): MailProvider {
-  return {
-    modifyThread: vi.fn(),
-    trashThread: vi.fn(),
-    untrashThread: vi.fn(),
-    getProfile: vi.fn(),
-    listLabels: vi.fn(),
-    listThreadIds: vi.fn(),
-    getThread: vi.fn(),
-    getAttachmentData: vi.fn(),
-    listHistory: vi.fn(),
-    listDrafts: vi.fn(),
+  return fakeMailProvider({
     getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: 'thread-1' } })),
     saveDraft: vi.fn(async ({ id }) => id ?? 'created-draft'),
     createDraft: vi.fn(async () => 'created-draft'),
@@ -37,165 +24,8 @@ function provider(overrides: Partial<MailProvider> = {}): MailProvider {
     sendDraft: vi.fn(async () => ({ id: 'sent-message', threadId: 'sent-thread' })),
     findByRfcId: vi.fn(),
     ...overrides
-  }
+  })
 }
-
-describe('outbox Gmail draft protocol', () => {
-  it('creates, persists, updates, then sends in that exact order', async () => {
-    const order: string[] = []
-    const fake = provider({
-      createDraft: vi.fn(async () => {
-        order.push('create')
-        return 'created-draft'
-      }),
-      updateDraft: vi.fn(async ({ id }) => {
-        order.push(`update:${id}`)
-        return id
-      }),
-      sendDraft: vi.fn(async (id) => {
-        order.push(`send:${id}`)
-        return { id: 'sent-message', threadId: 'sent-thread' }
-      })
-    })
-
-    await expect(
-      executeDraftSendProtocol(fake, {
-        gmailDraftId: null,
-        raw: 'raw',
-        threadId: 'thread-1',
-        persistCreatedId: (id) => {
-          order.push(`persist:${id}`)
-          return true
-        }
-      })
-    ).resolves.toEqual({ kind: 'sent', messageId: 'sent-message', threadId: 'sent-thread' })
-    expect(order).toEqual(['create', 'persist:created-draft', 'update:created-draft', 'send:created-draft'])
-  })
-
-  it('never updates or sends when a crash/error prevents id persistence', async () => {
-    const createDraft = vi.fn(async () => 'orphaned-draft')
-    const updateDraft = vi.fn(async ({ id }: { id: string }) => id)
-    const sendDraft = vi.fn(async () => ({ id: 'sent', threadId: 'thread' }))
-    const fake = provider({ createDraft, updateDraft, sendDraft })
-
-    await expect(
-      executeDraftSendProtocol(fake, {
-        gmailDraftId: null,
-        raw: 'raw',
-        threadId: null,
-        persistCreatedId: () => false
-      })
-    ).resolves.toEqual({ kind: 'aborted' })
-    expect(createDraft).toHaveBeenCalledTimes(1)
-    expect(updateDraft).not.toHaveBeenCalled()
-    expect(sendDraft).not.toHaveBeenCalled()
-  })
-
-  it('distinguishes a definitive retryable create rejection from an ambiguous create failure', async () => {
-    const rejected = provider({
-      createDraft: vi.fn(async () => {
-        throw new GmailApiError(429, 'quota', true)
-      })
-    })
-    await expect(
-      executeDraftSendProtocol(rejected, {
-        gmailDraftId: null,
-        raw: 'raw',
-        threadId: null,
-        persistCreatedId: () => true
-      })
-    ).rejects.toMatchObject({
-      reason: expect.objectContaining({ status: 429, retryable: true })
-    })
-
-    const ambiguous = new TypeError('fetch failed')
-    const uncertain = provider({
-      createDraft: vi.fn(async () => {
-        throw ambiguous
-      })
-    })
-    await expect(
-      executeDraftSendProtocol(uncertain, {
-        gmailDraftId: null,
-        raw: 'raw',
-        threadId: null,
-        persistCreatedId: () => true
-      })
-    ).rejects.toBe(ambiguous)
-
-    const timedOut = new GmailApiError(408, 'deadline exceeded', true)
-    const timeout = provider({
-      createDraft: vi.fn(async () => {
-        throw timedOut
-      })
-    })
-    await expect(
-      executeDraftSendProtocol(timeout, {
-        gmailDraftId: null,
-        raw: 'raw',
-        threadId: null,
-        persistCreatedId: () => true
-      })
-    ).rejects.toBe(timedOut)
-  })
-
-  it('treats send 404 as an already-consumed draft, never a blind-resend signal', async () => {
-    const fake = provider({
-      sendDraft: vi.fn(async () => {
-        throw new GmailApiError(404, 'gone')
-      })
-    })
-    await expect(
-      executeDraftSendProtocol(fake, {
-        gmailDraftId: 'known-draft',
-        raw: 'raw',
-        threadId: null,
-        persistCreatedId: () => true
-      })
-    ).resolves.toEqual({ kind: 'consumed' })
-  })
-
-  it('does not call send or claim success when the draft is missing during update', async () => {
-    const sendDraft = vi.fn(async () => ({ id: 'sent', threadId: 'thread' }))
-    const fake = provider({
-      updateDraft: vi.fn(async () => {
-        throw new GmailApiError(404, 'deleted before send')
-      }),
-      sendDraft
-    })
-    await expect(
-      executeDraftSendProtocol(fake, {
-        gmailDraftId: 'missing-draft',
-        raw: 'raw',
-        threadId: null,
-        persistCreatedId: () => true
-      })
-    ).resolves.toEqual({ kind: 'missing-before-send' })
-    expect(sendDraft).not.toHaveBeenCalled()
-  })
-
-  it('uses draft presence as the decisive recovery probe', async () => {
-    await expect(verifyKnownDraft(provider(), 'present')).resolves.toBe('present')
-    await expect(
-      verifyKnownDraft(
-        provider({
-          getDraft: vi.fn(async () => {
-            throw new GmailApiError(404, 'consumed')
-          })
-        }),
-        'consumed'
-      )
-    ).resolves.toBe('consumed')
-  })
-})
-
-describe('outbox preflight failures', () => {
-  it('retries only errors that can recover without editing the message', () => {
-    expect(isRetryableOutboxPreflightError(new TypeError('fetch failed'))).toBe(true)
-    expect(isRetryableOutboxPreflightError(new GmailApiError(503, 'unavailable', true))).toBe(true)
-    expect(isRetryableOutboxPreflightError(new Error('local attachment unavailable'))).toBe(false)
-  })
-})
 
 type FakeSendState = 'composing' | 'queued' | 'sending' | 'sent' | 'failed' | 'needs-review'
 
@@ -229,6 +59,9 @@ interface FakeSendRow {
 }
 
 const NOW = 10_000
+
+const MACHINE_WRITE_PREFIX =
+  'UPDATE outbox SET state = ?, gmail_draft_id = ?, send_at = ?, attempts = ?, verify_attempts = ?'
 
 function fakeRow(patch: Partial<FakeSendRow> = {}): FakeSendRow {
   return {
@@ -333,63 +166,42 @@ class FakeOutboxDb {
       }
       return { changes }
     }
-    if (query.startsWith("UPDATE outbox SET state = 'sending'")) {
-      const row = this.rows.get(String(args[1]))
-      if (!row || row.account_id !== args[0] || row.state !== 'queued') return { changes: 0 }
-      row.state = 'sending'
-      return { changes: 1 }
-    }
-    if (query.startsWith('UPDATE outbox SET gmail_draft_id = ?')) {
-      const row = this.rows.get(String(args[2]))
-      if (!row || row.account_id !== args[1] || row.state !== 'sending' || row.gmail_draft_id !== null) {
-        return { changes: 0 }
-      }
-      row.gmail_draft_id = String(args[0])
-      row.attempts = 0
-      row.verify_attempts = 0
-      row.last_error = null
-      return { changes: 1 }
-    }
-    if (query.startsWith('UPDATE outbox SET state = ?, gmail_draft_id = CASE')) {
-      const row = this.rows.get(String(args[6]))
-      if (!row || row.account_id !== args[5] || row.state !== 'sending') return { changes: 0 }
-      row.state = args[0] as FakeSendState
-      if (Number(args[1])) row.gmail_draft_id = null
-      row.send_at = null
-      row.attempts = Number(args[2])
-      row.verify_attempts = Number(args[3])
-      row.last_error = String(args[4])
-      return { changes: 1 }
-    }
-    if (query.startsWith('UPDATE outbox SET state = ?, send_at = ?, attempts = ?')) {
-      const row = this.rows.get(String(args[6]))
-      const requiresMissingDraft = query.includes('gmail_draft_id IS NULL')
-      if (
-        !row ||
-        row.account_id !== args[5] ||
-        row.state !== 'sending' ||
-        (requiresMissingDraft && row.gmail_draft_id !== null)
-      ) {
-        return { changes: 0 }
-      }
-      row.state = args[0] as FakeSendState
-      row.send_at = args[1] === null ? null : Number(args[1])
-      row.attempts = Number(args[2])
-      row.verify_attempts = Number(args[3])
-      row.last_error = args[4] === null ? null : String(args[4])
-      return { changes: 1 }
-    }
-    if (query.startsWith("UPDATE outbox SET state = 'sent'")) {
-      const row = this.rows.get(String(args[3]))
-      if (!row || row.account_id !== args[2] || row.state !== 'sending') return { changes: 0 }
-      row.state = 'sent'
-      if (args[0] !== null) row.gmail_message_id = String(args[0])
-      row.send_at = null
-      row.last_error = null
-      row.updated_at = Number(args[1])
-      return { changes: 1 }
-    }
+    // Every state change now arrives through persistPlan's one writer, so the
+    // fake interprets that single shape instead of five hand-written updates.
+    if (query.startsWith(MACHINE_WRITE_PREFIX)) return this.persistPlan(query, args)
     throw new Error(`unexpected fake run: ${query}`)
+  }
+
+  private persistPlan(query: string, args: unknown[]): { changes: number } {
+    const columns = ['state', 'gmail_draft_id', 'send_at', 'attempts', 'verify_attempts']
+    if (query.includes('rfc_message_id = ?')) columns.push('rfc_message_id')
+    if (query.includes('gmail_message_id = COALESCE')) columns.push('gmail_message_id')
+    if (query.includes('last_error = ?')) columns.push('last_error')
+    if (query.includes('updated_at = ?')) columns.push('updated_at')
+    const values = args.slice(0, columns.length)
+    const guards = args.slice(columns.length)
+    const row = this.rows.get(String(guards[1]))
+    if (!row || row.account_id !== guards[0] || row.state !== guards[2]) return { changes: 0 }
+    if (query.includes('gmail_draft_id IS NULL') && row.gmail_draft_id !== null) return { changes: 0 }
+    // Mirrors the claim's own send time predicate, so a row the user undid
+    // and re-sent during the mirror wait is no longer claimable.
+    if (query.includes('send_at <= ?') && (row.send_at === null || row.send_at > Number(guards[3]))) {
+      return { changes: 0 }
+    }
+    for (const [index, column] of columns.entries()) {
+      const value = values[index]
+      if (column === 'state') row.state = value as FakeSendState
+      else if (column === 'gmail_draft_id') row.gmail_draft_id = value === null ? null : String(value)
+      else if (column === 'send_at') row.send_at = value === null ? null : Number(value)
+      else if (column === 'attempts') row.attempts = Number(value)
+      else if (column === 'verify_attempts') row.verify_attempts = Number(value)
+      else if (column === 'rfc_message_id') row.rfc_message_id = String(value)
+      else if (column === 'gmail_message_id') {
+        if (value !== null) row.gmail_message_id = String(value)
+      } else if (column === 'last_error') row.last_error = value === null ? null : String(value)
+      else if (column === 'updated_at') row.updated_at = Number(value)
+    }
+    return { changes: 1 }
   }
 }
 
@@ -502,6 +314,59 @@ describe('OutboxSender effect layer', () => {
     expect(clean).toHaveBeenCalledWith('outbox-1')
   })
 
+  it('sends from the cached send-as name without a Gmail round trip', async () => {
+    const db = openDatabase(':memory:')
+    try {
+      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
+        'me@example.com',
+        'me@example.com',
+        NOW
+      )
+      db.prepare('INSERT INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(
+        'me@example.com',
+        'sendAsDisplayName',
+        'Chao Zhou'
+      )
+      const id = saveDraft(
+        db,
+        'me@example.com',
+        {
+          ...emptyDraftInput(),
+          to: [{ name: '', email: 'you@example.com' }],
+          subject: 'Cached identity',
+          bodyHtml: '<p>Hi</p>',
+          bodyText: 'Hi'
+        },
+        NOW
+      )
+      db.prepare("UPDATE outbox SET state = 'queued', rfc_message_id = ?, send_at = ? WHERE id = ?").run(
+        '<cached@example.com>',
+        NOW,
+        id
+      )
+      const getSendAs = vi.fn()
+      const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
+        expect(Buffer.from(raw, 'base64url').toString()).toContain('From: Chao Zhou <me@example.com>')
+        return 'created-draft'
+      })
+      const sender = new OutboxSender(
+        db,
+        () => 'me@example.com',
+        () => provider({ getSendAs, createDraft }),
+        vi.fn(),
+        { time: new ManualTime() }
+      )
+
+      await sender.trigger()
+
+      expect(getSendAs).not.toHaveBeenCalled()
+      expect(createDraft).toHaveBeenCalledTimes(1)
+      expect(db.prepare('SELECT state FROM outbox WHERE id = ?').get(id)).toEqual({ state: 'sent' })
+    } finally {
+      db.close()
+    }
+  })
+
   it('invalidates mail after persisting the confirmed sent conversation', async () => {
     const db = openDatabase(':memory:')
     const mailChanged = vi.fn()
@@ -516,6 +381,10 @@ describe('OutboxSender effect layer', () => {
            (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
          VALUES (?, 'gmail-sent', 'identity-thread', 'Chao Zhou', ?, ?, '["SENT"]')`
       ).run('me@example.com', 'me@example.com', NOW - 1)
+      // persistThread writes the thread's label union beside its messages.
+      db.prepare(
+        "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, 'identity-thread', 'SENT')"
+      ).run('me@example.com')
       const id = saveDraft(
         db,
         'me@example.com',
@@ -745,11 +614,82 @@ describe('OutboxSender effect layer', () => {
         getDraft: vi.fn(async () => {
           throw new GmailApiError(404, 'gone')
         }),
+        findByRfcId: vi.fn(async () => ({ kind: 'message' as const, messageId: 'confirmed-message' })),
         sendDraft: missingSend
       })
     ).trigger()
     expect(missingSend).not.toHaveBeenCalled()
-    expect(missingStore.row().state).toBe('sent')
+    expect(missingStore.row()).toMatchObject({ state: 'sent', gmail_message_id: 'confirmed-message' })
+  })
+
+  it('parks a draft deleted elsewhere during recovery instead of reporting it sent', async () => {
+    // "Consumed" conflates "Gmail sent it" with "deleted from Drafts on another
+    // device", and only the Message-ID lookup can tell them apart.
+    const store = new FakeOutboxDb(fakeRow({ state: 'sending', gmail_draft_id: 'draft-deleted' }))
+    const findByRfcId = vi.fn(async () => null)
+    const sendDraft = vi.fn(async () => ({ id: 'sent-message', threadId: '' }))
+    const notify = vi.fn()
+    await effectSender(
+      store,
+      effectProvider({
+        getDraft: vi.fn(async () => {
+          throw new GmailApiError(404, 'deleted on another device')
+        }),
+        findByRfcId,
+        sendDraft
+      }),
+      { notify }
+    ).trigger()
+
+    expect(findByRfcId).toHaveBeenCalledWith('<message@example.com>', expect.anything())
+    expect(sendDraft).not.toHaveBeenCalled()
+    expect(store.row()).toMatchObject({ state: 'needs-review', gmail_draft_id: null })
+    expect(store.row().last_error).toContain("couldn't confirm")
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed', id: 'outbox-1' }))
+  })
+
+  it('keeps the full undo window when the user re-sends during the mirror checkpoint wait', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const createDraft = vi.fn(async () => 'draft-1')
+    const sender = effectSender(store, effectProvider({ createDraft }), {
+      // Undo followed by a fresh send while the checkpoint wait holds the
+      // drain: the row is queued again, with a send time that has not arrived.
+      beforeRemote: async () => {
+        store.row().send_at = NOW + 30_000
+      }
+    })
+
+    await sender.trigger()
+
+    expect(createDraft).not.toHaveBeenCalled()
+    expect(store.row()).toMatchObject({ state: 'queued', send_at: NOW + 30_000 })
+  })
+
+  it('verifies an ambiguous 408 create by Message-ID instead of failing the row', async () => {
+    const store = new FakeOutboxDb(fakeRow())
+    const time = new ManualTime()
+    const findByRfcId = vi.fn(async () => null)
+    const sender = effectSender(
+      store,
+      effectProvider({
+        createDraft: vi.fn(async () => {
+          throw new GmailApiError(408, 'deadline exceeded')
+        }),
+        findByRfcId
+      }),
+      { time }
+    )
+
+    await sender.trigger()
+
+    expect(store.row()).toMatchObject({ state: 'sending', attempts: 1, verify_attempts: 0 })
+    expect(store.row().send_at).toBeGreaterThan(NOW)
+
+    time.advance((store.row().send_at ?? NOW) - NOW)
+    await sender.trigger()
+
+    expect(findByRfcId).toHaveBeenCalledWith('<message@example.com>', expect.anything())
+    expect(store.row()).toMatchObject({ state: 'sending', verify_attempts: 1 })
   })
 
   it('bounds successful secondary negatives independently from transport retries', async () => {

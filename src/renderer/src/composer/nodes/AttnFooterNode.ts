@@ -9,7 +9,7 @@ import {
 
 export type SerializedAttnFooterNode = SerializedElementNode
 
-export const ATTN_FOOTER_ATTRIBUTE = 'data-attn-signature'
+const ATTN_FOOTER_ATTRIBUTE = 'data-attn-signature'
 
 function isAttnFooter(element: HTMLElement): boolean {
   return element.getAttribute(ATTN_FOOTER_ATTRIBUTE) === 'footer'

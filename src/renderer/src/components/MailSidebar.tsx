@@ -7,6 +7,7 @@ import {
   userLabelView,
   VIEW_TITLES
 } from '../mailDisplay'
+import { formatShortcut } from '../platform'
 import { Kbd } from './Kbd'
 
 const MAILBOX_ITEMS: readonly { view: MailboxView; shortcut: string }[] = [
@@ -66,7 +67,7 @@ function NavButton({
           {compactCount(count)}
         </span>
       )}
-      {shortcut && <Kbd>{shortcut.toUpperCase()}</Kbd>}
+      {shortcut && <Kbd>{formatShortcut(shortcut)}</Kbd>}
     </button>
   )
 }

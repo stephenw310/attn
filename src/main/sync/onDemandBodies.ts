@@ -113,7 +113,13 @@ export class OnDemandBodyHydrator {
     } catch (error) {
       failure = error
     }
-    if (this.stopped || this.currentAccountId() !== accountId) return
+    if (this.stopped || this.currentAccountId() !== accountId) {
+      // No conclusion for a switched-away account, so leave no state behind:
+      // a retained 'loading' makes every later read of this thread report an
+      // in-progress hydration that nothing will ever finish.
+      this.states.delete(key)
+      return
+    }
 
     const missingAfter = this.effects.missingMessageIds(this.db, accountId, threadId)
     const bodyChanged = [...missingBefore].some((messageId) => !missingAfter.has(messageId))

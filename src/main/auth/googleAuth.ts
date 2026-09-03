@@ -6,6 +6,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
+import { errorMessage } from '../../shared/error'
 
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
@@ -116,6 +117,15 @@ function waitForAuthCode(
       server.close()
       reject(new Error('sign-in canceled'))
     }
+
+    // Without this, a failed `listen` (EACCES/EADDRNOTAVAIL on a locked-down
+    // host) re-throws as an uncaught exception in main and the promise only
+    // settles when the five-minute timeout fires.
+    server.on('error', (error) => {
+      clearTimeout(timeout)
+      activeCancel = null
+      reject(new Error(`sign-in could not open a loopback listener: ${errorMessage(error)}`))
+    })
 
     server.on('request', (req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
