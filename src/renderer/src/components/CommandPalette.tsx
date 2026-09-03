@@ -106,7 +106,9 @@ export function CommandPalette({
 
   useLayoutEffect(() => registerCommands([createCommand('palette.open', openPalette)]), [openPalette])
 
-  useEffect(() => {
+  // Layout phase, not passive: the cheat sheet reads this before the next key
+  // event can be dispatched, which the DOM probe it replaces guaranteed (P9).
+  useLayoutEffect(() => {
     onOpenChange(open)
   }, [onOpenChange, open])
 
