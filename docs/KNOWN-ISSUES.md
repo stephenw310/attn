@@ -41,89 +41,6 @@ unless a plan doc says so.
 Each was verified against `main` @ ee4fe41 on 2026-09-02. The review id in parentheses points at the full
 reasoning and fix direction in [REVIEW-2026-09-02.md](REVIEW-2026-09-02.md).
 
-### BUG-1: a local "Move to Inbox" on a lifetime-hidden thread never becomes visible *(review B1)*
-
-**Verified:** 2026-09-02 · **Severity:** high
-
-`applyThreadDelta` (`src/main/store/mutate.ts:11`) never writes `threads.is_inbox_visible`; the only writer is the
-`persistThread` upsert (`src/main/sync/persist.ts:155`). Every Inbox read requires the flag, so moving a
-sweep-hidden thread to Inbox, undoing its archive, or returning it from snooze shows nothing until the poller
-refetches it with `'show'` — at least 15 s online, never offline. Fix: promote the flag in `applyThreadDelta` when
-`delta.add` contains `INBOX`; add a `mutate.test.ts` case seeded hidden.
-
-### BUG-2: archive undo re-adds INBOX to threads that were never in the inbox *(review B2)*
-
-**Verified:** 2026-09-02 · **Severity:** high
-
-`inverseForThread` (`src/main/actions/plan.ts:86`) returns an unconditional `restoreInbox` for `archive`; `apply`
-(`src/main/actions/index.ts:285`) builds the undo entry before detecting `archiveWasAlreadyApplied` (`:395`).
-Archive from All Mail, Sent, or a label view reports "Archived" with a live undo that adds INBOX locally and in
-Gmail. Fix: label-aware inverses for archive/restoreInbox/unsnooze; report "Already there" when nothing changed.
-
-### BUG-3: the outbox claim after a long mirror wait ignores a renewed undo window *(review B3)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`OutboxSender.drain` (`src/main/outbox/sender.ts:379-406`) picks a due row, awaits the mirror's `waitForIdle`,
-then claims `WHERE state = 'queued'` with no `send_at` predicate against the stale row. An undo-and-resend during
-the wait is sent before its new window expires. Fix: `AND send_at <= ?` on the claim, or reload the row.
-
-### BUG-4: one persistently failing thread wedges history polling *(review B4)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`runHistoryCycle` (`src/main/sync/poller.ts:187-221`) rethrows any non-404 per-thread error before advancing
-`last_history_id`, so every 15 s cycle re-fetches the whole window and fails at the same thread with no exit.
-Fix: skip-and-log per thread, advance the checkpoint, let the existence sweep repair.
-
-### BUG-5: discarding a draft during its first mirror create orphans a Gmail draft that sync resurrects *(review B5)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`closeDraft` (`src/main/outbox/drafts.ts:428-437`) hard-deletes an empty unbound row while
-`streamDraftCheckpoint.create` (`src/main/outbox/mirror.ts:223`) may be in flight; the post-create binding matches
-zero rows and `syncRemoteDrafts` imports the remote draft as new. Fix: delete the remote draft when the binding
-update reports `changes === 0`, or transition to `discarding` while the mirror is running on the row.
-
-### BUG-6: a 408 on `sendDraft`/`createDraft` is treated as permanent *(review B6)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`permanentSendError` (`src/main/outbox/sender.ts:62`) is true for a non-retryable 4xx other than 404, and the real
-client only marks 429/5xx retryable, so the "ambiguous create" path that `executeDraftSendProtocol` (`:172`)
-intends for 408 is never reached; the row fails, a fresh Message-ID is minted, and a resend can duplicate.
-`sender.test.ts:126` passes only because its fixture sets `retryable: true`. Fix: exclude 408 like 404; fix the fixture.
-
-### BUG-7: a draft the user deleted in Gmail during recovery is marked sent *(review B7)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`verifyKnownDraft` (`src/main/outbox/sender.ts:117-129`) maps 404 to `'consumed'` and both callers `markSent`.
-Fix: on `'consumed'`, run `findByRfcId`; mark sent on a match, else `needs-review`.
-
-### BUG-8: `refreshMailRows` drifted from the effect refresh and mis-selects in Outbox *(review B8)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`src/renderer/src/hooks/useMailData.ts:640-726` copies the effect at `:402-532` but never fetches the outbox for
-`view === 'outbox'`, falling through to `drafts` and clamping the selection. Closing an outbox item snaps the
-selection to row 0. Fix: one `runRefresh(options)` for both paths.
-
-### BUG-9: Escape inside a Settings text field closes Settings and drops the edit *(review B9)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-The bubble-phase listener at `src/renderer/src/components/Inbox.tsx:676-687` has no text-entry guard, unlike
-`useKeyboardDispatch.ts:123-129`. An in-progress snippet body or AI standing rule is lost. Fix: early-return on
-text-entry targets.
-
-### BUG-10: strikethrough is invisible in the composer *(review B10)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`src/renderer/src/composer/editorConfig.ts:51` maps the theme key to `.app-composer-strikethrough`, which
-`app.css` never defines (`.app-composer-underline` at `:391` is). The sent mail still carries `<s>`. Fix: one rule.
-
 ### BUG-11: `preserve.ts` strips `background-color` from blocks, breaking F6 zero-loss silently *(review B11)*
 
 **Verified:** 2026-09-02 · **Severity:** medium
@@ -138,22 +55,6 @@ inherited; `materializeInheritedTextStyles` moves it onto text spans and deletes
 
 `InlineQuote` (`src/renderer/src/composer/Composer.tsx:336-347`) sanitizes with `sanitizeOutgoingHtml`, which
 drops `style`, headings, `hr`, `pre`; the `forceLightMailCss` branch there is dead. Fix falls out of REF-8.
-
-### BUG-13: the lifetime sweep counts all threads on every 250 ms foreground-yield tick *(review B13)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`progress()` (`src/main/sync/lifetimeSweep.ts:185`) runs `COUNT(*) FROM threads` unconditionally and
-`waitForRequestSlot` (`:209-217`) calls it on every yield iteration while foreground work holds the connection.
-Fix: count once per page, never in the yield loop.
-
-### SEC-1: mail links with non-web schemes reach `shell.openExternal` unfiltered *(review S1)*
-
-**Verified:** 2026-09-02 · **Severity:** low-medium
-
-DOMPurify admits `tel:`, `sms:`, `callto:`, `xmpp:`, `matrix:`; `normalizeMailLink`
-(`src/renderer/src/MessageBody.tsx:131`) passes any scheme; `setWindowOpenHandler` (`src/main/index.ts:377-380`)
-opens anything. Fix: allow only `http:`, `https:`, `mailto:` in main.
 
 ## Test coverage gaps
 
