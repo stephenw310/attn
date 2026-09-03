@@ -133,8 +133,6 @@ export function Inbox({
   const [composerError, setComposerError] = useState<string | null>(null)
   const [toast, showToast] = useToast()
   const { settings: appSettings, update: updateAppSetting } = useSettings(showToast)
-  const appSettingsRef = useRef(appSettings)
-  appSettingsRef.current = appSettings
   const { accountSettings, updateAccountSetting } = useAccountSettings(
     status.activeAccountId ?? status.email ?? null,
     showToast
@@ -150,8 +148,9 @@ export function Inbox({
   const setMailboxSelectedIndex = useCallback<React.Dispatch<React.SetStateAction<number>>>((next) => {
     if (!searchOpenRef.current) setSelectedIndex(next)
   }, [])
-  // Render-time mirrors keep the view-switch callbacks referentially stable:
-  // effects subscribe on top of switchView, and churning it re-runs them all.
+  // The synchronous halves of the shell's own state: the extracted hooks read
+  // the cursor, the reader and the settings surface inside the same event turn
+  // that changes them, before React re-renders.
   const selectedIndexRef = useRef(0)
   selectedIndexRef.current = selectedIndex
   const readerOpenRef = useRef(false)
@@ -398,13 +397,8 @@ export function Inbox({
     return unsubscribe
   }, [onClaimUpdateAnnouncement, showToast])
 
-  // T37 AI reply drafting: one Inbox-owned command serves the reader and the
-  // composer. An invocation parks in the pending ref until the (possibly just
-  // opened) reply composer's plugin claims it — claiming is one-shot, so a
-  // remounted composer can never replay a consumed invocation. The pending
-  // value is the target THREAD id: a composer for any other conversation
-  // finds nothing to claim, so an invocation can never carry into an
-  // unrelated draft (PR #101 review).
+  // The cursor can never point past the visible list, however the list got
+  // shorter — a refresh, a triage removal, or a narrowing search.
   useEffect(() => {
     const visibleCount = searchDraftMode
       ? search.drafts.length
