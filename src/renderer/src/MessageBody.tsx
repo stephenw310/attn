@@ -1,36 +1,21 @@
-import DOMPurify from 'dompurify'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { safeUrl } from '../../shared/html'
 import type { MessageAttachment } from '../../shared/mail'
-import {
-  MAIL_CID_SOURCE_MARKER as CID_SOURCE_MARKER,
-  MAIL_IMAGE_PENDING_MARKER as IMAGE_PENDING_MARKER,
-  sanitizeMailHtml,
-  MAIL_TRIM_MARKER as TRIM_MARKER
-} from '../../shared/mailSanitizer'
+import { MAIL_TRIM_MARKER as TRIM_MARKER } from '../../shared/mailSanitizer'
 import type { ThemeAppearance } from '../../shared/theme'
-import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
 import {
-  type InlineImageReference,
-  matchInlineImageReferences,
-  normalizedContentId
-} from './mailInlineImages'
-import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
-import {
-  findHtmlTrimStart,
-  findTrimIndex,
-  hasRenderableContent,
-  hasRenderableContentBefore,
-  type MailReadingParts
-} from './mailReading'
+  applyResolvedCidImages,
+  MailFrame,
+  mailCidReferences,
+  mailFrameDocument,
+  MAIL_TRIM_COLLAPSED_ATTRIBUTE as TRIM_COLLAPSED_ATTRIBUTE,
+  MAIL_TRIM_CONTROL_HEIGHT as TRIM_CONTROL_HEIGHT,
+  useMailFrameAccess
+} from './mailFrame'
+import { matchInlineImageReferences } from './mailInlineImages'
+import { mailTextParts } from './mailLinks'
+import { findTrimIndex, type MailReadingParts } from './mailReading'
 import { containsRemoteMailContent } from './mailRemoteContent'
-import {
-  forceLightMailCss,
-  type MailLayout,
-  type MailSurface,
-  normalizeNativeMailBackgrounds,
-  normalizeNativeMailDocument
-} from './mailSurface'
+import type { MailLayout, MailSurface } from './mailSurface'
 
 interface MessageBodyProps {
   bodyText: string
@@ -47,199 +32,16 @@ interface MessageBodyProps {
   onToggleTrim: () => void
 }
 
-const MAIL_VIEWPORT_HEIGHT = 800
 const MAX_SAFE_BODY_HEIGHT = 100_000
-const TRIM_CONTROL_HEIGHT = 28
 const HORIZONTAL_SCROLLBAR_HEIGHT = 16
-const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
-const TRIM_COLLAPSED_ATTRIBUTE = 'data-attn-trim-collapsed'
 const EMPTY_IMAGES = new Map<string, string>()
 const attn = window.attn
-
-function frameReset(surface: MailSurface, layout: MailLayout, appearance: ThemeAppearance): string {
-  const senderCanvas = surface === 'light'
-  const light = senderCanvas || appearance === 'light'
-  return `
-  :root { color-scheme: only ${light ? 'light' : 'dark'}; }
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: ${senderCanvas ? '#fff' : 'transparent'};
-    color: ${light ? '#202124' : '#e9eaee'};
-  }
-  html { overflow-x: auto; overflow-y: hidden; }
-  body { overflow: visible; }
-  body {
-    font: ${light ? '14px/1.6 Arial, Helvetica, sans-serif' : '15px/1.7 Arial, Helvetica, sans-serif'};
-    overflow-wrap: break-word;
-    box-sizing: border-box;
-    padding: 0;
-  }
-  ${
-    senderCanvas && layout === 'centered'
-      ? `#attn-mail-body#attn-mail-body {
-    width: fit-content !important;
-    max-width: 100% !important;
-    margin-inline: auto !important;
-  }`
-      : ''
-  }
-  ${
-    senderCanvas
-      ? ''
-      : `
-  #attn-mail-root#attn-mail-root,
-  #attn-mail-body#attn-mail-body,
-  #attn-mail-body#attn-mail-body :where(*) {
-    background-color: transparent !important;
-    background-image: none !important;
-  }`
-  }
-  ${
-    light
-      ? ''
-      : `
-  #attn-mail-body :is(blockquote, .gmail_quote) {
-    color: #9da2ac;
-  }
-  #attn-mail-body a {
-    color: #60a5fa !important;
-  }`
-  }
-  img { max-width: 100%; height: auto; }
-  img[${IMAGE_PENDING_MARKER}] { visibility: hidden !important; }
-  table { max-width: 100%; }
-  pre { white-space: pre-wrap; }
-  [${TRIM_MARKER}] {
-    display: block !important;
-    height: ${TRIM_CONTROL_HEIGHT}px !important;
-  }
-  html[${TRIM_COLLAPSED_ATTRIBUTE}] [${TRIM_MARKER}] {
-    height: calc(${TRIM_CONTROL_HEIGHT}px + var(--attn-trim-scrollbar-height, 0px)) !important;
-  }
-`
-}
 
 interface FrameMeasurement {
   srcDoc: string
   fullHeight: number
   trimTop: number | null
   scrollbarHeight: number
-}
-
-function freezeViewportHeightUnits(css: string): string {
-  return css.replace(VIEWPORT_HEIGHT_UNIT, (_, rawValue: string) => {
-    return `${(Number(rawValue) * MAIL_VIEWPORT_HEIGHT) / 100}px`
-  })
-}
-
-/**
- * Schemes main will actually open. `shell.openExternal` refuses anything else,
- * so a display link outside this set is dead markup that looks live — drop the
- * href instead and leave the text (review R8/S1).
- */
-const DISPLAY_LINK_SCHEMES = ['https', 'http', 'mailto']
-
-function normalizeMailLink(href: string): string | null {
-  const value = href.trim()
-  if (!value) return null
-  // An in-document fragment never leaves the frame.
-  if (value.startsWith('#')) return value
-  if (value.startsWith('//')) return safeUrl(`https:${value}`, DISPLAY_LINK_SCHEMES)
-  if (/^[a-z][a-z\d+.-]*:/i.test(value)) return safeUrl(value, DISPLAY_LINK_SCHEMES)
-  if (/^(?:www\.)?[a-z\d](?:[a-z\d-]*[a-z\d])?(?:\.[a-z\d](?:[a-z\d-]*[a-z\d])?)+(?:[/?#]|$)/i.test(value)) {
-    return safeUrl(`https://${value}`, DISPLAY_LINK_SCHEMES)
-  }
-  return null
-}
-
-function sanitizeToTemplate(
-  html: string,
-  surface: MailSurface,
-  appearance: ThemeAppearance,
-  viewOriginal: boolean
-): HTMLTemplateElement | null {
-  if (!html.trim()) return null
-  const clean = sanitizeMailHtml(DOMPurify, html)
-
-  const template = document.createElement('template')
-  template.innerHTML = clean
-  if (!viewOriginal) normalizeAppleMailLineBackgrounds(template.content)
-  template.content.querySelectorAll('style').forEach((style) => {
-    const frozen = freezeViewportHeightUnits(style.textContent ?? '')
-    style.textContent = surface === 'light' || appearance === 'light' ? forceLightMailCss(frozen) : frozen
-  })
-  template.content.querySelectorAll<HTMLElement>('[style]').forEach((element) => {
-    element.setAttribute('style', freezeViewportHeightUnits(element.getAttribute('style') ?? ''))
-  })
-  if (surface === 'native') {
-    if (appearance === 'dark') normalizeNativeMailDocument(template.content)
-    else normalizeNativeMailBackgrounds(template.content)
-  }
-  template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
-    const normalizedHref = normalizeMailLink(link.getAttribute('href') ?? '')
-    if (normalizedHref === null) link.removeAttribute('href')
-    else link.setAttribute('href', normalizedHref)
-  })
-  linkifyBareMailUrls(template.content)
-  if (!hasRenderableContent(template.content)) return null
-
-  return template
-}
-
-function replaceCidSources(content: DocumentFragment, inlineImages: ReadonlyMap<string, string>): void {
-  content.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => {
-    const source = image.getAttribute('src')?.trim() ?? ''
-    if (!source.toLowerCase().startsWith('cid:')) return
-    const dataUrl = inlineImages.get(normalizedContentId(source.slice(4)))
-    if (dataUrl) image.setAttribute('src', dataUrl)
-    else {
-      image.setAttribute(CID_SOURCE_MARKER, source)
-      image.removeAttribute('src')
-    }
-  })
-}
-
-function cidReferences(html: string): InlineImageReference[] {
-  if (!/cid:/i.test(html)) return []
-  const parsed = new DOMParser().parseFromString(html, 'text/html')
-  return [...parsed.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
-    const source = image.getAttribute('src')?.trim() ?? ''
-    if (!source.toLowerCase().startsWith('cid:')) return []
-    const filenameHint = image.getAttribute('alt')?.trim()
-    return [
-      {
-        contentId: normalizedContentId(source.slice(4)),
-        ...(filenameHint ? { filenameHint } : {})
-      }
-    ]
-  })
-}
-
-function makeSrcDoc(
-  html: string,
-  inlineImages: ReadonlyMap<string, string>,
-  surface: MailSurface,
-  layout: MailLayout,
-  appearance: ThemeAppearance,
-  viewOriginal: boolean,
-  allowTrim: boolean
-): string | null {
-  const template = sanitizeToTemplate(html, surface, appearance, viewOriginal)
-  if (!template) return null
-  replaceCidSources(template.content, inlineImages)
-  template.content.querySelectorAll('img').forEach((image) => {
-    image.setAttribute(IMAGE_PENDING_MARKER, '')
-  })
-  const trimMatch = allowTrim ? findHtmlTrimStart(template.content) : null
-  const trimStart = trimMatch && hasRenderableContentBefore(template.content, trimMatch) ? trimMatch : null
-  if (trimStart) {
-    const marker = document.createElement('div')
-    marker.setAttribute(TRIM_MARKER, '')
-    trimStart.parentNode?.insertBefore(marker, trimStart)
-  }
-  const renderedAppearance = surface === 'light' ? 'light' : appearance
-  return `<!doctype html><html id="attn-mail-root"><head><meta charset="utf-8"><meta name="color-scheme" content="${renderedAppearance}"><base target="_blank"><style>${frameReset(surface, layout, appearance)}</style></head><body id="attn-mail-body">${template.innerHTML}</body></html>`
 }
 
 function LinkedMailText({ text, lightSurface }: { text: string; lightSurface: boolean }): React.JSX.Element {
@@ -309,13 +111,6 @@ function TrimToggle({
   )
 }
 
-interface MailFrameAccess {
-  /** The iframe's name; scripts are off in the frame, so markup can't change it. */
-  nonce: string
-  blocked: boolean
-  imagesAllowed: boolean
-}
-
 export function MessageBody(props: MessageBodyProps): React.JSX.Element {
   const { parts, expanded = false, onToggleTrim, viewOriginal } = props
   if (!parts || viewOriginal) return <SingleMessageBody {...props} />
@@ -377,60 +172,43 @@ function SingleMessageBody({
 }: MessageBodyProps & { allowTrim?: boolean; hidden?: boolean }): React.JSX.Element {
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
-  // T33: the frame mounts only after main has registered it with the
-  // request filter, so an allowed sender's images are never spuriously
-  // cancelled by a race, and a blocked one fails closed.
-  const [frameAccess, setFrameAccess] = useState<MailFrameAccess | null>(null)
-  const [frameEpoch, setFrameEpoch] = useState(0)
-  const allowOnceRef = useRef(false)
+  // P7: a collapsed quote is registered with main and measured for nothing —
+  // it has no layout width until it is revealed. Build it on the first reveal
+  // and keep it afterwards, so collapsing again costs no re-registration.
+  const [revealed, setRevealed] = useState(!hidden)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
-  const observerRef = useRef<ResizeObserver | null>(null)
-  const keyDocumentRef = useRef<Document | null>(null)
   const inlineImagesRef = useRef<ReadonlyMap<string, string>>(EMPTY_IMAGES)
-  const watchedImagesRef = useRef(new WeakSet<HTMLImageElement>())
   const srcDoc = useMemo(
     () =>
       bodyHtml === null
         ? null
-        : makeSrcDoc(bodyHtml, EMPTY_IMAGES, surface, layout, appearance, viewOriginal, allowTrim),
+        : mailFrameDocument({
+            html: bodyHtml,
+            presentation: { surface, layout, appearance },
+            viewOriginal,
+            allowTrim
+          }),
     [allowTrim, appearance, bodyHtml, layout, surface, viewOriginal]
   )
 
-  const revealLoadedImages = useCallback((doc: Document) => {
-    doc.querySelectorAll<HTMLImageElement>(`img[${IMAGE_PENDING_MARKER}]`).forEach((image) => {
-      if (image.complete && image.naturalWidth > 0) {
-        image.removeAttribute(IMAGE_PENDING_MARKER)
-        return
-      }
-      if (watchedImagesRef.current.has(image)) return
-      watchedImagesRef.current.add(image)
-      image.addEventListener(
-        'load',
-        () => {
-          image.removeAttribute(IMAGE_PENDING_MARKER)
-        },
-        { once: true }
-      )
-    })
-  }, [])
+  useEffect(() => {
+    if (!hidden) setRevealed(true)
+  }, [hidden])
+
+  const { access: frameAccess, loadOnce: loadImagesOnce } = useMailFrameAccess({
+    messageId,
+    enabled: srcDoc !== null && revealed
+  })
 
   const applyInlineImages = useCallback(() => {
     const doc = frameRef.current?.contentDocument
-    if (!doc) return
-    doc.querySelectorAll<HTMLImageElement>(`img[${CID_SOURCE_MARKER}]`).forEach((image) => {
-      const source = image.getAttribute(CID_SOURCE_MARKER)?.trim() ?? ''
-      const dataUrl = inlineImagesRef.current.get(normalizedContentId(source.slice(4)))
-      if (!dataUrl) return
-      image.setAttribute('src', dataUrl)
-      image.removeAttribute(CID_SOURCE_MARKER)
-    })
-    revealLoadedImages(doc)
-  }, [revealLoadedImages])
+    if (doc) applyResolvedCidImages(doc, inlineImagesRef.current)
+  }, [])
 
   useLayoutEffect(() => {
     inlineImagesRef.current = EMPTY_IMAGES
     if (bodyHtml === null || !attn) return
-    const references = cidReferences(bodyHtml)
+    const references = mailCidReferences(bodyHtml)
     const cidAttachments = matchInlineImageReferences(attachments, references)
     const matchedReferences = new Set(cidAttachments.flatMap(({ contentIds }) => contentIds))
     if (references.some((reference) => !matchedReferences.has(reference.contentId))) {
@@ -459,56 +237,13 @@ function SingleMessageBody({
     }
   }, [applyInlineImages, attachments, bodyHtml, messageId, threadId])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: frameEpoch deliberately re-registers the frame so "Load once" / "Always load" take effect on the same mount
-  useEffect(() => {
-    setFrameAccess(null)
-    if (srcDoc === null) return
-    if (!attn) {
-      // Unit and browser harnesses have no bridge and no request filter.
-      setFrameAccess({ nonce: '', blocked: false, imagesAllowed: true })
-      return
-    }
-    const nonce = crypto.randomUUID()
-    // `Load once` is spent by exactly one registration (T33): the next mount
-    // of this message is blocked again.
-    const allowOnce = allowOnceRef.current
-    allowOnceRef.current = false
-    let stale = false
-    attn.mail
-      .registerMessageFrame(nonce, messageId, allowOnce)
-      .then((access) => {
-        if (!stale) setFrameAccess({ nonce, ...access })
-      })
-      .catch(() => {
-        // Main's filter fails closed for an unregistered frame; the renderer
-        // only loses the banner, never the protection.
-        if (!stale) setFrameAccess({ nonce, blocked: false, imagesAllowed: true })
-      })
-    return () => {
-      stale = true
-      void attn.mail.unregisterMessageFrame(nonce).catch(() => {})
-    }
-  }, [frameEpoch, messageId, srcDoc])
-
-  // A policy change (toggle or per-sender override, from Settings, the
-  // palette, or another open message) re-registers this frame so an already
-  // open message picks up its fresh answer without being reopened.
-  useEffect(() => {
-    if (!attn) return
-    return attn.mail.onRemoteImagesChanged(() => setFrameEpoch((epoch) => epoch + 1))
-  }, [])
-
   const hasRemoteContent = useMemo(() => srcDoc !== null && containsRemoteMailContent(srcDoc), [srcDoc])
   const remoteImagesBanner = frameAccess?.blocked === true && !frameAccess.imagesAllowed && hasRemoteContent
-  const loadImagesOnce = useCallback(() => {
-    allowOnceRef.current = true
-    setFrameEpoch((epoch) => epoch + 1)
-  }, [])
   const alwaysLoadFromSender = useCallback(() => {
     // The override's sender is resolved from the store in the utility. The
-    // policy-change broadcast above re-registers this frame (and every other
-    // mounted one) exactly once — no local epoch bump, or the frame would
-    // remount twice and fetch a third time.
+    // policy-change broadcast re-registers this frame (and every other mounted
+    // one) exactly once — no local epoch bump, or the frame would remount
+    // twice and fetch a third time.
     void attn?.mail.allowRemoteImagesFromSender(messageId).catch(() => {})
   }, [messageId])
 
@@ -525,10 +260,9 @@ function SingleMessageBody({
           )
 
   const measure = useCallback(
-    (frame: HTMLIFrameElement) => {
-      const doc = frame.contentDocument
+    (doc: Document) => {
       // A collapsed quote has no layout width. Measure only when it is revealed.
-      if (!doc?.body || hidden) return
+      if (hidden) return
       const scrollbarHeight =
         doc.documentElement.scrollWidth > doc.documentElement.clientWidth ? HORIZONTAL_SCROLLBAR_HEIGHT : 0
       doc.documentElement.style.setProperty('--attn-trim-scrollbar-height', `${scrollbarHeight}px`)
@@ -561,88 +295,6 @@ function SingleMessageBody({
     },
     [expanded, hidden, srcDoc]
   )
-
-  const forwardKey = useCallback((event: KeyboardEvent) => {
-    const paletteShortcut =
-      (event.metaKey || event.ctrlKey) &&
-      !event.altKey &&
-      !event.shiftKey &&
-      event.key.toLocaleLowerCase() === 'k'
-    if ((event.metaKey || event.ctrlKey || event.altKey) && !paletteShortcut) return
-    // Tab owns focus traversal inside the mail document. Forwarding it to the
-    // app would prevent the browser from moving through links in the message.
-    if (event.key === 'Tab') return
-    const target = event.target as HTMLElement | null
-    // Enter on a focused link or control belongs to that element, not the
-    // reader's convenient Reply-all alias.
-    if (event.key === 'Enter' && target?.closest?.('a, button, input, textarea, select')) return
-    const forwarded = new KeyboardEvent('keydown', {
-      key: event.key,
-      code: event.code,
-      repeat: event.repeat,
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
-      altKey: event.altKey,
-      shiftKey: event.shiftKey,
-      bubbles: true,
-      cancelable: true
-    })
-    const parentTarget = frameRef.current ?? document.body
-    parentTarget.dispatchEvent(forwarded)
-    if (forwarded.defaultPrevented) event.preventDefault()
-  }, [])
-
-  const disconnect = useCallback(() => {
-    observerRef.current?.disconnect()
-    observerRef.current = null
-    keyDocumentRef.current?.removeEventListener('keydown', forwardKey)
-    keyDocumentRef.current = null
-  }, [forwardKey])
-
-  const observe = useCallback(
-    (frame: HTMLIFrameElement) => {
-      const doc = frame.contentDocument
-      if (!doc?.body) return
-
-      disconnect()
-      applyInlineImages()
-      revealLoadedImages(doc)
-      measure(frame)
-      const observer = new ResizeObserver(() => measure(frame))
-      observer.observe(doc.body)
-      observerRef.current = observer
-      doc.addEventListener('keydown', forwardKey)
-      keyDocumentRef.current = doc
-    },
-    [applyInlineImages, disconnect, forwardKey, measure, revealLoadedImages]
-  )
-
-  const onLoad = useCallback(
-    (event: React.SyntheticEvent<HTMLIFrameElement>) => {
-      const frame = event.currentTarget
-      frame.dataset.loadCount = String(Number(frame.dataset.loadCount ?? 0) + 1)
-      observe(frame)
-    },
-    [observe]
-  )
-
-  useLayoutEffect(() => {
-    if (srcDoc === null || oversized) return
-    let frameId = 0
-    const waitForSrcDoc = (): void => {
-      const frame = frameRef.current
-      if (frame?.contentWindow?.location.href === 'about:srcdoc' && frame.contentDocument?.body) {
-        observe(frame)
-        return
-      }
-      frameId = requestAnimationFrame(waitForSrcDoc)
-    }
-    frameId = requestAnimationFrame(waitForSrcDoc)
-    return () => {
-      cancelAnimationFrame(frameId)
-      disconnect()
-    }
-  }, [disconnect, observe, oversized, srcDoc])
 
   if (srcDoc === null || oversized) {
     const lightSurface = surface === 'light'
@@ -732,15 +384,14 @@ function SingleMessageBody({
           />
         )}
         {frameAccess !== null && (
-          <iframe
-            key={frameAccess.nonce}
-            name={frameAccess.nonce}
-            ref={frameRef}
+          <MailFrame
+            access={frameAccess}
+            frameRef={frameRef}
             data-testid="html-body-frame"
             title="HTML message body"
-            sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
             srcDoc={srcDoc}
-            onLoad={onLoad}
+            onFrameLoad={applyInlineImages}
+            onMeasure={measure}
             className={`block w-full border-0 ${
               surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'
             }`}

@@ -46,23 +46,19 @@ import { errorMessage } from '../../../shared/error'
 import { escapeHtmlText as escapeHtml, safeUrl } from '../../../shared/html'
 import { type Snippet, subjectAfterSnippetInsert } from '../../../shared/snippets'
 import { formatSnoozeDate, parseSnoozeText } from '../../../shared/snooze'
-import type { ThemeAppearance } from '../../../shared/theme'
 import { createCommand, matchComposerKey, registerCommands } from '../commands'
 import { Kbd } from '../components/Kbd'
 import { formatBytes } from '../formatBytes'
 import type { ShowToast } from '../hooks/useToast'
-import { normalizeAppleMailLineBackgrounds } from '../mailAppleBackgrounds'
 import { normalizedContentId, TRANSPARENT_IMAGE } from '../mailInlineImages'
-import { suppressBlockedRemoteImages } from '../mailRemoteContent'
-import { type MailSurface, mailSurfaceForHtml, normalizeNativeMailDocument } from '../mailSurface'
 import { modKeyLabel } from '../platform'
-import { useTheme } from '../theme'
 import { AiAutocompletePlugin } from './AiAutocompletePlugin'
 import { AiDraftPlugin } from './AiDraftPlugin'
 import { ComposerBodyHintPlugin } from './ComposerBodyHintPlugin'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { EditorToolbar } from './EditorToolbar'
 import { editorConfig } from './editorConfig'
+import { InlineQuote } from './InlineQuote'
 import { AttnFooterNode } from './nodes/AttnFooterNode'
 import {
   COLLAPSED_GMAIL_SIGNATURE_SELECTOR,
@@ -158,8 +154,6 @@ function composerTitle(kind: Draft['kind']): string {
   return 'New message'
 }
 
-const QUOTE_MAX_HEIGHT = 720
-
 /**
  * Module scope on purpose. `LinkPlugin` re-registers its node transform
  * whenever this identity changes, and registering a transform runs it over the
@@ -180,258 +174,6 @@ function hasGmailSignature(html: string): boolean {
   if (!html) return false
   const document = new DOMParser().parseFromString(html, 'text/html')
   return document.querySelector('.gmail_signature, [data-smartmail="gmail_signature"]') !== null
-}
-
-function quoteSrcDoc(body: string, surface: MailSurface, appearance: ThemeAppearance): string {
-  const senderCanvas = surface === 'light'
-  const light = senderCanvas || appearance === 'light'
-  const nativeContrast = light
-    ? ''
-    : 'body,body :where(*){color:inherit!important;background-color:transparent!important;background-image:none!important}body a{color:#60a5fa!important}'
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="${light ? 'light' : 'dark'}"><base target="_blank"><style>:root{color-scheme:${light ? 'light' : 'dark'}}html,body{box-sizing:border-box;margin:0;background:${senderCanvas ? '#fff' : 'transparent'}!important}html{padding:0;overflow-x:auto;overflow-y:auto}body{padding:${senderCanvas ? '12px' : '0'};color:${light ? '#202124' : '#939baa'};font:${light ? '14px/1.6' : '15px/1.7'} Arial,Helvetica,sans-serif;overflow-wrap:break-word}blockquote{margin:.35rem 0 0;border-left:1px solid ${light ? '#dadce0' : '#555d69'};padding-left:1rem}p:first-child{margin-top:0}p:last-child{margin-bottom:0}a{color:${light ? '#1a73e8' : '#d7a13c'}}img{max-width:100%;height:auto}img[data-remote-blocked="true"]{visibility:hidden}table{max-width:100%}pre{white-space:pre-wrap}${nativeContrast}</style></head><body>${body}</body></html>`
-}
-
-function InlineQuote({
-  draftId,
-  html,
-  sourceMessageId,
-  expanded: controlledExpanded,
-  showToggle = true
-}: {
-  draftId: string
-  html: string
-  /** The quoted message, so per-sender remote-image exceptions apply (T33). */
-  sourceMessageId: string | null
-  expanded?: boolean
-  showToggle?: boolean
-}): React.JSX.Element | null {
-  const [localExpanded, setLocalExpanded] = useState(false)
-  const expanded = controlledExpanded ?? localExpanded
-  const { appearance } = useTheme()
-  const surface = useMemo(() => mailSurfaceForHtml(html), [html])
-  const [srcDoc, setSrcDoc] = useState(() => quoteSrcDoc('', surface, appearance))
-  const [height, setHeight] = useState(1)
-  const frameRef = useRef<HTMLIFrameElement | null>(null)
-  const observerRef = useRef<ResizeObserver | null>(null)
-  const keyDocumentRef = useRef<Document | null>(null)
-
-  // T33: the quote is the same untrusted mail HTML the reader frames render,
-  // so it registers with main's request filter under the quoted message —
-  // an Always-load-from-sender exception covers a reply's quoted history too
-  // (PR #101 review). Without a source id the frame stays unnamed and fails
-  // closed while blocking is on, exactly as before.
-  const [frameNonce, setFrameNonce] = useState<string | null>(null)
-  const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(false)
-  const [frameEpoch, setFrameEpoch] = useState(0)
-  useEffect(() => {
-    const bridge = window.attn
-    if (!bridge) return
-    return bridge.mail.onRemoteImagesChanged(() => setFrameEpoch((epoch) => epoch + 1))
-  }, [])
-  // biome-ignore lint/correctness/useExhaustiveDependencies: frameEpoch deliberately re-registers so policy changes reach a mounted quote
-  useEffect(() => {
-    const bridge = window.attn
-    setFrameNonce(null)
-    setRemoteImagesAllowed(false)
-    if (!expanded || !html) return
-    if (!bridge) {
-      setFrameNonce('')
-      return
-    }
-    if (sourceMessageId === null) {
-      let stale = false
-      void bridge.settings
-        .getAll()
-        .then((settings) => {
-          if (!stale) {
-            setRemoteImagesAllowed(!settings.remoteImagesBlocked)
-            setFrameNonce('')
-          }
-        })
-        .catch(() => {
-          if (!stale) setFrameNonce('')
-        })
-      return () => {
-        stale = true
-      }
-    }
-    const nonce = crypto.randomUUID()
-    let stale = false
-    bridge.mail
-      .registerMessageFrame(nonce, sourceMessageId, false)
-      .then(({ imagesAllowed }) => {
-        if (!stale) {
-          setRemoteImagesAllowed(imagesAllowed)
-          setFrameNonce(nonce)
-        }
-      })
-      .catch(() => {
-        if (!stale) setFrameNonce('')
-      })
-    return () => {
-      stale = true
-      void bridge.mail.unregisterMessageFrame(nonce).catch(() => {})
-    }
-  }, [expanded, frameEpoch, html, sourceMessageId])
-
-  const forwardKey = useCallback((event: KeyboardEvent) => {
-    const paletteShortcut =
-      (event.metaKey || event.ctrlKey) &&
-      !event.altKey &&
-      !event.shiftKey &&
-      event.key.toLocaleLowerCase() === 'k'
-    if ((event.metaKey || event.ctrlKey || event.altKey) && !paletteShortcut) return
-    if (event.key === 'Tab') return
-    const target = event.target as HTMLElement | null
-    if (event.key === 'Enter' && target?.closest?.('a, button, input, textarea, select')) return
-    const forwarded = new KeyboardEvent('keydown', {
-      key: event.key,
-      code: event.code,
-      repeat: event.repeat,
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
-      altKey: event.altKey,
-      shiftKey: event.shiftKey,
-      bubbles: true,
-      cancelable: true
-    })
-    ;(frameRef.current ?? document.body).dispatchEvent(forwarded)
-    if (forwarded.defaultPrevented) event.preventDefault()
-  }, [])
-
-  const disconnect = useCallback(() => {
-    observerRef.current?.disconnect()
-    observerRef.current = null
-    keyDocumentRef.current?.removeEventListener('keydown', forwardKey)
-    keyDocumentRef.current = null
-  }, [forwardKey])
-
-  const measure = useCallback((frame: HTMLIFrameElement) => {
-    const document = frame.contentDocument
-    if (!document?.body) return
-    const next = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, 1)
-    setHeight(Math.min(next, QUOTE_MAX_HEIGHT))
-  }, [])
-
-  const observe = useCallback(
-    (frame: HTMLIFrameElement) => {
-      const document = frame.contentDocument
-      if (!document?.body) return
-      disconnect()
-      measure(frame)
-      const observer = new ResizeObserver(() => measure(frame))
-      observer.observe(document.body)
-      observerRef.current = observer
-      document.addEventListener('keydown', forwardKey)
-      keyDocumentRef.current = document
-    },
-    [disconnect, forwardKey, measure]
-  )
-
-  useEffect(() => {
-    if (!html) return
-    let cancelled = false
-    // Detect the paste artifact before outgoing sanitization drops its CSS marker.
-    // Only the detached display copy changes, and it still passes through the sanitizer.
-    const displayCopy = new DOMParser().parseFromString(html, 'text/html')
-    normalizeAppleMailLineBackgrounds(displayCopy)
-    const document = new DOMParser().parseFromString(
-      sanitizeOutgoingHtml(displayCopy.body.innerHTML),
-      'text/html'
-    )
-    if (surface === 'native' && appearance === 'dark') normalizeNativeMailDocument(document.body)
-    // No stylesheet reaches here: `sanitizeOutgoingHtml`'s allowlist has no
-    // `style` element, so the quote is inline styles only and the light-mode
-    // CSS rewrite the reader frame runs has nothing to act on.
-    if (!remoteImagesAllowed) suppressBlockedRemoteImages(document.body, TRANSPARENT_IMAGE)
-    const pending = [...document.querySelectorAll<HTMLImageElement>('img[src]')].flatMap((image) => {
-      const source = image.getAttribute('src') ?? ''
-      if (!source.toLowerCase().startsWith('cid:') || !window.attn) return []
-      const contentId = normalizedContentId(source.slice(4))
-      image.setAttribute('src', TRANSPARENT_IMAGE)
-      return [{ contentId, image }]
-    })
-    // One srcDoc, after the CID images resolve. Setting it twice reloads the
-    // frame, and the measuring layout effect drops its height back to 1px in
-    // between, so the quote visibly collapses and re-expands.
-    if (pending.length === 0) {
-      setSrcDoc(quoteSrcDoc(document.body.innerHTML, surface, appearance))
-      return
-    }
-    void Promise.all(
-      pending.map(async ({ contentId, image }) => {
-        const result = await window.attn?.draft.getInlineImage(draftId, contentId)
-        if (result && 'dataUrl' in result) image.setAttribute('src', result.dataUrl)
-      })
-    ).then(() => {
-      if (!cancelled) setSrcDoc(quoteSrcDoc(document.body.innerHTML, surface, appearance))
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [appearance, draftId, html, remoteImagesAllowed, surface])
-
-  const renderedQuote = expanded ? srcDoc : null
-  useLayoutEffect(() => {
-    if (!renderedQuote) {
-      disconnect()
-      return
-    }
-    setHeight(1)
-    let frameId = 0
-    const waitForSrcDoc = (): void => {
-      const frame = frameRef.current
-      if (frame?.contentWindow?.location.href === 'about:srcdoc' && frame.contentDocument?.body) {
-        observe(frame)
-        return
-      }
-      frameId = requestAnimationFrame(waitForSrcDoc)
-    }
-    frameId = requestAnimationFrame(waitForSrcDoc)
-    return () => {
-      cancelAnimationFrame(frameId)
-      disconnect()
-    }
-  }, [disconnect, observe, renderedQuote])
-
-  if (!html || (!expanded && !showToggle)) return null
-  return (
-    <div className="mx-5 mb-5 text-sm text-ink-dim" data-testid="composer-quote-container">
-      {/* `allow-same-origin` is needed only to measure this scriptless srcdoc,
-          resolve CID images, and forward keyboard events to the app shell.
-          The frame mounts only after main has registered its nonce, so an
-          allowed sender's images are never spuriously cancelled by a race. */}
-      {expanded && frameNonce !== null && (
-        <iframe
-          ref={frameRef}
-          key={frameNonce}
-          name={frameNonce || undefined}
-          title="Quoted history"
-          sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-          data-testid="composer-quote"
-          data-surface={surface}
-          data-appearance={appearance}
-          className={`block w-full border-0 ${surface === 'light' ? 'bg-mail-light-ground' : 'bg-transparent'}`}
-          srcDoc={srcDoc}
-          onLoad={(event) => observe(event.currentTarget)}
-          style={{ colorScheme: surface === 'light' ? 'light' : appearance, height }}
-        />
-      )}
-      {showToggle && (
-        <button
-          type="button"
-          className={`${expanded ? 'mt-1' : ''} block cursor-pointer border-0 bg-transparent px-0.5 text-sm font-normal tracking-normal text-ink-faint hover:text-ink`}
-          data-testid="composer-quote-toggle"
-          aria-expanded={expanded}
-          aria-label={expanded ? 'Hide quoted history' : 'Show quoted history'}
-          title={expanded ? 'Hide quoted history' : 'Show quoted history'}
-          onClick={() => setLocalExpanded((current) => !current)}
-        >
-          ...
-        </button>
-      )}
-    </div>
-  )
 }
 
 function InitialHtmlPlugin({ draftId, html }: { draftId: string; html: string }): null {
