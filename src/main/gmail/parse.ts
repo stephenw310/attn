@@ -130,6 +130,20 @@ export function hasCalendarPart(payload: GmailPart | undefined): boolean {
   return payload.parts?.some(hasCalendarPart) ?? false
 }
 
+/** MIME types are case-insensitive (RFC 2045): `Text/Plain` is a body part. */
+function partMimeType(part: GmailPart): string {
+  return part.mimeType?.trim().toLowerCase() ?? ''
+}
+
+/**
+ * A forwarded-as-attachment message carries its own text parts. They belong to
+ * that attachment, not to this message's body, so no body walk descends into
+ * one.
+ */
+function isEmbeddedMessage(part: GmailPart): boolean {
+  return partMimeType(part) === 'message/rfc822'
+}
+
 /** Recursive walk: text/plain wins, text/html (stripped) is the fallback. */
 export function extractBodyText(payload: GmailPart | undefined): string {
   if (!payload) return ''
@@ -141,9 +155,10 @@ export function extractBodyText(payload: GmailPart | undefined): string {
     const data = part.body?.data
     if (data && !part.filename) {
       const text = decodeBody(data)
-      if (part.mimeType === 'text/plain') plains.push(text)
-      else if (part.mimeType === 'text/html') htmls.push(text)
+      if (partMimeType(part) === 'text/plain') plains.push(text)
+      else if (partMimeType(part) === 'text/html') htmls.push(text)
     }
+    if (isEmbeddedMessage(part)) return
     part.parts?.forEach(walk)
   }
   walk(payload)
@@ -160,7 +175,8 @@ export function extractBodyHtml(payload: GmailPart | undefined): string {
 
   const walk = (part: GmailPart): void => {
     const data = part.body?.data
-    if (data && !part.filename && part.mimeType === 'text/html') htmls.push(decodeBody(data))
+    if (data && !part.filename && partMimeType(part) === 'text/html') htmls.push(decodeBody(data))
+    if (isEmbeddedMessage(part)) return
     part.parts?.forEach(walk)
   }
   walk(payload)
@@ -171,7 +187,8 @@ export function extractBodyHtml(payload: GmailPart | undefined): string {
 /** Whether the inline payload contains authored text/plain (rather than an HTML-derived fallback). */
 export function hasInlinePlainText(payload: GmailPart | undefined): boolean {
   if (!payload) return false
-  if (!payload.filename && payload.mimeType === 'text/plain' && payload.body?.data) return true
+  if (!payload.filename && partMimeType(payload) === 'text/plain' && payload.body?.data) return true
+  if (isEmbeddedMessage(payload)) return false
   return payload.parts?.some(hasInlinePlainText) ?? false
 }
 
@@ -188,14 +205,16 @@ export interface ExternalTextPart {
 export function findExternalTextParts(payload: GmailPart | undefined): ExternalTextPart[] {
   const found: ExternalTextPart[] = []
   const walk = (p: GmailPart): void => {
+    const mimeType = partMimeType(p)
     if (
       !p.filename &&
       p.body?.attachmentId &&
       !p.body.data &&
-      (p.mimeType === 'text/plain' || p.mimeType === 'text/html')
+      (mimeType === 'text/plain' || mimeType === 'text/html')
     ) {
-      found.push({ attachmentId: p.body.attachmentId, mimeType: p.mimeType })
+      found.push({ attachmentId: p.body.attachmentId, mimeType })
     }
+    if (isEmbeddedMessage(p)) return
     p.parts?.forEach(walk)
   }
   if (payload) walk(payload)
@@ -204,7 +223,7 @@ export function findExternalTextParts(payload: GmailPart | undefined): ExternalT
 
 /** Decode a fetched raw part into display text (same pipeline as inline parts). */
 export function textFromRaw(mimeType: string, raw: string): string {
-  return normalize(mimeType === 'text/html' ? stripHtml(raw) : raw)
+  return normalize(mimeType.trim().toLowerCase() === 'text/html' ? stripHtml(raw) : raw)
 }
 
 export function decodeBase64Url(data: string): string {
