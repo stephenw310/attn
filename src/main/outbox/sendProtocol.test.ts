@@ -1,22 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { GmailApiError } from '../gmail/client'
 import type { MailProvider } from '../sync/provider'
+import { fakeMailProvider } from '../testing/fakes'
 import { executeDraftSendProtocol, isRetryableOutboxPreflightError, verifyKnownDraft } from './sender'
 
-// A complete MailProvider double. Folds into the shared test fakes module
-// (review R14) once that lands; sender.test.ts holds the same shape.
+/** The shared fake plus the draft/send members the outbox protocol drives. */
 function provider(overrides: Partial<MailProvider> = {}): MailProvider {
-  return {
-    modifyThread: vi.fn(),
-    trashThread: vi.fn(),
-    untrashThread: vi.fn(),
-    getProfile: vi.fn(),
-    listLabels: vi.fn(),
-    listThreadIds: vi.fn(),
-    getThread: vi.fn(),
-    getAttachmentData: vi.fn(),
-    listHistory: vi.fn(),
-    listDrafts: vi.fn(),
+  return fakeMailProvider({
     getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: 'thread-1' } })),
     saveDraft: vi.fn(async ({ id }) => id ?? 'created-draft'),
     createDraft: vi.fn(async () => 'created-draft'),
@@ -24,7 +14,7 @@ function provider(overrides: Partial<MailProvider> = {}): MailProvider {
     sendDraft: vi.fn(async () => ({ id: 'sent-message', threadId: 'sent-thread' })),
     findByRfcId: vi.fn(),
     ...overrides
-  }
+  })
 }
 
 describe('outbox Gmail draft protocol', () => {
