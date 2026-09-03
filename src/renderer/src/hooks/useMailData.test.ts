@@ -540,8 +540,11 @@ describe('useMailData mailbox refreshes', () => {
       await Promise.resolve()
     })
 
-    const refreshMailRows = latest?.refreshMailRows
-    if (!refreshMailRows) throw new Error('hook state was not captured')
+    const currentState = (): ReturnType<typeof useMailData> => {
+      if (!latest) throw new Error('hook state was not captured')
+      return latest
+    }
+    const refreshMailRows = currentState().refreshMailRows
     selectedDraftIdRef.current = 'outbox-3'
     selection.setState(0)
     const requestsBefore = listPending.mock.calls.length
@@ -551,7 +554,7 @@ describe('useMailData mailbox refreshes', () => {
 
     expect(listPending.mock.calls.length).toBeGreaterThan(requestsBefore)
     expect(selection.valueRef.current).toBe(2)
-    expect(latest?.realOutbox).toEqual(pending)
+    expect(currentState().realOutbox).toEqual(pending)
   })
 
   it('paints the first thread page before the sidebar counts answer', async () => {

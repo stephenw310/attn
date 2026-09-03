@@ -977,6 +977,30 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(composer.recipientField('bcc')).toBeVisible()
 })
 
+test('strikes text through with the format menu action (B10)', async ({ page }) => {
+  // Lexical renders strikethrough purely through its theme class, so a missing
+  // `.app-composer-strikethrough` rule left the toolbar action invisible while
+  // the sent mail still carried <s>.
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.typeBody('Struck through')
+  await composer.editor.selectText()
+
+  await page.getByTestId('composer-format-more').click()
+  await page.getByTestId('composer-format-menu').getByText('Strikethrough').click()
+  await expect(page.getByTestId('composer-format-menu')).toHaveCount(0)
+
+  await expect
+    .poll(() =>
+      composer.editor.evaluate((root) =>
+        [...root.querySelectorAll('*')].some((node) =>
+          getComputedStyle(node).textDecorationLine.includes('line-through')
+        )
+      )
+    )
+    .toBe(true)
+})
+
 test('adds links from the toolbar and the registered composer shortcut', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

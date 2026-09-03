@@ -185,7 +185,10 @@ function AccountMenu({
         {status.email ?? 'signed in'} <span className="text-[8px]">▾</span>
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-2 w-[250px] rounded-lg border border-edge bg-raised p-1.5 shadow-menu">
+        <div
+          role="menu"
+          className="absolute top-full right-0 z-50 mt-2 w-[250px] rounded-lg border border-edge bg-raised p-1.5 shadow-menu"
+        >
           {status.accounts.map((account, index) => {
             const active = account.id === status.activeAccountId
             const health = healthById.get(account.id) ?? null

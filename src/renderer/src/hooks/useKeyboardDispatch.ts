@@ -2,6 +2,18 @@ import { useCallback, useLayoutEffect, useRef } from 'react'
 import { chordKey, findCommandByShortcut, isChordPrefix, matchKey, readingScrollDelta } from '../commands'
 import { CHORD_TIMEOUT_MS } from '../tuning'
 
+/**
+ * True for a control that owns raw keys — typing, and Escape as "cancel this
+ * edit". Anything listening for a bare key at the window level has to skip it,
+ * or a keystroke meant for the field runs a command instead (B9).
+ */
+export function isTextEntry(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+  )
+}
+
 interface KeyboardDispatchOptions {
   blocked: boolean
   readerOpen: boolean
@@ -120,16 +132,13 @@ export function useKeyboardDispatch(options: KeyboardDispatchOptions): void {
         modifiedCommand.run()
         return
       }
-      const isTextEntry =
-        target instanceof HTMLElement &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      if (isTextEntry) {
+      if (isTextEntry(target)) {
         clearPendingChord()
         return
       }
       const tabCommand = event.key === 'Tab' ? matchKey(event, context) : null
       const keepsNativeTab = target?.closest(
-        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [data-testid="account-menu"]'
+        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [aria-haspopup="menu"]'
       )
       if (tabCommand && !keepsNativeTab) {
         clearPendingChord()

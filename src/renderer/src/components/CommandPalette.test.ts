@@ -47,7 +47,12 @@ it('reloads usage instead of carrying ranking across account changes', async () 
   try {
     await act(async () =>
       root.render(
-        createElement(CommandPalette, { key: 'first', account: 'first@attn.test', context: 'list' })
+        createElement(CommandPalette, {
+          key: 'first',
+          account: 'first@attn.test',
+          context: 'list',
+          onOpenChange: () => {}
+        })
       )
     )
     await openPalette()
@@ -58,7 +63,12 @@ it('reloads usage instead of carrying ranking across account changes', async () 
     stored = { 'view.inbox': { count: 10, lastUsedAt: 200 } }
     await act(async () =>
       root.render(
-        createElement(CommandPalette, { key: 'second', account: 'second@attn.test', context: 'list' })
+        createElement(CommandPalette, {
+          key: 'second',
+          account: 'second@attn.test',
+          context: 'list',
+          onOpenChange: () => {}
+        })
       )
     )
     await openPalette()
@@ -98,7 +108,9 @@ it('refreshes rows and callbacks when the command registry changes while open', 
 
   try {
     await act(async () =>
-      root.render(createElement(CommandPalette, { account: 'seed@attn.test', context: 'list' }))
+      root.render(
+        createElement(CommandPalette, { account: 'seed@attn.test', context: 'list', onOpenChange: () => {} })
+      )
     )
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))

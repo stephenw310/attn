@@ -10,6 +10,8 @@ import { Kbd } from './Kbd'
 
 interface CheatSheetProps {
   open: boolean
+  /** The palette renders above the sheet and owns input while it is up. */
+  paletteOpen: boolean
   onOpen: () => void
   onClose: () => void
 }
@@ -49,7 +51,12 @@ function sheetGroups(commands: readonly Command[]): SheetGroup[] {
     .filter((group) => group.commands.length > 0)
 }
 
-export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JSX.Element | null {
+export function CheatSheet({
+  open,
+  paletteOpen,
+  onOpen,
+  onClose
+}: CheatSheetProps): React.JSX.Element | null {
   const registeredCommands = useSyncExternalStore(
     subscribeCommandRegistry,
     getCommandRegistrySnapshot,
@@ -67,7 +74,7 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
       }
       if (!open) return
       // The palette can sit above the sheet; while it is up, input is its.
-      if (document.querySelector('[data-testid="command-palette"]')) return
+      if (paletteOpen) return
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
@@ -83,7 +90,7 @@ export function CheatSheet({ open, onOpen, onClose }: CheatSheetProps): React.JS
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [onClose, onOpen, open])
+  }, [onClose, onOpen, open, paletteOpen])
 
   // Modal focus: the sheet's scroll region takes focus while open — that is
   // what makes arrow/page keys scroll it and keeps typing out of whatever the

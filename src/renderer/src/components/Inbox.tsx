@@ -11,14 +11,19 @@ import type { MoveDestination } from '../../../shared/move'
 import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
 import type { UpdateState } from '../../../shared/update'
-import { clearAccountView, readAccountView, saveAccountView } from '../accountViewMemory'
+import {
+  clearAccountView,
+  readAccountView,
+  saveAccountView,
+  type ViewRecordSnapshot as ViewRecord
+} from '../accountViewMemory'
 import { actionReconnectMessage } from '../actionReconnect'
 import { aiThreadContext } from '../aiContext'
 import { createCommand, registerCommands } from '../commands'
 import { Composer, type ComposerHandle } from '../composer/Composer'
 import { useConversation } from '../hooks/useConversation'
 import { useInboxCommands } from '../hooks/useInboxCommands'
-import { useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
+import { isTextEntry, useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
 import { useLocalSearch } from '../hooks/useLocalSearch'
 import { useMailData } from '../hooks/useMailData'
 import { useRestoreTarget } from '../hooks/useRestoreTarget'
@@ -82,14 +87,8 @@ interface InboxProps {
   /** Runs the reorder round trip above the keyed remount, with a supersession ticket (see App). */
   onReorderAccounts: (ids: string[]) => Promise<void>
   onRemovalError: (message: string) => void
-}
-
-/** Selection and scroll survive a round trip away from each view (SPEC F3). */
-interface ViewRecord {
-  rowId: string | null
-  index: number
-  scrollTop: number
-  loadedRows?: number
+  /** Claims the one announcement of a ready update, above the keyed remount (see App). */
+  onClaimUpdateAnnouncement: (version: string) => boolean
 }
 
 interface MoveRequest {
@@ -121,19 +120,12 @@ function titleForView(view: MailView, labelsById: ReadonlyMap<string, MailLabel>
   return VIEW_TITLES[view as keyof typeof VIEW_TITLES]
 }
 
-function sidebarStorage(): Storage | null {
-  try {
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
-
 export function Inbox({
   status,
   onStatus,
   onReorderAccounts,
-  onRemovalError
+  onRemovalError,
+  onClaimUpdateAnnouncement
 }: InboxProps): React.JSX.Element {
   // The previous visit's snapshot for this account, saved by the guarded
   // switch before the tree remounted (F18: a warm switch restores the
@@ -147,7 +139,7 @@ export function Inbox({
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchKeyboardTarget, setSearchKeyboardTarget] = useState<'query' | 'results'>('query')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(sidebarStorage()))
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed())
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
@@ -157,6 +149,10 @@ export function Inbox({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsFocus, setSettingsFocus] = useState<SettingsControl | null>(null)
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
+  // The palette can sit above the cheat sheet, and the sheet's capture-phase
+  // handler runs first, so the sheet has to know when input belongs to the
+  // palette. Lifted here rather than probed out of the DOM (P9).
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [labelTargetIds, setLabelTargetIds] = useState<readonly string[] | null>(null)
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null)
   const [composerDraft, setComposerDraft] = useState<Draft | null>(null)
@@ -535,13 +531,13 @@ export function Inbox({
   }, [composerDraft?.id])
 
   // T39: a ready update surfaces once as a quiet toast; the palette command
-  // applies it through the awaited shutdown, and nothing forces a restart.
-  const updateToastedRef = useRef<string | null>(null)
+  // applies it through the awaited shutdown, and nothing forces a restart. The
+  // dedupe lives in App, above this account-keyed tree, so switching accounts
+  // does not re-announce an update the user has already seen.
   useEffect(() => {
     const announce = (state: UpdateState): void => {
       if (state.phase !== 'ready' || state.readyVersion === null) return
-      if (updateToastedRef.current === state.readyVersion) return
-      updateToastedRef.current = state.readyVersion
+      if (!onClaimUpdateAnnouncement(state.readyVersion)) return
       showToast(`Update ${state.readyVersion} ready — it applies on quit, or Restart to update`)
     }
     // Subscribe first, then read: a download that finished while no window
@@ -553,7 +549,7 @@ export function Inbox({
       .then(announce)
       .catch(() => {})
     return unsubscribe
-  }, [showToast])
+  }, [onClaimUpdateAnnouncement, showToast])
 
   // T37 AI reply drafting: one Inbox-owned command serves the reader and the
   // composer. An invocation parks in the pending ref until the (possibly just
@@ -643,7 +639,7 @@ export function Inbox({
   }, [composerDraft])
 
   useEffect(() => {
-    writeSidebarCollapsed(sidebarStorage(), sidebarCollapsed)
+    writeSidebarCollapsed(sidebarCollapsed)
   }, [sidebarCollapsed])
 
   const toggleSidebar = useCallback(() => {
@@ -680,6 +676,9 @@ export function Inbox({
     if (!settingsOpen || splitRulesOpen || removeAccountConfirm || cheatSheetOpen) return
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
+      // Escape inside a Settings field cancels that edit; closing Settings from
+      // under the cursor would discard the snippet or rule being typed (B9).
+      if (isTextEntry(event.target)) return
       event.preventDefault()
       closeSettings()
     }
@@ -2577,12 +2576,17 @@ export function Inbox({
       )}
 
       <CommandPalette
-        key={activeAccount ?? 'signed-in'}
         account={activeAccount}
         context={composerDraft ? 'composer' : readerOpen ? 'reader' : view === 'outbox' ? 'outbox' : 'list'}
+        onOpenChange={setPaletteOpen}
       />
 
-      <CheatSheet open={cheatSheetOpen} onOpen={openCheatSheet} onClose={closeCheatSheet} />
+      <CheatSheet
+        open={cheatSheetOpen}
+        paletteOpen={paletteOpen}
+        onOpen={openCheatSheet}
+        onClose={closeCheatSheet}
+      />
 
       {fullWindowComposerDraft && activeAccount && (
         <Composer

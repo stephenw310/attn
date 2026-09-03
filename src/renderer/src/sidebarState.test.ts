@@ -11,19 +11,16 @@ describe('sidebar state', () => {
 
   test('writes the current state and tolerates unavailable storage', () => {
     const setItem = vi.fn()
-    writeSidebarCollapsed({ getItem: () => null, setItem }, true)
+    writeSidebarCollapsed(true, { getItem: () => null, setItem })
     expect(setItem).toHaveBeenCalledWith(SIDEBAR_COLLAPSED_KEY, 'true')
 
     expect(() =>
-      writeSidebarCollapsed(
-        {
-          getItem: () => null,
-          setItem: () => {
-            throw new Error('blocked')
-          }
-        },
-        false
-      )
+      writeSidebarCollapsed(false, {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('blocked')
+        }
+      })
     ).not.toThrow()
   })
 })

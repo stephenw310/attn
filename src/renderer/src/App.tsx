@@ -32,6 +32,16 @@ export default function App(): React.JSX.Element {
     )
   }, [])
 
+  // A ready update announces itself once per run. The dedupe sits here, above
+  // the account-keyed Inbox, so switching accounts does not re-announce an
+  // update the user has already seen (B24).
+  const announcedUpdateRef = useRef<string | null>(null)
+  const claimUpdateAnnouncement = useCallback((version: string): boolean => {
+    if (announcedUpdateRef.current === version) return false
+    announcedUpdateRef.current = version
+    return true
+  }, [])
+
   const loadStatus = useCallback(() => {
     if (!attn) return
     setStatusError(null)
@@ -62,6 +72,7 @@ export default function App(): React.JSX.Element {
           onStatus={setStatus}
           onReorderAccounts={reorderRoster}
           onRemovalError={setRemovalError}
+          onClaimUpdateAnnouncement={claimUpdateAnnouncement}
         />
       )}
       {removalError && (

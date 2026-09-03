@@ -51,6 +51,30 @@ async function waitForSnippetsLoaded(page: Page, name: string): Promise<void> {
   await expect(page.getByTestId('snippet-picker')).toHaveCount(0)
 }
 
+test('Escape inside the snippet body cancels nothing and keeps Settings open (B9)', async ({ page }) => {
+  // The window-level Settings Escape listener once fired for any Escape,
+  // including one aimed at a Lexical field, unmounting Settings and taking the
+  // in-progress edit with it.
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await page.keyboard.press('ControlOrMeta+,')
+  await expect(page.getByTestId('settings-view')).toBeVisible()
+  await page.getByTestId('settings-snippet-new').click()
+  await page.getByTestId('settings-snippet-name').fill('Draft in progress')
+  await page.getByTestId('settings-snippet-body').click()
+  await page.keyboard.type('Half-written body text.')
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings-view')).toBeVisible()
+  await expect(page.getByTestId('settings-snippet-editor')).toBeVisible()
+  await expect(page.getByTestId('settings-snippet-body')).toContainText('Half-written body text.')
+  await expect(page.getByTestId('settings-snippet-name')).toHaveValue('Draft in progress')
+
+  // Escape from outside a field still closes Settings.
+  await page.getByTestId('settings-snippet-cancel').click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings-view')).toHaveCount(0)
+})
+
 test('the manager creates, edits, and deletes snippets, and the set survives relaunch', async ({
   boot,
   page

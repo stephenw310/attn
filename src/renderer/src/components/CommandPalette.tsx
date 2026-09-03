@@ -22,6 +22,8 @@ import { Kbd } from './Kbd'
 interface CommandPaletteProps {
   account: string | null
   context: ActiveCommandContext
+  /** Reported upward so overlays underneath know the palette owns input. */
+  onOpenChange: (open: boolean) => void
 }
 
 interface ReturnFocus {
@@ -51,7 +53,11 @@ export function shortcutLabel(shortcut: string): string {
     .join(' ')
 }
 
-export function CommandPalette({ account, context }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({
+  account,
+  context,
+  onOpenChange
+}: CommandPaletteProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -99,6 +105,10 @@ export function CommandPalette({ account, context }: CommandPaletteProps): React
   }, [])
 
   useLayoutEffect(() => registerCommands([createCommand('palette.open', openPalette)]), [openPalette])
+
+  useEffect(() => {
+    onOpenChange(open)
+  }, [onOpenChange, open])
 
   useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
