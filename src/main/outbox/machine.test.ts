@@ -31,7 +31,7 @@ describe('outbox state machine', () => {
     })
     expect(planTransition(row({ state: 'sending' }), { type: 'undo' }, NOW)).toEqual({
       next: row({ state: 'sending' }),
-      effects: ['notify']
+      effects: []
     })
   })
 

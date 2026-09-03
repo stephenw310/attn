@@ -9,7 +9,6 @@ export interface DraftRow {
   id: string
   account_id: string
   gmail_draft_id: string | null
-  gmail_message_id: string | null
   state: 'composing' | 'drafted' | 'discarding'
   kind: DraftKind
   to_json: string
@@ -32,7 +31,7 @@ export interface DraftRow {
   default_signature_fingerprint: string | null
 }
 
-const DRAFT_COLUMNS = `id, account_id, gmail_draft_id, gmail_message_id, state, kind, to_json, cc_json,
+const DRAFT_COLUMNS = `id, account_id, gmail_draft_id, state, kind, to_json, cc_json,
   bcc_json, subject, body_html, body_text, attachments_json, thread_id, source_message_id, in_reply_to,
   references_json, quote_html, quote_text, follow_up_at, created_at, updated_at, local_revision,
   default_signature_fingerprint`

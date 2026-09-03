@@ -34,11 +34,6 @@ function queueDb(lastErrors: Array<string | null>): Db {
 }
 
 describe('action queue status', () => {
-  it('keeps legacy failed rows visible in the pending count', () => {
-    const db = queueDb([null])
-    expect(pendingActionCount(db, 'a@example.com')).toBe(1)
-  })
-
   it('surfaces typed auth pauses separately from ordinary pending work', () => {
     const db = queueDb([null, storeActionError(new Error('revoked'), 'auth')])
     // `paused` counts only the auth-held rows, so the header can name them

@@ -705,7 +705,7 @@ export function pendingActionCount(db: Db, accountId: string): number {
   const row = db
     .prepare(
       `SELECT COUNT(*) AS count FROM action_queue
-       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering', 'failed')`
+       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering')`
     )
     .get(accountId) as { count: number }
   return row.count
@@ -717,7 +717,7 @@ export function actionQueueStatus(db: Db, accountId: string): ActionQueueStatus 
   const failed = db
     .prepare(
       `SELECT last_error FROM action_queue
-       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering', 'failed')
+       WHERE account_id = ? AND state IN ('pending', 'inflight', 'recovering')
          AND last_error IS NOT NULL`
     )
     .all(accountId) as { last_error: string | null }[]

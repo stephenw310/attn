@@ -585,7 +585,7 @@ describe('ServiceRuntime with several accounts', () => {
     const db = openDatabase(input.dbPath)
     const insert = db.prepare(
       `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, attempts, last_error)
-       VALUES (?, 'archive', ?, '{}', 'failed', 3, ?)`
+       VALUES (?, 'archive', ?, '{}', 'pending', 3, ?)`
     )
     const authError = storeActionError(new Error('invalid_grant'), 'auth')
     insert.run('primary@attn.test', 't-alpha', authError)
@@ -595,12 +595,13 @@ describe('ServiceRuntime with several accounts', () => {
     expect(await runtime.internal('resume-auth-failures', ['second@attn.test'])).toBe(1)
     const states = openDatabase(input.dbPath)
     const rows = states
-      .prepare('SELECT account_id, state FROM action_queue ORDER BY account_id')
-      .all() as Array<{ account_id: string; state: string }>
+      .prepare('SELECT account_id, attempts, last_error FROM action_queue ORDER BY account_id')
+      .all() as Array<{ account_id: string; attempts: number; last_error: string | null }>
     states.close()
+    // Only the reconnected account's row loses its auth marker and retry count.
     expect(rows).toEqual([
-      { account_id: 'primary@attn.test', state: 'failed' },
-      { account_id: 'second@attn.test', state: 'pending' }
+      { account_id: 'primary@attn.test', attempts: 3, last_error: authError },
+      { account_id: 'second@attn.test', attempts: 0, last_error: null }
     ])
 
     // Without an explicit account the operation still serves the active one.
@@ -674,7 +675,7 @@ describe('ServiceRuntime with several accounts', () => {
     const db = openDatabase(input.dbPath)
     db.prepare(
       `INSERT INTO action_queue (account_id, kind, thread_id, payload, state, attempts, last_error)
-       VALUES ('second@attn.test', 'archive', 't-beta', '{}', 'failed', 3, ?)`
+       VALUES ('second@attn.test', 'archive', 't-beta', '{}', 'pending', 3, ?)`
     ).run(storeActionError(new Error('invalid_grant'), 'auth'))
     db.close()
     const statuses = (await runtime.invoke(IPC_CHANNELS.accountsGetStatuses, [])) as Array<{

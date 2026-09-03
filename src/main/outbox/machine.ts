@@ -50,7 +50,7 @@ export function planTransition(row: MachineRow, event: MachineEvent, now: number
   }
 
   if (event.type === 'undo') {
-    if (row.state !== 'queued') return { next: row, effects: ['notify'] }
+    if (row.state !== 'queued') return unchanged(row)
     return {
       next: { ...row, state: 'composing', sendAt: null, attempts: 0, verifyAttempts: 0 },
       effects: ['persist', 'notify']

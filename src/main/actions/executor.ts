@@ -16,7 +16,6 @@ import {
   classifyActionError,
   executeIntent,
   isStoredAuthActionError,
-  isTypedStoredActionError,
   type QueueIntent,
   retryDelayMs,
   storeActionError
@@ -37,13 +36,6 @@ interface QueueRow {
   state: 'pending' | 'recovering'
   last_error: string | null
   subject?: string
-}
-
-interface FailedAuthRow {
-  id: number
-  account_id: string
-  state: 'pending' | 'recovering' | 'failed'
-  last_error: string | null
 }
 
 interface DecodedQueueRow {
@@ -84,7 +76,6 @@ export class ActionExecutor {
     this.notifyReverted = options.notifyReverted ?? (() => {})
     this.time = options.time ?? systemTime
     db.prepare("UPDATE action_queue SET state = 'pending' WHERE state = 'inflight'").run()
-    this.prepareLegacyFailures()
   }
 
   trigger(): Promise<void> {
@@ -120,20 +111,18 @@ export class ActionExecutor {
   resumeAuthFailures(accountId: string): number {
     const rows = this.db
       .prepare(
-        `SELECT id, account_id, state, last_error FROM action_queue
-         WHERE account_id = ? AND state IN ('pending', 'recovering', 'failed')`
+        `SELECT id, last_error FROM action_queue
+         WHERE account_id = ? AND state IN ('pending', 'recovering')`
       )
-      .all(accountId) as FailedAuthRow[]
+      .all(accountId) as Array<{ id: number; last_error: string | null }>
     const resume = this.db.prepare(
-      `UPDATE action_queue SET state = ?, attempts = 0, last_error = NULL
-       WHERE account_id = ? AND id = ?`
+      'UPDATE action_queue SET attempts = 0, last_error = NULL WHERE account_id = ? AND id = ?'
     )
     let resumed = 0
     this.db.transaction(() => {
       for (const row of rows) {
         if (!isStoredAuthActionError(row.last_error)) continue
-        const nextState = row.state === 'failed' ? 'pending' : row.state
-        resumed += resume.run(nextState, accountId, row.id).changes
+        resumed += resume.run(accountId, row.id).changes
       }
     })()
     if (resumed > 0) this.notify()
@@ -423,30 +412,5 @@ export class ActionExecutor {
          WHERE account_id = ? AND id = ?`
       )
       .run(incrementAttempts ? 1 : 0, storeActionError(error, errorKind), accountId, row.id)
-  }
-
-  private prepareLegacyFailures(): void {
-    const rows = this.db
-      .prepare(
-        `SELECT id, account_id, state, last_error FROM action_queue
-         WHERE state IN ('pending', 'recovering', 'failed')`
-      )
-      .all() as FailedAuthRow[]
-    const prepare = this.db.prepare(
-      'UPDATE action_queue SET state = ?, last_error = ? WHERE account_id = ? AND id = ?'
-    )
-    this.db.transaction(() => {
-      for (const row of rows) {
-        const auth = isStoredAuthActionError(row.last_error)
-        if (row.state !== 'failed' && !auth) continue
-        const state = row.state === 'failed' ? (auth ? 'pending' : 'recovering') : row.state
-        const lastError =
-          auth && !isTypedStoredActionError(row.last_error)
-            ? storeActionError(row.last_error ?? 'legacy authentication failure', 'auth')
-            : row.last_error
-        if (state === row.state && lastError === row.last_error) continue
-        prepare.run(state, lastError, row.account_id, row.id)
-      }
-    })()
   }
 }

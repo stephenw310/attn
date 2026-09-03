@@ -6,7 +6,6 @@ import {
   executeIntent,
   isPermanentActionError,
   isStoredAuthActionError,
-  isTypedStoredActionError,
   retryDelayMs,
   storeActionError,
   storedActionErrorKind
@@ -45,14 +44,13 @@ describe('queue intent execution', () => {
     expect(classifyActionError(new GmailAuthError('token refresh rejected'))).toBe('auth')
   })
 
-  it('stores typed auth markers while recognizing legacy Gmail 401 rows', () => {
-    const legacy = 'gmail /threads/t-roadmap/modify failed (401): invalid credentials'
+  it('recognizes only its own typed auth marker', () => {
     const stored = storeActionError(new GmailApiError(401, 'revoked'), 'auth')
     expect(isStoredAuthActionError(stored)).toBe(true)
-    expect(isTypedStoredActionError(stored)).toBe(true)
     expect(storedActionErrorKind(stored)).toBe('auth')
-    expect(isStoredAuthActionError(legacy)).toBe(true)
-    expect(isTypedStoredActionError(legacy)).toBe(false)
-    expect(isStoredAuthActionError('gmail /threads/t-roadmap/modify failed (403): forbidden')).toBe(false)
+    expect(storedActionErrorKind(storeActionError(new Error('nope'), 'permanent'))).toBe('permanent')
+    // Raw provider text is never a marker: only this executor writes them.
+    expect(isStoredAuthActionError('gmail /threads/t-roadmap/modify failed (401): invalid')).toBe(false)
+    expect(storedActionErrorKind('gmail /threads/t-roadmap/modify failed (401): invalid')).toBeNull()
   })
 })

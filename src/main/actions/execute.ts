@@ -62,16 +62,7 @@ export function storedActionErrorKind(message: string | null | undefined): Actio
       return null
     }
   }
-  // Compatibility for rows written before typed stored errors were introduced.
-  return /\bfailed \(401\):/i.test(message) ? 'auth' : null
-}
-
-export function isTypedStoredActionError(message: string | null | undefined): boolean {
-  return (
-    typeof message === 'string' &&
-    message.startsWith(STORED_ERROR_PREFIX) &&
-    storedActionErrorKind(message) !== null
-  )
+  return null
 }
 
 export function isStoredAuthActionError(message: string | null | undefined): boolean {
