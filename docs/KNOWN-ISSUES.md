@@ -38,75 +38,12 @@ unless a plan doc says so.
 
 ## Product defects
 
-Each was verified against `main` @ ee4fe41 on 2026-09-02. The review id in parentheses points at the full
-reasoning and fix direction in [REVIEW-2026-09-02.md](REVIEW-2026-09-02.md).
-
-### BUG-12: the composer's quote preview uses the outgoing allowlist, not the reader's *(review B12)*
-
-**Verified:** 2026-09-02 · **Severity:** medium
-
-`InlineQuote` (`src/renderer/src/composer/Composer.tsx` — search `sanitizeOutgoingHtml(displayCopy`) sanitizes the
-quote preview with the composer's outgoing allowlist, which drops `style`, headings, `hr`, `pre`, so a quoted
-newsletter renders flatter than in the reader and than the recipient sees. The dead `forceLightMailCss` branch and
-the double `srcDoc` load were removed on 2026-09-02; the sanitizer-policy half remains and falls out of REF-8.
-
-### BUG-14: the composer drops the last second of typing on quit *(review B28)*
-
-**Verified:** 2026-09-02 · **Severity:** low
-
-`useComposerDraft` checkpoints on a 1 s idle / 5 s maximum timer; `before-quit` (`src/main/index.ts`) tears down
-without asking the renderer to checkpoint. A renderer-only `pagehide`/`beforeunload`/`visibilitychange` commit was
-tried and backed out on this branch: serializing the editor during unload makes Lexical's `ImageNode.exportDOM`
-issue `data:` image loads that Chromium refuses once the document is unloading, so every composer with an inline
-image logs renderer console errors on quit (fails `composer.spec.ts` and `remote-images.spec.ts`). The fix needs
-the main-process half: `before-quit` asks the renderer for a checkpoint and awaits it while the document is alive.
-
-### BUG-15: `composer.spec.ts` "body undo and select-all stay inside authored text" is red on `main`
-
-**Verified:** 2026-09-02 (reproduced on ee4fe41 by three independent runs in the Claude Code cloud container)
-
-After Mod+Z in the reply body, typed text lands inside the `composer-attn-signature` footer node
-("Sent with Attn:Select only this new reply") instead of the authored paragraph. Not caused by any change on this
-branch — it fails identically at ee4fe41 with a clean build. Either the test's expectation or
-`BodyEditingShortcutsPlugin`'s protected-node handling after undo is wrong; whichever it is, `npm run verify` is
-red until it is settled. Worth confirming on a machine with a real display in case it is a hidden-window artifact.
+None recorded. Every defect the 2026-09-02 review found at high or medium severity was fixed on the branch
+that recorded it; the low-severity items stay listed in [REVIEW-2026-09-02.md](REVIEW-2026-09-02.md) §1.
 
 ## Test coverage gaps
 
 Each was verified against the acceptance criteria in SPEC §4 and the plan docs' Testing bullets.
-
-### GAP-2: `outbox/drafts.ts` CRUD has no unit tests
-
-**Verified:** 2026-08-31 (re-checked: `drafts.test.ts` still covers none of the five) · **Owed by:** T14A's Testing bullets
-
-`reopenThreadDraft`, `closeDraft`'s delete-versus-tombstone branch, `listDrafts` ordering and empty exclusion,
-`takeRecoveredDraft`, and `upgradeReplyToReplyAll` are untested. `drafts.test.ts` exists but covers the
-attachment trust boundary and lifecycle guards, not these five.
-
-The original reason was a belief that SQLite cannot load under vitest. It can. `openDatabase(':memory:')` works,
-as `outbox/{spool,queue,inlineImages}.test.ts` show.
-
-### GAP-3: no assertion that a DRAFT never drives the thread snippet
-
-**Verified:** 2026-08-31 (re-checked) · **Owed by:** T14B
-
-Only the `nonDraftMessages` filter is unit-tested. The `t-roadmap` fixture's newest message is a DRAFT, which
-makes it the natural place to assert the row's snippet and `last_msg_at`, but no test does.
-
-### GAP-4: offline bulk replay runs at N=3, not N=20
-
-**Verified:** 2026-08-31 · **Criterion:** F2 "airplane mode: 20 archives"
-
-`triage.spec.ts:347` (the offline-replay loop) still runs three iterations. The perf suite now covers the F4 side of scale, with a 100-thread
-archive and undo at 10,000 threads (`perf.spec.ts:394`), so this is the remaining scale gap.
-
-### GAP-5: crash recovery is tested with a graceful quit
-
-**Verified:** 2026-08-31
-
-`boot.relaunch()` calls `boot.app.close()` (`e2e/electron.ts:141`). The plan itself calls this an approximation.
-A SIGKILL variant would make the continuous-typing and queued-row cases real force-kills rather than clean
-shutdowns.
 
 ### GAP-6: the T18 auth-pause e2e injects a 401, not `invalid_grant`
 
@@ -149,50 +86,3 @@ somebody found and verified it, not because it is scheduled.
 `Composer.tsx` is 1,397 lines and `Inbox.tsx` is 2,458, against the bar R1 set at roughly 350; both grew
 through M3–M4 (splits, settings deep links, follow-ups, AI drafting). Clean seams exist:
 `InlineQuote` plus `quoteSrcDoc` out of the composer, and the label and snooze picker wiring out of `Inbox`.
-
-### REF-3: two MIME builders with subtly different header rules *(review R6)*
-
-**Verified:** 2026-08-31
-
-`outbox/mime.ts` (465 lines, send) and `outbox/draftMime.ts` (319 lines, draft mirror) each implement CRLF and
-RFC 2047 encoding separately. The two encoders must agree, and no test asserts that they do.
-
-### REF-4: outbox row deserialization is hand-rolled at eight sites *(review R7)*
-
-**Verified:** 2026-08-31 (re-checked; `sender.ts` gained T35's follow-up columns in the same inline style)
-
-`outbox/drafts.ts`, `outbox/mirror.ts`, `outbox/queue.ts`, `outbox/sender.ts`, and `outbox/draftSync.ts` all
-parse rows inline, and `draftSync.ts` alone does it four times. No shared row-to-object helper exists.
-
-### REF-5: five sync runners hand-roll the same cursor walk *(review R1)*
-
-**Verified:** 2026-09-02
-
-`lifetimeSweep.ts`, `attachmentFlags.ts`, `splitMetadata.ts`, `ftsBackfill.ts`, and `backfill.ts` each re-implement
-cursor grammar, yield/pacing, the one-shot expired-token reset, checkpoint, `progress()` and the `onError` guard;
-only `isExpiredPageTokenError` and `persistThread` are shared, and four test suites re-test the same skeleton. A
-`runCursorWalk` leaves each runner as its per-item body.
-
-### REF-6: ~42% of the utility runtime is e2e seam code *(review R2)*
-
-**Verified:** 2026-09-02
-
-`src/main/service/runtime.ts:944-1645` (`handleTest` and its nine helpers, seven guards, five delay fields) exist
-only for the harness; AGENTS.md isolates main's seams in `testIpc.ts` but the utility half never got the same
-treatment. `ai/manager.ts` carries a fake provider the same way. Move to `service/testOperations.ts`.
-
-### REF-7: the outbox state machine is bypassed for most transitions *(review R3)*
-
-**Verified:** 2026-09-02
-
-`sender.ts:488-493,656-661,780-786` write transitions as raw SQL that `machine.ts` also models; five events are
-never dispatched and six `machine.test.ts` cases cover unreachable paths. Route every transition through
-`planTransition` (which retires BUG-3 and BUG-6 structurally) or delete the unused events.
-
-### REF-8: mail-frame plumbing is copied four times *(review R5)*
-
-**Verified:** 2026-09-02
-
-Frame registration and remote-image epoch handling at `MessageBody.tsx:456-493`, `Composer.tsx:226-275`,
-`OpaqueHtmlNode.tsx:387-435`, `ImageNode.tsx:46-81`; iframe measurement three times; three divergent srcdoc
-shells. A `useMailFrameAccess` hook plus `<MailFrame>` also fixes BUG-12.
