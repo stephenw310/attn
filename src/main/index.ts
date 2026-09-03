@@ -86,8 +86,6 @@ let oauthConfig: OAuthConfig | null = null
 // registered mail frames, consulted by the request filter in createWindow.
 let remoteImagePolicy: RemoteImagePolicy = DEFAULT_REMOTE_IMAGE_POLICY
 const mailFrames = new MailFrameRegistry()
-// T36: AI key custody and the streaming LLM transport live in main (F17/D2).
-let aiManager: AiManager | null = null
 // T39: constructed only for packaged release builds outside the test seam.
 let appUpdater: AppUpdater | null = null
 // The opened database's schema, from the utility's ready handshake: updates
@@ -99,7 +97,6 @@ let updateStateOverride: UpdateState | null = null
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
-  ai: () => aiManager,
   focusInboxThread: (threadId, accountId) => {
     const owner = accountId ?? activeAccountId
     if (owner) focusInboxThread(owner, threadId)
@@ -595,9 +592,11 @@ async function initialize(): Promise<void> {
   const ownedAiManager = new AiManager({
     keyStore: aiKeyStore,
     readSettings: () => ownedService.invoke(IPC_CHANNELS.aiGetSettings),
-    emit: (event) => broadcast(IPC_CHANNELS.aiStreamEvent, event)
+    emit: (event) => broadcast(IPC_CHANNELS.aiStreamEvent, event),
+    // Under the seam the scripted provider replaces the network entirely; the
+    // manager runs its one production path either way (T36).
+    ...(testUserData ? { fetchFn: testSeams.aiTransport.fetch } : {})
   })
-  aiManager = ownedAiManager
   const aiSettingsSnapshot = async (): Promise<AiSettings> => ({
     ...(await ownedService.invoke(IPC_CHANNELS.aiGetSettings)),
     keyPresent: aiKeyStore.present()

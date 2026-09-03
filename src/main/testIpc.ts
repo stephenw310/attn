@@ -3,12 +3,11 @@ import { errorMessage } from '../shared/error'
 import { nonEmptyString } from '../shared/guards'
 import { TEST_CHANNELS } from '../shared/ipc'
 import type { UpdatePhase, UpdateState } from '../shared/update'
-import type { AiManager, FakeAiScript } from './ai/manager'
+import { type FakeAiScript, FakeAiTransport } from './ai/fakeTransport'
 import type { ServiceSupervisor } from './service/supervisor'
 
 export interface TestSeamDeps {
   service: () => ServiceSupervisor | null
-  ai: () => AiManager | null
   focusInboxThread: (threadId: string | null, accountId?: string) => void
   /** T39: makes update:getState answer a fixed state (null clears the override). */
   setUpdateStateOverride: (state: UpdateState | null) => void
@@ -25,6 +24,12 @@ function parseUpdateState(value: unknown): UpdateState | null {
 }
 
 export class TestSeams {
+  /**
+   * The scripted AI provider (T36). Main hands its `fetch` to the AiManager
+   * under the seam, so the production transport is the only one that ever
+   * runs — there is no fake inside the manager (REF-6).
+   */
+  readonly aiTransport = new FakeAiTransport()
   private attachmentPickerPaths: string[] | null = null
 
   constructor(
@@ -145,22 +150,18 @@ export class TestSeams {
           .catch((error) => done?.([], errorMessage(error)))
       }
     )
-    // T36: the fake AI provider lives in main's AiManager, not the utility —
-    // that is where the real transport (and its gating) runs.
+    // T36: the fake provider replaces main's HTTP transport, not the
+    // AiManager — that is where the real gating, streaming and cancellation
+    // run, and the harness must exercise them.
     ipcMain.on(
       TEST_CHANNELS.installFakeAiProvider,
       (_event, script: unknown, done?: (error?: string) => void) => {
-        const manager = this.deps.ai()
-        if (!manager) {
-          done?.('AI manager unavailable')
-          return
-        }
-        manager.installFakeProvider((script ?? {}) as FakeAiScript)
+        this.aiTransport.install((script ?? {}) as FakeAiScript)
         done?.()
       }
     )
     ipcMain.on(TEST_CHANNELS.aiProviderRequests, (_event, done?: (result: unknown) => void) => {
-      done?.(this.deps.ai()?.fakeProviderRequests() ?? [])
+      done?.(this.aiTransport.recorded())
     })
     // T39: no updater exists under the harness, so the initial-read path of
     // the renderer's ready announcement needs a stored state to find.
