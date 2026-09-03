@@ -53,6 +53,24 @@ import { isThemePreference, type ThemePreference } from '../shared/theme'
 import type { UpdateState } from '../shared/update'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
+/** Open composers awaiting a pre-quit checkpoint request (B28). */
+const checkpointSubscribers = new Set<() => Promise<void> | void>()
+
+ipcRenderer.on(IPC_CHANNELS.draftCheckpointRequest, (_event, payload: { requestId: number }) => {
+  const commits = [...checkpointSubscribers].map(async (commit) => {
+    try {
+      await commit()
+    } catch {
+      // A failed checkpoint must not hold up the quit; the draft keeps its
+      // last successful revision, exactly as an autosave failure leaves it.
+    }
+  })
+  void Promise.all(commits).then(() =>
+    // Answering is best effort: main may already have torn its handlers down.
+    ipcRenderer.invoke(IPC_CHANNELS.draftCheckpointDone, payload.requestId).catch(() => {})
+  )
+})
+
 const THEME_ARGUMENT_PREFIX = '--attn-theme='
 const themeArgument = process.argv.find((argument) => argument.startsWith(THEME_ARGUMENT_PREFIX))
 const themeCandidate = themeArgument?.slice(THEME_ARGUMENT_PREFIX.length)
@@ -312,7 +330,20 @@ const api = {
     discard: (id: string, expectedState: 'composing' | 'drafted' = 'composing'): Promise<void> =>
       invoke(IPC_CHANNELS.draftDiscard, id, expectedState),
     mirror: (id: string): Promise<void> => invoke(IPC_CHANNELS.draftMirror, id),
-    takeRecovered: (): Promise<Draft | null> => invoke(IPC_CHANNELS.draftTakeRecovered)
+    takeRecovered: (): Promise<Draft | null> => invoke(IPC_CHANNELS.draftTakeRecovered),
+    /**
+     * Commit before quit (B28). Main asks while the document is still alive
+     * and waits for the answer, so the last second of typing reaches SQLite.
+     * The subscription list lives here rather than in the tree: main must get
+     * an answer even when no composer is mounted, or every quit would wait out
+     * its timeout.
+     */
+    onCheckpointRequest: (cb: () => Promise<void> | void): (() => void) => {
+      checkpointSubscribers.add(cb)
+      return () => {
+        checkpointSubscribers.delete(cb)
+      }
+    }
   },
   outbox: {
     send: (draftId: string): Promise<QueueSendResult> => invoke(IPC_CHANNELS.outboxSend, draftId),

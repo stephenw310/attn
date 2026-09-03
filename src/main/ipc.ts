@@ -29,6 +29,8 @@ export interface IpcContext {
   reorderAccounts: (accountIds: string[]) => Promise<AuthStatus>
   takePendingFocus: () => PendingFocusTarget | null
   acknowledgePendingFocus: (id: number) => void
+  /** A renderer finished its pre-quit composer checkpoint (B28). */
+  acknowledgeComposerCheckpoint: (requestId: number) => void
   /** T33: register/unregister a mounted mail frame with the request filter. */
   registerMailFrame: (
     nonce: string,
@@ -112,6 +114,13 @@ export function registerIpc(context: IpcContext): () => void {
     const settings = await context.service.invoke(IPC_CHANNELS.settingsSet, update.key, update.value)
     context.applySettingEffects(update)
     return settings
+  })
+  handle(IPC_CHANNELS.draftCheckpointDone, (_event, requestId) => {
+    if (typeof requestId !== 'number' || !Number.isFinite(requestId)) {
+      throw new Error('invalid checkpoint id')
+    }
+    context.acknowledgeComposerCheckpoint(requestId)
+    return undefined
   })
   handle(IPC_CHANNELS.mailAcknowledgePendingFocus, (_event, id) => {
     if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('invalid focus id')

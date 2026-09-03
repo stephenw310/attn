@@ -45,7 +45,12 @@ it('pushes an attachment change promptly but lets body edits wait', async () => 
   Object.defineProperty(window, 'attn', {
     configurable: true,
     value: {
-      draft: { save: vi.fn(async () => ({ id: 'local-draft' })), mirror }
+      draft: {
+        save: vi.fn(async () => ({ id: 'local-draft' })),
+        mirror,
+        // The pre-quit checkpoint subscription (B28); main drives it in e2e.
+        onCheckpointRequest: () => () => {}
+      }
     } as unknown as Window['attn']
   })
 
@@ -103,7 +108,9 @@ it('does not re-arm a failed autosave after the composer unmounts', async () => 
   )
   Object.defineProperty(window, 'attn', {
     configurable: true,
-    value: { draft: { save, mirror: vi.fn() } } as unknown as Window['attn']
+    value: {
+      draft: { save, mirror: vi.fn(), onCheckpointRequest: () => () => {} }
+    } as unknown as Window['attn']
   })
 
   const container = document.createElement('div')

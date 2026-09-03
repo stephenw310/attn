@@ -116,14 +116,18 @@ export class FakeAiTransport {
         let next = 0
         const read = (): Promise<{ done: boolean; value?: Uint8Array }> => {
           const frame = frames[next]
-          if (frame === undefined) {
-            finished = true
-            return Promise.resolve({ done: true, value: undefined })
-          }
           next++
-          if (interval <= 0 || next === 1) return Promise.resolve({ done: false, value: frame })
-          return new Promise((deliver) => {
-            this.time.timers.setTimeout(() => deliver({ done: false, value: frame }), interval)
+          const deliver = (): { done: boolean; value?: Uint8Array } => {
+            if (frame !== undefined) return { done: false, value: frame }
+            finished = true
+            return { done: true, value: undefined }
+          }
+          // The first frame lands as soon as the response does; every later
+          // step waits out the interval, the completion included — so a cancel
+          // during the final gap still finds the request in flight.
+          if (interval <= 0 || next <= 1) return Promise.resolve(deliver())
+          return new Promise((resolve) => {
+            this.time.timers.setTimeout(() => resolve(deliver()), interval)
           })
         }
         resolve({ ok: true, status: 200, body: { getReader: () => ({ read }) } } as unknown as Response)

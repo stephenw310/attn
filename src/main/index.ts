@@ -77,6 +77,10 @@ let openedSchemaVersion: number | null = null
 // Test-only: lets the seeded harness stage a stored update state for the
 // renderer's mount-time read; always null outside ATTN_TEST_USER_DATA.
 let updateStateOverride: UpdateState | null = null
+// B28: in-flight pre-quit composer checkpoints, keyed by request id.
+const pendingComposerCheckpoints = new Map<number, () => void>()
+let composerCheckpointId = 0
+const COMPOSER_CHECKPOINT_TIMEOUT_MS = 2_000
 
 const testSeams = new TestSeams(Boolean(testUserData), {
   service: () => service,
@@ -427,6 +431,7 @@ async function initialize(): Promise<void> {
     reorderAccounts: (accountIds) => roster.reorderAccounts(accountIds),
     takePendingFocus: takePendingFocusTarget,
     acknowledgePendingFocus: acknowledgeFocusTarget,
+    acknowledgeComposerCheckpoint: (requestId) => pendingComposerCheckpoints.get(requestId)?.(),
     applySettingEffects,
     update: {
       getState: () => updateStateOverride ?? appUpdater?.state() ?? UPDATE_STATE_IDLE,
@@ -477,6 +482,41 @@ async function initialize(): Promise<void> {
   app.on('activate', () => showMainWindow())
 }
 
+/**
+ * Ask every window to commit its open composer and wait for the answers
+ * (B28). This runs on `before-quit`, while the documents are still alive: a
+ * renderer that serializes its editor during unload cannot load the `data:`
+ * URLs an inline image needs, so the checkpoint has to happen here rather than
+ * in a `pagehide` handler. The wait is bounded — a wedged renderer delays the
+ * quit by at most `COMPOSER_CHECKPOINT_TIMEOUT_MS`, and the preload answers
+ * immediately when no composer is mounted.
+ */
+function checkpointComposers(): Promise<void> {
+  const windows = BrowserWindow.getAllWindows().filter((win) => !win.webContents.isDestroyed())
+  if (windows.length === 0) return Promise.resolve()
+  const requestId = ++composerCheckpointId
+  return new Promise<void>((resolve) => {
+    let remaining = windows.length
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const settle = (): void => {
+      if (!pendingComposerCheckpoints.delete(requestId)) return
+      if (timer !== null) clearTimeout(timer)
+      resolve()
+    }
+    timer = setTimeout(() => {
+      console.warn('[composer] checkpoint timed out before quit')
+      settle()
+    }, COMPOSER_CHECKPOINT_TIMEOUT_MS)
+    pendingComposerCheckpoints.set(requestId, () => {
+      remaining -= 1
+      if (remaining <= 0) settle()
+    })
+    for (const win of windows) {
+      win.webContents.send(IPC_CHANNELS.draftCheckpointRequest, { requestId })
+    }
+  })
+}
+
 function refreshSchedulersAfterResume(): void {
   service?.control({ kind: 'refresh-schedulers' })
 }
@@ -512,10 +552,13 @@ else {
     event.preventDefault()
     if (preparingQuit) return
     preparingQuit = true
-    void teardown().finally(() => {
-      quitPrepared = true
-      app.quit()
-    })
+    void checkpointComposers()
+      .catch(() => {})
+      .then(teardown)
+      .finally(() => {
+        quitPrepared = true
+        app.quit()
+      })
   })
   app.on('second-instance', () => showMainWindow())
   app.whenReady().then(async () => {

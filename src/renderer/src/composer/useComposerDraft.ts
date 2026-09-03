@@ -164,6 +164,12 @@ export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): Com
     }
   }, [clearTimers])
 
+  // B28: main asks for a checkpoint on `before-quit`, while the document is
+  // still alive — serializing the editor during unload cannot load the `data:`
+  // URLs an inline image needs. Committing here is what keeps the last second
+  // of typing; main waits for the answer before it tears anything down.
+  useEffect(() => window.attn?.draft.onCheckpointRequest(() => commitRef.current()), [])
+
   const saveNow = useCallback(async () => {
     if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
     mirrorTimerRef.current = null

@@ -2570,3 +2570,22 @@ test('keeps a reply signature and quoted history collapsed with empty lines besi
   const reopened = await page.evaluate(async (id) => window.attn.draft.get(id ?? ''), savedId)
   expect(reopened?.quoteHtml).toBe(saved?.quoteHtml)
 })
+
+test('quit checkpoints composer text no autosave timer has reached yet (B28)', async ({ boot, page }) => {
+  let composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  const clockStart = Date.now()
+  await page.clock.install({ time: clockStart })
+  // Freeze time well inside the one-second idle debounce: neither checkpoint
+  // timer can fire, so only the pre-quit request can reach SQLite.
+  await page.clock.pauseAt(clockStart + 100)
+  const typed = 'Quit must not drop this sentence.'
+  await page.keyboard.type(typed)
+  await expect(composer.editor).toContainText(typed)
+
+  ;({ page } = await boot.relaunch())
+  composer = new ComposerPage(page)
+  await expect(composer.root).toBeVisible()
+  await expect(composer.editor).toContainText(typed)
+})
