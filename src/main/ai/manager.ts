@@ -23,6 +23,7 @@ import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import type { AiKeyStore } from './keyStore'
 import {
   type AiPrompt,
+  AiStreamError,
   AiStreamParser,
   buildPrompt,
   buildWireRequest,
@@ -287,6 +288,12 @@ export class AiManager {
       this.settle(entry, {})
     } catch (error) {
       if (entry.settled) return
+      // A mid-stream provider error already carries its own user-facing text,
+      // and never the provider's own message.
+      if (error instanceof AiStreamError) {
+        this.fail(entry, error.message)
+        return
+      }
       const aborted = error instanceof Error && error.name === 'AbortError'
       this.fail(entry, aborted ? 'The AI request was canceled' : 'The AI provider could not be reached')
     }

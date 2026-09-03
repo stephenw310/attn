@@ -120,6 +120,9 @@ const MAX_VOICE_RULES_LENGTH = 4_000
  * before forwarding (so cancel-on-disable effects only follow a valid write)
  * and the utility before touching SQLite (the renderer is untrusted).
  */
+/** `URL.hostname` keeps the brackets on an IPv6 literal. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+
 export function validateAiSettingUpdate(key: unknown, value: unknown): AiSettingUpdate {
   switch (key) {
     case 'enabled':
@@ -145,6 +148,12 @@ export function validateAiSettingUpdate(key: unknown, value: unknown): AiSetting
       }
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new Error('invalid AI base URL')
+      }
+      // Plain HTTP would put the bearer key on the wire in clear text, so it
+      // is allowed only for a local endpoint (Ollama, LM Studio) that never
+      // leaves the machine.
+      if (parsed.protocol === 'http:' && !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) {
+        throw new Error('AI base URL must use https except on localhost')
       }
       return { key, value }
     }
