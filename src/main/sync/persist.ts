@@ -81,8 +81,16 @@ export interface PersistThreadOptions {
   metadataOnly?: boolean
   /**
    * Lifetime-only rows retain Gmail's labels without entering M2's bounded
-   * Inbox surface. Ordinary refetches preserve that choice; a backfill or a
-   * new Inbox event may explicitly promote the thread.
+   * Inbox surface, and `'preserve'` never changes that flag — including on an
+   * insert, where there is no prior choice to keep and a thread the sweep has
+   * not reached must not enter the surface through a label-only refetch or a
+   * server-search store. Only `'show'` (a backfill or a fresh Inbox event) may
+   * promote a thread into it.
+   *
+   * Omitting the option keeps a new row visible: those callers store an
+   * authoritative snapshot of a thread the user is already acting on (action
+   * recovery, the post-send refresh, an inline-image repair) or seed a
+   * development store, none of which is bounded by the lifetime sweep.
    */
   inboxVisibility?: 'hide' | 'preserve' | 'show'
 }
@@ -172,6 +180,8 @@ export function persistThread(
     'DELETE FROM contact_messages WHERE account_id = ? AND message_id = ?'
   )
   const incomingMessageIds = messages.map((message) => message.id)
+
+  const hidesNewRow = options.inboxVisibility === 'hide' || options.inboxVisibility === 'preserve'
 
   db.transaction(() => {
     const affectedContactEmails = new Set<string>()
@@ -269,7 +279,7 @@ export function persistThread(
       is_unread: anyUnread,
       is_starred: anyStarred,
       has_attachment: anyAttachment,
-      insert_inbox_visible: options.inboxVisibility === 'hide' ? 0 : 1,
+      insert_inbox_visible: hidesNewRow ? 0 : 1,
       promote_inbox_visible: options.inboxVisibility === 'show' ? 1 : 0,
       metadata_only: options.metadataOnly ? 1 : 0
     })
@@ -298,8 +308,8 @@ function removeMissingMessages(
   // Written the other way round the planner scanned every `contact_messages` row
   // in the account on every thread write, so storing mail got slower the more
   // mail was already stored: importing 100,000 threads reached 17 ms each and
-  // never finished. `INDEXED BY` pins the drive, since the planner's own choice
-  // is what regressed here.
+  // never finished. `CROSS JOIN` pins the drive to this thread's messages, since
+  // the planner's own choice is what regressed here.
   const affected = db
     .prepare(
       `SELECT DISTINCT cm.email

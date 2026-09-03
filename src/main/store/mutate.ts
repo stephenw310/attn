@@ -66,6 +66,18 @@ export function applyThreadDelta(db: Db, accountId: string, delta: ThreadDelta):
       accountId,
       delta.threadId
     )
+    // Local-first: a user action that puts a thread back in the Inbox — move,
+    // undone archive, snooze return — must show it there at once. The lifetime
+    // sweep stores older threads outside M2's bounded Inbox surface
+    // (`is_inbox_visible = 0`), and every Inbox read requires that flag, so the
+    // added label alone would leave the thread invisible until Gmail's own
+    // `labelsAdded INBOX` came back through the poller.
+    if (delta.add.includes('INBOX')) {
+      db.prepare('UPDATE threads SET is_inbox_visible = 1 WHERE account_id = ? AND id = ?').run(
+        accountId,
+        delta.threadId
+      )
+    }
     // An optimistic label change moves the thread between mailboxes, so derived
     // membership converges inside the same transaction as the labels.
     refreshThreadMailboxes(db, accountId, delta.threadId)

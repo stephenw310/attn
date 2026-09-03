@@ -202,6 +202,77 @@ describe('thread snapshot persistence', () => {
     }
   })
 
+  it('keeps a new row out of the bounded Inbox surface unless the caller promotes it', () => {
+    const db = openDatabase(':memory:')
+    try {
+      const message = (threadId: string): { id: string; threadId: string; labelIds: string[] } => ({
+        id: `message-${threadId}`,
+        threadId,
+        labelIds: ['INBOX']
+      })
+      const visibility = (threadId: string): { is_inbox_visible: number } =>
+        db
+          .prepare('SELECT is_inbox_visible FROM threads WHERE account_id = ? AND id = ?')
+          .get('account', threadId) as { is_inbox_visible: number }
+
+      // A label-only poller refetch and a server-search store both pass
+      // 'preserve': neither may pull an older thread into the Inbox surface.
+      persistThread(
+        db,
+        'account',
+        { id: 'preserved', messages: [message('preserved')] },
+        {
+          inboxVisibility: 'preserve'
+        }
+      )
+      persistThread(
+        db,
+        'account',
+        { id: 'hidden', messages: [message('hidden')] },
+        {
+          inboxVisibility: 'hide'
+        }
+      )
+      persistThread(
+        db,
+        'account',
+        { id: 'promoted', messages: [message('promoted')] },
+        {
+          inboxVisibility: 'show'
+        }
+      )
+      persistThread(db, 'account', { id: 'default', messages: [message('default')] })
+
+      expect(visibility('preserved')).toEqual({ is_inbox_visible: 0 })
+      expect(visibility('hidden')).toEqual({ is_inbox_visible: 0 })
+      expect(visibility('promoted')).toEqual({ is_inbox_visible: 1 })
+      expect(visibility('default')).toEqual({ is_inbox_visible: 1 })
+
+      // A later Inbox event promotes the stored row; an ordinary refetch keeps
+      // whichever choice the row already carries.
+      persistThread(
+        db,
+        'account',
+        { id: 'preserved', messages: [message('preserved')] },
+        {
+          inboxVisibility: 'show'
+        }
+      )
+      persistThread(
+        db,
+        'account',
+        { id: 'promoted', messages: [message('promoted')] },
+        {
+          inboxVisibility: 'preserve'
+        }
+      )
+      expect(visibility('preserved')).toEqual({ is_inbox_visible: 1 })
+      expect(visibility('promoted')).toEqual({ is_inbox_visible: 1 })
+    } finally {
+      db.close()
+    }
+  })
+
   it('summarizes the messages shown by the normal reader instead of newer junk', () => {
     const db = openDatabase(':memory:')
     try {

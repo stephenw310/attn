@@ -123,7 +123,11 @@ export async function searchAllGmail(
           format: 'full',
           priority: 'foreground',
           ...(options.signal ? { signal: options.signal } : {}),
-          shouldPersist: shouldContinue
+          shouldPersist: shouldContinue,
+          // A search result is stored so the row can be read; it must not put an
+          // older Inbox thread the lifetime sweep has not reached into the
+          // bounded Inbox surface.
+          persistOptions: { inboxVisibility: 'preserve' }
         })
         if (!shouldContinue()) return { rows: [], quotaWaitMs: 0 }
         options.onStoreChanged?.()
