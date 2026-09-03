@@ -14,7 +14,6 @@ interface FakeDbState {
   cursor: string | null
   threadIds: Set<string>
   done?: number
-  total?: number | null
 }
 
 const fakeDbStates = new WeakMap<Db, FakeDbState>()
@@ -24,11 +23,7 @@ function fakeDb(state: FakeDbState): Db {
     prepare: (sql: string) => ({
       get: (...args: unknown[]) => {
         if (sql.startsWith('SELECT sweep_cursor')) {
-          return {
-            sweep_cursor: state.cursor,
-            sweep_threads_done: state.done ?? 0,
-            sweep_threads_total: state.total ?? null
-          }
+          return { sweep_cursor: state.cursor, sweep_threads_done: state.done ?? 0 }
         }
         if (sql.startsWith('SELECT COUNT(*) AS count FROM threads')) {
           return { count: state.threadIds.size }
@@ -42,7 +37,6 @@ function fakeDb(state: FakeDbState): Db {
         if (sql.includes('UPDATE sync_state')) {
           state.cursor = args[0] as string
           state.done = args[1] as number
-          state.total = args[2] as number | null
         }
         return { changes: 1 }
       }
@@ -517,8 +511,7 @@ describe('lifetime header indexing', () => {
     const state = {
       cursor: 'lifetime:page-2',
       threadIds: new Set(existingIds),
-      done: 500,
-      total: 1_000 as number | null
+      done: 500
     }
     const events = callbacks()
 

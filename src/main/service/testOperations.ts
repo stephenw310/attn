@@ -509,7 +509,7 @@ export class TestOperations implements TestHooks {
     if (value.resetCursor) {
       db.prepare(
         `UPDATE sync_state
-         SET sweep_cursor = ?, sweep_threads_done = 0, sweep_threads_total = NULL
+         SET sweep_cursor = ?, sweep_threads_done = 0
          WHERE account_id = ?`
       ).run(value.resetCursor, accountId)
     }

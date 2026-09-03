@@ -59,7 +59,6 @@ export type LifetimeSweepStartPlan =
 interface StoredSweepState {
   sweep_cursor: string | null
   sweep_threads_done: number
-  sweep_threads_total: number | null
 }
 
 interface IndexedThreadCount {
@@ -117,7 +116,7 @@ export async function runLifetimeSweep(
   try {
     const state = db
       .prepare(
-        `SELECT sweep_cursor, sweep_threads_done, sweep_threads_total
+        `SELECT sweep_cursor, sweep_threads_done
          FROM sync_state WHERE account_id = ?`
       )
       .get(accountId) as StoredSweepState | undefined
@@ -128,7 +127,7 @@ export async function runLifetimeSweep(
 
     const checkpoint = db.prepare(
       `UPDATE sync_state
-       SET sweep_cursor = ?, sweep_threads_done = ?, sweep_threads_total = ?
+       SET sweep_cursor = ?, sweep_threads_done = ?
        WHERE account_id = ?`
     )
     // The durable count belongs to the listing cursor: it says how many ids the
@@ -137,13 +136,14 @@ export async function runLifetimeSweep(
     // currently present in the local account store.
     let listedThreadsDone = state?.sweep_threads_done ?? 0
     let startingListedThreadsDone = listedThreadsDone
-    // Never publish the saved total before refreshing the Gmail profile: old
-    // builds stored `resultSizeEstimate` here, including impossible values.
+    // The total is published from the Gmail profile on every run and never
+    // stored: old builds saved `resultSizeEstimate` here, impossible values
+    // included, and the sweep would have republished them.
     let threadsTotal: number | undefined
     if (plan.initialize) {
       listedThreadsDone = 0
       startingListedThreadsDone = 0
-      checkpoint.run('lifetime', 0, null, accountId)
+      checkpoint.run('lifetime', 0, accountId)
     }
 
     const runMetrics = (): Pick<LifetimeSweepResult, 'elapsedMs' | 'threadsPerMinute' | 'quotaWaitMs'> => {
@@ -165,12 +165,7 @@ export async function runLifetimeSweep(
     const stopAtCap = (pageToken: string | undefined, pageStartCount: number): LifetimeSweepResult => {
       // Replay the partial page on resume. Its starting count must accompany
       // the cursor, or already-stored ids on that page would be counted twice.
-      checkpoint.run(
-        `capped:${pageToken ? `lifetime:${pageToken}` : 'lifetime'}`,
-        pageStartCount,
-        threadsTotal ?? state?.sweep_threads_total ?? null,
-        accountId
-      )
+      checkpoint.run(`capped:${pageToken ? `lifetime:${pageToken}` : 'lifetime'}`, pageStartCount, accountId)
       console.log(`[sync] lifetime sweep stopped at the ${threadCap}-conversation limit for ${accountId}`)
       return { threadCount: listedThreadsDone, ...runMetrics() }
     }
@@ -256,7 +251,7 @@ export async function runLifetimeSweep(
         threadsIndexed = countIndexedThreads()
         threadsIndexedBySweep = 0
         indexingElapsedMs = 0
-        checkpoint.run('lifetime', 0, threadsTotal ?? null, accountId)
+        checkpoint.run('lifetime', 0, accountId)
         continue
       }
       if (!shouldContinue()) return null
@@ -305,12 +300,7 @@ export async function runLifetimeSweep(
       // count scans every stored thread id, so it must stay out of the yield
       // loop's 250 ms ticks.
       threadsIndexed = countIndexedThreads()
-      checkpoint.run(
-        pageToken ? `lifetime:${pageToken}` : 'done',
-        listedThreadsDone,
-        threadsTotal ?? null,
-        accountId
-      )
+      checkpoint.run(pageToken ? `lifetime:${pageToken}` : 'done', listedThreadsDone, accountId)
       progress('running')
       if (!pageToken) return { threadCount: listedThreadsDone, ...runMetrics() }
 

@@ -374,6 +374,56 @@ describe('thread snapshot persistence', () => {
     }
   })
 
+  it('never lets a newer Gmail draft drive the thread summary', () => {
+    // The `t-roadmap` fixture's newest message is a DRAFT: unsent text belongs
+    // to the outbox, so the list must summarize the last real reply instead.
+    const db = openDatabase(':memory:')
+    try {
+      persistThread(db, 'account', {
+        id: 'thread',
+        messages: [
+          {
+            id: 'reply',
+            threadId: 'thread',
+            labelIds: ['INBOX'],
+            internalDate: '200',
+            snippet: 'Latest sent reply',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Maya <maya@example.com>' },
+                { name: 'Subject', value: 'Roadmap' }
+              ]
+            }
+          },
+          {
+            id: 'draft',
+            threadId: 'thread',
+            labelIds: ['DRAFT'],
+            internalDate: '300',
+            snippet: 'Half-written answer',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Me <account>' },
+                { name: 'Subject', value: 'Re: Roadmap' }
+              ]
+            }
+          }
+        ]
+      })
+
+      expect(
+        db
+          .prepare('SELECT snippet, last_msg_at, from_display FROM threads WHERE account_id = ? AND id = ?')
+          .get('account', 'thread')
+      ).toEqual({ snippet: 'Latest sent reply', last_msg_at: 200, from_display: 'Maya' })
+      expect(db.prepare('SELECT id FROM messages WHERE account_id = ?').all('account')).toEqual([
+        { id: 'reply' }
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   it('summarizes a self-authored latest message as Me', () => {
     const db = openDatabase(':memory:')
     try {
