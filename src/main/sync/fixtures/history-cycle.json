@@ -1,25 +1,74 @@
 [
   {
     "id": "9007199254740993",
+    "messages": [
+      {
+        "id": "m-label-add",
+        "threadId": "t-label"
+      }
+    ],
     "labelsAdded": [
       {
-        "message": { "id": "m-label-add", "threadId": "t-label", "labelIds": ["STARRED"] },
+        "message": {
+          "id": "m-label-add",
+          "threadId": "t-label",
+          "labelIds": ["STARRED"]
+        },
         "labelIds": ["STARRED"]
       }
     ]
   },
   {
     "id": "9007199254740994",
-    "labelsRemoved": [
+    "messages": [
       {
-        "message": { "id": "m-label-remove", "threadId": "t-label", "labelIds": [] },
-        "labelIds": ["INBOX"]
+        "id": "m-label-remove",
+        "threadId": "t-label"
+      },
+      {
+        "id": "m-deleted",
+        "threadId": "t-deleted"
       }
     ],
-    "messagesDeleted": [{ "message": { "id": "m-deleted", "threadId": "t-deleted" } }]
+    "messagesDeleted": [
+      {
+        "message": {
+          "id": "m-deleted",
+          "threadId": "t-deleted"
+        }
+      }
+    ],
+    "labelsRemoved": [
+      {
+        "message": {
+          "id": "m-label-remove",
+          "threadId": "t-label",
+          "labelIds": []
+        },
+        "labelIds": ["INBOX"]
+      }
+    ]
   },
   {
     "id": "9007199254740995",
+    "messages": [
+      {
+        "id": "m-inbound",
+        "threadId": "t-inbound"
+      },
+      {
+        "id": "m-self",
+        "threadId": "t-self"
+      },
+      {
+        "id": "m-read",
+        "threadId": "t-read"
+      },
+      {
+        "id": "m-draft",
+        "threadId": "t-draft"
+      }
+    ],
     "messagesAdded": [
       {
         "message": {
@@ -36,7 +85,11 @@
         }
       },
       {
-        "message": { "id": "m-read", "threadId": "t-read", "labelIds": ["INBOX"] }
+        "message": {
+          "id": "m-read",
+          "threadId": "t-read",
+          "labelIds": ["INBOX"]
+        }
       },
       {
         "message": {
@@ -46,7 +99,11 @@
         }
       },
       {
-        "message": { "id": "m-draft", "threadId": "t-draft", "labelIds": ["DRAFT"] }
+        "message": {
+          "id": "m-draft",
+          "threadId": "t-draft",
+          "labelIds": ["DRAFT"]
+        }
       }
     ]
   }

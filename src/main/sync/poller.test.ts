@@ -163,6 +163,63 @@ describe('stateful history application', () => {
     expect(checkpoint()).toBe('11')
   })
 
+  it('skips a permanently failing thread, checkpoints, and reports it once', async () => {
+    const { db, checkpoint } = checkpointDb()
+    const provider = providerFor([
+      {
+        history: [
+          {
+            id: '11',
+            messages: [
+              { id: 'm1', threadId: 'broken' },
+              { id: 'm2', threadId: 'healthy' }
+            ]
+          }
+        ],
+        historyId: '11'
+      }
+    ])
+    const fetchThread = vi.fn(async (_db, _accountId, _provider, threadId: string) => {
+      if (threadId === 'broken') throw new GmailApiError(403, 'thread too large')
+      return { thread: { id: threadId, messages: [] }, persisted: true }
+    }) as unknown as typeof fetchAndCacheThread
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const result = await runHistoryCycle(db, 'test@example.com', provider, {
+      fetchThread,
+      hydrate: vi.fn(async () => {})
+    })
+
+    // The healthy thread still lands, the window is not replayed forever, and
+    // the skipped thread is reported rather than swallowed.
+    expect(fetchThread).toHaveBeenCalledTimes(2)
+    expect(checkpoint()).toBe('11')
+    expect(result.refetchFailures).toEqual([expect.any(GmailApiError)])
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('history refetch failed for thread broken'))
+    error.mockRestore()
+  })
+
+  it('keeps the checkpoint when the failure is the token or the network, not the thread', async () => {
+    for (const failure of [
+      new GmailApiError(401, 'token expired'),
+      new GmailApiError(503, 'backend error', true),
+      new Error('fetch failed')
+    ]) {
+      const { db, checkpoint } = checkpointDb()
+      const provider = providerFor([
+        { history: [{ id: '11', messages: [{ id: 'm1', threadId: 'first' }] }], historyId: '11' }
+      ])
+      const fetchThread = vi.fn(async () => {
+        throw failure
+      }) as unknown as typeof fetchAndCacheThread
+
+      await expect(
+        runHistoryCycle(db, 'test@example.com', provider, { fetchThread, hydrate: vi.fn(async () => {}) })
+      ).rejects.toThrow(failure)
+      expect(checkpoint()).toBe('10')
+    }
+  })
+
   it('reconciles against a complete server set without stripping older inbox mail', () => {
     const labels = new Set(['recent-missing', 'recent-present', 'old-unlisted'])
     const db = {
@@ -475,6 +532,48 @@ describe('history poller lifecycle', () => {
     await firstCycle
     await vi.waitFor(() => expect(options.runCycle).toHaveBeenCalledTimes(2))
     expect(onRetryStarted).toHaveBeenCalledOnce()
+
+    finishes[1]?.(plan())
+    await vi.waitFor(() => expect(options.onCycleComplete).toHaveBeenCalledTimes(2))
+    poller.stop()
+  })
+
+  it('completes a cycle that skipped a thread and still reports the failure', async () => {
+    const failure = new GmailApiError(403, 'thread too large')
+    const options = pollerOptions({
+      runCycle: vi.fn(async () => ({ ...plan(['broken']), refetchFailures: [failure] })),
+      syncDrafts: vi.fn(async () => false)
+    })
+    const poller = new HistoryPoller(options)
+    poller.start()
+
+    await poller.runNow()
+
+    expect(options.syncDrafts).toHaveBeenCalledOnce()
+    expect(options.onCycleComplete).toHaveBeenCalledWith(true)
+    expect(options.onError).toHaveBeenCalledWith(failure)
+    poller.stop()
+  })
+
+  it('starts every request queued behind one running cycle', async () => {
+    const finishes: Array<(value: FetchedHistoryPlan) => void> = []
+    const options = pollerOptions({
+      runCycle: vi.fn(() => new Promise<FetchedHistoryPlan>((resolve) => finishes.push(resolve)))
+    })
+    const poller = new HistoryPoller(options)
+    const first = vi.fn()
+    const second = vi.fn()
+    poller.start()
+
+    const firstCycle = poller.runNow()
+    expect(poller.requestRunNow(first)).toBe('queued')
+    expect(poller.requestRunNow(second)).toBe('queued')
+
+    finishes[0]?.(plan())
+    await firstCycle
+    await vi.waitFor(() => expect(options.runCycle).toHaveBeenCalledTimes(2))
+    expect(first).toHaveBeenCalledOnce()
+    expect(second).toHaveBeenCalledOnce()
 
     finishes[1]?.(plan())
     await vi.waitFor(() => expect(options.onCycleComplete).toHaveBeenCalledTimes(2))
