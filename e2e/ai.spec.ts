@@ -1,6 +1,6 @@
-import type { ElectronApplication, Page } from '@playwright/test'
-import { TEST_CHANNELS } from '../src/shared/ipc'
+import type { Page } from '@playwright/test'
 import { expect, test } from './electron'
+import { aiRequests, installFakeAi } from './seams'
 
 // T36 (F17): the AI writing foundation — consent flows, key custody, the
 // scripted generation round trip through the production main-process
@@ -9,29 +9,6 @@ import { expect, test } from './electron'
 // endpoint anywhere in this suite; real endpoints stay out of e2e.
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
-
-async function installFakeAi(app: ElectronApplication, script?: unknown): Promise<void> {
-  const error = await app.evaluate(
-    ({ ipcMain }, input) =>
-      new Promise<string | undefined>((resolve) => ipcMain.emit(input.channel, {}, input.script, resolve)),
-    { channel: TEST_CHANNELS.installFakeAiProvider, script }
-  )
-  if (error) throw new Error(error)
-}
-
-interface RecordedRequest {
-  purpose: string
-  system: string
-  messages: Array<{ role: string; content: string }>
-  canceled: boolean
-}
-
-function aiRequests(app: ElectronApplication): Promise<RecordedRequest[]> {
-  return app.evaluate(
-    ({ ipcMain }, channel) => new Promise<RecordedRequest[]>((resolve) => ipcMain.emit(channel, {}, resolve)),
-    TEST_CHANNELS.aiProviderRequests
-  )
-}
 
 /** Run one generation from the renderer, collecting the streamed text. */
 function generateText(page: Page, request: unknown): Promise<string> {

@@ -1,6 +1,6 @@
-import type { ElectronApplication } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { emitSeam } from './seams'
 
 // T39 wiring under the harness, where no updater may exist: seeded builds
 // construct nothing and make zero feed requests, so update:getState answers
@@ -9,15 +9,6 @@ import { expect, test } from './electron'
 // manual T40 evidence — they cannot run under the e2e harness.
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
-
-async function emitSeam(app: ElectronApplication, channel: string, request?: unknown): Promise<void> {
-  const error = await app.evaluate(
-    ({ ipcMain }, input) =>
-      new Promise<string | undefined>((resolve) => ipcMain.emit(input.channel, {}, input.request, resolve)),
-    { channel, request }
-  )
-  if (error) throw new Error(error)
-}
 
 test('a seeded build has no updater: idle state, refused restart, quiet ready toast', async ({
   app,

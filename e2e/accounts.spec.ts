@@ -4,7 +4,7 @@ import type { ElectronApplication } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
-import { expectResponseHeld, holdNextResponse } from './holdResponse'
+import { expectResponseHeld, holdNextResponse } from './seams'
 
 // F18 account switching against a seeded two-account store: the whole surface
 // (chip, list, sidebar labels, unread readout) swaps atomically, every switch
@@ -364,9 +364,8 @@ for (const { choice, lastAccount } of [
       type Handler = Parameters<typeof ipcMain.handle>[1]
       const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
       const remove = handlers.get(channels.accountsRemove)
-      const status = handlers.get(channels.authGetStatus)
       const save = handlers.get(channels.draftSave)
-      if (!remove || !status || !save) throw new Error('Missing account/draft handlers')
+      if (!remove || !save) throw new Error('Missing account/draft handlers')
       const activity = { draftSaves: 0 }
       Object.assign(globalThis, { removalActivity: activity })
       ipcMain.removeHandler(channels.draftSave)
@@ -380,15 +379,10 @@ for (const { choice, lastAccount } of [
         await remove(args[0], args[1], false)
         throw new Error('Simulated failure after account retirement')
       })
-      ipcMain.removeHandler(channels.authGetStatus)
-      ipcMain.handle(channels.authGetStatus, async (...args) => {
-        const result = await status(...args)
-        await new Promise<void>((resolve) => {
-          Object.assign(globalThis, { releaseHeldResponse: resolve })
-        })
-        return result
-      })
     }, IPC_CHANNELS)
+    // Park the status read the failed removal triggers, so the warning has to
+    // stand on its own while the roster is still unknown to the renderer.
+    const release = await holdNextResponse(app, IPC_CHANNELS.authGetStatus)
     await page.getByTestId('account-menu').getByRole('button').first().click()
     await page.getByTestId('account-remove').click()
     await page.getByTestId(`remove-account-${choice}`).click()
@@ -417,10 +411,7 @@ for (const { choice, lastAccount } of [
       )
     ).toBe(0)
     await expect(page.getByTestId('composer')).toHaveCount(0)
-    await app.evaluate(() => {
-      const state = globalThis as unknown as { releaseHeldResponse: () => void }
-      state.releaseHeldResponse()
-    })
+    await release()
     if (lastAccount) {
       await expect(page.getByTestId('login-screen')).toBeVisible()
       await expect(warning).toContainText('Could not delete all local data')

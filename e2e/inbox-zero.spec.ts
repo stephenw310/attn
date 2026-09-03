@@ -1,16 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ElectronApplication } from '@playwright/test'
-import { TEST_CHANNELS } from '../src/shared/ipc'
-import type { SyncState } from '../src/shared/mail'
 import { expect, test } from './electron'
-
-async function setSyncState(app: ElectronApplication, state: SyncState): Promise<void> {
-  await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.state), {
-    channel: TEST_CHANNELS.setSyncState,
-    state
-  })
-}
+import { setSyncState } from './seams'
 
 test.describe('complete Inbox metadata', () => {
   test.use({ seed: 'fixtures/seed-splits.json' })

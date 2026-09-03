@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from './electron'
+import { goTo } from './nav'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
@@ -14,11 +15,6 @@ async function chooseMoveLabel(page: Page, label: string): Promise<void> {
   await input.fill(label)
   await input.press('Enter')
   await expect(page.getByTestId('move-picker')).toHaveCount(0)
-}
-
-async function goTo(page: Page, chordKey: string): Promise<void> {
-  await page.keyboard.press('g')
-  await page.keyboard.press(chordKey)
 }
 
 async function expectMovePaletteCount(page: Page, count: number): Promise<void> {

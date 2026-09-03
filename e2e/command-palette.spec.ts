@@ -1,9 +1,9 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Page } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
+import { openPalette, runPaletteCommand } from './nav'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
@@ -18,21 +18,6 @@ const G_CHORD_COMMANDS = [
   'view.trash',
   'view.outbox'
 ] as const
-
-async function openPalette(page: Page, query = ''): Promise<void> {
-  await page.getByTestId('thread-list').waitFor({ state: 'attached' })
-  await page.keyboard.press('ControlOrMeta+K')
-  const palette = page.getByTestId('command-palette')
-  await expect(palette).toBeVisible()
-  await expect(page.getByTestId('command-palette-input')).toBeFocused()
-  if (query) await page.getByTestId('command-palette-input').fill(query)
-}
-
-async function runPaletteCommand(page: Page, query: string): Promise<void> {
-  await openPalette(page, query)
-  await page.getByTestId('command-palette-input').press('Enter')
-  await expect(page.getByTestId('command-palette')).toHaveCount(0)
-}
 
 test('opens in list, reader, and composer contexts and dispatches a command in each', async ({
   page

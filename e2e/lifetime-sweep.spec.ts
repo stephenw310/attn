@@ -1,62 +1,7 @@
-import type { ElectronApplication } from '@playwright/test'
-import type { GmailThread } from '../src/main/gmail/parse'
-import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { oldThread, runSweep } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
-
-interface SweepRequest {
-  resetCursor?: string
-  threads: GmailThread[]
-  pages: Array<{
-    pageToken?: string
-    threadIds: string[]
-    nextPageToken?: string
-    resultSizeEstimate?: number
-  }>
-  offlineAtPageToken?: string
-  threadsTotal?: number
-  messagesTotal?: number
-}
-
-interface SweepResult {
-  cursor: string | null
-  error?: string
-  formats: string[]
-  pageTokens: Array<string | undefined>
-}
-
-async function runSweep(app: ElectronApplication, request: SweepRequest): Promise<SweepResult> {
-  return app.evaluate(
-    ({ ipcMain }, { channel, input }) =>
-      new Promise<SweepResult>((resolve) => ipcMain.emit(channel, {}, input, resolve)),
-    { channel: TEST_CHANNELS.runLifetimeSweep, input: request }
-  )
-}
-
-function oldThread(id: string, recipient: string, year: number, labelIds: string[] = ['SENT']): GmailThread {
-  return {
-    id,
-    messages: [
-      {
-        id: `message-${id}`,
-        threadId: id,
-        labelIds,
-        internalDate: String(Date.UTC(year, 0, 2)),
-        snippet: `A header-only note to ${recipient}`,
-        payload: {
-          mimeType: 'multipart/mixed',
-          headers: [
-            { name: 'From', value: 'Attn Seed <seed@attn.test>' },
-            { name: 'To', value: recipient },
-            { name: 'Subject', value: `Old correspondence from ${year}` },
-            { name: 'Message-ID', value: `<${id}@attn.test>` }
-          ]
-        }
-      }
-    ]
-  }
-}
 
 test('resumes a header-only lifetime sweep across offline relaunch without changing inbox unread', async ({
   boot,

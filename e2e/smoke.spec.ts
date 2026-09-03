@@ -1,16 +1,10 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Page } from '@playwright/test'
 import { expect, test } from './electron'
+import { selectedIndex } from './nav'
 
 const seedThreadCount = 8
 const initialUnread = 4
-
-function selectedIndex(page: Page): Promise<number> {
-  return page
-    .getByTestId('thread-row')
-    .evaluateAll((rows) => rows.findIndex((row) => row.hasAttribute('data-selected')))
-}
 
 test('boots the built app with an isolated store and working IPC bridge', async ({
   app,

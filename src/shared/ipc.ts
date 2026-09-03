@@ -178,7 +178,8 @@ export const TEST_CHANNELS = {
   crashUtility: 'attn:test:crashUtility',
   accountDataStats: 'attn:test:accountDataStats',
   listMailboxThreadIds: 'attn:test:listMailboxThreadIds',
-  setUpdateState: 'attn:test:setUpdateState'
+  setUpdateState: 'attn:test:setUpdateState',
+  holdNextResponse: 'attn:test:holdNextResponse'
 } as const
 
 export interface InvokeChannels {

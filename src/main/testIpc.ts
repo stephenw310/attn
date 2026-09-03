@@ -32,10 +32,43 @@ export class TestSeams {
   readonly aiTransport = new FakeAiTransport()
   private attachmentPickerPaths: string[] | null = null
 
+  private armedHoldChannel: string | null = null
+  private releaseHeld: (() => void) | null = null
+
   constructor(
     private readonly enabled: boolean,
     private readonly deps: TestSeamDeps
-  ) {}
+  ) {
+    if (enabled) this.wrapInvokeHandlers()
+  }
+
+  /**
+   * T4: hold one invoke result after main computed it, so a spec can
+   * interleave a competing action without a sleep. Every invoke channel is
+   * claimed through `ipcMain.handle` — `registerIpc` uses its own `handle()`
+   * wrapper for the channels main answers and the same call in the loop that
+   * forwards the rest — so wrapping that one public method reaches them all.
+   * The alternative, a spec swapping handlers through Electron's private
+   * `_invokeHandlers`, breaks with no compile-time signal on an Electron bump.
+   * Installed from the constructor because `registerIpc` runs before
+   * `register()`, and only under the test-user-data seam.
+   */
+  private wrapInvokeHandlers(): void {
+    const handle = ipcMain.handle.bind(ipcMain)
+    ipcMain.handle = (channel, listener) => {
+      handle(channel, async (event, ...args) => {
+        const hold = this.armedHoldChannel === channel
+        if (hold) this.armedHoldChannel = null
+        const result = await listener(event, ...args)
+        if (hold) {
+          await new Promise<void>((resolve) => {
+            this.releaseHeld = resolve
+          })
+        }
+        return result
+      })
+    }
+  }
 
   takeAttachmentPickerPaths(): string[] {
     const paths = this.attachmentPickerPaths ?? []
@@ -169,6 +202,17 @@ export class TestSeams {
       this.deps.setUpdateStateOverride(parseUpdateState(state))
       done?.()
     })
+    // Arm the next result on a channel to park ('arm'), let a parked one
+    // through ('release'), or report whether one is parked ('status').
+    ipcMain.on(TEST_CHANNELS.holdNextResponse, (_event, request: unknown, done?: (held: boolean) => void) => {
+      const { action, channel } = (request ?? {}) as { action?: string; channel?: string }
+      if (action === 'arm') this.armedHoldChannel = nonEmptyString(channel) ? channel : null
+      else if (action === 'release') {
+        this.releaseHeld?.()
+        this.releaseHeld = null
+      }
+      done?.(this.releaseHeld !== null)
+    })
     ipcMain.on(TEST_CHANNELS.crashUtility, (_event, done?: (error?: string) => void) => {
       void this.deps
         .service()
@@ -181,6 +225,9 @@ export class TestSeams {
   dispose(): void {
     for (const channel of Object.values(TEST_CHANNELS)) ipcMain.removeAllListeners(channel)
     this.attachmentPickerPaths = null
+    this.armedHoldChannel = null
+    this.releaseHeld?.()
+    this.releaseHeld = null
   }
 
   private forward(channel: string, args: unknown[]): Promise<unknown> {
