@@ -164,19 +164,6 @@ export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): Com
     }
   }, [clearTimers])
 
-  useEffect(() => {
-    // Quit tears the renderer down without running React cleanup, and the idle
-    // checkpoint can be a second behind the keyboard. `pagehide` is the last
-    // event this frame is guaranteed to see, so the checkpoint is issued there.
-    // It cannot be awaited — the save is IPC — but `before-quit` defers the
-    // quit behind an async teardown, so an already-sent request can still land.
-    const checkpoint = (): void => {
-      void commitRef.current().catch(() => {})
-    }
-    window.addEventListener('pagehide', checkpoint)
-    return () => window.removeEventListener('pagehide', checkpoint)
-  }, [])
-
   const saveNow = useCallback(async () => {
     if (mirrorTimerRef.current !== null) window.clearTimeout(mirrorTimerRef.current)
     mirrorTimerRef.current = null
