@@ -166,7 +166,8 @@ export function registerIpc(context: IpcContext): () => void {
       paths = (await (parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options)))
         .filePaths
     }
-    return context.service.invoke(IPC_CHANNELS.draftPickAttachments, id, paths)
+    // The dialog is main's half; spooling is the shared utility handler.
+    return context.service.invoke(IPC_CHANNELS.draftAddAttachments, id, paths)
   })
   handle(IPC_CHANNELS.mailDownloadAttachment, async (_event, request) => {
     const result = await context.service.invoke(IPC_CHANNELS.mailDownloadAttachment, request)

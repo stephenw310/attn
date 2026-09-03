@@ -88,14 +88,6 @@ export interface BadgeEffects {
   setWindowsOverlay: (unreadCount: number, description: string) => void
 }
 
-export function isolateNotificationFailure(operation: () => void, report: (message: string) => void): void {
-  try {
-    operation()
-  } catch (error) {
-    report(errorMessage(error))
-  }
-}
-
 export function applyUnreadBadge(
   platform: NodeJS.Platform,
   unreadCount: number,
@@ -139,10 +131,6 @@ export function planNotifications(
     body: mail.snippet
   }))
 }
-
-// The pause deadlines are shared with the renderer's settings surface (F15);
-// the tray and settings must compute identical "1 hour" / "until tomorrow".
-export { oneHourFrom, tomorrowStart } from '../shared/notifications'
 
 /**
  * Resolve a focus target requested by a notification click. A renderer that

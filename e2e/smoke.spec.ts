@@ -33,14 +33,14 @@ test('boots the built app with an isolated store and working IPC bridge', async 
   // isolated dir, at a migrated schema version.
   await expect.poll(mainLog).toMatch(/\[log\] \[db\] open at .*attn-e2e-.*attn\.db \(schema v\d+\)/)
 
-  expect(await page.evaluate(() => typeof window.attn?.mail.listThreads)).toBe('function')
+  expect(await page.evaluate(() => typeof window.attn?.mail.listThreadPage)).toBe('function')
   expect(await page.evaluate(() => window.attn.auth.getStatus())).toEqual({
     configured: false,
     signedIn: false,
     accounts: [],
     activeAccountId: null
   })
-  expect(await page.evaluate(() => window.attn.mail.listThreads('inbox'))).toEqual([])
+  expect(await page.evaluate(async () => (await window.attn.mail.listThreadPage('inbox')).rows)).toEqual([])
   expect(await page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(0)
   expect(
     await page.evaluate(() => window.attn.mail.getConversation('no-such-thread', false, 'normal'))

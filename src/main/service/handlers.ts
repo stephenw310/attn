@@ -670,20 +670,11 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     context.broadcastMailChanged()
     return getDraft(context.db, account, id)
   })
-  handle(IPC_CHANNELS.draftPickAttachments, async (_event, id, paths) => {
+  // Both the file dialog (`draft:pickAttachments`, answered in main) and a
+  // renderer drop arrive here with the same paths, so one handler serves them.
+  handle(IPC_CHANNELS.draftAddAttachments, async (_event, id, paths) => {
     if (!nonEmptyString(id)) throw new Error('invalid draft id')
     if (!Array.isArray(paths) || !paths.every((path) => nonEmptyString(path))) {
-      throw new Error('invalid attachments')
-    }
-    return spoolDraftAttachments(context.db, context.userDataPath, requireAccount(context), id, paths)
-  })
-  handle(IPC_CHANNELS.draftAddAttachments, async (_event, id, paths) => {
-    if (
-      typeof id !== 'string' ||
-      id.length === 0 ||
-      !Array.isArray(paths) ||
-      !paths.every((path) => nonEmptyString(path))
-    ) {
       throw new Error('invalid attachments')
     }
     return spoolDraftAttachments(context.db, context.userDataPath, requireAccount(context), id, paths)

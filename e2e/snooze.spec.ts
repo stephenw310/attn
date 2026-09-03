@@ -184,7 +184,7 @@ test('returns a due snooze to the inbox with a returned chip', async ({ page }) 
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await page.evaluate(async () => {
-    const [thread] = await window.attn.mail.listThreads('inbox')
+    const [thread] = (await window.attn.mail.listThreadPage('inbox')).rows
     await window.attn.mail.snooze([thread.id], Date.now() + 800)
   })
   await expect(rows).toHaveCount(7)
@@ -201,7 +201,7 @@ test('catches up a snooze that became due while the app was closed', async ({ bo
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await page.evaluate(async () => {
-    const [thread] = await window.attn.mail.listThreads('inbox')
+    const [thread] = (await window.attn.mail.listThreadPage('inbox')).rows
     await window.attn.mail.snooze([thread.id], Date.now() + 600)
   })
   await expect(rows).toHaveCount(7)

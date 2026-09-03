@@ -169,8 +169,8 @@ async function measureLocalMailRefresh(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const started = performance.now()
     await Promise.all([
-      window.attn.mail.listThreads('inbox'),
-      window.attn.mail.listSnoozed(),
+      window.attn.mail.listThreadPage('inbox'),
+      window.attn.mail.listSnoozedPage(),
       window.attn.draft.list(),
       window.attn.outbox.listPending()
     ])

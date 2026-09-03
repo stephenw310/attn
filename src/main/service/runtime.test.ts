@@ -21,7 +21,7 @@ import { persistThread } from '../sync/persist'
 import { type HistoryPoller, historyEvents } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
-import type { ServiceEvent, ServiceInitialize } from './protocol'
+import type { ServiceAccountsState, ServiceEvent, ServiceInitialize } from './protocol'
 import { IndexingSlot, ServiceRuntime } from './runtime'
 
 // Two seeded accounts prove the session-per-account runtime (F18): reads are
@@ -126,6 +126,17 @@ describe('ServiceRuntime with several accounts', () => {
     const runtime = await ServiceRuntime.create(input, (event) => events.push(event))
     runtimes.push(runtime)
     return { runtime, events }
+  }
+
+  /**
+   * Apply a roster without awaiting the deferred session creates, the way
+   * `apply-accounts` does before it awaits them: several cases below assert
+   * what the runtime reports *before* a re-added account's session exists.
+   */
+  function pushAccounts(runtime: ServiceRuntime, accounts: ServiceAccountsState): void {
+    void (
+      runtime as unknown as { applyAccounts(state: ServiceAccountsState): Promise<void>[] }
+    ).applyAccounts(accounts)
   }
 
   async function listInboxSubjects(runtime: ServiceRuntime): Promise<string[]> {
@@ -358,6 +369,7 @@ describe('ServiceRuntime with several accounts', () => {
       if (!controller) throw new Error('Seeded account session missing')
       const polling = controller as unknown as {
         startHistoryPoller(id: string, provider: GmailMailProvider, generation: number): void
+        generation: number
         poller: HistoryPoller
       }
       let releaseThread!: (response: Response) => void
@@ -388,7 +400,7 @@ describe('ServiceRuntime with several accounts', () => {
       polling.startHistoryPoller(
         accountId,
         new GmailMailProvider(internals.makeClientFor(accountId)),
-        controller.getGeneration()
+        polling.generation
       )
       const cycle = polling.poller.runNow()
       await vi.waitFor(() => expect(releaseThread).toBeTypeOf('function'))
@@ -526,9 +538,11 @@ describe('ServiceRuntime with several accounts', () => {
     // Remove the active account, then re-add it through the awaited operation
     // main uses: the answer must name a session that actually exists, so the
     // published AuthStatus can never point at a still-retiring account.
-    runtime.control({
-      kind: 'accounts',
-      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['second@attn.test']
     })
     const active = await runtime.internal('apply-accounts', [
       {
@@ -543,18 +557,17 @@ describe('ServiceRuntime with several accounts', () => {
     expect(await listInboxSubjects(runtime)).toEqual(['Alpha roadmap'])
 
     // And a switch aimed at a still-pending session waits instead of failing.
-    runtime.control({
-      kind: 'accounts',
-      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['second@attn.test']
     })
-    runtime.control({
-      kind: 'accounts',
-      accounts: {
-        config: null,
-        accounts: [],
-        activeAccountId: null,
-        seedAccountIds: ['primary@attn.test', 'second@attn.test']
-      }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['primary@attn.test', 'second@attn.test']
     })
     expect(runtime.ready().accountIds).toEqual(['second@attn.test'])
     expect(await runtime.internal('set-active-account', ['primary@attn.test'])).toBe('primary@attn.test')
@@ -602,18 +615,17 @@ describe('ServiceRuntime with several accounts', () => {
     // outbox workers are still quiescing, so a second session for the same
     // rows must not exist yet — two executor sets could double a
     // non-idempotent remote draft create.
-    runtime.control({
-      kind: 'accounts',
-      accounts: { config: null, accounts: [], activeAccountId: null, seedAccountIds: ['second@attn.test'] }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['second@attn.test']
     })
-    runtime.control({
-      kind: 'accounts',
-      accounts: {
-        config: null,
-        accounts: [],
-        activeAccountId: 'primary@attn.test',
-        seedAccountIds: ['primary@attn.test', 'second@attn.test']
-      }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: 'primary@attn.test',
+      seedAccountIds: ['primary@attn.test', 'second@attn.test']
     })
     expect(runtime.ready().accountIds).toEqual(['second@attn.test'])
 
@@ -831,14 +843,11 @@ describe('ServiceRuntime with several accounts', () => {
     const { runtime } = await createRuntime(input)
     await runtime.internal('set-active-account', ['second@attn.test'])
 
-    runtime.control({
-      kind: 'accounts',
-      accounts: {
-        config: null,
-        accounts: [],
-        activeAccountId: null,
-        seedAccountIds: ['primary@attn.test']
-      }
+    pushAccounts(runtime, {
+      config: null,
+      accounts: [],
+      activeAccountId: null,
+      seedAccountIds: ['primary@attn.test']
     })
     expect(runtime.ready().accountIds).toEqual(['primary@attn.test'])
     expect(runtime.ready().activeAccountId).toBe('primary@attn.test')

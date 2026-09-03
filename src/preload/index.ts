@@ -29,8 +29,7 @@ import type {
   ThreadListRequest,
   ThreadListView,
   ThreadPage,
-  ThreadPageCursor,
-  ThreadRow
+  ThreadPageCursor
 } from '../shared/mail'
 import type { PendingFocusTarget } from '../shared/notifications'
 import type {
@@ -92,7 +91,6 @@ const api = {
   },
   settings: {
     initialTheme,
-    getTheme: (): Promise<ThemePreference> => invoke(IPC_CHANNELS.settingsGetTheme),
     setTheme: (preference: ThemePreference): Promise<ThemePreference> =>
       invoke(IPC_CHANNELS.settingsSetTheme, preference),
     getCommandUsage: (accountId: string): Promise<CommandUsage> =>
@@ -156,13 +154,6 @@ const api = {
       listThreadPage({ view: 'snoozed', ...(cursor ? { cursor } : {}) }) as Promise<
         ThreadPage<SnoozedThreadRow>
       >,
-    listThreads: (view: Exclude<ThreadListView, 'snoozed'>): Promise<ThreadRow[]> =>
-      listThreadPage({ view }).then((page) => page.rows),
-    listLabelThreads: (labelId: string): Promise<ThreadRow[]> =>
-      listThreadPage({ view: 'label', labelId }).then((page) => page.rows),
-    // The one typed read serves Snoozed too; only that view returns reminder rows.
-    listSnoozed: (): Promise<SnoozedThreadRow[]> =>
-      listThreadPage({ view: 'snoozed' }).then((page) => page.rows as SnoozedThreadRow[]),
     listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
     getMailboxCounts: (): Promise<SystemMailboxCounts> => invoke(IPC_CHANNELS.mailGetMailboxCounts),
     getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),

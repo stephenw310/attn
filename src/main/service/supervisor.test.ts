@@ -75,25 +75,14 @@ describe('ServiceSupervisor', () => {
     const started = supervisor.start()
 
     supervisor.control({ kind: 'focus', focused: true })
-    const accounts = {
-      config: { client_id: 'client', client_secret: 'secret' },
-      accounts: [
-        {
-          id: 'user@example.com',
-          tokens: { access_token: 'access', expires_at: 1, email: 'user@example.com' },
-          generation: 1
-        }
-      ],
-      activeAccountId: 'user@example.com'
-    }
-    supervisor.setAccounts(accounts)
+    supervisor.control({ kind: 'refresh-schedulers' })
     expect(child.messages.map((message) => message.type)).toEqual(['initialize'])
 
     child.ready()
     await expect(started).resolves.toEqual(READY)
     expect(child.messages.slice(1)).toEqual([
       { type: 'control', payload: { kind: 'focus', focused: true } },
-      { type: 'control', payload: { kind: 'accounts', accounts } }
+      { type: 'control', payload: { kind: 'refresh-schedulers' } }
     ])
   })
 

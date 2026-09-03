@@ -336,20 +336,21 @@ describe('generation guards', () => {
     const stale = backfills[0]
     states.length = 0
 
-    controller.onSignOut()
+    // Removing the account stops its controller — the production teardown.
+    controller.stop()
     states.length = 0
     stale.callbacks.onProgress?.({ stage: 'metadata', threadsDone: 12, mailChanged: false })
 
     expect(states).toEqual([])
   })
 
-  it('does not publish idle or reconcile when a stale backfill resolves after sign-out', async () => {
+  it('does not publish idle or reconcile when a stale backfill resolves after teardown', async () => {
     const { controller, session, backfills, states, broadcastMailChanged } = harness()
     controller.retry()
     const stale = backfills[0]
 
     session.signedIn = false
-    controller.onSignOut()
+    controller.stop()
     states.length = 0
     broadcastMailChanged.mockClear()
     stale.result.resolve({ threadCount: 3, inboxThreadIds: ['t1'], spamThreadIds: [], trashThreadIds: [] })
@@ -379,15 +380,6 @@ describe('generation guards', () => {
     // and the switch re-drains the queue so mail already queued keeps flowing.
     expect(mocks.reconcileInboxMembership).not.toHaveBeenCalled()
     expect(trigger).toHaveBeenCalledTimes(2)
-  })
-
-  it('bumps the generation and clears state on sign-in', () => {
-    const { controller } = harness()
-    const before = controller.getGeneration()
-
-    controller.onSignIn()
-
-    expect(controller.getGeneration()).toBe(before + 1)
   })
 })
 

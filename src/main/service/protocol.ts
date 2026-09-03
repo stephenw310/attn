@@ -39,9 +39,7 @@ export interface ServiceInitialize {
 }
 
 export type ServiceControl =
-  | { kind: 'accounts'; accounts: ServiceAccountsState }
   | { kind: 'focus'; focused: boolean }
-  | { kind: 'resume' }
   | { kind: 'refresh-schedulers' }
   | { kind: 'stop' }
 
@@ -102,7 +100,6 @@ export type ServiceToMainMessage =
   | { type: 'response'; id: number; result: unknown }
   | { type: 'response-error'; id: number; message: string; stack?: string }
   | { type: 'event'; payload: ServiceEvent }
-  | { type: 'test-result'; channel: string; result: unknown; error?: string }
   | { type: 'stopped' }
 
 export function isMainToServiceMessage(value: unknown): value is MainToServiceMessage {

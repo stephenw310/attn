@@ -395,16 +395,8 @@ export class ServiceRuntime {
   }
 
   control(control: ServiceControl): void {
-    if (control.kind === 'accounts') {
-      void this.applyAccounts(control.accounts)
-      return
-    }
     if (control.kind === 'focus') {
       this.focused = control.focused
-      return
-    }
-    if (control.kind === 'resume') {
-      for (const session of this.sessions.values()) void session.syncController.resumeOnlineWork()
       return
     }
     if (control.kind === 'refresh-schedulers') {

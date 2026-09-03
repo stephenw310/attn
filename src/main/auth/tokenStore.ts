@@ -79,7 +79,3 @@ export function reorderAccountTokens(userDataDir: string, ids: readonly string[]
   write(userDataDir, accounts)
   return accounts
 }
-
-export function clearTokens(userDataDir: string): void {
-  rmSync(join(userDataDir, FILE), { force: true })
-}

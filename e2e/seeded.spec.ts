@@ -28,7 +28,6 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
     Math.abs((statusBox?.x ?? 0) + (statusBox?.width ?? 0) - (contentBox?.x ?? 0) - (contentBox?.width ?? 0))
   ).toBeLessThan(1)
 
-  expect(await page.evaluate(() => window.attn.mail.listThreads('inbox'))).toHaveLength(8)
   const firstPage = await page.evaluate(() => window.attn.mail.listThreadPage('inbox'))
   expect(firstPage.rows).toHaveLength(8)
   expect(firstPage.nextCursor).toBeNull()

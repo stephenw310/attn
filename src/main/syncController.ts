@@ -40,7 +40,7 @@ interface SyncControllerContext {
   currentAccountId: () => string | null
   isSignedIn: () => boolean
   isSeeded: () => boolean
-  makeProvider: (generation: number) => GmailMailProvider | null
+  makeProvider: () => GmailMailProvider | null
   /** Drives the poller's foreground/background cadence; owned by index.ts so this stays Electron-free. */
   isForeground: () => boolean
   /** True while an interactive body or attachment request is using Gmail for this account. */
@@ -108,10 +108,6 @@ export class SyncController {
     return this.state
   }
 
-  getGeneration(): number {
-    return this.generation
-  }
-
   isInboxRecoveryPending(): boolean {
     return this.inboxRecoveryPending
   }
@@ -126,12 +122,6 @@ export class SyncController {
     if (this.stopped) return
     this.resetSession()
     void this.resumeOnlineWork()
-  }
-
-  onSignOut(): void {
-    if (this.stopped) return
-    this.resetSession()
-    this.setState({ phase: 'idle' })
   }
 
   stop(): void {
@@ -166,7 +156,7 @@ export class SyncController {
     const generation = this.generation
     const accountId = this.context.currentAccountId()
     if (!accountId) return
-    const provider = this.context.makeProvider(generation)
+    const provider = this.context.makeProvider()
     if (!provider) return
     this.startLifetimeSweep(accountId, provider, generation)
   }
@@ -370,7 +360,7 @@ export class SyncController {
     this.offlineRetry.clear()
     const generation = this.generation
     const accountId = this.context.currentAccountId()
-    const provider = this.context.makeProvider(generation)
+    const provider = this.context.makeProvider()
     if (!accountId) return
     // Ahead of the provider check: membership is local, so an unconfigured or
     // offline client still gets working counts and All Mail.

@@ -1,17 +1,15 @@
 import { describe, expect, it } from 'vitest'
+import { oneHourFrom, tomorrowStart } from '../shared/notifications'
 import { type Db, openDatabase } from './db'
 import {
   acknowledgePendingFocus,
   applyUnreadBadge,
   applyUnreadBadgeToWindow,
   BoundedRetainer,
-  isolateNotificationFailure,
   notificationClickTarget,
-  oneHourFrom,
   PENDING_FOCUS_TTL_MS,
   planNotifications,
-  takePendingFocus,
-  tomorrowStart
+  takePendingFocus
 } from './notify'
 import {
   candidatesFor,
@@ -155,21 +153,6 @@ describe('badge effects', () => {
       'windows:150:150 unread conversations',
       'windows:0:'
     ])
-  })
-})
-
-describe('notification failure isolation', () => {
-  it('reports notification errors without rethrowing into the sync poller', () => {
-    const messages: string[] = []
-    expect(() =>
-      isolateNotificationFailure(
-        () => {
-          throw new Error('database is locked')
-        },
-        (message) => messages.push(message)
-      )
-    ).not.toThrow()
-    expect(messages).toEqual(['database is locked'])
   })
 })
 
