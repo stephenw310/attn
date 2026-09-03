@@ -95,7 +95,7 @@ export interface CursorWalk<Page, Result> {
     plan: CursorRunPlan,
     context: CursorWalkContext,
     state: CursorWalkState
-  ) => Promise<CursorWalkStop<Result> | void>
+  ) => Promise<CursorWalkStop<Result> | undefined>
   listPage: (token: string | undefined, context: CursorWalkContext) => Promise<Page>
   nextToken: (page: Page) => string | undefined
   /** The page's own work, before its checkpoint. `token` fetched this page. */
@@ -103,7 +103,7 @@ export interface CursorWalk<Page, Result> {
     page: Page,
     token: string | undefined,
     context: CursorWalkContext
-  ) => Promise<CursorWalkStop<Result> | void>
+  ) => Promise<CursorWalkStop<Result> | undefined>
   /** Resets per-run counters when an expired page token restarts the walk. */
   onRestart?: () => void
   /** Writes the cursor value; passes with extra checkpoint columns override it. */
