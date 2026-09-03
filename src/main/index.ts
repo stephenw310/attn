@@ -26,6 +26,7 @@ import {
 } from './background'
 import { applyLoginItemSetting } from './backgroundSettings'
 import { CURRENT_SCHEMA_VERSION } from './db/schema'
+import { isOpenableExternalUrl } from './externalLinks'
 import { registerIpc } from './ipc'
 import { acknowledgePendingFocus, MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import {
@@ -375,7 +376,10 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   attachBackgroundWindow(win)
   win.webContents.on('will-navigate', (event) => event.preventDefault())
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    // Mail bodies are untrusted, so main decides which schemes may reach the
+    // OS; everything else is dropped rather than handed to a protocol handler.
+    if (isOpenableExternalUrl(url)) void shell.openExternal(url)
+    else console.warn(`[window] refused to open a ${url.split(':', 1)[0] || 'scheme-less'} link`)
     return { action: 'deny' }
   })
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
