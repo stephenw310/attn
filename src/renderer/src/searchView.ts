@@ -8,6 +8,18 @@ function searchMailboxes(query: string): string[] {
     .map((filter) => filter.value.toLowerCase().replaceAll(/[\s_-]/g, ''))
 }
 
+/**
+ * The reader projection each view owns. All Mail deliberately maps to 'normal':
+ * both hide spam and keep trashed-message markers, so the projections are
+ * identical and sharing the value keeps the conversation cache warm across an
+ * Inbox ⇄ All Mail switch.
+ */
+export function conversationMailboxFor(view: MailView): ConversationMailbox {
+  if (view === 'spam') return 'spam'
+  if (view === 'trash') return 'trash'
+  return 'normal'
+}
+
 export function conversationMailboxForSearch(query: string): ConversationMailbox {
   const mailboxes = searchMailboxes(query)
   if (mailboxes.includes('spam')) return 'spam'

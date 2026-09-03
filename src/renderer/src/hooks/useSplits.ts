@@ -7,7 +7,7 @@ import {
   type SplitState
 } from '../../../shared/splits'
 
-interface SplitData {
+export interface SplitData {
   state: SplitState | null
   activeSplitId: string | null
   setActiveSplitId: (id: string) => void
