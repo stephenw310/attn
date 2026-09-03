@@ -71,7 +71,11 @@ let storedAccounts: StoredAccount[] = []
 let activeAccountId: string | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
-let signInInFlight = false
+// Each interactive sign-in takes a generation; a later call cancels the flow
+// in flight, and only the newest flow may clear the marker — a boolean let a
+// canceled flow's `finally` clear the flag of the flow that replaced it.
+let signInGeneration = 0
+let activeSignInGeneration = 0
 const authGenerations = new Map<string, number>()
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
@@ -208,8 +212,9 @@ async function signIn(): Promise<AuthSignInResult> {
     const resumedActions = Number((await service?.internal('resume-auth-failures')) ?? 0)
     return { status: authStatus(), resumedActions }
   }
-  if (signInInFlight) cancelActiveSignIn()
-  signInInFlight = true
+  if (activeSignInGeneration !== 0) cancelActiveSignIn()
+  const generation = ++signInGeneration
+  activeSignInGeneration = generation
   let resumedActions = 0
   let signedInAccountId: string | undefined
   try {
@@ -235,7 +240,7 @@ async function signIn(): Promise<AuthSignInResult> {
     console.error(`[auth] sign-in failed: ${errorMessage(error)}`)
     throw error
   } finally {
-    signInInFlight = false
+    if (activeSignInGeneration === generation) activeSignInGeneration = 0
   }
   return {
     status: authStatus(),
@@ -258,17 +263,27 @@ async function adoptServiceAccounts(): Promise<void> {
 }
 
 /**
- * Remove one account (F18, D3): tokens always go and its session stops; the
- * caller chooses whether the local rows go too (Delete) or stay dormant for
- * a future re-add to resume from stored cursors (Keep).
+ * Remove one account (F18, D3): tokens go and its session stops; the caller
+ * chooses whether the local rows go too (Delete) or stay dormant for a future
+ * re-add to resume from stored cursors (Keep).
+ *
+ * The purge cannot run first — the utility refuses to delete rows while a
+ * session still holds them, so the roster push that stops it has to precede
+ * it. Instead the roster leaves memory before the purge and the tokens leave
+ * disk only after it succeeded: a failed Delete therefore restores the
+ * account (session included) and rejects, leaving a signed-in account whose
+ * data is intact and whose Delete can be retried, rather than a retired
+ * account with orphaned rows and no way back (B23).
  */
 async function removeAccount(accountId: string, deleteData: boolean): Promise<AuthStatus> {
   const removedIndex = rosterAccountIds().indexOf(accountId)
   if (removedIndex < 0) throw new Error('unknown account')
   cancelActiveSignIn()
-  if (seedAccountIds.length > 0) seedAccountIds = seedAccountIds.filter((id) => id !== accountId)
-  else storedAccounts = removeAccountTokens(app.getPath('userData'), accountId)
-  authGenerations.delete(accountId)
+  const previousSeedIds = seedAccountIds
+  const previousStoredAccounts = storedAccounts
+  const previousActiveAccountId = activeAccountId
+  if (previousSeedIds.length > 0) seedAccountIds = seedAccountIds.filter((id) => id !== accountId)
+  else storedAccounts = storedAccounts.filter((account) => account.id !== accountId)
   // Removing the active account activates the next by position; removing a
   // background account leaves the surface alone.
   if (activeAccountId === accountId) {
@@ -276,7 +291,22 @@ async function removeAccount(accountId: string, deleteData: boolean): Promise<Au
     activeAccountId = remaining[removedIndex] ?? remaining[0] ?? null
   }
   await adoptServiceAccounts()
-  if (deleteData) await service?.internal('remove-account-data', accountId)
+  if (deleteData) {
+    try {
+      await service?.internal('remove-account-data', accountId)
+    } catch (error) {
+      console.error(`[auth] could not delete local data for ${accountId}: ${errorMessage(error)}`)
+      seedAccountIds = previousSeedIds
+      storedAccounts = previousStoredAccounts
+      activeAccountId = previousActiveAccountId
+      await adoptServiceAccounts()
+      throw error
+    }
+  }
+  if (previousSeedIds.length === 0) {
+    storedAccounts = removeAccountTokens(app.getPath('userData'), accountId)
+  }
+  authGenerations.delete(accountId)
   console.log(`[auth] removed account ${accountId} (${deleteData ? 'deleted' : 'kept'} local data)`)
   return authStatus()
 }
@@ -375,6 +405,13 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   win.on('blur', publishFocus)
   attachBackgroundWindow(win)
   win.webContents.on('will-navigate', (event) => event.preventDefault())
+  // T33: a reload or a renderer crash takes every mounted mail frame with it
+  // without unregistering; stale entries (an `allowOnce` grant among them)
+  // must not outlive the frames they described.
+  win.webContents.on('render-process-gone', () => mailFrames.clear())
+  win.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) mailFrames.clear()
+  })
   win.webContents.setWindowOpenHandler(({ url }) => {
     // Mail bodies are untrusted, so main decides which schemes may reach the
     // OS; everything else is dropped rather than handed to a protocol handler.
