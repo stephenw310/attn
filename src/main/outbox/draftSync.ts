@@ -411,9 +411,12 @@ function writeRemoteDraft(
 
 function attachmentLocatorIdentity(attachment: StoredDraftAttachment): string {
   return JSON.stringify([
-    // Matched across the same local/remote seam as the fingerprint, so it must
-    // normalize the filename the same way.
-    mimeFilename(attachment.filename),
+    // Matched across the same local/remote seam as the fingerprint, and it has
+    // to pair a draft checkpointed before RFC 2231 filenames shipped, whose
+    // echo carries only the ASCII fold. Two files can share a fold, so the
+    // type, size, content id and disposition below stay part of the identity
+    // and matches are consumed in order.
+    asciiFilenameFallback(mimeFilename(attachment.filename)),
     attachment.mimeType,
     attachment.sizeBytes,
     attachment.contentId ?? null,

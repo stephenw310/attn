@@ -345,6 +345,38 @@ describe('draft synchronization identity', () => {
     expect(fingerprintOf('résumé.pdf')).toBe(fingerprintOf(' résumé.pdf '))
   })
 
+  it('refreshes a locator whose echo carries only the legacy ASCII fold', () => {
+    const local: StoredDraftAttachment = {
+      id: 'local-file',
+      filename: 'résumé.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      spoolPath: '',
+      remoteMessageId: 'old-message',
+      remoteAttachmentId: 'old-attachment'
+    }
+    const echo: StoredDraftAttachment = {
+      id: 'remote-echo',
+      filename: 'r_sum_.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      spoolPath: '',
+      remoteMessageId: 'new-message',
+      remoteAttachmentId: 'new-attachment'
+    }
+
+    const refreshed = parseStoredDraftAttachments(
+      refreshRemoteAttachmentLocators(JSON.stringify([local]), [echo])
+    )
+
+    expect(refreshed).toHaveLength(1)
+    expect(refreshed[0]).toMatchObject({
+      filename: 'résumé.pdf',
+      remoteMessageId: 'new-message',
+      remoteAttachmentId: 'new-attachment'
+    })
+  })
+
   it('pairs an echo with its own file when two attachments share a name', () => {
     const first: StoredDraftAttachment = {
       id: 'first',
