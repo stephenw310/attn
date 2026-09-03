@@ -10,23 +10,27 @@ import {
 } from '../../shared/mailSanitizer'
 import type { ThemeAppearance } from '../../shared/theme'
 import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
-import { forceLightMailCss } from './mailCss'
-import { findHtmlTrimStart, hasRenderableContent, hasRenderableContentBefore } from './mailHtmlTrim'
 import {
   type InlineImageReference,
   matchInlineImageReferences,
   normalizedContentId
 } from './mailInlineImages'
 import { linkifyBareMailUrls, mailTextParts } from './mailLinks'
-import type { MailReadingParts } from './mailReading'
+import {
+  findHtmlTrimStart,
+  findTrimIndex,
+  hasRenderableContent,
+  hasRenderableContentBefore,
+  type MailReadingParts
+} from './mailReading'
 import { containsRemoteMailContent } from './mailRemoteContent'
 import {
+  forceLightMailCss,
   type MailLayout,
   type MailSurface,
   normalizeNativeMailBackgrounds,
   normalizeNativeMailDocument
 } from './mailSurface'
-import { findTrimIndex } from './mailTrim'
 
 interface MessageBodyProps {
   bodyText: string
