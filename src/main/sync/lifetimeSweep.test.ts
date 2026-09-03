@@ -338,6 +338,54 @@ describe('lifetime header indexing', () => {
     })
   })
 
+  it('counts stored threads once a page, never on a foreground-yield tick', async () => {
+    vi.useFakeTimers()
+    let foregroundBusy = true
+    let counts = 0
+    const inner = fakeDb({ cursor: 'lifetime', threadIds: new Set<string>() })
+    // Counting every stored thread id scans the account: on a 400,000-thread
+    // store the 250 ms yield loop would repeat that scan while foreground work
+    // holds the single utility-process connection.
+    const db = {
+      prepare: (sql: string) => {
+        const statement = inner.prepare(sql)
+        if (!sql.startsWith('SELECT COUNT(*) AS count FROM threads')) return statement
+        return {
+          ...statement,
+          get: (...args: unknown[]) => {
+            counts++
+            return statement.get(...args)
+          }
+        }
+      }
+    } as unknown as Db
+    const listThreadIds = vi
+      .fn()
+      .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-2' })
+      .mockResolvedValueOnce({ threadIds: [] })
+    const events = callbacks()
+
+    const run = runLifetimeSweep(db, provider({ listThreadIds }), 'test@example.com', events, {
+      requestIntervalMs: 0,
+      pagePauseMs: 1_000,
+      foregroundYieldMs: 250,
+      shouldYield: () => foregroundBusy
+    })
+
+    await flush()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(events.onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'foreground-yield', waitMs: 250 })
+    )
+    expect(events.onProgress.mock.calls.length).toBeGreaterThan(3)
+    expect(counts).toBe(1)
+
+    foregroundBusy = false
+    await vi.advanceTimersByTimeAsync(2_000)
+    await expect(run).resolves.toMatchObject({ threadCount: 0 })
+    expect(counts).toBe(3)
+  })
+
   it.each([
     { threadCap: undefined, expectedEtaMs: 7_200 },
     { threadCap: 4, expectedEtaMs: 2_400 },

@@ -179,10 +179,10 @@ export async function runLifetimeSweep(
 
     let messagesTotal: number | undefined
     const progress = (reason: LifetimeSweepProgress['reason'], waitMs?: number): void => {
-      // Foreground history work can add a thread while this low-priority pass
-      // yields, so read the indexed count rather than deriving it from this
-      // sweep's listing position.
-      threadsIndexed = countIndexedThreads()
+      // `threadsIndexed` is refreshed once per listing page, never here: this
+      // count scans every stored thread id for the account, and progress is
+      // reported on every 250 ms foreground yield while the sweep waits for
+      // the single utility-process connection.
       // The account total describes coverage. ETA describes this sweep, which
       // stops at the local cap even when Gmail has more conversations.
       const targetThreads =
@@ -299,6 +299,12 @@ export async function runLifetimeSweep(
       }
 
       pageToken = page.nextPageToken
+      // Once per page: foreground history work can add a thread while this
+      // low-priority pass yields, so the reported coverage is the account's
+      // real indexed count rather than this sweep's listing position — but the
+      // count scans every stored thread id, so it must stay out of the yield
+      // loop's 250 ms ticks.
+      threadsIndexed = countIndexedThreads()
       checkpoint.run(
         pageToken ? `lifetime:${pageToken}` : 'done',
         listedThreadsDone,
