@@ -2,9 +2,10 @@ import { errorMessage } from '../../shared/error'
 import { MIRROR_STOP_TIMEOUT_MS } from '../../shared/outboxTuning'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
+import { GracefulDrainer } from '../drain'
 import { GmailApiError } from '../gmail/client'
 import type { MailActionProvider } from '../sync/provider'
-import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
+import { type SchedulerTime, systemTime } from '../time'
 import { DraftMirrorRowError, drainDraftMirrors } from './mirror'
 
 type MirrorDrain = typeof drainDraftMirrors
@@ -35,15 +36,12 @@ export interface DraftMirrorExecutorOptions {
 }
 
 export class DraftMirrorExecutor {
-  private drainPromise: Promise<void> | null = null
   private remoteAbortController: AbortController | null = null
-  private stopping = false
-  private timer: TimerHandle | null = null
   private attempts = 0
   /** Rows Gmail permanently rejected, against the local revision it rejected. */
   private readonly rejectedRows = new Map<string, number | null>()
 
-  private readonly time: SchedulerTime
+  private readonly drainer: GracefulDrainer
   private readonly drainDrafts: MirrorDrain
   private readonly spoolRoot: string | null
 
@@ -53,47 +51,34 @@ export class DraftMirrorExecutor {
     private readonly provider: () => MailActionProvider | null,
     options: DraftMirrorExecutorOptions = {}
   ) {
-    this.time = options.time ?? systemTime
     this.drainDrafts = options.drainDrafts ?? drainDraftMirrors
     this.spoolRoot = options.spoolRoot ?? null
+    this.drainer = new GracefulDrainer(() => this.drain(), {
+      time: options.time ?? systemTime,
+      graceMs: MIRROR_STOP_TIMEOUT_MS,
+      abort: () => this.remoteAbortController?.abort(new Error('draft mirror shutdown')),
+      // A retry ladder outlasts any nudge: a trigger arriving while the timer
+      // is armed neither restarts the drain nor shortens the backoff.
+      preemptTimer: () => false
+    })
   }
 
   trigger(): Promise<void> {
-    if (this.stopping || this.timer) return Promise.resolve()
-    if (this.drainPromise) return this.drainPromise
-    this.drainPromise = this.drain().finally(() => {
-      this.drainPromise = null
-    })
-    return this.drainPromise
+    return this.drainer.trigger()
   }
 
   /** True only while a draft checkpoint is active, not while its retry timer is idle. */
   isRunning(): boolean {
-    return this.drainPromise !== null
+    return this.drainer.isRunning()
   }
 
-  async stop(): Promise<void> {
-    this.stopping = true
-    if (this.timer) this.time.timers.clearTimeout(this.timer)
-    this.timer = null
-    const drain = this.drainPromise
-    if (!drain) return
-    let timeout: TimerHandle | null = null
-    const timedOut = await Promise.race([
-      drain.then(() => false),
-      new Promise<boolean>((resolve) => {
-        timeout = this.time.timers.setTimeout(() => resolve(true), MIRROR_STOP_TIMEOUT_MS)
-      })
-    ])
-    if (timeout) this.time.timers.clearTimeout(timeout)
-    if (!timedOut) return
-    this.remoteAbortController?.abort(new Error('draft mirror shutdown'))
-    await drain
+  stop(): Promise<void> {
+    return this.drainer.stop()
   }
 
   /** Let a queued send wait for any checkpoint that already selected its row. */
   waitForIdle(signal?: AbortSignal): Promise<void> {
-    return waitForAbortable(this.drainPromise ?? Promise.resolve(), signal)
+    return waitForAbortable(this.drainer.active() ?? Promise.resolve(), signal)
   }
 
   /**
@@ -132,7 +117,7 @@ export class DraftMirrorExecutor {
             this.db,
             accountId,
             provider,
-            () => !this.stopping,
+            () => !this.drainer.isStopping(),
             this.spoolRoot,
             controller.signal,
             (rowId) => this.isRejected(accountId, rowId)
@@ -140,7 +125,7 @@ export class DraftMirrorExecutor {
           this.attempts = 0
           return
         } catch (error) {
-          if (this.stopping) return
+          if (this.drainer.isStopping()) return
           const rowError = error instanceof DraftMirrorRowError ? error : null
           const reason = rowError?.reason ?? error
           console.error(`[draft] mirror failed: ${errorMessage(reason)}`)
@@ -150,11 +135,7 @@ export class DraftMirrorExecutor {
             continue
           }
           if (!retryable) return
-          const delay = retryDelayMs(this.attempts++)
-          this.timer = this.time.timers.setTimeout(() => {
-            this.timer = null
-            void this.trigger()
-          }, delay)
+          this.drainer.arm(retryDelayMs(this.attempts++))
           return
         }
       }

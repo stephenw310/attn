@@ -12,13 +12,14 @@ import {
 } from '../../shared/outboxTuning'
 import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
+import { GracefulDrainer } from '../drain'
 import { createFollowUpOnSent, evaluateThreadFollowUp, resolveFollowUpOrigins } from '../followUps'
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import { readAccountSetting } from '../settings'
 import { isOfflineFailure } from '../sync/failure'
 import { persistThread } from '../sync/persist'
 import type { MailProvider, ProviderMimeUpload } from '../sync/provider'
-import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
+import { type SchedulerTime, systemTime } from '../time'
 import { parseStoredDraftAttachments } from './draftAttachments'
 import { planTransition } from './machine'
 import { buildMime, mimeByteLength, streamMime } from './mime'
@@ -219,11 +220,9 @@ export interface OutboxSenderOptions {
 
 /** The sole production chokepoint that may call Gmail drafts.send. */
 export class OutboxSender {
-  private drainPromise: Promise<void> | null = null
   private remoteAbortController: AbortController | null = null
-  private stopping = false
-  private timer: TimerHandle | null = null
   private drainAttempts = 0
+  private readonly drainer: GracefulDrainer
 
   private readonly beforeRemote: (signal?: AbortSignal) => Promise<void>
   private readonly time: SchedulerTime
@@ -247,72 +246,52 @@ export class OutboxSender {
     this.progress = options.progress ?? (() => {})
     this.mailChanged = options.mailChanged ?? (() => {})
     this.followUpsChanged = options.followUpsChanged ?? (() => {})
+    this.drainer = new GracefulDrainer(() => this.drainSafely(), {
+      time: this.time,
+      graceMs: OUTBOX_STOP_TIMEOUT_MS,
+      abort: () => this.remoteAbortController?.abort(new Error('outbox shutdown'))
+      // A trigger always cancels an armed timer: the send it carries is due
+      // now, and the drain re-arms whatever is left from the database.
+    })
   }
 
   start(): void {
-    this.stopping = false
+    this.drainer.start()
     const accountId = this.accountId()
     if (accountId) this.pruneSent(accountId)
     this.refresh()
   }
 
   refresh(): void {
-    if (this.stopping) return
-    if (this.timer) this.time.timers.clearTimeout(this.timer)
-    this.timer = null
-    if (this.drainPromise) return
+    if (this.drainer.isStopping()) return
+    this.drainer.clearTimer()
+    if (this.drainer.isRunning()) return
     this.armFromDatabase()
   }
 
   trigger(): Promise<void> {
-    if (this.stopping) return Promise.resolve()
-    if (this.timer) this.time.timers.clearTimeout(this.timer)
-    this.timer = null
-    if (this.drainPromise) return this.drainPromise
-    this.drainPromise = this.drainSafely().finally(() => {
-      this.drainPromise = null
-    })
-    return this.drainPromise
+    return this.drainer.trigger()
   }
 
   private async drainSafely(): Promise<void> {
     try {
       await this.drain()
-      if (!this.stopping && !this.timer) this.armFromDatabase()
+      if (!this.drainer.isStopping() && !this.drainer.hasTimer()) this.armFromDatabase()
       this.drainAttempts = 0
     } catch (error) {
-      if (this.stopping) return
+      if (this.drainer.isStopping()) return
       console.error(`[outbox] drain failed: ${errorMessage(error)}`)
-      const delay = retryDelayMs(this.drainAttempts++)
-      this.timer = this.time.timers.setTimeout(() => {
-        this.timer = null
-        void this.trigger()
-      }, delay)
+      this.drainer.arm(retryDelayMs(this.drainAttempts++))
     }
   }
 
   /** True only while send recovery or delivery is active, not while an undo/retry timer is idle. */
   isRunning(): boolean {
-    return this.drainPromise !== null
+    return this.drainer.isRunning()
   }
 
-  async stop(): Promise<void> {
-    this.stopping = true
-    if (this.timer) this.time.timers.clearTimeout(this.timer)
-    this.timer = null
-    const drain = this.drainPromise
-    if (!drain) return
-    let timeout: TimerHandle | null = null
-    const timedOut = await Promise.race([
-      drain.then(() => false),
-      new Promise<boolean>((resolve) => {
-        timeout = this.time.timers.setTimeout(() => resolve(true), OUTBOX_STOP_TIMEOUT_MS)
-      })
-    ])
-    if (timeout) this.time.timers.clearTimeout(timeout)
-    if (!timedOut) return
-    this.remoteAbortController?.abort(new Error('outbox shutdown'))
-    await drain
+  stop(): Promise<void> {
+    return this.drainer.stop()
   }
 
   private armFromDatabase(): void {
@@ -329,11 +308,7 @@ export class OutboxSender {
       .get(accountId) as { state: string; send_at: number | null } | undefined
     if (!next) return
     const now = this.time.now()
-    const delay = next.send_at === null ? 0 : Math.max(0, next.send_at - now)
-    this.timer = this.time.timers.setTimeout(() => {
-      this.timer = null
-      void this.trigger()
-    }, delay)
+    this.drainer.arm(next.send_at === null ? 0 : Math.max(0, next.send_at - now))
   }
 
   private nextDue(accountId: string): SendRow | undefined {
@@ -359,15 +334,12 @@ export class OutboxSender {
     const accountId = this.accountId()
     const provider = this.provider()
     if (!accountId || !provider) {
-      this.timer = this.time.timers.setTimeout(() => {
-        this.timer = null
-        void this.trigger()
-      }, OUTBOX_OFFLINE_RECHECK_MS)
+      this.drainer.arm(OUTBOX_OFFLINE_RECHECK_MS)
       return
     }
 
     for (;;) {
-      if (this.stopping || this.accountId() !== accountId) return
+      if (this.drainer.isStopping() || this.accountId() !== accountId) return
       let row = this.nextDue(accountId)
       if (!row) return
       const recovering = row.state === 'sending'
@@ -381,18 +353,15 @@ export class OutboxSender {
         try {
           await this.beforeRemote(checkpointController.signal)
         } catch (error) {
-          if (this.stopping && checkpointController.signal.aborted) return
+          if (this.drainer.isStopping() && checkpointController.signal.aborted) return
           console.warn(`[outbox] draft checkpoint wait failed: ${errorMessage(error)}`)
-          this.timer = this.time.timers.setTimeout(() => {
-            this.timer = null
-            void this.trigger()
-          }, retryDelayMs(row.attempts))
+          this.drainer.arm(retryDelayMs(row.attempts))
           return
         } finally {
           if (this.remoteAbortController === checkpointController) this.remoteAbortController = null
         }
         checkpointWaited = true
-        if (this.stopping || this.accountId() !== accountId) return
+        if (this.drainer.isStopping() || this.accountId() !== accountId) return
         const plan = planTransition(
           {
             state: row.state,
@@ -449,7 +418,7 @@ export class OutboxSender {
     this.remoteAbortController = controller
     try {
       if (!checkpointWaited) await this.beforeRemote(controller.signal)
-      if (this.stopping || this.accountId() !== initial.account_id) return true
+      if (this.drainer.isStopping() || this.accountId() !== initial.account_id) return true
       const row = this.reloadSending(initial.account_id, initial.id)
       if (!row) return false
       if (recovering) {
@@ -480,7 +449,7 @@ export class OutboxSender {
       await this.send(row, provider, controller.signal)
       return false
     } catch (error) {
-      if (this.stopping && controller.signal.aborted) return true
+      if (this.drainer.isStopping() && controller.signal.aborted) return true
       return this.handleError(initial, error)
     } finally {
       if (this.remoteAbortController === controller) this.remoteAbortController = null
@@ -840,7 +809,7 @@ export class OutboxSender {
     this.notify({ kind: 'changed' })
     // Sending is already durably settled. Do not make normal shutdown or an
     // account switch wait on the best-effort post-send conversation refresh.
-    if (!threadId || this.stopping || this.accountId() !== row.account_id) return
+    if (!threadId || this.drainer.isStopping() || this.accountId() !== row.account_id) return
     try {
       const thread = await provider.getThread(threadId, { format: 'full', signal, priority: 'send' })
       if (persistThread(this.db, row.account_id, thread)) this.mailChanged()
