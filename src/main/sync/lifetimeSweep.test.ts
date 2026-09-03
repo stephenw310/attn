@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../db'
-import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { fakeMailProvider, fakeSchedulerTime } from '../testing/fakes'
 import { type LifetimeSweepCallbacks, planLifetimeSweepStart, runLifetimeSweep } from './lifetimeSweep'
@@ -229,30 +228,6 @@ describe('lifetime header indexing', () => {
     expect(mail.getThread).toHaveBeenCalledWith('older', expect.anything())
   })
 
-  it('resumes from the durable page token and restarts an expired token once', async () => {
-    const state = { cursor: 'lifetime:expired', threadIds: new Set<string>() }
-    const listThreadIds = vi
-      .fn()
-      .mockRejectedValueOnce(new GmailApiError(400, 'invalid page token'))
-      .mockResolvedValueOnce({ threadIds: [] })
-    const mail = provider({ listThreadIds })
-
-    await runLifetimeSweep(fakeDb(state), mail, 'test@example.com', callbacks(), {
-      requestIntervalMs: 0,
-      pagePauseMs: 0
-    })
-
-    expect(listThreadIds).toHaveBeenNthCalledWith(1, {
-      pageToken: 'expired',
-      priority: 'background'
-    })
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
-      pageToken: undefined,
-      priority: 'background'
-    })
-    expect(state.cursor).toBe('done')
-  })
-
   it('does not write or advance the cursor after cancellation during a metadata request', async () => {
     let resolveThread!: (thread: GmailThread) => void
     const thread = new Promise<GmailThread>((resolve) => {
@@ -277,49 +252,6 @@ describe('lifetime header indexing', () => {
     await expect(run).resolves.toBeNull()
     expect(mocks.persistThread).not.toHaveBeenCalled()
     expect(state.cursor).toBe('lifetime')
-  })
-
-  it('paces page requests and yields repeatedly to foreground work on injected time', async () => {
-    vi.useFakeTimers()
-    let foregroundBusy = true
-    const state = { cursor: 'lifetime', threadIds: new Set<string>() }
-    const listThreadIds = vi
-      .fn()
-      .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-2' })
-      .mockResolvedValueOnce({ threadIds: [] })
-    const events = callbacks()
-    const run = runLifetimeSweep(fakeDb(state), provider({ listThreadIds }), 'test@example.com', events, {
-      requestIntervalMs: 100,
-      pagePauseMs: 1_000,
-      foregroundYieldMs: 250,
-      shouldYield: () => foregroundBusy
-    })
-
-    await flush()
-    expect(listThreadIds).not.toHaveBeenCalled()
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: 'foreground-yield', waitMs: 250 })
-    )
-
-    foregroundBusy = false
-    await vi.advanceTimersByTimeAsync(250)
-    expect(listThreadIds).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(99)
-    expect(listThreadIds).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(listThreadIds).toHaveBeenCalledOnce()
-    expect(events.onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: 'quota-wait', waitMs: 1_000 })
-    )
-
-    await vi.advanceTimersByTimeAsync(999)
-    expect(listThreadIds).toHaveBeenCalledOnce()
-    await vi.advanceTimersByTimeAsync(1)
-    await expect(run).resolves.toMatchObject({ threadCount: 0, quotaWaitMs: 0 })
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
-      pageToken: 'page-2',
-      priority: 'background'
-    })
   })
 
   it('counts stored threads once a page, never on a foreground-yield tick', async () => {

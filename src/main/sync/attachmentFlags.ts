@@ -8,10 +8,9 @@
 // mail arrives through full-format fetches that set the flag on the write path.
 
 import type { Db } from '../db'
-import { type SchedulerTime, systemTime } from '../time'
-import { isExpiredPageTokenError } from './pageToken'
+import type { SchedulerTime } from '../time'
+import { type CursorWalkReason, lazyStatement, planCursorStart, runCursorWalk } from './cursorWalk'
 import type { MailProvider, ThreadIdPage } from './provider'
-import { LIFETIME_FOREGROUND_YIELD_MS, LIFETIME_PAGE_PAUSE_MS } from './tuning'
 
 /** The one Gmail operator this pass depends on. */
 export const ATTACHMENT_FLAG_QUERY = 'has:attachment'
@@ -48,12 +47,9 @@ const CURSOR_PHASE = 'attachments'
 
 /** Same `phase` / `phase:pageToken` / `done` grammar as the sweep's own cursor. */
 export function planAttachmentFlagStart(rawCursor: string | null | undefined): AttachmentFlagStartPlan {
-  if (rawCursor === 'done') return { kind: 'skip' }
-  if (!rawCursor || rawCursor === CURSOR_PHASE) return { kind: 'run' }
-  if (rawCursor.startsWith(`${CURSOR_PHASE}:`) && rawCursor.length > CURSOR_PHASE.length + 1) {
-    return { kind: 'run', pageToken: rawCursor.slice(CURSOR_PHASE.length + 1) }
-  }
-  throw new Error(`Invalid attachment flag cursor: ${rawCursor}`)
+  const plan = planCursorStart(CURSOR_PHASE, rawCursor, 'attachment flag')
+  if (plan.kind === 'skip') return plan
+  return { kind: 'run', ...(plan.token === undefined ? {} : { pageToken: plan.token }) }
 }
 
 /**
@@ -70,14 +66,13 @@ export async function runAttachmentFlagWalk(
   callbacks: AttachmentFlagCallbacks,
   options: AttachmentFlagOptions = {}
 ): Promise<AttachmentFlagResult | null> {
-  const time = options.time ?? systemTime
-  const shouldContinue = options.shouldContinue ?? (() => true)
-  const shouldYield = options.shouldYield ?? (() => false)
-  const pagePauseMs = options.pagePauseMs ?? LIFETIME_PAGE_PAUSE_MS
-  const foregroundYieldMs = options.foregroundYieldMs ?? LIFETIME_FOREGROUND_YIELD_MS
-
   let threadsFlagged = 0
-  const progress = (reason: AttachmentFlagProgress['reason'], mailChanged = false, waitMs?: number): void => {
+  let pageMailChanged = false
+  // `mailChanged` belongs to the page just checkpointed, so the first report
+  // after that page carries it and the reports around the pause do not.
+  const progress = (reason: CursorWalkReason, waitMs?: number): void => {
+    const mailChanged = pageMailChanged
+    pageMailChanged = false
     callbacks.onProgress({
       threadsFlagged,
       reason,
@@ -85,78 +80,43 @@ export async function runAttachmentFlagWalk(
       mailChanged
     })
   }
-
-  const wait = async (delayMs: number): Promise<boolean> => {
-    if (delayMs <= 0) return shouldContinue()
-    await new Promise<void>((resolve) => time.timers.setTimeout(resolve, delayMs))
-    return shouldContinue()
-  }
-
-  const waitForRequestSlot = async (): Promise<boolean> => {
-    let yielded = false
-    while (shouldContinue() && shouldYield()) {
-      yielded = true
-      progress('foreground-yield', false, foregroundYieldMs)
-      if (!(await wait(foregroundYieldMs))) return false
-    }
-    if (!shouldContinue()) return false
-    if (yielded) progress('running')
-    return true
-  }
-
-  try {
-    const state = db
-      .prepare('SELECT attachment_cursor FROM sync_state WHERE account_id = ?')
-      .get(accountId) as { attachment_cursor: string | null } | undefined
-    const plan = planAttachmentFlagStart(state?.attachment_cursor)
-    if (plan.kind === 'skip') return { threadsFlagged: 0 }
-
-    const checkpoint = db.prepare('UPDATE sync_state SET attachment_cursor = ? WHERE account_id = ?')
-    // Raise only, and only for threads the store already holds: this pass adds
-    // no mail, and `changes` then counts real repaints rather than re-marks.
-    const raise = db.prepare(
+  // Raise only, and only for threads the store already holds: this pass adds
+  // no mail, and `changes` then counts real repaints rather than re-marks.
+  const raise = lazyStatement(() =>
+    db.prepare(
       `UPDATE threads SET has_attachment = 1
        WHERE account_id = ? AND id = ? AND has_attachment = 0`
     )
-    let pageToken = plan.pageToken
-    let resetExpiredCursor = false
+  )
 
-    for (;;) {
-      if (!(await waitForRequestSlot())) return null
-      let page: ThreadIdPage
-      try {
-        page = await provider.listThreadIds({
-          q: ATTACHMENT_FLAG_QUERY,
-          pageToken,
-          priority: 'background'
-        })
-      } catch (error) {
-        if (!pageToken || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
-        pageToken = undefined
-        resetExpiredCursor = true
-        threadsFlagged = 0
-        checkpoint.run(CURSOR_PHASE, accountId)
-        continue
-      }
-      if (!shouldContinue()) return null
-
+  return runCursorWalk<ThreadIdPage, AttachmentFlagResult>({
+    db,
+    accountId,
+    cursorColumn: 'attachment_cursor',
+    phase: CURSOR_PHASE,
+    parseCursor: (cursor) => planCursorStart(CURSOR_PHASE, cursor, 'attachment flag'),
+    time: options.time,
+    pagePauseMs: options.pagePauseMs,
+    foregroundYieldMs: options.foregroundYieldMs,
+    shouldYield: options.shouldYield,
+    shouldContinue: options.shouldContinue,
+    progress,
+    onError: callbacks.onError,
+    onSkip: () => ({ threadsFlagged: 0 }),
+    listPage: (pageToken) =>
+      provider.listThreadIds({ q: ATTACHMENT_FLAG_QUERY, pageToken, priority: 'background' }),
+    nextToken: (page) => page.nextPageToken,
+    onPage: async (page) => {
       let flaggedOnPage = 0
       db.transaction(() => {
-        for (const threadId of page.threadIds) flaggedOnPage += raise.run(accountId, threadId).changes
+        for (const threadId of page.threadIds) flaggedOnPage += raise().run(accountId, threadId).changes
       })()
       threadsFlagged += flaggedOnPage
-
-      pageToken = page.nextPageToken
-      checkpoint.run(pageToken ? `${CURSOR_PHASE}:${pageToken}` : 'done', accountId)
-      progress('running', flaggedOnPage > 0)
-      if (!pageToken) return { threadsFlagged }
-
-      progress('quota-wait', false, pagePauseMs)
-      if (!(await wait(pagePauseMs))) return null
-      progress('running')
-    }
-  } catch (error) {
-    if (shouldContinue()) callbacks.onError(error)
-    return null
-  }
+      pageMailChanged = flaggedOnPage > 0
+    },
+    onRestart: () => {
+      threadsFlagged = 0
+    },
+    onFinish: () => ({ threadsFlagged })
+  })
 }

@@ -6,9 +6,10 @@
 // interactive work (M3 global rule 7).
 
 import type { Db } from '../db'
-import { type SchedulerTime, systemTime } from '../time'
+import type { SchedulerTime } from '../time'
+import { type CursorWalkReason, lazyStatement, planCursorStart, runCursorWalk } from './cursorWalk'
 import { type FtsWriteCounts, indexStoredMessages } from './fts'
-import { FTS_BACKFILL_BATCH_PAUSE_MS, FTS_BACKFILL_BATCH_SIZE, LIFETIME_FOREGROUND_YIELD_MS } from './tuning'
+import { FTS_BACKFILL_BATCH_PAUSE_MS, FTS_BACKFILL_BATCH_SIZE } from './tuning'
 
 const CURSOR_PHASE = 'fts'
 
@@ -16,12 +17,9 @@ export type FtsBackfillStartPlan = { kind: 'skip' } | { kind: 'run'; afterMessag
 
 /** Same `phase` / `phase:checkpoint` / `done` grammar as the other three cursors. */
 export function planFtsBackfillStart(rawCursor: string | null | undefined): FtsBackfillStartPlan {
-  if (rawCursor === 'done') return { kind: 'skip' }
-  if (!rawCursor || rawCursor === CURSOR_PHASE) return { kind: 'run' }
-  if (rawCursor.startsWith(`${CURSOR_PHASE}:`) && rawCursor.length > CURSOR_PHASE.length + 1) {
-    return { kind: 'run', afterMessageId: rawCursor.slice(CURSOR_PHASE.length + 1) }
-  }
-  throw new Error(`Invalid FTS backfill cursor: ${rawCursor}`)
+  const plan = planCursorStart(CURSOR_PHASE, rawCursor, 'FTS backfill')
+  if (plan.kind === 'skip') return plan
+  return { kind: 'run', ...(plan.token === undefined ? {} : { afterMessageId: plan.token }) }
 }
 
 export interface FtsBackfillProgress {
@@ -63,50 +61,24 @@ export async function runFtsBackfill(
   callbacks: FtsBackfillCallbacks,
   options: FtsBackfillOptions = {}
 ): Promise<FtsBackfillResult | null> {
-  const time = options.time ?? systemTime
-  const shouldContinue = options.shouldContinue ?? (() => true)
-  const shouldYield = options.shouldYield ?? (() => false)
   const batchSize = options.batchSize ?? FTS_BACKFILL_BATCH_SIZE
-  const batchPauseMs = options.batchPauseMs ?? FTS_BACKFILL_BATCH_PAUSE_MS
-  const foregroundYieldMs = options.foregroundYieldMs ?? LIFETIME_FOREGROUND_YIELD_MS
   let messagesIndexed = 0
+  let batchIndex = 0
 
-  const progress = (reason: FtsBackfillProgress['reason'], waitMs?: number): void => {
-    callbacks.onProgress({ messagesIndexed, reason, ...(waitMs === undefined ? {} : { waitMs }) })
+  // A local pass waits on nothing but its own pacing, so the walk's
+  // between-batch pause is silent and only these two reasons are reported.
+  const progress = (reason: CursorWalkReason, waitMs?: number): void => {
+    callbacks.onProgress({
+      messagesIndexed,
+      reason: reason === 'foreground-yield' ? reason : 'running',
+      ...(waitMs === undefined ? {} : { waitMs })
+    })
   }
 
-  const wait = async (delayMs: number): Promise<boolean> => {
-    if (delayMs <= 0) return shouldContinue()
-    await new Promise<void>((resolve) => time.timers.setTimeout(resolve, delayMs))
-    return shouldContinue()
-  }
-
-  const waitForBatchSlot = async (): Promise<boolean> => {
-    let yielded = false
-    while (shouldContinue() && shouldYield()) {
-      yielded = true
-      progress('foreground-yield', foregroundYieldMs)
-      if (!(await wait(foregroundYieldMs))) return false
-    }
-    if (!shouldContinue()) return false
-    if (yielded) progress('running')
-    return true
-  }
-
-  try {
-    // Unit and upgrade scenarios can hold messages without a sync_state row;
-    // the cursor UPDATE below must never be a silent no-op.
-    db.prepare('INSERT OR IGNORE INTO sync_state (account_id) VALUES (?)').run(accountId)
-    const state = db.prepare('SELECT fts_cursor FROM sync_state WHERE account_id = ?').get(accountId) as
-      | { fts_cursor: string | null }
-      | undefined
-    const plan = planFtsBackfillStart(state?.fts_cursor)
-    if (plan.kind === 'skip') return { messagesIndexed: 0 }
-
-    const checkpoint = db.prepare('UPDATE sync_state SET fts_cursor = ? WHERE account_id = ?')
-    // Rows indexed inline by `persistThread` fall out of the anti-join, so the
-    // pass touches only what actually needs indexing.
-    const selectBatch = db.prepare(
+  // Rows indexed inline by `persistThread` fall out of the anti-join, so the
+  // pass touches only what actually needs indexing.
+  const selectBatch = lazyStatement(() =>
+    db.prepare(
       `SELECT m.id
        FROM messages m
        LEFT JOIN message_fts_map map ON map.account_id = m.account_id AND map.message_id = m.id
@@ -114,29 +86,41 @@ export async function runFtsBackfill(
        ORDER BY m.id
        LIMIT ?`
     )
-    let afterMessageId = plan.afterMessageId ?? ''
-    let batchIndex = 0
+  )
 
-    for (;;) {
-      if (!(await waitForBatchSlot())) return null
-      const batch = (selectBatch.all(accountId, afterMessageId, batchSize) as { id: string }[]).map(
+  return runCursorWalk<string[], FtsBackfillResult>({
+    db,
+    accountId,
+    cursorColumn: 'fts_cursor',
+    phase: CURSOR_PHASE,
+    parseCursor: (cursor) => planCursorStart(CURSOR_PHASE, cursor, 'FTS backfill'),
+    time: options.time,
+    pagePauseMs: options.batchPauseMs ?? FTS_BACKFILL_BATCH_PAUSE_MS,
+    foregroundYieldMs: options.foregroundYieldMs,
+    pauseReason: null,
+    shouldYield: options.shouldYield,
+    shouldContinue: options.shouldContinue,
+    ensureSyncStateRow: true,
+    progress,
+    onError: callbacks.onError,
+    onSkip: () => ({ messagesIndexed: 0 }),
+    listPage: async (afterMessageId) =>
+      (selectBatch().all(accountId, afterMessageId ?? '', batchSize) as { id: string }[]).map(
         (row) => row.id
-      )
-      const cursor = batch.length < batchSize ? 'done' : `${CURSOR_PHASE}:${batch[batch.length - 1]}`
+      ),
+    nextToken: (batch) => (batch.length < batchSize ? undefined : batch[batch.length - 1]),
+    onPage: async () => {},
+    commitPage: (batch, applyCursor) => {
       db.transaction(() => {
         const counts: FtsWriteCounts = indexStoredMessages(db, accountId, batch)
-        checkpoint.run(cursor, accountId)
+        applyCursor()
         messagesIndexed += counts.inserted
       })()
-      progress('running')
+    },
+    afterCheckpoint: async (cursor) => {
       await options.onBatchCheckpoint?.({ batchIndex, cursor })
       batchIndex++
-      if (cursor === 'done') return { messagesIndexed }
-      afterMessageId = batch[batch.length - 1]
-      if (!(await wait(batchPauseMs))) return null
-    }
-  } catch (error) {
-    if (shouldContinue()) callbacks.onError(error)
-    return null
-  }
+    },
+    onFinish: () => ({ messagesIndexed })
+  })
 }

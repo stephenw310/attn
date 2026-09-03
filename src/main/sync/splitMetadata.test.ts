@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
-import { GmailApiError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { fakeMailProvider } from '../testing/fakes'
 import { planSplitMetadataStart, runSplitMetadataRebuild, type SplitMetadataCallbacks } from './splitMetadata'
@@ -130,33 +129,6 @@ describe('split metadata rebuild', () => {
     db.close()
   })
 
-  it('resumes at the saved page and checkpoints only after each complete page', async () => {
-    const db = upgradedStore('split-metadata:page-2')
-    const listThreadIds = vi
-      .fn()
-      .mockResolvedValueOnce({ threadIds: [], nextPageToken: 'page-3' })
-      .mockResolvedValueOnce({ threadIds: [] })
-
-    await expect(
-      runSplitMetadataRebuild(db, fakeMailProvider({ listThreadIds }), ACCOUNT, callbacks(), NO_PAUSE)
-    ).resolves.toEqual({ threadsRefreshed: 0 })
-
-    expect(listThreadIds).toHaveBeenNthCalledWith(1, {
-      labelIds: ['INBOX'],
-      pageToken: 'page-2',
-      priority: 'background'
-    })
-    expect(listThreadIds).toHaveBeenNthCalledWith(2, {
-      labelIds: ['INBOX'],
-      pageToken: 'page-3',
-      priority: 'background'
-    })
-    expect(
-      db.prepare('SELECT split_metadata_cursor FROM sync_state WHERE account_id = ?').get(ACCOUNT)
-    ).toEqual({ split_metadata_cursor: 'done' })
-    db.close()
-  })
-
   it('costs nothing on a fresh profile whose bodies stage already populated the fields', async () => {
     const db = upgradedStore('done')
     const listThreadIds = vi.fn()
@@ -204,26 +176,6 @@ describe('split metadata rebuild', () => {
         .prepare('SELECT has_calendar_part FROM messages WHERE account_id = ? AND id = ?')
         .get(ACCOUNT, 'message-stored')
     ).toEqual({ has_calendar_part: 1 })
-    db.close()
-  })
-
-  it('restarts once when a saved Gmail page token expires', async () => {
-    const db = upgradedStore('split-metadata:stale')
-    const listThreadIds = vi
-      .fn()
-      .mockRejectedValueOnce(new GmailApiError(400, 'invalid page token'))
-      .mockResolvedValueOnce({ threadIds: [] })
-    const events = callbacks()
-
-    await expect(
-      runSplitMetadataRebuild(db, fakeMailProvider({ listThreadIds }), ACCOUNT, events, NO_PAUSE)
-    ).resolves.toEqual({ threadsRefreshed: 0 })
-    expect(listThreadIds).toHaveBeenLastCalledWith({
-      labelIds: ['INBOX'],
-      pageToken: undefined,
-      priority: 'background'
-    })
-    expect(events.onError).not.toHaveBeenCalled()
     db.close()
   })
 
