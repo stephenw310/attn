@@ -745,11 +745,16 @@ test.describe('"Sent with Attn" footer', () => {
     // driver before its retrying save assertion.)
     composer = new ComposerPage(page)
     await composer.root.waitFor()
+    // A hidden window never dispatches `selectionchange`, so Lexical learns a
+    // clicked or arrowed caret only from the next `beforeinput`: type one
+    // character at the footer's end to anchor the caret there, then delete
+    // through it. Home / Shift+End would move the DOM caret alone, and the
+    // keydown-driven Backspace would act on wherever Lexical last was.
     await footer(page).click()
-    await page.keyboard.press('Home')
-    await page.keyboard.press('Shift+End')
-    await page.keyboard.press('Backspace')
-    await page.keyboard.press('Backspace')
+    await page.keyboard.type(' ')
+    for (let index = 0; index < 'Sent with Attn: '.length; index += 1) {
+      await page.keyboard.press('Backspace')
+    }
     await expect(composer.editor).not.toContainText('Sent with Attn')
     await expect(composer.editor).toContainText('Reply that keeps its footer.')
     await composer.expectSaved()
