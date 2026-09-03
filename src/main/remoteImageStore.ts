@@ -5,20 +5,11 @@
 // (§9 decision #5), so an absent toggle row means everything passes.
 
 import { normalizeEmailKey } from '../shared/address'
+import { remoteImagesBlocked } from './appSettings'
 import type { Db } from './db'
-import { APP_SETTINGS_ACCOUNT_ID, deleteSetting, readSetting, writeSetting } from './settings'
+import { APP_SETTINGS_ACCOUNT_ID, deleteSetting, writeSetting } from './settings'
 
-const REMOTE_IMAGES_SETTING = 'remoteImages'
 const OVERRIDE_PREFIX = 'remoteImages:allow:'
-
-export function remoteImagesBlocked(db: Db): boolean {
-  return readSetting(db, REMOTE_IMAGES_SETTING) === 'blocked'
-}
-
-export function setRemoteImagesBlocked(db: Db, blocked: boolean): void {
-  if (blocked) writeSetting(db, REMOTE_IMAGES_SETTING, 'blocked')
-  else deleteSetting(db, REMOTE_IMAGES_SETTING)
-}
 
 /** Sender addresses with a stored Always-load override, normalized and sorted. */
 export function listRemoteImageOverrides(db: Db): string[] {

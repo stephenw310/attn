@@ -8,6 +8,7 @@ import type { SplitState } from '../../shared/splits'
 import { actionQueueStatus, clearUndo } from '../actions'
 import { ActionExecutor } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
+import { notificationPausedUntil, setNotificationPausedUntil } from '../appSettings'
 import { type Db, openDatabase, schemaVersion } from '../db'
 import { accountOutboxSpoolIds, purgeAccountRows } from '../db/purgeAccount'
 import { countInboxUnread, countSystemMailboxes } from '../db/queries'
@@ -27,7 +28,7 @@ import type { ServerSearchProvider } from '../sync/serverSearch'
 import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE } from '../sync/tuning'
 import { SyncController } from '../syncController'
 import { createServiceHandlers, type ServiceHandlers } from './handlers'
-import { candidatesFor, notificationPausedUntil, setNotificationPausedUntil } from './notificationQueries'
+import { candidatesFor } from './notificationQueries'
 import type {
   ServiceAccountAuth,
   ServiceAccountsState,

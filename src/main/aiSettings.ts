@@ -12,49 +12,55 @@ import {
   isAiVoiceTone
 } from '../shared/ai'
 import type { Db } from './db'
-import { deleteSetting, readSetting, settingEnabled, writeSetting } from './settings'
+import { type TypedSetting, typedSetting } from './settings'
 
-const KEYS: Record<keyof AiStoredSettings, string> = {
-  enabled: 'aiEnabled',
-  autocompleteEnabled: 'aiAutocompleteEnabled',
-  provider: 'aiProvider',
-  baseUrl: 'aiBaseUrl',
-  model: 'aiModel',
-  voiceTone: 'aiVoiceTone',
-  voiceRules: 'aiVoiceRules',
-  voiceMatchingEnabled: 'aiVoiceMatching'
+const asBoolean = (raw: string): boolean => raw === 'true'
+const asText = (raw: string): string => raw
+
+/**
+ * One typed row per setting, each carrying its own default. `typedSetting`
+ * owns the "writing a default deletes its row" rule, so an absent row always
+ * means the default — the same rule the app settings use.
+ */
+const SETTINGS: { [K in keyof AiStoredSettings]: TypedSetting<AiStoredSettings[K]> } = {
+  enabled: typedSetting('aiEnabled', AI_SETTINGS_DEFAULTS.enabled, asBoolean),
+  autocompleteEnabled: typedSetting(
+    'aiAutocompleteEnabled',
+    AI_SETTINGS_DEFAULTS.autocompleteEnabled,
+    asBoolean
+  ),
+  provider: typedSetting('aiProvider', AI_SETTINGS_DEFAULTS.provider, (raw) =>
+    isAiProviderKind(raw) ? raw : undefined
+  ),
+  baseUrl: typedSetting('aiBaseUrl', AI_SETTINGS_DEFAULTS.baseUrl, asText),
+  model: typedSetting('aiModel', AI_SETTINGS_DEFAULTS.model, asText),
+  voiceTone: typedSetting('aiVoiceTone', AI_SETTINGS_DEFAULTS.voiceTone, (raw) =>
+    isAiVoiceTone(raw) ? raw : undefined
+  ),
+  voiceRules: typedSetting('aiVoiceRules', AI_SETTINGS_DEFAULTS.voiceRules, asText),
+  voiceMatchingEnabled: typedSetting('aiVoiceMatching', AI_SETTINGS_DEFAULTS.voiceMatchingEnabled, asBoolean)
 }
 
 export function readAiStoredSettings(db: Db): AiStoredSettings {
-  const provider = readSetting(db, KEYS.provider)
-  const voiceTone = readSetting(db, KEYS.voiceTone)
   return {
-    enabled: settingEnabled(db, KEYS.enabled, AI_SETTINGS_DEFAULTS.enabled),
-    autocompleteEnabled: settingEnabled(
-      db,
-      KEYS.autocompleteEnabled,
-      AI_SETTINGS_DEFAULTS.autocompleteEnabled
-    ),
-    provider: isAiProviderKind(provider) ? provider : AI_SETTINGS_DEFAULTS.provider,
-    baseUrl: readSetting(db, KEYS.baseUrl) ?? AI_SETTINGS_DEFAULTS.baseUrl,
-    model: readSetting(db, KEYS.model) ?? AI_SETTINGS_DEFAULTS.model,
-    voiceTone: isAiVoiceTone(voiceTone) ? voiceTone : AI_SETTINGS_DEFAULTS.voiceTone,
-    voiceRules: readSetting(db, KEYS.voiceRules) ?? AI_SETTINGS_DEFAULTS.voiceRules,
-    voiceMatchingEnabled: settingEnabled(
-      db,
-      KEYS.voiceMatchingEnabled,
-      AI_SETTINGS_DEFAULTS.voiceMatchingEnabled
-    )
+    enabled: SETTINGS.enabled.read(db),
+    autocompleteEnabled: SETTINGS.autocompleteEnabled.read(db),
+    provider: SETTINGS.provider.read(db),
+    baseUrl: SETTINGS.baseUrl.read(db),
+    model: SETTINGS.model.read(db),
+    voiceTone: SETTINGS.voiceTone.read(db),
+    voiceRules: SETTINGS.voiceRules.read(db),
+    voiceMatchingEnabled: SETTINGS.voiceMatchingEnabled.read(db)
   }
 }
 
 /** Persist one validated write; a default value removes its row. */
 export function writeAiStoredSetting(db: Db, update: AiSettingUpdate): AiStoredSettings {
-  const storageKey = KEYS[update.key]
-  if (update.value === AI_SETTINGS_DEFAULTS[update.key] || update.value === null) {
-    deleteSetting(db, storageKey)
-  } else {
-    writeSetting(db, storageKey, String(update.value))
-  }
+  // The update is a discriminated union over these same keys, so the row and
+  // the value always agree; the cast only says so to TypeScript.
+  const setting = SETTINGS[update.key] as TypedSetting<AiSettingUpdate['value']>
+  // Clearing an override (null) means "follow the default", which is the row
+  // removal `typedSetting` already performs for a default value.
+  setting.write(db, update.value === null ? AI_SETTINGS_DEFAULTS[update.key] : update.value)
   return readAiStoredSettings(db)
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { oneHourFrom, tomorrowStart } from '../shared/notifications'
+import { notificationPausedUntil, setNotificationPausedUntil } from './appSettings'
 import { type Db, openDatabase } from './db'
 import {
   acknowledgePendingFocus,
@@ -11,12 +12,7 @@ import {
   planNotifications,
   takePendingFocus
 } from './notify'
-import {
-  candidatesFor,
-  type NotificationCandidate,
-  notificationPausedUntil,
-  setNotificationPausedUntil
-} from './service/notificationQueries'
+import { candidatesFor, type NotificationCandidate } from './service/notificationQueries'
 
 function mail(threadId: string, overrides: Partial<NotificationCandidate> = {}): NotificationCandidate {
   return {
