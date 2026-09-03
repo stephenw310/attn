@@ -286,6 +286,40 @@ describe('windowed backfill checkpoints', () => {
     )
   })
 
+  it('stops the page after one thread fails instead of draining the rest', async () => {
+    const provider = emptyProvider()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    vi.mocked(provider.listThreadIds).mockImplementation(async (options): Promise<ThreadIdPage> => {
+      if (options?.q === ALL_MAIL_WINDOW && !options.labelIds) {
+        return { threadIds: ['boom', 't2', 't3', 't4', 't5', 't6'] }
+      }
+      return { threadIds: [] }
+    })
+    vi.mocked(provider.getThread).mockImplementation(async (id) => {
+      if (id === 'boom') throw new GmailApiError(500, 'backend error', true)
+      await held
+      return { id, messages: [] }
+    })
+
+    const run = runInboxBackfill(
+      fakeDb({ backfill_cursor: 'all-mail', last_history_id: '88' }),
+      provider,
+      callbacks
+    )
+    await vi.waitFor(() => expect(provider.getThread).toHaveBeenCalledTimes(3))
+    release()
+
+    await expect(run).resolves.toBeNull()
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.any(GmailApiError))
+    // The three workers in flight finish what they hold; nothing else is
+    // fetched behind a rejection the caller has already seen.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(provider.getThread).toHaveBeenCalledTimes(3)
+  })
+
   it('resumes directly at per-label reconciliation after the junk stages complete', async () => {
     const provider = emptyProvider()
     const result = await runInboxBackfill(

@@ -538,11 +538,20 @@ function checkpoint(db: Db, accountId: string, cursor: string): void {
 
 async function mapConcurrent<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   const queue = [...items]
+  // One worker's failure ends the phase, so the others stop taking work rather
+  // than draining the rest of the page — and spending its quota — behind a
+  // rejection the caller has already seen.
+  let failed = false
   const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
     for (;;) {
       const item = queue.shift()
-      if (item === undefined) return
-      await fn(item)
+      if (failed || item === undefined) return
+      try {
+        await fn(item)
+      } catch (error) {
+        failed = true
+        throw error
+      }
     }
   })
   await Promise.all(workers)
