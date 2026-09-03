@@ -13,7 +13,6 @@ import type { MailView, NavigableMailView } from '../mailDisplay'
 interface Options {
   selected: { id: string } | undefined
   selectedCount: number
-  selectedIndex: number
   readerOpen: boolean
   view: MailView
   searchOpen: boolean
@@ -27,7 +26,8 @@ interface Options {
   navigatePrevious: () => void
   clearSelection: () => void
   toggleSelection: () => void
-  extendSelection: (index: number) => void
+  /** Shift+J/K: the focused index comes from the selection hook's own ref (P1). */
+  extendSelectionBy: (delta: number) => void
   openSelected: () => void
   closeReader: () => void
   switchView: (view: NavigableMailView) => void
@@ -72,7 +72,6 @@ export function useInboxCommands(options: Options): void {
   const {
     selected,
     selectedCount,
-    selectedIndex,
     readerOpen,
     view,
     searchOpen,
@@ -86,7 +85,7 @@ export function useInboxCommands(options: Options): void {
     navigatePrevious,
     clearSelection,
     toggleSelection,
-    extendSelection,
+    extendSelectionBy,
     openSelected,
     closeReader,
     switchView,
@@ -165,8 +164,8 @@ export function useInboxCommands(options: Options): void {
         ...(mailCommandsEnabled && (searchOpen || view !== 'drafts')
           ? [
               createCommand('selection.toggle', toggleSelection),
-              createCommand('selection.extendNext', () => extendSelection(selectedIndex + 1)),
-              createCommand('selection.extendPrevious', () => extendSelection(selectedIndex - 1)),
+              createCommand('selection.extendNext', () => extendSelectionBy(1)),
+              createCommand('selection.extendPrevious', () => extendSelectionBy(-1)),
               ...(searchBrowsing
                 ? [createCommand('selection.clear', focusSearchQuery, { title: 'Edit search query' })]
                 : selectedCount > 0
@@ -278,7 +277,7 @@ export function useInboxCommands(options: Options): void {
       closeReader,
       closeOutbox,
       discardSelectedDraft,
-      extendSelection,
+      extendSelectionBy,
       focusSearchQuery,
       markNotDone,
       markUnreadOn,
@@ -300,7 +299,6 @@ export function useInboxCommands(options: Options): void {
       reopenUndoDraft,
       selected,
       selectedCount,
-      selectedIndex,
       snoozeAt,
       searchOpen,
       submitSearch,

@@ -22,6 +22,15 @@ const thread: ThreadRow = {
   labelIds: []
 }
 
+/** The hook reads the display shape the list renders, not the stored row. */
+function triageThreads(rows: readonly ThreadRow[]): ReturnType<typeof displayShape>[] {
+  return rows.map(displayShape)
+}
+
+function displayShape(row: ThreadRow) {
+  return { ...row, from: row.fromDisplay }
+}
+
 test('rolls back overlapping failed star and unread actions independently', async () => {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
@@ -55,8 +64,7 @@ test('rolls back overlapping failed star and unread actions independently', asyn
     runTriage = useTriage({
       selectedIds: new Set(),
       selectedIndex: 0,
-      threads: rows ?? [],
-      moveCacheRows: rows ?? [],
+      threads: triageThreads(rows ?? []),
       readerOpen: false,
       view: 'inbox',
       activeSplitId: null,
@@ -155,8 +163,7 @@ test('updates inactive Move cache membership immediately and restores it on reje
     runTriage = useTriage({
       selectedIds: new Set(),
       selectedIndex: 0,
-      threads: mailboxRows.allMail ?? [],
-      moveCacheRows: mailboxRows.allMail ?? [],
+      threads: triageThreads(mailboxRows.allMail ?? []),
       readerOpen: false,
       view: 'allMail',
       activeSplitId: null,
@@ -249,8 +256,7 @@ test("a rejected write reopens the reader that 'list' auto-advance closed", asyn
     runTriage = useTriage({
       selectedIds: new Set(),
       selectedIndex: 0,
-      threads: rows ?? [],
-      moveCacheRows: rows ?? [],
+      threads: triageThreads(rows ?? []),
       readerOpen: true,
       view: 'inbox',
       activeSplitId: null,

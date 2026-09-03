@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   conversationMailboxForSearch,
-  retainedSearchQuery,
   searchAllowsMove,
   searchesDrafts,
   searchesLocalSnoozes,
@@ -10,16 +9,16 @@ import {
 } from './searchView'
 
 describe('search result interpretation', () => {
-  it('uses the last completed query while a different query is pending', () => {
-    const query = retainedSearchQuery('in:drafts subject:quarterly', 'in:trash subject:invoice')
+  it('reads the last completed query, which Inbox keeps showing while a new one is typed', () => {
+    const query = 'in:trash subject:invoice'
 
     expect(searchesDrafts(query)).toBe(false)
     expect(conversationMailboxForSearch(query)).toBe('trash')
     expect(triageViewForSearch(query)).toBe('allMail')
   })
 
-  it('uses the input query before the first response completes', () => {
-    const query = retainedSearchQuery('in:drafts subject:quarterly', null)
+  it('reads the typed query, which stands in before the first response completes', () => {
+    const query = 'in:drafts subject:quarterly'
 
     expect(searchesDrafts(query)).toBe(true)
     expect(conversationMailboxForSearch(query)).toBe('normal')

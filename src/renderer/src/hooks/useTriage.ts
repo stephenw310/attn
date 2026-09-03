@@ -27,14 +27,18 @@ interface Options {
   selectedIndex: number
   threads: readonly {
     id: string
+    from: string
+    subject: string
+    snippet: string
+    lastMsgAt: number
     starred: boolean
     unread: boolean
     hasAttachment: boolean
+    hasDraft: boolean
     labelIds: readonly string[]
     snoozed: boolean
     returned: boolean
   }[]
-  moveCacheRows: readonly ThreadRow[]
   readerOpen: boolean
   view: MailView
   activeSplitId: string | null
@@ -93,12 +97,37 @@ function moveRetainsActiveInboxSplit(row: ThreadRow, activeSplitId: string | nul
   return true
 }
 
+/**
+ * The rows a move can add to another cached view: only threads the move
+ * touched, projected into the `ThreadRow` shape those caches hold.
+ */
+function moveCandidates(threads: Options['threads'], snapshot: ThreadMoveSnapshot): readonly ThreadRow[] {
+  const candidates: ThreadRow[] = []
+  for (const thread of threads) {
+    if (!snapshot.before.has(thread.id)) continue
+    candidates.push({
+      id: thread.id,
+      fromDisplay: thread.from,
+      subject: thread.subject,
+      snippet: thread.snippet,
+      lastMsgAt: thread.lastMsgAt,
+      unread: thread.unread,
+      starred: thread.starred,
+      hasAttachment: thread.hasAttachment,
+      snoozed: thread.snoozed,
+      returned: thread.returned,
+      hasDraft: thread.hasDraft,
+      labelIds: [...thread.labelIds]
+    })
+  }
+  return candidates
+}
+
 export function useTriage(options: Options): (action: TriageAction) => void {
   const {
     selectedIds,
     selectedIndex,
     threads,
-    moveCacheRows,
     readerOpen,
     view,
     activeSplitId,
@@ -236,7 +265,10 @@ export function useTriage(options: Options): (action: TriageAction) => void {
             preservedView === 'snoozed' ? preservedIds : undefined
           )
         )
-        applyMoveToMailboxRows(moveSnapshot, preservedView, moveCacheRows)
+        // Only rows the move touched can be added to another cached view, so
+        // the candidate list is built here from the moved ids rather than
+        // maintaining a full copy of the visible list on every list change.
+        applyMoveToMailboxRows(moveSnapshot, preservedView, moveCandidates(threads, moveSnapshot))
         updateSearchRows?.((rows) => applyThreadMove(rows, moveSnapshot) ?? rows)
       }
       const settleFlag = (rollback: boolean): void => {
@@ -374,7 +406,6 @@ export function useTriage(options: Options): (action: TriageAction) => void {
       realSnoozedThreads,
       realThreads,
       mailboxRows,
-      moveCacheRows,
       rollbackMoveInMailboxRows,
       searchMoveRetains,
       searchOpen,

@@ -6,7 +6,7 @@ import {
   isSignInCanceled
 } from '../../../shared/auth'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
-import type { ConversationMailbox, MailLabel, ThreadListView, ThreadRow } from '../../../shared/mail'
+import type { ConversationMailbox, MailLabel, ThreadListView } from '../../../shared/mail'
 import type { MoveDestination } from '../../../shared/move'
 import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
@@ -55,7 +55,6 @@ import { selectionAfterExit } from '../optimisticTriage'
 import { isMacPlatform } from '../platform'
 import {
   conversationMailboxForSearch,
-  retainedSearchQuery,
   searchAllowsMove,
   searchesDrafts,
   searchesLocalSnoozes,
@@ -376,7 +375,9 @@ export function Inbox({
     [serverSearchThreads.length, visibleLocalSearchThreads.length]
   )
   const searchDrafts = useMemo(() => search.response?.drafts ?? [], [search.response])
-  const searchResultQuery = retainedSearchQuery(searchQuery, search.completedQuery)
+  // A completed query keeps driving the visible results while the field is
+  // being retyped; until one completes, the typed query stands in.
+  const searchResultQuery = search.completedQuery ?? searchQuery
   const searchDraftMode = searchOpen && searchesDrafts(searchResultQuery)
   const searchSnoozeMode = searchOpen && searchesLocalSnoozes(searchResultQuery)
   const moveAllowed = searchOpen
@@ -390,24 +391,6 @@ export function Inbox({
   const threads = searchOpen ? searchThreads : mailboxThreads
   const loadedRowsRef = useRef(0)
   loadedRowsRef.current = mailboxThreads.length
-  const moveCacheRows = useMemo<ThreadRow[]>(
-    () =>
-      threads.map((thread) => ({
-        id: thread.id,
-        fromDisplay: thread.from,
-        subject: thread.subject,
-        snippet: thread.snippet,
-        lastMsgAt: thread.lastMsgAt,
-        unread: thread.unread,
-        starred: thread.starred,
-        hasAttachment: thread.hasAttachment,
-        snoozed: thread.snoozed,
-        returned: thread.returned,
-        hasDraft: thread.hasDraft,
-        labelIds: [...thread.labelIds]
-      })),
-    [threads]
-  )
   const activeViewTitle = titleForView(view, userLabelsById)
   const pagedView = searchOpen || view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
   const activePageState = pagedView ? threadPagination[pagedView] : undefined
@@ -431,11 +414,8 @@ export function Inbox({
   const loadMoreVisibleThreads = useCallback(() => {
     if (pagedView) void loadMoreThreads(pagedView)
   }, [loadMoreThreads, pagedView])
-  const { selectedIds, clearSelection, toggleFocusedSelection, extendSelectionTo } = useSelectionState(
-    threads,
-    selectedIndex,
-    setSelectedIndex
-  )
+  const { selectedIds, clearSelection, toggleFocusedSelection, extendSelectionTo, extendSelectionBy } =
+    useSelectionState(threads, selectedIndex, setSelectedIndex)
 
   const showDraft = useCallback(
     (draft: Draft) => {
@@ -1117,7 +1097,15 @@ export function Inbox({
       activateInboxSplitCache(id)
       splits.setActiveSplitId(id)
     },
-    [activateInboxSplitCache, clearSelection, mailboxThreads, splits, switchViewNow]
+    [
+      activateInboxSplitCache,
+      clearSelection,
+      mailboxThreads,
+      splits.activeSplitId,
+      splits.setActiveSplitId,
+      splits.state,
+      switchViewNow
+    ]
   )
 
   const moveSplit = useCallback(
@@ -1437,7 +1425,6 @@ export function Inbox({
     selectedIds,
     selectedIndex,
     threads,
-    moveCacheRows,
     readerOpen,
     view: searchOpen ? triageViewForSearch(searchResultQuery) : view,
     activeSplitId: searchOpen ? null : splits.activeSplitId,
@@ -1855,6 +1842,59 @@ export function Inbox({
     setAiDraftRequest((count) => count + 1)
   }, [])
 
+  // ThreadList and ConversationView are memoized, so every prop they take has
+  // to keep its identity across renders they do not care about — a sync push
+  // must not re-render a mounted Lexical tree (P3).
+  const openLabelView = useCallback((labelId: string) => switchView(userLabelView(labelId)), [switchView])
+  const openThreadFromList = useCallback(
+    (index: number) => {
+      if (searchOpen) setSearchKeyboardTarget('results')
+      openThread(index)
+    },
+    [openThread, searchOpen]
+  )
+  const inlineComposerAiDraft = useMemo(
+    () =>
+      inlineComposerDraft
+        ? {
+            request: aiDraftRequest,
+            claim: () =>
+              inlineComposerDraft.threadId !== null && claimAiDraftRequest(inlineComposerDraft.threadId),
+            getThreadContext: () => getAiThreadContext(inlineComposerDraft.sourceMessageId)
+          }
+        : null,
+    [aiDraftRequest, claimAiDraftRequest, getAiThreadContext, inlineComposerDraft]
+  )
+  const inlineComposerAttached =
+    conversation?.messages.some((message) => message.id === inlineComposerDraft?.sourceMessageId) ?? false
+  const inlineComposer = useMemo(
+    () =>
+      inlineComposerDraft && activeAccount && inlineComposerAiDraft ? (
+        <Composer
+          key={inlineComposerDraft.id}
+          ref={inlineComposerRef}
+          draft={inlineComposerDraft}
+          mode="inline"
+          attachedToMessage={inlineComposerAttached}
+          initialError={composerError}
+          onClose={closeComposer}
+          onExit={closeComposerAndReader}
+          onToast={showToast}
+          aiDraft={inlineComposerAiDraft}
+        />
+      ) : null,
+    [
+      activeAccount,
+      closeComposer,
+      closeComposerAndReader,
+      composerError,
+      inlineComposerAiDraft,
+      inlineComposerAttached,
+      inlineComposerDraft,
+      showToast
+    ]
+  )
+
   const snoozeSelected = useCallback(
     (dueAt: number) => {
       if (!window.attn || !selected) return
@@ -1986,7 +2026,6 @@ export function Inbox({
   useInboxCommands({
     selected,
     selectedCount: selectedIds.size,
-    selectedIndex,
     readerOpen,
     view,
     searchOpen,
@@ -2000,7 +2039,7 @@ export function Inbox({
     navigatePrevious,
     clearSelection,
     toggleSelection: toggleFocusedSelection,
-    extendSelection: extendSelectionTo,
+    extendSelectionBy,
     openSelected,
     closeReader,
     switchView,
@@ -2422,11 +2461,8 @@ export function Inbox({
                 listRef={listElRef}
                 onExtendSelection={extendSelectionTo}
                 onLoadMore={loadMoreVisibleThreads}
-                onOpenLabel={(labelId) => switchView(userLabelView(labelId))}
-                onOpen={(index) => {
-                  if (searchOpen) setSearchKeyboardTarget('results')
-                  openThread(index)
-                }}
+                onOpenLabel={openLabelView}
+                onOpen={openThreadFromList}
                 sectionDivider={searchOpen ? searchSectionDivider : undefined}
               />
             )}
@@ -2471,32 +2507,7 @@ export function Inbox({
                 online={online}
                 scrollRef={conversationScrollRef}
                 replyTargetRef={messageReplyTargetRef}
-                inlineComposer={
-                  inlineComposerDraft && activeAccount ? (
-                    <Composer
-                      key={inlineComposerDraft.id}
-                      ref={inlineComposerRef}
-                      draft={inlineComposerDraft}
-                      mode="inline"
-                      attachedToMessage={
-                        conversation?.messages.some(
-                          (message) => message.id === inlineComposerDraft.sourceMessageId
-                        ) ?? false
-                      }
-                      initialError={composerError}
-                      onClose={closeComposer}
-                      onExit={closeComposerAndReader}
-                      onToast={showToast}
-                      aiDraft={{
-                        request: aiDraftRequest,
-                        claim: () =>
-                          inlineComposerDraft.threadId !== null &&
-                          claimAiDraftRequest(inlineComposerDraft.threadId),
-                        getThreadContext: () => getAiThreadContext(inlineComposerDraft.sourceMessageId)
-                      }}
-                    />
-                  ) : null
-                }
+                inlineComposer={inlineComposer}
                 inlineComposerDraftId={inlineComposerDraft?.id ?? null}
                 inlineComposerSourceMessageId={inlineComposerDraft?.sourceMessageId ?? null}
                 onReply={openReply}

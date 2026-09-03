@@ -8,10 +8,6 @@ function searchMailboxes(query: string): string[] {
     .map((filter) => filter.value.toLowerCase().replaceAll(/[\s_-]/g, ''))
 }
 
-export function retainedSearchQuery(query: string, completedQuery: string | null): string {
-  return completedQuery ?? query
-}
-
 export function conversationMailboxForSearch(query: string): ConversationMailbox {
   const mailboxes = searchMailboxes(query)
   if (mailboxes.includes('spam')) return 'spam'
