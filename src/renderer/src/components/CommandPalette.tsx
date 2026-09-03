@@ -16,7 +16,8 @@ import {
   registerCommands,
   subscribeCommandRegistry
 } from '../commands'
-import { modKeyLabel } from '../platform'
+import { wrappedIndex } from '../hooks/useHighlightedOption'
+import { formatShortcut } from '../platform'
 import { Kbd } from './Kbd'
 
 interface CommandPaletteProps {
@@ -38,19 +39,6 @@ function isPaletteShortcut(event: KeyboardEvent): boolean {
     !event.altKey &&
     !event.shiftKey
   )
-}
-
-export function shortcutLabel(shortcut: string): string {
-  return shortcut
-    .replace(/Mod/gi, modKeyLabel())
-    .split(' ')
-    .map((part) =>
-      part
-        .split('+')
-        .map((key) => (/^[a-z]$/i.test(key) ? key.toLocaleUpperCase() : key))
-        .join('+')
-    )
-    .join(' ')
 }
 
 export function CommandPalette({
@@ -256,7 +244,7 @@ export function CommandPalette({
                 event.stopPropagation()
                 if (results.length === 0) return
                 const direction = event.key === 'ArrowDown' ? 1 : -1
-                setActiveIndex((current) => (current + direction + results.length) % results.length)
+                setActiveIndex((current) => wrappedIndex(current, direction, results.length))
                 return
               }
               if (event.key === 'Enter' && activeResult) {
@@ -302,7 +290,7 @@ export function CommandPalette({
                 onClick={() => runResult(result)}
               >
                 <span className="min-w-0 flex-1 truncate">{result.title}</span>
-                {result.command.shortcut && <Kbd>{shortcutLabel(result.command.shortcut)}</Kbd>}
+                {result.command.shortcut && <Kbd>{formatShortcut(result.command.shortcut)}</Kbd>}
               </button>
             ))
           )}

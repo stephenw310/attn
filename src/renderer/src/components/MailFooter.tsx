@@ -7,15 +7,9 @@ import {
   listFooterHints,
   subscribeCommandRegistry
 } from '../commands'
-import { modKeyLabel } from '../platform'
+import { formatShortcutKey } from '../platform'
 import { Kbd } from './Kbd'
 import { SyncStatus } from './SyncStatus'
-
-function keyLabel(key: string): string {
-  if (key.toLowerCase() === 'mod') return modKeyLabel()
-  if (key.toLowerCase() === 'escape') return 'Esc'
-  return key.length === 1 ? key.toUpperCase() : key
-}
 
 function Shortcut({ shortcut }: { shortcut: string }): React.JSX.Element {
   const parts = shortcut.split('+')
@@ -24,7 +18,7 @@ function Shortcut({ shortcut }: { shortcut: string }): React.JSX.Element {
       {parts.map((part, index) => (
         <span key={part} className="contents">
           {index > 0 && <span aria-hidden>+</span>}
-          <Kbd>{keyLabel(part)}</Kbd>
+          <Kbd>{formatShortcutKey(part)}</Kbd>
         </span>
       ))}
     </span>
@@ -75,7 +69,7 @@ function ChordGuide({ prefix, context }: { prefix: string; context: FooterContex
           data-testid={`footer-chord-${completion.key}`}
           className="flex items-center gap-1 text-ink-dim"
         >
-          <Kbd compact>{keyLabel(completion.key)}</Kbd>
+          <Kbd compact>{formatShortcutKey(completion.key)}</Kbd>
           {completion.label}
         </span>
       ))}

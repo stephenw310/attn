@@ -8,10 +8,8 @@ import { CHORD_TIMEOUT_MS } from '../tuning'
  * or a keystroke meant for the field runs a command instead (B9).
  */
 export function isTextEntry(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement &&
-    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-  )
+  if (!(target instanceof HTMLElement)) return false
+  return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable === true
 }
 
 interface KeyboardDispatchOptions {

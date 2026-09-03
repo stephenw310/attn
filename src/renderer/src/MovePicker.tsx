@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import type { MailLabel } from '../../shared/mail'
 import { type MoveDestination, moveLabelDelta } from '../../shared/move'
+import { PickerDialog } from './components/PickerDialog'
+import { useHighlightedOption } from './hooks/useHighlightedOption'
 
 export interface MoveTarget {
   id: string
@@ -61,9 +63,6 @@ export function MovePicker({
   onMove
 }: MovePickerProps): React.JSX.Element {
   const [query, setQuery] = useState('')
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const optionRefs = useRef(new Map<string, HTMLButtonElement>())
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const filteredLabels = useMemo(() => {
     return labels.filter(
@@ -141,132 +140,81 @@ export function MovePicker({
     return [...destinationOptions, ...importanceOptions, ...labelOptions]
   }, [filteredLabels, normalizedQuery, showImportanceActions, sourceLabelId, targets])
 
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
-  useEffect(() => {
-    setHighlightedIndex((index) => Math.min(index, Math.max(options.length - 1, 0)))
-  }, [options.length])
-
-  useEffect(() => {
-    const highlighted = options[highlightedIndex]
-    if (highlighted) optionRefs.current.get(highlighted.id)?.scrollIntoView({ block: 'nearest' })
-  }, [highlightedIndex, options])
+  const optionIds = useMemo(() => options.map((option) => option.id), [options])
+  const highlight = useHighlightedOption(optionIds)
 
   const moveHighlighted = (): void => {
-    const option = options[highlightedIndex]
+    const option = options[highlight.index]
     if (option && !option.disabled) onMove(option.destination)
   }
 
   return (
-    <>
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the focused search input handles Escape */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: this is the conventional pointer-only backdrop */}
-      <div className="fixed inset-0 z-[60] bg-overlay" onClick={onClose} />
-      <section
-        data-testid="move-picker"
-        role="dialog"
-        aria-label="Move or mark conversations"
-        aria-modal="true"
-        className="fixed top-[18vh] left-1/2 z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
-        onKeyDownCapture={(event) => {
-          if (event.key !== 'Escape') return
-          event.preventDefault()
-          event.stopPropagation()
-          onClose()
-        }}
-      >
-        <div className="border-b border-edge p-3">
-          <input
-            ref={inputRef}
-            data-testid="move-search"
-            type="search"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value)
-              setHighlightedIndex(0)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                setHighlightedIndex((index) => (options.length === 0 ? 0 : (index + 1) % options.length))
-              } else if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                setHighlightedIndex((index) =>
-                  options.length === 0 ? 0 : (index - 1 + options.length) % options.length
-                )
-              } else if (event.key === 'Enter') {
-                event.preventDefault()
-                moveHighlighted()
-              }
-            }}
-            placeholder="Search…"
-            className="w-full rounded-lg border border-edge bg-ground px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent"
-          />
+    <PickerDialog
+      testId="move-picker"
+      ariaLabel="Move or mark conversations"
+      searchTestId="move-search"
+      searchPlaceholder="Search…"
+      optionsTestId="move-options"
+      footer="↑↓ navigate · Enter choose · Esc close"
+      query={query}
+      onQuery={setQuery}
+      highlight={highlight}
+      onChoose={moveHighlighted}
+      onClose={onClose}
+    >
+      {options.map((option, index) => {
+        const startsGroup = index === 0 || options[index - 1]?.group !== option.group
+        return (
+          <Fragment key={option.id}>
+            {startsGroup && (
+              <div
+                data-testid={`move-section-${option.group}`}
+                className={`px-3 pb-1 text-[10px] font-semibold tracking-[0.14em] text-ink-faint uppercase ${
+                  index === 0 ? 'pt-1' : 'mt-1 border-t border-edge pt-2.5'
+                }`}
+              >
+                {option.group === 'destinations'
+                  ? 'Move to'
+                  : option.group === 'importance'
+                    ? 'Importance'
+                    : 'Labels'}
+              </div>
+            )}
+            <button
+              ref={highlight.optionRef(option.id)}
+              type="button"
+              data-testid={option.labelId ? 'move-option' : `move-${option.id}`}
+              data-label-id={option.labelId}
+              data-destination-kind={option.destination.kind}
+              data-highlighted={index === highlight.index || undefined}
+              disabled={option.disabled}
+              onMouseEnter={() => highlight.setIndex(index)}
+              onClick={() => onMove(option.destination)}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                index === highlight.index ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
+              }`}
+            >
+              <span
+                className={`flex size-4 items-center justify-center text-sm ${
+                  option.id === 'done' ? 'text-status-live' : 'text-ink-faint'
+                }`}
+                aria-hidden
+              >
+                {option.icon}
+              </span>
+              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{option.label}</span>
+            </button>
+          </Fragment>
+        )
+      })}
+      {filteredLabels.length === 0 && labels.length === 0 && (
+        <div className="px-3 py-4 text-center text-xs text-ink-faint">
+          Create labels in Gmail to add more destinations.
         </div>
-        <div data-testid="move-options" className="max-h-[320px] overflow-y-auto p-1.5">
-          {options.map((option, index) => {
-            const startsGroup = index === 0 || options[index - 1]?.group !== option.group
-            return (
-              <Fragment key={option.id}>
-                {startsGroup && (
-                  <div
-                    data-testid={`move-section-${option.group}`}
-                    className={`px-3 pb-1 text-[10px] font-semibold tracking-[0.14em] text-ink-faint uppercase ${
-                      index === 0 ? 'pt-1' : 'mt-1 border-t border-edge pt-2.5'
-                    }`}
-                  >
-                    {option.group === 'destinations'
-                      ? 'Move to'
-                      : option.group === 'importance'
-                        ? 'Importance'
-                        : 'Labels'}
-                  </div>
-                )}
-                <button
-                  ref={(element) => {
-                    if (element) optionRefs.current.set(option.id, element)
-                    else optionRefs.current.delete(option.id)
-                  }}
-                  type="button"
-                  data-testid={option.labelId ? 'move-option' : `move-${option.id}`}
-                  data-label-id={option.labelId}
-                  data-destination-kind={option.destination.kind}
-                  data-highlighted={index === highlightedIndex || undefined}
-                  disabled={option.disabled}
-                  onMouseEnter={() => setHighlightedIndex(index)}
-                  onClick={() => onMove(option.destination)}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
-                    index === highlightedIndex ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
-                  }`}
-                >
-                  <span
-                    className={`flex size-4 items-center justify-center text-sm ${
-                      option.id === 'done' ? 'text-status-live' : 'text-ink-faint'
-                    }`}
-                    aria-hidden
-                  >
-                    {option.icon}
-                  </span>
-                  <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{option.label}</span>
-                </button>
-              </Fragment>
-            )
-          })}
-          {filteredLabels.length === 0 && labels.length === 0 && (
-            <div className="px-3 py-4 text-center text-xs text-ink-faint">
-              Create labels in Gmail to add more destinations.
-            </div>
-          )}
-          {options.length === 0 && query.trim() && (
-            <div className="px-3 py-4 text-center text-xs text-ink-faint">No matching options</div>
-          )}
-        </div>
-        <div className="border-t border-edge px-4 py-2 text-xs text-ink-faint">
-          ↑↓ navigate · Enter choose · Esc close
-        </div>
-      </section>
-    </>
+      )}
+      {options.length === 0 && query.trim() && (
+        <div className="px-3 py-4 text-center text-xs text-ink-faint">No matching options</div>
+      )}
+    </PickerDialog>
   )
 }

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ACCOUNT_SYNC_PHASE_LABELS, type AccountSyncStatus, type AuthStatus } from '../../../shared/auth'
+import type { AccountSyncStatus, AuthStatus } from '../../../shared/auth'
 import { THEME_OPTIONS, type ThemePreference } from '../../../shared/theme'
+import { accountNeedsAttention, useAccountHealth } from '../hooks/useAccountHealth'
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
+import { AccountHealthLine } from './AccountHealthLine'
 import { blurActive } from './blurActive'
 import { Kbd } from './Kbd'
 
@@ -102,44 +104,11 @@ function AccountMenu({
 }): React.JSX.Element {
   const blockedTitle = accountActionsBlocked ? 'Save and close the draft first (Esc)' : undefined
   const [open, setOpen] = useState(false)
-  const [openedStatuses, setOpenedStatuses] = useState<{
-    statuses: AccountSyncStatus[]
-    source: readonly AccountSyncStatus[] | null
-  } | null>(null)
-  const pushedStatusesRef = useRef(accountStatuses)
-  pushedStatusesRef.current = accountStatuses
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const { preference, setPreference } = useTheme()
-  // The pushed statuses move only on phase changes (they are what keeps the
-  // chip live); the unread counts in them can lag, so an open menu re-reads
-  // the full statuses once. A later push supersedes that snapshot, including
-  // when it arrives while the snapshot request is still pending.
-  const healthById = new Map(
-    [
-      ...(accountStatuses ?? []),
-      ...(openedStatuses?.source === accountStatuses ? openedStatuses.statuses : [])
-    ].map((health) => [health.accountId, health])
-  )
   // The chip itself carries an attention mark while *any* account needs the
   // user, so a background failure is visible without opening the menu (F18).
-  const chipAttention = (accountStatuses ?? []).some(
-    (health) => health.phase === 'reconnect' || health.phase === 'error'
-  )
-
-  useEffect(() => {
-    if (!open || !window.attn) return
-    let stale = false
-    const source = pushedStatusesRef.current
-    window.attn.auth
-      .getAccountStatuses()
-      .then((statuses) => {
-        if (!stale) setOpenedStatuses({ statuses, source })
-      })
-      .catch(() => {})
-    return () => {
-      stale = true
-    }
-  }, [open])
+  const { healthFor, needsAttention: chipAttention } = useAccountHealth(accountStatuses, open)
 
   const closeMenu = useCallback(() => {
     setOpen(false)
@@ -191,8 +160,8 @@ function AccountMenu({
         >
           {status.accounts.map((account, index) => {
             const active = account.id === status.activeAccountId
-            const health = healthById.get(account.id) ?? null
-            const attention = health?.phase === 'reconnect' || health?.phase === 'error'
+            const health = healthFor(account.id)
+            const attention = accountNeedsAttention(health)
             return (
               <button
                 key={account.id}
@@ -213,14 +182,7 @@ function AccountMenu({
                 <span className="flex min-w-0 flex-col items-start">
                   <span className="w-full truncate text-left">{account.email}</span>
                   {health && (
-                    <span
-                      data-testid="account-status"
-                      data-phase={health.phase}
-                      className={`text-[11px] ${attention ? 'font-medium text-accent' : 'text-ink-faint'}`}
-                    >
-                      {ACCOUNT_SYNC_PHASE_LABELS[health.phase]}
-                      {health.unread > 0 ? ` · ${health.unread} unread` : ''}
-                    </span>
+                    <AccountHealthLine health={health} attention={attention} testId="account-status" />
                   )}
                 </span>
                 <span className="flex flex-none items-center gap-1.5">

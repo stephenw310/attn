@@ -6,7 +6,7 @@ import {
   getCommandRegistrySnapshot,
   subscribeCommandRegistry
 } from '../commands'
-import { shortcutLabel } from './CommandPalette'
+import { formatShortcut } from '../platform'
 import { Kbd } from './Kbd'
 
 interface CheatSheetProps {
@@ -148,7 +148,7 @@ export function CheatSheet({
                       className="flex items-center justify-between gap-3 text-[13px] text-ink-dim"
                     >
                       <span className="min-w-0 truncate">{commandTitle(command)}</span>
-                      {command.shortcut && <Kbd>{shortcutLabel(command.shortcut)}</Kbd>}
+                      {command.shortcut && <Kbd>{formatShortcut(command.shortcut)}</Kbd>}
                     </li>
                   ))}
                 </ul>

@@ -2,10 +2,19 @@ import type { ConversationMailbox, MailLabel } from '../../shared/mail'
 import { parseSearchQuery } from '../../shared/searchQuery'
 import type { MailView } from './mailDisplay'
 
+/**
+ * `in:` values are written loosely ("all mail", "all_mail", "AllMail"), so
+ * every comparison against one goes through the same normalization. Main has
+ * its own copies of this rule (R9); one shared normalizer is pending there.
+ */
+function normalizedMailbox(value: string): string {
+  return value.toLowerCase().replaceAll(/[\s_-]/g, '')
+}
+
 function searchMailboxes(query: string): string[] {
   return parseSearchQuery(query)
     .filters.filter((filter) => filter.kind === 'in')
-    .map((filter) => filter.value.toLowerCase().replaceAll(/[\s_-]/g, ''))
+    .map((filter) => normalizedMailbox(filter.value))
 }
 
 /**
@@ -38,7 +47,7 @@ export function searchesLocalSnoozes(query: string): boolean {
   return parsed.filters.some(
     (filter) =>
       (filter.kind === 'is' && filter.value === 'snoozed') ||
-      (filter.kind === 'in' && filter.value.toLowerCase().replaceAll(/[\s_-]/g, '') === 'snoozed')
+      (filter.kind === 'in' && normalizedMailbox(filter.value) === 'snoozed')
   )
 }
 
@@ -47,10 +56,6 @@ export function searchAllowsMove(query: string): boolean {
   if (parsed.filters.some((filter) => filter.kind === 'is' && filter.value === 'snoozed')) return false
   const blocked = new Set(['draft', 'drafts', 'snoozed', 'outbox'])
   return !searchMailboxes(query).some((mailbox) => blocked.has(mailbox))
-}
-
-function normalizedMailbox(value: string): string {
-  return value.toLowerCase().replaceAll(/[\s_-]/g, '')
 }
 
 /** Re-evaluate only the row fields Move can change; the completed search already proved every other term. */

@@ -11,3 +11,26 @@ export function isMacPlatform(): boolean {
 export function modKeyLabel(): string {
   return isMacPlatform() ? '⌘' : 'Ctrl'
 }
+
+/**
+ * One key of a shortcut as the UI shows it: the platform modifier, `Esc` for
+ * Escape, and single letters upper-cased so `j` reads as `J`.
+ */
+export function formatShortcutKey(key: string): string {
+  const lowered = key.toLowerCase()
+  if (lowered === 'mod') return modKeyLabel()
+  if (lowered === 'escape') return 'Esc'
+  return key.length === 1 ? key.toUpperCase() : key
+}
+
+/**
+ * A whole shortcut as the UI shows it — `Mod+Shift+k` becomes `⌘+Shift+K`, and
+ * a chord keeps its space (`g i` becomes `G I`). The footer renders each key in
+ * its own Kbd and uses `formatShortcutKey` directly instead.
+ */
+export function formatShortcut(shortcut: string): string {
+  return shortcut
+    .split(' ')
+    .map((keystroke) => keystroke.split('+').map(formatShortcutKey).join('+'))
+    .join(' ')
+}

@@ -15,7 +15,6 @@ import { isTextEntry, useKeyboardDispatch } from '../hooks/useKeyboardDispatch'
 import { type MoveRequest, useListActions } from '../hooks/useListActions'
 import { useMailData } from '../hooks/useMailData'
 import { useSearchSession } from '../hooks/useSearchSession'
-import { useSelectedRowScroll } from '../hooks/useSelectedRowScroll'
 import { useSelectionState } from '../hooks/useSelectionState'
 import { useAccountSettings, useSettings } from '../hooks/useSettings'
 import { useSettingsCommands } from '../hooks/useSettingsCommands'
@@ -864,8 +863,6 @@ export function Inbox({
     onPendingChordChange: setPendingChord,
     conversationScrollRef
   })
-
-  useSelectedRowScroll(selectedRowRef, selectedIndex, readerOpen)
 
   useEffect(() => {
     if (!outboxFailure) return
