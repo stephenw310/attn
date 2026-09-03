@@ -2,6 +2,11 @@ import { findSignatureLineIndex } from './mailTrim'
 
 const MEANINGFUL_ELEMENTS = 'img, picture, svg, table, hr, video, audio, canvas'
 const TRIM_SELECTOR = '.gmail_quote, .gmail_signature_prefix, .gmail_signature, blockquote[type="cite"]'
+// Contexts where a lone `--` line is content or layout rather than a signature
+// separator: verbatim text (`pre`, `code`) and table cells, where a dashed
+// divider or a literal em-dash cell would otherwise collapse the rest of the
+// mail behind the trim control.
+const TRIM_EXEMPT_ANCESTORS = `${TRIM_SELECTOR}, a, style, title, pre, code, td, th`
 
 export function hasRenderableContent(content: DocumentFragment): boolean {
   const visibleProbe = content.cloneNode(true) as DocumentFragment
@@ -34,7 +39,7 @@ export function findHtmlTrimStart(content: DocumentFragment): Node | null {
   let current = walker.nextNode()
   while (current) {
     if (current instanceof Element && current.matches(TRIM_SELECTOR)) return current
-    if (current instanceof Text && !current.parentElement?.closest(`${TRIM_SELECTOR}, a, style, title`)) {
+    if (current instanceof Text && !current.parentElement?.closest(TRIM_EXEMPT_ANCESTORS)) {
       const signatureIndex = findSignatureLineIndex(current.data)
       if (signatureIndex !== null) {
         return signatureIndex === 0 ? wholeLineSignatureContainer(current) : current.splitText(signatureIndex)
