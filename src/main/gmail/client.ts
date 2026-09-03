@@ -78,6 +78,7 @@ export class GmailClient {
   private readonly random: () => number
   private readonly quotaLimiter: GmailQuotaLimiter
   private readonly readSignal: AbortSignal | undefined
+  private refreshInFlight: Promise<string> | null = null
 
   constructor(
     private readonly config: OAuthConfig,
@@ -99,42 +100,80 @@ export class GmailClient {
     return this.quotaLimiter.snapshot()
   }
 
-  private async ensureAccessToken(signal?: AbortSignal): Promise<string> {
+  private async ensureAccessToken(): Promise<string> {
     if (this.time.now() < this.tokens.expires_at - GMAIL_TOKEN_REFRESH_MARGIN_MS)
       return this.tokens.access_token
-    return this.refresh(signal)
+    return this.refresh()
   }
 
-  private async refresh(signal?: AbortSignal): Promise<string> {
+  /**
+   * Single-flight. Three backfill workers plus the poller, the hydrator and the
+   * executor cross the expiry margin together; without this each would POST to
+   * the token endpoint and `persist()` a token the others had already replaced.
+   * The shared request follows the client's own read signal rather than any one
+   * caller's, so a canceled search cannot fail the refresh everyone is awaiting.
+   */
+  private refresh(): Promise<string> {
+    const started = this.refreshInFlight ?? this.runRefresh()
+    if (this.refreshInFlight !== started) {
+      this.refreshInFlight = started
+      const clear = (): void => {
+        if (this.refreshInFlight === started) this.refreshInFlight = null
+      }
+      // Also marks the shared promise handled: its rejection reaches every
+      // caller through their own await, not as an unhandled rejection.
+      void started.then(clear, clear)
+    }
+    return started
+  }
+
+  private async runRefresh(): Promise<string> {
     if (!this.tokens.refresh_token) {
       throw new GmailAuthError('no refresh token stored — sign in again')
     }
-    const res = await fetch(TOKEN_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: this.config.client_id,
-        client_secret: this.config.client_secret,
-        refresh_token: this.tokens.refresh_token,
-        grant_type: 'refresh_token'
-      }),
-      signal
-    })
-    if (!res.ok) {
-      const message = `token refresh failed (${res.status}): ${(await res.text()).slice(0, 300)}`
-      if (res.status === 400 || res.status === 401) throw new GmailAuthError(message)
-      throw new GmailApiError(res.status, message, res.status === 429 || res.status >= 500)
+    let attempt = 0
+    for (;;) {
+      const res = await fetch(TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: this.config.client_id,
+          client_secret: this.config.client_secret,
+          refresh_token: this.tokens.refresh_token,
+          grant_type: 'refresh_token'
+        }),
+        signal: this.readSignal
+      })
+      if (!res.ok) {
+        const message = `token refresh failed (${res.status}): ${(await res.text()).slice(0, 300)}`
+        if (res.status === 400 || res.status === 401) throw new GmailAuthError(message)
+        const transient = res.status === 429 || res.status >= 500
+        // A rate-limited or briefly unavailable token endpoint is the same
+        // failure `request()` already rides out; without this it escaped that
+        // loop and failed the call it was refreshing for.
+        if (transient && attempt < GMAIL_MAX_RETRIES) {
+          attempt++
+          await sleep(
+            Math.min(GMAIL_RETRY_MAX_MS, GMAIL_RETRY_BASE_MS * 2 ** attempt) +
+              this.random() * GMAIL_RETRY_JITTER_MS,
+            this.time,
+            this.readSignal
+          )
+          continue
+        }
+        throw new GmailApiError(res.status, message, transient)
+      }
+      const json = (await res.json()) as { access_token: string; expires_in: number }
+      // Google's refresh response carries NO refresh_token — merge over the
+      // existing set so the stored refresh_token survives.
+      this.tokens = {
+        ...this.tokens,
+        access_token: json.access_token,
+        expires_at: this.time.now() + json.expires_in * 1000
+      }
+      this.persist(this.tokens)
+      return this.tokens.access_token
     }
-    const json = (await res.json()) as { access_token: string; expires_in: number }
-    // Google's refresh response carries NO refresh_token — merge over the
-    // existing set so the stored refresh_token survives.
-    this.tokens = {
-      ...this.tokens,
-      access_token: json.access_token,
-      expires_at: this.time.now() + json.expires_in * 1000
-    }
-    this.persist(this.tokens)
-    return this.tokens.access_token
   }
 
   async get<T>(
@@ -204,7 +243,7 @@ export class GmailClient {
     const contentLength = prefix.byteLength + media.sizeBytes + suffix.byteLength
     let attempt = 0
     for (;;) {
-      const token = await this.ensureAccessToken(options?.signal)
+      const token = await this.ensureAccessToken()
       await this.acquireQuota(method, path, options?.priority, options?.signal)
       const init = {
         method,
@@ -225,7 +264,7 @@ export class GmailClient {
       const text = await res.text()
       if (res.status === 401 && attempt === 0) {
         attempt++
-        await this.refresh(options?.signal)
+        await this.refresh()
         continue
       }
       const quotaHit = res.status === 403 && /quota|rate ?limit/i.test(text)
@@ -265,7 +304,7 @@ export class GmailClient {
     }
     let attempt = 0
     for (;;) {
-      const token = await this.ensureAccessToken(options.signal)
+      const token = await this.ensureAccessToken()
       await this.acquireQuota(method, path, options.priority, options.signal)
       const res = await fetch(url, {
         method,
@@ -283,7 +322,7 @@ export class GmailClient {
       const text = await res.text()
       if (res.status === 401 && attempt === 0) {
         attempt++
-        await this.refresh(options.signal)
+        await this.refresh()
         continue
       }
       // Gmail reports some rate/quota limits as 403 rather than 429. The
