@@ -5,9 +5,9 @@ import {
   createCommand,
   createDynamicSplitCommand,
   findCommandByShortcut,
+  getCommandRegistrySnapshot,
   isChordPrefix,
   listChordCompletions,
-  listCommands,
   listFooterHints,
   matchComposerKey,
   matchKey,
@@ -42,7 +42,7 @@ function key(
 
 afterEach(() => {
   while (cleanups.length > 0) cleanups.pop()?.()
-  expect(listCommands()).toHaveLength(0)
+  expect(getCommandRegistrySnapshot()).toHaveLength(0)
 })
 
 describe('command catalog', () => {
@@ -381,7 +381,7 @@ describe('keyboard dispatch', () => {
       createDynamicSplitCommand('preset:github', 'Go to: GitHub', () => {}),
       createDynamicSplitCommand('custom:news', 'Go to: News', () => {})
     ])
-    expect(listCommands().map((command) => command.id)).toEqual([
+    expect(getCommandRegistrySnapshot().map((command) => command.id)).toEqual([
       'split.goto:preset:github',
       'split.goto:custom:news'
     ])

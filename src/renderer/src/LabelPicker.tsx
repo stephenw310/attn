@@ -3,7 +3,7 @@ import type { MailLabel } from '../../shared/mail'
 
 export type LabelCheckState = 'all' | 'some' | 'off'
 
-export interface LabelTarget {
+interface LabelTarget {
   id: string
   labelIds: readonly string[]
 }

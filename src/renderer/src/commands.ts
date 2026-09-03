@@ -519,10 +519,6 @@ export function registerCommands(next: Command[]): () => void {
   }
 }
 
-export function listCommands(): readonly Command[] {
-  return commandRegistrySnapshot
-}
-
 function normalizedKey(event: KeyboardEvent, context: ShortcutContext): string {
   // Arrows alias to J/K so navigation and range selection accept either. A bare
   // arrow in the reader scrolls instead — readingScrollDelta claims it before

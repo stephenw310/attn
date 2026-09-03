@@ -243,7 +243,7 @@ export function MovePicker({
                 >
                   <span
                     className={`flex size-4 items-center justify-center text-sm ${
-                      option.id === 'done' ? 'text-positive' : 'text-ink-faint'
+                      option.id === 'done' ? 'text-status-live' : 'text-ink-faint'
                     }`}
                     aria-hidden
                   >
