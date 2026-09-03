@@ -433,6 +433,17 @@ export interface Command extends CommandSpec {
   id: CommandId
   run: () => void
   argument?: CommandArgument
+  /**
+   * A title that depends on state the command reads at display time (Star vs
+   * Unstar). Registering it as a function keeps the batch's registration
+   * independent of the focused row, which changes on every J/K (P1).
+   */
+  titleOf?: () => string
+}
+
+/** The title to show: the lazy form wins when a command declares one. */
+export function commandTitle(command: Pick<Command, 'title' | 'titleOf'>): string {
+  return command.titleOf ? command.titleOf() : command.title
 }
 
 const commands: Command[] = []
@@ -456,7 +467,9 @@ export function getCommandRegistrySnapshot(): readonly Command[] {
 export function createCommand(
   id: StaticCommandId,
   run: () => void,
-  overrides: Partial<Pick<Command, 'title' | 'shortcut' | 'shortcutAliases' | 'context' | 'argument'>> = {}
+  overrides: Partial<
+    Pick<Command, 'title' | 'titleOf' | 'shortcut' | 'shortcutAliases' | 'context' | 'argument'>
+  > = {}
 ): Command {
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
 }
@@ -619,7 +632,7 @@ export function listChordCompletions(
       completions.push({
         commandId: command.id,
         key,
-        label: command.chordGuide?.label ?? command.title,
+        label: command.chordGuide?.label ?? commandTitle(command),
         order: command.chordGuide?.order ?? Number.MAX_SAFE_INTEGER
       })
     }

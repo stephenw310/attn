@@ -50,14 +50,13 @@ test('rolls back overlapping failed star and unread actions independently', asyn
 
   const container = document.createElement('div')
   const root = createRoot(container)
-  let runTriage: ReturnType<typeof useTriage> | undefined
+  let runTriage: ReturnType<typeof useTriage>['triage'] | undefined
   let visibleRows: ThreadRow[] = []
   let visibleSearchRows: ThreadRow[] = []
   function Harness(): null {
     const [rows, setRows] = useState<ThreadRow[] | null>([thread])
     const [searchRows, setSearchRows] = useState<ThreadRow[]>([thread])
     const [, setSnoozedRows] = useState<SnoozedThreadRow[] | null>(null)
-    const [, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
     const [, setSelectedIndex] = useState(0)
     visibleRows = rows ?? []
     visibleSearchRows = searchRows
@@ -85,9 +84,8 @@ test('rolls back overlapping failed star and unread actions independently', asyn
       autoAdvance: 'next',
       closeReader: () => {},
       reopenReader: () => {},
-      setExitingThreadIds,
       setSelectedIndex
-    })
+    }).triage
     return null
   }
 
@@ -141,7 +139,7 @@ test('updates inactive Move cache membership immediately and restores it on reje
   const snoozedThread = { ...movedThread, dueAt: 123 }
   const container = document.createElement('div')
   const root = createRoot(container)
-  let runTriage: ReturnType<typeof useTriage> | undefined
+  let runTriage: ReturnType<typeof useTriage>['triage'] | undefined
   let visibleInbox: ThreadRow[] = []
   let visibleSnoozed: SnoozedThreadRow[] = []
   let visibleAllMail: ThreadRow[] = []
@@ -154,7 +152,6 @@ test('updates inactive Move cache membership immediately and restores it on reje
       'label:source': [movedThread],
       'label:destination': []
     })
-    const [, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
     const [, setSelectedIndex] = useState(0)
     visibleInbox = inboxRows ?? []
     visibleSnoozed = snoozedRows ?? []
@@ -183,9 +180,8 @@ test('updates inactive Move cache membership immediately and restores it on reje
       autoAdvance: 'next',
       closeReader: () => {},
       reopenReader: () => {},
-      setExitingThreadIds,
       setSelectedIndex
-    })
+    }).triage
     return null
   }
 
@@ -247,11 +243,10 @@ test("a rejected write reopens the reader that 'list' auto-advance closed", asyn
 
   const container = document.createElement('div')
   const root = createRoot(container)
-  let runTriage: ReturnType<typeof useTriage> | undefined
+  let runTriage: ReturnType<typeof useTriage>['triage'] | undefined
   function Harness(): null {
     const [rows, setRows] = useState<ThreadRow[] | null>([{ ...thread, labelIds: ['INBOX'] }])
     const [, setSnoozedRows] = useState<SnoozedThreadRow[] | null>(null)
-    const [, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
     const [, setSelectedIndex] = useState(0)
     runTriage = useTriage({
       selectedIds: new Set(),
@@ -276,9 +271,8 @@ test("a rejected write reopens the reader that 'list' auto-advance closed", asyn
       autoAdvance: 'list',
       closeReader,
       reopenReader,
-      setExitingThreadIds,
       setSelectedIndex
-    })
+    }).triage
     return null
   }
 

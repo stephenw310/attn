@@ -4,7 +4,8 @@ import {
   COMMAND_SPECS,
   type Command,
   type CommandArgumentValue,
-  commandMatchesContext
+  commandMatchesContext,
+  commandTitle
 } from './commands'
 
 const COMMAND_ORDER = new Map(Object.keys(COMMAND_SPECS).map((id, index) => [id, index]))
@@ -79,10 +80,9 @@ export function rankCommands(
     if (!commandMatchesContext(command, context)) return []
     const index = COMMAND_ORDER.get(command.id) ?? Number.MAX_SAFE_INTEGER
     const commandUsageScore = usageScore(usage[command.id], now)
+    const title = commandTitle(command)
     if (!foldedQuery) {
-      return [
-        { command, title: command.title, match: 'empty', score: 0, usageScore: commandUsageScore, index }
-      ]
+      return [{ command, title, match: 'empty', score: 0, usageScore: commandUsageScore, index }]
     }
 
     const argument = inlineArgument(command, query)
@@ -100,7 +100,7 @@ export function rankCommands(
       ]
     }
 
-    const haystacks = [command.title, ...(command.argument?.prefixes ?? [])].map(normalized)
+    const haystacks = [title, ...(command.argument?.prefixes ?? [])].map(normalized)
     const prefixScores = haystacks
       .filter((candidate) => candidate.startsWith(foldedQuery))
       .map((candidate) => 1_000 - (candidate.length - foldedQuery.length) / 100)
@@ -108,7 +108,7 @@ export function rankCommands(
       return [
         {
           command,
-          title: command.title,
+          title,
           match: 'prefix',
           score: Math.max(...prefixScores),
           usageScore: commandUsageScore,
@@ -124,7 +124,7 @@ export function rankCommands(
     return [
       {
         command,
-        title: command.title,
+        title,
         match: 'fuzzy',
         score: Math.max(...fuzzyScores),
         usageScore: commandUsageScore,

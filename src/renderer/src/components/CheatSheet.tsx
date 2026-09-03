@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import {
   COMMAND_CONTEXT_GROUPS,
   type Command,
+  commandTitle,
   getCommandRegistrySnapshot,
   subscribeCommandRegistry
 } from '../commands'
@@ -46,7 +47,7 @@ function sheetGroups(commands: readonly Command[]): SheetGroup[] {
   return [...groups.entries()]
     .map(([label, grouped]) => ({
       label,
-      commands: grouped.sort((left, right) => left.title.localeCompare(right.title))
+      commands: grouped.sort((left, right) => commandTitle(left).localeCompare(commandTitle(right)))
     }))
     .filter((group) => group.commands.length > 0)
 }
@@ -146,7 +147,7 @@ export function CheatSheet({
                       data-command-id={command.id}
                       className="flex items-center justify-between gap-3 text-[13px] text-ink-dim"
                     >
-                      <span className="min-w-0 truncate">{command.title}</span>
+                      <span className="min-w-0 truncate">{commandTitle(command)}</span>
                       {command.shortcut && <Kbd>{shortcutLabel(command.shortcut)}</Kbd>}
                     </li>
                   ))}

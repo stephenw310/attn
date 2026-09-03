@@ -174,7 +174,6 @@ export function Inbox({
     showToast
   )
   const autoAdvance = appSettings?.autoAdvanceDirection ?? 'next'
-  const [exitingThreadIds, setExitingThreadIds] = useState<ReadonlySet<string>>(new Set())
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const selectedThreadIdRef = useRef<string | null>(null)
   const selectedDraftIdRef = useRef<string | null>(null)
@@ -558,12 +557,6 @@ export function Inbox({
             ? realOutbox.length
             : threads.length
     setSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(visibleCount - 1, 0))))
-    setExitingThreadIds((current) => {
-      if (current.size === 0) return current
-      const visibleIds = new Set(threads.map((thread) => thread.id))
-      const next = new Set([...current].filter((id) => visibleIds.has(id)))
-      return next.size === current.size ? current : next
-    })
     if ((searchOpen || view !== 'drafts') && threads.length === 0) setReaderOpen(false)
   }, [realDrafts.length, realOutbox.length, searchDraftMode, searchDrafts.length, searchOpen, threads, view])
 
@@ -736,8 +729,16 @@ export function Inbox({
   })
   const targetedThreads =
     selectedIds.size > 0 ? threads.filter((thread) => selectedIds.has(thread.id)) : selected ? [selected] : []
-  const starOn = targetedThreads.some((thread) => !thread.starred)
-  const markUnreadOn = targetedThreads.some((thread) => !thread.unread)
+  // Read at invocation, not captured at registration: both flip as the focused
+  // row moves, and the command batch must not churn with it (P1).
+  const starOnRef = useRef(false)
+  starOnRef.current = targetedThreads.some((thread) => !thread.starred)
+  const markUnreadOnRef = useRef(false)
+  markUnreadOnRef.current = targetedThreads.some((thread) => !thread.unread)
+  // Stable views of the focused row for the command batch and the AI-draft
+  // command, both of which must not re-register as the cursor moves.
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
 
   // Snapshot ids when the picker opens. A bulk apply clears the list selection,
   // but the open picker keeps operating on the same conversations.
@@ -1421,7 +1422,7 @@ export function Inbox({
   // restores rows and selection, and this restores the closed reader.
   const reopenReaderForAdvance = useCallback(() => setReaderOpen(true), [])
 
-  const triage = useTriage({
+  const { triage, exitingThreadIds } = useTriage({
     selectedIds,
     selectedIndex,
     threads,
@@ -1443,7 +1444,6 @@ export function Inbox({
     updateSearchRows: searchOpen ? updateSearchRows : undefined,
     clearSelection,
     showToast,
-    setExitingThreadIds,
     setSelectedIndex,
     autoAdvance,
     closeReader: closeReaderForAdvance,
@@ -1827,8 +1827,6 @@ export function Inbox({
   // time (its registration must not churn on every keystroke or selection).
   const composerDraftRef = useRef(composerDraft)
   composerDraftRef.current = composerDraft
-  const selectedRef = useRef(selected)
-  selectedRef.current = selected
   const openReplyRef = useRef(openReply)
   openReplyRef.current = openReply
   const conversationRef = useRef(conversation)
@@ -2024,15 +2022,16 @@ export function Inbox({
   }, [moveSplit, splits.state, switchSplit])
 
   useInboxCommands({
-    selected,
+    hasSelection: selected !== undefined,
+    selectedRef,
     selectedCount: selectedIds.size,
     readerOpen,
     view,
     searchOpen,
     searchBrowsing: searchOpen && searchKeyboardTarget === 'results' && !readerOpen,
     sidebarCollapsed,
-    starOn,
-    markUnreadOn,
+    starOnRef,
+    markUnreadOnRef,
     moveAllowed,
     preserveSelectionOnRefreshRef,
     navigateNext,
