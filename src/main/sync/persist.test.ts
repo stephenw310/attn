@@ -202,6 +202,44 @@ describe('thread snapshot persistence', () => {
     }
   })
 
+  it('replays pending local intent inside the snapshot transaction', () => {
+    const db = openDatabase(':memory:')
+    try {
+      ensureAccount(db, 'account', 'account')
+      db.prepare(
+        `INSERT INTO action_queue (account_id, kind, thread_id, payload, state)
+         VALUES ('account', 'modifyLabels', 'thread', '{"add":[],"remove":["INBOX"]}', 'pending')`
+      ).run()
+
+      // A crash between the snapshot and the replay would leave Gmail's label
+      // set visible — the archived thread back in the Inbox — so both must
+      // commit together. The nested transaction becomes a savepoint.
+      const prepared: { sql: string; inTransaction: boolean }[] = []
+      const tracked = {
+        prepare: (sql: string) => {
+          prepared.push({ sql, inTransaction: db.inTransaction })
+          return db.prepare(sql)
+        },
+        transaction: (callback: () => void) => db.transaction(callback)
+      } as unknown as Db
+
+      persistThread(tracked, 'account', {
+        id: 'thread',
+        messages: [{ id: 'message', threadId: 'thread', labelIds: ['INBOX'], internalDate: '100' }]
+      })
+
+      const replayReads = prepared.filter(
+        (statement) => statement.sql.includes('FROM action_queue') || statement.sql.includes('FROM reminders')
+      )
+      expect(replayReads.length).toBeGreaterThan(0)
+      expect(replayReads.every((statement) => statement.inTransaction)).toBe(true)
+      // The pending archive still wins over the authoritative snapshot.
+      expect(db.prepare('SELECT label_id FROM thread_labels').all()).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
+
   it('keeps a new row out of the bounded Inbox surface unless the caller promotes it', () => {
     const db = openDatabase(':memory:')
     try {

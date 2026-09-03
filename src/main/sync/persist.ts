@@ -290,9 +290,13 @@ export function persistThread(
     indexThreadMessages(db, accountId, thread.id)
     // After the labels are current: membership reads them and the thread flags.
     refreshThreadMailboxes(db, accountId, thread.id)
+    // Inside the same transaction (better-sqlite3 nests as a savepoint): a
+    // crash between the snapshot and the replay would leave the server's label
+    // set visible — an archived thread back in the Inbox — until the next
+    // refetch. Local intent always wins, atomically.
+    replayPendingThreadDeltas(db, accountId, thread.id)
+    replaySnoozeReminderDelta(db, accountId, thread.id)
   })()
-  replayPendingThreadDeltas(db, accountId, thread.id)
-  replaySnoozeReminderDelta(db, accountId, thread.id)
   return true
 }
 
