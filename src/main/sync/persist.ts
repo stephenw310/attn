@@ -90,7 +90,11 @@ export interface PersistThreadOptions {
    * Omitting the option keeps a new row visible: those callers store an
    * authoritative snapshot of a thread the user is already acting on (action
    * recovery, the post-send refresh, an inline-image repair) or seed a
-   * development store, none of which is bounded by the lifetime sweep.
+   * development store, none of which is bounded by the lifetime sweep. Server
+   * search deliberately stays on that default even though it can store a thread
+   * the sweep has not reached: its results are read back through the ordinary
+   * queries, so an `in:inbox` match stored hidden would vanish from the very
+   * result list that fetched it (`e2e/search.spec.ts`).
    */
   inboxVisibility?: 'hide' | 'preserve' | 'show'
 }

@@ -287,16 +287,14 @@ describe('ServiceRuntime with several accounts', () => {
     try {
       await secondRequested
       const count = vi.spyOn(queries, 'countSystemMailboxes')
-      // The stored search result raises All Mail; it deliberately does not enter
-      // M2's bounded Inbox surface (`persist.ts`, `inboxVisibility: 'preserve'`).
-      expect(await read()).toMatchObject({ inbox: 1, allMail: 2 })
-      expect(await read()).toMatchObject({ inbox: 1, allMail: 2 })
+      expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
+      expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
       expect(count).toHaveBeenCalledTimes(2)
       await runtime.internal('set-active-account', ['second@attn.test'])
       release()
       await expect(search).resolves.toMatchObject({ status: 'error' })
       await runtime.internal('set-active-account', ['primary@attn.test'])
-      expect(await read()).toMatchObject({ inbox: 1, allMail: 2 })
+      expect(await read()).toMatchObject({ inbox: 2, allMail: 2 })
       expect(count).toHaveBeenCalledTimes(3)
     } finally {
       release()
