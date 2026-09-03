@@ -168,8 +168,8 @@ export function useComposerDraft(draft: Draft, prepareSnapshot: () => void): Com
     // Quit tears the renderer down without running React cleanup, and the idle
     // checkpoint can be a second behind the keyboard. `pagehide` is the last
     // event this frame is guaranteed to see, so the checkpoint is issued there.
-    // It cannot be awaited — the save is IPC — but the main process holds the
-    // window open long enough for an already-sent request to be handled.
+    // It cannot be awaited — the save is IPC — but `before-quit` defers the
+    // quit behind an async teardown, so an already-sent request can still land.
     const checkpoint = (): void => {
       void commitRef.current().catch(() => {})
     }
