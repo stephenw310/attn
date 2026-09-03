@@ -259,7 +259,20 @@ function insertRule(db: Db, accountId: string, rule: SplitRule): void {
   )
 }
 
+export function hasSplitSetup(db: Db, accountId: string): boolean {
+  const row = db.prepare('SELECT initialized FROM split_config WHERE account_id = ?').get(accountId) as
+    | { initialized: number }
+    | undefined
+  return row?.initialized === 1
+}
+
+/**
+ * Seed the starter rules once per account. Reads run on every Inbox page, badge
+ * count and notification check, so the already-initialized case must stay a
+ * pure SELECT: opening a write transaction there made every read a write.
+ */
 export function ensureSplitSetup(db: Db, accountId: string): void {
+  if (hasSplitSetup(db, accountId)) return
   db.transaction(() => {
     db.prepare(
       `INSERT OR IGNORE INTO split_config (account_id, initialized, revision)
@@ -281,20 +294,12 @@ export function ensureSplitSetup(db: Db, accountId: string): void {
   })()
 }
 
-export function hasSplitSetup(db: Db, accountId: string): boolean {
-  const row = db.prepare('SELECT initialized FROM split_config WHERE account_id = ?').get(accountId) as
-    | { initialized: number }
-    | undefined
-  return row?.initialized === 1
-}
-
+/** Pure read: `ensureSplitSetup` owns creating the row at account setup. */
 export function splitRevision(db: Db, accountId: string): number {
-  ensureSplitSetup(db, accountId)
-  return (
-    db.prepare('SELECT revision FROM split_config WHERE account_id = ?').get(accountId) as {
-      revision: number
-    }
-  ).revision
+  const row = db.prepare('SELECT revision FROM split_config WHERE account_id = ?').get(accountId) as
+    | { revision: number }
+    | undefined
+  return row?.revision ?? 0
 }
 
 function compileCondition(condition: SplitCondition): { sql: string; params: unknown[] } {
@@ -393,7 +398,6 @@ export function compileSplitAssignment(rules: readonly SplitRule[]): SplitAssign
 }
 
 export function splitAssignmentForAccount(db: Db, accountId: string): SplitAssignmentSql {
-  ensureSplitSetup(db, accountId)
   return compileSplitAssignment(visibleRules(db, accountId))
 }
 
@@ -600,6 +604,11 @@ export function restoreSplitPreset(db: Db, accountId: string, id: SplitPresetId)
   return getSplitState(db, accountId)
 }
 
+/**
+ * The notification and badge path reaches accounts the caller has not otherwise
+ * opened, including background roster members, so this is the one reader that
+ * still seeds setup. `ensureSplitSetup` is a pure SELECT once that has happened.
+ */
 export function notificationEnabledSplitIds(db: Db, accountId: string): string[] {
   ensureSplitSetup(db, accountId)
   return visibleRules(db, accountId)
@@ -651,7 +660,6 @@ export function splitLocationForThread(
   accountId: string,
   threadId: string
 ): SplitThreadLocation | null {
-  ensureSplitSetup(db, accountId)
   return db.transaction(() => {
     const revision = splitRevision(db, accountId)
     const splitId = splitIdForThread(db, accountId, threadId)

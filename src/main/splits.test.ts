@@ -166,6 +166,38 @@ describe('split inbox', () => {
     expect(oldMessageEvaluations).toBe(0)
   })
 
+  it('reads splits without writing', () => {
+    // Every Inbox page, badge count and thread focus reads the split rules.
+    // Seeding them from those readers opened a write transaction on each one.
+    insertThread('other', 100, [{ id: 'm-other', from: 'friend@example.com' }], true)
+    getSplitState(db, 'account')
+    const statements: string[] = []
+    const recording = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property === 'prepare') {
+          return (sql: string) => {
+            statements.push(sql)
+            return target.prepare(sql)
+          }
+        }
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      }
+    }) as Db
+
+    expect(splitRevision(recording, 'account')).toBe(1)
+    expect(listInboxThreads(recording, 'account', 10, null, 'fallback:other').map((row) => row.id)).toEqual([
+      'other'
+    ])
+    expect(countNotificationEnabledUnread(recording, 'account')).toBe(0)
+    expect(splitLocationForThread(recording, 'account', 'other')).toEqual({
+      splitId: 'fallback:other',
+      revision: 1
+    })
+
+    expect(statements.filter((sql) => /^\s*(insert|update|delete)/i.test(sql))).toEqual([])
+  })
+
   it('does not recreate deleted presets and restores only the requested preset', () => {
     ensureSplitSetup(db, 'account')
     const initialRevision = splitRevision(db, 'account')

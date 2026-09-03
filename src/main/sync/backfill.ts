@@ -10,6 +10,7 @@
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
+import { ensureSplitSetup } from '../splits'
 import { type SchedulerTime, systemTime } from '../time'
 import { type BackfillPhase, type ParsedCursor, parseBackfillCursor } from './backfillCursor'
 import { hydrateMissingThreadBodies } from './bodies'
@@ -192,6 +193,10 @@ export async function runInboxBackfill(
     const profile = await provider.getProfile({ priority: 'foreground' })
     const accountId = profile.emailAddress
     ensureAccount(db, accountId, profile.emailAddress)
+    // The one place every real account is registered, and so the one place the
+    // split rules are seeded: the split readers on the Inbox, badge and
+    // notification paths stay pure SELECTs.
+    ensureSplitSetup(db, accountId)
 
     const previous = db
       .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
