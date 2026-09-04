@@ -180,7 +180,11 @@ export const TEST_CHANNELS = {
   accountDataStats: 'attn:test:accountDataStats',
   listMailboxThreadIds: 'attn:test:listMailboxThreadIds',
   setUpdateState: 'attn:test:setUpdateState',
-  holdNextResponse: 'attn:test:holdNextResponse'
+  holdNextResponse: 'attn:test:holdNextResponse',
+  expireReminders: 'attn:test:expireReminders',
+  observeInvokes: 'attn:test:observeInvokes',
+  invokeHandler: 'attn:test:invokeHandler',
+  failNextInvoke: 'attn:test:failNextInvoke'
 } as const
 
 export interface InvokeChannels {
