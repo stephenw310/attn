@@ -120,6 +120,7 @@ export const IPC_CHANNELS = {
   mailRepairInlineImages: 'mail:repairInlineImages',
   mailRegisterMessageFrame: 'mail:registerMessageFrame',
   mailUnregisterMessageFrame: 'mail:unregisterMessageFrame',
+  mailAllowRemoteImagesOnce: 'mail:allowRemoteImagesOnce',
   mailAllowRemoteImagesFromSender: 'mail:allowRemoteImagesFromSender',
   mailListRemoteImageOverrides: 'mail:listRemoteImageOverrides',
   mailRemoveRemoteImageOverride: 'mail:removeRemoteImageOverride',
@@ -331,12 +332,19 @@ export interface InvokeChannels {
   }
   // T33 remote images: the reader registers each mounted mail frame under the
   // nonce it set as the iframe's name; main answers whether that message's
-  // images load so the banner needs no second policy source.
+  // images load so the banner needs no second policy source. Registration
+  // carries no allowance of its own — a `Load once` render is admitted only
+  // by the grant the gesture channel below minted in main for that nonce.
   [IPC_CHANNELS.mailRegisterMessageFrame]: {
-    args: [nonce: string, messageId: string, allowOnce: boolean]
+    args: [nonce: string, messageId: string]
     result: { blocked: boolean; imagesAllowed: boolean }
   }
   [IPC_CHANNELS.mailUnregisterMessageFrame]: { args: [nonce: string]; result: undefined }
+  /** The reader's `Load once` gesture: main records the one-shot grant. */
+  [IPC_CHANNELS.mailAllowRemoteImagesOnce]: {
+    args: [nonce: string, messageId: string]
+    result: undefined
+  }
   [IPC_CHANNELS.mailAllowRemoteImagesFromSender]: {
     args: [messageId: string]
     result: { sender: string; overrides: string[] }

@@ -24,8 +24,52 @@ export interface RegisteredMailFrame {
   messageId: string
   /** Resolved from the local store at registration; null when unknown. */
   sender: string | null
-  /** One `Load once` render; cleared with the frame's registration. */
+  /**
+   * One `Load once` render. Minted by main from the reader's gesture (see
+   * `MailFrameGrants`) — never taken from the registering renderer — and
+   * cleared with the frame's registration.
+   */
   allowOnce: boolean
+}
+
+/**
+ * Pending `Load once` grants (T33). Registering a mail frame asserts nothing
+ * about its allowance: main mints a one-shot grant only when the reader's
+ * explicit `Load once` gesture arrives on its own channel, and binds it to
+ * the exact nonce that gesture is about to register. The next registration of
+ * that nonce and message spends it; every other registration — a second
+ * registration of the same message, the same nonce for another message, or a
+ * registration with no gesture behind it at all — is decided by the policy
+ * alone. A compromised renderer therefore cannot self-grant a tracking pixel
+ * by registering a frame.
+ */
+export class MailFrameGrants {
+  private readonly pending = new Map<string, string>()
+
+  /**
+   * `limit` bounds dead entries: the gesture's own remount spends a grant
+   * immediately, so anything still pending is a registration that never
+   * arrived (a closed reader, a failed round trip). Oldest is evicted first.
+   */
+  constructor(private readonly limit = 16) {}
+
+  /** Record the gesture: the frame `nonce` will carry `messageId` remotely once. */
+  allowOnceFor(nonce: string, messageId: string): void {
+    this.pending.delete(nonce)
+    this.pending.set(nonce, messageId)
+    for (const oldest of this.pending.keys()) {
+      if (this.pending.size <= this.limit) break
+      this.pending.delete(oldest)
+    }
+  }
+
+  /** Spend this registration's grant, if the gesture minted one for it. */
+  take(nonce: string, messageId: string): boolean {
+    const granted = this.pending.get(nonce) === messageId
+    // A nonce registers once, so the entry is dead either way.
+    this.pending.delete(nonce)
+    return granted
+  }
 }
 
 /**

@@ -13,6 +13,7 @@ import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHAN
 import type { PendingFocusTarget } from '../shared/notifications'
 import { type AppSettingUpdate, validateAppSettingUpdate } from '../shared/settings'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
+import { MailFrameGrants } from './remoteImages'
 import type { ServiceSupervisor } from './service/supervisor'
 
 type Handler<K extends InvokeChannel> = (
@@ -31,7 +32,11 @@ export interface IpcContext {
   acknowledgePendingFocus: (id: number) => void
   /** A renderer finished its pre-quit composer checkpoint (B28). */
   acknowledgeComposerCheckpoint: (requestId: number) => void
-  /** T33: register/unregister a mounted mail frame with the request filter. */
+  /**
+   * T33: register/unregister a mounted mail frame with the request filter.
+   * `allowOnce` is minted here in main from the reader's `Load once` gesture
+   * (`MailFrameGrants`); the registering renderer never asserts it.
+   */
   registerMailFrame: (
     nonce: string,
     messageId: string,
@@ -129,13 +134,22 @@ export function registerIpc(context: IpcContext): () => void {
   })
   const isFrameNonce = (value: unknown): value is string =>
     typeof value === 'string' && /^[a-z0-9-]{8,64}$/i.test(value)
-  handle(IPC_CHANNELS.mailRegisterMessageFrame, (_event, nonce, messageId, allowOnce) => {
+  const isMessageId = (value: unknown): value is string =>
+    typeof value === 'string' && value.length > 0 && value.length <= 256
+  // T33: main owns the one-shot allowance. Registration reports where a frame
+  // is mounted; only the gesture channel below grants it a `Load once` render,
+  // so a compromised renderer cannot admit a tracking pixel by registering.
+  const mailFrameGrants = new MailFrameGrants()
+  handle(IPC_CHANNELS.mailAllowRemoteImagesOnce, (_event, nonce, messageId) => {
     if (!isFrameNonce(nonce)) throw new Error('invalid frame nonce')
-    if (typeof messageId !== 'string' || messageId.length === 0 || messageId.length > 256) {
-      throw new Error('invalid message id')
-    }
-    if (typeof allowOnce !== 'boolean') throw new Error('invalid allow-once flag')
-    return context.registerMailFrame(nonce, messageId, allowOnce)
+    if (!isMessageId(messageId)) throw new Error('invalid message id')
+    mailFrameGrants.allowOnceFor(nonce, messageId)
+    return undefined
+  })
+  handle(IPC_CHANNELS.mailRegisterMessageFrame, (_event, nonce, messageId) => {
+    if (!isFrameNonce(nonce)) throw new Error('invalid frame nonce')
+    if (!isMessageId(messageId)) throw new Error('invalid message id')
+    return context.registerMailFrame(nonce, messageId, mailFrameGrants.take(nonce, messageId))
   })
   handle(IPC_CHANNELS.mailUnregisterMessageFrame, (_event, nonce) => {
     if (!isFrameNonce(nonce)) throw new Error('invalid frame nonce')

@@ -189,12 +189,15 @@ const api = {
       invoke(IPC_CHANNELS.mailRepairInlineImages, request),
     registerMessageFrame: (
       nonce: string,
-      messageId: string,
-      allowOnce: boolean
+      messageId: string
     ): Promise<{ blocked: boolean; imagesAllowed: boolean }> =>
-      invoke(IPC_CHANNELS.mailRegisterMessageFrame, nonce, messageId, allowOnce),
+      invoke(IPC_CHANNELS.mailRegisterMessageFrame, nonce, messageId),
     unregisterMessageFrame: (nonce: string): Promise<void> =>
       invoke(IPC_CHANNELS.mailUnregisterMessageFrame, nonce),
+    // The `Load once` gesture, recorded in main against the nonce the reader
+    // is about to register: a registration cannot allow itself (T33).
+    allowRemoteImagesOnce: (nonce: string, messageId: string): Promise<void> =>
+      invoke(IPC_CHANNELS.mailAllowRemoteImagesOnce, nonce, messageId),
     allowRemoteImagesFromSender: (messageId: string): Promise<{ sender: string; overrides: string[] }> =>
       invoke(IPC_CHANNELS.mailAllowRemoteImagesFromSender, messageId),
     listRemoteImageOverrides: (): Promise<string[]> => invoke(IPC_CHANNELS.mailListRemoteImageOverrides),
