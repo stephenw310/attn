@@ -3,7 +3,15 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, test } from 'vitest'
-import { commandTitle, getCommandRegistrySnapshot, subscribeCommandRegistry } from '../commands'
+import {
+  type ActiveCommandContext,
+  COMMAND_SPECS,
+  type CommandContext,
+  commandMatchesContext,
+  commandTitle,
+  getCommandRegistrySnapshot,
+  subscribeCommandRegistry
+} from '../commands'
 import { useInboxCommands } from './useInboxCommands'
 
 type Options = Parameters<typeof useInboxCommands>[0]
@@ -143,27 +151,112 @@ test('registers once per context change, not per focused row', async () => {
   })
 })
 
+/**
+ * The static specs are collision-checked in `commands.test.ts`, but the
+ * registry the user actually types against also carries commands minted at
+ * runtime: one per split, and `Mod+1..9` for the first nine accounts. This
+ * checks the union — runtime commands against each other, against the specs
+ * the shell registered, and against the specs it did not (a composer or
+ * settings shortcut is still a shortcut this registry could grow into).
+ */
+interface ShortcutOwner {
+  id: string
+  context: CommandContext
+  allowInComposer?: boolean
+  shortcuts: readonly string[]
+}
+
+function shortcutOwners(): ShortcutOwner[] {
+  const registered: ShortcutOwner[] = getCommandRegistrySnapshot().map((command) => ({
+    id: command.id,
+    context: command.context,
+    ...(command.allowInComposer === undefined ? {} : { allowInComposer: command.allowInComposer }),
+    shortcuts: [...(command.shortcut ? [command.shortcut] : []), ...(command.shortcutAliases ?? [])]
+  }))
+  const registeredIds = new Set(registered.map((owner) => owner.id))
+  const unregistered: ShortcutOwner[] = Object.entries(COMMAND_SPECS)
+    .filter(([id]) => !registeredIds.has(id))
+    .map(([id, spec]) => ({
+      id,
+      context: spec.context,
+      ...('allowInComposer' in spec ? { allowInComposer: spec.allowInComposer } : {}),
+      shortcuts: [
+        ...('shortcut' in spec && spec.shortcut ? [spec.shortcut] : []),
+        ...('shortcutAliases' in spec ? spec.shortcutAliases : [])
+      ]
+    }))
+  return [...registered, ...unregistered]
+}
+
+function shortcutConflicts(context: ActiveCommandContext): string[] {
+  const conflicts: string[] = []
+  const seen = new Map<string, string>()
+  for (const owner of shortcutOwners()) {
+    if (!commandMatchesContext(owner, context)) continue
+    for (const shortcut of owner.shortcuts) {
+      // Inside the composer a composer verb deliberately outranks a global
+      // that shares its keystroke (`Mod+B` is Bold while writing, the sidebar
+      // toggle everywhere else), so the two tiers are checked apart. Every
+      // other context is flat: the first registration would simply win.
+      const tier = context === 'composer' && owner.context !== 'composer' ? 'global' : 'command'
+      const key = `${tier}:${shortcut.toLowerCase()}`
+      const existing = seen.get(key)
+      if (existing) conflicts.push(`${existing} and ${owner.id} share ${shortcut} in ${context}`)
+      else seen.set(key, owner.id)
+    }
+  }
+  return conflicts
+}
+
+const CONTEXTS: ActiveCommandContext[] = ['list', 'reader', 'outbox', 'composer']
+
 test('no two registered shortcuts collide in one context', async () => {
   await withHarness(async (render) => {
     await render(options({}))
-    const contexts = ['list', 'reader', 'outbox'] as const
-    for (const context of contexts) {
-      const seen = new Map<string, string>()
-      for (const command of getCommandRegistrySnapshot()) {
-        const shortcuts = [
-          ...(command.shortcut ? [command.shortcut] : []),
-          ...(command.shortcutAliases ?? [])
-        ]
-        for (const shortcut of shortcuts) {
-          const key = shortcut.toLowerCase()
-          const existing = seen.get(key)
-          expect(
-            existing === undefined,
-            `${command.id} and ${existing} share ${shortcut} in ${context}`
-          ).toBe(true)
-          seen.set(key, command.id)
+    for (const context of CONTEXTS) expect(shortcutConflicts(context)).toEqual([])
+  })
+})
+
+test('the runtime split and account commands claim no key twice', async () => {
+  const accounts = Array.from({ length: 10 }, (_, index) => ({
+    id: `account-${index}@attn.test`,
+    email: `account-${index}@attn.test`
+  }))
+  await withHarness(async (render) => {
+    // Ten accounts and a full rule set: `Mod+1..9` is handed out to the first
+    // nine in switcher order, and every split mints a `Go to:` command.
+    await render(
+      options({
+        accountCommands: { ...BASE.accountCommands, accounts, activeAccountId: accounts[0]?.id ?? null },
+        splitCommands: {
+          ...BASE.splitCommands,
+          goTo: ['Important', 'Everything else', 'Newsletters', 'Receipts'].map((name) => ({
+            id: name.toLowerCase(),
+            name,
+            run: noop
+          }))
         }
-      }
-    }
+      })
+    )
+    for (const context of CONTEXTS) expect(shortcutConflicts(context)).toEqual([])
+
+    const snapshot = getCommandRegistrySnapshot()
+    const switchers = snapshot.filter((command) => command.id.startsWith('account.switch:'))
+    expect(switchers.map((command) => command.shortcut)).toEqual([
+      'Mod+1',
+      'Mod+2',
+      'Mod+3',
+      'Mod+4',
+      'Mod+5',
+      'Mod+6',
+      'Mod+7',
+      'Mod+8',
+      'Mod+9',
+      undefined
+    ])
+    // Splits ride the palette and Tab, never a digit of their own.
+    const splitGoTo = snapshot.filter((command) => command.id.startsWith('split.goto:'))
+    expect(splitGoTo).toHaveLength(4)
+    expect(splitGoTo.every((command) => command.shortcut === undefined)).toBe(true)
   })
 })
