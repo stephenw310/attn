@@ -1,9 +1,9 @@
 import type { Db } from '../db'
 import { applyThreadDelta } from './mutate'
 
-export type SnoozeReminderState = 'pending' | 'returned' | 'done' | 'canceled'
+type SnoozeReminderState = 'pending' | 'returned' | 'done' | 'canceled'
 
-export type ReminderKind = 'snooze' | 'follow_up'
+type ReminderKind = 'snooze' | 'follow_up'
 
 /**
  * Files a live reminder the way triage does: a pending one is canceled, a

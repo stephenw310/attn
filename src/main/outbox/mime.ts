@@ -17,7 +17,7 @@ const MAX_FILENAME_LENGTH = 200
 // hard line limit, so it goes out as foldable encoded words instead.
 const MAX_UNENCODED_HEADER_BYTES = 900
 
-export interface MimeAttachment {
+interface MimeAttachment {
   filename: string
   mimeType: string
   content: Uint8Array

@@ -5,7 +5,6 @@ import {
   extractBodyText,
   extractThreadingHeaders,
   findExternalTextParts,
-  hasAttachment,
   hasCalendarPart,
   hasInlinePlainText,
   parseAddress,
@@ -92,7 +91,6 @@ describe('Gmail message parsing', () => {
         { mimeType: 'text/plain', filename: '', body: { attachmentId: 'external-body' } }
       ]
     }
-    expect(hasAttachment(payload)).toBe(true)
     expect(collectAttachments(payload)).toEqual([
       {
         attachmentId: 'att-1',
@@ -144,7 +142,6 @@ describe('Gmail message parsing', () => {
         inline: true
       }
     ])
-    expect(hasAttachment(payload)).toBe(false)
   })
 
   it('finds filename-less calendar MIME parts without exposing them as downloads', () => {

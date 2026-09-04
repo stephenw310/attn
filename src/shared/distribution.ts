@@ -19,7 +19,7 @@ export interface UpdateState {
 
 export const UPDATE_STATE_IDLE: UpdateState = { phase: 'idle', readyVersion: null }
 
-export type DistributionMode = 'personal' | 'release'
+type DistributionMode = 'personal' | 'release'
 
 export interface DistributionMetadata {
   metadataVersion: number
