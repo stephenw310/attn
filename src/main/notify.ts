@@ -46,17 +46,16 @@ export class BoundedRetainer<T> {
     if (this.held.length > this.cap) this.held.splice(0, this.held.length - this.cap)
   }
 
-  release(value: T): void {
+  /** True when the value was still held, so a click on it could still be handled. */
+  release(value: T): boolean {
     const index = this.held.indexOf(value)
-    if (index >= 0) this.held.splice(index, 1)
+    if (index < 0) return false
+    this.held.splice(index, 1)
+    return true
   }
 
   clear(): void {
     this.held.length = 0
-  }
-
-  get size(): number {
-    return this.held.length
   }
 }
 

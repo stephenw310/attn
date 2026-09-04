@@ -322,7 +322,7 @@ describe('notification retention', () => {
     const retainer = new BoundedRetainer<object>(50)
     const banner = { id: 'shown' }
     retainer.retain(banner)
-    expect(retainer.size).toBe(1)
+    expect(retainer.release(banner)).toBe(true)
   })
 
   it('releases a notification once its click has been handled', () => {
@@ -331,29 +331,27 @@ describe('notification retention', () => {
     const second = { id: 'second' }
     retainer.retain(first)
     retainer.retain(second)
-    retainer.release(first)
-    expect(retainer.size).toBe(1)
+    expect(retainer.release(first)).toBe(true)
     // Releasing something never retained (or released twice) is a no-op, not a throw.
-    retainer.release(first)
-    expect(retainer.size).toBe(1)
+    expect(retainer.release(first)).toBe(false)
+    expect(retainer.release(second)).toBe(true)
   })
 
   it('evicts the oldest beyond the cap rather than growing without bound', () => {
     const retainer = new BoundedRetainer<number>(3)
     for (const value of [1, 2, 3, 4, 5]) retainer.retain(value)
-    expect(retainer.size).toBe(3)
     // The evicted entries are the oldest, which are the least likely to be clicked.
-    retainer.release(4)
-    retainer.release(5)
-    expect(retainer.size).toBe(1)
+    expect([1, 2].map((value) => retainer.release(value))).toEqual([false, false])
+    expect([3, 4, 5].map((value) => retainer.release(value))).toEqual([true, true, true])
   })
 
   it('drops every reference when the notifier stops', () => {
     const retainer = new BoundedRetainer<object>(50)
-    retainer.retain({})
+    const banner = {}
+    retainer.retain(banner)
     retainer.retain({})
     retainer.clear()
-    expect(retainer.size).toBe(0)
+    expect(retainer.release(banner)).toBe(false)
   })
 })
 
