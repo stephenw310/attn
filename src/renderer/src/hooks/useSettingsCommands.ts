@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
+import { describeUpdateStatus } from '../../../shared/distribution'
 import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import type { AccountSettingKey, AccountSettings, AppSettingKey, AppSettings } from '../../../shared/settings'
 import { createCommand, registerCommands } from '../commands'
@@ -75,6 +76,13 @@ export function useSettingsCommands(options: Options): void {
         ),
         createCommand('notifications.resume', () => updateAppSetting('notificationsPausedUntil', null)),
         createCommand('cheatsheet.open', openCheatSheet),
+        createCommand('update.check', () => {
+          const attn = window.attn
+          if (!attn) return
+          void Promise.all([attn.app.getInfo(), attn.update.check()])
+            .then(([info, state]) => showToast(describeUpdateStatus(info, state, Date.now())))
+            .catch(() => showToast('Could not check for updates'))
+        }),
         createCommand('update.restart', () => {
           void window.attn?.update
             .restart()

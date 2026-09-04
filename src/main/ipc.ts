@@ -8,7 +8,7 @@ import {
 } from 'electron'
 import type { AiSettings } from '../shared/ai'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
-import type { UpdateState } from '../shared/distribution'
+import type { AppInfo, UpdateState } from '../shared/distribution'
 import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { PendingFocusTarget } from '../shared/notifications'
 import { type AppSettingUpdate, validateAppSettingUpdate } from '../shared/settings'
@@ -45,9 +45,12 @@ export interface IpcContext {
   unregisterMailFrame: (nonce: string) => void
   /** OS-side effects of a persisted settings write (login item, menu bar, badge). */
   applySettingEffects: (update: AppSettingUpdate) => void
-  /** T39 auto-update: absent updater answers idle / false. */
+  /** The About surface's version, schema, and build kind (F15). */
+  appInfo: () => AppInfo
+  /** T39 auto-update: absent updater answers idle / idle / false. */
   update: {
     getState: () => UpdateState
+    check: () => Promise<UpdateState>
     restart: () => Promise<boolean>
   }
   /** T36 AI writing: key custody, gating, and streaming live in main. */
@@ -71,7 +74,9 @@ export function registerIpc(context: IpcContext): () => void {
     mainOwned.add(channel)
     ipcMain.handle(channel, handler as Parameters<typeof ipcMain.handle>[1])
   }
+  handle(IPC_CHANNELS.appGetInfo, () => context.appInfo())
   handle(IPC_CHANNELS.updateGetState, () => context.update.getState())
+  handle(IPC_CHANNELS.updateCheck, () => context.update.check())
   handle(IPC_CHANNELS.updateRestart, () => context.update.restart())
   handle(IPC_CHANNELS.aiGetSettings, () => context.ai.getSettings())
   handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => context.ai.setSetting(key, value))

@@ -65,6 +65,9 @@ items needing real Gmail, a real LLM provider, or operator credentials are **ope
 ## Bookkeeping
 
 - [x] SPEC §8 status paragraph updated with the M4 entry; the M4 bullet carries its shipped/open note.
+- [x] Release workflow, feed stamping, and the Settings → About update surface landed 2026-09-04;
+  `e2e/update.spec.ts` covers About under the harness (development build, no check button, a
+  staged ready state offering the restart) and `scripts/stamp-update-feed.test.mjs` the stamp.
 - [x] KNOWN-ISSUES re-verified 2026-09-03: auth-refresh and real-vsync perf gaps closed by evidence.
   REF-1 closed on 2026-09-03 by separating Inbox's behavior coordination from its layout; both exported
   mail-surface components are now below the ~350-line bar.
@@ -93,6 +96,8 @@ items needing real Gmail, a real LLM provider, or operator credentials are **ope
 
 The v1 tag is cut from a green `npm run verify` on `main` once the open boxes above are ticked or
 struck with reasons. The T39 operator prerequisites (Apple Developer ID + notarytool credentials, the
-Windows signing certificate, the release-feed repository decision — deferred into
-`ATTN_RELEASE_FEED`/`ATTN_DISTRIBUTION_MODE` at package time — and the publishing workflow that stamps
-`requiredSchemaVersion` into each release feed entry) gate the signed-update boxes.
+Windows signing certificate, and the release-feed repository decision — a public repository, recorded
+as the `ATTN_RELEASE_FEED` repository variable) gate the signed-update boxes. The publishing workflow
+that stamps `requiredSchemaVersion` into each release feed entry shipped on 2026-09-04
+(`.github/workflows/release.yml`, [RELEASE.md](RELEASE.md)); running it is the first step of the
+signed-update box.

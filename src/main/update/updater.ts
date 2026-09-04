@@ -7,7 +7,7 @@
 // before download AND again before install so a stale cached download can
 // never slip through.
 
-import type { UpdatePhase, UpdateState } from '../../shared/distribution'
+import type { UpdateCheck, UpdateCheckOutcome, UpdatePhase, UpdateState } from '../../shared/distribution'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 
 export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
@@ -68,7 +68,9 @@ export class AppUpdater {
   private readonly time: SchedulerTime
   private phase: UpdatePhase = 'idle'
   private ready: UpdateFeedInfo | null = null
+  private lastCheck: UpdateCheck | null = null
   private timer: TimerHandle | null = null
+  private inFlight: Promise<void> | null = null
   private backoffMs = UPDATE_ERROR_BACKOFF_MS
   private stopped = false
   private applying = false
@@ -78,12 +80,30 @@ export class AppUpdater {
   }
 
   state(): UpdateState {
-    return { phase: this.phase, readyVersion: this.ready?.version ?? null }
+    return { phase: this.phase, readyVersion: this.ready?.version ?? null, lastCheck: this.lastCheck }
   }
 
   /** Check now, then keep the six-hour cadence. */
   start(): void {
     void this.runCheck()
+  }
+
+  /**
+   * The Settings button and the palette's `Check for updates`: run one check
+   * immediately (joining one already in flight) and resolve with the state
+   * it left behind. The cadence timer restarts from this check, so a manual
+   * check never stacks a second scheduled one on top of it.
+   */
+  async checkNow(): Promise<UpdateState> {
+    if (this.inFlight === null) {
+      if (this.timer !== null) {
+        this.time.timers.clearTimeout(this.timer)
+        this.timer = null
+      }
+      void this.runCheck()
+    }
+    await this.inFlight
+    return this.state()
   }
 
   stop(): void {
@@ -98,13 +118,23 @@ export class AppUpdater {
    * The target release is installable only when its declared schema exactly
    * matches both the running build and the local database, and its version
    * is genuinely newer. Checked before download and re-checked before
-   * install; a null anywhere rejects.
+   * install; a null anywhere rejects. The three answers are kept apart so
+   * the About surface can say "needs a database upgrade" rather than
+   * pretending an incompatible release does not exist.
    */
+  private classify(info: UpdateFeedInfo): Exclude<UpdateCheckOutcome, 'error'> {
+    if (!isNewerVersion(info.version, this.options.currentVersion)) return 'up-to-date'
+    if (info.requiredSchemaVersion === null) return 'incompatible'
+    if (info.requiredSchemaVersion !== this.options.schemaVersion) return 'incompatible'
+    return this.options.localSchemaVersion() === info.requiredSchemaVersion ? 'available' : 'incompatible'
+  }
+
   private compatible(info: UpdateFeedInfo): boolean {
-    if (!isNewerVersion(info.version, this.options.currentVersion)) return false
-    if (info.requiredSchemaVersion === null) return false
-    if (info.requiredSchemaVersion !== this.options.schemaVersion) return false
-    return this.options.localSchemaVersion() === info.requiredSchemaVersion
+    return this.classify(info) === 'available'
+  }
+
+  private recordCheck(outcome: UpdateCheckOutcome, version: string | null): void {
+    this.lastCheck = { at: this.time.now(), outcome, version }
   }
 
   private setPhase(phase: UpdatePhase): void {
@@ -122,7 +152,15 @@ export class AppUpdater {
     }, delayMs)
   }
 
-  private async runCheck(): Promise<void> {
+  private runCheck(): Promise<void> {
+    if (this.inFlight !== null) return this.inFlight
+    this.inFlight = this.performCheck().finally(() => {
+      this.inFlight = null
+    })
+    return this.inFlight
+  }
+
+  private async performCheck(): Promise<void> {
     if (this.stopped || this.applying) return
     // A downloaded update waits for a restart; polling again cannot improve
     // on it and a second download could race the installer handoff.
@@ -134,7 +172,9 @@ export class AppUpdater {
     try {
       const info = await this.options.feed.check()
       if (this.stopped) return
-      if (info === null || !this.compatible(info)) {
+      const outcome = info === null ? 'up-to-date' : this.classify(info)
+      this.recordCheck(outcome, outcome === 'up-to-date' ? null : (info?.version ?? null))
+      if (info === null || outcome !== 'available') {
         this.setPhase('idle')
       } else {
         this.setPhase('downloading')
@@ -149,6 +189,7 @@ export class AppUpdater {
       if (this.stopped) return
       // Errors stay quiet (the next check may succeed); backoff doubles to
       // the ordinary cadence cap so a broken feed is not hammered.
+      this.recordCheck('error', null)
       this.setPhase('idle')
       this.schedule(this.backoffMs)
       this.backoffMs = Math.min(this.backoffMs * 2, UPDATE_CHECK_INTERVAL_MS)

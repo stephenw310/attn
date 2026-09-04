@@ -1,0 +1,230 @@
+name: Release
+
+# Publishes a signed, notarized release to the GitHub Releases feed the
+# installed apps update from (T39, SPEC §6 Packaging). Runs when a `v*` tag is
+# pushed, or by hand from any ref; either way the version is package.json's,
+# and a tag must match it.
+#
+# What it needs (Settings → Secrets and variables → Actions):
+#   secrets  CSC_LINK, CSC_KEY_PASSWORD          Developer ID Application .p12 (base64) + password
+#            APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID   notarytool login
+#            WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD  Windows code-signing .pfx (base64) + password
+#            ATTN_RELEASE_TOKEN                  only when the feed is another repository:
+#                                                a token with contents:write there
+#   variables ATTN_RELEASE_FEED                  owner/repo of the update feed; defaults to
+#                                                this repository
+#             ATTN_ALLOW_PRIVATE_FEED            'true' to publish into a private feed anyway
+#                                                (installed apps cannot read one anonymously)
+#
+# Each build verifies itself with `package:verify --release` before uploading,
+# so an unsigned or un-notarized artifact never reaches the feed, and the
+# publish job stamps `requiredSchemaVersion` into latest.yml / latest-mac.yml
+# so the updater can refuse a release built for another database schema.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve version and feed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      feed: ${{ steps.meta.outputs.feed }}
+      schema: ${{ steps.meta.outputs.schema }}
+      same_repo: ${{ steps.meta.outputs.same_repo }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+
+      - name: Read version, schema, and feed
+        id: meta
+        env:
+          FEED: ${{ vars.ATTN_RELEASE_FEED || github.repository }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          schema="$(node --input-type=module -e "import('./scripts/write-distribution-metadata.mjs').then(m => console.log(m.packagedSchemaVersion()))")"
+          tag="v$version"
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${{ github.ref_name }}" != "$tag" ]; then
+            echo "::error::tag ${{ github.ref_name }} does not match package.json version $version (expected $tag)"
+            exit 1
+          fi
+          case "$FEED" in
+            */*) ;;
+            *) echo "::error::ATTN_RELEASE_FEED must be owner/repo, got '$FEED'"; exit 1 ;;
+          esac
+          same_repo=false
+          [ "$FEED" = "${{ github.repository }}" ] && same_repo=true
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "feed=$FEED"
+            echo "schema=$schema"
+            echo "same_repo=$same_repo"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing Attn $version (schema v$schema) to $FEED as $tag" >> "$GITHUB_STEP_SUMMARY"
+
+      # electron-updater reads a GitHub Releases feed anonymously, so a private
+      # feed repository is one the installed apps cannot see. Refuse unless the
+      # operator has said so explicitly.
+      - name: Check the feed is readable by installed apps
+        env:
+          GH_TOKEN: ${{ secrets.ATTN_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          FEED: ${{ steps.meta.outputs.feed }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          ALLOW_PRIVATE: ${{ vars.ATTN_ALLOW_PRIVATE_FEED }}
+        run: |
+          private="$(gh api "repos/$FEED" --jq .private)"
+          if [ "$private" = "true" ] && [ "$ALLOW_PRIVATE" != "true" ]; then
+            echo "::error::$FEED is private: installed apps cannot read its releases. Publish to a public feed repository (set ATTN_RELEASE_FEED), make it public, or set ATTN_ALLOW_PRIVATE_FEED=true."
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$FEED" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists in $FEED; bump package.json instead of republishing"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: macOS
+            runner: macos-latest
+            command: npm run release:mac
+            artifact: release-macos
+            paths: |
+              dist/*.dmg
+              dist/*.zip
+              dist/*.blockmap
+              dist/latest-mac.yml
+          - platform: Windows
+            runner: windows-latest
+            command: npm run release:win
+            artifact: release-windows
+            paths: |
+              dist/*.exe
+              dist/*.blockmap
+              dist/latest.yml
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      # `release:*` packages in release mode and then runs the release
+      # verifier: signature, notarization ticket, and feed metadata. A missing
+      # credential fails here, inside electron-builder, rather than producing
+      # a personal artifact that the verifier would then reject.
+      - name: Package, sign, notarize, and verify
+        run: ${{ matrix.command }}
+        env:
+          ATTN_DISTRIBUTION_MODE: release
+          ATTN_RELEASE_FEED: ${{ needs.prepare.outputs.feed }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to ${{ needs.prepare.outputs.feed }}
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.ATTN_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+      FEED: ${{ needs.prepare.outputs.feed }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SCHEMA: ${{ needs.prepare.outputs.schema }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
+      # The updater rejects a feed entry without requiredSchemaVersion; this
+      # is the step that makes the release installable, and it fails when a
+      # feed file names a version other than package.json's or an asset that
+      # was not built.
+      - name: Stamp requiredSchemaVersion into the feed files
+        run: |
+          node scripts/stamp-update-feed.mjs release
+          ls -l release
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat release/latest-mac.yml release/latest.yml >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # Create as a draft, upload every asset, then publish in one step:
+      # electron-updater ignores drafts, so no client ever sees a release
+      # whose assets are still arriving.
+      - name: Create the release and upload assets
+        env:
+          SAME_REPO: ${{ needs.prepare.outputs.same_repo }}
+          SOURCE: ${{ github.repository }}@${{ github.sha }}
+        run: |
+          notes="Attn $VERSION. Requires database schema v$SCHEMA; installed apps on that schema update automatically. Built from $SOURCE."
+          if [ "$SAME_REPO" = "true" ]; then
+            gh release create "$TAG" --repo "$FEED" --draft --title "Attn $VERSION" \
+              --target "${{ github.sha }}" --generate-notes --notes "$notes"
+          else
+            gh release create "$TAG" --repo "$FEED" --draft --title "Attn $VERSION" --notes "$notes"
+          fi
+          gh release upload "$TAG" --repo "$FEED" release/*
+          gh release edit "$TAG" --repo "$FEED" --draft=false --latest
+          echo "Published https://github.com/$FEED/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

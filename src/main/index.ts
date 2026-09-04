@@ -1,9 +1,15 @@
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, powerMonitor, safeStorage, shell } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import { type AiSettings, validateAiSettingUpdate } from '../shared/ai'
-import { shouldConstructUpdater, UPDATE_STATE_IDLE, type UpdateState } from '../shared/distribution'
+import {
+  type AppInfo,
+  type DistributionKind,
+  shouldConstructUpdater,
+  UPDATE_STATE_IDLE,
+  type UpdateState
+} from '../shared/distribution'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { AppSettingUpdate } from '../shared/settings'
@@ -274,6 +280,24 @@ function refreshTitleBarOverlay(): void {
   for (const win of BrowserWindow.getAllWindows()) win.setTitleBarOverlay(options)
 }
 
+/**
+ * The version About shows and the updater compares against. A packaged app
+ * reads its own package.json through `app.getVersion()`; an unpackaged one
+ * (electron-vite dev, the e2e harness) is launched from `out/main`, where
+ * Electron finds no package.json and answers with its own version instead,
+ * so the project's package.json two levels up is read directly.
+ */
+function runningVersion(): string {
+  if (app.isPackaged) return app.getVersion()
+  try {
+    const manifest = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'))
+    if (typeof manifest.version === 'string' && manifest.version.length > 0) return manifest.version
+  } catch {
+    // fall through to Electron's answer
+  }
+  return app.getVersion()
+}
+
 function handleNativeThemeUpdated(): void {
   if (themePreference === 'system') refreshTitleBarOverlay()
 }
@@ -410,10 +434,24 @@ async function initialize(): Promise<void> {
   // T39: only an explicit, packaged release build constructs an updater —
   // personal, dev, and seeded builds make zero feed requests (§6 Packaging).
   const distribution = app.isPackaged ? readDistributionMetadata(process.resourcesPath) : null
+  const version = runningVersion()
+  // What the About surface says about this build (F15): unpackaged is a
+  // development build; packaged with missing or personal metadata is
+  // personal; only explicit release metadata is a release.
+  const distributionKind: DistributionKind = !app.isPackaged
+    ? 'development'
+    : (distribution?.mode ?? 'personal')
+  const appInfo = (): AppInfo => ({
+    version,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    distribution: distributionKind,
+    feed: distribution?.feed ? `${distribution.feed.owner}/${distribution.feed.repo}` : null,
+    updaterActive: appUpdater !== null
+  })
   if (shouldConstructUpdater(distribution, app.isPackaged, Boolean(testUserData))) {
     appUpdater = new AppUpdater({
       feed: createElectronUpdaterFeed(distribution),
-      currentVersion: app.getVersion(),
+      currentVersion: version,
       schemaVersion: CURRENT_SCHEMA_VERSION,
       localSchemaVersion: () => openedSchemaVersion,
       onStateChange: (state) => broadcast(IPC_CHANNELS.updateState, state),
@@ -432,8 +470,10 @@ async function initialize(): Promise<void> {
     acknowledgePendingFocus: acknowledgeFocusTarget,
     acknowledgeComposerCheckpoint: (requestId) => pendingComposerCheckpoints.get(requestId)?.(),
     applySettingEffects,
+    appInfo,
     update: {
       getState: () => updateStateOverride ?? appUpdater?.state() ?? UPDATE_STATE_IDLE,
+      check: () => appUpdater?.checkNow() ?? Promise.resolve(updateStateOverride ?? UPDATE_STATE_IDLE),
       restart: () => appUpdater?.restartToApply() ?? Promise.resolve(false)
     },
     ai: {

@@ -97,7 +97,11 @@ describe('cadence and state machine', () => {
     h.updater.start()
     await settle()
     expect(h.calls).toMatchObject({ check: 1, download: 1 })
-    expect(h.updater.state()).toEqual({ phase: 'ready', readyVersion: '1.1.0' })
+    expect(h.updater.state()).toEqual({
+      phase: 'ready',
+      readyVersion: '1.1.0',
+      lastCheck: { at: 0, outcome: 'available', version: '1.1.0' }
+    })
     expect(h.states.map((state) => state.phase)).toEqual(['checking', 'downloading', 'ready'])
     expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
     // A later tick never re-downloads a ready update.
@@ -110,7 +114,60 @@ describe('cadence and state machine', () => {
     const h = harness()
     h.updater.start()
     await settle()
-    expect(h.updater.state().phase).toBe('idle')
+    expect(h.updater.state()).toEqual({
+      phase: 'idle',
+      readyVersion: null,
+      lastCheck: { at: 0, outcome: 'up-to-date', version: null }
+    })
+    expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
+  })
+
+  it('records why a newer release did not download, and a failed check as an error', async () => {
+    const incompatible = harness({ check: async () => ({ version: '2.0.0', requiredSchemaVersion: 25 }) })
+    incompatible.updater.start()
+    await settle()
+    expect(incompatible.calls.download).toBe(0)
+    expect(incompatible.updater.state().lastCheck).toEqual({
+      at: 0,
+      outcome: 'incompatible',
+      version: '2.0.0'
+    })
+
+    const failing = harness({
+      check: async () => {
+        throw new Error('feed down')
+      }
+    })
+    failing.updater.start()
+    await settle()
+    expect(failing.updater.state().lastCheck).toEqual({ at: 0, outcome: 'error', version: null })
+  })
+
+  it('checkNow runs one check, joins an in-flight one, and restarts the cadence from it', async () => {
+    const pending: { release: () => void } = { release: () => {} }
+    const h = harness({
+      check: () =>
+        new Promise((resolve) => {
+          pending.release = () => resolve(null)
+        })
+    })
+    h.updater.start()
+    await settle()
+    expect(h.calls.check).toBe(1)
+    // A second request while the first is still answering joins it.
+    const joined = h.updater.checkNow()
+    await settle()
+    expect(h.calls.check).toBe(1)
+    pending.release()
+    expect((await joined).lastCheck?.outcome).toBe('up-to-date')
+    expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
+
+    // A manual check replaces the pending scheduled one rather than stacking.
+    const manual = h.updater.checkNow()
+    await settle()
+    expect(h.calls.check).toBe(2)
+    pending.release()
+    await manual
     expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
   })
 

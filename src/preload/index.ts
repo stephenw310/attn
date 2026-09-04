@@ -5,7 +5,7 @@ import type { AiGenerateRequest, AiSettingKey, AiSettings, AiStreamEvent } from 
 import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from '../shared/auth'
 import type { CommandUsage } from '../shared/commandUsage'
 import type { ContactSearchResult } from '../shared/contacts'
-import type { UpdateState } from '../shared/distribution'
+import type { AppInfo, UpdateState } from '../shared/distribution'
 import type {
   Draft,
   DraftAttachmentMutationResult,
@@ -365,8 +365,12 @@ const api = {
       return () => ipcRenderer.removeListener(IPC_CHANNELS.outboxProgress, listener)
     }
   },
+  app: {
+    getInfo: (): Promise<AppInfo> => invoke(IPC_CHANNELS.appGetInfo)
+  },
   update: {
     getState: (): Promise<UpdateState> => invoke(IPC_CHANNELS.updateGetState),
+    check: (): Promise<UpdateState> => invoke(IPC_CHANNELS.updateCheck),
     restart: (): Promise<boolean> => invoke(IPC_CHANNELS.updateRestart),
     onState: (cb: (state: UpdateState) => void): (() => void) => {
       const listener = (_event: unknown, state: UpdateState): void => cb(state)

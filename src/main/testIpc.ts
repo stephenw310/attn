@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import type { UpdatePhase, UpdateState } from '../shared/distribution'
+import type { UpdateCheck, UpdateCheckOutcome, UpdatePhase, UpdateState } from '../shared/distribution'
 import { errorMessage } from '../shared/error'
 import { nonEmptyString } from '../shared/guards'
 import { TEST_CHANNELS } from '../shared/ipc'
@@ -14,13 +14,29 @@ export interface TestSeamDeps {
 }
 
 const UPDATE_PHASES: readonly UpdatePhase[] = ['idle', 'checking', 'downloading', 'ready']
+const UPDATE_OUTCOMES: readonly UpdateCheckOutcome[] = ['up-to-date', 'available', 'incompatible', 'error']
+
+function parseUpdateCheck(value: unknown): UpdateCheck | null | undefined {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'object') return undefined
+  const check = value as { at?: unknown; outcome?: unknown; version?: unknown }
+  if (typeof check.at !== 'number' || !UPDATE_OUTCOMES.includes(check.outcome as UpdateCheckOutcome)) {
+    return undefined
+  }
+  if (check.version !== null && check.version !== undefined && typeof check.version !== 'string') {
+    return undefined
+  }
+  return { at: check.at, outcome: check.outcome as UpdateCheckOutcome, version: check.version ?? null }
+}
 
 function parseUpdateState(value: unknown): UpdateState | null {
   if (!value || typeof value !== 'object') return null
-  const state = value as { phase?: unknown; readyVersion?: unknown }
+  const state = value as { phase?: unknown; readyVersion?: unknown; lastCheck?: unknown }
   if (!UPDATE_PHASES.includes(state.phase as UpdatePhase)) return null
   if (state.readyVersion !== null && typeof state.readyVersion !== 'string') return null
-  return { phase: state.phase as UpdatePhase, readyVersion: state.readyVersion as string | null }
+  const lastCheck = parseUpdateCheck(state.lastCheck)
+  if (lastCheck === undefined) return null
+  return { phase: state.phase as UpdatePhase, readyVersion: state.readyVersion as string | null, lastCheck }
 }
 
 export class TestSeams {
