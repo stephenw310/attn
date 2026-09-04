@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { MailLabel, SnoozedThreadRow, ThreadRow } from '../../shared/mail'
+import type { MailLabel, SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
 import { reuseLabels, reuseSnoozedRows, reuseThreadRows } from './mailDataEquality'
 
 const row = (overrides: Partial<ThreadRow> = {}): ThreadRow => ({

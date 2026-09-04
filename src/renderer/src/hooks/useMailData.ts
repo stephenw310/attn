@@ -11,7 +11,7 @@ import {
   type ThreadRow
 } from '../../../shared/mail'
 import type { OutboxChanged, OutboxItem, OutboxProgress } from '../../../shared/outbox'
-import { reuseLabels, reuseSnoozedRows, reuseThreadRows } from '../mailDataEquality'
+import { reuseLabels, reuseSnoozedRows, reuseThreadRows } from '../list/mailDataEquality'
 import {
   type CachedThreadView,
   cachedThreadView,
@@ -19,7 +19,7 @@ import {
   type MailView,
   type PagedThreadView,
   userLabelId
-} from '../mailDisplay'
+} from '../list/mailDisplay'
 import { refreshedSelectionIndex } from '../selection'
 
 /** Cached rows per system mailbox or user-label view, kept across pure switches. */

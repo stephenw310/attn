@@ -4,7 +4,7 @@ import { act, createElement, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { Draft } from '../../../shared/drafts'
-import type { MailView } from '../mailDisplay'
+import type { MailView } from '../list/mailDisplay'
 import { useDraftOpening } from './useDraftOpening'
 
 const attnDescriptor = Object.getOwnPropertyDescriptor(window, 'attn')

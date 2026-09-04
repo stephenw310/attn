@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MailLabel, ThreadListView } from '../../../shared/mail'
 import { dateGroup } from '../dateGroup'
-import type { DisplayThread } from '../mailDisplay'
+import type { DisplayThread } from '../list/mailDisplay'
 
 const LABEL_PALETTE = [
   {

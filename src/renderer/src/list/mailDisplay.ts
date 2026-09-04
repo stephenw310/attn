@@ -6,8 +6,8 @@ import type {
   MessageRecipients,
   SnoozedThreadRow,
   ThreadRow
-} from '../../shared/mail'
-import { formatSnoozeDate } from '../../shared/snooze'
+} from '../../../shared/mail'
+import { formatSnoozeDate } from '../../../shared/snooze'
 
 export type UserLabelView = `label:${string}`
 

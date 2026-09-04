@@ -11,7 +11,7 @@ import {
   type ThreadRow
 } from '../../../shared/mail'
 import type { OutboxItem } from '../../../shared/outbox'
-import type { MailView } from '../mailDisplay'
+import type { MailView } from '../list/mailDisplay'
 import { useMailData } from './useMailData'
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {

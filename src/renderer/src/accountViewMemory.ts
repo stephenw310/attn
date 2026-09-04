@@ -1,4 +1,4 @@
-import type { MailView, NavigableMailView } from './mailDisplay'
+import type { MailView, NavigableMailView } from './list/mailDisplay'
 
 /** Selection and scroll for one view, mirroring Inbox's ViewRecord shape. */
 export interface ViewRecordSnapshot {

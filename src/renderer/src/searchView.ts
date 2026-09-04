@@ -1,6 +1,6 @@
 import type { ConversationMailbox, MailLabel } from '../../shared/mail'
 import { normalizeMailboxName, parseSearchQuery } from '../../shared/searchQuery'
-import type { MailView } from './mailDisplay'
+import type { MailView } from './list/mailDisplay'
 
 function searchMailboxes(query: string): string[] {
   return parseSearchQuery(query)

@@ -3,7 +3,7 @@ import type { TriageAction } from '../../../shared/actions'
 import type { SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
 import type { AutoAdvanceDirection } from '../../../shared/settings'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../../shared/splits'
-import { type MailView, userLabelId } from '../mailDisplay'
+import { type MailView, userLabelId } from '../list/mailDisplay'
 import {
   applyThreadFlag,
   applyThreadFlagToElement,

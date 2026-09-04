@@ -4,7 +4,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, test, vi } from 'vitest'
 import type { Conversation, ConversationMailbox } from '../../../shared/mail'
-import type { DisplayThread } from '../mailDisplay'
+import type { DisplayThread } from '../list/mailDisplay'
 import { useConversation } from './useConversation'
 
 const thread: DisplayThread = {
