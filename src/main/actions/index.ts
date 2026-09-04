@@ -11,6 +11,7 @@ import {
   restoreFollowUpReminder,
   restoreSnoozeReminder,
   type SnoozeReminderSnapshot,
+  settleReminders,
   snoozeReminderSnapshot
 } from '../store/reminders'
 import { isStoredAuthActionError } from './execute'
@@ -222,21 +223,6 @@ function settleFollowUpForTriage(
     return completed + canceled
   }
   return 0
-}
-
-/**
- * Files a live reminder the way triage does: a pending one is canceled, a
- * returned one is completed. Returns the number of rows it changed so callers
- * can tell whether the thread moved at all.
- */
-function settleReminders(db: Db, accountId: string, threadId: string, kind: 'snooze' | 'follow_up'): number {
-  return db
-    .prepare(
-      `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
-       WHERE account_id = ? AND thread_id = ? AND kind = ?
-         AND state IN ('pending', 'returned')`
-    )
-    .run(accountId, threadId, kind).changes
 }
 
 /** True when {@link settleFollowUpForTriage} will change this snapshot, so an undo must restore it. */
