@@ -4,8 +4,8 @@
 // injected (electron-updater in production, fakes in tests) and time rides
 // SchedulerTime. Updates never cross a schema version: the running build,
 // the local database, and the target release must agree exactly, checked
-// before download AND again before install so a stale cached download can
-// never slip through.
+// before download AND again before install — on the explicit restart and on
+// the ordinary quit alike — so a stale cached download can never slip through.
 
 import type { UpdateCheck, UpdateCheckOutcome, UpdatePhase, UpdateState } from '../../shared/distribution'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
@@ -25,8 +25,14 @@ export interface UpdateFeed {
   /** The newest release the feed offers, or null when up to date. */
   check(): Promise<UpdateFeedInfo | null>
   download(info: UpdateFeedInfo): Promise<void>
-  /** Hand over to the installer. The caller has already quiesced workers. */
+  /** Hand over to the installer and relaunch. The caller has already quiesced workers. */
   quitAndInstall(): void
+  /**
+   * Stage the downloaded update so the quit already in progress applies it,
+   * without relaunching. Resolves once staging is done or has failed; a
+   * failure must not hold the quit.
+   */
+  installOnQuit(): Promise<void>
 }
 
 export type { UpdatePhase, UpdateState }
@@ -39,19 +45,22 @@ export interface AppUpdaterOptions {
   /** The local database's user_version at decision time; null rejects. */
   localSchemaVersion: () => number | null
   onStateChange: (state: UpdateState) => void
-  /** The existing awaited shutdown: draft mirroring and sends quiesce here. */
+  /** The existing awaited shutdown: composers checkpoint, draft mirroring and sends quiesce here. */
   shutdown: () => Promise<void>
   time?: SchedulerTime
 }
 
-/** Dotted-numeric version comparison; an unparsable target never installs. */
+/**
+ * Dotted-numeric version comparison. Every part must be a plain integer, so
+ * a prerelease such as `1.0.0-beta.1` (which the release workflow refuses to
+ * publish) or anything else unparsable never installs.
+ */
 export function isNewerVersion(candidate: string, current: string): boolean {
   const parse = (value: string): number[] | null => {
     const parts = value.replace(/^v/, '').split('.')
+    if (parts.length === 0 || !parts.every((part) => /^\d+$/.test(part))) return null
     const numbers = parts.map((part) => Number.parseInt(part, 10))
-    return numbers.length > 0 && numbers.every((part) => Number.isSafeInteger(part) && part >= 0)
-      ? numbers
-      : null
+    return numbers.every((part) => Number.isSafeInteger(part)) ? numbers : null
   }
   const target = parse(candidate)
   const base = parse(current)
@@ -197,23 +206,45 @@ export class AppUpdater {
   }
 
   /**
-   * The palette's `Restart to update`: re-validate the cached download —
-   * schema agreement can have changed since it landed, and a stale cache
-   * must never install — then quiesce the workers and hand over. Returns
-   * false when nothing installable is ready.
+   * The cached download is installable only if it still passes the same
+   * check it passed before download — schema agreement can have changed
+   * since it landed (a manual dogfood upgrade), and a stale cache must never
+   * install. A rejected cache is dropped so the next check can replace it.
    */
-  async restartToApply(): Promise<boolean> {
+  private claimReadyForInstall(): UpdateFeedInfo | null {
     const info = this.ready
-    if (this.applying || this.phase !== 'ready' || info === null) return false
+    if (this.applying || this.phase !== 'ready' || info === null) return null
     if (!this.compatible(info)) {
       this.ready = null
       this.setPhase('idle')
-      return false
+      return null
     }
     this.applying = true
     this.stop()
+    return info
+  }
+
+  /**
+   * The palette's `Restart to update`: re-validate, quiesce the workers
+   * through the ordinary quit preparation, and hand over to the installer
+   * with a relaunch. Returns false when nothing installable is ready.
+   */
+  async restartToApply(): Promise<boolean> {
+    if (this.claimReadyForInstall() === null) return false
     await this.options.shutdown()
     this.options.feed.quitAndInstall()
     return true
+  }
+
+  /**
+   * The ordinary quit: main calls this from its quit preparation, after the
+   * composers have checkpointed. A ready, still-compatible download is staged
+   * so the quit applies it; anything else is left alone. electron-updater's
+   * own install-on-quit is disabled precisely so this re-validation is the
+   * only path to an install.
+   */
+  async installOnQuit(): Promise<void> {
+    if (this.claimReadyForInstall() === null) return
+    await this.options.feed.installOnQuit()
   }
 }

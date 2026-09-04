@@ -3,9 +3,12 @@ name: Release
 # Publishes a signed, notarized release to the GitHub Releases feed the
 # installed apps update from (T39, SPEC §6 Packaging). Runs when a `v*` tag is
 # pushed, or by hand from any ref; either way the version is package.json's,
-# and a tag must match it.
+# the tag must match it, and the commit must already be on `main`.
 #
-# What it needs (Settings → Secrets and variables → Actions):
+# What it needs (Settings → Environments → `release`; the build and publish
+# jobs run in that environment, so its deployment-branch rule — `main` plus
+# tags `v*` — and any required reviewers are what stand between a branch and
+# the signing credentials):
 #   secrets  CSC_LINK, CSC_KEY_PASSWORD          Developer ID Application .p12 (base64) + password
 #            APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID   notarytool login
 #            WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD  Windows code-signing .pfx (base64) + password
@@ -16,10 +19,11 @@ name: Release
 #             ATTN_ALLOW_PRIVATE_FEED            'true' to publish into a private feed anyway
 #                                                (installed apps cannot read one anonymously)
 #
-# Each build verifies itself with `package:verify --release` before uploading,
-# so an unsigned or un-notarized artifact never reaches the feed, and the
+# The whole verification contract (`npm run verify`) runs first, each build
+# verifies itself with `package:verify --release` before uploading, and the
 # publish job stamps `requiredSchemaVersion` into latest.yml / latest-mac.yml
-# so the updater can refuse a release built for another database schema.
+# and places them in the per-schema feed release (`feed-schema-<n>`), so an
+# installation only ever sees releases built for its own database schema.
 
 on:
   push:
@@ -44,6 +48,7 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       feed: ${{ steps.meta.outputs.feed }}
       schema: ${{ steps.meta.outputs.schema }}
+      feed_tag: ${{ steps.meta.outputs.feed_tag }}
       same_repo: ${{ steps.meta.outputs.same_repo }}
     steps:
       - name: Check out repository
@@ -62,6 +67,12 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           schema="$(node --input-type=module -e "import('./scripts/write-distribution-metadata.mjs').then(m => console.log(m.packagedSchemaVersion()))")"
           tag="v$version"
+          # Plain major.minor.patch only: the updater compares numerically and
+          # the feed has one channel per schema, not per prerelease line.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::package.json version $version is not a release version (major.minor.patch, no prerelease suffix)"
+            exit 1
+          fi
           if [ "${{ github.ref_type }}" = "tag" ] && [ "${{ github.ref_name }}" != "$tag" ]; then
             echo "::error::tag ${{ github.ref_name }} does not match package.json version $version (expected $tag)"
             exit 1
@@ -77,14 +88,37 @@ jobs:
             echo "tag=$tag"
             echo "feed=$FEED"
             echo "schema=$schema"
+            echo "feed_tag=feed-schema-$schema"
             echo "same_repo=$same_repo"
           } >> "$GITHUB_OUTPUT"
-          echo "Releasing Attn $version (schema v$schema) to $FEED as $tag" >> "$GITHUB_STEP_SUMMARY"
+          echo "Releasing Attn $version (schema v$schema) to $FEED as $tag; feed release feed-schema-$schema" >> "$GITHUB_STEP_SUMMARY"
+
+      # Only commits already on main are released, whatever ref the run was
+      # started from, and an existing tag must name this exact commit — a
+      # manual re-run after a deleted release must not attach fresh binaries
+      # to a tag that points at other source.
+      - name: Check the commit is on main and the tag, if present, names it
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "::error::${{ github.sha }} is not on main; merge first, then release"
+            exit 1
+          fi
+          if git fetch --no-tags origin "refs/tags/$TAG:refs/tags/$TAG" 2>/dev/null; then
+            tagged="$(git rev-parse "$TAG^{commit}")"
+            if [ "$tagged" != "${{ github.sha }}" ]; then
+              echo "::error::tag $TAG already exists and points at $tagged, not ${{ github.sha }}"
+              exit 1
+            fi
+          fi
 
       # electron-updater reads a GitHub Releases feed anonymously, so a private
       # feed repository is one the installed apps cannot see. Refuse unless the
-      # operator has said so explicitly.
-      - name: Check the feed is readable by installed apps
+      # operator has said so explicitly. A version that already has a release
+      # is never republished.
+      - name: Check the feed is readable and the release is new
         env:
           GH_TOKEN: ${{ secrets.ATTN_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           FEED: ${{ steps.meta.outputs.feed }}
@@ -101,18 +135,68 @@ jobs:
             exit 1
           fi
 
+  verify:
+    name: Verify (typecheck, lint, unit, build, e2e)
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Resolve Electron version
+        id: electron
+        run: |
+          version="$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ steps.electron.outputs.version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The definition of done from AGENTS.md, on the exact commit being
+      # released. A tag push never runs verify.yml, and a manual dispatch may
+      # name a commit no pull request gated, so nothing is signed before this
+      # passes.
+      - name: Run the verification contract
+        run: npm run verify
+
+      - name: Report flaky tests
+        if: always()
+        run: node scripts/report-flaky.mjs
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-verify-traces
+          path: e2e/.results/
+          if-no-files-found: ignore
+          include-hidden-files: true
+
   build:
     name: Build ${{ matrix.platform }}
-    needs: prepare
+    needs: [prepare, verify]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
+    environment: release
     strategy:
       fail-fast: true
       matrix:
         include:
           - platform: macOS
             runner: macos-latest
-            command: npm run release:mac
             artifact: release-macos
             paths: |
               dist/*.dmg
@@ -121,7 +205,6 @@ jobs:
               dist/latest-mac.yml
           - platform: Windows
             runner: windows-latest
-            command: npm run release:win
             artifact: release-windows
             paths: |
               dist/*.exe
@@ -147,9 +230,11 @@ jobs:
       # `release:*` packages in release mode and then runs the release
       # verifier: signature, notarization ticket, and feed metadata. A missing
       # credential fails here, inside electron-builder, rather than producing
-      # a personal artifact that the verifier would then reject.
-      - name: Package, sign, notarize, and verify
-        run: ${{ matrix.command }}
+      # a personal artifact that the verifier would then reject. Each OS step
+      # receives only its own credentials.
+      - name: Package, sign, notarize, and verify (macOS)
+        if: runner.os == 'macOS'
+        run: npm run release:mac
         env:
           ATTN_DISTRIBUTION_MODE: release
           ATTN_RELEASE_FEED: ${{ needs.prepare.outputs.feed }}
@@ -158,6 +243,13 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Package, sign, and verify (Windows)
+        if: runner.os == 'Windows'
+        run: npm run release:win
+        env:
+          ATTN_DISTRIBUTION_MODE: release
+          ATTN_RELEASE_FEED: ${{ needs.prepare.outputs.feed }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
@@ -174,12 +266,14 @@ jobs:
     needs: [prepare, build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: release
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.ATTN_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
       FEED: ${{ needs.prepare.outputs.feed }}
       TAG: ${{ needs.prepare.outputs.tag }}
+      FEED_TAG: ${{ needs.prepare.outputs.feed_tag }}
       VERSION: ${{ needs.prepare.outputs.version }}
       SCHEMA: ${{ needs.prepare.outputs.schema }}
     steps:
@@ -198,27 +292,35 @@ jobs:
           path: release
           merge-multiple: true
 
-      # The updater rejects a feed entry without requiredSchemaVersion; this
-      # is the step that makes the release installable, and it fails when a
-      # feed file names a version other than package.json's or an asset that
-      # was not built.
-      - name: Stamp requiredSchemaVersion into the feed files
+      # The feed files point at the versioned release's assets by absolute
+      # URL and carry requiredSchemaVersion; both are what make the release
+      # installable. The step fails when a feed file names a version other
+      # than package.json's, an asset that was not built, or a version no
+      # newer than the one this schema's feed already offers.
+      - name: Stamp the feed files
         run: |
-          node scripts/stamp-update-feed.mjs release
+          mkdir -p current
+          if gh release view "$FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
+            gh release download "$FEED_TAG" --repo "$FEED" --dir current --pattern 'latest*.yml' || true
+          fi
+          node scripts/stamp-update-feed.mjs release \
+            --assets-base "https://github.com/$FEED/releases/download/$TAG" \
+            --current current
           ls -l release
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat release/latest-mac.yml release/latest.yml >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '```'
+            cat release/latest-mac.yml release/latest.yml
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Create as a draft, upload every asset, then publish in one step:
-      # electron-updater ignores drafts, so no client ever sees a release
-      # whose assets are still arriving.
-      - name: Create the release and upload assets
+      # no client ever sees a release whose assets are still arriving.
+      - name: Create the versioned release and upload assets
         env:
           SAME_REPO: ${{ needs.prepare.outputs.same_repo }}
           SOURCE: ${{ github.repository }}@${{ github.sha }}
         run: |
-          notes="Attn $VERSION. Requires database schema v$SCHEMA; installed apps on that schema update automatically. Built from $SOURCE."
+          notes="Attn $VERSION. Requires database schema v$SCHEMA; installed apps on that schema update automatically from the feed-schema-$SCHEMA release. Built from $SOURCE."
           if [ "$SAME_REPO" = "true" ]; then
             gh release create "$TAG" --repo "$FEED" --draft --title "Attn $VERSION" \
               --target "${{ github.sha }}" --generate-notes --notes "$notes"
@@ -228,3 +330,16 @@ jobs:
           gh release upload "$TAG" --repo "$FEED" release/*
           gh release edit "$TAG" --repo "$FEED" --draft=false --latest
           echo "Published https://github.com/$FEED/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      # The per-schema feed is a rolling prerelease (never GitHub's "latest")
+      # whose only assets are this schema's feed files. Installed apps on
+      # schema v$SCHEMA read it; nothing else does. Replacing its files is
+      # the moment the release becomes visible to them.
+      - name: Point the schema feed at the new release
+        run: |
+          if ! gh release view "$FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
+            gh release create "$FEED_TAG" --repo "$FEED" --prerelease --title "Update feed for database schema v$SCHEMA" \
+              --notes "Rolling update feed read by Attn installations on database schema v$SCHEMA. Not an installer; download a versioned release instead."
+          fi
+          gh release upload "$FEED_TAG" --repo "$FEED" --clobber release/latest*.yml
+          echo "Feed feed-schema-$SCHEMA now offers $VERSION" >> "$GITHUB_STEP_SUMMARY"

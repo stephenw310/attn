@@ -4,6 +4,8 @@ import {
   describeCheckedAt,
   describeUpdateStatus,
   parseDistributionMetadata,
+  schemaFeedTag,
+  schemaFeedUrl,
   shouldConstructUpdater,
   UPDATE_STATE_IDLE,
   verifyDistributionMetadata
@@ -171,5 +173,16 @@ describe('describeCheckedAt', () => {
     expect(describeCheckedAt(now - 72 * 3_600_000, now)).toBe('3 days ago')
     // A clock that went backwards never reads as the future.
     expect(describeCheckedAt(now + 5_000, now)).toBe('just now')
+  })
+})
+
+describe('schema feed location', () => {
+  it('names the rolling per-schema release the workflow maintains', () => {
+    // The release workflow builds the same tag from the schema number; the
+    // two must agree or installed apps read an empty feed.
+    expect(schemaFeedTag(27)).toBe('feed-schema-27')
+    expect(schemaFeedUrl({ owner: 'stephenw310', repo: 'attn' }, 27)).toBe(
+      'https://github.com/stephenw310/attn/releases/download/feed-schema-27'
+    )
   })
 })

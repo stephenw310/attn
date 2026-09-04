@@ -48,7 +48,7 @@ interface FeedScript {
 function harness(script: FeedScript = {}, localSchema: number | null = 24) {
   const timers = new ManualTimers()
   const states: UpdateState[] = []
-  const calls = { check: 0, download: 0, install: 0 }
+  const calls = { check: 0, download: 0, install: 0, stage: 0 }
   const shutdown = vi.fn(async () => {})
   const feed: UpdateFeed = {
     check: async () => {
@@ -61,6 +61,9 @@ function harness(script: FeedScript = {}, localSchema: number | null = 24) {
     },
     quitAndInstall: () => {
       calls.install++
+    },
+    installOnQuit: async () => {
+      calls.stage++
     }
   }
   const updater = new AppUpdater({
@@ -88,6 +91,10 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('1.0.0', '1.0.0')).toBe(false)
     expect(isNewerVersion('0.9.9', '1.0.0')).toBe(false)
     expect(isNewerVersion('not-a-version', '1.0.0')).toBe(false)
+    // Prereleases are never published; a parser that read "0-beta" as 0
+    // would let a beta client refuse the final release (PR #114 review).
+    expect(isNewerVersion('1.0.0-beta.1', '0.9.0')).toBe(false)
+    expect(isNewerVersion('1.0.0', '1.0.0-beta.1')).toBe(false)
   })
 })
 
@@ -256,6 +263,54 @@ describe('restart to apply', () => {
     expect(h.calls.install).toBe(0)
   })
 
+  it('stages a ready update for the ordinary quit, once, and never for a stale one', async () => {
+    const h = harness({ check: async () => compatibleInfo })
+    h.updater.start()
+    await settle()
+    await h.updater.installOnQuit()
+    expect(h.calls.stage).toBe(1)
+    expect(h.calls.install).toBe(0)
+    // Quit preparation and the explicit restart share one claim.
+    await h.updater.installOnQuit()
+    expect(await h.updater.restartToApply()).toBe(false)
+    expect(h.calls.stage).toBe(1)
+
+    const idle = harness()
+    idle.updater.start()
+    await settle()
+    await idle.updater.installOnQuit()
+    expect(idle.calls.stage).toBe(0)
+  })
+
+  it('a stale cached download is dropped at quit instead of staged', async () => {
+    let localSchema = 24
+    const timers = new ManualTimers()
+    const calls = { stage: 0 }
+    const updater = new AppUpdater({
+      feed: {
+        check: async () => compatibleInfo,
+        download: async () => {},
+        quitAndInstall: () => {},
+        installOnQuit: async () => {
+          calls.stage++
+        }
+      },
+      currentVersion: '1.0.0',
+      schemaVersion: 24,
+      localSchemaVersion: () => localSchema,
+      onStateChange: () => {},
+      shutdown: async () => {},
+      time: timers.time
+    })
+    updater.start()
+    await settle()
+    expect(updater.state().phase).toBe('ready')
+    localSchema = 25
+    await updater.installOnQuit()
+    expect(calls.stage).toBe(0)
+    expect(updater.state().phase).toBe('idle')
+  })
+
   it('re-validates the cached download at install time', async () => {
     let localSchema = 24
     const timers = new ManualTimers()
@@ -266,7 +321,8 @@ describe('restart to apply', () => {
         download: async () => {},
         quitAndInstall: () => {
           calls.install++
-        }
+        },
+        installOnQuit: async () => {}
       },
       currentVersion: '1.0.0',
       schemaVersion: 24,

@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// Stamps `requiredSchemaVersion` into the electron-updater feed files
-// (latest.yml, latest-mac.yml) before the release workflow uploads them (T39,
-// SPEC §6 Packaging). The updater rejects any release whose feed entry lacks
-// the key or names another schema, so a feed file that reaches GitHub without
-// this stamp is an update nobody can install — the workflow runs this step
-// between the build and the upload, and refuses to continue when it fails.
+// Prepares the electron-updater feed files (latest.yml, latest-mac.yml) for
+// the per-schema feed before the release workflow uploads them (T39, SPEC §6
+// Packaging):
 //
-//   node scripts/stamp-update-feed.mjs <directory holding latest*.yml>
+//   node scripts/stamp-update-feed.mjs <dir> --assets-base <url> [--current <dir>]
 //
-// The schema version is read from src/main/db/schema.ts at the same commit
-// the artifacts were built from, and each file's `version:` must equal
-// package.json's, so a stale artifact from another build cannot be published
-// under this version. The feed files are flat YAML maps whose top level
-// electron-builder writes; a top-level key is appended rather than re-serialized
-// so nothing else in the file changes.
+// - `requiredSchemaVersion` is appended, read from src/main/db/schema.ts at
+//   the commit the artifacts were built from. The updater rejects any entry
+//   without it, so an unstamped feed is an update nobody can install.
+// - Every `url:` / `path:` becomes an absolute URL under --assets-base (the
+//   versioned release's download directory). The feed itself lives in the
+//   rolling `feed-schema-<n>` release, so relative names would resolve there.
+// - Each file's `version:` must equal package.json's, must be a plain
+//   `major.minor.patch`, and — with --current, the directory holding the feed
+//   files currently published for this schema — must be newer than what the
+//   feed already offers, so a re-run of an older tag cannot roll a feed back.
+//
+// The feed files are flat YAML maps electron-builder writes; they are edited
+// line by line rather than re-serialized so nothing else in them changes.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -25,41 +29,91 @@ const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** The feed file names electron-builder emits for the two shipping targets. */
 export const UPDATE_INFO_FILES = ['latest.yml', 'latest-mac.yml']
 
-/**
- * Return the stamped text of one feed file. Throws when the file is not the
- * expected shape: a different version, an existing stamp, or no `files:` block.
- */
-export function stampUpdateInfo(text, { version, schemaVersion }) {
-  if (!Number.isSafeInteger(schemaVersion) || schemaVersion <= 0) {
-    throw new Error(`schema version must be a positive integer, got ${schemaVersion}`)
-  }
-  const lines = text.split('\n')
-  const topLevel = (key) => lines.find((line) => line.startsWith(`${key}:`))
-  const versionLine = topLevel('version')
-  if (!versionLine) throw new Error('feed file has no top-level version')
-  const declared = versionLine
-    .slice('version:'.length)
-    .trim()
-    .replace(/^['"]|['"]$/g, '')
-  if (declared !== version) {
-    throw new Error(`feed file declares version ${declared}, expected ${version}`)
-  }
-  if (topLevel('requiredSchemaVersion')) throw new Error('feed file is already stamped')
-  if (!topLevel('files')) throw new Error('feed file has no files block')
-  const body = text.endsWith('\n') ? text : `${text}\n`
-  return `${body}requiredSchemaVersion: ${schemaVersion}\n`
+const RELEASE_VERSION = /^\d+\.\d+\.\d+$/
+
+/** Plain `major.minor.patch` only — the updater's comparison rejects anything else. */
+export function isReleaseVersion(version) {
+  return RELEASE_VERSION.test(version)
 }
 
-/** Every `url:` in the feed must name a file that sits beside it. */
+/** True when `candidate` is a strictly newer release version than `current`. */
+export function isNewerReleaseVersion(candidate, current) {
+  if (!isReleaseVersion(candidate) || !isReleaseVersion(current)) return false
+  const left = candidate.split('.').map(Number)
+  const right = current.split('.').map(Number)
+  for (let index = 0; index < 3; index++) {
+    if (left[index] !== right[index]) return left[index] > right[index]
+  }
+  return false
+}
+
+function unquote(value) {
+  return value.trim().replace(/^['"]|['"]$/g, '')
+}
+
+/** The top-level `version:` of a feed file, or null. */
+export function feedVersion(text) {
+  const line = text.split('\n').find((candidate) => candidate.startsWith('version:'))
+  return line ? unquote(line.slice('version:'.length)) : null
+}
+
+/** Every `url:` in the feed, quoted or not, top-level or inside `files:`. */
 export function feedAssetNames(text) {
   return text
     .split('\n')
     .map((line) => line.match(/^\s*(?:-\s+)?url:\s*(.+?)\s*$/))
     .filter((match) => match !== null)
-    .map((match) => match[1].replace(/^['"]|['"]$/g, ''))
+    .map((match) => unquote(match[1]))
 }
 
-function stampDirectory(directory) {
+/**
+ * Return the stamped text of one feed file. Throws when the file is not the
+ * expected shape: a different or non-release version, an existing stamp, no
+ * `files:` block, or an asset that is already absolute (stamped twice).
+ */
+export function stampUpdateInfo(text, { version, schemaVersion, assetsBase }) {
+  if (!Number.isSafeInteger(schemaVersion) || schemaVersion <= 0) {
+    throw new Error(`schema version must be a positive integer, got ${schemaVersion}`)
+  }
+  if (!isReleaseVersion(version)) throw new Error(`${version} is not a release version (major.minor.patch)`)
+  if (!/^https:\/\/\S+$/.test(assetsBase))
+    throw new Error(`assets base must be an https URL, got ${assetsBase}`)
+  const lines = text.split('\n')
+  const topLevel = (key) => lines.find((line) => line.startsWith(`${key}:`))
+  const declared = feedVersion(text)
+  if (declared === null) throw new Error('feed file has no top-level version')
+  if (declared !== version) throw new Error(`feed file declares version ${declared}, expected ${version}`)
+  if (topLevel('requiredSchemaVersion')) throw new Error('feed file is already stamped')
+  if (!topLevel('files')) throw new Error('feed file has no files block')
+  const base = assetsBase.endsWith('/') ? assetsBase : `${assetsBase}/`
+  const absolute = (name) => {
+    if (/^[a-z]+:\/\//i.test(name)) throw new Error(`asset ${name} is already absolute; stamped twice?`)
+    return `${base}${encodeURIComponent(name)}`
+  }
+  const rewritten = lines.map((line) => {
+    const match = line.match(/^(\s*(?:-\s+)?(?:url|path):\s*)(.+?)\s*$/)
+    return match ? `${match[1]}${absolute(unquote(match[2]))}` : line
+  })
+  const body = rewritten.join('\n')
+  return `${body.endsWith('\n') ? body : `${body}\n`}requiredSchemaVersion: ${schemaVersion}\n`
+}
+
+function parseArguments(argv) {
+  const options = { directory: null, assetsBase: null, current: null }
+  for (let index = 0; index < argv.length; index++) {
+    const argument = argv[index]
+    if (argument === '--assets-base') options.assetsBase = argv[++index]
+    else if (argument === '--current') options.current = argv[++index]
+    else if (options.directory === null) options.directory = argument
+    else throw new Error(`unexpected argument ${argument}`)
+  }
+  if (!options.directory || !options.assetsBase) {
+    throw new Error('usage: node scripts/stamp-update-feed.mjs <dir> --assets-base <url> [--current <dir>]')
+  }
+  return options
+}
+
+function stampDirectory({ directory, assetsBase, current }) {
   const version = JSON.parse(readFileSync(join(projectDir, 'package.json'), 'utf8')).version
   const schemaVersion = packagedSchemaVersion()
   const present = UPDATE_INFO_FILES.filter((name) => existsSync(join(directory, name)))
@@ -73,13 +127,25 @@ function stampDirectory(directory) {
     for (const asset of feedAssetNames(text)) {
       if (!siblings.has(asset)) throw new Error(`${name} names ${asset}, which is not in ${directory}`)
     }
-    writeFileSync(path, stampUpdateInfo(text, { version, schemaVersion }))
-    console.log(`[release] ${name}: version ${version}, requiredSchemaVersion ${schemaVersion}`)
+    const currentPath = current ? join(current, name) : null
+    if (currentPath && existsSync(currentPath)) {
+      const published = feedVersion(readFileSync(currentPath, 'utf8'))
+      if (published !== null && !isNewerReleaseVersion(version, published)) {
+        throw new Error(`${name}: the feed already offers ${published}; ${version} is not newer`)
+      }
+    }
+    writeFileSync(path, stampUpdateInfo(text, { version, schemaVersion, assetsBase }))
+    console.log(
+      `[release] ${name}: version ${version}, requiredSchemaVersion ${schemaVersion}, assets at ${assetsBase}`
+    )
   }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const directory = process.argv[2]
-  if (!directory) throw new Error('usage: node scripts/stamp-update-feed.mjs <directory>')
-  stampDirectory(resolve(directory))
+  const options = parseArguments(process.argv.slice(2))
+  stampDirectory({
+    directory: resolve(options.directory),
+    assetsBase: options.assetsBase,
+    current: options.current ? resolve(options.current) : null
+  })
 }

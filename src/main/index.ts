@@ -450,12 +450,15 @@ async function initialize(): Promise<void> {
   })
   if (shouldConstructUpdater(distribution, app.isPackaged, Boolean(testUserData))) {
     appUpdater = new AppUpdater({
-      feed: createElectronUpdaterFeed(distribution),
+      feed: createElectronUpdaterFeed(distribution, CURRENT_SCHEMA_VERSION),
       currentVersion: version,
       schemaVersion: CURRENT_SCHEMA_VERSION,
       localSchemaVersion: () => openedSchemaVersion,
       onStateChange: (state) => broadcast(IPC_CHANNELS.updateState, state),
-      shutdown: teardown
+      // The explicit restart quiesces exactly like a quit — composers
+      // checkpoint first, then the workers stop — and marks the quit prepared,
+      // so the installer's own app.quit() passes straight through below.
+      shutdown: () => prepareQuit({ installReadyUpdate: false })
     })
     appUpdater.start()
   }
@@ -581,23 +584,39 @@ async function teardownOwnedResources(): Promise<void> {
   await ownedService?.stop()
 }
 
+let quitPrepared = false
+let quitPreparation: Promise<void> | null = null
+
+/**
+ * Everything a quit needs before the process may go: the composers checkpoint
+ * while their documents are alive (B28), a ready update is re-validated and
+ * staged so this quit applies it (T39 — the ordinary quit and the explicit
+ * restart both pass through here; the restart hands over to the installer
+ * itself, so it skips the staging), and then the workers stop. Runs once;
+ * a second caller joins the first.
+ */
+function prepareQuit(options: { installReadyUpdate: boolean }): Promise<void> {
+  if (quitPreparation) return quitPreparation
+  quitPreparation = (async () => {
+    await checkpointComposers().catch(() => {})
+    if (options.installReadyUpdate) await appUpdater?.installOnQuit().catch(() => {})
+    await teardown()
+  })().finally(() => {
+    quitPrepared = true
+  })
+  return quitPreparation
+}
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
 else {
-  let quitPrepared = false
-  let preparingQuit = false
   app.on('before-quit', (event) => {
     if (quitPrepared) return
     event.preventDefault()
-    if (preparingQuit) return
-    preparingQuit = true
-    void checkpointComposers()
-      .catch(() => {})
-      .then(teardown)
-      .finally(() => {
-        quitPrepared = true
-        app.quit()
-      })
+    // A preparation already under way (a second quit, or the explicit
+    // restart's) quits on its own when it finishes.
+    if (quitPreparation) return
+    void prepareQuit({ installReadyUpdate: true }).finally(() => app.quit())
   })
   app.on('second-instance', () => showMainWindow())
   app.whenReady().then(async () => {

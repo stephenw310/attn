@@ -25,13 +25,18 @@ export function useAppUpdate(): AppUpdateApi {
     const attn = window.attn
     if (!attn) return
     let stale = false
+    // A push that lands while the snapshot request is in flight is newer than
+    // the snapshot; the snapshot then only fills in when nothing was pushed.
+    let pushed = false
     const unsubscribe = attn.update.onState((next) => {
-      if (!stale) setState(next)
+      if (stale) return
+      pushed = true
+      setState(next)
     })
     void attn.update
       .getState()
       .then((next) => {
-        if (!stale) setState(next)
+        if (!stale && !pushed) setState(next)
       })
       .catch(() => {})
     void attn.app

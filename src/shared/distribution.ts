@@ -104,6 +104,22 @@ export interface DistributionMetadata {
   feed?: { owner: string; repo: string }
 }
 
+/**
+ * Where a build on schema `n` reads its update feed: the rolling
+ * `feed-schema-<n>` release of the feed repository holds that schema's
+ * latest.yml / latest-mac.yml, whose entries point at the versioned release's
+ * assets by absolute URL (T39; the release workflow maintains it). Separate
+ * per-schema feeds are what let an installation on an older schema keep
+ * finding maintenance releases after a newer schema has shipped.
+ */
+export function schemaFeedTag(schemaVersion: number): string {
+  return `feed-schema-${schemaVersion}`
+}
+
+export function schemaFeedUrl(feed: { owner: string; repo: string }, schemaVersion: number): string {
+  return `https://github.com/${feed.owner}/${feed.repo}/releases/download/${schemaFeedTag(schemaVersion)}`
+}
+
 function isFeed(value: unknown): value is { owner: string; repo: string } {
   if (!value || typeof value !== 'object') return false
   const feed = value as Partial<{ owner: string; repo: string }>
