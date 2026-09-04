@@ -12,7 +12,13 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   grepInvert: process.env.ATTN_E2E_PERF === '1' ? undefined : /@perf/,
   retries: process.env.CI ? 1 : 0,
-  reporter: [['list']],
+  // A retry that passes still reports the job green, so CI also writes a JSON
+  // report into the directory it already uploads; `scripts/report-flaky.mjs`
+  // reads it and prints the retried tests into the job log. Local runs keep the
+  // plain list reporter and write no report file.
+  reporter: process.env.CI
+    ? [['list'], ['github'], ['json', { outputFile: './e2e/.results/results.json' }]]
+    : [['list']],
   outputDir: './e2e/.results',
   use: { trace: 'retain-on-failure' }
 })

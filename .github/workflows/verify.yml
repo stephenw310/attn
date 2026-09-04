@@ -30,6 +30,21 @@ jobs:
           node-version: 22.x
           cache: npm
 
+      - name: Resolve Electron version
+        id: electron
+        run: |
+          version="$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # setup-node's npm cache covers registry tarballs only. The Electron
+      # binary is fetched separately by the postinstall toolchain script into
+      # ~/.cache/electron, and without this every job downloads it again.
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ steps.electron.outputs.version }}
+
       - name: Install dependencies
         run: npm ci
 
@@ -62,11 +77,40 @@ jobs:
           node-version: 22.x
           cache: npm
 
+      - name: Resolve Electron version
+        id: electron
+        run: |
+          version="$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ steps.electron.outputs.version }}
+
       - name: Install dependencies
         run: npm ci
 
+      # The static passes run inside this job rather than behind `needs:` on
+      # the verify job: they cost about a minute against a warm npm cache and
+      # they run before the 30-minute suite, so a lint or type error fails this
+      # job just as fast as a dependency would have — without adding the verify
+      # job's wall clock to every Electron run.
+      - name: Check lint and formatting
+        run: npx biome ci .
+
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Run Electron smoke tests
         run: npm run e2e
+
+      # `retries: 1` in CI turns a flake into a green run. The JSON reporter
+      # records it; this prints it so the job log says so out loud.
+      - name: Report flaky tests
+        if: always()
+        run: node scripts/report-flaky.mjs
 
       - name: Upload smoke artifacts
         if: always()
@@ -103,13 +147,39 @@ jobs:
           node-version: 22.x
           cache: npm
 
+      - name: Resolve Electron version
+        id: electron
+        run: |
+          version="$(node -p "require('./package-lock.json').packages['node_modules/electron'].version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ steps.electron.outputs.version }}
+
       - name: Install dependencies
         run: npm ci
+
+      # Same reasoning as the smoke job: the static passes up front keep this
+      # job's meaning identical to a local `npm run verify` and fail it fast.
+      - name: Check lint and formatting
+        run: npx biome ci .
+
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Run Electron performance smoke
         # This job measures requestAnimationFrame paint latency. Keep the app
         # visible inside xvfb so Chromium does not apply its hidden-window cadence.
         run: npm run e2e:perf -- --visible
+
+      # `retries: 1` in CI turns a flake into a green run. The JSON reporter
+      # records it; this prints it so the job log says so out loud.
+      - name: Report flaky tests
+        if: always()
+        run: node scripts/report-flaky.mjs
 
       - name: Upload performance traces and metrics
         if: always()
