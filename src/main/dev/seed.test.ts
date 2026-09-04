@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,7 +48,8 @@ describe('loadSeed', () => {
     // Built here rather than read from e2e/fixtures: the e2e suite derives its
     // own readiness seeds, and this test only needs two accounts at different
     // checkpoints.
-    const fixturePath = join(mkdtempSync(join(tmpdir(), 'attn-seed-')), 'two-accounts.json')
+    const fixtureDir = mkdtempSync(join(tmpdir(), 'attn-seed-'))
+    const fixturePath = join(fixtureDir, 'two-accounts.json')
     writeFileSync(
       fixturePath,
       JSON.stringify({
@@ -73,6 +74,7 @@ describe('loadSeed', () => {
       ])
     } finally {
       db.close()
+      rmSync(fixtureDir, { recursive: true, force: true })
     }
   })
 
