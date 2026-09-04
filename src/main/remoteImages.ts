@@ -24,8 +24,79 @@ export interface RegisteredMailFrame {
   messageId: string
   /** Resolved from the local store at registration; null when unknown. */
   sender: string | null
-  /** One `Load once` render; cleared with the frame's registration. */
+  /**
+   * One `Load once` render. Minted by main from the reader's gesture (see
+   * `MailFrameGrants`) — never taken from the registering renderer — and
+   * cleared with the frame's registration.
+   */
   allowOnce: boolean
+}
+
+/**
+ * Pending `Load once` grants (T33). Registering a mail frame asserts nothing
+ * about its allowance: the reader's `Load once` gesture arrives on its own
+ * bridge call, main records it against the exact nonce that gesture is about
+ * to register, and the next registration of that nonce and message spends it.
+ * Every other registration — a second one for the same message, the same
+ * nonce for another message, one no gesture preceded — is decided by the
+ * policy alone.
+ *
+ * What this does and does not guarantee: the registration path carries no
+ * policy, a grant is single-use, and it cannot outlive its nonce. It is not
+ * gesture authentication. Main has no evidence of a click, so the gesture
+ * call is trusted as user intent exactly like `Always load from sender` and
+ * every other bridge call — a renderer that has already been compromised can
+ * call it. The renderer's own defense against that is SPEC §6: mail HTML is
+ * sanitized and rendered scriptless, and `fromAppFrame` refuses grants from
+ * any frame but the app's own.
+ */
+export class MailFrameGrants {
+  private readonly pending = new Map<string, string>()
+
+  /**
+   * `limit` bounds dead entries: the gesture's own remount spends a grant
+   * immediately, so anything still pending is a registration that never
+   * arrived (a closed reader, a failed round trip). Oldest is evicted first.
+   */
+  constructor(private readonly limit = 16) {}
+
+  /** Record the gesture: the frame `nonce` will carry `messageId` remotely once. */
+  allowOnceFor(nonce: string, messageId: string): void {
+    this.pending.delete(nonce)
+    this.pending.set(nonce, messageId)
+    for (const oldest of this.pending.keys()) {
+      if (this.pending.size <= this.limit) break
+      this.pending.delete(oldest)
+    }
+  }
+
+  /** Spend this registration's grant, if the gesture minted one for it. */
+  take(nonce: string, messageId: string): boolean {
+    const granted = this.pending.get(nonce) === messageId
+    // A nonce registers once, so the entry is dead either way.
+    this.pending.delete(nonce)
+    return granted
+  }
+}
+
+/** The shape of an `ipcMain.handle` event this module needs to place a caller. */
+export interface FrameOriginEvent {
+  senderFrame: { frameToken?: string } | null
+  sender: { mainFrame: { frameToken?: string } | null }
+}
+
+/**
+ * True when an IPC call came from the app's top-level frame. Mail frames are
+ * scriptless sandboxed `srcdoc` documents with no bridge, and the window runs
+ * without `nodeIntegrationInSubFrames`, so no child frame can reach `ipcMain`
+ * today; the check is the one piece of origin evidence main can verify itself
+ * (Electron's own guidance for `handle`), kept so a future frame with a bridge
+ * cannot mint or spend a grant.
+ */
+export function fromAppFrame(event: FrameOriginEvent): boolean {
+  const frame = event.senderFrame
+  const main = event.sender?.mainFrame
+  return Boolean(frame && main && frame === main)
 }
 
 /**

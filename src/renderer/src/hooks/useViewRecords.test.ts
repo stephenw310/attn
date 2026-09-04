@@ -4,7 +4,7 @@ import { act, createElement, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, test } from 'vitest'
 import { clearAccountView, readAccountView } from '../accountViewMemory'
-import type { MailView } from '../mailDisplay'
+import type { MailView } from '../list/mailDisplay'
 import { useViewRecords } from './useViewRecords'
 
 const ACCOUNT = 'records@attn.test'

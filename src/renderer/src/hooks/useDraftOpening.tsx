@@ -11,7 +11,7 @@ import {
   displaySnoozedThread,
   displayThread,
   type MailView
-} from '../mailDisplay'
+} from '../list/mailDisplay'
 import { conversationMailboxFor, conversationMailboxForSearch } from '../searchView'
 import type { ShowToast } from './useToast'
 

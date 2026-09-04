@@ -459,6 +459,28 @@ test('keeps formatting edits made inside the saved Gmail signature', async ({ ap
   expect(drafts[0]?.bodyHtml).toMatch(/<(?:b|strong)\b/)
 })
 
+test('gives Mod+B to Bold inside the composer, not to the sidebar toggle', async ({ page }) => {
+  // `layout.sidebar.toggle` is a global command that stays enabled in the
+  // composer on the same keystroke; SPEC §5 gives the composer verb precedence.
+  const toggle = page.getByTestId('sidebar-toggle')
+  await expect(toggle).toHaveAttribute('aria-label', 'Collapse sidebar')
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+
+  // Toggle the format on a collapsed caret, then type: the typed run carries it.
+  await composer.typeBody('Plain ')
+  await page.keyboard.press('ControlOrMeta+b')
+  await composer.typeBody('Strong')
+  await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+
+  const drafts = await page.evaluate(async () => window.attn.draft.list())
+  expect(drafts).toHaveLength(1)
+  expect(drafts[0]?.bodyHtml).toMatch(/<(?:b|strong)\b[^>]*>Strong<\/(?:b|strong)>/)
+  await expect(toggle).toHaveAttribute('aria-label', 'Collapse sidebar')
+})
+
 test('opens reply and forward from the selected inbox row', async ({ page }) => {
   await expect(page.getByTestId('thread-row').first()).toHaveAttribute('data-selected', 'true')
 

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '../db'
@@ -42,8 +45,19 @@ describe('resolveInternalDate', () => {
 describe('loadSeed', () => {
   it('keeps each account backfill checkpoint independent', () => {
     const db = openDatabase(':memory:')
-    const fixturePath = fileURLToPath(
-      new URL('../../../e2e/fixtures/seed-two-accounts-inbox-ready.json', import.meta.url)
+    // Built here rather than read from e2e/fixtures: the e2e suite derives its
+    // own readiness seeds, and this test only needs two accounts at different
+    // checkpoints.
+    const fixtureDir = mkdtempSync(join(tmpdir(), 'attn-seed-'))
+    const fixturePath = join(fixtureDir, 'two-accounts.json')
+    writeFileSync(
+      fixturePath,
+      JSON.stringify({
+        accounts: [
+          { account: 'ready@attn.test', splitSetup: true, threads: [] },
+          { account: 'syncing@attn.test', splitSetup: true, backfillCursor: 'bodies', threads: [] }
+        ]
+      })
     )
     try {
       expect(loadSeed(db, fixturePath).accountIds).toEqual(['ready@attn.test', 'syncing@attn.test'])
@@ -60,6 +74,7 @@ describe('loadSeed', () => {
       ])
     } finally {
       db.close()
+      rmSync(fixtureDir, { recursive: true, force: true })
     }
   })
 

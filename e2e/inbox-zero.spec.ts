@@ -1,7 +1,30 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from './electron'
 import { setSyncState } from './seams'
+
+/**
+ * The readiness suites need an empty Inbox at a given backfill checkpoint and
+ * nothing else, so their seeds are derived here instead of being carried as
+ * near-identical fixture files. Generated seeds land in the gitignored
+ * `.generated/`, never in `.artifacts/`, which CI uploads wholesale.
+ */
+function emptyAccount(name: string, backfillCursor?: string) {
+  return { account: `${name}@attn.test`, splitSetup: true, backfillCursor, threads: [] }
+}
+
+function useGeneratedSeed(name: string, fixture: unknown): void {
+  const seed = `.generated/inbox-zero-${name}.json`
+  test.use({ seed })
+  test.beforeEach(() => {
+    mkdirSync(join(__dirname, '.generated'), { recursive: true })
+    writeFileSync(join(__dirname, seed), JSON.stringify(fixture))
+  })
+}
+
+function useEmptyInboxSeed(name: string, backfillCursor: string): void {
+  useGeneratedSeed(name, emptyAccount(name, backfillCursor))
+}
 
 test.describe('complete Inbox metadata', () => {
   test.use({ seed: 'fixtures/seed-splits.json' })
@@ -48,7 +71,9 @@ test.describe('complete Inbox metadata', () => {
 })
 
 test.describe('account-scoped Inbox readiness', () => {
-  test.use({ seed: 'fixtures/seed-two-accounts-inbox-ready.json' })
+  useGeneratedSeed('two-accounts', {
+    accounts: [emptyAccount('ready'), emptyAccount('syncing', 'bodies')]
+  })
 
   test('switches between the reward and loading state using each account checkpoint', async ({ page }) => {
     await expect(page.getByTestId('account-menu')).toContainText('ready@attn.test')
@@ -69,7 +94,7 @@ test.describe('account-scoped Inbox readiness', () => {
 })
 
 test.describe('partial Inbox metadata', () => {
-  test.use({ seed: 'fixtures/seed-inbox-not-ready.json' })
+  useEmptyInboxSeed('not-ready', 'metadata')
 
   test('keeps the reward hidden while the Inbox metadata walk is incomplete', async ({ app, page }) => {
     await setSyncState(app, { phase: 'syncing', stage: 'metadata', threadsDone: 0 })
@@ -82,7 +107,7 @@ test.describe('partial Inbox metadata', () => {
 })
 
 test.describe('partial Inbox bodies', () => {
-  test.use({ seed: 'fixtures/seed-inbox-bodies.json' })
+  useEmptyInboxSeed('bodies', 'bodies')
 
   test('waits for body-derived split classification', async ({ page }) => {
     await expect(page.getByTestId('inbox-zero')).toHaveCount(0)
@@ -92,7 +117,7 @@ test.describe('partial Inbox bodies', () => {
 })
 
 test.describe('Inbox metadata recovery', () => {
-  test.use({ seed: 'fixtures/seed-inbox-recovery.json' })
+  useEmptyInboxSeed('recovery', 'done')
 
   test('hides an existing reward as soon as metadata recovery starts', async ({ app, page }) => {
     await expect(page.getByTestId('inbox-zero')).toBeVisible()

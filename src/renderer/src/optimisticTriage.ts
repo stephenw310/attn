@@ -1,7 +1,7 @@
 import type { TriageAction } from '../../shared/actions'
 import { moveLabelDelta } from '../../shared/move'
 import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../shared/splits'
-import { type MailView, userLabelId } from './mailDisplay'
+import { type MailView, userLabelId } from './list/mailDisplay'
 
 type ThreadFlag = 'starred' | 'unread'
 

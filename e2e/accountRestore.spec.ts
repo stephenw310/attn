@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import type { ThreadListRequest } from '../src/shared/mail'
 import { expect, test } from './electron'
+import { emitSeam, observeInvokes } from './seams'
 
 for (const view of ['inbox', 'split', 'all'] as const) {
   test.describe(`account restoration in ${view}`, () => {
@@ -118,30 +119,13 @@ for (const view of ['inbox', 'split', 'all'] as const) {
           for (const message of thread.messages) message.labelIds = ['TRASH']
         }
         writeFileSync(join(__dirname, seed), JSON.stringify(fixture))
-        await app.evaluate(
-          ({ ipcMain }, channel) => new Promise<void>((resolve) => ipcMain.emit(channel, {}, resolve)),
-          TEST_CHANNELS.reloadSeed
-        )
-        await app.evaluate(({ ipcMain }, channel) => {
-          type Handler = Parameters<typeof ipcMain.handle>[1]
-          const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
-          const original = handlers.get(channel)
-          if (!original) throw new Error('Missing thread list handler')
-          const requests: ThreadListRequest[] = []
-          Object.assign(globalThis, { restoreRequests: requests })
-          ipcMain.removeHandler(channel)
-          ipcMain.handle(channel, (event, request) => {
-            requests.push(request)
-            return original(event, request)
-          })
-        }, IPC_CHANNELS.mailListThreads)
+        await emitSeam(app, TEST_CHANNELS.reloadSeed)
+        const listCalls = await observeInvokes(app, IPC_CHANNELS.mailListThreads)
         await page.keyboard.press('ControlOrMeta+1')
         await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
         await expect(selected).toHaveAttribute('data-thread-id', change === 'new mail' ? id : fallbackId)
         await expect(list).toHaveAttribute('data-thread-count', change === 'new mail' ? '200' : '100')
-        const requests = await app.evaluate(
-          () => (globalThis as unknown as { restoreRequests: ThreadListRequest[] }).restoreRequests
-        )
+        const requests = (await listCalls()).map(([request]) => request as ThreadListRequest)
         expect(requests.some((request) => request.threadId === id)).toBe(true)
         // A missing row must not trigger a scan of the remaining mailbox pages.
         expect(requests.filter((request) => request.cursor && !request.threadId)).toHaveLength(

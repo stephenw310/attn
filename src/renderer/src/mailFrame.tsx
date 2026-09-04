@@ -320,7 +320,7 @@ export interface MailFrameAccess {
 export interface MailFrameAccessState {
   /** Null until main has answered; nothing may mount before then (T33). */
   access: MailFrameAccess | null
-  /** T33 "Load once": spend one registration's allowance and re-register. */
+  /** T33 "Load once": ask main to grant one render, then re-register. */
   loadOnce: () => void
 }
 
@@ -340,7 +340,9 @@ export function useMailFrameAccess({
 }): MailFrameAccessState {
   const [access, setAccess] = useState<MailFrameAccess | null>(null)
   const [epoch, setEpoch] = useState(0)
-  const allowOnceRef = useRef(false)
+  // The nonce main granted one render to, minted by `loadOnce` before the
+  // gesture crossed IPC so the re-registration below claims that exact grant.
+  const grantedNonceRef = useRef<string | null>(null)
 
   // A policy change (the toggle or a per-sender override, from Settings, the
   // palette, or another open message) re-registers every mounted frame, so an
@@ -378,13 +380,13 @@ export function useMailFrameAccess({
         stale = true
       }
     }
-    const nonce = crypto.randomUUID()
-    // `Load once` is spent by exactly one registration (T33): the next mount
-    // of this message is blocked again.
-    const allowOnce = allowOnceRef.current
-    allowOnceRef.current = false
+    // `Load once` is spent by exactly one registration (T33): main matches
+    // its grant to this nonce and message, so the next mount of this message —
+    // which mints a fresh nonce — is blocked again.
+    const nonce = grantedNonceRef.current ?? crypto.randomUUID()
+    grantedNonceRef.current = null
     bridge.mail
-      .registerMessageFrame(nonce, messageId, allowOnce)
+      .registerMessageFrame(nonce, messageId)
       .then((answer) => {
         if (!stale) setAccess({ nonce, ...answer })
       })
@@ -401,9 +403,20 @@ export function useMailFrameAccess({
   }, [enabled, epoch, messageId])
 
   const loadOnce = useCallback(() => {
-    allowOnceRef.current = true
-    setEpoch((current) => current + 1)
-  }, [])
+    const bridge = window.attn
+    if (!bridge || messageId === null) return
+    // Report the gesture first: main records a single-use grant against the
+    // nonce the remount will register, and only then does the frame
+    // re-register (T33). Registration itself carries no allowance.
+    const nonce = crypto.randomUUID()
+    void bridge.mail
+      .allowRemoteImagesOnce(nonce, messageId)
+      .then(() => {
+        grantedNonceRef.current = nonce
+        setEpoch((current) => current + 1)
+      })
+      .catch(() => {})
+  }, [messageId])
 
   return { access, loadOnce }
 }

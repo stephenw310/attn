@@ -193,6 +193,65 @@ export async function expectResponseHeld(app: ElectronApplication): Promise<void
 }
 
 /**
+ * Back-date every pending reminder (snooze and follow-up) so the next launch
+ * finds it due, once exactly `pending` of them exist — the count is returned,
+ * so a spec polls this until the reminder it is waiting on has been written
+ * rather than sleeping. The live scheduler is deliberately not refreshed: the
+ * deadline must pass while the app is down, which is what the production
+ * snooze bridge (which does refresh) cannot express.
+ */
+export async function expireReminders(app: ElectronApplication, pending: number): Promise<number> {
+  const result = await callSeam<number | { error: string }>(app, TEST_CHANNELS.expireReminders, pending)
+  if (typeof result !== 'number') throw new Error(result.error)
+  return result
+}
+
+/**
+ * Record the arguments of every invoke on `channel` from now on. The returned
+ * reader answers with the calls so far, so a spec can assert what the renderer
+ * asked main for — or that it asked nothing — without swapping handlers
+ * through Electron's private `_invokeHandlers` map (R14).
+ */
+export async function observeInvokes(
+  app: ElectronApplication,
+  channel: string
+): Promise<() => Promise<unknown[][]>> {
+  await callSeam<unknown[][]>(app, TEST_CHANNELS.observeInvokes, { action: 'watch', channel })
+  return () => callSeam<unknown[][]>(app, TEST_CHANNELS.observeInvokes, { action: 'read', channel })
+}
+
+/**
+ * Call a channel's registered handler inside main, the way a request whose
+ * result no renderer subscription is waiting for arrives: main does the work
+ * and the answer goes nowhere.
+ */
+export async function invokeInMain<T>(
+  app: ElectronApplication,
+  channel: string,
+  ...args: unknown[]
+): Promise<T> {
+  const outcome = await callSeam<{ value?: T; error?: string }>(app, TEST_CHANNELS.invokeHandler, {
+    channel,
+    args
+  })
+  if (outcome.error) throw new Error(outcome.error)
+  return outcome.value as T
+}
+
+/**
+ * Make the next invoke on `channel` reject once its real handler has run.
+ * `args` substitutes the renderer's arguments, which is how a spec models a
+ * handler whose work partly landed before it failed.
+ */
+export function failNextInvoke(
+  app: ElectronApplication,
+  channel: string,
+  options: { message: string; args?: unknown[] }
+): Promise<void> {
+  return emitSeam(app, TEST_CHANNELS.failNextInvoke, { channel, ...options })
+}
+
+/**
  * Settle the renderer's IPC queue: two real round trips through the bridge.
  * A response released above is delivered before these, and anything its
  * continuation invokes is answered before the second — so once this resolves,

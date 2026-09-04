@@ -3,7 +3,7 @@
 import { act, createElement, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, test, vi } from 'vitest'
-import type { MailView } from '../mailDisplay'
+import type { MailView } from '../list/mailDisplay'
 import type { SplitData } from './useSplits'
 import { useViewNavigation } from './useViewNavigation'
 import type { ViewRecordStore } from './useViewRecords'

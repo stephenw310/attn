@@ -8,6 +8,8 @@ import {
   type SearchResponse,
   type SearchTextTerm,
   searchDateMilliseconds,
+  searchesDrafts,
+  searchesLocalSnoozes,
   searchMatchExpression
 } from '../../shared/searchQuery'
 import { listDrafts } from '../outbox/drafts'
@@ -235,22 +237,6 @@ function draftLocationOnly(parsed: ParsedSearchQuery): boolean {
   )
 }
 
-function searchesDrafts(parsed: ParsedSearchQuery): boolean {
-  return parsed.filters.some((filter) => {
-    if (filter.kind !== 'in') return false
-    const mailbox = normalizeMailboxName(filter.value)
-    return mailbox === 'draft' || mailbox === 'drafts'
-  })
-}
-
-function searchesLocalSnoozes(parsed: ParsedSearchQuery): boolean {
-  return parsed.filters.some((filter) => {
-    if (filter.kind === 'is') return filter.value === 'snoozed'
-    if (filter.kind !== 'in') return false
-    return normalizeMailboxName(filter.value) === 'snoozed'
-  })
-}
-
 function draftText(draft: Draft, field: SearchTextTerm['field'], accountId: string): string {
   const recipients = [...draft.to, ...draft.cc, ...draft.bcc]
     .flatMap((address) => [address.name, address.email])
@@ -302,6 +288,12 @@ function junkProjection(parsed: ParsedSearchQuery): 'SPAM' | 'TRASH' | null {
   return null
 }
 
+/**
+ * The "Me" sender test compares against `t.account_id` rather than joining
+ * `accounts.email` the way `db/queries.ts` does. Same answer only because v1
+ * keys an account by its address — if an account id ever stops being the
+ * account's email, this site and `queries.ts` must move together.
+ */
 function threadProjectionSql(junkLabel: 'SPAM' | 'TRASH' | null): string {
   if (!junkLabel) {
     return `t.from_display, t.subject, t.snippet, t.last_msg_at,

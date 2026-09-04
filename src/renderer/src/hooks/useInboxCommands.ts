@@ -8,7 +8,7 @@ import {
   createDynamicSplitCommand,
   registerCommands
 } from '../commands'
-import type { MailView, NavigableMailView } from '../mailDisplay'
+import type { MailView, NavigableMailView } from '../list/mailDisplay'
 
 /** The triage verbs that act on the focused row alone. */
 type SelectedTriage = { kind: 'archive' | 'trash' | 'spam' } | { kind: 'star' | 'markUnread'; on: boolean }

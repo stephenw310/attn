@@ -4,7 +4,7 @@ export const OTHER_SPLIT_ID = 'fallback:other'
 export const SPLIT_PRESET_IDS = ['preset:calendar', 'preset:github', 'preset:newsletters'] as const
 
 export type SplitPresetId = (typeof SPLIT_PRESET_IDS)[number]
-export type SplitOperator = 'any' | 'all'
+type SplitOperator = 'any' | 'all'
 
 export type SplitCondition =
   | { type: 'senderAddress'; value: string }
@@ -58,11 +58,6 @@ export interface SaveSplitInput {
 
 export interface ReorderSplitsInput {
   ids: string[]
-}
-
-export interface SetSplitNotifyInput {
-  id: string
-  notify: boolean
 }
 
 export function canonicalizeListIdValue(value: string): string {

@@ -76,6 +76,10 @@ export function useComposerController({
     [draft.quoteHtml, preparedHtml.html]
   )
   const revealUnifiedContent = useCallback(() => setUnifiedContentExpanded(true), [])
+  // Stable: `ComposerCommandPlugin` re-registers all 14 composer commands when
+  // any handler identity changes, and an inline arrow here did that on every
+  // subject keystroke (review P2).
+  const openFollowUp = useCallback(() => setFollowUpOpen(true), [])
   const notePreservedContent = useCallback(() => setHasPreservedContent(true), [])
 
   useEffect(() => {
@@ -264,6 +268,7 @@ export function useComposerController({
     setFollowUpAt,
     followUpOpen,
     setFollowUpOpen,
+    openFollowUp,
     showCopies,
     setShowCopies,
     closing,

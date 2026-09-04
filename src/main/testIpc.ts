@@ -34,6 +34,11 @@ export class TestSeams {
 
   private armedHoldChannel: string | null = null
   private releaseHeld: (() => void) | null = null
+  /** Every invoke listener main registered, by channel (see `wrapInvokeHandlers`). */
+  private readonly invokeHandlers = new Map<string, InvokeListener>()
+  /** Channels whose calls are being recorded, with the args each call carried. */
+  private readonly observedInvokes = new Map<string, unknown[][]>()
+  private failNextInvoke: { channel: string; args?: unknown[]; message: string } | null = null
 
   constructor(
     private readonly enabled: boolean,
@@ -56,15 +61,22 @@ export class TestSeams {
   private wrapInvokeHandlers(): void {
     const handle = ipcMain.handle.bind(ipcMain)
     ipcMain.handle = (channel, listener) => {
+      this.invokeHandlers.set(channel, listener)
       handle(channel, async (event, ...args) => {
+        this.observedInvokes.get(channel)?.push(args)
         const hold = this.armedHoldChannel === channel
         if (hold) this.armedHoldChannel = null
-        const result = await listener(event, ...args)
+        const fail = this.failNextInvoke?.channel === channel ? this.failNextInvoke : null
+        if (fail) this.failNextInvoke = null
+        const result = await listener(event, ...(fail?.args ?? args))
         if (hold) {
           await new Promise<void>((resolve) => {
             this.releaseHeld = resolve
           })
         }
+        // A handler that half-succeeded and then rejected: the substituted
+        // arguments decide how far the real work got before the failure.
+        if (fail) throw new Error(fail.message)
         return result
       })
     }
@@ -162,6 +174,14 @@ export class TestSeams {
           .catch((error) => done?.({ error: errorMessage(error) }))
       })
     }
+    ipcMain.on(
+      TEST_CHANNELS.expireReminders,
+      (_event, expected: unknown, done?: (result: unknown) => void) => {
+        void this.forward(TEST_CHANNELS.expireReminders, [expected])
+          .then((count) => done?.(count))
+          .catch((error) => done?.({ error: errorMessage(error) }))
+      }
+    )
     ipcMain.on(TEST_CHANNELS.utilityState, (_event, ids: unknown, done?: (result: unknown) => void) => {
       void this.forward(TEST_CHANNELS.utilityState, [ids])
         .then((result) => done?.(result))
@@ -213,6 +233,52 @@ export class TestSeams {
       }
       done?.(this.releaseHeld !== null)
     })
+    // Record the arguments of every invoke on a channel, so a spec can assert
+    // what the renderer asked main for (or that it asked nothing at all)
+    // without swapping handlers through Electron's private map.
+    ipcMain.on(TEST_CHANNELS.observeInvokes, (_event, request: unknown, done?: (calls: unknown) => void) => {
+      const { action, channel } = (request ?? {}) as { action?: string; channel?: string }
+      if (!nonEmptyString(channel)) {
+        done?.([])
+        return
+      }
+      if (action === 'watch') this.observedInvokes.set(channel, [])
+      else if (action === 'stop') this.observedInvokes.delete(channel)
+      done?.(this.observedInvokes.get(channel) ?? [])
+    })
+    // Call a registered handler straight from main — a request whose result
+    // no renderer subscription is waiting for (the T32 adversarial pull).
+    ipcMain.on(TEST_CHANNELS.invokeHandler, (_event, request: unknown, done?: (result: unknown) => void) => {
+      const { channel, args } = (request ?? {}) as { channel?: string; args?: unknown[] }
+      const listener = nonEmptyString(channel) ? this.invokeHandlers.get(channel) : undefined
+      if (!listener) {
+        done?.({ error: `no handler for ${channel}` })
+        return
+      }
+      void Promise.resolve(listener({} as Parameters<InvokeListener>[0], ...(args ?? [])))
+        .then((value) => done?.({ value }))
+        .catch((error) => done?.({ error: errorMessage(error) }))
+    })
+    // Make the next invoke on a channel reject after its real handler ran —
+    // optionally with substituted arguments, which is how a spec models work
+    // that partly landed before the failure.
+    ipcMain.on(TEST_CHANNELS.failNextInvoke, (_event, request: unknown, done?: Done) => {
+      const { channel, args, message } = (request ?? {}) as {
+        channel?: string
+        args?: unknown[]
+        message?: string
+      }
+      if (!nonEmptyString(channel)) {
+        done?.('missing channel')
+        return
+      }
+      this.failNextInvoke = {
+        channel,
+        ...(Array.isArray(args) ? { args } : {}),
+        message: nonEmptyString(message) ? message : 'Simulated handler failure'
+      }
+      done?.()
+    })
     ipcMain.on(TEST_CHANNELS.crashUtility, (_event, done?: (error?: string) => void) => {
       void this.deps
         .service()
@@ -228,6 +294,8 @@ export class TestSeams {
     this.armedHoldChannel = null
     this.releaseHeld?.()
     this.releaseHeld = null
+    this.observedInvokes.clear()
+    this.failNextInvoke = null
   }
 
   private forward(channel: string, args: unknown[]): Promise<unknown> {
@@ -244,3 +312,5 @@ export class TestSeams {
 }
 
 type Done = (error?: string) => void
+
+type InvokeListener = Parameters<typeof ipcMain.handle>[1]

@@ -17,7 +17,7 @@ import {
   userLabelId,
   userLabelView,
   VIEW_TITLES
-} from '../mailDisplay'
+} from '../list/mailDisplay'
 import {
   conversationMailboxFor,
   conversationMailboxForSearch,

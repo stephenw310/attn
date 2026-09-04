@@ -6,7 +6,7 @@ import {
   userLabelId,
   userLabelView,
   VIEW_TITLES
-} from '../mailDisplay'
+} from '../list/mailDisplay'
 import { formatShortcut } from '../platform'
 import { Kbd } from './Kbd'
 

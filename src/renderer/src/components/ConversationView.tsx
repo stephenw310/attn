@@ -2,7 +2,7 @@ import { memo, type ReactNode, useCallback, useLayoutEffect, useRef, useState } 
 import type { DraftKind } from '../../../shared/drafts'
 import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
-import type { DisplayConversation, DisplayThread } from '../mailDisplay'
+import type { DisplayConversation, DisplayThread } from '../list/mailDisplay'
 import { Kbd } from './Kbd'
 import { MessageCard } from './MessageCard'
 

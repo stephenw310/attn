@@ -1,7 +1,24 @@
 import type { Db } from '../db'
 import { applyThreadDelta } from './mutate'
 
-export type SnoozeReminderState = 'pending' | 'returned' | 'done' | 'canceled'
+type SnoozeReminderState = 'pending' | 'returned' | 'done' | 'canceled'
+
+type ReminderKind = 'snooze' | 'follow_up'
+
+/**
+ * Files a live reminder the way triage does: a pending one is canceled, a
+ * returned one is completed. Returns the number of rows it changed so callers
+ * can tell whether the thread moved at all.
+ */
+export function settleReminders(db: Db, accountId: string, threadId: string, kind: ReminderKind): number {
+  return db
+    .prepare(
+      `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
+       WHERE account_id = ? AND thread_id = ? AND kind = ?
+         AND state IN ('pending', 'returned')`
+    )
+    .run(accountId, threadId, kind).changes
+}
 
 export interface SnoozeReminderSnapshot {
   dueAt: number

@@ -115,7 +115,7 @@ export async function syncPrimarySendAs(
   return sendAs
 }
 
-export function cachedPrimarySignature(db: Db, accountId: string): DraftSignature | null {
+function cachedPrimarySignature(db: Db, accountId: string): DraftSignature | null {
   const bodyHtml = readAccountSetting(db, accountId, SEND_AS_SIGNATURE_HTML_SETTING)
   if (!bodyHtml) return null
   // Both halves are written together in one transaction.

@@ -19,7 +19,6 @@ interface Boot {
   app: ElectronApplication
   mainLog: () => string
   relaunch: (options?: {
-    waitBeforeLaunch?: number
     /** SIGKILL the app instead of quitting it: a real crash, not a clean exit. */
     kill?: boolean
   }) => Promise<{ app: ElectronApplication; page: Page }>
@@ -144,9 +143,6 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       relaunch: async (options) => {
         if (options?.kill) await kill(boot.app)
         else await boot.app.close()
-        if (options?.waitBeforeLaunch) {
-          await new Promise((resolve) => setTimeout(resolve, options.waitBeforeLaunch))
-        }
         boot.app = await launch()
         return { app: boot.app, page: await boot.app.firstWindow() }
       }

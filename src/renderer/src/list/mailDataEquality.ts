@@ -1,4 +1,4 @@
-import type { MailLabel, SnoozedThreadRow, ThreadRow } from '../../shared/mail'
+import type { MailLabel, SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])

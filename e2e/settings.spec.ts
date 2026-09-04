@@ -1,7 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
-import type { GmailThread } from '../src/main/gmail/parse'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
@@ -11,8 +10,9 @@ import {
   expectResponseHeld,
   flushRendererIpc,
   holdNextResponse,
-  type LifetimeSweepResult,
-  runSweep as runLifetimeSweep
+  type LifetimeSweepRequest,
+  oldThread,
+  runSweep
 } from './seams'
 
 // T32 (F15): the full-window settings surface, its palette commands, the
@@ -445,43 +445,18 @@ test.describe('account reorder', () => {
 test.describe('historical sync limit', () => {
   test.use({ seed: 'fixtures/seed-two-accounts.json' })
 
-  function oldThread(id: string): GmailThread {
-    return {
-      id,
-      messages: [
-        {
-          id: `message-${id}`,
-          threadId: id,
-          labelIds: ['SENT'],
-          internalDate: String(Date.UTC(2019, 0, 2)),
-          snippet: `A header-only note (${id})`,
-          payload: {
-            mimeType: 'multipart/mixed',
-            headers: [
-              { name: 'From', value: 'Primary <primary@attn.test>' },
-              { name: 'To', value: 'old-friend@example.com' },
-              { name: 'Subject', value: `Old correspondence ${id}` },
-              { name: 'Message-ID', value: `<${id}@attn.test>` }
-            ]
-          }
-        }
-      ]
-    }
-  }
-
-  /** The production sweep against a scripted provider; the cap comes from the
+  /** The script every sweep below runs against; the cap comes from the
       persisted preference the settings control wrote — no override here. */
-  function runSweep(app: ElectronApplication, resetCursor?: string): Promise<LifetimeSweepResult> {
-    return runLifetimeSweep(app, {
-      ...(resetCursor ? { resetCursor } : {}),
-      threads: ['old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6'].map(oldThread),
-      pages: [
-        { threadIds: ['old-1', 'old-2', 'old-3', 'old-4'], nextPageToken: 'page-2' },
-        { pageToken: 'page-2', threadIds: ['old-5', 'old-6'] }
-      ],
-      threadsTotal: 8,
-      messagesTotal: 8
-    })
+  const sweepRequest: LifetimeSweepRequest = {
+    threads: ['old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6'].map((id) =>
+      oldThread(id, 'old-friend@example.com', 2019)
+    ),
+    pages: [
+      { threadIds: ['old-1', 'old-2', 'old-3', 'old-4'], nextPageToken: 'page-2' },
+      { pageToken: 'page-2', threadIds: ['old-5', 'old-6'] }
+    ],
+    threadsTotal: 8,
+    messagesTotal: 8
   }
 
   async function setCustomLimit(page: Page, value: string): Promise<void> {
@@ -534,7 +509,7 @@ test.describe('historical sync limit', () => {
 
     // The store holds 2 threads; the production sweep stops at 4.
     // Seeded profiles mark the sweep done; model an account mid-walk once.
-    const capped = await runSweep(app, 'lifetime')
+    const capped = await runSweep(app, { ...sweepRequest, resetCursor: 'lifetime' })
     expect(capped.error).toBeUndefined()
     expect(capped.cursor).toBe('capped:lifetime')
     expect(capped.pageTokens).toEqual([undefined])
@@ -553,7 +528,7 @@ test.describe('historical sync limit', () => {
     await page.keyboard.press('ControlOrMeta+,')
     await setCustomLimit(page, '6')
     await page.keyboard.press('Escape')
-    const resumed = await runSweep(app)
+    const resumed = await runSweep(app, sweepRequest)
     expect(resumed.cursor).toBe('capped:lifetime:page-2')
     expect(resumed.pageTokens).toEqual([undefined, 'page-2'])
     await expectAllMailCount(page, 6)
@@ -563,7 +538,7 @@ test.describe('historical sync limit', () => {
     await page.keyboard.press('ControlOrMeta+,')
     await setCustomLimit(page, '3')
     await page.keyboard.press('Escape')
-    const lowered = await runSweep(app)
+    const lowered = await runSweep(app, sweepRequest)
     expect(lowered.cursor).toBe('capped:lifetime:page-2')
     expect(lowered.pageTokens).toEqual([])
     await expectAllMailCount(page, 6)
@@ -576,7 +551,7 @@ test.describe('historical sync limit', () => {
     await expect(page.getByTestId('settings-sync-limit-confirm')).toHaveCount(0)
     await expectStoredLimit(page, 0)
     await page.keyboard.press('Escape')
-    const unlimited = await runSweep(app)
+    const unlimited = await runSweep(app, sweepRequest)
     expect(unlimited.cursor).toBe('done')
     expect(unlimited.pageTokens).toEqual(['page-2'])
     await expectAllMailCount(page, 8)
@@ -588,7 +563,7 @@ test.describe('historical sync limit', () => {
     await relaunched.keyboard.press('ControlOrMeta+,')
     await expect(relaunched.getByTestId('settings-sync-limit-mode')).toHaveValue('all')
     await relaunched.keyboard.press('Escape')
-    const settled = await runSweep(boot.app)
+    const settled = await runSweep(boot.app, sweepRequest)
     expect(settled.cursor).toBe('done')
     expect(settled.pageTokens).toEqual([])
 

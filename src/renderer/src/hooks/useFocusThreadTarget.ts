@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { NavigableMailView } from '../mailDisplay'
+import type { NavigableMailView } from '../list/mailDisplay'
 
 interface Options {
   account: string | null

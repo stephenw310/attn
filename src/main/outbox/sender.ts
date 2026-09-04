@@ -68,7 +68,7 @@ function permanentSendError(error: unknown): boolean {
   )
 }
 
-export function userFacingSendError(error: unknown): string {
+function userFacingSendError(error: unknown): string {
   if (error instanceof DraftAttachmentSourceError) {
     return error.retryable
       ? 'An attachment is temporarily unavailable — Attn will retry'

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ThreadListRequest, ThreadPageCursor } from '../../../shared/mail'
-import { labelMailboxView, type PagedThreadView, userLabelId } from '../mailDisplay'
+import { labelMailboxView, type PagedThreadView, userLabelId } from '../list/mailDisplay'
 
 /**
  * Before paging beyond a saved scroll extent, check that the selected thread

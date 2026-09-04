@@ -7,7 +7,7 @@ import {
   type MailView,
   type NavigableMailView,
   type PagedThreadView
-} from '../mailDisplay'
+} from '../list/mailDisplay'
 import { conversationMailboxFor } from '../searchView'
 import type { ThreadPagination, ThreadPaginationState } from './useMailData'
 import { useRestoreTarget } from './useRestoreTarget'

@@ -29,7 +29,7 @@ export type MachineEvent =
  * and the network effects are ordered after it, so a row is durable before
  * Gmail is asked to do anything about it.
  */
-export type MachineEffect = 'persist' | 'verify' | 'verify-secondary' | 'send'
+type MachineEffect = 'persist' | 'verify' | 'verify-secondary' | 'send'
 
 export interface TransitionPlan {
   next: MachineRow

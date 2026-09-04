@@ -495,6 +495,8 @@ export async function reconcileRemoteDraft(
     writeRemoteDraft(db, accountId, remote, undefined)
     return 'remote'
   }
+  // Binds a row this build imported before its thread was stored locally (see
+  // the drafts poll), not only a row from an older schema.
   const repairsThreadBinding =
     local.kind === 'new' &&
     local.thread_id === null &&
@@ -585,8 +587,11 @@ export async function syncRemoteDrafts(
       remoteIds.add(summary.id)
       const known = knownDrafts.get(summary.id)
       if (known && !known.editable) continue
-      // A legacy row imported before thread binding existed still needs one
-      // refetch to learn its parent, even though its remote summary is unchanged.
+      // Not a legacy-only path: `parseRemoteDraft` imports any Gmail draft whose
+      // thread this account has not stored yet as an unbound `new` row (no reply
+      // headers means the kind cannot be told apart from a fresh compose). Once
+      // the thread lands locally the row still needs one refetch to learn its
+      // parent, even though its remote summary is unchanged.
       const canRepairThreadBinding =
         known?.kind === 'new' &&
         known.threadId === null &&

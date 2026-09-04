@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ConversationMailbox } from '../../../shared/mail'
 import { hydrationAttemptDecision } from '../bodyHydrationStatus'
-import { type DisplayConversation, type DisplayThread, displayConversation } from '../mailDisplay'
+import { type DisplayConversation, type DisplayThread, displayConversation } from '../list/mailDisplay'
 
 interface UseConversationOptions {
   selected: DisplayThread | undefined

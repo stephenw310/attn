@@ -237,6 +237,18 @@ describe('keyboard dispatch', () => {
     expect(matchComposerKey(key('k', { ctrlKey: true, shiftKey: true, altKey: true }))).toBeNull()
   })
 
+  test('gives a shared keystroke to the composer verb, not the global', () => {
+    // The shell registers `layout.sidebar.toggle` (global, allowInComposer)
+    // when the Inbox mounts, long before any composer registers Bold on the
+    // same `Mod+B`. Registration order must not decide what typing does.
+    useCommands([createCommand('layout.sidebar.toggle', () => {})])
+    useCommands([createCommand('composer.bold', () => {})])
+    expect(matchComposerKey(key('b', { metaKey: true }))?.id).toBe('composer.bold')
+    expect(matchComposerKey(key('b', { ctrlKey: true }))?.id).toBe('composer.bold')
+    // Outside the composer the sidebar keeps the key.
+    expect(matchKey(key('b', { metaKey: true }), 'list')?.id).toBe('layout.sidebar.toggle')
+  })
+
   test('respects list, reader, mail, and global contexts', () => {
     useCommands([
       createCommand('conversation.open', () => {}),

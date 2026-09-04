@@ -6,6 +6,7 @@
 
 import type { Db } from './db'
 import { deleteAccountSetting, readAccountSetting, writeAccountSetting } from './settings'
+import { settleReminders } from './store/reminders'
 
 export const FOLLOW_UP_KIND = 'follow_up'
 
@@ -161,11 +162,7 @@ export function evaluateThreadFollowUp(db: Db, accountId: string, threadId: stri
     )
     .all(accountId, threadId) as StoredMessage[]
   if (!messages.some((message) => qualifiesAsReply(message, reminder))) return false
-  db.prepare(
-    `UPDATE reminders SET state = CASE state WHEN 'pending' THEN 'canceled' ELSE 'done' END
-     WHERE account_id = ? AND thread_id = ? AND kind = '${FOLLOW_UP_KIND}'
-       AND state IN ('pending', 'returned')`
-  ).run(accountId, threadId)
+  settleReminders(db, accountId, threadId, FOLLOW_UP_KIND)
   return true
 }
 
