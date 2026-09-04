@@ -111,11 +111,7 @@ it('aborts a stalled checkpoint after the shutdown grace period', async () => {
 it('stops retrying a permanently rejected draft until the user edits it', async () => {
   const time = new ManualTime()
   const db = openDatabase(':memory:')
-  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-    'user@example.com',
-    'user@example.com',
-    1
-  )
+  db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('user@example.com', 'user@example.com')
   const rejectedId = saveDraft(
     db,
     'user@example.com',

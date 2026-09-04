@@ -13,7 +13,7 @@ function settingsDb(value: string | undefined): Db {
 
 function memoryDb(accountId: string): Db {
   const db = openDatabase(':memory:')
-  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(accountId, accountId, 1)
+  db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(accountId, accountId)
   return db
 }
 
@@ -123,11 +123,7 @@ describe('queued send undo races', () => {
 describe('failed outbox reopen', () => {
   it('clears stale failure state and mints a fresh Message-ID on resend', () => {
     const db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-      'me@example.com',
-      'me@example.com',
-      1
-    )
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('me@example.com', 'me@example.com')
     const id = saveDraft(
       db,
       'me@example.com',

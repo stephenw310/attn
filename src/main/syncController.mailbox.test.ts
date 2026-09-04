@@ -8,7 +8,7 @@ afterEach(() => vi.useRealTimers())
 
 function upgradedMailbox(): Db {
   const db = openDatabase(':memory:')
-  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run('account', 'a@b.test', 0)
+  db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('account', 'a@b.test')
   const insertThread = db.prepare('INSERT INTO threads (account_id, id) VALUES (?, ?)')
   const insertLabel = db.prepare(
     "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, 'INBOX')"

@@ -119,11 +119,7 @@ describe('outbox state machine', () => {
 
 function outboxDb(): { db: Db; id: string } {
   const db = openDatabase(':memory:')
-  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-    'me@example.com',
-    'me@example.com',
-    1
-  )
+  db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('me@example.com', 'me@example.com')
   const id = saveDraft(
     db,
     'me@example.com',

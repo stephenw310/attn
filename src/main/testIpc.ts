@@ -1,8 +1,8 @@
 import { ipcMain } from 'electron'
+import type { UpdatePhase, UpdateState } from '../shared/distribution'
 import { errorMessage } from '../shared/error'
 import { nonEmptyString } from '../shared/guards'
 import { TEST_CHANNELS } from '../shared/ipc'
-import type { UpdatePhase, UpdateState } from '../shared/update'
 import { type FakeAiScript, FakeAiTransport } from './ai/fakeTransport'
 import type { ServiceSupervisor } from './service/supervisor'
 

@@ -18,7 +18,7 @@ const OTHER = 'other@attn.test'
 function storeWith(cursors: { sweep?: string | null; attachment?: string | null } = {}): Db {
   const db = openDatabase(':memory:')
   for (const accountId of [ACCOUNT, OTHER]) {
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(accountId, accountId)
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(accountId, accountId)
     db.prepare('INSERT INTO sync_state (account_id, sweep_cursor, attachment_cursor) VALUES (?, ?, ?)').run(
       accountId,
       cursors.sweep ?? null,

@@ -16,7 +16,7 @@ function callbacks(): SplitMetadataCallbacks & {
 
 function upgradedStore(cursor = 'split-metadata'): Db {
   const db = openDatabase(':memory:')
-  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 1)').run(ACCOUNT, ACCOUNT)
+  db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
   db.prepare(
     `INSERT INTO sync_state (account_id, backfill_cursor, split_metadata_cursor)
      VALUES (?, 'done', ?)`
@@ -77,7 +77,7 @@ describe('split metadata cursor routing', () => {
 
   it('defaults new profiles to done because the bodies stage already writes split metadata', () => {
     const db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 1)').run(ACCOUNT, ACCOUNT)
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
     db.prepare('INSERT INTO sync_state (account_id) VALUES (?)').run(ACCOUNT)
     expect(
       db.prepare('SELECT split_metadata_cursor FROM sync_state WHERE account_id = ?').get(ACCOUNT)

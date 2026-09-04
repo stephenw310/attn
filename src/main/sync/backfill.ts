@@ -14,7 +14,7 @@ import { ensureSplitSetup } from '../splits'
 import { type SchedulerTime, systemTime } from '../time'
 import { type BackfillPhase, type ParsedCursor, parseBackfillCursor } from './backfillCursor'
 import { hydrateMissingThreadBodies } from './bodies'
-import { isExpiredPageTokenError } from './pageToken'
+import { planCursorStart, runCursorWalk } from './cursorWalk'
 import { ensureAccount, persistThread, upsertLabels } from './persist'
 import type { DraftPage, ListThreadIdsOptions, MailProvider, ThreadIdPage } from './provider'
 import {
@@ -201,7 +201,8 @@ export async function runInboxBackfill(
     const previous = db
       .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null } | undefined
-    const plan = planBackfillStart(previous?.backfill_cursor, options.recovery)
+    const rawCursor = previous?.backfill_cursor
+    const plan = planBackfillStart(rawCursor, options.recovery)
     if (plan.kind === 'skip') {
       return { threadCount: 0, inboxThreadIds: [], spamThreadIds: [], trashThreadIds: [] }
     }
@@ -216,6 +217,18 @@ export async function runInboxBackfill(
            last_history_id = excluded.last_history_id,
            backfill_cursor = excluded.backfill_cursor`
       ).run(accountId, profile.historyId)
+    } else {
+      // Persist parser translations before a phase delegates to the shared
+      // walker, which deliberately rereads its durable cursor. In particular,
+      // retired `sent` cursors restart at the unfiltered all-mail listing and
+      // their SENT-scoped page tokens must not reach that listing.
+      const canonicalCursor = cursor.pageToken ? `${cursor.phase}:${cursor.pageToken}` : cursor.phase
+      if (rawCursor !== canonicalCursor) {
+        db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run(
+          canonicalCursor,
+          accountId
+        )
+      }
     }
 
     upsertLabels(db, accountId, await provider.listLabels({ priority: 'foreground' }))
@@ -229,7 +242,6 @@ export async function runInboxBackfill(
         query: INBOX_METADATA_WINDOW,
         labelIds: ['INBOX'],
         phase: 'metadata',
-        initialPageToken: cursor.pageToken,
         nextPhase: 'bodies',
         priority: 'foreground',
         onThread: async (threadId) => {
@@ -260,7 +272,6 @@ export async function runInboxBackfill(
         query: INBOX_BODIES_WINDOW,
         labelIds: ['INBOX'],
         phase: 'bodies',
-        initialPageToken: cursor.pageToken,
         nextPhase: 'drafts',
         priority: 'background',
         onThread: async (threadId) => {
@@ -282,7 +293,6 @@ export async function runInboxBackfill(
         db,
         provider,
         accountId,
-        initialPageToken: cursor.pageToken,
         now: time.now,
         onPage: (page) => pageCompleted('drafts', page)
       })
@@ -301,7 +311,6 @@ export async function runInboxBackfill(
         accountId,
         query: ALL_MAIL_WINDOW,
         phase: 'all-mail',
-        initialPageToken: cursor.pageToken,
         nextPhase: 'spam',
         skipExisting: true,
         priority: 'background',
@@ -337,7 +346,6 @@ export async function runInboxBackfill(
         labelIds: [junk.labelId],
         includeSpamTrash: true,
         phase: junk.phase,
-        initialPageToken: cursor.pageToken,
         nextPhase: junk.nextPhase,
         skipExisting: true,
         priority: 'background',
@@ -405,7 +413,6 @@ interface ThreadPhaseOptions {
   labelIds?: readonly string[]
   includeSpamTrash?: boolean
   phase: Exclude<BackfillPhase, 'drafts' | 'reconcile'>
-  initialPageToken?: string
   nextPhase: BackfillPhase
   priority: 'foreground' | 'background'
   /**
@@ -422,103 +429,106 @@ async function runThreadPhase(options: ThreadPhaseOptions): Promise<void> {
   const exists = options.skipExisting
     ? options.db.prepare('SELECT 1 FROM threads WHERE account_id = ? AND id = ?')
     : null
-  let pageToken = options.initialPageToken
-  let resetExpiredCursor = false
-  for (;;) {
-    let page: ThreadIdPage
-    try {
-      page = await options.provider.listThreadIds({
+  await runCursorWalk<ThreadIdPage, void>({
+    db: options.db,
+    accountId: options.accountId,
+    cursorColumn: 'backfill_cursor',
+    phase: options.phase,
+    parseCursor: (raw) => planCursorStart(options.phase, raw, `backfill ${options.phase}`),
+    pagePauseMs: 0,
+    pauseReason: null,
+    progress: () => {},
+    onError: (error) => {
+      throw error
+    },
+    onSkip: () => undefined,
+    listPage: (pageToken) =>
+      options.provider.listThreadIds({
         ...(options.query === undefined ? {} : { q: options.query }),
         ...(options.labelIds === undefined ? {} : { labelIds: options.labelIds }),
         ...(options.includeSpamTrash ? { includeSpamTrash: true } : {}),
         pageToken,
         priority: options.priority
-      })
-    } catch (error) {
-      if (!pageToken || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
-      // Preserve the original history checkpoint while restarting this phase.
-      pageToken = undefined
-      resetExpiredCursor = true
-      checkpoint(options.db, options.accountId, options.phase)
-      continue
-    }
-
-    const wanted = exists
-      ? page.threadIds.filter((threadId) => !exists.get(options.accountId, threadId))
-      : page.threadIds
-    let completed = 0
-    await mapConcurrent(wanted, BACKFILL_THREAD_CONCURRENCY, async (threadId) => {
-      try {
-        await options.onThread(threadId)
-      } catch (error) {
-        // Normal race on an active inbox: listed thread disappeared before get.
-        if (error instanceof GmailApiError && error.status === 404) {
-          console.log(`[sync] thread ${threadId} vanished mid-backfill — skipped`)
-          return
+      }),
+    nextToken: (page) => page.nextPageToken,
+    onPage: async (page) => {
+      const wanted = exists
+        ? page.threadIds.filter((threadId) => !exists.get(options.accountId, threadId))
+        : page.threadIds
+      let completed = 0
+      await mapConcurrent(wanted, BACKFILL_THREAD_CONCURRENCY, async (threadId) => {
+        try {
+          await options.onThread(threadId)
+        } catch (error) {
+          // Normal race on an active inbox: listed thread disappeared before get.
+          if (error instanceof GmailApiError && error.status === 404) {
+            console.log(`[sync] thread ${threadId} vanished mid-backfill — skipped`)
+            return
+          }
+          throw error
         }
-        throw error
-      }
-      completed++
-    })
-    if (page.threadIds.length > 0 || page.resultSizeEstimate !== undefined) {
-      options.onPage({
-        listed: page.threadIds.length,
-        fetched: completed,
-        ...(page.resultSizeEstimate === undefined ? {} : { estimate: page.resultSizeEstimate })
+        completed++
       })
-    }
-    pageToken = page.nextPageToken
-    checkpoint(options.db, options.accountId, pageToken ? `${options.phase}:${pageToken}` : options.nextPhase)
-    if (!pageToken) return
-  }
+      if (page.threadIds.length > 0 || page.resultSizeEstimate !== undefined) {
+        options.onPage({
+          listed: page.threadIds.length,
+          fetched: completed,
+          ...(page.resultSizeEstimate === undefined ? {} : { estimate: page.resultSizeEstimate })
+        })
+      }
+    },
+    finishedCursor: options.nextPhase,
+    onFinish: () => undefined
+  })
 }
 
 interface DraftPhaseOptions {
   db: Db
   provider: MailProvider
   accountId: string
-  initialPageToken?: string
   now: () => number
   onPage: (page: { listed: number; fetched: number }) => void
 }
 
 async function runDraftPhase(options: DraftPhaseOptions): Promise<void> {
-  let pageToken = options.initialPageToken
-  let resetExpiredCursor = false
-  for (;;) {
-    let page: DraftPage
-    try {
-      page = await options.provider.listDrafts(pageToken, { priority: 'background' })
-    } catch (error) {
-      if (!pageToken || resetExpiredCursor || !isExpiredPageTokenError(error)) throw error
-      pageToken = undefined
-      resetExpiredCursor = true
-      checkpoint(options.db, options.accountId, 'drafts')
-      continue
-    }
-
-    let completed = 0
-    await mapConcurrent(page.drafts, BACKFILL_DRAFT_CONCURRENCY, async (summary) => {
-      try {
-        await reconcileRemoteDraft(
-          options.db,
-          options.accountId,
-          await options.provider.getDraft(summary.id, { priority: 'background' }),
-          options.provider,
-          options.now(),
-          { priority: 'background' }
-        )
-      } catch (error) {
-        if (error instanceof GmailApiError && error.status === 404) return
-        throw error
-      }
-      completed++
-    })
-    if (page.drafts.length > 0) options.onPage({ listed: page.drafts.length, fetched: completed })
-    pageToken = page.nextPageToken
-    checkpoint(options.db, options.accountId, pageToken ? `drafts:${pageToken}` : 'all-mail')
-    if (!pageToken) return
-  }
+  await runCursorWalk<DraftPage, void>({
+    db: options.db,
+    accountId: options.accountId,
+    cursorColumn: 'backfill_cursor',
+    phase: 'drafts',
+    parseCursor: (raw) => planCursorStart('drafts', raw, 'backfill drafts'),
+    pagePauseMs: 0,
+    pauseReason: null,
+    progress: () => {},
+    onError: (error) => {
+      throw error
+    },
+    onSkip: () => undefined,
+    listPage: (pageToken) => options.provider.listDrafts(pageToken, { priority: 'background' }),
+    nextToken: (page) => page.nextPageToken,
+    onPage: async (page) => {
+      let completed = 0
+      await mapConcurrent(page.drafts, BACKFILL_DRAFT_CONCURRENCY, async (summary) => {
+        try {
+          await reconcileRemoteDraft(
+            options.db,
+            options.accountId,
+            await options.provider.getDraft(summary.id, { priority: 'background' }),
+            options.provider,
+            options.now(),
+            { priority: 'background' }
+          )
+        } catch (error) {
+          if (error instanceof GmailApiError && error.status === 404) return
+          throw error
+        }
+        completed++
+      })
+      if (page.drafts.length > 0) options.onPage({ listed: page.drafts.length, fetched: completed })
+    },
+    finishedCursor: 'all-mail',
+    onFinish: () => undefined
+  })
 }
 
 async function listAllThreadIds(
@@ -535,10 +545,6 @@ async function listAllThreadIds(
     pageToken = page.nextPageToken
   } while (pageToken)
   return [...threadIds]
-}
-
-function checkpoint(db: Db, accountId: string, cursor: string): void {
-  db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run(cursor, accountId)
 }
 
 async function mapConcurrent<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

@@ -1,20 +1,11 @@
 import type { ConversationMailbox, MailLabel } from '../../shared/mail'
-import { parseSearchQuery } from '../../shared/searchQuery'
+import { normalizeMailboxName, parseSearchQuery } from '../../shared/searchQuery'
 import type { MailView } from './mailDisplay'
-
-/**
- * `in:` values are written loosely ("all mail", "all_mail", "AllMail"), so
- * every comparison against one goes through the same normalization. Main has
- * its own copies of this rule (R9); one shared normalizer is pending there.
- */
-function normalizedMailbox(value: string): string {
-  return value.toLowerCase().replaceAll(/[\s_-]/g, '')
-}
 
 function searchMailboxes(query: string): string[] {
   return parseSearchQuery(query)
     .filters.filter((filter) => filter.kind === 'in')
-    .map((filter) => normalizedMailbox(filter.value))
+    .map((filter) => normalizeMailboxName(filter.value))
 }
 
 /**
@@ -47,7 +38,7 @@ export function searchesLocalSnoozes(query: string): boolean {
   return parsed.filters.some(
     (filter) =>
       (filter.kind === 'is' && filter.value === 'snoozed') ||
-      (filter.kind === 'in' && normalizedMailbox(filter.value) === 'snoozed')
+      (filter.kind === 'in' && normalizeMailboxName(filter.value) === 'snoozed')
   )
 }
 
@@ -86,7 +77,7 @@ export function searchRetainsMovedThread(
       continue
     }
     if (filter.kind !== 'in') continue
-    const mailbox = normalizedMailbox(filter.value)
+    const mailbox = normalizeMailboxName(filter.value)
     if (mailbox === 'inbox' && (!row.labelIds.includes('INBOX') || row.snoozed)) return false
     if (mailbox === 'snoozed' && !row.snoozed) return false
     if (mailbox === 'sent' && (!normal || !row.labelIds.includes('SENT'))) return false

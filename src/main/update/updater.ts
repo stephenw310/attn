@@ -7,7 +7,7 @@
 // before download AND again before install so a stale cached download can
 // never slip through.
 
-import type { UpdatePhase, UpdateState } from '../../shared/update'
+import type { UpdatePhase, UpdateState } from '../../shared/distribution'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 
 export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000

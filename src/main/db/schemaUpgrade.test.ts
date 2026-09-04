@@ -194,3 +194,37 @@ it('applies the documented v24 → 25 upgrade and backfills durable follow-up or
     fresh.close()
   }
 })
+
+it('applies the PR #108 v26 → 27 cleanup without changing account rows', () => {
+  const db = new Database(':memory:')
+  const fresh = openDatabase(':memory:')
+  try {
+    db.exec(`
+      CREATE TABLE accounts (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO accounts VALUES ('primary', 'primary@example.test', 123);
+      INSERT INTO accounts VALUES ('secondary', 'secondary@example.test', 456);
+      PRAGMA user_version = 26;
+    `)
+    db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE accounts DROP COLUMN created_at;
+      PRAGMA user_version = 27;
+      COMMIT;
+    `)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(27)
+    expect(db.pragma('quick_check', { simple: true })).toBe('ok')
+    expect(db.pragma('table_info(accounts)')).toEqual(fresh.pragma('table_info(accounts)'))
+    expect(db.prepare('SELECT * FROM accounts ORDER BY id').all()).toEqual([
+      { id: 'primary', email: 'primary@example.test' },
+      { id: 'secondary', email: 'secondary@example.test' }
+    ])
+  } finally {
+    db.close()
+    fresh.close()
+  }
+})

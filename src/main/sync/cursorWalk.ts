@@ -106,6 +106,8 @@ export interface CursorWalk<Page, Result> {
   ) => Promise<CursorWalkStop<Result> | undefined>
   /** Resets per-run counters when an expired page token restarts the walk. */
   onRestart?: () => void
+  /** Cursor written when the listing ends. Defaults to the pass-wide `done`. */
+  finishedCursor?: string
   /** Writes the cursor value; passes with extra checkpoint columns override it. */
   writeCursor?: (cursor: string) => void
   /** Wraps the page checkpoint, for a pass whose writes must commit with it. */
@@ -198,7 +200,7 @@ export async function runCursorWalk<Page, Result>(walk: CursorWalk<Page, Result>
       if (outcome) return outcome.stop
 
       token = walk.nextToken(page)
-      const cursor = token ? `${phase}:${token}` : 'done'
+      const cursor = token ? `${phase}:${token}` : (walk.finishedCursor ?? 'done')
       commitPage(page, () => writeCursor(cursor))
       progress('running')
       await walk.afterCheckpoint?.(cursor)

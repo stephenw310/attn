@@ -52,10 +52,7 @@ function seedEveryAccountTable(db: Db, accountId: string): void {
        VALUES (${placeholders})`
     ).run(...values)
   }
-  db.prepare('INSERT OR IGNORE INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(
-    accountId,
-    accountId
-  )
+  db.prepare('INSERT OR IGNORE INTO accounts (id, email) VALUES (?, ?)').run(accountId, accountId)
   db.prepare(
     "INSERT OR REPLACE INTO settings (account_id, key, value) VALUES ('__app__', 'theme', 'dark')"
   ).run()

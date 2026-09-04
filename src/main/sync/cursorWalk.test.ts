@@ -119,6 +119,23 @@ describe('page walk', () => {
     }
   })
 
+  it('can checkpoint into the next phase when a staged walk finishes', async () => {
+    const db = store(PHASE)
+    try {
+      await expect(
+        runCursorWalk(
+          walkOver(db, async () => ({ ids: ['a'] }), {
+            finishedCursor: 'next-phase'
+          })
+        )
+      ).resolves.toEqual(['a'])
+
+      expect(cursorOf(db)).toBe('next-phase')
+    } finally {
+      db.close()
+    }
+  })
+
   it('restarts the phase once when a saved page token has expired', async () => {
     const db = store(`${PHASE}:stale`)
     try {

@@ -183,6 +183,36 @@ describe('removal', () => {
     expect(store.rows.map((row) => row.id)).toEqual(['a@example.test', 'b@example.test'])
   })
 
+  it('restores the roster and session when token deletion fails', async () => {
+    const stored = tokenStore([account('a@example.test'), account('b@example.test')])
+    const remove = vi.fn((): StoredAccount[] => {
+      throw new Error('token delete failed')
+    })
+    const { roster, pushed } = harness([account('a@example.test'), account('b@example.test')], {
+      tokenStore: {
+        load: stored.load,
+        save: stored.save,
+        remove,
+        reorder: stored.reorder
+      }
+    })
+    await roster.setActiveAccount('a@example.test')
+    pushed.length = 0
+
+    await expect(roster.removeAccount('a@example.test', true)).rejects.toThrow('token delete failed')
+
+    expect(remove).toHaveBeenCalledOnce()
+    expect(roster.activeId()).toBe('a@example.test')
+    expect(roster.authStatus().accounts.map((entry) => entry.id)).toEqual([
+      'a@example.test',
+      'b@example.test'
+    ])
+    expect(pushed.map((state) => state.accounts.map((entry) => entry.id))).toEqual([
+      ['b@example.test'],
+      ['a@example.test', 'b@example.test']
+    ])
+  })
+
   it('activates the account at the removed position and leaves a background removal alone', async () => {
     const { roster, service } = harness([
       account('a@example.test'),

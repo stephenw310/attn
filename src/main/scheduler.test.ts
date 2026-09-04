@@ -161,7 +161,7 @@ describe('follow-up scheduling against a real store (T35)', () => {
       }
     }
     const db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
     const announced = { changed: 0, queueChanged: 0 }
     const scheduler = new SnoozeScheduler(
       db,

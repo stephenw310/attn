@@ -213,6 +213,12 @@ export class AccountRoster {
     const previousSeedIds = this.seedAccountIds
     const previousStoredAccounts = this.storedAccounts
     const previousActiveAccountId = this.activeAccountId
+    const restorePreviousRoster = async (): Promise<void> => {
+      this.seedAccountIds = previousSeedIds
+      this.storedAccounts = previousStoredAccounts
+      this.activeAccountId = previousActiveAccountId
+      await this.adoptServiceAccounts()
+    }
     if (previousSeedIds.length > 0) {
       this.seedAccountIds = this.seedAccountIds.filter((id) => id !== accountId)
     } else {
@@ -230,15 +236,18 @@ export class AccountRoster {
         await this.options.service()?.internal('remove-account-data', accountId)
       } catch (error) {
         console.error(`[auth] could not delete local data for ${accountId}: ${errorMessage(error)}`)
-        this.seedAccountIds = previousSeedIds
-        this.storedAccounts = previousStoredAccounts
-        this.activeAccountId = previousActiveAccountId
-        await this.adoptServiceAccounts()
+        await restorePreviousRoster()
         throw error
       }
     }
     if (previousSeedIds.length === 0) {
-      this.storedAccounts = this.tokens.remove(this.options.userDataPath(), accountId)
+      try {
+        this.storedAccounts = this.tokens.remove(this.options.userDataPath(), accountId)
+      } catch (error) {
+        console.error(`[auth] could not remove tokens for ${accountId}: ${errorMessage(error)}`)
+        await restorePreviousRoster()
+        throw error
+      }
     }
     this.authGenerations.delete(accountId)
     console.log(`[auth] removed account ${accountId} (${deleteData ? 'deleted' : 'kept'} local data)`)

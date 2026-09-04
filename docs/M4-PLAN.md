@@ -789,7 +789,7 @@ F17's reply-drafting acceptance criteria hold end to end under the seam: zero tr
 
 ## T37A: inline AI autocomplete
 
-**Status: shipped (2026-08-31, `2a50fda`).** Real-provider runs and on-hardware paint metrics stay in T40 (KNOWN-ISSUES GAP-7).
+**Status: shipped (2026-08-31, `2a50fda`; perf evidence updated 2026-09-03).** Real-provider runs stay in T40; on-hardware paint metrics are recorded in T40-EVIDENCE.
 
 **Depends on:** T36 (provider and consent), T37 (composer generation lifecycle) · **Unblocks:** nothing · **Spec:** F17, F15, §5, §7
 

@@ -33,11 +33,7 @@ export interface LabelCatalogPlan {
 
 /** Idempotently register an account row (account id doubles as the email in v1). */
 export function ensureAccount(db: Db, accountId: string, email: string): void {
-  db.prepare('INSERT OR IGNORE INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-    accountId,
-    email,
-    Date.now()
-  )
+  db.prepare('INSERT OR IGNORE INTO accounts (id, email) VALUES (?, ?)').run(accountId, email)
 }
 
 /** Compare a stored catalog with one complete, authoritative provider listing. */

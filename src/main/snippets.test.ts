@@ -52,10 +52,7 @@ describe('snippet storage', () => {
 
   it('is app-global: removing an account leaves the snippet set intact (F18 rule 9)', () => {
     const db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(
-      'user@attn.test',
-      'user@attn.test'
-    )
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('user@attn.test', 'user@attn.test')
     saveSnippet(db, input)
     const result = purgeAccountRows(db, 'user@attn.test')
     expect(result.tables).toContain('snippets')

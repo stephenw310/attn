@@ -7,6 +7,18 @@
 export const DISTRIBUTION_METADATA_FILE = 'distribution.json'
 const DISTRIBUTION_METADATA_VERSION = 1
 
+// Auto-update state shared across processes. The renderer only receives this
+// snapshot, and no state can force a restart without an explicit command.
+export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready'
+
+export interface UpdateState {
+  phase: UpdatePhase
+  /** The downloaded-and-ready version, when phase is 'ready'. */
+  readyVersion: string | null
+}
+
+export const UPDATE_STATE_IDLE: UpdateState = { phase: 'idle', readyVersion: null }
+
 export type DistributionMode = 'personal' | 'release'
 
 export interface DistributionMetadata {

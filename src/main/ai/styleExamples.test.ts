@@ -12,7 +12,7 @@ const ACCOUNT = 'user@attn.test'
 
 function store(): Db {
   const db = openDatabase(':memory:')
-  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+  db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
   return db
 }
 
@@ -90,7 +90,7 @@ describe('listStyleExamples', () => {
     addMessage(db, { id: 'm-not-reply', internalDate: 7_000, references: null })
     addMessage(db, { id: 'm-empty', internalDate: 6_000, body: '   ' })
     addMessage(db, { id: 'm-good', internalDate: 5_000 })
-    db.prepare("INSERT INTO accounts (id, email, created_at) VALUES ('other@attn.test', 'o', 0)").run()
+    db.prepare("INSERT INTO accounts (id, email) VALUES ('other@attn.test', 'o')").run()
     addMessage(db, { id: 'm-other-account', internalDate: 4_000, account: 'other@attn.test' })
     expect(listStyleExamples(db, ACCOUNT, 'current-thread')).toEqual(['body of m-good'])
   })

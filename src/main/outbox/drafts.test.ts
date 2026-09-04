@@ -247,11 +247,7 @@ describe('untouched reply and forward drafts', () => {
 describe('draft store CRUD', () => {
   function account(): Db {
     const db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-      'account',
-      'account@example.com',
-      1
-    )
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('account', 'account@example.com')
     return db
   }
 

@@ -52,6 +52,8 @@ export interface GmailClientOptions {
   random?: () => number
   quota?: GmailQuotaConfig
   quotaLimiter?: GmailQuotaLimiter
+  /** Test transports can exercise token refresh without replacing process-global fetch. */
+  fetch?: typeof globalThis.fetch
   /** Account removal cancels reads; draft mutations retain their shutdown grace period. */
   readSignal?: AbortSignal
 }
@@ -77,6 +79,7 @@ export class GmailClient {
   private readonly time: SchedulerTime
   private readonly random: () => number
   private readonly quotaLimiter: GmailQuotaLimiter
+  private readonly fetcher: typeof globalThis.fetch
   private readonly readSignal: AbortSignal | undefined
   private refreshInFlight: Promise<string> | null = null
 
@@ -88,6 +91,7 @@ export class GmailClient {
   ) {
     this.time = options.time ?? systemTime
     this.random = options.random ?? Math.random
+    this.fetcher = options.fetch ?? ((input, init) => globalThis.fetch(input, init))
     this.readSignal = options.readSignal
     this.quotaLimiter =
       options.quotaLimiter ??
@@ -133,7 +137,7 @@ export class GmailClient {
     }
     let attempt = 0
     for (;;) {
-      const res = await fetch(TOKEN_ENDPOINT, {
+      const res = await this.fetcher(TOKEN_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -256,7 +260,7 @@ export class GmailClient {
         signal: options?.signal,
         duplex: 'half' as const
       } satisfies RequestInit & { duplex: 'half' }
-      const res = await fetch(url, init)
+      const res = await this.fetcher(url, init)
       if (res.ok) {
         const text = await res.text()
         return (text ? JSON.parse(text) : undefined) as T
@@ -306,7 +310,7 @@ export class GmailClient {
     for (;;) {
       const token = await this.ensureAccessToken()
       await this.acquireQuota(method, path, options.priority, options.signal)
-      const res = await fetch(url, {
+      const res = await this.fetcher(url, {
         method,
         headers: {
           Authorization: `Bearer ${token}`,

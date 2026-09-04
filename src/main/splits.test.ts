@@ -62,7 +62,7 @@ describe('split inbox', () => {
 
   beforeEach(() => {
     db = openDatabase(':memory:')
-    db.prepare("INSERT INTO accounts (id, email, created_at) VALUES ('account', 'me@test', 0)").run()
+    db.prepare("INSERT INTO accounts (id, email) VALUES ('account', 'me@test')").run()
   })
 
   afterEach(() => db.close())
