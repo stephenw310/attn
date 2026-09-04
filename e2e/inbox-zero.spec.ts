@@ -9,14 +9,21 @@ import { setSyncState } from './seams'
  * near-identical fixture files. Generated seeds land in the gitignored
  * `.generated/`, never in `.artifacts/`, which CI uploads wholesale.
  */
-function useEmptyInboxSeed(name: string, backfillCursor: string): void {
+function emptyAccount(name: string, backfillCursor?: string) {
+  return { account: `${name}@attn.test`, splitSetup: true, backfillCursor, threads: [] }
+}
+
+function useGeneratedSeed(name: string, fixture: unknown): void {
   const seed = `.generated/inbox-zero-${name}.json`
   test.use({ seed })
   test.beforeEach(() => {
     mkdirSync(join(__dirname, '.generated'), { recursive: true })
-    const fixture = { account: `${name}@attn.test`, splitSetup: true, backfillCursor, threads: [] }
     writeFileSync(join(__dirname, seed), JSON.stringify(fixture))
   })
+}
+
+function useEmptyInboxSeed(name: string, backfillCursor: string): void {
+  useGeneratedSeed(name, emptyAccount(name, backfillCursor))
 }
 
 test.describe('complete Inbox metadata', () => {
@@ -64,10 +71,9 @@ test.describe('complete Inbox metadata', () => {
 })
 
 test.describe('account-scoped Inbox readiness', () => {
-  // Still a fixture file, unlike its siblings below: `src/main/dev/seed.test.ts`
-  // loads this one to prove per-account backfill checkpoints stay independent,
-  // so the file has a consumer outside this suite.
-  test.use({ seed: 'fixtures/seed-two-accounts-inbox-ready.json' })
+  useGeneratedSeed('two-accounts', {
+    accounts: [emptyAccount('ready'), emptyAccount('syncing', 'bodies')]
+  })
 
   test('switches between the reward and loading state using each account checkpoint', async ({ page }) => {
     await expect(page.getByTestId('account-menu')).toContainText('ready@attn.test')
