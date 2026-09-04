@@ -3,6 +3,9 @@
 // manual additive-upgrade procedure for preserving a local dogfood profile.
 export const CURRENT_SCHEMA_VERSION = 27
 
+// `messages.labels_json` deliberately stays nullable: NULL identifies a pre-S2
+// row whose message-level labels are unknown, so readers fall back to the thread
+// label union. An empty JSON array means the authoritative message has no labels.
 export const CURRENT_SCHEMA = `
 CREATE TABLE accounts (
   id    TEXT PRIMARY KEY,

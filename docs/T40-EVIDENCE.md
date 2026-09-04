@@ -65,8 +65,9 @@ items needing real Gmail, a real LLM provider, or operator credentials are **ope
 ## Bookkeeping
 
 - [x] SPEC §8 status paragraph updated with the M4 entry; the M4 bullet carries its shipped/open note.
-- [x] KNOWN-ISSUES re-verified 2026-09-03: auth-refresh and real-vsync perf gaps closed by evidence;
-  REF-1 now names Inbox as the remaining oversized component.
+- [x] KNOWN-ISSUES re-verified 2026-09-03: auth-refresh and real-vsync perf gaps closed by evidence.
+  REF-1 closed on 2026-09-03 by separating Inbox's behavior coordination from its layout; both exported
+  mail-surface components are now below the ~350-line bar.
 - [x] **Perf suites, recorded runs (2026-08-31 cloud container; 2026-09-03 Apple Silicon Mac):**
   - `npm run e2e:perf:scale` (40k-thread bounded reads): **passed**.
   - `npm run e2e:perf` (10k + 1k two-account profile): **14 of 18 passed.** Every non-paint budget
@@ -81,6 +82,12 @@ items needing real Gmail, a real LLM provider, or operator credentials are **ope
     **9ms**, search keystroke-to-results **41ms**, composer keystroke paint **9ms**, and paint delta
     **6ms**. The previously suspect warm split switch measured **3ms p95** (cold **30ms**), and the
     two-account split switches measured **33ms** and **33ms p95**, all inside their existing ceilings.
+  - The hosted-Linux ceiling decision was recorded on 2026-09-03 after the same built-app account-switch
+    path varied independently of product code: the post-merge `main` run measured split-account p95s of
+    **126ms/109ms** and ordinary account switching at **243ms**, while the next PR measured the ordinary
+    path at **68ms** but one split direction at **157ms**. Hosted Linux now uses a **300ms regression-smoke
+    ceiling** for account switching. Developer hardware retains the normative F18 **100ms** gate, already
+    evidenced above at 33ms in both split directions.
 
 ## Done when
 
