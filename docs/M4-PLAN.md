@@ -805,8 +805,9 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   Connect T36's separate default-off autocomplete control to the editor, with enable/disable commands and the
   F17 privacy/cost disclosure. Both master AI and autocomplete must be enabled. Use the configured
   provider/model; no new service or mailbox index. Persist only the preference, never suggestion state.
-- **Preview, then insertion:** stream one plain-text suggestion in gray at a collapsed caret,
-  with no line breaks and a 120-character cap. Update the transient preview as provider chunks arrive;
+- **Preview, then insertion:** stream one plain-text sentence continuation in gray at a collapsed caret,
+  with no line breaks and a 120-character cap. Stop at the first sentence-ending punctuation even if the
+  provider returns more. Update the transient preview as provider chunks arrive;
   never stream those partial words into the document. Render the preview outside the persisted Lexical
   document, anchored to the caret through wrapping and scrolling. It must not affect selection, copying,
   exported HTML, autosave revisions, Gmail mirroring, or sending. Acceptance inserts plain text in the
@@ -818,8 +819,9 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   own their keys when active; never install a global Tab interceptor. Route accept/dismiss through the
   composer's keyboard handling, register enable/disable commands in the palette, and update the cheat
   sheet. Opening a picker or palette invalidates the preview.
-- **Trigger:** after a deliberate body-typing edit, wait 300ms of inactivity. Require a nonempty authored
-  prefix, a collapsed selection in ordinary editable text, and a focused foreground composer. Mount,
+- **Trigger:** after a deliberate body-typing edit at the end of the authored body, wait 300ms of inactivity.
+  Require an unfinished, nonempty authored prefix, no authored text after the caret, a collapsed selection
+  in ordinary editable text, and a focused foreground composer. Mount,
   draft restore, focus alone, AI chunks, snippet insertion, undo/redo, and suggestion acceptance/dismissal
   do not trigger requests. Suppress requests during IME composition, selections, T37 generation/refine,
   open pickers/dialogs, and inside quotes, signatures, T32B's footer, tables, or opaque preserved regions.

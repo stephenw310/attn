@@ -138,6 +138,8 @@ describe('buildPrompt', () => {
     expect(payload).toContain('AFTER')
     expect(prompt.system).toContain('Never repeat text already before the caret')
     expect(prompt.system).toContain('add another greeting')
+    expect(prompt.system).toContain('Complete only the sentence')
+    expect(prompt.system).toContain('Never start a second sentence')
     // The excerpt is truncated to the disclosed bounds: prefix keeps its tail
     // (the text at the caret), suffix its head.
     const content = prompt.messages[0].content

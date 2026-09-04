@@ -141,6 +141,28 @@ describe('debounce', () => {
     expect(h.hooks.requests).toHaveLength(0)
   })
 
+  it('never requests when authored text follows the caret', async () => {
+    const h = harness()
+    h.hooks.excerpt = { prefix: 'Hello ', suffix: 'existing body', anchor: 'a-1' }
+    h.controller.noteTypingEdit()
+    h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+    await settle()
+    expect(h.hooks.requests).toHaveLength(0)
+    expect(h.hooks.previews).toHaveLength(0)
+  })
+
+  it('never requests after the user finishes the current sentence', async () => {
+    for (const prefix of ['Thanks.', 'Does that work?”', '完成しました。']) {
+      const h = harness()
+      h.hooks.excerpt = { prefix, suffix: '', anchor: 'a-1' }
+      h.controller.noteTypingEdit()
+      h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+      await settle()
+      expect(h.hooks.requests).toHaveLength(0)
+      expect(h.hooks.previews).toHaveLength(0)
+    }
+  })
+
   it('coalesces a replacement until the one-second start interval expires', async () => {
     const h = harness()
     h.controller.noteTypingEdit()
@@ -193,10 +215,43 @@ describe('suggestion lifecycle', () => {
     expect(h.hooks.previews).toEqual(['ld, how', 'ld, how are you?', 'ld, how are you?'])
   })
 
-  it('normalizes to one line and the character cap', () => {
+  it('normalizes to one sentence, one line, and the character cap', () => {
+    expect(normalizeSuggestion('finish this sentence. Start another one.')).toBe('finish this sentence.')
+    expect(normalizeSuggestion('finish this thought?” Start another one.')).toBe('finish this thought?”')
+    expect(normalizeSuggestion('ship version 1.2 today. Start another one.')).toBe('ship version 1.2 today.')
+    expect(normalizeSuggestion('第一文。第二文。')).toBe('第一文。')
+    expect(normalizeSuggestion('第一文。」第二文。')).toBe('第一文。」')
     expect(normalizeSuggestion('first line\nsecond line')).toBe('first line')
     expect(normalizeSuggestion('x'.repeat(500))).toHaveLength(AUTOCOMPLETE_MAX_SUGGESTION_CHARS)
     expect(normalizeSuggestion('\nleading newline')).toBe('')
+  })
+
+  it('never reveals a second sentence as chunks stream', async () => {
+    const h = harness()
+    h.controller.noteTypingEdit()
+    h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+    await settle()
+    h.controller.handleStreamEvent({
+      requestId: 'ac-1',
+      kind: 'chunk',
+      text: 'ld, how are you? I can'
+    })
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'chunk', text: ' help tomorrow.' })
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'done' })
+    expect(h.hooks.previews).toEqual(['ld, how are you?', 'ld, how are you?'])
+    expect(h.controller.takeAcceptedText()).toBe('ld, how are you?')
+  })
+
+  it('never expands a completed CJK sentence when an unspaced sentence streams next', async () => {
+    const h = harness()
+    h.controller.noteTypingEdit()
+    h.timers.fire(AUTOCOMPLETE_DEBOUNCE_MS)
+    await settle()
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'chunk', text: '第一文。' })
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'chunk', text: '第二文。' })
+    h.controller.handleStreamEvent({ requestId: 'ac-1', kind: 'done' })
+    expect(h.hooks.previews).toEqual(['第一文。', '第一文。'])
+    expect(h.controller.takeAcceptedText()).toBe('第一文。')
   })
 
   it('strips a current-line echo and suppresses a restarted greeting', () => {

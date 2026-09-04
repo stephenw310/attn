@@ -41,6 +41,11 @@ export interface ImmediateSuggestion {
   anchor: string
 }
 
+/** Sentence punctuation followed by quote or bracket marks at the end of authored text. */
+function endsSentence(text: string): boolean {
+  return /[.!?。！？]+["'’”»)}\]）】』」]*$/u.test(text.trimEnd())
+}
+
 interface PendingRequest {
   sequence: number
   requestId: string | null
@@ -61,7 +66,14 @@ interface PendingRequest {
  */
 export function normalizeSuggestion(raw: string, prefix = ''): string {
   const firstLine = raw.split('\n', 1)[0] ?? ''
-  let suggestion = firstLine.trimEnd()
+  // Providers sometimes return a paragraph despite the prompt. Keep only
+  // the first generated sentence, including trailing quote/bracket marks.
+  // ASCII punctuation requires whitespace or end-of-text so periods inside
+  // values such as version 1.2 do not cut the suggestion. Chinese and
+  // Japanese terminators need no separator before the next sentence.
+  const sentenceEnd = /(?:[.!?]+["'’”»)}\]）】』」]*(?=\s|$)|[。！？]+["'’”»)}\]）】』」]*)/u.exec(firstLine)
+  const boundedLine = sentenceEnd ? firstLine.slice(0, sentenceEnd.index + sentenceEnd[0].length) : firstLine
+  let suggestion = boundedLine.trimEnd()
   if (suggestion.length === 0) return ''
 
   const prefixLines = prefix.split('\n')
@@ -237,7 +249,17 @@ export class AutocompleteController {
     }
     if (!enabled || this.disposed) return
     const excerpt = this.hooks.buildExcerpt()
-    if (excerpt === null || excerpt.prefix.trim().length === 0) return
+    // The preview is an overlay and cannot make room for text already after
+    // the caret. Only complete at the end of the authored body so a streamed
+    // suggestion never covers existing draft content.
+    if (
+      excerpt === null ||
+      excerpt.prefix.trim().length === 0 ||
+      endsSentence(excerpt.prefix) ||
+      excerpt.suffix.length > 0
+    ) {
+      return
+    }
     const pending: PendingRequest = {
       sequence: ++this.sequence,
       requestId: null,

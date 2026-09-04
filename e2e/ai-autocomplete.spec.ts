@@ -121,11 +121,14 @@ test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab acc
     await window.attn.ai.setSetting('voiceRules', 'Avoid exclamation marks.')
     await window.attn.ai.setSetting('autocompleteEnabled', true)
   })
-  await installFakeAi(app, { chunks: [' notes — the overlay reads well.'] })
+  await installFakeAi(app, {
+    chunks: [' notes — the overlay reads well. A second sentence must stay hidden.']
+  })
   await page.keyboard.type(' d')
   await expect.poll(() => aiRequests(app).then((requests) => requests.length)).toBe(1)
   await expect(preview(page)).toBeVisible()
   await expect(preview(page)).toContainText('the overlay reads well.')
+  await expect(preview(page)).not.toContainText('second sentence')
 
   const requests = await aiRequests(app)
   expect(requests).toHaveLength(1)
@@ -144,6 +147,7 @@ test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab acc
   await page.keyboard.press('Tab')
   await expect(preview(page)).toHaveCount(0)
   await expect(editor(page)).toContainText('Thanks for the d notes — the overlay reads well.')
+  await expect(editor(page)).not.toContainText('second sentence')
   await page.keyboard.press('ControlOrMeta+z')
   await expect(editor(page)).not.toContainText('the overlay reads well.')
   await expect(editor(page)).toContainText('Thanks for the d')
@@ -198,6 +202,39 @@ test('stop-and-start typing coalesces the latest request through the cooldown', 
   await expect.poll(() => aiRequests(app).then((requests) => requests[0]?.canceled)).toBe(true)
   await expect(preview(page)).toContainText('latest suggestion')
   await expect(editor(page)).toContainText('Hello again')
+})
+
+test('typing in the middle of existing body text does not request or show autocomplete', async ({
+  app,
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page, false)
+  await installFakeAi(app, { chunks: [' overlapping suggestion'] })
+  await page.keyboard.press('c')
+  await editor(page).click({ position: { x: 24, y: 24 } })
+  await page.keyboard.type('Hello existing ending')
+
+  await page.evaluate(async () => window.attn.ai.setSetting('autocompleteEnabled', true))
+  for (let index = 0; index < 'ending'.length; index += 1) await page.keyboard.press('ArrowLeft')
+  await page.keyboard.type('x')
+
+  await expect(editor(page)).toContainText('Hello existing xending')
+  await expectNoRequestAfterDebounce(app, page)
+  await expect(preview(page)).toHaveCount(0)
+})
+
+test('finishing the current sentence does not request a new one', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page, true)
+  await installFakeAi(app, { chunks: [' Let me know if you have questions.'] })
+  await page.keyboard.press('c')
+  await editor(page).click({ position: { x: 24, y: 24 } })
+  await page.keyboard.type('Thanks.')
+
+  await expectNoRequestAfterDebounce(app, page)
+  await expect(preview(page)).toHaveCount(0)
+  await expect(editor(page)).toContainText('Thanks.')
 })
 
 test('a caret in the Attn footer never requests; provider failure yields silence, not toasts', async ({
