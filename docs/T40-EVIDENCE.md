@@ -82,6 +82,12 @@ items needing real Gmail, a real LLM provider, or operator credentials are **ope
     **9ms**, search keystroke-to-results **41ms**, composer keystroke paint **9ms**, and paint delta
     **6ms**. The previously suspect warm split switch measured **3ms p95** (cold **30ms**), and the
     two-account split switches measured **33ms** and **33ms p95**, all inside their existing ceilings.
+  - The hosted-Linux ceiling decision was recorded on 2026-09-03 after the same built-app account-switch
+    path varied independently of product code: the post-merge `main` run measured split-account p95s of
+    **126ms/109ms** and ordinary account switching at **243ms**, while the next PR measured the ordinary
+    path at **68ms** but one split direction at **157ms**. Hosted Linux now uses a **300ms regression-smoke
+    ceiling** for account switching. Developer hardware retains the normative F18 **100ms** gate, already
+    evidenced above at 33ms in both split directions.
 
 ## Done when
 
