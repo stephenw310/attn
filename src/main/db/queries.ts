@@ -25,10 +25,12 @@ import type {
   ThreadRow
 } from '../../shared/mail'
 import { messageLabelsMatchMailbox } from '../../shared/mail'
+import { combinedBody } from '../outbox/text'
 import { splitAssignmentForAccount } from '../splits'
 import { needsBodyHydration } from '../sync/bodyHydration'
 import { THREAD_LIST_LIMIT } from '../sync/tuning'
 import type { Db } from './index'
+import { parseJson } from './json'
 import { storedMessageLabelSql, threadLabelSql } from './labelSql'
 import type { MaterializedMailboxView } from './mailboxMembership'
 import {
@@ -220,6 +222,10 @@ export function listMailboxThreads(
            GROUP BY account_id, thread_id
          ),
          visible AS (
+           -- "Me" is decided against accounts.email here, while db/search.ts
+           -- compares the same sender to threads.account_id. Same answer only
+           -- because v1 keys an account by its address; the two sites must move
+           -- together if that ever stops being true.
            SELECT t.account_id, t.id,
                   CASE
                     WHEN lower(trim(COALESCE(latest.from_email, ''))) = lower(trim(account.email))
@@ -729,12 +735,6 @@ interface OutboxConversationRow {
   updated_at: number
 }
 
-function combinedBody(primary: string, quote: string, separator: string): string {
-  if (!quote) return primary
-  if (!primary) return quote
-  return `${primary}${separator}${quote}`
-}
-
 const LEGACY_SENT_MATCH_WINDOW_MS = 2 * 60 * 1_000
 
 function canonicalSentBody(value: string): string {
@@ -1043,8 +1043,4 @@ function messageVisibleInMailbox(
     return fallbackLabels.has(mailbox.toUpperCase())
   }
   return messageLabelsMatchMailbox(new Set(parseJson(labelsJson, [] as string[])), mailbox)
-}
-
-function parseJson<T>(value: string | null, fallback: T): T {
-  return value === null ? fallback : (JSON.parse(value) as T)
 }

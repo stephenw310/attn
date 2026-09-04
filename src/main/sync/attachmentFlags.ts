@@ -13,7 +13,7 @@ import { type CursorWalkReason, lazyStatement, planCursorStart, runCursorWalk } 
 import type { MailProvider, ThreadIdPage } from './provider'
 
 /** The one Gmail operator this pass depends on. */
-export const ATTACHMENT_FLAG_QUERY = 'has:attachment'
+const ATTACHMENT_FLAG_QUERY = 'has:attachment'
 
 export interface AttachmentFlagProgress {
   threadsFlagged: number

@@ -459,7 +459,7 @@ describe('draft synchronization identity', () => {
     expect(getDraft).not.toHaveBeenCalled()
   })
 
-  it('refetches an unchanged legacy draft once to repair its missing thread binding', async () => {
+  it('refetches an unchanged unbound draft once to repair its missing thread binding', async () => {
     const remote = providerDraft('Fwd: Existing conversation', {
       mimeType: 'text/plain',
       body: { data: Buffer.from('Forward body').toString('base64url') }
@@ -508,7 +508,7 @@ describe('draft synchronization identity', () => {
         }
         if (sql.includes('UPDATE outbox SET kind = ?')) return { run: repairBinding }
         if (sql.includes('INSERT INTO outbox')) return { run: writeRemote }
-        // The send state machine never owns this legacy row, so the claim finds
+        // The send state machine never owns this imported row, so the claim finds
         // no owner and reconciliation proceeds to the thread-binding repair.
         if (sql.includes("state NOT IN ('composing', 'drafted')")) {
           return { get: vi.fn(() => undefined) }

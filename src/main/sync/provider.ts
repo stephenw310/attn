@@ -28,7 +28,7 @@ export interface ThreadIdPage {
   resultSizeEstimate?: number
 }
 
-export interface ProviderDraftSummary {
+interface ProviderDraftSummary {
   id: string
   messageId?: string
   threadId?: string
@@ -63,7 +63,7 @@ export interface ListThreadIdsOptions {
   priority?: ProviderRequestPriority
 }
 
-export interface HistoryMessageEvent {
+interface HistoryMessageEvent {
   message: GmailMessage
   labelIds?: string[]
 }
@@ -89,14 +89,14 @@ export interface GetThreadOptions {
   priority?: ProviderRequestPriority
 }
 
-export type ProviderRequestPriority = 'send' | 'action' | 'polling' | 'foreground' | 'background'
+type ProviderRequestPriority = 'send' | 'action' | 'polling' | 'foreground' | 'background'
 
 export interface ProviderRequestOptions {
   signal?: AbortSignal
   priority?: ProviderRequestPriority
 }
 
-export interface ProviderQuotaMetrics {
+interface ProviderQuotaMetrics {
   requests: number
   units: number
   waitMs: number

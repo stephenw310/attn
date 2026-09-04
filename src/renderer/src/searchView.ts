@@ -1,5 +1,10 @@
 import type { ConversationMailbox, MailLabel } from '../../shared/mail'
-import { normalizeMailboxName, parseSearchQuery } from '../../shared/searchQuery'
+import {
+  normalizeMailboxName,
+  parseSearchQuery,
+  searchesDrafts as searchesDraftStore,
+  searchesLocalSnoozes as searchesStoredSnoozes
+} from '../../shared/searchQuery'
 import type { MailView } from './mailDisplay'
 
 function searchMailboxes(query: string): string[] {
@@ -28,18 +33,11 @@ export function conversationMailboxForSearch(query: string): ConversationMailbox
 }
 
 export function searchesDrafts(query: string): boolean {
-  const mailboxes = searchMailboxes(query)
-  return mailboxes.includes('draft') || mailboxes.includes('drafts')
+  return searchesDraftStore(parseSearchQuery(query))
 }
 
-/** Attn snoozes are local reminders, not Gmail's native snooze state. */
 export function searchesLocalSnoozes(query: string): boolean {
-  const parsed = parseSearchQuery(query)
-  return parsed.filters.some(
-    (filter) =>
-      (filter.kind === 'is' && filter.value === 'snoozed') ||
-      (filter.kind === 'in' && normalizeMailboxName(filter.value) === 'snoozed')
-  )
+  return searchesStoredSnoozes(parseSearchQuery(query))
 }
 
 export function searchAllowsMove(query: string): boolean {

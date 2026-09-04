@@ -6,7 +6,7 @@ import { parseAddress, parseAddressList } from '../../shared/address'
 
 export { parseAddress, parseAddressList }
 
-export interface GmailHeader {
+interface GmailHeader {
   name: string
   value: string
 }
@@ -232,10 +232,6 @@ export function decodeBase64Url(data: string): string {
   } catch {
     return ''
   }
-}
-
-export function hasAttachment(payload: GmailPart | undefined): boolean {
-  return collectAttachments(payload).some((attachment) => !attachment.inline)
 }
 
 function decodeBody(data: string): string {

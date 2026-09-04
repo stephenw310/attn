@@ -6,7 +6,7 @@ import { parseStoredDraftAttachments, publicDraftAttachments } from './draftAtta
 import { outboxAddresses, outboxDraftContent, outboxDraftInput } from './row'
 import { hasOnlyDefaultPrimarySignature } from './sendAs'
 
-export interface DraftRow {
+interface DraftRow {
   id: string
   account_id: string
   gmail_draft_id: string | null
@@ -37,7 +37,7 @@ const DRAFT_COLUMNS = `id, account_id, gmail_draft_id, state, kind, to_json, cc_
   references_json, quote_html, quote_text, follow_up_at, created_at, updated_at, local_revision,
   default_signature_fingerprint`
 
-export function toDraft(row: DraftRow): Draft {
+function toDraft(row: DraftRow): Draft {
   const content = outboxDraftContent(row)
   return {
     ...content,

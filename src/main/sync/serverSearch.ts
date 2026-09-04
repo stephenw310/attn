@@ -34,10 +34,7 @@ export interface SearchAllGmailOptions {
 }
 
 /** Keep Gmail order, remove repeated ids, and leave existing local results in their original section. */
-export function newServerThreadIds(
-  localThreadIds: Iterable<string>,
-  serverThreadIds: Iterable<string>
-): string[] {
+function newServerThreadIds(localThreadIds: Iterable<string>, serverThreadIds: Iterable<string>): string[] {
   const local = new Set(localThreadIds)
   const seen = new Set<string>()
   const merged: string[] = []

@@ -4,12 +4,7 @@ import { SEARCH_RECENT_MESSAGE_LIMIT, SEARCH_RESULT_LIMIT, searchThreads } from 
 import { GmailApiError, GmailAuthError } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { ensureAccount, persistThread } from './persist'
-import {
-  newServerThreadIds,
-  type ServerSearchProvider,
-  searchAllGmail,
-  serverSearchFailure
-} from './serverSearch'
+import { type ServerSearchProvider, searchAllGmail, serverSearchFailure } from './serverSearch'
 
 const ACCOUNT = 'search@example.test'
 
@@ -36,14 +31,6 @@ function thread(id: string, at: number, labelIds: string[] = ['INBOX']): GmailTh
     ]
   }
 }
-
-describe('newServerThreadIds', () => {
-  it('keeps Gmail order while removing local and repeated ids', () => {
-    expect(
-      newServerThreadIds(['local', 'also-local'], ['local', 'remote-b', 'remote-b', 'remote-a'])
-    ).toEqual(['remote-b', 'remote-a'])
-  })
-})
 
 describe('searchAllGmail', () => {
   it('fetches, persists, orders, and dedupes server-only matches', async () => {

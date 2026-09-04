@@ -31,7 +31,7 @@ export interface BackfillCallbacks {
   onMetric?: (metric: BackfillMetric) => void
 }
 
-export interface BackfillProgress {
+interface BackfillProgress {
   stage: BackfillPhase
   threadsDone: number
   stageThreadsListed?: number
@@ -48,7 +48,7 @@ export interface BackfillProgress {
   mailChanged: boolean
 }
 
-export type BackfillMetric =
+type BackfillMetric =
   | {
       kind: 'stage-complete'
       stage: BackfillPhase

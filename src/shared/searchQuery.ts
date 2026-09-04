@@ -148,6 +148,11 @@ export function searchMatchExpression(parsed: ParsedSearchQuery): string | null 
     .join(' AND ')
 }
 
+/**
+ * `before:`/`after:` boundaries anchor to UTC midnight, while Gmail evaluates the
+ * same operators in the account's timezone — so a local and a server search of
+ * one dated query can legitimately disagree about mail near a day boundary.
+ */
 export function searchDateMilliseconds(value: string): number {
   const [year, month, day] = value.split('-').map(Number)
   return Date.UTC(year, month - 1, day)
@@ -161,4 +166,19 @@ export function searchDateMilliseconds(value: string): number {
  */
 export function normalizeMailboxName(value: string): string {
   return value.toLowerCase().replaceAll(/[\s_-]/g, '')
+}
+
+/** `in:draft`/`in:drafts` selects the local draft store rather than stored mail. */
+export function searchesDrafts(parsed: ParsedSearchQuery): boolean {
+  return parsed.filters.some(
+    (filter) => filter.kind === 'in' && ['draft', 'drafts'].includes(normalizeMailboxName(filter.value))
+  )
+}
+
+/** Attn snoozes are local reminders, not Gmail's native snooze state. */
+export function searchesLocalSnoozes(parsed: ParsedSearchQuery): boolean {
+  return parsed.filters.some((filter) => {
+    if (filter.kind === 'is') return filter.value === 'snoozed'
+    return filter.kind === 'in' && normalizeMailboxName(filter.value) === 'snoozed'
+  })
 }

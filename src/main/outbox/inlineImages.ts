@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import type { DraftInlineImageInput, DraftInlineImageResult } from '../../shared/drafts'
 import type { Db } from '../db'
 import {
@@ -8,17 +8,13 @@ import {
   publicDraftAttachment,
   type StoredDraftAttachment
 } from './draftAttachments'
-import { validateAttachmentCap } from './spool'
+import { safeFilename, validateAttachmentCap } from './spool'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const IMAGE_MIME = /^image\/(?:png|jpeg|gif|webp)$/i
 
 export function isSupportedInlineImageMimeType(value: string): boolean {
   return IMAGE_MIME.test(value)
-}
-
-function safeFilename(value: string): string {
-  return basename(value.replace(/[\0\r\n]/g, '').trim()) || 'pasted-image'
 }
 
 export async function addInlineImage(
@@ -48,7 +44,7 @@ export async function addInlineImage(
   const used = attachments.reduce((total, attachment) => total + attachment.sizeBytes, 0)
   validateAttachmentCap(used, [content.byteLength])
 
-  const filename = safeFilename(input.filename)
+  const filename = safeFilename(input.filename, 'pasted-image')
   const contentId = `${randomUUID()}@attn.local`
   const directory = join(userData, 'outbox', draftId)
   // The original name lives in metadata. A UUID-only storage name keeps the
