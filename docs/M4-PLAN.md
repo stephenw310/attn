@@ -820,8 +820,8 @@ Repeated transmission of an unfinished draft requires its own consent and reques
   composer's keyboard handling, register enable/disable commands in the palette, and update the cheat
   sheet. Opening a picker or palette invalidates the preview.
 - **Trigger:** after a deliberate body-typing edit at the end of the authored body, wait 300ms of inactivity.
-  Require a nonempty authored prefix, no authored text after the caret, a collapsed selection in ordinary
-  editable text, and a focused foreground composer. Mount,
+  Require an unfinished, nonempty authored prefix, no authored text after the caret, a collapsed selection
+  in ordinary editable text, and a focused foreground composer. Mount,
   draft restore, focus alone, AI chunks, snippet insertion, undo/redo, and suggestion acceptance/dismissal
   do not trigger requests. Suppress requests during IME composition, selections, T37 generation/refine,
   open pickers/dialogs, and inside quotes, signatures, T32B's footer, tables, or opaque preserved regions.

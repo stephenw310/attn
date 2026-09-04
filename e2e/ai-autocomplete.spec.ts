@@ -224,6 +224,19 @@ test('typing in the middle of existing body text does not request or show autoco
   await expect(preview(page)).toHaveCount(0)
 })
 
+test('finishing the current sentence does not request a new one', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page, true)
+  await installFakeAi(app, { chunks: [' Let me know if you have questions.'] })
+  await page.keyboard.press('c')
+  await editor(page).click({ position: { x: 24, y: 24 } })
+  await page.keyboard.type('Thanks.')
+
+  await expectNoRequestAfterDebounce(app, page)
+  await expect(preview(page)).toHaveCount(0)
+  await expect(editor(page)).toContainText('Thanks.')
+})
+
 test('a caret in the Attn footer never requests; provider failure yields silence, not toasts', async ({
   app,
   page

@@ -665,7 +665,8 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   keys, and `Enter` keep their existing behavior; recipient completion, menus, and snippet pickers take
   precedence in their own contexts.
 - Only deliberate typing at the end of the focused body of the foreground composer can trigger a request.
-  Opening, restoring, focusing a draft, or editing before existing authored text does not. Suppress
+  The text before the caret must belong to an unfinished sentence. Opening, restoring, focusing a draft,
+  finishing a sentence, or editing before existing authored text does not trigger a request. Suppress
   suggestions during IME composition, non-collapsed selections, reply generation/refine, and editing of
   quotes, signatures, tables, or preserved opaque content.
 - Edits, caret/selection changes, blur, closing or sending the draft, account changes, and AI configuration
