@@ -653,8 +653,10 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - A **separate, default-off setting** enables short suggestions while typing in new messages, replies,
   reply-all, and forwards. Enabling reply drafting does not enable autocomplete. It uses the configured
   provider and model; cloud suggestions can incur repeated API charges. Local endpoints remain supported.
-- After a pause in typing, stream one short continuation in gray at the caret, with no line breaks and at
-  most 120 characters. This suggestion is a preview outside the saved editor document; it never enters
+- After a pause in typing at the end of the authored body, stream one short continuation in gray at the
+  caret, with no line breaks and at most 120 characters. Complete only the sentence being typed and discard
+  any provider output after its first sentence-ending punctuation. Do not request or show autocomplete when
+  authored text follows the caret. This suggestion is a preview outside the saved editor document; it never enters
   autosave, Gmail draft mirroring, copied mail text, or the outbox until accepted.
 - `Tab` accepts a visible, current suggestion only while the body editor has focus. The accepted text is
   editable and one undo step; undo restores the previous text and caret. `Esc` dismisses the suggestion
@@ -662,10 +664,10 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   another pause. With no suggestion, normal `Tab` focus and `Esc` close behavior remain. `Shift+Tab`, arrow
   keys, and `Enter` keep their existing behavior; recipient completion, menus, and snippet pickers take
   precedence in their own contexts.
-- Only deliberate typing in the focused body of the foreground composer can trigger a request. Opening,
-  restoring, or focusing a draft does not. Suppress suggestions during IME composition, non-collapsed
-  selections, reply generation/refine, and editing of quotes, signatures, tables, or preserved opaque
-  content.
+- Only deliberate typing at the end of the focused body of the foreground composer can trigger a request.
+  Opening, restoring, focusing a draft, or editing before existing authored text does not. Suppress
+  suggestions during IME composition, non-collapsed selections, reply generation/refine, and editing of
+  quotes, signatures, tables, or preserved opaque content.
 - Edits, caret/selection changes, blur, closing or sending the draft, account changes, and AI configuration
   changes invalidate pending and visible suggestions. Late results can never insert into another draft
   or account, and dismissing or accepting a suggestion does not itself request another.

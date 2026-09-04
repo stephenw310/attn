@@ -111,8 +111,8 @@ export function buildPrompt(request: AiGenerateRequest, voice: AiVoiceProfile): 
     const subject = request.subject?.replace(/\s+/g, ' ').trim()
     const conversation = conversationBlocks(request.thread)
     const system = [
-      'Complete the email the user is typing. Continue directly from the text before the caret with one short continuation of at most ' +
-        `${AUTOCOMPLETE_MAX_SUGGESTION_CHARS} characters and no line breaks. Never repeat text already before the caret, restart the email, or add another greeting when one is already present. The first output character must be the next character after the caret. Use the subject and conversation context when present. Output only the continuation text.`,
+      'Complete only the sentence the user is currently typing. Continue directly from the text before the caret and stop after the first sentence-ending punctuation. Never start a second sentence. The continuation must be at most ' +
+        `${AUTOCOMPLETE_MAX_SUGGESTION_CHARS} characters with no line breaks. Never repeat text already before the caret, restart the email, or add another greeting when one is already present. The first output character must be the next character after the caret. Use the subject and conversation context when present. Output only the sentence continuation.`,
       UNTRUSTED_CONTENT_RULE,
       TONE_INSTRUCTIONS[voice.tone]
     ]
