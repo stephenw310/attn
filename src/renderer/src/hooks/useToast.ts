@@ -9,7 +9,7 @@ export interface ToastState {
   countdown: boolean
 }
 
-export interface ToastOptions {
+interface ToastOptions {
   durationMs?: number
   expiresAt?: number
   countdown?: boolean

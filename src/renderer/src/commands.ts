@@ -395,7 +395,7 @@ export const COMMAND_SPECS = {
 } as const satisfies Record<string, CommandSpec>
 
 export type StaticCommandId = keyof typeof COMMAND_SPECS
-export type CommandId =
+type CommandId =
   | StaticCommandId
   | `split.goto:${string}`
   | `account.switch:${string}`
@@ -423,7 +423,7 @@ export interface CommandArgumentValue {
   value: unknown
 }
 
-export interface CommandArgument {
+interface CommandArgument {
   prefixes: readonly string[]
   parse: (input: string) => CommandArgumentValue | null
   run: (value: unknown) => void
