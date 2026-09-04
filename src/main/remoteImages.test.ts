@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_REMOTE_IMAGE_POLICY,
+  fromAppFrame,
   MailFrameGrants,
   MailFrameRegistry,
   type RemoteImagePolicy,
@@ -77,10 +78,9 @@ describe('MailFrameRegistry', () => {
 })
 
 describe('MailFrameGrants', () => {
-  // The one-shot allowance is main's to mint: registration reports where a
-  // frame is mounted and nothing more, so a renderer that registers frames of
-  // its own choosing cannot admit a tracking pixel.
-  it('refuses a registration with no gesture behind it', () => {
+  // Registration reports where a frame is mounted and nothing more: a grant
+  // exists only if the gesture call preceded it, and is spent by one mount.
+  it('refuses a registration no gesture call preceded', () => {
     const grants = new MailFrameGrants()
     expect(grants.take('nonce-1', 'm1')).toBe(false)
     // Registering under that answer leaves the frame subject to the policy.
@@ -114,5 +114,16 @@ describe('MailFrameGrants', () => {
     expect(grants.take('nonce-1', 'm1')).toBe(false)
     expect(grants.take('nonce-2', 'm1')).toBe(true)
     expect(grants.take('nonce-3', 'm1')).toBe(true)
+  })
+})
+
+describe('fromAppFrame', () => {
+  it('accepts only the window main frame as the caller', () => {
+    const main = { frameToken: 'main' }
+    const child = { frameToken: 'child' }
+    expect(fromAppFrame({ senderFrame: main, sender: { mainFrame: main } })).toBe(true)
+    expect(fromAppFrame({ senderFrame: child, sender: { mainFrame: main } })).toBe(false)
+    // A disposed sender frame is no evidence at all.
+    expect(fromAppFrame({ senderFrame: null, sender: { mainFrame: main } })).toBe(false)
   })
 })

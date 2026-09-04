@@ -13,7 +13,7 @@ import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHAN
 import type { PendingFocusTarget } from '../shared/notifications'
 import { type AppSettingUpdate, validateAppSettingUpdate } from '../shared/settings'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
-import { MailFrameGrants } from './remoteImages'
+import { fromAppFrame, MailFrameGrants } from './remoteImages'
 import type { ServiceSupervisor } from './service/supervisor'
 
 type Handler<K extends InvokeChannel> = (
@@ -136,17 +136,25 @@ export function registerIpc(context: IpcContext): () => void {
     typeof value === 'string' && /^[a-z0-9-]{8,64}$/i.test(value)
   const isMessageId = (value: unknown): value is string =>
     typeof value === 'string' && value.length > 0 && value.length <= 256
-  // T33: main owns the one-shot allowance. Registration reports where a frame
-  // is mounted; only the gesture channel below grants it a `Load once` render,
-  // so a compromised renderer cannot admit a tracking pixel by registering.
+  // T33: main keeps the one-shot allowance. Registration reports where a
+  // frame is mounted and carries no policy; the gesture channel records a
+  // single-use grant against the nonce about to register. The gesture itself
+  // is renderer-reported user intent, like `Always load from sender` — main
+  // cannot see a click — so the only origin evidence it checks is that the
+  // call came from the app frame, never from a mail frame.
+  const assertAppFrame = (event: Parameters<Parameters<typeof handle>[1]>[0]): void => {
+    if (!fromAppFrame(event)) throw new Error('remote-image grants come from the app frame only')
+  }
   const mailFrameGrants = new MailFrameGrants()
-  handle(IPC_CHANNELS.mailAllowRemoteImagesOnce, (_event, nonce, messageId) => {
+  handle(IPC_CHANNELS.mailAllowRemoteImagesOnce, (event, nonce, messageId) => {
+    assertAppFrame(event)
     if (!isFrameNonce(nonce)) throw new Error('invalid frame nonce')
     if (!isMessageId(messageId)) throw new Error('invalid message id')
     mailFrameGrants.allowOnceFor(nonce, messageId)
     return undefined
   })
-  handle(IPC_CHANNELS.mailRegisterMessageFrame, (_event, nonce, messageId) => {
+  handle(IPC_CHANNELS.mailRegisterMessageFrame, (event, nonce, messageId) => {
+    assertAppFrame(event)
     if (!isFrameNonce(nonce)) throw new Error('invalid frame nonce')
     if (!isMessageId(messageId)) throw new Error('invalid message id')
     return context.registerMailFrame(nonce, messageId, mailFrameGrants.take(nonce, messageId))

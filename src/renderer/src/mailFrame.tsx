@@ -405,9 +405,9 @@ export function useMailFrameAccess({
   const loadOnce = useCallback(() => {
     const bridge = window.attn
     if (!bridge || messageId === null) return
-    // Main, not the renderer, decides that this render may load: the gesture
-    // is recorded against the nonce the remount will register, and only then
-    // does the frame re-register (T33).
+    // Report the gesture first: main records a single-use grant against the
+    // nonce the remount will register, and only then does the frame
+    // re-register (T33). Registration itself carries no allowance.
     const nonce = crypto.randomUUID()
     void bridge.mail
       .allowRemoteImagesOnce(nonce, messageId)

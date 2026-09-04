@@ -34,14 +34,21 @@ export interface RegisteredMailFrame {
 
 /**
  * Pending `Load once` grants (T33). Registering a mail frame asserts nothing
- * about its allowance: main mints a one-shot grant only when the reader's
- * explicit `Load once` gesture arrives on its own channel, and binds it to
- * the exact nonce that gesture is about to register. The next registration of
- * that nonce and message spends it; every other registration — a second
- * registration of the same message, the same nonce for another message, or a
- * registration with no gesture behind it at all — is decided by the policy
- * alone. A compromised renderer therefore cannot self-grant a tracking pixel
- * by registering a frame.
+ * about its allowance: the reader's `Load once` gesture arrives on its own
+ * bridge call, main records it against the exact nonce that gesture is about
+ * to register, and the next registration of that nonce and message spends it.
+ * Every other registration — a second one for the same message, the same
+ * nonce for another message, one no gesture preceded — is decided by the
+ * policy alone.
+ *
+ * What this does and does not guarantee: the registration path carries no
+ * policy, a grant is single-use, and it cannot outlive its nonce. It is not
+ * gesture authentication. Main has no evidence of a click, so the gesture
+ * call is trusted as user intent exactly like `Always load from sender` and
+ * every other bridge call — a renderer that has already been compromised can
+ * call it. The renderer's own defense against that is SPEC §6: mail HTML is
+ * sanitized and rendered scriptless, and `fromAppFrame` refuses grants from
+ * any frame but the app's own.
  */
 export class MailFrameGrants {
   private readonly pending = new Map<string, string>()
@@ -70,6 +77,26 @@ export class MailFrameGrants {
     this.pending.delete(nonce)
     return granted
   }
+}
+
+/** The shape of an `ipcMain.handle` event this module needs to place a caller. */
+export interface FrameOriginEvent {
+  senderFrame: { frameToken?: string } | null
+  sender: { mainFrame: { frameToken?: string } | null }
+}
+
+/**
+ * True when an IPC call came from the app's top-level frame. Mail frames are
+ * scriptless sandboxed `srcdoc` documents with no bridge, and the window runs
+ * without `nodeIntegrationInSubFrames`, so no child frame can reach `ipcMain`
+ * today; the check is the one piece of origin evidence main can verify itself
+ * (Electron's own guidance for `handle`), kept so a future frame with a bridge
+ * cannot mint or spend a grant.
+ */
+export function fromAppFrame(event: FrameOriginEvent): boolean {
+  const frame = event.senderFrame
+  const main = event.sender?.mainFrame
+  return Boolean(frame && main && frame === main)
 }
 
 /**
