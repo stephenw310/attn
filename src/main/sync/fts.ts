@@ -12,6 +12,7 @@
 
 import type { SearchCoverage } from '../../shared/searchQuery'
 import type { Db } from '../db'
+import { parseJson } from '../db/json'
 import { textFromRaw } from '../gmail/parse'
 
 interface StoredMessageRow {
@@ -50,15 +51,6 @@ const STORED_ROW_COLUMNS = `
   m.id, m.thread_id, m.internal_date, t.subject, m.from_name, m.from_email, m.body_text, m.body_html,
   m.recipients_json, m.attachments_json`
 
-function parseJson(raw: string | null): unknown {
-  if (!raw) return null
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
-
 /** Derive the indexed body from stored columns; markup never reaches the tokenizer. */
 function bodyColumnFor(bodyText: string | null, bodyHtml: string | null): string {
   if (bodyText?.trim()) return bodyText
@@ -66,8 +58,14 @@ function bodyColumnFor(bodyText: string | null, bodyHtml: string | null): string
   return ''
 }
 
+/**
+ * To, Cc, Bcc and Reply-To all land in the one `recipients` column, so a local
+ * `to:` term matches any of them. Gmail's `to:` (see `gmail/searchQuery.ts`)
+ * matches the To header alone, so a local and a server search of one `to:`
+ * query legitimately return different mail.
+ */
 function recipientsColumnFor(recipientsJson: string | null): string {
-  const parsed = parseJson(recipientsJson)
+  const parsed = parseJson<unknown>(recipientsJson, null)
   if (!parsed || typeof parsed !== 'object') return ''
   const parts: string[] = []
   for (const role of ['to', 'cc', 'bcc', 'replyTo'] as const) {
@@ -84,7 +82,7 @@ function recipientsColumnFor(recipientsJson: string | null): string {
 }
 
 function filenamesColumnFor(attachmentsJson: string | null): string {
-  const parsed = parseJson(attachmentsJson)
+  const parsed = parseJson<unknown>(attachmentsJson, null)
   if (!Array.isArray(parsed)) return ''
   const names: string[] = []
   for (const attachment of parsed) {
