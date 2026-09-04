@@ -186,6 +186,36 @@ export class TestOperations implements TestHooks {
       this.host.broadcastMailChanged(accountId)
       return undefined
     }
+    if (channel === TEST_CHANNELS.expireReminders) {
+      // Back-date every pending reminder — snooze and follow-up alike — so a
+      // relaunch finds it due, WITHOUT refreshing the live scheduler: the
+      // specs that use this prove the deadline passing while the app is down,
+      // and the production snooze bridge refreshes in the same call, which
+      // would fire the reminder while the app is still up. The shift is
+      // uniform, so an ordering between two reminders survives it.
+      const expected = args[0]
+      if (!accountId) throw new Error('no active account')
+      if (typeof expected !== 'number' || !Number.isInteger(expected) || expected < 0) {
+        throw new Error('invalid pending reminder count')
+      }
+      const pending = db
+        .prepare(
+          `SELECT COUNT(*) AS count, MAX(due_at) AS latest
+             FROM reminders WHERE account_id = ? AND state = 'pending'`
+        )
+        .get(accountId) as { count: number; latest: number | null }
+      // Poll-friendly: a spec waits for the reminder it is about to expire by
+      // calling this until the count matches, and nothing is written before.
+      if (pending.count !== expected || pending.latest === null) return pending.count
+      const shift = pending.latest - (Date.now() - 1_000)
+      if (shift > 0) {
+        db.prepare(`UPDATE reminders SET due_at = due_at - ? WHERE account_id = ? AND state = 'pending'`).run(
+          shift,
+          accountId
+        )
+      }
+      return pending.count
+    }
     if (channel === TEST_CHANNELS.setSendAsSignature) {
       const signature = args[0]
       if (!accountId || typeof signature !== 'string') throw new Error('invalid send-as signature')

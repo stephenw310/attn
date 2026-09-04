@@ -1,5 +1,6 @@
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { expireReminders } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
@@ -196,20 +197,23 @@ test('returns a due snooze to the inbox with a returned chip', async ({ page }) 
   await expect(returned.getByTestId('chip-returned')).toHaveCount(0)
 })
 
-test('catches up a snooze that became due while the app was closed', async ({ boot }) => {
+test('catches up a snooze that became due while the app was closed', async ({ app, boot }) => {
   let page = await boot.app.firstWindow()
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await page.evaluate(async () => {
     const [thread] = (await window.attn.mail.listThreadPage('inbox')).rows
-    await window.attn.mail.snooze([thread.id], Date.now() + 600)
+    await window.attn.mail.snooze([thread.id], Date.now() + 60 * 60 * 1_000)
   })
   await expect(rows).toHaveCount(7)
 
   // The deadline has to pass while the app is closed. Writing it already due
-  // is not an option: the same bridge call refreshes the scheduler, which
-  // would return the thread before the app could be shut down at all.
-  ;({ page } = await boot.relaunch({ waitBeforeLaunch: 1_000 }))
+  // through the bridge is not an option: the same call refreshes the
+  // scheduler, which would return the thread before the app could be shut
+  // down at all. The seam back-dates the stored deadline and leaves the live
+  // scheduler holding its far-future timer, so only startup can catch it up.
+  expect(await expireReminders(app, 1)).toBe(1)
+  ;({ page } = await boot.relaunch())
   const returned = page.getByTestId('thread-row').filter({ hasText: 'Maya Lin' })
   await expect(returned).toHaveCount(1)
   await expect(returned.getByTestId('chip-returned')).toBeVisible()

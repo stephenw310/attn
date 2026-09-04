@@ -4,7 +4,7 @@ import type { ElectronApplication } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
-import { expectResponseHeld, holdNextResponse } from './seams'
+import { expectResponseHeld, failNextInvoke, holdNextResponse, invokeInMain, observeInvokes } from './seams'
 
 // F18 account switching against a seeded two-account store: the whole surface
 // (chip, list, sidebar labels, unread readout) swaps atomically, every switch
@@ -360,26 +360,13 @@ for (const { choice, lastAccount } of [
       expect(remaining.activeAccountId).toBe(PRIMARY)
       expect(remaining.accounts).toHaveLength(1)
     }
-    await app.evaluate(({ ipcMain }, channels) => {
-      type Handler = Parameters<typeof ipcMain.handle>[1]
-      const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
-      const remove = handlers.get(channels.accountsRemove)
-      const save = handlers.get(channels.draftSave)
-      if (!remove || !save) throw new Error('Missing account/draft handlers')
-      const activity = { draftSaves: 0 }
-      Object.assign(globalThis, { removalActivity: activity })
-      ipcMain.removeHandler(channels.draftSave)
-      ipcMain.handle(channels.draftSave, (...args) => {
-        activity.draftSaves++
-        return save(...args)
-      })
-      ipcMain.removeHandler(channels.accountsRemove)
-      ipcMain.handle(channels.accountsRemove, async (...args) => {
-        // Retire the account but retain its local rows, as a failed spool purge does.
-        await remove(args[0], args[1], false)
-        throw new Error('Simulated failure after account retirement')
-      })
-    }, IPC_CHANNELS)
+    const draftSaves = await observeInvokes(app, IPC_CHANNELS.draftSave)
+    // The removal retires the account but retains its local rows, as a failed
+    // spool purge does, and only then rejects.
+    await failNextInvoke(app, IPC_CHANNELS.accountsRemove, {
+      args: [PRIMARY, false],
+      message: 'Simulated failure after account retirement'
+    })
     // Park the status read the failed removal triggers, so the warning has to
     // stand on its own while the roster is still unknown to the renderer.
     const release = await holdNextResponse(app, IPC_CHANNELS.authGetStatus)
@@ -404,12 +391,7 @@ for (const { choice, lastAccount } of [
     await page.keyboard.press('c')
     // Wait through the draft IPC queue before asserting that composing stayed blocked.
     await page.evaluate(() => window.attn.draft.list())
-    expect(
-      await app.evaluate(
-        () =>
-          (globalThis as unknown as { removalActivity: { draftSaves: number } }).removalActivity.draftSaves
-      )
-    ).toBe(0)
+    expect(await draftSaves()).toEqual([])
     await expect(page.getByTestId('composer')).toHaveCount(0)
     await release()
     if (lastAccount) {
@@ -570,13 +552,7 @@ test('a notification click survives a pull that dies during the account remount'
 
   // The adversarial pull: main answers `focus` (its active account already
   // flipped), but nothing delivers or acknowledges the result.
-  await app.evaluate(async ({ ipcMain }, channel) => {
-    type Handler = (...args: unknown[]) => Promise<unknown>
-    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
-    const handler = handlers.get(channel)
-    if (!handler) throw new Error(`Missing handler: ${channel}`)
-    await handler({})
-  }, IPC_CHANNELS.mailTakePendingFocus)
+  await invokeInMain(app, IPC_CHANNELS.mailTakePendingFocus)
 
   await release()
   await expect(page.getByTestId('account-menu')).toContainText(SECOND)

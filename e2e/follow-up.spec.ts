@@ -4,7 +4,7 @@ import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 import { threadRow } from './nav'
-import { armSending, emitSeam } from './seams'
+import { armSending, emitSeam, expireReminders } from './seams'
 
 // T35 (F9): follow-up reminders end to end — the composer deadline, the
 // reminder created at the sent transition through the production OutboxSender
@@ -216,16 +216,20 @@ test('coexisting snooze and follow-up produce one stable return across relaunch'
 }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await armSending(app)
-  await sendReplyWithFollowUp(page, 'in 2 seconds')
-  // Snooze before the follow-up fires: the pending snooze postpones it.
-  await page.evaluate(() => window.attn.mail.snooze(['t-design'], Date.now() + 1_200))
+  await sendReplyWithFollowUp(page, 'in 2 hours')
+  // Snooze before the follow-up fires, and ahead of its deadline: the pending
+  // snooze postpones it.
+  await page.evaluate(() => window.attn.mail.snooze(['t-design'], Date.now() + 60 * 60 * 1_000))
   await expect(threadRow(page, 'Design notes')).toHaveCount(0)
 
   // Both deadlines pass while the app is closed; startup settles them once.
-  // Neither can be written already due: the snooze bridge refreshes the
-  // scheduler in the same call, so a past deadline returns the thread
-  // immediately instead of while the app is down.
-  const { page: relaunched } = await boot.relaunch({ waitBeforeLaunch: 2_500 })
+  // Neither can be written already due through the bridge: its snooze call
+  // refreshes the scheduler, so a past deadline would return the thread while
+  // the app is still up. The seam back-dates both stored deadlines instead,
+  // keeping the snooze ahead of the follow-up, and waits for the send to have
+  // written its reminder — two pending rows — before it does.
+  await expect.poll(() => expireReminders(app, 2)).toBe(2)
+  const { page: relaunched } = await boot.relaunch()
   const returned = relaunched.getByTestId('thread-row').filter({ hasText: 'Design notes' })
   await expect(returned.getByTestId('chip-follow-up')).toBeVisible({ timeout: 10_000 })
   await expect(returned.getByTestId('chip-returned')).toBeVisible()
