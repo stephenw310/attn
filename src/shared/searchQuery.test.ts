@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeMailboxName, parseSearchQuery, searchMatchExpression } from './searchQuery'
+import {
+  normalizeMailboxName,
+  parseSearchQuery,
+  searchesDrafts,
+  searchesLocalSnoozes,
+  searchMatchExpression
+} from './searchQuery'
 
 describe('parseSearchQuery', () => {
   it.each([
@@ -98,5 +104,31 @@ describe('normalizeMailboxName', () => {
     ])
     expect(normalizeMailboxName(' Drafts ')).toBe('drafts')
     expect(normalizeMailboxName('Team/Design')).toBe('team/design')
+  })
+})
+
+describe('searchesDrafts', () => {
+  it.each(['in:drafts', 'in:draft', 'in:DRAFTS subject:budget', 'in:Drafts'])(
+    'selects the local draft store for %s',
+    (query) => {
+      expect(searchesDrafts(parseSearchQuery(query))).toBe(true)
+    }
+  )
+
+  it.each(['in:inbox', 'subject:draft', 'draft', 'is:snoozed'])('leaves %s on stored mail', (query) => {
+    expect(searchesDrafts(parseSearchQuery(query))).toBe(false)
+  })
+})
+
+describe('searchesLocalSnoozes', () => {
+  it.each(['is:snoozed', 'in:snoozed', 'in:Snoozed from:maya'])(
+    'answers %s from local reminders',
+    (query) => {
+      expect(searchesLocalSnoozes(parseSearchQuery(query))).toBe(true)
+    }
+  )
+
+  it.each(['is:unread', 'in:inbox', 'snoozed'])('does not claim %s', (query) => {
+    expect(searchesLocalSnoozes(parseSearchQuery(query))).toBe(false)
   })
 })

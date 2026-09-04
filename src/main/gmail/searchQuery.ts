@@ -1,4 +1,9 @@
-import { normalizeMailboxName, type ParsedSearchQuery, type SearchTextTerm } from '../../shared/searchQuery'
+import {
+  normalizeMailboxName,
+  type ParsedSearchQuery,
+  type SearchTextTerm,
+  searchesDrafts
+} from '../../shared/searchQuery'
 
 export interface GmailSearchQuery {
   q: string
@@ -34,6 +39,12 @@ function locationQuery(value: string, resolveLabelName: (value: string) => strin
  * Translate Attn's parsed query into Gmail's q= syntax. Snooze is local state
  * with no server equivalent, so `searchAllGmail` answers those queries from the
  * store and never reaches this translation.
+ *
+ * A term's field name is forwarded as Gmail spells it, which is not always what
+ * the local index means by it: `to:` here matches Gmail's To header, while the
+ * local FTS index folds to/cc/bcc/reply-to into one `recipients` column
+ * (`sync/fts.ts`). Local and server results for one `to:` query legitimately
+ * differ, and neither side is wrong.
  */
 export function toGmailSearchQuery(
   parsed: ParsedSearchQuery,
@@ -56,9 +67,6 @@ export function toGmailSearchQuery(
       parts.push(`${filter.kind}:${filter.value}`)
     }
   }
-  const searchesDrafts = parsed.filters.some(
-    (filter) => filter.kind === 'in' && ['draft', 'drafts'].includes(normalizeMailboxName(filter.value))
-  )
-  if (!searchesDrafts) parts.push('-in:drafts')
+  if (!searchesDrafts(parsed)) parts.push('-in:drafts')
   return { q: parts.join(' '), includeSpamTrash }
 }
