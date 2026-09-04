@@ -47,15 +47,5 @@ Each was verified against the acceptance criteria in SPEC §4 and the plan docs'
 
 ## Refactors
 
-These are proposals, not defects. Nothing here is required for a milestone. Each one is recorded because
-somebody found and verified it, not because it is scheduled.
-
-### REF-1: Inbox still exceeds the ~350-line bar *(review R3)*
-
-**Verified:** 2026-09-03
-
-`Composer.tsx` is now 344 lines (from 1,627): its state/actions live in `useComposerController`, its envelope
-and header in `ComposerChrome`, and its attachment chips and controls in `ComposerFooter`. `Inbox.tsx` remains
-1,196 lines (from 2,614) and delegates to `useAccountSession`, `useViewNavigation`, `useViewRecords`,
-`useSearchSession`, `useDraftOpening`, `useListActions`, `useFocusThreadTarget`, and `useSettingsCommands`.
-Its next seam is the layout itself (header/list/reader/footer composition).
+None recorded. `Inbox.tsx` and `Composer.tsx` are both below the ~350-line component bar; Inbox's behavior
+coordination and layout now live behind separate contracts in `useInboxController` and `InboxLayout`.
