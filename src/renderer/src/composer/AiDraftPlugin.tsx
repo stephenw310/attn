@@ -13,10 +13,11 @@ import {
   HISTORY_PUSH_TAG,
   type LexicalNode
 } from 'lexical'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AiStreamEvent, AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
+import { createCommand, registerCommands } from '../commands'
 import type { ShowToast } from '../hooks/useToast'
 import { $isProtectedComposerNode } from './nodes/protected'
 
@@ -112,6 +113,7 @@ export function AiDraftPlugin({
   const [edited, setEdited] = useState(false)
   const [refineDismissed, setRefineDismissed] = useState(false)
   const [refineText, setRefineText] = useState('')
+  const refineInputRef = useRef<HTMLInputElement | null>(null)
   const runRef = useRef<AiRun | null>(null)
   /** Set on unmount so the awaits inside a preparing start() stop cold. */
   const disposedRef = useRef(false)
@@ -408,6 +410,16 @@ export function AiDraftPlugin({
     editor.focus()
   }, [editor])
 
+  // Refine is valid only while its transient affordance is visible. Register
+  // the palette command for that same lifetime, and return focus to the
+  // instruction field after the palette closes.
+  useLayoutEffect(() => {
+    if (!showRefine) return
+    return registerCommands([
+      createCommand('composer.aiRefine', () => refineInputRef.current?.focus({ preventScroll: true }))
+    ])
+  }, [showRefine])
+
   // A landed draft leaves focus in the body, not in the pill. Claim the
   // first unmodified Esc from either surface so it dismisses Refine; only the
   // next Esc reaches the composer's save-and-close command.
@@ -485,6 +497,7 @@ export function AiDraftPlugin({
         className="flex w-full max-w-md items-center gap-1.5 rounded-full border border-edge bg-raised py-1 pr-1 pl-3 shadow-lg"
       >
         <input
+          ref={refineInputRef}
           data-testid="ai-refine-input"
           aria-label="Refine the AI draft"
           placeholder="Refine: shorter, more formal…"
