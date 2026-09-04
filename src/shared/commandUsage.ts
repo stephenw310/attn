@@ -1,4 +1,4 @@
-export interface CommandUsageEntry {
+interface CommandUsageEntry {
   count: number
   lastUsedAt: number
 }

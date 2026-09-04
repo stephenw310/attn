@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import type { ShowToast } from '../hooks/useToast'
@@ -128,7 +128,13 @@ export function useComposerAttachments({
     [draftId, mutate]
   )
 
-  const visibleAttachments = attachments.filter((attachment) => !attachment.inline)
+  // Memoized so `removeLastAttachment` keeps its identity: it is one of the
+  // handlers `ComposerCommandPlugin` lists in its effect, and a fresh array
+  // per render re-registered all 14 composer commands on every keystroke (P2).
+  const visibleAttachments = useMemo(
+    () => attachments.filter((attachment) => !attachment.inline),
+    [attachments]
+  )
 
   // Attaching is keyboard-reachable, so removing has to be too. Inline body
   // images have no chip and are removed by editing the body instead.

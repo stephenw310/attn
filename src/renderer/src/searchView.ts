@@ -5,7 +5,7 @@ import {
   searchesDrafts as searchesDraftStore,
   searchesLocalSnoozes as searchesStoredSnoozes
 } from '../../shared/searchQuery'
-import type { MailView } from './mailDisplay'
+import type { MailView } from './list/mailDisplay'
 
 function searchMailboxes(query: string): string[] {
   return parseSearchQuery(query)

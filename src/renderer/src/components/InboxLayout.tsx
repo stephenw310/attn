@@ -1,6 +1,6 @@
 import type { ThreadListView } from '../../../shared/mail'
 import type { InboxController } from '../hooks/useInboxController'
-import { type MailView, userLabelId } from '../mailDisplay'
+import { type MailView, userLabelId } from '../list/mailDisplay'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
 import { InboxOverlays } from './InboxOverlays'

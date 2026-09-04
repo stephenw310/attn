@@ -88,6 +88,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     setFollowUpAt,
     followUpOpen,
     setFollowUpOpen,
+    openFollowUp,
     showCopies,
     setShowCopies,
     closing,
@@ -287,7 +288,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   onClose={mode === 'inline' ? closeAndExit : closeAndSave}
                   onDiscard={discard}
                   onSend={send}
-                  onFollowUp={() => setFollowUpOpen(true)}
+                  onFollowUp={openFollowUp}
                 />
                 <PasteContentPlugin
                   draftId={draft.id}

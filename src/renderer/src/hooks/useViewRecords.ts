@@ -4,7 +4,7 @@ import {
   saveAccountView,
   type ViewRecordSnapshot as ViewRecord
 } from '../accountViewMemory'
-import type { MailView, NavigableMailView } from '../mailDisplay'
+import type { MailView, NavigableMailView } from '../list/mailDisplay'
 
 /** Where the outbox returns to when it closes: the list it covered (F3). */
 export interface OutboxReturn {

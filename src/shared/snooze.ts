@@ -1,6 +1,6 @@
 import * as chrono from 'chrono-node'
 
-export type SnoozePresetId = 'later-today' | 'tonight' | 'tomorrow' | 'weekend' | 'next-week'
+type SnoozePresetId = 'later-today' | 'tonight' | 'tomorrow' | 'weekend' | 'next-week'
 
 export interface SnoozePreset {
   id: SnoozePresetId

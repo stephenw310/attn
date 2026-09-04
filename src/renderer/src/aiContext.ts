@@ -4,7 +4,7 @@
 // bounds keep an explicit invocation's payload proportionate to a reply.
 
 import type { AiThreadMessage } from '../../shared/ai'
-import type { DisplayConversation, DisplayMessage } from './mailDisplay'
+import type { DisplayConversation, DisplayMessage } from './list/mailDisplay'
 
 const MAX_CONTEXT_MESSAGES = 12
 const MAX_MESSAGE_CHARS = 4_000

@@ -3,7 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
-import type { DisplayConversation, DisplayThread } from '../mailDisplay'
+import type { DisplayConversation, DisplayThread } from '../list/mailDisplay'
 import { ConversationView, type MessageReplyTarget } from './ConversationView'
 
 it('skips the reader tree when only footer sync progress changes above it', async () => {

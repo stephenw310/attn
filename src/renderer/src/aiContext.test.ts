@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { aiThreadContext } from './aiContext'
-import type { DisplayConversation, DisplayMessage } from './mailDisplay'
+import type { DisplayConversation, DisplayMessage } from './list/mailDisplay'
 
 function message(patch: Partial<DisplayMessage> & { id: string }): DisplayMessage {
   return {

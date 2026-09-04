@@ -4,7 +4,7 @@ import { act, createElement, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { TriageAction } from '../../../shared/actions'
-import type { DisplayThread } from '../mailDisplay'
+import type { DisplayThread } from '../list/mailDisplay'
 import { useListActions } from './useListActions'
 import type { ViewRecordStore } from './useViewRecords'
 

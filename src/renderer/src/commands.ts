@@ -395,7 +395,7 @@ export const COMMAND_SPECS = {
 } as const satisfies Record<string, CommandSpec>
 
 export type StaticCommandId = keyof typeof COMMAND_SPECS
-export type CommandId =
+type CommandId =
   | StaticCommandId
   | `split.goto:${string}`
   | `account.switch:${string}`
@@ -423,7 +423,7 @@ export interface CommandArgumentValue {
   value: unknown
 }
 
-export interface CommandArgument {
+interface CommandArgument {
   prefixes: readonly string[]
   parse: (input: string) => CommandArgumentValue | null
   run: (value: unknown) => void
@@ -694,13 +694,16 @@ export function matchComposerKey(event: KeyboardEvent): Command | null {
   // global allowInComposer set (Mod+J AI drafting, Mod+/ cheat sheet — Mod+K
   // never reaches here because the palette claims it in the capture phase).
   // Chord shortcuts contain a space and can never equal a single keystroke.
-  return (
-    commands.find(
-      (command) =>
-        commandMatchesContext(command, 'composer') &&
-        commandShortcuts(command).some((candidate) => candidate.toLowerCase() === shortcut.toLowerCase())
-    ) ?? null
+  const matches = commands.filter(
+    (command) =>
+      commandMatchesContext(command, 'composer') &&
+      commandShortcuts(command).some((candidate) => candidate.toLowerCase() === shortcut.toLowerCase())
   )
+  // A composer verb outranks a global that shares its keystroke, whatever the
+  // registration order. The shell registers its batch long before a composer
+  // mounts, so `Mod+B` reached the sidebar toggle instead of Bold (SPEC §5
+  // gives `Mod+B` to Bold in the composer and to the sidebar elsewhere).
+  return matches.find((command) => command.context === 'composer') ?? matches[0] ?? null
 }
 
 declare global {

@@ -3,7 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
-import type { DisplayThread } from '../mailDisplay'
+import type { DisplayThread } from '../list/mailDisplay'
 import { ThreadList } from './ThreadList'
 
 it('does not call an unresolved Inbox split empty', async () => {

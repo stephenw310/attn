@@ -1,7 +1,7 @@
 import type { Draft } from './drafts'
 import type { ThreadRow } from './mail'
 
-export type SearchTextField = 'any' | 'from' | 'to' | 'subject'
+type SearchTextField = 'any' | 'from' | 'to' | 'subject'
 
 export interface SearchTextTerm {
   field: SearchTextField
