@@ -237,7 +237,7 @@ test('an invocation on a recovered full-window reply never parks for another dra
   expect(await aiRequests(app)).toHaveLength(0)
 })
 
-test('refine replaces the unedited draft as one undo step and hides after hand edits', async ({
+test('the palette opens refine, which replaces the unedited draft as one undo step', async ({
   app,
   page
 }) => {
@@ -252,6 +252,11 @@ test('refine replaces the unedited draft as one undo step and hides after hand e
   await page.screenshot({ path: 'e2e/.artifacts/ai-draft.png' })
 
   await installFakeAi(app, { chunks: ['Refined shorter text.'] })
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByTestId('command-palette-input').fill('Refine AI draft')
+  await expect(page.locator('[data-command-id="composer.aiRefine"]')).toHaveCount(1)
+  await page.getByTestId('command-palette-input').press('Enter')
+  await expect(page.getByTestId('ai-refine-input')).toBeFocused()
   await page.getByTestId('ai-refine-input').fill('shorter')
   await page.getByTestId('ai-refine-input').press('Enter')
   await expect(editor(page)).toContainText('Refined shorter text.')
@@ -270,6 +275,10 @@ test('refine replaces the unedited draft as one undo step and hides after hand e
   await expect(editor(page)).toContainText('Original draft text.')
   await expect(editor(page)).not.toContainText('Refined shorter text.')
   await expect(page.getByTestId('ai-refine')).toHaveCount(0)
+
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByTestId('command-palette-input').fill('Refine AI draft')
+  await expect(page.locator('[data-command-id="composer.aiRefine"]')).toHaveCount(0)
 })
 
 test('the first Esc dismisses Refine and the next saves every generated chunk', async ({ app, page }) => {

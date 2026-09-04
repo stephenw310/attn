@@ -647,6 +647,8 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   input to 64 KiB and the total loaded input per invocation to 256 KiB. Skip oversized candidates whole
   so clipping cannot break quote or signature boundaries.
 - **Inline refine:** after a draft lands, a one-line instruction ("shorter", "more formal") regenerates it.
+  A transient **Refine AI draft…** palette command focuses the instruction field while refinement is
+  available.
 
 **Inline autocomplete:**
 

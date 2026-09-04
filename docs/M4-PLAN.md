@@ -743,7 +743,8 @@ it with a one-line instruction, and never auto-send.
   still as one undoable step. A second `Esc` behaves like any composer `Esc`.
 - **Inline refine:** after a draft lands, a one-line instruction field ("shorter", "more formal")
   regenerates. The regeneration replaces the prior AI-inserted region as a single undoable step; text the
-  user edited by hand is theirs, so refine is offered only while the AI region is unedited.
+  user edited by hand is theirs, so refine is offered only while the AI region is unedited. While refine is
+  available, the transient `Refine AI draft…` palette command focuses that field.
 - **Voice matching:** when the toggle is on, a handful of the user's recent sent replies are selected
   locally from the store of the account that owns the draft (F18: replies bind to the thread's owning
   account) and sent as style examples. Exclude the conversation being answered from style examples so
@@ -772,7 +773,8 @@ it with a one-line instruction, and never auto-send.
 
 - E2e with the fake provider: `Mod+J` in the reader opens the reply composer and streams the scripted
   draft; the result is editable and sends through the normal outbox; one `Mod+Z` removes it; `Esc`
-  mid-stream stops cleanly with partial text present; refine replaces the draft; with voice matching off,
+  mid-stream stops cleanly with partial text present; the palette opens refine and refine replaces the
+  draft; with voice matching off,
   no recorded payload contains extra sent-mail style examples; with the feature disabled, `Mod+J` shows
   the disabled hint and the seam records zero requests.
 - Unit: sent-reply selection for style examples (recency, own-reply filter, count cap).
