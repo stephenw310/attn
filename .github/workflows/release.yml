@@ -5,8 +5,8 @@ name: Release
 # pushed, or by hand from any ref; either way the version is package.json's,
 # the tag must match it, and the commit must already be on `main`.
 #
-# What it needs (Settings → Environments → `release`; the build and publish
-# jobs run in that environment, so its deployment-branch rule — `main` plus
+# What it needs (Settings → Environments → `release`; the feed check, build,
+# and publish jobs run in that environment, so its deployment-branch rule — `main` plus
 # tags `v*` — and any required reviewers are what stand between a branch and
 # the signing credentials):
 #   secrets  CSC_LINK, CSC_KEY_PASSWORD          Developer ID Application .p12 (base64) + password
@@ -114,27 +114,6 @@ jobs:
             fi
           fi
 
-      # electron-updater reads a GitHub Releases feed anonymously, so a private
-      # feed repository is one the installed apps cannot see. Refuse unless the
-      # operator has said so explicitly. A version that already has a release
-      # is never republished.
-      - name: Check the feed is readable and the release is new
-        env:
-          GH_TOKEN: ${{ secrets.ATTN_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          FEED: ${{ steps.meta.outputs.feed }}
-          TAG: ${{ steps.meta.outputs.tag }}
-          ALLOW_PRIVATE: ${{ vars.ATTN_ALLOW_PRIVATE_FEED }}
-        run: |
-          private="$(gh api "repos/$FEED" --jq .private)"
-          if [ "$private" = "true" ] && [ "$ALLOW_PRIVATE" != "true" ]; then
-            echo "::error::$FEED is private: installed apps cannot read its releases. Publish to a public feed repository (set ATTN_RELEASE_FEED), make it public, or set ATTN_ALLOW_PRIVATE_FEED=true."
-            exit 1
-          fi
-          if gh release view "$TAG" --repo "$FEED" >/dev/null 2>&1; then
-            echo "::error::release $TAG already exists in $FEED; bump package.json instead of republishing"
-            exit 1
-          fi
-
   verify:
     name: Verify (typecheck, lint, unit, build, e2e)
     needs: prepare
@@ -184,6 +163,36 @@ jobs:
           path: e2e/.results/
           if-no-files-found: ignore
           include-hidden-files: true
+
+  feed:
+    name: Check release feed
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: release
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.ATTN_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+      FEED: ${{ needs.prepare.outputs.feed }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      ALLOW_PRIVATE: ${{ vars.ATTN_ALLOW_PRIVATE_FEED }}
+    steps:
+      # electron-updater reads a GitHub Releases feed anonymously, so a private
+      # feed repository is one the installed apps cannot see. This job runs
+      # after source validation and verification because a cross-repository
+      # token stored in the release environment is unavailable to prepare.
+      - name: Check the feed is readable and the release is new
+        run: |
+          private="$(gh api "repos/$FEED" --jq .private)"
+          if [ "$private" = "true" ] && [ "$ALLOW_PRIVATE" != "true" ]; then
+            echo "::error::$FEED is private: installed apps cannot read its releases. Publish to a public feed repository (set ATTN_RELEASE_FEED), make it public, or set ATTN_ALLOW_PRIVATE_FEED=true."
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$FEED" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists in $FEED; bump package.json instead of republishing"
+            exit 1
+          fi
 
   build:
     name: Build ${{ matrix.platform }}
@@ -263,10 +272,15 @@ jobs:
 
   publish:
     name: Publish to ${{ needs.prepare.outputs.feed }}
-    needs: [prepare, build]
+    needs: [prepare, build, feed]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
+    # Different tags for one schema must not compare and replace the same
+    # rolling feed concurrently. Keep the monotonic check inside this lock.
+    concurrency:
+      group: release-feed-${{ needs.prepare.outputs.feed }}-schema-${{ needs.prepare.outputs.schema }}
+      cancel-in-progress: false
     permissions:
       contents: write
     env:
@@ -300,12 +314,14 @@ jobs:
       - name: Stamp the feed files
         run: |
           mkdir -p current
+          current_args=()
           if gh release view "$FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
-            gh release download "$FEED_TAG" --repo "$FEED" --dir current --pattern 'latest*.yml' || true
+            gh release download "$FEED_TAG" --repo "$FEED" --dir current --pattern 'latest*.yml'
+            current_args=(--current current)
           fi
           node scripts/stamp-update-feed.mjs release \
             --assets-base "https://github.com/$FEED/releases/download/$TAG" \
-            --current current
+            "${current_args[@]}"
           ls -l release
           {
             echo '```'

@@ -454,11 +454,7 @@ async function initialize(): Promise<void> {
       currentVersion: version,
       schemaVersion: CURRENT_SCHEMA_VERSION,
       localSchemaVersion: () => openedSchemaVersion,
-      onStateChange: (state) => broadcast(IPC_CHANNELS.updateState, state),
-      // The explicit restart quiesces exactly like a quit — composers
-      // checkpoint first, then the workers stop — and marks the quit prepared,
-      // so the installer's own app.quit() passes straight through below.
-      shutdown: () => prepareQuit({ installReadyUpdate: false })
+      onStateChange: (state) => broadcast(IPC_CHANNELS.updateState, state)
     })
     appUpdater.start()
   }
@@ -591,9 +587,9 @@ let quitPreparation: Promise<void> | null = null
  * Everything a quit needs before the process may go: the composers checkpoint
  * while their documents are alive (B28), a ready update is re-validated and
  * staged so this quit applies it (T39 — the ordinary quit and the explicit
- * restart both pass through here; the restart hands over to the installer
- * itself, so it skips the staging), and then the workers stop. Runs once;
- * a second caller joins the first.
+ * restart both pass through here; the restart claims the update before its
+ * installer calls app.quit(), so it skips the staging), and then the workers
+ * stop. Runs once; a second caller joins the first.
  */
 function prepareQuit(options: { installReadyUpdate: boolean }): Promise<void> {
   if (quitPreparation) return quitPreparation

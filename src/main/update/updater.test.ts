@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { SchedulerTime, TimerHandle } from '../time'
 import {
   AppUpdater,
@@ -43,13 +43,13 @@ class ManualTimers {
 interface FeedScript {
   check?: () => Promise<UpdateFeedInfo | null>
   downloadError?: boolean
+  installError?: boolean
 }
 
 function harness(script: FeedScript = {}, localSchema: number | null = 24) {
   const timers = new ManualTimers()
   const states: UpdateState[] = []
   const calls = { check: 0, download: 0, install: 0, stage: 0 }
-  const shutdown = vi.fn(async () => {})
   const feed: UpdateFeed = {
     check: async () => {
       calls.check++
@@ -61,6 +61,7 @@ function harness(script: FeedScript = {}, localSchema: number | null = 24) {
     },
     quitAndInstall: () => {
       calls.install++
+      if (script.installError) throw new Error('installer handoff failed')
     },
     installOnQuit: async () => {
       calls.stage++
@@ -72,10 +73,9 @@ function harness(script: FeedScript = {}, localSchema: number | null = 24) {
     schemaVersion: 24,
     localSchemaVersion: () => localSchema,
     onStateChange: (state) => states.push(state),
-    shutdown,
     time: timers.time
   })
-  return { updater, timers, states, calls, shutdown }
+  return { updater, timers, states, calls }
 }
 
 const compatibleInfo: UpdateFeedInfo = { version: '1.1.0', requiredSchemaVersion: 24 }
@@ -238,21 +238,25 @@ describe('schema gating', () => {
 })
 
 describe('restart to apply', () => {
-  it('awaits the worker shutdown before handing over to the installer', async () => {
-    const order: string[] = []
+  it('hands over while the app is live so a failed handoff cannot strand torn-down workers', async () => {
     const h = harness({ check: async () => compatibleInfo })
-    h.shutdown.mockImplementation(async () => {
-      order.push('shutdown')
-    })
     h.updater.start()
     await settle()
-    const original = h.calls
     const installed = await h.updater.restartToApply()
-    order.push(`install:${original.install}`)
     expect(installed).toBe(true)
-    expect(h.shutdown).toHaveBeenCalledTimes(1)
     expect(h.calls.install).toBe(1)
-    expect(order[0]).toBe('shutdown')
+  })
+
+  it('keeps a ready update retryable after a synchronous handoff failure', async () => {
+    const h = harness({ check: async () => compatibleInfo, installError: true })
+    h.updater.start()
+    await settle()
+    expect(await h.updater.restartToApply()).toBe(false)
+    expect(h.updater.state().phase).toBe('ready')
+    expect(h.updater.state().readyVersion).toBe('1.1.0')
+    expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
+    expect(await h.updater.restartToApply()).toBe(false)
+    expect(h.calls.install).toBe(2)
   })
 
   it('refuses with nothing ready and never installs twice', async () => {
@@ -299,7 +303,6 @@ describe('restart to apply', () => {
       schemaVersion: 24,
       localSchemaVersion: () => localSchema,
       onStateChange: () => {},
-      shutdown: async () => {},
       time: timers.time
     })
     updater.start()
@@ -328,7 +331,6 @@ describe('restart to apply', () => {
       schemaVersion: 24,
       localSchemaVersion: () => localSchema,
       onStateChange: () => {},
-      shutdown: async () => {},
       time: timers.time
     })
     updater.start()

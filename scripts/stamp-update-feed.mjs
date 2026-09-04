@@ -113,7 +113,7 @@ function parseArguments(argv) {
   return options
 }
 
-function stampDirectory({ directory, assetsBase, current }) {
+export function stampDirectory({ directory, assetsBase, current }) {
   const version = JSON.parse(readFileSync(join(projectDir, 'package.json'), 'utf8')).version
   const schemaVersion = packagedSchemaVersion()
   const present = UPDATE_INFO_FILES.filter((name) => existsSync(join(directory, name)))
@@ -127,10 +127,14 @@ function stampDirectory({ directory, assetsBase, current }) {
     for (const asset of feedAssetNames(text)) {
       if (!siblings.has(asset)) throw new Error(`${name} names ${asset}, which is not in ${directory}`)
     }
-    const currentPath = current ? join(current, name) : null
-    if (currentPath && existsSync(currentPath)) {
+    if (current) {
+      const currentPath = join(current, name)
+      if (!existsSync(currentPath)) throw new Error(`current feed is missing ${name}`)
       const published = feedVersion(readFileSync(currentPath, 'utf8'))
-      if (published !== null && !isNewerReleaseVersion(version, published)) {
+      if (published === null || !isReleaseVersion(published)) {
+        throw new Error(`${name}: current feed has no valid release version`)
+      }
+      if (!isNewerReleaseVersion(version, published)) {
         throw new Error(`${name}: the feed already offers ${published}; ${version} is not newer`)
       }
     }

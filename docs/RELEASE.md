@@ -39,11 +39,11 @@ unsigned installers that never check for updates.
    `true`, which is only useful for a private test feed with a token-authenticated updater you have
    not built.
 2. **Create the `release` environment** (Settings → Environments → New environment, named
-   `release`). The build and publish jobs run in it, so its protection rules are what keep the
-   signing credentials away from arbitrary branches: set the deployment branch rule to selected
-   branches and tags, allow `main` and the tag pattern `v*`, and add yourself as a required reviewer
-   if you want every release to wait for a click. The workflow independently refuses any commit that
-   is not already on `main`.
+   `release`). The feed check, build, and publish jobs run in it. Its protection rules keep the
+   release token and signing credentials away from arbitrary branches. Set the deployment branch
+   rule to selected branches and tags. Allow `main` and the tag pattern `v*`. Add yourself as a
+   required reviewer if you want every release to wait for approval. The workflow also refuses any
+   commit that is not already on `main`.
 3. **Add the signing secrets to that environment** (Settings → Environments → release → Secrets;
    repository-level secrets work too but are visible to every workflow):
 

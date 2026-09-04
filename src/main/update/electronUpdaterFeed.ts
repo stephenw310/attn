@@ -110,6 +110,8 @@ export function createElectronUpdaterFeed(metadata: DistributionMetadata, schema
       // the user asked for a relaunch: isForceRunAfter must be true or the
       // silent Windows installer leaves the app closed (PR #101 review). On
       // macOS electron-updater stages through Squirrel first, then relaunches.
+      // Call before teardown: both platform implementations call app.quit()
+      // only after the installer handoff, and that quit runs prepareQuit.
       autoUpdater.quitAndInstall(true, true)
     },
     installOnQuit: (): Promise<void> => stageForQuit(autoUpdater)

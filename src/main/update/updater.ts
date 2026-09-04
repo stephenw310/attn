@@ -25,7 +25,7 @@ export interface UpdateFeed {
   /** The newest release the feed offers, or null when up to date. */
   check(): Promise<UpdateFeedInfo | null>
   download(info: UpdateFeedInfo): Promise<void>
-  /** Hand over to the installer and relaunch. The caller has already quiesced workers. */
+  /** Hand over to the installer. It quits the app only after the handoff succeeds. */
   quitAndInstall(): void
   /**
    * Stage the downloaded update so the quit already in progress applies it,
@@ -45,8 +45,6 @@ export interface AppUpdaterOptions {
   /** The local database's user_version at decision time; null rejects. */
   localSchemaVersion: () => number | null
   onStateChange: (state: UpdateState) => void
-  /** The existing awaited shutdown: composers checkpoint, draft mirroring and sends quiesce here. */
-  shutdown: () => Promise<void>
   time?: SchedulerTime
 }
 
@@ -225,15 +223,25 @@ export class AppUpdater {
   }
 
   /**
-   * The palette's `Restart to update`: re-validate, quiesce the workers
-   * through the ordinary quit preparation, and hand over to the installer
-   * with a relaunch. Returns false when nothing installable is ready.
+   * The palette's `Restart to update`: re-validate and ask the installer to
+   * relaunch. electron-updater initiates the platform handoff first and calls
+   * app.quit() only when it succeeds. The ordinary before-quit path then
+   * checkpoints composers and stops workers. Returns false when nothing
+   * installable is ready.
    */
   async restartToApply(): Promise<boolean> {
     if (this.claimReadyForInstall() === null) return false
-    await this.options.shutdown()
-    this.options.feed.quitAndInstall()
-    return true
+    try {
+      this.options.feed.quitAndInstall()
+      return true
+    } catch {
+      // A synchronous platform handoff failure leaves the app running. Restore
+      // the ready state so the user can retry instead of wedging the updater.
+      this.applying = false
+      this.stopped = false
+      this.schedule(UPDATE_CHECK_INTERVAL_MS)
+      return false
+    }
   }
 
   /**
