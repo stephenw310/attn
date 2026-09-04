@@ -133,7 +133,7 @@ These constrain future work, S1 above all, because S1 moves this code between pr
 
 ## S1: move sync work into an Electron utility process
 
-**Status: done.** The boundary design is recorded in [S1-DESIGN.md](S1-DESIGN.md).
+**Status: done.** The boundary design is recorded in [S1-DESIGN.md](archive/S1-DESIGN.md).
 
 **Depends on:** nothing · **Unblocks:** F10's FTS indexing · **Spec:** §6 architecture
 

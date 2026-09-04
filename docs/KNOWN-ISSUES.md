@@ -20,12 +20,13 @@ whole-codebase re-review that this paragraph used to ask for; its bug, security,
 carry `B`/`S`/`R`/`D` ids there, and the entries here cite them. Low-severity items and the deletion list stay in
 the review rather than being copied here — pick them up from that document.
 
-Sources so far: the 2026-08-16 review of `main` @ #52 ([REVIEW-2026-08-16.md](REVIEW-2026-08-16.md)), its
-coverage map ([REVIEW-2026-08-16-coverage.md](REVIEW-2026-08-16-coverage.md)), and the 2026-09-02 review of
-`main` @ #107 ([REVIEW-2026-09-02.md](REVIEW-2026-09-02.md)). All three are frozen snapshots kept for their
-reasoning. This file is the part that stays current. Each entry cross-references its original review
-tag, because the review's `S1` and `S2` security tags collide with the `S1` through `S4` task names in
-M3-PLAN.
+Sources so far: the 2026-08-16 review of `main` @ #52 ([REVIEW-2026-08-16.md](archive/REVIEW-2026-08-16.md))
+and its coverage map ([REVIEW-2026-08-16-coverage.md](archive/REVIEW-2026-08-16-coverage.md)), and the
+2026-09-02 review of `main` @ #107 ([REVIEW-2026-09-02.md](REVIEW-2026-09-02.md)). All three are frozen
+snapshots kept for their reasoning; the two settled ones now live in [archive/](archive/), while the
+2026-09-02 sweep stays in `docs/` because the entries below still cite its open items. This file is the part
+that stays current. Each entry cross-references its original review tag, because the review's `S1` and `S2`
+security tags collide with the `S1` through `S4` task names in M3-PLAN.
 
 A finding already attached to a planned task stays with that task instead of moving here. The review's B4
 pruning edge shipped with M3 S2 on 2026-08-22. M3-PLAN records its coverage and keeps the status current.
