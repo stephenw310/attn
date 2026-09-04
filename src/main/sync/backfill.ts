@@ -201,7 +201,8 @@ export async function runInboxBackfill(
     const previous = db
       .prepare('SELECT backfill_cursor FROM sync_state WHERE account_id = ?')
       .get(accountId) as { backfill_cursor: string | null } | undefined
-    const plan = planBackfillStart(previous?.backfill_cursor, options.recovery)
+    const rawCursor = previous?.backfill_cursor
+    const plan = planBackfillStart(rawCursor, options.recovery)
     if (plan.kind === 'skip') {
       return { threadCount: 0, inboxThreadIds: [], spamThreadIds: [], trashThreadIds: [] }
     }
@@ -216,6 +217,18 @@ export async function runInboxBackfill(
            last_history_id = excluded.last_history_id,
            backfill_cursor = excluded.backfill_cursor`
       ).run(accountId, profile.historyId)
+    } else {
+      // Persist parser translations before a phase delegates to the shared
+      // walker, which deliberately rereads its durable cursor. In particular,
+      // retired `sent` cursors restart at the unfiltered all-mail listing and
+      // their SENT-scoped page tokens must not reach that listing.
+      const canonicalCursor = cursor.pageToken ? `${cursor.phase}:${cursor.pageToken}` : cursor.phase
+      if (rawCursor !== canonicalCursor) {
+        db.prepare('UPDATE sync_state SET backfill_cursor = ? WHERE account_id = ?').run(
+          canonicalCursor,
+          accountId
+        )
+      }
     }
 
     upsertLabels(db, accountId, await provider.listLabels({ priority: 'foreground' }))

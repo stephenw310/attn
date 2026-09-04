@@ -327,6 +327,26 @@ describe('windowed backfill checkpoints', () => {
     expect(result).not.toBeNull()
   })
 
+  it.each(['sent', 'sent:retired-page-token'])(
+    'canonicalizes the retired %s cursor before the all-mail walker rereads it',
+    async (legacyCursor) => {
+      const provider = fakeMailProvider()
+      const result = await runInboxBackfill(
+        fakeDb({ backfill_cursor: legacyCursor, last_history_id: '88' }),
+        provider,
+        callbacks
+      )
+
+      expect(provider.listThreadIds).toHaveBeenNthCalledWith(1, {
+        q: ALL_MAIL_WINDOW,
+        pageToken: undefined,
+        priority: 'background'
+      })
+      expect(result).not.toBeNull()
+      expect(callbacks.onError).not.toHaveBeenCalled()
+    }
+  )
+
   it('drops an expired saved page token and restarts that phase once', async () => {
     const provider = fakeMailProvider()
     vi.mocked(provider.listThreadIds).mockImplementation(async (options): Promise<ThreadIdPage> => {

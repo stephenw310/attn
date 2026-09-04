@@ -389,9 +389,10 @@ export function useMailFrameAccess({
         if (!stale) setAccess({ nonce, ...answer })
       })
       .catch(() => {
-        // Main's filter fails closed for an unregistered frame; the renderer
-        // only loses the banner, never the protection.
-        if (!stale) setAccess({ nonce, blocked: false, imagesAllowed: true })
+        // Iframes still fail closed in main when registration is absent. The
+        // composer also consumes this answer from the unfiltered top frame, so
+        // the renderer must keep its remote source behind the placeholder too.
+        if (!stale) setAccess({ nonce, blocked: true, imagesAllowed: false })
       })
     return () => {
       stale = true
