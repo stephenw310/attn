@@ -25,6 +25,7 @@ import type {
   ThreadRow
 } from '../../shared/mail'
 import { messageLabelsMatchMailbox } from '../../shared/mail'
+import { combinedBody } from '../outbox/text'
 import { splitAssignmentForAccount } from '../splits'
 import { needsBodyHydration } from '../sync/bodyHydration'
 import { THREAD_LIST_LIMIT } from '../sync/tuning'
@@ -732,12 +733,6 @@ interface OutboxConversationRow {
   rfc_message_id: string
   gmail_message_id: string | null
   updated_at: number
-}
-
-function combinedBody(primary: string, quote: string, separator: string): string {
-  if (!quote) return primary
-  if (!primary) return quote
-  return `${primary}${separator}${quote}`
 }
 
 const LEGACY_SENT_MATCH_WINDOW_MS = 2 * 60 * 1_000

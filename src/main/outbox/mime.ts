@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto'
 import { domainToASCII } from 'node:url'
 import type { MailAddress } from '../../shared/mail'
-import { escapeHtml, singleLine } from './text'
+import { combinedBody, escapeHtml, singleLine } from './text'
 
 const CRLF = '\r\n'
 const RECOMMENDED_HEADER_WIDTH = 78
@@ -373,12 +373,6 @@ export function mimeSegments<T extends AttachmentIdentity>(entity: MimeEntity<T>
     // The trailing empty segment is what gives the message its final CRLF.
     ''
   ]
-}
-
-function combinedBody(primary: string, quote: string | null | undefined, separator: string): string {
-  if (!quote) return primary
-  if (!primary) return quote
-  return `${primary}${separator}${quote}`
 }
 
 function plainTextHtml(value: string): string {

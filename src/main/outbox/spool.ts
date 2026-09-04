@@ -60,8 +60,13 @@ export function validateAttachmentCap(existingBytes: number, incomingSizes: read
   }
 }
 
-function safeFilename(value: string): string {
-  return basename(value.replace(/[\0\r\n]/g, '').trim()) || 'attachment'
+/**
+ * A stored attachment name is the basename only, with the characters that could
+ * break a path or a header stripped; an empty result falls back to the caller's
+ * name for the kind of file it is spooling.
+ */
+export function safeFilename(value: string, fallback = 'attachment'): string {
+  return basename(value.replace(/[\0\r\n]/g, '').trim()) || fallback
 }
 
 function mimeTypeFor(filename: string): string {
